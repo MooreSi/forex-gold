@@ -33,7 +33,14 @@ class SqliteAdapter:
         cur = self._con.execute(sql, params)
         if not self._in_transaction:
             self._con.commit()
-        return RunResult(cur.lastrowid, cur.rowcount)
+        # cur.lastrowid is connection-level state in sqlite3: on a no-op
+        # write (e.g. INSERT OR IGNORE hitting a UNIQUE conflict), it still
+        # reports the PREVIOUS successful insert's rowid rather than None,
+        # because this adapter reuses one persistent connection across every
+        # call. Gate on rowcount so callers only see a lastrowid when this
+        # specific statement actually wrote a row.
+        lastrowid = cur.lastrowid if cur.rowcount > 0 else None
+        return RunResult(lastrowid, cur.rowcount)
 
     def exec(self, sql: str) -> None:
         self._con.executescript(sql)

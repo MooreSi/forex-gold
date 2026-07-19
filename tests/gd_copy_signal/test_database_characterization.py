@@ -3,26 +3,34 @@ before it's touched by task 030 (repo/adapter migration) or task 040
 (service extraction) -- see
 docs/todo/refactor/backend-foundation/020-characterize-gd-copy-current-behavior.md.
 
-Every test here must keep passing, unmodified, against the new
-gd_copy_signal_repo.py (030) and gd_copy_signal_service.py (040). That's
-the whole point: this file is the contract those tasks are held to.
+Every test here runs against BOTH the original database.py and the new
+gd_copy_signal_repo.py (030) -- the `fresh_db` fixture is parametrized over
+both modules, so the same assertions prove behavior equivalence without
+being duplicated or edited per backend. That's the whole point: this file
+is the contract task 030 (and eventually 040) is held to.
 """
 import os
 import tempfile
-import time
 
 import pytest
 
-from forex_trader.gd_copy_signal import database as db
+from forex_trader.gd_copy_signal import database as database_module
+from forex_trader.gd_copy_signal import gd_copy_signal_repo as repo_module
 
 
 @pytest.fixture
-def fresh_db():
+def db_path():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    db.init(path)
-    yield db
+    yield path
     os.remove(path)
+
+
+@pytest.fixture(params=[database_module, repo_module], ids=["database", "repo"])
+def fresh_db(request, db_path):
+    module = request.param
+    module.init(db_path)
+    yield module
 
 
 # ── Schema / init ────────────────────────────────────────────────────────────
@@ -31,11 +39,11 @@ def test_init_creates_all_tables_and_a_starting_balance(fresh_db):
     assert fresh_db.get_virtual_balance() == 1000.0
 
 
-def test_init_is_idempotent_when_called_again_on_the_same_file(fresh_db):
+def test_init_is_idempotent_when_called_again_on_the_same_file(fresh_db, db_path):
     # _create_schema uses CREATE TABLE IF NOT EXISTS -- calling init() twice
     # on the same path must not error or reset state.
     sig_id = fresh_db.create_signal({"direction": "BUY", "signal_ref": "x1"})
-    fresh_db.init(db._DB_PATH)
+    fresh_db.init(db_path)
     assert fresh_db.get_signal_by_id(sig_id) is not None
 
 
@@ -384,12 +392,10 @@ def test_upsert_level_far_price_creates_a_new_row(fresh_db):
 def test_deactivate_old_levels_skips_vip_sourced_levels(fresh_db):
     fresh_db.upsert_level("swing_high", 2450.0, "SELL", source="engine")
     fresh_db.upsert_level("round_10", 2500.0, "BUY", source="vip")
-    # Force both rows old enough to be deactivated by directly rewriting
-    # updated_at -- there's no public setter, so this goes through the
-    # underlying connection the way the module itself is structured today.
-    with fresh_db._conn() as con:
-        con.execute("UPDATE gdc_levels SET updated_at=?", (time.time() - 999999,))
-    fresh_db.deactivate_old_levels(older_than_hours=1)
+    # Force every row to look old enough to deactivate using only the public
+    # API: a large negative older_than_hours pushes the cutoff far into the
+    # future, so every row's updated_at (set moments ago) falls before it.
+    fresh_db.deactivate_old_levels(older_than_hours=-999999)
     remaining = {r["level_type"] for r in fresh_db.get_active_levels()}
     assert remaining == {"round_10"}  # vip-sourced survives, engine-sourced doesn't
 

@@ -41,6 +41,20 @@ def test_get_returns_none_when_no_row_matches(adapter):
     assert adapter.get("SELECT * FROM t WHERE id=?", 999) is None
 
 
+def test_run_lastrowid_is_none_on_a_no_op_insert(adapter):
+    """Regression test: found via gd_copy_signal's characterization suite.
+    sqlite3's cursor.lastrowid is connection-level state -- since this
+    adapter reuses one persistent connection, an INSERT OR IGNORE that hits
+    a UNIQUE conflict (writes nothing) would otherwise still report the
+    PREVIOUS successful insert's rowid instead of "no row was written"."""
+    adapter.exec("CREATE UNIQUE INDEX idx_t_val ON t(val)")
+    first = adapter.run("INSERT OR IGNORE INTO t (val) VALUES (?)", "unique-val")
+    assert first.lastrowid is not None
+    second = adapter.run("INSERT OR IGNORE INTO t (val) VALUES (?)", "unique-val")
+    assert second.lastrowid is None
+    assert second.rowcount == 0
+
+
 def test_transaction_commits_all_statements_together(adapter):
     with adapter.transaction() as tx:
         tx.run("INSERT INTO t (val) VALUES (?)", "x")

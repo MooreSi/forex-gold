@@ -282,6 +282,21 @@ def get_all_signals(limit: int = 100) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_recent_outcomes_by_direction(direction: str, since_ts: float, limit: int) -> list[str]:
+    """Recent closed-signal outcomes for a direction, newest first -- feeds
+    the consecutive-loss cooldown check in gd_copy_signal_service. New in
+    the repo (030/040): database.py's equivalent was a raw sqlite3 query
+    inline in engine.py (bypassing database.py's own API entirely) rather
+    than a named function here."""
+    rows = get_db().all(
+        "SELECT outcome FROM gdc_signals "
+        "WHERE direction=? AND close_time>? AND outcome IN ('win','loss','be') "
+        "ORDER BY close_time DESC LIMIT ?",
+        direction, since_ts, limit,
+    )
+    return [r[0] for r in rows]
+
+
 def get_signal_by_id(sig_id: int) -> Optional[dict]:
     row = get_db().get("SELECT * FROM gdc_signals WHERE id=?", sig_id)
     return dict(row) if row else None

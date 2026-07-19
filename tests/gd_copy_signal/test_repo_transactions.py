@@ -84,3 +84,17 @@ def test_close_signal_succeeds_normally_without_injected_failure(fresh_repo):
     row = fresh_repo.get_signal_by_id(sig_id)
     assert row["status"] == "closed"
     assert fresh_repo.get_virtual_balance() == 1025.0
+
+
+def test_get_recent_outcomes_by_direction_filters_and_orders(fresh_repo):
+    """New repo-only function (added in 040) replacing a raw sqlite3 query
+    that used to live inline in engine.py, bypassing database.py's API."""
+    s1 = fresh_repo.create_signal({"direction": "BUY", "signal_ref": "s1"})
+    fresh_repo.close_signal(s1, 2400.0, "loss", net_pnl_dollars=-10.0)
+    s2 = fresh_repo.create_signal({"direction": "SELL", "signal_ref": "s2"})
+    fresh_repo.close_signal(s2, 2400.0, "win", net_pnl_dollars=10.0)  # different direction -- excluded
+    s3 = fresh_repo.create_signal({"direction": "BUY", "signal_ref": "s3"})
+    fresh_repo.close_signal(s3, 2400.0, "loss", net_pnl_dollars=-5.0)
+
+    outcomes = fresh_repo.get_recent_outcomes_by_direction("BUY", since_ts=0, limit=10)
+    assert outcomes == ["loss", "loss"]  # s3 newest first, s2 excluded (wrong direction)

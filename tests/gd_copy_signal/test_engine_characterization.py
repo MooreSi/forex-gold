@@ -1,22 +1,18 @@
-"""Characterizes the currently-testable surface of
-forex_trader.gd_copy_signal.engine.GDCopyEngine before task 040 splits it --
-see docs/todo/refactor/backend-foundation/020-characterize-gd-copy-current-behavior.md.
+"""Characterizes the testable surface of GDCopyEngine. Originally written
+against engine.py during task 020; re-pointed at gd_copy_signal_service.py
+in task 040 by changing only the import + fixture module (database.py ->
+gd_copy_signal_repo.py, since the service now depends on the repo) -- every
+assertion below is unchanged. See
+docs/todo/refactor/backend-foundation/020-characterize-gd-copy-current-behavior.md
+and 040-extract-gd-copy-service-layer.md.
 
-Scope note: engine.py's async loops (_run_cycle, _check_outcomes,
-_check_correlation) are heavily coupled to externals this task doesn't
-attempt to fully mock -- a live MT5 bridge (self._bridge), the main
-SimulationEngine (self._main_eng, used for fee calculation and live order
-placement), forex_trader.core.database (session gates, risk settings,
-regime/drawdown/agreement features, the cross-engine signal bus), and even a
-raw sqlite3.connect() straight into the CORE database's vantage_tg_signals
-table for VIP correlation (engine.py:832-865, :1181-1205) -- plus one raw
-SQL query that bypasses gd_copy_signal/database.py's own API entirely
-(engine.py:319-325, the consecutive-loss check). Building a harness that
-fakes all of that is real work, deliberately left for a follow-up rather
-than rushed here. What this file covers instead: every pure/isolable method
+Scope note (unchanged from 020): the async orchestration loops
+(_run_cycle, _check_outcomes, _check_correlation) are heavily coupled to
+externals this file doesn't attempt to fully mock -- a live MT5 bridge
+(self._bridge), the main SimulationEngine (self._main_eng), and
+forex_trader.core.database. Covered instead: every pure/isolable method
 GDCopyEngine exposes, plus the money math and the DB-backed helper methods
-(_level_on_cooldown, _already_open, _today_signal_count), which together
-are the parts task 040 must not silently change while splitting engine.py.
+(_level_on_cooldown, _already_open, _today_signal_count).
 """
 import os
 import tempfile
@@ -24,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.gd_copy_signal import database as db
-from forex_trader.gd_copy_signal.engine import GDCopyEngine
+from forex_trader.gd_copy_signal import gd_copy_signal_repo as db
+from forex_trader.gd_copy_signal.gd_copy_signal_service import GDCopyEngine
 
 
 @pytest.fixture

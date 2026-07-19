@@ -1,17 +1,19 @@
 """Characterizes the CURRENT behavior of forex_trader.breakout_signal.database
-before task 020 (repo/adapter migration) or 030 (service extraction) touch it
--- see docs/todo/refactor/breakout-signal-migration/010-*.md.
+-- see docs/todo/refactor/breakout-signal-migration/010-*.md and 020-*.md.
 
-Every test here must keep passing, unmodified, against the new
-breakout_signal_repo.py (020). Mirrors the gd_copy_signal characterization
-suite's structure and rigor.
+The `fresh_db` fixture is parametrized over both database.py and the new
+breakout_signal_repo.py (020) -- every assertion runs against both backends
+unmodified, proving behavior equivalence (including the known close_signal
+double-counting bug, preserved faithfully in both -- see the killer test's
+docstring below).
 """
 import os
 import tempfile
 
 import pytest
 
-from forex_trader.breakout_signal import database as db
+from forex_trader.breakout_signal import database as database_module
+from forex_trader.breakout_signal import breakout_signal_repo as repo_module
 
 
 @pytest.fixture
@@ -22,10 +24,11 @@ def db_path():
     os.remove(path)
 
 
-@pytest.fixture
-def fresh_db(db_path):
-    db.init(db_path)
-    yield db
+@pytest.fixture(params=[database_module, repo_module], ids=["database", "repo"])
+def fresh_db(request, db_path):
+    module = request.param
+    module.init(db_path)
+    yield module
 
 
 def _sig(**overrides) -> dict:

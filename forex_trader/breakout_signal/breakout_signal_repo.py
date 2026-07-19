@@ -323,6 +323,25 @@ def book_partial_close(
     return new_remaining
 
 
+def get_closed_or_expired_signals_with_mt5_ticket() -> list[dict]:
+    """New in the repo (030) -- replaces engine.py's raw
+    `with bdb._conn() as conn: conn.execute("SELECT id, mt5_ticket, ...")`
+    in _reconcile_live_pnl's _do_reconcile (~engine.py:180-186)."""
+    rows = get_db().all(
+        "SELECT id, mt5_ticket, pnl_dollars, outcome, status FROM bo_signals"
+        " WHERE status IN ('closed','expired') AND mt5_ticket IS NOT NULL"
+    )
+    return [_row(r) for r in rows]
+
+
+def promote_expired_to_closed(signal_id: int) -> None:
+    """New in the repo (030) -- replaces engine.py's raw
+    `with bdb._conn() as _c: _c.execute("UPDATE bo_signals SET status='closed' ...")`
+    in _reconcile_live_pnl (~engine.py:217-220), used when an expired
+    signal turns out to have had a live MT5 trade that actually closed."""
+    get_db().run("UPDATE bo_signals SET status='closed' WHERE id=?", signal_id)
+
+
 def expire_signal(signal_id: int, reason: str = "expired") -> None:
     get_db().run(
         "UPDATE bo_signals SET status='expired', outcome='expired', close_time=?, learning_note=? WHERE id=?",

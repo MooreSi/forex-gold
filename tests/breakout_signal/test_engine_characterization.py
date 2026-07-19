@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.breakout_signal import database as db
-from forex_trader.breakout_signal.engine import BreakoutEngine
+from forex_trader.breakout_signal import breakout_signal_repo as db
+from forex_trader.breakout_signal.breakout_signal_service import BreakoutEngine
 
 
 @pytest.fixture

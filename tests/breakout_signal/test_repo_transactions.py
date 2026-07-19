@@ -120,3 +120,30 @@ def test_set_stop_loss(fresh_repo):
     fresh_repo.set_stop_loss(sig_id, 2405.123)
     row = fresh_repo.get_signal_by_id(sig_id)
     assert row["stop_loss"] == 2405.123
+
+
+def test_get_closed_or_expired_signals_with_mt5_ticket(fresh_repo):
+    pending = fresh_repo.create_signal(_sig(signal_ref="pending"))
+    fresh_repo.update_live_exec_result(pending, 111, "v1", "success")  # has ticket but still pending -- excluded
+
+    closed_no_ticket = fresh_repo.create_signal(_sig(signal_ref="closed_no_ticket"))
+    fresh_repo.close_signal(closed_no_ticket, 2410.0, "win")
+
+    closed_with_ticket = fresh_repo.create_signal(_sig(signal_ref="closed_with_ticket"))
+    fresh_repo.update_live_exec_result(closed_with_ticket, 222, "v2", "success")
+    fresh_repo.close_signal(closed_with_ticket, 2410.0, "win")
+
+    expired_with_ticket = fresh_repo.create_signal(_sig(signal_ref="expired_with_ticket"))
+    fresh_repo.update_live_exec_result(expired_with_ticket, 333, "v3", "success")
+    fresh_repo.expire_signal(expired_with_ticket)
+
+    ids = {r["id"] for r in fresh_repo.get_closed_or_expired_signals_with_mt5_ticket()}
+    assert ids == {closed_with_ticket, expired_with_ticket}
+
+
+def test_promote_expired_to_closed(fresh_repo):
+    sig_id = fresh_repo.create_signal(_sig())
+    fresh_repo.expire_signal(sig_id)
+    assert fresh_repo.get_signal_by_id(sig_id)["status"] == "expired"
+    fresh_repo.promote_expired_to_closed(sig_id)
+    assert fresh_repo.get_signal_by_id(sig_id)["status"] == "closed"

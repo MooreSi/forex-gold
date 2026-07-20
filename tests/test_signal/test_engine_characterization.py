@@ -12,11 +12,12 @@ import tempfile
 
 import pytest
 
-from forex_trader.test_signal import database as db
-from forex_trader.test_signal.engine import (
-    TestSignalEngine, _calc_lot_size, _calc_pnl_dollars, _compute_cost_pts,
-    _compute_swing_levels,
-)
+from forex_trader.test_signal import test_signal_repo as db
+from forex_trader.test_signal import database as _legacy_db
+from forex_trader.test_signal.test_signal_service import TestSignalEngine
+from forex_trader.test_signal.test_signal_generate import _calc_lot_size
+from forex_trader.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
+from forex_trader.test_signal.test_signal_velocity import _compute_swing_levels
 
 
 @pytest.fixture
@@ -24,6 +25,11 @@ def fresh_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     db.init(path)
+    # ml_engine.py (unmigrated, out of scope) imports the OLD database
+    # module directly -- _close_signal's ml.record_outcome() call needs it
+    # initialized too. See test_signal_service.py's init() for the same fix
+    # applied to the real app.
+    _legacy_db.init(path)
     yield db
     os.remove(path)
 

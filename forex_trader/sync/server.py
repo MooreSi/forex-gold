@@ -966,7 +966,7 @@ class SyncServer:
     @staticmethod
     def _gd_copy_stats() -> dict:
         try:
-            from forex_trader.gd_copy_signal import database as gdc_db
+            from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
             from forex_trader.gd_copy_signal import ml_engine as gdc_ml
             return {
                 "virtual_balance":      gdc_db.get_virtual_balance(),

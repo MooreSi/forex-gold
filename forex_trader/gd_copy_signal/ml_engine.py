@@ -239,7 +239,7 @@ def vip_match_rate_for_type(level_type: str) -> Optional[float]:
 def _get_training_data():
     """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
     try:
-        from forex_trader.gd_copy_signal import database as gdc_db
+        from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
         rows = gdc_db.get_ml_training_data()
         X, y = [], []
         for r in rows:
@@ -320,7 +320,7 @@ def get_daily_research_scores() -> tuple[float, float]:
     nightly Telegram research run, read at signal-generation time. Neutral
     0.5/0.5 prior until the first research run has completed."""
     try:
-        from forex_trader.gd_copy_signal import database as gdc_db
+        from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
         d = float(gdc_db.get_config("vip_discipline_score", "0.5") or 0.5)
         a = float(gdc_db.get_config("vip_aggression_score", "0.5") or 0.5)
         return d, a
@@ -365,7 +365,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     """Called when a signal closes — update online learner + maybe retrain batch."""
     global _model_online, _labeled_count
 
-    from forex_trader.gd_copy_signal import database as gdc_db
+    from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
     sig = gdc_db.get_signal_by_id(signal_id)
     if not sig:
         return
@@ -482,14 +482,13 @@ def get_ml_metrics() -> dict:
         "labeled_count":    _labeled_count,
     }
     try:
-        from forex_trader.gd_copy_signal import database as gdc_db
-        with gdc_db._conn() as _c:
-            rows = _c.execute(
-                "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
-                "FROM gdc_signals "
-                "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
-                "ORDER BY id"
-            ).fetchall()
+        from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
+        rows = gdc_db.get_db().all(
+            "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
+            "FROM gdc_signals "
+            "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
+            "ORDER BY id"
+        )
         if not rows:
             return _blank
 

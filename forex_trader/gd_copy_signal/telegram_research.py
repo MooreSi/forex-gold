@@ -185,7 +185,7 @@ async def run_nightly_research(engine) -> dict:
     keyed by date and store_daily_research does INSERT OR REPLACE, and a
     duplicate run simply overwrites the cached scores and retrains again
     rather than corrupting anything."""
-    from forex_trader.gd_copy_signal import database as gdc_db
+    from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
     from forex_trader.gd_copy_signal import ml_engine as gdc_ml
     from forex_trader.core import database as db_module
     from forex_trader.core import email_service

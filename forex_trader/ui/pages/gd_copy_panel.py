@@ -22,8 +22,8 @@ from forex_trader.core import database as db_module
 
 from nicegui import ui
 
-from forex_trader.gd_copy_signal import database as _gdc_db_real
-from forex_trader.gd_copy_signal import engine as gdc_engine_module
+from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdc_db_real
+from forex_trader.gd_copy_signal import gd_copy_signal_service as gdc_engine_module
 from forex_trader.gd_copy_signal import ml_engine as _gdc_ml_real
 from forex_trader.sync import client as sync_client
 from forex_trader.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode

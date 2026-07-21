@@ -25,7 +25,7 @@ from forex_trader.core.telegram_reader import TelegramReader
 
 import forex_trader.test_signal.engine as _test_engine_module
 import forex_trader.breakout_signal.engine as _breakout_engine_module
-import forex_trader.gd_copy_signal.engine as _gdc_engine_module
+import forex_trader.gd_copy_signal.gd_copy_signal_service as _gdc_engine_module
 import forex_trader.remote.client as _remote_client
 import forex_trader.remote.server as _remote_server
 from forex_trader.remote.auth import password_is_set
@@ -142,7 +142,7 @@ async def _signal_engine_watchdog_loop() -> None:
         except Exception as _e:
             log.debug("[AppWatchdog] Breakout health check error: %s", _e)
         try:
-            from forex_trader.gd_copy_signal import database as _gdcdb_wd
+            from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdcdb_wd
             if _gdcdb_wd.get_config("gdc_user_stopped", "0") != "1":
                 gdc = _gdc_engine_module.get_instance()
                 if gdc and not gdc.is_running:
@@ -182,7 +182,7 @@ async def startup() -> None:
     _breakout_engine_module.init(_engine._bridge)
 
     # Initialise GD Copy engine DB (completely isolated from other engines).
-    from forex_trader.gd_copy_signal import database as _gdcdb
+    from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdcdb
     _gdcdb.init(str(_DATA_DIR / "gd_copy_signal.db"))
     from forex_trader.gd_copy_signal import ml_engine as _gdc_ml
     _gdc_ml.init(str(_DATA_DIR))
@@ -232,7 +232,7 @@ async def startup() -> None:
     # Auto-start GD Copy engine — always on unless the user explicitly stopped it.
     # Uses gdc_user_stopped="1" (not gdc_engine_enabled) so normal app restarts
     # don't reset the preference; only a deliberate UI stop persists a "0".
-    from forex_trader.gd_copy_signal import database as _gdcdb2
+    from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdcdb2
     gdc_eng = _gdc_engine_module.get_instance()
     if gdc_eng:
         gdc_eng.set_main_engine(_engine)

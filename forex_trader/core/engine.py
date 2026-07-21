@@ -161,6 +161,7 @@ from forex_trader.core.core_handle_conservative_trial import (
     handle_conservative_trial as _handle_conservative_trial_impl,
 )
 from forex_trader.core.core_handle_scalp_runner import handle_scalp_runner as _handle_scalp_runner_impl
+from forex_trader.core.core_handle_orb_fixed import handle_orb_fixed as _handle_orb_fixed_impl
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -2000,33 +2001,7 @@ class SimulationEngine:
         _monitor_loop — since the whole point of this strategy is "exactly
         the setup the report computed, nothing recalculated."
         """
-        hits = await self._check_tp_hits(trade, tick)
-        if not hits:
-            return
-        trade_id   = trade["trade_id"]
-        mt5_ticket = trade.get("mt5_ticket")
-        tp1_val    = float(trade["tp1"])
-        remaining  = await db_module.to_db_thread(self._get_remaining_lots, trade_id)
-        if remaining <= 0:
-            return
-
-        actual_price = tp1_val
-        if mt5_ticket:
-            mt5_res = await self._bridge.partial_close(int(mt5_ticket), remaining)
-            if mt5_res.get("success"):
-                actual_price = float(mt5_res.get("close_price", tp1_val))
-            elif mt5_res.get("error") or mt5_res.get("success") is False:
-                log.warning("[orb_fixed] MT5 target close failed ticket=%s: %s",
-                            mt5_ticket, mt5_res)
-                return
-
-        result = await self.partial_close_trade(trade_id, remaining, actual_price, "Target")
-        asyncio.create_task(telegram_alerts.send_message(
-            telegram_alerts.fmt_tp_hit(trade, 1, actual_price, remaining,
-                                        result.get("partial_pnl", 0)),
-            trade_id, "orb_fixed_target",
-        ))
-        log.info("[orb_fixed] %s target @ %.2f — full close", trade_id[:8], actual_price)
+        return await _handle_orb_fixed_impl(trade, tick, self._bridge, self._tp_trigger_cache)
 
     async def _handle_scalp_runner(self, trade: dict, tick: Tick) -> None:
         """

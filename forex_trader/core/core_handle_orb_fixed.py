@@ -65,3 +65,4 @@ async def handle_orb_fixed(trade: dict, tick: Tick, bridge: Any, tp_cache: TPCac
         trade_id, "orb_fixed_target",
     ))
     log.info("[orb_fixed] %s target @ %.2f — full close", trade_id[:8], actual_price)
+    log.info("[orb_fixed] %s target @ %.2f — full close", trade_id[:8], actual_price)

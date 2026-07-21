@@ -39,7 +39,11 @@ from forex_trader.core.core_monitor_loop import check_sl as _check_sl_impl
 from forex_trader.core.core_scan_messages_auto_execute import (
     price_in_entry_range as _price_in_entry_range_impl,
 )
-from forex_trader.core.core_max_tp_hit import _tp_level_from_extreme
+from forex_trader.core.core_max_tp_hit import (
+    _tp_level_from_extreme,
+    max_tp_checker_sweep as _max_tp_checker_sweep_impl,
+    backfill_max_tp_hit_corrected as _backfill_max_tp_hit_corrected_impl,
+)
 from forex_trader.core.core_fees_sizing import pnl as _pnl_impl
 from forex_trader.core.core_mt5_performance import (
     compute_mt5_performance as _compute_mt5_performance_impl,
@@ -72,6 +76,7 @@ from forex_trader.core.core_signals import (
     activate_signal as _activate_signal_impl,
     cancel_signal as _cancel_signal_impl,
 )
+from forex_trader.core.core_gd_copy_research import gd_copy_research_sweep as _gd_copy_research_sweep_impl
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -7162,67 +7167,7 @@ class SimulationEngine:
         await asyncio.sleep(90)  # startup delay
         while self._monitor_running:
             try:
-                cutoff = time.time() - 1800  # 30 minutes ago
-                pending = db_module.get_trades_pending_max_tp(cutoff)
-                for t in pending:
-                    try:
-                        from_ts = float(t.get("open_time") or 0)
-                        to_ts   = float(t.get("close_time") or 0)
-                        direction = (t.get("direction") or "").upper()
-                        if not from_ts or not to_ts or not direction:
-                            db_module.save_max_tp_hit(t["trade_id"], "none")
-                            continue
-
-                        candles = await self._bridge.get_candles_range(from_ts, to_ts, "M1")
-                        if not candles:
-                            # Bridge offline or no data — skip, will retry next cycle
-                            continue
-
-                        # Extreme price in the trade's favourable direction
-                        if direction == "BUY":
-                            extreme = max(float(c.get("high", 0) or 0) for c in candles)
-                        else:
-                            extreme = min(float(c.get("low", float("inf")) or float("inf"))
-                                          for c in candles)
-
-                        # Prefer original signal TPs (sig_tp1..sig_tp8) so the column
-                        # reflects how far price ran vs the Telegram signal levels,
-                        # not the strategy's own overridden TP levels.
-                        def _tp_source(idx: int, t=t):
-                            sig_v = t.get(f"sig_tp{idx}")
-                            return sig_v if sig_v is not None else t.get(f"tp{idx}")
-
-                        hit = _tp_level_from_extreme(direction, extreme, _tp_source)
-
-                        db_module.save_max_tp_hit(t["trade_id"], hit)
-                        log.info(
-                            "max_tp_hit trade=%s dir=%s extreme=%.2f -> %s",
-                            t["trade_id"], direction, extreme, hit,
-                        )
-
-                        try:
-                            from forex_trader.sync.ledger import push_trade_closed
-                            net_pnl = t.get("net_pnl")
-                            push_trade_closed({
-                                "trade_id":    t["trade_id"],
-                                "engine":      "main",
-                                "direction":   direction,
-                                "strategy":    t.get("strategy", ""),
-                                "open_time":   t.get("open_time"),
-                                "close_time":  t.get("close_time"),
-                                "pnl_dollars": net_pnl,
-                                "outcome": (
-                                    "win" if (net_pnl or 0) > 0.5
-                                    else ("loss" if (net_pnl or 0) < -0.5 else "be")
-                                ),
-                                "tg_source":   t.get("tg_source"),
-                                "mt5_ticket":  t.get("mt5_ticket"),
-                                "max_tp_hit":  hit,
-                            })
-                        except Exception as _le:
-                            log.debug("[Ledger] max_tp_hit push failed: %s", _le)
-                    except Exception as _te:
-                        log.debug("max_tp_hit trade=%s error: %s", t.get("trade_id"), _te)
+                await _max_tp_checker_sweep_impl(self._bridge)
             except Exception as e:
                 log.debug("_max_tp_checker_loop error: %s", e)
             await asyncio.sleep(300)  # run every 5 minutes
@@ -7235,65 +7180,7 @@ class SimulationEngine:
         flat (see _max_tp_checker_loop docstring). Safe to leave running at
         startup — recompute-and-compare is idempotent, and it no-ops once
         every row already matches its corrected value."""
-        await asyncio.sleep(120)  # let the bridge connect first
-        try:
-            trades = await db_module.to_db_thread(db_module.get_trades_with_max_tp_set)
-        except Exception as e:
-            log.warning("[MaxTP-backfill] fetch failed: %s", e)
-            return
-        corrected = 0
-        for t in trades:
-            try:
-                direction = (t.get("direction") or "").upper()
-                from_ts = float(t.get("open_time") or 0)
-                to_ts   = float(t.get("close_time") or 0)
-                if not direction or not from_ts or not to_ts:
-                    continue
-                candles = await self._bridge.get_candles_range(from_ts, to_ts, "M1")
-                if not candles:
-                    continue
-                if direction == "BUY":
-                    extreme = max(float(c.get("high", 0) or 0) for c in candles)
-                else:
-                    extreme = min(float(c.get("low", float("inf")) or float("inf"))
-                                  for c in candles)
-
-                def _tp_source(idx: int, t=t):
-                    sig_v = t.get(f"sig_tp{idx}")
-                    return sig_v if sig_v is not None else t.get(f"tp{idx}")
-
-                hit = _tp_level_from_extreme(direction, extreme, _tp_source)
-                if hit == t.get("old_hit"):
-                    continue
-
-                await db_module.to_db_thread(db_module.save_max_tp_hit, t["trade_id"], hit)
-                corrected += 1
-                log.info("[MaxTP-backfill] trade=%s %s -> %s", t["trade_id"], t.get("old_hit"), hit)
-
-                try:
-                    from forex_trader.sync.ledger import push_trade_closed
-                    net_pnl = t.get("net_pnl")
-                    push_trade_closed({
-                        "trade_id":    t["trade_id"],
-                        "engine":      "main",
-                        "direction":   direction,
-                        "strategy":    t.get("strategy", ""),
-                        "open_time":   t.get("open_time"),
-                        "close_time":  t.get("close_time"),
-                        "pnl_dollars": net_pnl,
-                        "outcome": (
-                            "win" if (net_pnl or 0) > 0.5
-                            else ("loss" if (net_pnl or 0) < -0.5 else "be")
-                        ),
-                        "tg_source":   t.get("tg_source"),
-                        "mt5_ticket":  t.get("mt5_ticket"),
-                        "max_tp_hit":  hit,
-                    })
-                except Exception as _le:
-                    log.debug("[MaxTP-backfill] ledger push failed trade=%s: %s", t["trade_id"], _le)
-            except Exception as _te:
-                log.debug("[MaxTP-backfill] trade=%s error: %s", t.get("trade_id"), _te)
-        log.info("[MaxTP-backfill] done: %d/%d trades corrected", corrected, len(trades))
+        await _backfill_max_tp_hit_corrected_impl(self._bridge)
 
     # ── TP safety net ────────────────────────────────────────────────────────
     # 2026-07-03: several open trades ran deep into a favourable TP ladder
@@ -7633,17 +7520,7 @@ class SimulationEngine:
         await asyncio.sleep(90)  # let the app settle before the first check
         while self._monitor_running:
             try:
-                from zoneinfo import ZoneInfo
-                uk_now = datetime.now(ZoneInfo("Europe/London"))
-                _is_local = not await db_module.to_db_thread(db_module.is_remote_node)
-                if uk_now.hour == 22 and uk_now.minute == 0 and _is_local:
-                    uk_date_str = uk_now.strftime("%Y-%m-%d")
-                    if db_module.get_app_config("gdc_research_last") != uk_date_str:
-                        from forex_trader.gd_copy_signal import telegram_research
-                        result = await telegram_research.run_nightly_research(self)
-                        if result.get("ran"):
-                            db_module.set_app_config("gdc_research_last", uk_date_str)
-                        log.info("[GDC-Research] nightly run result: %s", result)
+                await _gd_copy_research_sweep_impl(self)
             except asyncio.CancelledError:
                 break
             except Exception as e:

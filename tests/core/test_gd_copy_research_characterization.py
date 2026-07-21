@@ -45,9 +45,11 @@ def fresh_db():
 
 
 def _patched_now(fixed_dt):
-    """Context manager patching engine.datetime.now() while leaving direct
-    datetime(...) construction working via the real class."""
-    patcher = mock.patch("forex_trader.core.engine.datetime")
+    """Context manager patching core_gd_copy_research.datetime.now() (where
+    engine.py's now-wired _gd_copy_research_loop actually computes the
+    current time, having delegated to gd_copy_research_sweep) while leaving
+    direct datetime(...) construction working via the real class."""
+    patcher = mock.patch("forex_trader.core.core_gd_copy_research.datetime")
     mock_dt = patcher.start()
     mock_dt.now.return_value = fixed_dt
     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)

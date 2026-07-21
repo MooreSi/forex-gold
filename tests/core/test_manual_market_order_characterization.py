@@ -83,6 +83,7 @@ def _default_tick():
 def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
+    e._cfg = {}
     return e
 
 

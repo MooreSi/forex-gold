@@ -22,6 +22,7 @@ import pytest
 
 from forex_trader.core import ai_signal_extractor
 from forex_trader.core import claude_ai
+from forex_trader.core import core_ai_signal_fallback
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
 
@@ -235,7 +236,7 @@ def test_apply_sl_adjustment_bridge_raises_no_db_write(fresh_db, engine):
 # ── _queue_unrecognised / _analyse_unrecognised_message ──────────────────────
 
 async def _call_queue_unrecognised(engine, tg_id, channel_name, text):
-    with mock.patch.object(SimulationEngine, "_analyse_unrecognised_message",
+    with mock.patch.object(core_ai_signal_fallback, "analyse_unrecognised_message",
                            new=mock.AsyncMock()) as m:
         SimulationEngine._queue_unrecognised(engine, tg_id, channel_name, text)
         await asyncio.sleep(0)  # let the scheduled task (if any) get created

@@ -128,6 +128,13 @@ from forex_trader.core.core_tp_safety_net import (
 from forex_trader.core.core_untracked_positions import (
     get_untracked_mt5_positions as _get_untracked_mt5_positions_impl,
 )
+from forex_trader.core.core_ai_signal_fallback import (
+    try_ai_signal_fallback as _try_ai_signal_fallback_impl,
+    push_ai_recovered_created as _push_ai_recovered_created_impl,
+    apply_sl_adjustment as _apply_sl_adjustment_impl,
+    queue_unrecognised as _queue_unrecognised_impl,
+    analyse_unrecognised_message as _analyse_unrecognised_message_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -4693,65 +4700,10 @@ class SimulationEngine:
         A cheap pre-check reuses the existing "Currency:" regex so the AI
         never even gets asked about an explicitly-non-XAUUSD message (the
         AI's own prompt is gold-only and untested against other pairs)."""
-        if not self._is_active_trader_node():
-            return None
-
-        if await db_module.to_db_thread(db_module.has_ai_fallback_check, tg_id, text):
-            return None
-
-        cm = _CURRENCY_RE.search(text)
-        if cm and cm.group(1).upper().replace("/", "").replace("-", "") != "XAUUSD":
-            return None
-        try:
-            from forex_trader.core import ai_signal_extractor
-            result = await ai_signal_extractor.classify_message(text, channel_name, self._cfg)
-        except Exception as e:
-            log.debug("[AI-Fallback] tg_id=%s extraction call failed: %s", tg_id, e)
-            return None
-        await db_module.to_db_thread(db_module.record_ai_fallback_check, tg_id, text)
-        if result is None:
-            return None
-
-        if result.get("kind") == "sl_adjustment":
-            log.info(
-                "[AI-Fallback] tg_id=%s %s recognised an SL-adjustment instruction "
-                "(confidence=%.2f): new_sl=%s — %s",
-                tg_id, channel_name, result.get("_ai_confidence", 0),
-                result.get("new_stop_loss"), result.get("_ai_reasoning", ""),
-            )
-            await db_module.to_db_thread(
-                db_module.save_ai_recovered_sl_adjustment,
-                tg_id, channel_name, text, result["new_stop_loss"],
-                result.get("_ai_confidence", 0), result.get("_ai_reasoning", ""),
-            )
-            await self._push_ai_recovered_created(
-                tg_id, channel_name, text, "sl_adjustment",
-                result.get("_ai_confidence", 0), result.get("_ai_reasoning", ""),
-                new_stop_loss=result["new_stop_loss"],
-            )
-            await self._apply_sl_adjustment(
-                result["new_stop_loss"], channel_name, tg_id, via="ai_fallback",
-            )
-            return None  # not a new entry signal — nothing for the caller to execute
-
-        log.info(
-            "[AI-Fallback] tg_id=%s %s recovered a signal the deterministic parser missed "
-            "(confidence=%.2f): %s",
-            tg_id, channel_name, result.get("_ai_confidence", 0), result.get("_ai_reasoning", ""),
+        return await _try_ai_signal_fallback_impl(
+            text, channel_name, tg_id, self._cfg,
+            self._is_active_trader_node(), self._bridge,
         )
-        await db_module.to_db_thread(
-            db_module.save_ai_recovered_signal,
-            tg_id, channel_name, text, result,
-            result.get("_ai_confidence", 0), result.get("_ai_reasoning", ""),
-        )
-        await self._push_ai_recovered_created(
-            tg_id, channel_name, text, "signal",
-            result.get("_ai_confidence", 0), result.get("_ai_reasoning", ""),
-            **{k: result.get(k) for k in
-               ("direction", "entry_low", "entry_high", "stop_loss",
-                "tp1", "tp2", "tp3", "tp4", "tp5", "tp6", "tp7", "tp8")},
-        )
-        return result
 
     @staticmethod
     async def _push_ai_recovered_created(
@@ -4762,30 +4714,9 @@ class SimulationEngine:
         Local/Remote node — see sync/protocol.py's MSG_AI_RECOVERED_SIGNAL_SYNC
         comment. Best-effort: a missed delivery is caught by the periodic
         full-queue pull (sync.client.SyncClient._ai_recovered_pull_loop)."""
-        try:
-            from forex_trader.sync import server as sync_server
-            srv = sync_server.get_instance()
-            if srv is not None:
-                await srv.push_own_ai_recovered_signal(
-                    "created", tg_message_id=tg_id, channel_name=channel_name,
-                    raw_text=text, message_type=message_type,
-                    confidence=confidence, reasoning=reasoning, **fields,
-                )
-                return
-        except Exception as e:
-            log.debug("[AI-Fallback] peer sync via server skipped/failed: %s", e)
-        try:
-            from forex_trader.sync import client as sync_client
-            from forex_trader.sync.protocol import CONN_CONNECTED
-            cli = sync_client.get_instance()
-            if cli.conn_state == CONN_CONNECTED:
-                await cli.push_ai_recovered_signal(
-                    "created", tg_message_id=tg_id, channel_name=channel_name,
-                    raw_text=text, message_type=message_type,
-                    confidence=confidence, reasoning=reasoning, **fields,
-                )
-        except Exception as e:
-            log.debug("[AI-Fallback] peer sync via client skipped/failed: %s", e)
+        return await _push_ai_recovered_created_impl(
+            tg_id, channel_name, text, message_type, confidence, reasoning, **fields,
+        )
 
     async def _apply_sl_adjustment(
         self, new_sl: float, channel_name: str, tg_id: str, via: str,
@@ -4812,114 +4743,15 @@ class SimulationEngine:
         message every cycle for as long as it stayed buffered, each time
         sending a fresh "SL adjusted" alert (found live 2026-07-08 — same
         message re-triggered roughly once a minute for over half an hour)."""
-        if not await db_module.to_db_thread(
-            db_module.try_claim_sl_adjustment, tg_id, channel_name, new_sl,
-        ):
-            return
-
-        with db_module.db() as conn:
-            row = conn.execute(
-                "SELECT * FROM vantage_simulated_trades WHERE status='open' AND "
-                "(tg_source=? OR tg_source=? OR tg_source LIKE ?) "
-                "ORDER BY open_time DESC LIMIT 1",
-                (channel_name, f"instant:{channel_name}", f"Telegram Auto ({channel_name})"),
-            ).fetchone()
-        trade = db_module.row_to_dict(row) if row else None
-        if not trade:
-            log.info(
-                "[%s] SL adjustment (tg_id=%s, via=%s) target %.2f — no matching "
-                "open trade found locally, nothing to apply",
-                channel_name, tg_id, via, new_sl,
-            )
-            return
-
-        mt5_ticket = trade.get("mt5_ticket")
-        trade_id   = trade["trade_id"]
-        old_sl     = trade.get("stop_loss")
-        if old_sl is not None and abs(float(old_sl) - new_sl) < 0.011:
-            log.info(
-                "[%s] SL adjustment (tg_id=%s, via=%s) target %.2f already matches "
-                "trade=%s's current SL — no-op",
-                channel_name, tg_id, via, new_sl, trade_id[:8],
-            )
-            return
-        try:
-            if mt5_ticket:
-                await self._bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                    (new_sl, trade_id),
-                )
-            log.info(
-                "[%s] SL adjustment (tg_id=%s, via=%s) applied to trade=%s (ticket %s): %s -> %s",
-                channel_name, tg_id, via, trade_id[:8], mt5_ticket, old_sl, new_sl,
-            )
-            _alert = (
-                f"SL adjusted — {channel_name}\n"
-                f"Trade {trade_id[:8]} (ticket {mt5_ticket}): {old_sl} → {new_sl}\n"
-                f"Source: {'learned rule' if via == 'learned_rule' else 'AI-recovered instruction'}"
-            )
-            asyncio.create_task(
-                telegram_alerts.send_message(_alert, tg_id, "sl_adjustment_applied")
-            )
-        except Exception as e:
-            log.error(
-                "[%s] SL adjustment (tg_id=%s) FAILED to apply to trade=%s (ticket %s): %s",
-                channel_name, tg_id, trade_id[:8], mt5_ticket, e,
-            )
-            asyncio.create_task(telegram_alerts.send_message(
-                f"SL ADJUSTMENT FAILED — {channel_name}\nTrade {trade_id[:8]} "
-                f"(ticket {mt5_ticket}): tried to set SL to {new_sl}, error: {e}\nReview manually.",
-                tg_id, "sl_adjustment_failed",
-            ))
+        return await _apply_sl_adjustment_impl(new_sl, channel_name, tg_id, via, self._bridge)
 
     def _queue_unrecognised(self, tg_id: str, channel_name: str, text: str) -> None:
-        try:
-            with db_module.db() as conn:
-                exists = conn.execute(
-                    "SELECT id FROM channel_unrecognised_messages WHERE tg_message_id=?",
-                    (tg_id,),
-                ).fetchone()
-            if not exists:
-                unrec_id = db_module.save_unrecognised_message(channel_name, tg_id, text)
-                if unrec_id:
-                    import asyncio as _aio
-                    _aio.create_task(
-                        self._analyse_unrecognised_message(unrec_id, channel_name, text)
-                    )
-                    log.info("[%s] Unrecognised message tg_id=%s — queued for analysis", channel_name, tg_id)
-        except Exception as e:
-            log.warning("_queue_unrecognised failed: %s", e)
+        return _queue_unrecognised_impl(tg_id, channel_name, text, self._cfg)
 
     async def _analyse_unrecognised_message(
         self, unrec_id: int, channel_name: str, text: str
     ) -> None:
-        from forex_trader.core import claude_ai
-        analysis: dict = {}
-        try:
-            analysis = await claude_ai.classify_unknown_message(
-                text, channel_name, self._cfg
-            )
-            db_module.update_unrecognised_message(
-                unrec_id, claude_analysis=__import__("json").dumps(analysis)
-            )
-        except Exception as e:
-            log.warning("_analyse_unrecognised_message failed: %s", e)
-            db_module.update_unrecognised_message(
-                unrec_id,
-                claude_analysis=__import__("json").dumps({"error": str(e), "summary": "Analysis failed"}),
-            )
-        try:
-            summary = analysis.get("summary", "Unknown message") if analysis else "Unknown message"
-            await telegram_alerts.send_message(
-                f"Unrecognised message from *{channel_name}*\n"
-                f"Analysis: {summary}\n"
-                f"Open the Telegram tab to review and classify it.",
-                event_type="unrecognised_message",
-            )
-        except Exception:
-            pass
+        return await _analyse_unrecognised_message_impl(unrec_id, channel_name, text, self._cfg)
 
     # ── Signal scanner ────────────────────────────────────────────────────────
 

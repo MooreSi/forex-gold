@@ -77,6 +77,7 @@ from forex_trader.core.core_signals import (
     cancel_signal as _cancel_signal_impl,
 )
 from forex_trader.core.core_gd_copy_research import gd_copy_research_sweep as _gd_copy_research_sweep_impl
+from forex_trader.core.core_email_scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -7800,184 +7801,14 @@ class SimulationEngine:
     # ── Email scheduler ───────────────────────────────────────────────────────
 
     async def _email_scheduler_loop(self) -> None:
-        from forex_trader.core import email_service
         await asyncio.sleep(60)  # initial startup delay
         while self._monitor_running:
             try:
-                cfg = db_module.get_email_config()
-                # Any one of these makes send_email() able to deliver — checking
-                # smtp_host alone here (as before) silently skipped this entire
-                # loop, ORB report included, on a node configured for Resend/
-                # Mailjet with no SMTP host set at all (confirmed live on the
-                # VPS: resend_api_key present, smtp_host empty).
-                _has_provider = bool(
-                    (cfg.get("smtp_host") or "").strip()
-                    or (cfg.get("resend_api_key") or "").strip()
-                    or (cfg.get("mailjet_api_key") or "").strip()
+                await _email_scheduler_sweep_impl(
+                    self._bridge, self._cfg, self._is_active_trader_node(),
                 )
-                if not _has_provider:
-                    await asyncio.sleep(60)
-                    continue
-
-                # Morning ORB report — a fixed 08:15 Europe/London send, rather
-                # than the daily/weekly summary's configurable send_time below.
-                # Reference range is now the Asian session (00:00-08:00 UTC —
-                # see build_orb_report), which is already fully formed by the
-                # moment London opens at 08:00, so the report no longer needs
-                # to wait out an extra hour for a new range to build the way
-                # the old first-hour-of-London-range design did (that used to
-                # fire at 09:00). 08:15 instead of checking right at 08:00
-                # gives genuine London order-flow a few minutes to establish a
-                # real direction (avoiding pure open-gap noise) and a small
-                # buffer for the M1 candle feed to fully settle, while still
-                # claiming most of the move's runway — gold's breakout
-                # typically develops over 1-3 hours, so every extra minute of
-                # delay here is runway that can't be recovered (2026-07-17
-                # decision, moved up from 09:00 for exactly this reason).
-                # Checked every cycle regardless of whether the daily/weekly
-                # gate below matches this minute — zoneinfo handles the
-                # BST/GMT switch automatically, so this stays correct at 08:15
-                # UK time year-round without adjustment. Weekdays only
-                # (weekday() < 5 — Mon-Fri; the London FX session doesn't
-                # trade weekends).
-                # Auto-execute is a separate toggle (vantage_risk_settings, not
-                # email_config) — it must still fire even if the informational
-                # email itself is disabled, and vice versa, so both are checked
-                # independently off one shared report/dedup gate.
-                _orb_email_on = bool(cfg.get("orb_report_enabled", 1))
-                _orb_auto_rs = await db_module.to_db_thread(db_module.get_risk_settings)
-                _orb_auto_on = bool(_orb_auto_rs.get("orb_auto_execute_enabled", 0))
-                if _orb_email_on or _orb_auto_on:
-                    try:
-                        from zoneinfo import ZoneInfo
-                        uk_now = datetime.now(ZoneInfo("Europe/London"))
-                        if uk_now.hour == 8 and uk_now.minute == 15 and uk_now.weekday() < 5:
-                            uk_date_str = uk_now.strftime("%Y-%m-%d")
-                            report = None
-                            if _orb_email_on and db_module.get_app_config("email_last_orb") != uk_date_str:
-                                report = await self.build_orb_report()
-                                if report:
-                                    chart_png = email_service.build_orb_chart_image(report)
-                                    orb_html = email_service.build_orb_html(
-                                        report, uk_now.strftime("%A, %d %B %Y"),
-                                        has_chart=bool(chart_png),
-                                    )
-                                    ok, err = await email_service.send_email(
-                                        f"FOREX Trader — London Open ORB Report — {uk_date_str}",
-                                        orb_html, cfg,
-                                        image_bytes=chart_png, image_cid=email_service._ORB_CHART_CID,
-                                    )
-                                    if ok:
-                                        db_module.set_app_config("email_last_orb", uk_date_str)
-                                    log.info("ORB report email %s%s", "sent" if ok else "FAILED",
-                                              f": {err}" if err else "")
-                            if _orb_auto_on and db_module.get_app_config("orb_auto_execute_last") != uk_date_str:
-                                if report is None:
-                                    report = await self.build_orb_report()
-                                if report:
-                                    await self._orb_auto_execute(report)
-                                    db_module.set_app_config("orb_auto_execute_last", uk_date_str)
-                    except Exception as e:
-                        log.warning("ORB report scheduling error: %s", e)
-
-                now = datetime.now()
-                send_time_str = cfg.get("send_time", "18:00") or "18:00"
-                try:
-                    sh, sm = [int(x) for x in send_time_str.split(":")]
-                except Exception:
-                    sh, sm = 18, 0
-
-                if now.hour != sh or now.minute != sm:
-                    await asyncio.sleep(60)
-                    continue
-
-                today_str = now.strftime("%Y-%m-%d")
-                perf = {}
-                try:
-                    perf = await self.compute_mt5_performance(90)
-                except Exception:
-                    pass
-
-                # Daily email — skip on weekends (Sat=5, Sun=6). Gated to the
-                # active-trader node only: both nodes previously ran this
-                # loop unconditionally, so the passive/standby node — which
-                # has no locally-closed trades of its own — sent a blank
-                # daily summary alongside the active node's correctly
-                # populated one every single day. Same fix as
-                # _is_active_trader_node's AI-fallback gate, applied here for
-                # the same reason: only one node's own vantage_simulated_trades
-                # table is ever a complete picture of "today's" activity.
-                if cfg.get("daily_enabled") and now.weekday() < 5 and self._is_active_trader_node():
-                    last_daily = db_module.get_app_config("email_last_daily")
-                    if last_daily != today_str:
-                        day_cutoff = datetime.now().replace(
-                            hour=0, minute=0, second=0, microsecond=0
-                        ).timestamp()
-                        with db_module.db() as conn:
-                            closed_today = [
-                                db_module.row_to_dict(r)
-                                for r in conn.execute(
-                                    "SELECT * FROM vantage_simulated_trades "
-                                    "WHERE status='closed' AND close_time>? "
-                                    "ORDER BY close_time DESC",
-                                    (day_cutoff,),
-                                ).fetchall()
-                            ]
-                        _balance = float(perf.get("balance", 0) or 0)
-                        _dpnl    = float(perf.get("daily_pnl", 0) or 0)
-                        try:
-                            claude_analysis = await claude_ai.generate_daily_analysis(
-                                closed_today, _balance, _dpnl, self._cfg,
-                            )
-                        except Exception as _ae:
-                            log.warning("Daily Claude analysis failed: %s", _ae)
-                            claude_analysis = None
-                        html = email_service.build_daily_html(
-                            perf, closed_today,
-                            now.strftime("%A, %d %B %Y"),
-                            claude_analysis=claude_analysis,
-                        )
-                        ok, err = await email_service.send_email(
-                            f"FOREX Trader Daily Summary — {today_str}", html, cfg
-                        )
-                        if ok:
-                            db_module.set_app_config("email_last_daily", today_str)
-                        log.info("Daily email %s%s", "sent" if ok else "FAILED",
-                                 f": {err}" if err else "")
-
-                # Weekly email (Friday = weekday 4) — same active-node gate as
-                # the daily email above, for the same reason.
-                if cfg.get("weekly_enabled") and now.weekday() == 4 and self._is_active_trader_node():
-                    iso = now.isocalendar()
-                    week_key = f"{iso[0]}-W{iso[1]:02d}"
-                    last_weekly = db_module.get_app_config("email_last_weekly")
-                    if last_weekly != week_key:
-                        cutoff_week = time.time() - 7 * 86400
-                        with db_module.db() as conn:
-                            week_trades = [
-                                db_module.row_to_dict(r)
-                                for r in conn.execute(
-                                    "SELECT * FROM vantage_simulated_trades "
-                                    "WHERE status='closed' AND close_time>? "
-                                    "ORDER BY close_time DESC",
-                                    (cutoff_week,),
-                                ).fetchall()
-                            ]
-                        html = email_service.build_weekly_html(
-                            perf, week_trades,
-                            f"Week ending {now.strftime('%d %B %Y')}",
-                        )
-                        ok, err = await email_service.send_email(
-                            f"FOREX Trader Weekly Summary — {week_key}", html, cfg
-                        )
-                        if ok:
-                            db_module.set_app_config("email_last_weekly", week_key)
-                        log.info("Weekly email %s%s", "sent" if ok else "FAILED",
-                                 f": {err}" if err else "")
-
             except Exception as e:
                 log.debug("Email scheduler error: %s", e)
-
             # Sleep until next minute boundary
             await asyncio.sleep(60)
 

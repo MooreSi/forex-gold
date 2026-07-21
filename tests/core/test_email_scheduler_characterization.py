@@ -18,6 +18,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import email_service, claude_ai
+from forex_trader.core import core_email_scheduler
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -48,7 +49,11 @@ def fresh_db():
 
 
 def _patched_now(fixed_dt):
-    patcher = mock.patch("forex_trader.core.engine.datetime")
+    """Patches core_email_scheduler.datetime (where engine.py's now-wired
+    _email_scheduler_loop actually computes the current time, having
+    delegated to email_scheduler_sweep) while leaving direct datetime(...)
+    construction working via the real class."""
+    patcher = mock.patch("forex_trader.core.core_email_scheduler.datetime")
     mock_dt = patcher.start()
     mock_dt.now.return_value = fixed_dt
     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -90,7 +95,7 @@ def _insert_closed_trade(trade_id, close_time):
         )
 
 
-async def _fake_perf(self_, days):
+async def _fake_perf(bridge, days):
     return {"balance": 1000.0, "daily_pnl": 5.0}
 
 
@@ -100,13 +105,13 @@ def test_no_provider_configured_nothing_runs(fresh_db):
     p = _patched_now(datetime(2026, 7, 20, 8, 15, 0))  # Monday
     build_calls = []
 
-    async def fake_build(self_):
+    async def fake_build(bridge):
         build_calls.append(1)
         return {}
 
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "build_orb_report", fake_build):
+             mock.patch.object(core_email_scheduler, "build_orb_report", fake_build):
             asyncio.run(e._email_scheduler_loop())
     finally:
         p.stop()
@@ -120,7 +125,7 @@ def test_orb_email_sent_with_chart_and_dedup_set(fresh_db):
     report = {"ok": True}
     sent = []
 
-    async def fake_build(self_):
+    async def fake_build(bridge):
         return report
 
     async def fake_send(subject, html, cfg, image_bytes=None, image_cid=None):
@@ -129,7 +134,7 @@ def test_orb_email_sent_with_chart_and_dedup_set(fresh_db):
 
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "build_orb_report", fake_build), \
+             mock.patch.object(core_email_scheduler, "build_orb_report", fake_build), \
              mock.patch.object(email_service, "build_orb_chart_image", return_value=b"PNG"), \
              mock.patch.object(email_service, "build_orb_html", return_value="<html>orb</html>"), \
              mock.patch.object(email_service, "send_email", side_effect=fake_send):
@@ -148,17 +153,17 @@ def test_orb_auto_execute_only_no_email_report_still_built(fresh_db):
     report = {"ok": True}
     build_calls, auto_calls = [], []
 
-    async def fake_build(self_):
+    async def fake_build(bridge):
         build_calls.append(1)
         return report
 
-    async def fake_auto(self_, r):
+    async def fake_auto(r, bridge, is_active_trader_node):
         auto_calls.append(r)
 
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "build_orb_report", fake_build), \
-             mock.patch.object(SimulationEngine, "_orb_auto_execute", fake_auto), \
+             mock.patch.object(core_email_scheduler, "build_orb_report", fake_build), \
+             mock.patch.object(core_email_scheduler, "orb_auto_execute", fake_auto), \
              mock.patch.object(email_service, "send_email") as mock_send:
             asyncio.run(e._email_scheduler_loop())
     finally:
@@ -200,7 +205,7 @@ def test_daily_email_sent_with_perf_and_claude_analysis(fresh_db):
 
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "compute_mt5_performance", _fake_perf), \
+             mock.patch.object(core_email_scheduler, "compute_mt5_performance", _fake_perf), \
              mock.patch.object(SimulationEngine, "_is_active_trader_node", staticmethod(lambda: True)), \
              mock.patch.object(claude_ai, "generate_daily_analysis", side_effect=fake_claude), \
              mock.patch.object(email_service, "build_daily_html", return_value="<html>daily</html>") as mock_build, \
@@ -243,7 +248,7 @@ def test_daily_claude_exception_swallowed_email_still_sent(fresh_db):
 
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "compute_mt5_performance", _fake_perf), \
+             mock.patch.object(core_email_scheduler, "compute_mt5_performance", _fake_perf), \
              mock.patch.object(SimulationEngine, "_is_active_trader_node", staticmethod(lambda: True)), \
              mock.patch.object(claude_ai, "generate_daily_analysis", side_effect=raising_claude), \
              mock.patch.object(email_service, "build_daily_html", return_value="<html>daily</html>") as mock_build, \
@@ -268,7 +273,7 @@ def test_weekly_email_sent_on_friday_with_iso_week_dedup(fresh_db):
 
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "compute_mt5_performance", _fake_perf), \
+             mock.patch.object(core_email_scheduler, "compute_mt5_performance", _fake_perf), \
              mock.patch.object(SimulationEngine, "_is_active_trader_node", staticmethod(lambda: True)), \
              mock.patch.object(email_service, "build_weekly_html", return_value="<html>weekly</html>"), \
              mock.patch.object(email_service, "send_email", side_effect=fake_send):
@@ -285,7 +290,7 @@ def test_weekly_skipped_on_non_friday(fresh_db):
     p = _patched_now(datetime(2026, 7, 23, 18, 0, 0))  # Thursday
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
-             mock.patch.object(SimulationEngine, "compute_mt5_performance", _fake_perf), \
+             mock.patch.object(core_email_scheduler, "compute_mt5_performance", _fake_perf), \
              mock.patch.object(SimulationEngine, "_is_active_trader_node", staticmethod(lambda: True)), \
              mock.patch.object(email_service, "send_email") as mock_send:
             asyncio.run(e._email_scheduler_loop())

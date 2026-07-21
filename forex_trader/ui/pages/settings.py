@@ -72,12 +72,18 @@ def render(get_engine: Callable, get_tg_reader: Callable):
             from forex_trader.ui.pages.remote_node import render as _render_remote_node
             _render_remote_node(get_engine)
         with ui.tab_panel(t_diag):
-            _render_diagnostics(engine)
+            _run_diag = _render_diagnostics(engine)
         with ui.tab_panel(t_reg):
             _render_registration()
         with ui.tab_panel(t_upd):
             from forex_trader.ui.pages.update_panel import render as _render_update
             _render_update()
+
+    def _on_settings_tab_change(e):
+        if e.value == t_diag:
+            asyncio.create_task(_run_diag())
+
+    stabs.on_value_change(_on_settings_tab_change)
 
 
 def _render_cred_card(engine, creds: dict, env: str, status_lbl) -> tuple:
@@ -2527,8 +2533,27 @@ def _render_diagnostics(engine):
                             ).classes("text-orange-300 text-xs mt-1 w-full")
                         elif trade_allowed is True:
                             ui.badge("AutoTrading ON", color="green")
+
+                    from forex_trader.core import ea_bridge as _ea_bridge_mod
+                    _ea = _ea_bridge_mod.get_instance()
+                    _ea_ok = _ea is not None and _ea.is_ea_healthy()
+                    ui.badge(
+                        "EA Connected" if _ea_ok else "EA Not Connected",
+                        color="green" if _ea_ok else "red",
+                    )
                 if health.get("last_error"):
                     ui.label(f"Last error: {health['last_error']}").classes("text-red-300 text-sm mt-1")
+                if not _ea_ok:
+                    _ea_hint = (
+                        "No MQL5 EA has ever connected this session."
+                        if _ea is None or _ea._last_seen == 0 else
+                        f"EA connection lost {round(_time_mod.time() - _ea._last_seen)}s ago."
+                    )
+                    ui.label(
+                        f"{_ea_hint} Trades will still be managed by the Python bridge -- "
+                        "this only affects EA-native on-tick management. If unexpected, check "
+                        "that ForexTraderBridge is attached to the chart with AutoTrading on."
+                    ).classes("text-gray-400 text-xs mt-1 w-full")
 
             with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
                 ui.label("Market Data").classes("font-bold text-yellow-300 mb-2")
@@ -3071,6 +3096,8 @@ def _render_diagnostics(engine):
 
     live_diag_card
     diag_container
+
+    return run_diag
 
 
 # ── Registration tab ───────────────────────────────────────────────────────────

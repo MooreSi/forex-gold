@@ -93,6 +93,14 @@ from forex_trader.core.core_bot_commands_readonly import (
     cmd_ime_on as _cmd_ime_on_impl,
     cmd_ime_off as _cmd_ime_off_impl,
 )
+from forex_trader.core.core_bot_commands_infra import (
+    cmd_restart_bridge as _cmd_restart_bridge_impl,
+    cmd_restart_app as _cmd_restart_app_impl,
+    cmd_headless as _cmd_headless_impl,
+    cmd_switch_live as _cmd_switch_live_impl,
+    cmd_switch_demo as _cmd_switch_demo_impl,
+    cmd_switch_env as _cmd_switch_env_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -250,24 +258,6 @@ def _ema(values: list[float], period: int) -> Optional[float]:
     for v in values[1:]:
         ema = v * k + ema * (1.0 - k)
     return ema
-
-
-async def _delayed_app_shutdown(delay_seconds: int) -> None:
-    await asyncio.sleep(delay_seconds)
-    if db_module.get_app_config("headless_mode_enabled") == "1":
-        # No NiceGUI ASGI server running in headless mode to gracefully shut
-        # down — nicegui.app.shutdown() would no-op here. The relaunch
-        # subprocess was already spawned separately (with its own delay) by
-        # whichever command triggered this, so ending this process is all
-        # that's needed; it starts the next instance on its own.
-        import os as _os
-        _os._exit(0)
-        return
-    try:
-        from nicegui import app as _nicegui_app
-        _nicegui_app.shutdown()
-    except Exception as _e:
-        log.warning("App shutdown after /restartapp failed: %s", _e)
 
 
 def _compute_volume_profile(
@@ -8477,90 +8467,11 @@ class SimulationEngine:
 
     async def _cmd_restart_bridge(self, args: list) -> str:
         """Stop and restart the MT5 bridge process, then enable AutoTrading."""
-        import subprocess
-
-        launched = await self._start_bridge_process()
-        if not launched:
-            return "Could not start bridge — check Settings > MT5 / Bridge > Start Bridge."
-
-        # Poll for port 9000.  Wine/CrossOver startup takes 15-30 s on macOS;
-        # native Windows bridge is up in 2-3 s.
-        from forex_trader.core.platform_utils import is_port_listening as _ipl
-        bridge_up = False
-        for _ in range(12):
-            await asyncio.sleep(3)
-            try:
-                bridge_up = _ipl(9000)
-            except Exception:
-                bridge_up = False
-            if bridge_up:
-                break
-
-        if not bridge_up:
-            return (
-                "Bridge process launched but port 9000 not bound after 36s.\n"
-                "Check Settings > MT5 / Bridge for errors."
-            )
-
-        # Allow the bridge a moment to complete its initial MT5 connect
-        await asyncio.sleep(3)
-
-        health = await self._bridge.get_health()
-        if not health.get("connected", False):
-            return (
-                "Bridge is up on port 9000 but MT5 is not connected yet.\n"
-                "It will retry automatically every 30s — check /status shortly."
-            )
-
-        # Bridge is connected — check and ensure AutoTrading is active
-        if health.get("trade_allowed"):
-            return "Bridge restarted and connected. Algo Trading: active."
-
-        at = await self._bridge.enable_autotrading()
-        if at.get("enabled"):
-            method = at.get("method", "")
-            if method == "already_enabled":
-                return "Bridge restarted and connected. Algo Trading: active."
-            return "Bridge restarted and connected. Algo Trading: enabled automatically."
-
-        at_err = at.get("error", "unknown")
-        return (
-            "Bridge restarted and connected to MT5.\n"
-            "Algo Trading: DISABLED — re-enable the AutoTrading button in the MT5 terminal toolbar.\n"
-            f"Auto-enable failed: {at_err}"
-        )
+        return await _cmd_restart_bridge_impl(args, self._bridge, self._start_bridge_process)
 
     async def _cmd_restart_app(self, args: list) -> str:
         """Restart the FOREX Trader app process (5-second delay so reply can send)."""
-        import subprocess as _sp
-        import sys as _sys
-        from pathlib import Path as _Path
-        try:
-            root = _Path(__file__).parent.parent.parent
-            if _sys.platform == "win32":
-                venv_python = root / ".venv" / "Scripts" / "python.exe"
-            else:
-                venv_python = root / ".venv" / "bin" / "python3"
-            python = str(venv_python) if venv_python.exists() else _sys.executable
-            from forex_trader.config import USER_DATA_DIR
-            from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
-            log_path = USER_DATA_DIR / "data" / "restart.log"
-            # Persist the current offset NOW so the restarted process skips
-            # this /restartapp update and doesn't trigger another restart.
-            db_module.set_app_config("bot_update_offset", str(self._bot_offset))
-            with open_restart_log(log_path) as _f:
-                _sp.Popen(
-                    delayed_relaunch_cmd(python, "run.py", delay_secs=6, extra_args=["--no-browser"]),
-                    cwd=str(root),
-                    start_new_session=True,
-                    stdin=_sp.DEVNULL,
-                    stdout=_f,
-                    stderr=_f,
-                )
-            asyncio.create_task(_delayed_app_shutdown(5))
-            return "Restarting app in 5 seconds — reconnect your browser shortly."
-        except Exception as e:
-            return f"Restart failed: {e}"
+        return await _cmd_restart_app_impl(args, self._bot_offset)
 
     async def _cmd_headless(self, args: list) -> str:
         """Toggle headless mode (no web UI) and restart to apply it.
@@ -8572,70 +8483,17 @@ class SimulationEngine:
         just with the flag flipped first, so it's one command end to end
         rather than "set a setting, then remember to also restart."
         """
-        if not args or args[0].lower() not in ("on", "off"):
-            current = "ON" if db_module.get_app_config("headless_mode_enabled") == "1" else "OFF"
-            return f"Usage: /headless on | off\nCurrently: {current}"
-        action = args[0].lower()
-        db_module.set_app_config("headless_mode_enabled", "1" if action == "on" else "0")
-        restart_result = await self._cmd_restart_app(args=[])
-        if action == "on":
-            return (
-                "Headless mode enabled. " + restart_result + "\n"
-                "The web UI will not be available after this restart — "
-                "send /headless off to bring it back."
-            )
-        return "Headless mode disabled — the web UI will be available again. " + restart_result
+        return await _cmd_headless_impl(args, self._cmd_restart_app)
 
     async def _cmd_switch_live(self, args: list) -> str:
-        return await self._cmd_switch_env("live")
+        return await _cmd_switch_live_impl(args, self._bridge)
 
     async def _cmd_switch_demo(self, args: list) -> str:
-        return await self._cmd_switch_env("demo")
+        return await _cmd_switch_demo_impl(args, self._bridge)
 
     async def _cmd_switch_env(self, new_env: str) -> str:
         """Switch the active MT5 account environment (live/demo)."""
-        import forex_trader.config as _cfg
-        from pathlib import Path as _Path
-        env_label = "Live" if new_env == "live" else "Demo"
-        try:
-            creds = db_module.get_mt5_credentials()
-            if new_env == "live":
-                login    = int(creds.get("live_login") or 0)
-                password = creds.get("live_password_enc") or ""
-                server   = (creds.get("live_server") or "").strip()
-            else:
-                login    = int(creds.get("login") or 0)
-                password = creds.get("password_enc") or ""
-                server   = (creds.get("server") or "").strip()
-
-            if not login or not password or not server:
-                return (
-                    f"{env_label} credentials not configured.\n"
-                    "Go to Settings > MT5 / Bridge and enter your "
-                    f"{env_label} account login, password and server first."
-                )
-
-            from forex_trader.config import DATA_DIR as _DATA_DIR
-            db_module.init(str(_DATA_DIR / f"forex_trader_{new_env}.db"))
-            _cfg.save_to_yaml({"account_env": new_env})
-            db_module.sync_bridge_credentials_file(new_env)
-
-            result = await self._bridge.send_credentials(login, password, server)
-            if result.get("status") == "connected":
-                health = await self._bridge.get_health()
-                at_note = (
-                    "\nNote: Algo Trading may have reset in MT5 — re-enable the AutoTrading button."
-                    if health.get("trade_allowed") is False else ""
-                )
-                return f"Switched to {env_label} account (login {login}).{at_note}"
-            else:
-                err = result.get("error") or result.get("status") or "unknown"
-                return (
-                    f"Config saved for {env_label} but MT5 bridge returned: {err}\n"
-                    "Try /restartbridge to reconnect."
-                )
-        except Exception as e:
-            return f"Switch to {env_label} failed: {e}"
+        return await _cmd_switch_env_impl(new_env, self._bridge)
 
     async def _cmd_market_price_buy(self, args: list) -> str:
         try:

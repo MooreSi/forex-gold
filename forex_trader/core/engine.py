@@ -112,6 +112,14 @@ from forex_trader.core.core_profit_sync import (
     profit_sweep as _profit_sweep_impl,
 )
 from forex_trader.core.core_update_signal import update_signal as _update_signal_impl
+from forex_trader.core.core_risk_governor import (
+    is_trading_paused as _is_trading_paused_impl,
+    check_pre_trade_filters as _check_pre_trade_filters_impl,
+    rg_day_start_ts as _rg_day_start_ts_impl,
+    rg_size_and_check as _rg_size_and_check_impl,
+    rg_check_halt as _rg_check_halt_impl,
+    rg_apply_halts_on_close as _rg_apply_halts_on_close_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -3462,13 +3470,7 @@ class SimulationEngine:
     # ── Pause check ───────────────────────────────────────────────────────────
 
     def is_trading_paused(self) -> bool:
-        raw = db_module.get_app_config("trade_pause_until")
-        if not raw:
-            return False
-        try:
-            return float(raw) > time.time()
-        except Exception:
-            return False
+        return _is_trading_paused_impl()
 
     @staticmethod
     def _price_in_entry_range(direction: str, entry_low: float, entry_high: float,
@@ -3476,14 +3478,6 @@ class SimulationEngine:
         return _price_in_entry_range_impl(direction, entry_low, entry_high, tick)
 
     # ── Pre-trade filters ─────────────────────────────────────────────────────
-
-    # Channels whose TP/SL levels come directly from a paid signal provider and
-    # should be taken as-is without the R:R filter.  Matching is case-insensitive
-    # and substring-based so it covers "Telegram Auto (Gold Diggers VIP)" etc.
-    _RR_BYPASS_SOURCES: frozenset = frozenset({
-        "gold diggers vip",
-        "gold diggers 2.0",
-    })
 
     def _check_pre_trade_filters(
         self,
@@ -3500,7 +3494,7 @@ class SimulationEngine:
 
         Filter 1 — Minimum R:R on TP1 (0.75 : 1)
             Compares TP1 distance against SL distance from the reference price.
-            Skipped for channels in _RR_BYPASS_SOURCES that supply their own
+            Skipped for channels in RR_BYPASS_SOURCES that supply their own
             TP/SL levels from a signal provider service.
 
         Filter 2 — Directional cap (max 2 unprotected same-direction trades)
@@ -3509,41 +3503,10 @@ class SimulationEngine:
 
         Returns an error string when a filter fires, None when the trade may proceed.
         """
-        direction = direction.upper()
-
-        # ── Filter 1: Minimum TP1 R:R ─────────────────────────────────────────
-        _MIN_RR = 0.75
-        _src_lower    = source_name.lower()
-        _rr_bypassed  = any(ch in _src_lower for ch in self._RR_BYPASS_SOURCES)
-        if tp1 is not None and not _rr_bypassed:
-            ref_price = float(actual_price) if actual_price is not None \
-                        else (entry_low + entry_high) / 2.0
-            sl_dist   = abs(ref_price - float(stop_loss))
-            tp1_dist  = abs(float(tp1) - ref_price)
-            if sl_dist > 0 and (tp1_dist / sl_dist) < _MIN_RR:
-                rr = tp1_dist / sl_dist
-                price_src = "live price" if actual_price is not None else "zone mid"
-                return (
-                    f"R:R filter blocked: TP1 is {tp1_dist:.1f} pts from {price_src} vs "
-                    f"SL {sl_dist:.1f} pts away ({rr:.2f}:1 — minimum {_MIN_RR:.2f}:1 required)"
-                )
-
-        # ── Filter 2: Directional cap ──────────────────────────────────────────
-        _MAX_UNPROTECTED = 2
-        with db_module.db() as conn:
-            same_dir_unprotected = conn.execute(
-                "SELECT COUNT(*) FROM vantage_simulated_trades "
-                "WHERE status='open' AND direction=? AND sl_moved_to_be=0",
-                (direction,),
-            ).fetchone()[0]
-        if same_dir_unprotected >= _MAX_UNPROTECTED:
-            return (
-                f"Directional cap blocked: {same_dir_unprotected} open {direction} "
-                f"trade(s) are still exposed (SL not at breakeven) — "
-                f"max {_MAX_UNPROTECTED} unprotected same-direction trades allowed"
-            )
-
-        return None
+        return _check_pre_trade_filters_impl(
+            direction, entry_low, entry_high, stop_loss, tp1,
+            actual_price=actual_price, source_name=source_name,
+        )
 
     # ── Tier 1 Risk Governor ───────────────────────────────────────────────────
     # Deterministic, app-wide safety layer. When risk_governor_enabled is set it
@@ -3553,81 +3516,18 @@ class SimulationEngine:
     # All thresholds come from existing vantage_risk_settings columns. When the
     # toggle is off none of this runs and strategies behave exactly as before.
 
-    # 0.30 only rejects badly-inverted setups (TP1 closer than 1/3 of the stop).
-    # A 1:1 floor was tested but blocks the breakeven-mechanism winners that the
-    # scale-out/conservative strategies rely on, so sizing does the heavy lifting.
-    _RG_MIN_TP1_RR   = 1.00  # minimum TP1 reward:risk required to open (1:1 floor)
-    _RG_MAX_STOP_ATR = 1.5   # reject scalps whose stop is wider than this x ATR
-
     def _rg_day_start_ts(self) -> float:
         """Epoch of the current trading day's start, in broker time (UTC+3)."""
-        from datetime import datetime, timezone, timedelta
-        broker_now      = datetime.now(timezone.utc) + timedelta(hours=3)
-        broker_midnight = broker_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return (broker_midnight - timedelta(hours=3)).timestamp()
+        return _rg_day_start_ts_impl()
 
     def _rg_size_and_check(self, *, direction: str, ref_price: float,
                            stop_loss: float, tp1, strategy: str,
                            atr: float, balance: float, rs: dict):
         """Return (lot_size, None) when a trade is allowed, or (None, reason)."""
-        direction = direction.upper()
-        stop_dist = abs(float(ref_price) - float(stop_loss))
-        if stop_dist <= 0:
-            return None, "stop distance is zero"
-
-        # (E) Stop-width cap — keep scalps tight. Skipped when ATR is unavailable.
-        if atr > 0 and stop_dist > atr * self._RG_MAX_STOP_ATR:
-            return None, (
-                f"stop {stop_dist:.1f} pts exceeds {self._RG_MAX_STOP_ATR:.1f}x ATR "
-                f"({atr * self._RG_MAX_STOP_ATR:.1f} pts) — too wide for a scalp"
-            )
-
-        # (A) Risk-based position size from risk_per_trade_pct.
-        risk_pct = float(rs.get("risk_per_trade_pct", 0.5) or 0.5)
-        risk_amt = balance * (risk_pct / 100.0)
-        lot      = risk_amt / (stop_dist * CONTRACT_SIZE)
-
-        # (B) Hard ceiling on worst-case loss from max_risk_per_trade_pct.
-        max_pct = float(rs.get("max_risk_per_trade_pct", 1.0) or 1.0)
-        ceiling = balance * (max_pct / 100.0)
-        lot_cap = ceiling / (stop_dist * CONTRACT_SIZE)
-        lot     = min(lot, lot_cap, float(rs.get("max_lot_size", 0.10) or 0.10))
-        lot     = round(lot, 2)
-        if lot < 0.01:
-            return None, (
-                f"risk-correct size below 0.01 lots for a {stop_dist:.1f} pt stop "
-                f"(would exceed {max_pct:.1f}% of ${balance:,.0f}) — trade skipped"
-            )
-
-        # (E) Minimum TP1 R:R — only when the strategy honours signal TPs.
-        # GD VIP Runner and Adaptive Runner deliberately widen SL well beyond
-        # TP1 distance — real R:R is measured across the full ladder, not at
-        # TP1 alone.
-        if tp1 is not None and strategy not in (
-            STRATEGY_CONSERVATIVE_TRIAL,
-            STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
-        ):
-            tp1_dist = abs(float(tp1) - float(ref_price))
-            if tp1_dist / stop_dist < self._RG_MIN_TP1_RR:
-                return None, (
-                    f"TP1 R:R {tp1_dist / stop_dist:.2f}:1 below the "
-                    f"{self._RG_MIN_TP1_RR:.2f}:1 minimum"
-                )
-
-        # (E) Directional cap — at most 2 unprotected same-direction trades.
-        with db_module.db() as conn:
-            same_dir = conn.execute(
-                "SELECT COUNT(*) FROM vantage_simulated_trades "
-                "WHERE status='open' AND direction=? AND sl_moved_to_be=0",
-                (direction,),
-            ).fetchone()[0]
-        if same_dir >= 2:
-            return None, (
-                f"{same_dir} unprotected {direction} trade(s) already open "
-                f"(directional cap is 2)"
-            )
-
-        return lot, None
+        return _rg_size_and_check_impl(
+            direction=direction, ref_price=ref_price, stop_loss=stop_loss,
+            tp1=tp1, strategy=strategy, atr=atr, balance=balance, rs=rs,
+        )
 
     def _rg_check_halt(self, rs: dict, balance: float) -> Optional[str]:
         """Return a reason string when the Risk Governor should halt trading.
@@ -3639,52 +3539,11 @@ class SimulationEngine:
         producing a false drawdown-halt reason based on a number unrelated to
         the account's actual health.
         """
-        day_start = self._rg_day_start_ts()
-        with db_module.db() as conn:
-            realised_today = conn.execute(
-                "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "
-                "WHERE close_time >= ?", (day_start,),
-            ).fetchone()[0] or 0.0
-
-        # (C) Daily loss limit — base off balance before today's realised P&L.
-        max_daily = float(rs.get("max_daily_loss_pct", 20.0) or 0)
-        if max_daily > 0:
-            day_base = balance - realised_today
-            limit    = day_base * (max_daily / 100.0)
-            if realised_today <= -abs(limit):
-                return (
-                    f"Daily loss limit hit: ${realised_today:.2f} today vs "
-                    f"-${abs(limit):.2f} ({max_daily:.0f}% of ${day_base:,.0f})"
-                )
-
-        # (D) Total account drawdown from peak balance watermark.
-        max_total_dd = float(rs.get("max_total_drawdown_pct", 20.0) or 0)
-        if max_total_dd > 0 and balance > 0:
-            peak_str  = db_module.get_app_config("peak_balance") or "0"
-            peak_bal  = float(peak_str or 0)
-            if peak_bal > balance:
-                dd_pct = (peak_bal - balance) / peak_bal * 100
-                if dd_pct >= max_total_dd:
-                    return (
-                        f"Total drawdown {dd_pct:.1f}% from peak ${peak_bal:,.2f} "
-                        f"(limit {max_total_dd:.0f}%)"
-                    )
-
-        return None
+        return _rg_check_halt_impl(rs, balance)
 
     def _rg_apply_halts_on_close(self, rs: dict, balance: float) -> None:
         """After a close, trip the pause flag if a circuit breaker fired."""
-        reason = self._rg_check_halt(rs, balance)
-        if not reason:
-            return
-        if reason.startswith("Daily loss"):
-            until = self._rg_day_start_ts() + 86400.0          # resume next broker day
-        else:
-            cooldown_min = int(rs.get("cooldown_after_loss_min", 15) or 15)
-            until = time.time() + cooldown_min * 60
-        db_module.set_app_config("trade_pause_until", str(until))
-        db_module.set_app_config("risk_halt_reason", reason)
-        log.warning("[RG] Trading paused until %.0f: %s", until, reason)
+        return _rg_apply_halts_on_close_impl(rs, balance)
 
     # ── Pending signal watcher ────────────────────────────────────────────────
 

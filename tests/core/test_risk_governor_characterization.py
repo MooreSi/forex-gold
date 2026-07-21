@@ -279,14 +279,17 @@ def test_rg_apply_halts_on_close_sets_pause_and_reason_together(engine):
     assert db.get_app_config("risk_halt_reason") is not None
 
 
-def test_rg_apply_halts_on_close_is_not_atomic_today(engine):
-    """Documents the real (small) atomicity gap in this pack's scope:
-    _rg_apply_halts_on_close makes two SEPARATE top-level set_app_config()
-    calls (trade_pause_until, then risk_halt_reason), each its own
-    independent db_module.db() transaction (depth 0->1->0 twice, not
-    nested). A crash between them leaves the pause flag set with no
-    reason, or vice versa. Confirmed here with a forced failure; fixed in
-    020 by wrapping the whole method body in one outer `with db_module.db():`."""
+def test_rg_apply_halts_on_close_is_atomic_since_020_fix(engine):
+    """Was test_rg_apply_halts_on_close_is_not_atomic_today: documented a real
+    atomicity gap where _rg_apply_halts_on_close made two SEPARATE top-level
+    set_app_config() calls (trade_pause_until, then risk_halt_reason), each
+    its own independent db_module.db() transaction (depth 0->1->0 twice, not
+    nested) -- a crash between them could leave the pause flag set with no
+    reason, or vice versa. Fixed in the 020 extraction (core_risk_governor.py)
+    by wrapping the whole method body in one outer `with db_module.db():`, so
+    a failure partway through now rolls back both writes together via the
+    connection's single (nested, uncommitted-until-outermost) transaction.
+    Now wired in -- this asserts the FIXED atomic behavior takes effect."""
     db.set_app_config("peak_balance", "2000.0")
     rs = db.get_risk_settings()
 
@@ -300,12 +303,12 @@ def test_rg_apply_halts_on_close_is_not_atomic_today(engine):
             raise RuntimeError("simulated crash between the two config writes")
         return real_set_app_config(key, value)
 
-    with patch.object(SimulationEngine._rg_apply_halts_on_close.__globals__["db_module"],
-                       "set_app_config", side_effect=_fail_on_second_call):
+    with patch.object(db, "set_app_config", side_effect=_fail_on_second_call):
         with pytest.raises(RuntimeError):
             engine._rg_apply_halts_on_close(rs, balance=1000.0)
 
-    # This is the bug: the first write (trade_pause_until) survived even
-    # though the second one (risk_halt_reason) never happened.
-    assert db.get_app_config("trade_pause_until") is not None
+    # Fixed: both writes are in the same outer transaction, so the forced
+    # failure on the second call rolls back the first one too -- neither
+    # survives.
+    assert db.get_app_config("trade_pause_until") is None
     assert db.get_app_config("risk_halt_reason") is None

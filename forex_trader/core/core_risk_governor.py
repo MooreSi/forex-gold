@@ -21,6 +21,7 @@ new adapter/repo needed.
 """
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -30,6 +31,8 @@ from forex_trader.core.models import (
     CONTRACT_SIZE,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
 )
+
+log = logging.getLogger(__name__)
 
 # Channels whose TP/SL levels come directly from a paid signal provider and
 # should be taken as-is without the R:R filter. Matching is case-insensitive
@@ -270,4 +273,5 @@ def rg_apply_halts_on_close(rs: dict, balance: float) -> None:
     with db_module.db():
         db_module.set_app_config("trade_pause_until", str(until))
         db_module.set_app_config("risk_halt_reason", reason)
+    log.warning("[RG] Trading paused until %.0f: %s", until, reason)
 

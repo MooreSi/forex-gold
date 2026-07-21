@@ -98,6 +98,7 @@ def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     e._dpm_candles = None
+    e._cfg = {}
     return e
 
 

@@ -28,7 +28,7 @@ from typing import Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core.models import (
-    CONTRACT_SIZE,
+    CONTRACT_SIZE, Tick,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
 )
 

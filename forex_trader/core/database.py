@@ -83,8 +83,40 @@ async def to_db_thread(fn, *args, **kwargs):
 _thread_local = threading.local()
 
 
+def _close_thread_local_conn() -> None:
+    """Close and drop this thread's cached db() connection, if any, so the
+    next db() call on this thread opens a fresh connection against whatever
+    _DB_PATH currently is -- see init()'s comment for why this matters."""
+    conn = getattr(_thread_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        del _thread_local.conn
+    if hasattr(_thread_local, "depth"):
+        del _thread_local.depth
+
+
 def init(db_path: str) -> None:
     global _DB_PATH
+    # db() caches one connection per thread for the life of that thread, so
+    # simply reassigning _DB_PATH here is not enough: any thread that already
+    # opened a db() connection against the OLD path (the calling thread doing
+    # this account-env switch, and the single to_db_thread() worker -- the
+    # only two threads that ever call db()) would keep silently reading and
+    # writing the OLD database file forever, since db() only opens a fresh
+    # connection when a thread has none cached yet. Close both caches here so
+    # every subsequent db() call, on either thread, opens fresh against the
+    # new path. Found 2026-07-21: switching demo/live in the running app left
+    # _apply_schema() below reusing the calling thread's stale connection, so
+    # it silently re-applied the schema to the OLD file instead of the new
+    # one -- the new file stayed schema-less until the next full process
+    # restart, and background loops that read fresh (not cached) connections
+    # against the new path (e.g. gd_copy_signal_correlate.py's VIP fetch)
+    # broke immediately with "no such table".
+    _close_thread_local_conn()
+    _db_executor.submit(_close_thread_local_conn).result(timeout=5)
     _DB_PATH = db_path
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     _apply_schema()

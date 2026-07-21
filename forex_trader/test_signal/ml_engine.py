@@ -713,7 +713,7 @@ def _retrain() -> None:
             "result": f"ml_retrain:{len(X_all)}_samples",
             "claude_decision": (
                 f"{'LGB' if _LGB else 'RF'} retrained on {len(X_all)} examples. "
-                f"CV-AUC={cv_mean:.3f}. Regime models: "
+                f"CV-AUC={cv_rmse:.3f}. Regime models: "
                 f"trending={_model_trending is not None}, ranging={_model_ranging is not None}."
             ),
         })

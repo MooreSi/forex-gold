@@ -18,6 +18,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import claude_ai, email_service
+from forex_trader.core import core_bot_commands_trading as cmds
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
 
@@ -50,10 +51,16 @@ def fresh_db():
     os.remove(path)
 
 
+class _FakeBridge:
+    async def get_tick(self):
+        return None
+
+
 @pytest.fixture
 def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._cfg = {}
+    e._bridge = _FakeBridge()
     return e
 
 
@@ -155,9 +162,9 @@ def test_activate_in_zone_opens_trade(fresh_db, engine):
     _insert_tg_signal()
     trade_result = {"trade_id": "trade-abc", "entry_price": 2400.0, "mt5_ticket": 555}
     tick = SimpleNamespace(bid=2399.5, ask=2400.5)
-    with mock.patch.object(SimulationEngine, "get_tick", new=mock.AsyncMock(return_value=tick)), \
-         mock.patch.object(SimulationEngine, "_get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
-         mock.patch.object(SimulationEngine, "open_trade", new=mock.AsyncMock(return_value=trade_result)) as ot:
+    engine._bridge.get_tick = mock.AsyncMock(return_value=tick)
+    with mock.patch.object(cmds, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
+         mock.patch.object(cmds, "open_trade", new=mock.AsyncMock(return_value=trade_result)) as ot:
         result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
     assert "Activated!" in result
     assert "Trade ID: trade-abc" in result
@@ -167,8 +174,8 @@ def test_activate_in_zone_opens_trade(fresh_db, engine):
 def test_activate_outside_zone_saved_pending(fresh_db, engine):
     _insert_tg_signal(entry_low=2399.0, entry_high=2401.0)
     tick = SimpleNamespace(bid=2410.0, ask=2410.5)
-    with mock.patch.object(SimulationEngine, "get_tick", new=mock.AsyncMock(return_value=tick)), \
-         mock.patch.object(SimulationEngine, "open_trade", new=mock.AsyncMock()) as ot:
+    engine._bridge.get_tick = mock.AsyncMock(return_value=tick)
+    with mock.patch.object(cmds, "open_trade", new=mock.AsyncMock()) as ot:
         result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
     assert "saved as pending" in result
     assert not ot.called
@@ -179,8 +186,8 @@ def test_activate_outside_zone_saved_pending(fresh_db, engine):
 
 def test_activate_no_tick_leaves_for_manual(fresh_db, engine):
     _insert_tg_signal()
-    with mock.patch.object(SimulationEngine, "get_tick", new=mock.AsyncMock(return_value=None)), \
-         mock.patch.object(SimulationEngine, "open_trade", new=mock.AsyncMock()) as ot:
+    engine._bridge.get_tick = mock.AsyncMock(return_value=None)
+    with mock.patch.object(cmds, "open_trade", new=mock.AsyncMock()) as ot:
         result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
     assert "no live price available" in result
     assert not ot.called
@@ -225,7 +232,7 @@ def test_report_send_succeeds(fresh_db, engine):
     ecfg = db.get_email_config()
     ecfg["to_addr"] = "ops@example.com"
     db.save_email_config(ecfg)
-    with mock.patch.object(SimulationEngine, "compute_mt5_performance",
+    with mock.patch.object(cmds, "compute_mt5_performance",
                            new=mock.AsyncMock(return_value={"balance": 1000.0, "daily_pnl": 10.0})), \
          mock.patch.object(claude_ai, "generate_daily_analysis", new=mock.AsyncMock(return_value="analysis")), \
          mock.patch.object(email_service, "build_daily_html", return_value="<html></html>"), \
@@ -238,7 +245,7 @@ def test_report_send_fails(fresh_db, engine):
     ecfg = db.get_email_config()
     ecfg["to_addr"] = "ops@example.com"
     db.save_email_config(ecfg)
-    with mock.patch.object(SimulationEngine, "compute_mt5_performance", new=mock.AsyncMock(return_value={})), \
+    with mock.patch.object(cmds, "compute_mt5_performance", new=mock.AsyncMock(return_value={})), \
          mock.patch.object(claude_ai, "generate_daily_analysis", new=mock.AsyncMock(return_value=None)), \
          mock.patch.object(email_service, "build_daily_html", return_value="<html></html>"), \
          mock.patch.object(email_service, "send_email", new=mock.AsyncMock(return_value=(False, "smtp error"))):

@@ -16,6 +16,7 @@ packs are done.
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from datetime import datetime
@@ -33,6 +34,8 @@ from forex_trader.core.core_risk_governor import price_in_entry_range
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.models import STRATEGY_SCALE_OUT
 from forex_trader.core.signal_parser import validate_signal
+
+log = logging.getLogger(__name__)
 
 
 async def cmd_close(args: list, bridge: Any, starting_balance: float = 1000.0) -> str:
@@ -231,6 +234,7 @@ async def cmd_report(args: list, bridge: Any, cfg: dict) -> str:
             closed_today, _balance, _dpnl, cfg,
         )
     except Exception as _ae:
+        log.warning("Daily Claude analysis (manual report) failed: %s", _ae)
         claude_analysis = None
     html    = email_service.build_daily_html(perf, closed_today, today_str,
                                               claude_analysis=claude_analysis)

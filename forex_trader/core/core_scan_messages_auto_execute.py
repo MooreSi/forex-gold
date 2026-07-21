@@ -1,0 +1,379 @@
+"""Auto-execution flow -- extracted verbatim (no logic changes) from
+core/engine.py's SimulationEngine._scan_messages (lines 6984-7364), as
+part of the core/engine.py migration series. See
+docs/todo/refactor/core-scan-messages-auto-execute-migration/020-*.md.
+
+Highest real-money surface in the whole migration series: places a real
+MT5 order via `open_trade` (already extracted -- reused, not re-derived)
+and, for Conservative/Scalp Runner, follows up with a `modify_order`
+SL/TP sync and an EA `update_trade` call on a live ticket.
+
+`get_open_trades_fn`/`find_and_apply_instant_followup_fn`/
+`check_pre_trade_filters_fn`/`suggest_lot_size_fn`/`get_trading_balance_fn`
+are required explicit collaborators bound to the same simplified call
+shapes `_scan_messages` itself uses -- small/already-extracted helpers out
+of scope for this pack (see the parent
+`core-scan-messages-migration/README.md`). `open_trade_fn` defaults to the
+real, already-extracted `core_open_trade.open_trade`.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import uuid
+from typing import Any, Awaitable, Callable, Optional
+
+from forex_trader.core import database as db_module
+from forex_trader.core import ea_bridge
+from forex_trader.core.core_open_trade import open_trade as _real_open_trade
+from forex_trader.core.models import (
+    Tick,
+    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
+    STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+)
+from forex_trader.core.signal_parser import validate_signal
+
+log = logging.getLogger(__name__)
+
+# Conservative strategy fixed levels (points from fill)
+_CONSERVATIVE_SL_PT = 5.0
+_CONSERVATIVE_TP1_PT = 3.0
+# Scalp Runner fixed levels (points from fill)
+_SCALP_RUNNER_SL_PT = 10.0
+_SCALP_RUNNER_TP1_PT = 3.0
+_SCALP_RUNNER_TP2_PT = 4.0
+
+_SELF_MANAGED_STRATEGIES = {STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL}
+_CLIMBER_MODE_STRATEGIES = (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER)
+_PRE_TRADE_FILTER_BYPASS_STRATEGIES = _SELF_MANAGED_STRATEGIES | set(_CLIMBER_MODE_STRATEGIES)
+_SL_OVERRIDE_STRATEGIES = (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER)
+
+
+def price_in_entry_range(direction: str, entry_low: float, entry_high: float, tick: Tick) -> bool:
+    if direction.upper() == "BUY":
+        return tick.ask <= entry_high
+    else:
+        return tick.bid >= entry_low
+
+
+async def execute_auto_signal(
+    parsed: dict,
+    tg_id: str,
+    channel_name: str,
+    source_label: str,
+    strategy: str,
+    rs: dict,
+    sess_ok: bool,
+    per_signal_skip: bool,
+    per_signal_skip_reason: str,
+    skip_reason: str,
+    bridge: Any,
+    get_open_trades_fn: Callable[[], list],
+    find_and_apply_instant_followup_fn: Callable[[str, str, dict, str], Awaitable[bool]],
+    check_pre_trade_filters_fn: Callable[..., Optional[str]],
+    suggest_lot_size_fn: Callable[[float, float, float, float], float],
+    get_trading_balance_fn: Callable[[], Awaitable[float]],
+    open_trade_fn: Optional[Callable[..., Awaitable[dict]]] = None,
+) -> dict:
+    """Returns {'executed', 'exec_lot', 'exec_price', 'trade_result',
+    'skip_reason', 'gap_note'}."""
+    if open_trade_fn is None:
+        open_trade_fn = lambda **kw: _real_open_trade(bridge, **kw)
+
+    executed = False
+    exec_lot = None
+    exec_price = None
+    trade_result = None
+    gap_note = ""
+
+    # ── Instant trade follow-up ──────────────────────────────────
+    if bool(rs.get("immediate_market_entry", 0)):
+        followup_matched = await find_and_apply_instant_followup_fn(
+            channel_name, parsed["direction"], parsed, tg_id,
+        )
+        if followup_matched:
+            return {"executed": True, "exec_lot": None, "exec_price": None,
+                    "trade_result": None, "skip_reason": skip_reason, "gap_note": ""}
+
+    # ── Normal open-new-trade flow ───────────────────────────────
+    open_count = len(get_open_trades_fn())
+    max_trades = int(rs.get("max_open_trades", 1))
+    if not sess_ok:
+        pass  # skip_reason already set by the caller
+    elif per_signal_skip:
+        skip_reason = f"Auto-eval declined signal: {per_signal_skip_reason}"
+    elif open_count >= max_trades:
+        skip_reason = f"Auto-execution skipped — max open trades ({max_trades}) reached."
+    else:
+        tick = await bridge.get_tick()
+        if not tick:
+            skip_reason = "Auto-execution skipped — no live price available."
+        else:
+            self_mgd = strategy in _SELF_MANAGED_STRATEGIES
+            climber_mode = strategy in _CLIMBER_MODE_STRATEGIES
+            if self_mgd:
+                errs = (
+                    ["entry_low must be <= entry_high"]
+                    if float(parsed["entry_low"]) > float(parsed["entry_high"])
+                    else []
+                )
+            else:
+                errs = validate_signal(
+                    parsed["direction"], parsed["entry_low"], parsed["entry_high"],
+                    parsed["stop_loss"],
+                    parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
+                    parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
+                )
+            if errs:
+                skip_reason = f"Auto-execution skipped — signal validation failed: {'; '.join(errs)}"
+            else:
+                dir_up = parsed["direction"].upper()
+                el = float(parsed["entry_low"])
+                eh = float(parsed["entry_high"])
+                live_px = tick.ask if dir_up == "BUY" else tick.bid
+                zone_mid = (el + eh) / 2.0
+                in_zone = price_in_entry_range(dir_up, el, eh, tick)
+
+                zone_broken = (
+                    (dir_up == "BUY" and live_px < el) or
+                    (dir_up == "SELL" and live_px > eh)
+                )
+                if zone_broken:
+                    skip_reason = (
+                        f"Auto-execution skipped — {dir_up} zone ${el:.2f}–${eh:.2f} "
+                        f"already breached (price ${live_px:.2f}); setup invalidated."
+                    )
+                    log.info("[%s] Signal rejected — zone breached: %s", source_label, skip_reason)
+                else:
+                    rr_ref_px = live_px if in_zone else zone_mid
+                    if strategy in _PRE_TRADE_FILTER_BYPASS_STRATEGIES:
+                        filter_err = None
+                    else:
+                        filter_err = check_pre_trade_filters_fn(
+                            parsed["direction"], el, eh,
+                            float(parsed["stop_loss"]), parsed.get("tp1"),
+                            actual_price=rr_ref_px, source_name=channel_name,
+                        )
+                    if filter_err:
+                        skip_reason = f"Auto-execution skipped — {filter_err}"
+                        log.info("[%s] Signal filtered: %s", source_label, filter_err)
+                    else:
+                        signal_id = str(uuid.uuid4())[:16]
+                        balance = await get_trading_balance_fn()
+                        entry_mid = (float(parsed["entry_low"]) + float(parsed["entry_high"])) / 2
+                        lot = suggest_lot_size_fn(entry_mid, float(parsed["stop_loss"]),
+                                                  balance, float(rs.get("risk_per_trade_pct", 0.5)))
+                        strategy_lot = float(rs.get("strategy_lot_size", 0))
+                        if strategy_lot > 0:
+                            lot = strategy_lot
+
+                        direction = parsed["direction"]
+                        el = float(parsed["entry_low"])
+                        eh = float(parsed["entry_high"])
+                        in_range = price_in_entry_range(direction, el, eh, tick)
+                        cur_px = tick.ask if direction == "BUY" else tick.bid
+
+                        # ── Gap-adjusted market entry (GD2 / Gold Diggers VIP) ──
+                        src_lower = source_label.lower()
+                        gap_cap: Optional[float] = None
+                        if bool(rs.get("immediate_market_entry", 0)):
+                            if "gold diggers vip" in src_lower:
+                                gap_cap = 15.0
+                            elif "gold diggers 2.0" in src_lower:
+                                gap_cap = 10.0
+
+                        if not in_range and gap_cap is not None:
+                            gap = (
+                                round(cur_px - eh, 2) if direction == "BUY"
+                                else round(el - cur_px, 2)
+                            )
+                            if 0 < gap <= gap_cap:
+                                sign = 1.0 if direction == "BUY" else -1.0
+                                parsed = dict(parsed)
+                                parsed["stop_loss"] = round(float(parsed["stop_loss"]) + sign * gap, 2)
+                                for tp_i in range(1, 9):
+                                    tp_v = parsed.get(f"tp{tp_i}")
+                                    if tp_v is not None:
+                                        parsed[f"tp{tp_i}"] = round(float(tp_v) + sign * gap, 2)
+                                parsed["entry_low"] = round(el + sign * gap, 2)
+                                parsed["entry_high"] = round(eh + sign * gap, 2)
+                                entry_mid = (parsed["entry_low"] + parsed["entry_high"]) / 2
+                                in_range = True
+                                gap_note = (
+                                    f"Gap-adjusted +{gap:.1f}pt — zone was "
+                                    f"{el:.2f}–{eh:.2f}, market at {cur_px:.2f}. "
+                                    f"Levels shifted to match fill."
+                                )
+                                log.info(
+                                    "[%s] Gap-adjusted market entry: zone %.2f–%.2f, "
+                                    "market %.2f, gap=%.2f pts (cap=%.0f) → "
+                                    "SL %.2f  TP1 %.2f",
+                                    source_label, el, eh, cur_px, gap, gap_cap,
+                                    parsed["stop_loss"], parsed.get("tp1") or 0,
+                                )
+
+                        if not in_range:
+                            side = "above" if direction == "BUY" else "below"
+                            with db_module.db() as conn:
+                                conn.execute(
+                                    """INSERT INTO vantage_signals
+                                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
+                                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
+                                        lot_size,notes,status,created_at)
+                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                    (signal_id, f"Telegram Auto ({source_label})",
+                                     parsed["direction"], parsed["entry_low"], parsed["entry_high"],
+                                     parsed["stop_loss"],
+                                     parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
+                                     parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
+                                     lot,
+                                     f"Queued: {direction} price ${cur_px:.2f} is {side} zone "
+                                     f"${el:.2f}–${eh:.2f}",
+                                     "pending", time.time()),
+                                )
+                                conn.execute(
+                                    "UPDATE vantage_tg_signals SET status='pending',signal_id=?"
+                                    " WHERE tg_message_id=?",
+                                    (signal_id, tg_id),
+                                )
+                            log.info("[%s] Signal queued (price $%.2f %s zone $%.2f–$%.2f)",
+                                    source_label, cur_px, side, el, eh)
+                            skip_reason = (
+                                f"Signal queued — {direction} price ${cur_px:.2f} is {side} "
+                                f"the entry zone ${el:.2f}–${eh:.2f}. "
+                                f"Will auto-activate when price returns to zone."
+                            )
+                        else:
+                            with db_module.db() as conn:
+                                conn.execute(
+                                    """INSERT INTO vantage_signals
+                                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
+                                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
+                                        lot_size,notes,status,created_at,activated_at)
+                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                    (signal_id, f"Telegram Auto ({source_label})",
+                                     parsed["direction"], parsed["entry_low"], parsed["entry_high"],
+                                     parsed["stop_loss"],
+                                     parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
+                                     parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
+                                     lot, f"Auto-executed from Telegram {tg_id} ({source_label})",
+                                     "active", time.time(), time.time()),
+                                )
+                                conn.execute(
+                                    "UPDATE vantage_tg_signals SET status='activated',signal_id=?"
+                                    " WHERE tg_message_id=?",
+                                    (signal_id, tg_id),
+                                )
+                            if strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
+                                tg_co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
+                                if strategy == STRATEGY_SCALP_RUNNER:
+                                    tg_sl_pt = _SCALP_RUNNER_SL_PT
+                                else:
+                                    tg_sl_pt = _CONSERVATIVE_SL_PT
+                                tg_sl_use = round(entry_mid - tg_co_sign * tg_sl_pt, 2)
+                            else:
+                                tg_sl_use = float(parsed["stop_loss"])
+                            try:
+                                trade_result = await open_trade_fn(
+                                    signal_id=signal_id, direction=parsed["direction"],
+                                    entry_low=float(parsed["entry_low"]),
+                                    entry_high=float(parsed["entry_high"]),
+                                    stop_loss=tg_sl_use,
+                                    tp1=parsed["tp1"], tp2=parsed["tp2"], tp3=parsed["tp3"],
+                                    tp4=parsed["tp4"], tp5=parsed["tp5"],
+                                    tp6=parsed.get("tp6"), tp7=parsed.get("tp7"),
+                                    tp8=parsed.get("tp8"),
+                                    lot_size=lot, tick=tick, strategy=strategy,
+                                    tg_source=channel_name,
+                                )
+                                executed = True
+                                exec_lot = lot
+                                exec_price = trade_result.get("entry_price")
+                                if (not trade_result.get("executed_remotely")
+                                        and strategy in _SL_OVERRIDE_STRATEGIES
+                                        and trade_result.get("trade_id")):
+                                    if strategy == STRATEGY_SCALP_RUNNER:
+                                        sl_pt, tp1_pt, tp2_pt = (
+                                            _SCALP_RUNNER_SL_PT, _SCALP_RUNNER_TP1_PT, _SCALP_RUNNER_TP2_PT,
+                                        )
+                                    else:
+                                        sl_pt, tp1_pt, tp2_pt = (
+                                            _CONSERVATIVE_SL_PT, _CONSERVATIVE_TP1_PT, None,
+                                        )
+                                    fill = float(exec_price or entry_mid)
+                                    co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
+                                    exact_sl = round(fill - co_sign * sl_pt, 2)
+                                    exact_tp1 = round(fill + co_sign * tp1_pt, 2)
+                                    exact_tp2 = (
+                                        round(fill + co_sign * tp2_pt, 2)
+                                        if tp2_pt is not None else None
+                                    )
+                                    with db_module.db() as conn:
+                                        conn.execute(
+                                            """UPDATE vantage_simulated_trades
+                                               SET stop_loss=?, tp1=?, tp2=?, tp3=NULL,
+                                                   tp4=NULL, tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
+                                               WHERE trade_id=?""",
+                                            (exact_sl, exact_tp1, exact_tp2, trade_result["trade_id"]),
+                                        )
+                                    mt5_tkt = trade_result.get("mt5_ticket")
+                                    if mt5_tkt:
+                                        try:
+                                            await bridge.modify_order(int(mt5_tkt), sl=exact_sl, tp=None)
+                                        except Exception as _e:
+                                            log.warning("[%s] TG modify_order SL sync failed: %s", strategy, _e)
+                                    trade_result["stop_loss"] = exact_sl
+                                    trade_result["tp1"] = exact_tp1
+                                    trade_result["tp2"] = exact_tp2
+                                    log.info(
+                                        "[%s/tg] trade_id=%s fill=%.2f "
+                                        "SL=%.2f(-%.1fpt) TP1=%.2f(+%.1fpt)%s",
+                                        strategy, trade_result["trade_id"][:8], fill,
+                                        exact_sl, sl_pt, exact_tp1, tp1_pt,
+                                        f" TP2={exact_tp2:.2f}(+{tp2_pt:.1f}pt)" if exact_tp2 is not None else "",
+                                    )
+                                    if trade_result.get("managed_by") == "ea":
+                                        try:
+                                            _ea = ea_bridge.get_instance()
+                                            if _ea is not None:
+                                                tg_new_tps = {1: exact_tp1}
+                                                if exact_tp2 is not None:
+                                                    tg_new_tps[2] = exact_tp2
+                                                await _ea.update_trade(trade_result["trade_id"], tg_new_tps)
+                                        except Exception as _e:
+                                            log.warning(
+                                                "EA update_trade after %s TG fill failed: %s", strategy, _e
+                                            )
+                            except Exception as e:
+                                e_str = str(e)
+                                is_cb = "circuit breaker" in e_str.lower()
+                                is_stood_down = "stood down" in e_str.lower()
+                                if is_stood_down:
+                                    log.info(
+                                        "[%s] Signal deferred to active node (stood down): %s",
+                                        source_label, e_str,
+                                    )
+                                    with db_module.db() as conn:
+                                        conn.execute(
+                                            "UPDATE vantage_signals SET status='pending', activated_at=NULL"
+                                            " WHERE signal_id=?",
+                                            (signal_id,),
+                                        )
+                                    return {"executed": executed, "exec_lot": exec_lot, "exec_price": exec_price,
+                                            "trade_result": trade_result, "skip_reason": skip_reason,
+                                            "gap_note": gap_note, "deferred_stood_down": True}
+                                elif is_cb:
+                                    log.warning("[CB] TG trade blocked for %s: %s", source_label, e_str)
+                                else:
+                                    log.error("[%s] Auto-exec failed: %s", source_label, e)
+                                with db_module.db() as conn:
+                                    conn.execute(
+                                        "UPDATE vantage_signals SET status='pending', activated_at=NULL"
+                                        " WHERE signal_id=?",
+                                        (signal_id,),
+                                    )
+                                skip_reason = e_str if is_cb else f"Auto-execution failed: {e_str}"
+
+    return {"executed": executed, "exec_lot": exec_lot, "exec_price": exec_price,
+            "trade_result": trade_result, "skip_reason": skip_reason, "gap_note": gap_note}

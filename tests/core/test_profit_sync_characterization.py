@@ -14,6 +14,7 @@ from unittest import mock
 
 import pytest
 
+from forex_trader.core import core_profit_sync
 from forex_trader.core import database as db
 from forex_trader.core.core_sim_account import get_sim_account
 from forex_trader.core.engine import SimulationEngine
@@ -157,14 +158,14 @@ def test_sync_profit_falls_back_to_deal_history_filtered_by_ticket(fresh_db, eng
 
 def test_schedule_profit_sync_already_synced_returns_immediately(fresh_db, engine):
     _insert_trade(mt5_profit=49.0)
-    with mock.patch.object(SimulationEngine, "_sync_profit", new=mock.AsyncMock()) as sp:
+    with mock.patch.object(core_profit_sync, "sync_profit", new=mock.AsyncMock()) as sp:
         asyncio.run(SimulationEngine._schedule_profit_sync(engine, "t-1", 555))
     assert not sp.called
 
 
 def test_schedule_profit_sync_succeeds_first_attempt_no_sleep(fresh_db, engine):
     _insert_trade(mt5_profit=None)
-    with mock.patch.object(SimulationEngine, "_sync_profit", new=mock.AsyncMock(return_value=49.0)) as sp, \
+    with mock.patch.object(core_profit_sync, "sync_profit", new=mock.AsyncMock(return_value=49.0)) as sp, \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()) as sleep_mock:
         asyncio.run(SimulationEngine._schedule_profit_sync(engine, "t-1", 555))
     assert sp.call_count == 1
@@ -174,9 +175,9 @@ def test_schedule_profit_sync_succeeds_first_attempt_no_sleep(fresh_db, engine):
 def test_schedule_profit_sync_retries_until_success(fresh_db, engine):
     _insert_trade(mt5_profit=None)
     results = iter([None, None, 49.0])
-    async def fake_sync(trade_id, ticket):
+    async def fake_sync(trade_id, ticket, bridge):
         return next(results)
-    with mock.patch.object(SimulationEngine, "_sync_profit", side_effect=fake_sync) as sp, \
+    with mock.patch.object(core_profit_sync, "sync_profit", side_effect=fake_sync) as sp, \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()) as sleep_mock:
         asyncio.run(SimulationEngine._schedule_profit_sync(engine, "t-1", 555))
     assert sp.call_count == 3
@@ -190,12 +191,12 @@ def test_profit_sweep_picks_up_null_and_recent_zero_skips_synced(fresh_db, engin
     _insert_trade("t-2", mt5_profit=0.0, close_time=time.time())
     _insert_trade("t-3", mt5_profit=5.0, close_time=time.time())
     calls = []
-    async def fake_sync(trade_id, ticket):
+    async def fake_sync(trade_id, ticket, bridge):
         calls.append(trade_id)
         if trade_id == "t-2":
             raise RuntimeError("boom")
         return 1.0
-    with mock.patch.object(SimulationEngine, "_sync_profit", side_effect=fake_sync):
+    with mock.patch.object(core_profit_sync, "sync_profit", side_effect=fake_sync):
         asyncio.run(SimulationEngine._profit_sweep(engine))
     assert sorted(calls) == ["t-1", "t-2"]
 

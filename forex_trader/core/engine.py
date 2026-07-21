@@ -45,6 +45,19 @@ from forex_trader.core.core_mt5_performance import (
     compute_mt5_performance as _compute_mt5_performance_impl,
     _platform_fee_rate, _apply_fee,
 )
+from forex_trader.core.core_total_deposits import get_total_deposits as _get_total_deposits_impl
+from forex_trader.core.core_sim_account import (
+    get_sim_account as _get_sim_account_impl,
+    update_sim_balance as _update_sim_balance_impl,
+    reset_simulation as _reset_simulation_impl,
+)
+from forex_trader.core.core_trade_reporting import (
+    get_open_trades as _get_open_trades_impl,
+    get_all_trades as _get_all_trades_impl,
+    compute_performance as _compute_performance_impl,
+)
+from forex_trader.core.core_mt5_import import import_mt5_history as _import_mt5_history_impl
+from forex_trader.core.core_tg_signals import get_tg_signals as _get_tg_signals_impl
 
 if TYPE_CHECKING:
     from forex_trader.core.telegram_reader import TelegramReader
@@ -490,30 +503,14 @@ class SimulationEngine:
     # ── Account ───────────────────────────────────────────────────────────────
 
     def get_sim_account(self) -> dict:
-        with db_module.db() as conn:
-            return db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_simulation_account WHERE id=1").fetchone()
-            )
+        return _get_sim_account_impl()
 
     def update_sim_balance(self, delta: float) -> None:
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                (delta,),
-            )
+        _update_sim_balance_impl(delta)
 
     def reset_simulation(self) -> None:
         starting = float(self._cfg.get("starting_balance", 1000.0))
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulation_account SET balance=?, reset_at=? WHERE id=1",
-                (starting, time.time()),
-            )
-            conn.execute("DELETE FROM vantage_simulated_trades")
-            conn.execute("DELETE FROM vantage_partial_closes")
-            conn.execute(
-                "UPDATE vantage_signals SET status='cancelled' WHERE status IN ('pending','active')"
-            )
+        _reset_simulation_impl(starting)
 
     # ── Signals ───────────────────────────────────────────────────────────────
 
@@ -1844,26 +1841,7 @@ class SimulationEngine:
         }
 
     def get_open_trades(self) -> list[dict]:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT t.*, s.source_name AS _sig_source "
-                "FROM vantage_simulated_trades t "
-                "LEFT JOIN vantage_signals s ON s.signal_id = t.signal_id "
-                "WHERE t.status='open' ORDER BY t.open_time DESC"
-            ).fetchall()
-        result = [db_module.row_to_dict(r) for r in rows]
-        for t in result:
-            # Backfill tg_source from the linked signal when not set on the trade
-            if not t.get("tg_source") and t.get("_sig_source"):
-                t["tg_source"] = t["_sig_source"]
-            t.pop("_sig_source", None)
-            for key in ("claude_open", "claude_close"):
-                if t.get(key):
-                    try:
-                        t[key] = json.loads(t[key])
-                    except Exception:
-                        pass
-        return result
+        return _get_open_trades_impl()
 
     async def get_untracked_mt5_positions(self) -> list[dict]:
         """
@@ -1887,140 +1865,13 @@ class SimulationEngine:
         return [dict(p, _untracked=True) for p in live if int(p["ticket"]) not in tracked_tickets]
 
     def get_all_trades(self, status: Optional[str] = None, limit: int = 100) -> list[dict]:
-        with db_module.db() as conn:
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM vantage_simulated_trades WHERE status=?"
-                    " ORDER BY open_time DESC LIMIT ?", (status, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM vantage_simulated_trades ORDER BY open_time DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-        result = [db_module.row_to_dict(r) for r in rows]
-        for t in result:
-            for key in ("claude_open", "claude_close"):
-                if t.get(key):
-                    try:
-                        t[key] = json.loads(t[key])
-                    except Exception:
-                        pass
-        return result
+        return _get_all_trades_impl(status, limit)
 
     # ── Performance ───────────────────────────────────────────────────────────
 
     def compute_performance(self) -> dict:
         starting = float(self._cfg.get("starting_balance", 1000.0))
-        with db_module.db() as conn:
-            acc    = db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_simulation_account WHERE id=1").fetchone()
-            )
-            closed = [db_module.row_to_dict(r) for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades WHERE status='closed'"
-                " ORDER BY close_time ASC"
-            ).fetchall()]
-            open_t = [db_module.row_to_dict(r) for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades WHERE status='open'"
-            ).fetchall()]
-
-        balance   = float(acc.get("balance", starting))
-        net_pnls  = [float(t.get("net_pnl", 0)) for t in closed]
-        winners   = [p for p in net_pnls if p > 0]
-        losers    = [p for p in net_pnls if p < 0]
-        win_rate  = len(winners) / len(net_pnls) * 100 if net_pnls else 0.0
-        avg_win   = sum(winners) / len(winners) if winners else 0.0
-        avg_loss  = sum(losers) / len(losers) if losers else 0.0
-        pf        = (sum(winners) / abs(sum(losers))) if losers and sum(winners) > 0 else 0.0
-
-        hold_times = []
-        for t in closed:
-            if t.get("open_time") and t.get("close_time"):
-                hold_times.append(float(t["close_time"]) - float(t["open_time"]))
-        avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0.0
-
-        cumulative = starting
-        peak   = starting if starting > 0 else 1.0
-        trough = cumulative
-        max_dd = 0.0
-        max_ru = 0.0
-        for p in net_pnls:
-            cumulative += p
-            if cumulative < trough:
-                trough = cumulative
-            if cumulative > peak:
-                peak = cumulative
-            # Drawdown: loss from running peak — checked every step (standard)
-            if peak > 0:
-                dd = (peak - cumulative) / peak * 100
-                if dd > max_dd:
-                    max_dd = dd
-            # Run-up: gain from running trough — checked every step (mirror of drawdown)
-            if trough > 0:
-                ru = (cumulative - trough) / trough * 100
-                if ru > max_ru:
-                    max_ru = ru
-
-        # Local calendar-day cutoff for sim mode (close_time is proper UTC epoch)
-        from datetime import datetime as _dt3
-        _uk_day_cutoff = _dt3.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-
-        _daily_closed = [t for t in closed
-                         if float(t.get("close_time", 0)) >= _uk_day_cutoff]
-        _daily_pnls   = [float(t.get("net_pnl", 0)) for t in _daily_closed]
-        daily_pnl     = sum(_daily_pnls)
-        _daily_wins   = [p for p in _daily_pnls if p > 0]
-        _daily_wr     = (
-            round(len(_daily_wins) / len(_daily_pnls) * 100, 1)
-            if _daily_pnls else 0.0
-        )
-
-        # Sharpe and Sortino ratios (trade P&L as returns; no risk-free rate subtracted)
-        import math as _math
-        if len(net_pnls) > 1:
-            _mean_r = sum(net_pnls) / len(net_pnls)
-            _std_r  = _math.sqrt(sum((r - _mean_r) ** 2 for r in net_pnls) / (len(net_pnls) - 1))
-            sharpe  = round(_mean_r / _std_r, 3) if _std_r > 0 else 0.0
-            _neg    = [r for r in net_pnls if r < 0]
-            if _neg:
-                _down_std = _math.sqrt(sum(r ** 2 for r in _neg) / len(net_pnls))
-                sortino   = round(_mean_r / _down_std, 3) if _down_std > 0 else 0.0
-            else:
-                sortino = 0.0
-        else:
-            sharpe = sortino = 0.0
-
-        # Equity high-watermark from app_config (updated on each close)
-        _peak_bal = float(db_module.get_app_config("peak_balance") or balance)
-
-        return {
-            "starting_balance":   starting,
-            "current_balance":    round(balance, 4),
-            "equity":             round(balance, 4),
-            "peak_balance":       round(_peak_bal, 4),
-            "total_net_pnl":      round(sum(net_pnls), 4),
-            "open_trades":        len(open_t),
-            "closed_trades":      len(closed),
-            "win_rate_pct":       round(win_rate, 2),
-            "loss_rate_pct":      round(100 - win_rate, 2),
-            "avg_win":            round(avg_win, 4),
-            "avg_loss":           round(avg_loss, 4),
-            "profit_factor":      round(pf, 4),
-            "sharpe_ratio":       sharpe,
-            "sortino_ratio":      sortino,
-            "best_trade":         round(max(net_pnls), 4) if net_pnls else 0.0,
-            "worst_trade":        round(min(net_pnls), 4) if net_pnls else 0.0,
-            "avg_hold_seconds":   round(avg_hold, 1),
-            "max_drawdown_pct":   round(max_dd, 2),
-            "max_runup_pct":      round(max_ru, 2),
-            # UK calendar-day stats
-            "daily_pnl_24h":      round(daily_pnl, 4),  # kept for email compat
-            "daily_pnl":          round(daily_pnl, 4),
-            "daily_closed":       len(_daily_pnls),
-            "daily_win_rate_pct": _daily_wr,
-            "daily_best":         round(max(_daily_pnls), 2) if _daily_pnls else 0.0,
-            "daily_worst":        round(min(_daily_pnls), 2) if _daily_pnls else 0.0,
-        }
+        return _compute_performance_impl(starting)
 
     # ── TP trigger tracking ───────────────────────────────────────────────────
 
@@ -7319,109 +7170,10 @@ class SimulationEngine:
 
     async def import_mt5_history(self, days: int = 90) -> dict:
         """Pull closed deals from MT5 bridge, reconstruct positions, insert any missing into DB."""
-        deals = await self._bridge.get_deal_history(days)
-        if not deals:
-            return {"imported": 0, "skipped": 0, "error": "No deals returned from bridge"}
-
-        # Group deals by position_id
-        by_pos: dict[int, list] = {}
-        for d in deals:
-            pid = d.get("position_id")
-            if pid:  # excludes None and 0 (balance/deposit ops)
-                by_pos.setdefault(int(pid), []).append(d)
-
-        with db_module.db() as conn:
-            existing_tickets = {
-                row[0] for row in conn.execute(
-                    "SELECT mt5_ticket FROM vantage_simulated_trades WHERE mt5_ticket IS NOT NULL"
-                ).fetchall()
-            }
-
-        imported = skipped = 0
-        for ticket, pos_deals in by_pos.items():
-            if ticket in existing_tickets:
-                skipped += 1
-                continue
-            # Find open and close deals (use last close deal for multi-partial positions)
-            open_deal  = next((d for d in pos_deals if d.get("entry") == 0), None)
-            _cd        = [d for d in pos_deals if d.get("entry") in (1, 2, 3)]
-            close_deal = max(_cd, key=lambda d: d.get("time", 0)) if _cd else None
-            if not open_deal or not close_deal:
-                skipped += 1
-                continue
-
-            direction   = "BUY" if open_deal.get("type", 0) == 0 else "SELL"
-            entry_price = float(open_deal.get("price", 0))
-            close_price = float(close_deal.get("price", 0))
-            lot_size    = float(open_deal.get("volume", 0.01))
-            open_ts     = float(open_deal.get("time", time.time()))
-            close_ts    = float(close_deal.get("time", time.time()))
-            mt5_profit  = round(
-                sum(float(d.get("profit", 0)) + float(d.get("swap", 0)) + float(d.get("fee", 0))
-                    for d in pos_deals), 2,
-            )
-            gross_pnl   = self.pnl(direction, entry_price, close_price, lot_size)
-            comment     = (close_deal.get("comment") or "").lower()
-            if "sl" in comment or "stop" in comment:
-                exit_reason = "SL"
-            elif "tp" in comment or "take" in comment:
-                exit_reason = "TP"
-            else:
-                exit_reason = "MT5_import"
-
-            signal_id = str(uuid.uuid4())[:16]
-            trade_id  = str(uuid.uuid4())[:16]
-            with db_module.db() as conn:
-                conn.execute(
-                    """INSERT OR IGNORE INTO vantage_signals
-                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                        notes,status,created_at,activated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (signal_id, "MT5 Import", direction, entry_price, entry_price, 0.0,
-                     f"Imported from MT5 ticket {ticket}", "closed", open_ts, open_ts),
-                )
-                conn.execute(
-                    """INSERT OR IGNORE INTO vantage_simulated_trades
-                       (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
-                        lot_size,remaining_lots,stop_loss,status,open_time,close_time,
-                        close_price,exit_reason,gross_pnl,realised_pnl,net_pnl,mt5_profit,strategy)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (trade_id, signal_id, ticket, direction, entry_price, entry_price, entry_price,
-                     lot_size, 0.0, 0.0, "closed", open_ts, close_ts,
-                     close_price, exit_reason, gross_pnl, gross_pnl, mt5_profit, mt5_profit,
-                     "MT5_import"),
-                )
-                conn.execute(
-                    "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                    (mt5_profit,),
-                )
-            imported += 1
-            log.info("MT5 import: ticket=%s %s @ %.2f -> %.2f profit=%.2f",
-                     ticket, direction, entry_price, close_price, mt5_profit)
-
-        return {"imported": imported, "skipped": skipped}
+        return await _import_mt5_history_impl(self._bridge, days)
 
     def get_tg_signals(self, limit: int = 50) -> list[dict]:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                # Show all signals — historical/instant_historical are displayed
-                # with a grey badge so the user can see what was received during
-                # a restart backfill even if it was too old to execute.
-                # instant_historical records (bare "Buy Now" messages) are excluded
-                # as they are low-value noise.
-                "SELECT * FROM vantage_tg_signals "
-                "WHERE status != 'instant_historical' "
-                "ORDER BY parsed_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        result = [db_module.row_to_dict(r) for r in rows]
-        # Resolve missing group names from TG reader
-        for r in result:
-            if not r.get("group_name") and r.get("group_id") and self._tg_reader:
-                name = self._tg_reader.get_group_name(str(r["group_id"]))
-                if name:
-                    r["group_name"] = name
-        return result
+        return _get_tg_signals_impl(limit, self._tg_reader)
 
     async def update_signal(self, signal_id: str, updates: dict) -> dict:
         """Update signal fields and propagate changes to any linked open trade."""
@@ -7575,36 +7327,7 @@ class SimulationEngine:
         return await _compute_mt5_performance_impl(self._bridge, days)
 
     async def get_total_deposits(self) -> float:
-        """
-        Net funding since account inception (deposits minus withdrawals) — used
-        to compute lifetime P&L as equity minus deposits, independent of any
-        rolling trade-history window. Cached for an hour since this only
-        changes when money actually moves in/out of the account, unlike trade
-        P&L which changes constantly; recomputing it on every UI refresh tick
-        would mean an extra full deal-history fetch for a number that's almost
-        always unchanged.
-        """
-        cached = db_module.get_app_config("mt5_total_deposits_cache")
-        if cached:
-            try:
-                data = json.loads(cached)
-                if time.time() - data.get("computed_at", 0) < 3600:
-                    return float(data["total"])
-            except Exception:
-                pass
-        try:
-            deals = await self._bridge.get_deal_history(3650)  # effectively whole account life
-            total = round(sum(
-                float(d.get("profit", 0)) for d in deals if not d.get("position_id")
-            ), 2)
-            db_module.set_app_config(
-                "mt5_total_deposits_cache",
-                json.dumps({"total": total, "computed_at": time.time()}),
-            )
-            return total
-        except Exception as e:
-            log.debug("get_total_deposits error: %s", e)
-            return 0.0
+        return await _get_total_deposits_impl(self._bridge)
 
     # ── Max TP checker ────────────────────────────────────────────────────────
 

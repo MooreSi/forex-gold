@@ -44,7 +44,17 @@ EA_PORTABLE_STRATEGIES = frozenset({
 
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy
 _HOST = "127.0.0.1"
-_PORT = 9101
+
+
+def _resolve_port() -> int:
+    try:
+        import forex_trader.config as _cfg_module
+        return int(_cfg_module.get("ea_bridge_port", 9101))
+    except Exception:
+        return 9101
+
+
+_PORT = _resolve_port()
 
 
 class EABridge:

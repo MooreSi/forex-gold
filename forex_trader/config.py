@@ -91,6 +91,11 @@ def load() -> dict:
         # back to its normal "bridge not configured" behavior instead.
         "mt5_bridge_url":     _e("MT5_BRIDGE_URL", "http://localhost:9010"),
         "mt5_bridge_enabled": str(_e("MT5_BRIDGE_ENABLED", base.get("mt5_bridge_enabled", True))).lower() != "false",
+        # Port 9101 is the LIVE app's EA-bridge listener (core/ea_bridge.py) --
+        # the companion MQL5 EA's InpPort input must match whatever this
+        # resolves to. 9111 by default here so a fork EA never accidentally
+        # dials into the live app's bridge (or vice versa) on a shared machine.
+        "ea_bridge_port":     int(_e("EA_BRIDGE_PORT", base.get("ea_bridge_port", 9111))),
         # Native Windows can import MetaTrader5 directly in the main process
         # instead of running mt5_bridge.py as a separate HTTP-served
         # subprocess (that split only exists because macOS runs MT5 under

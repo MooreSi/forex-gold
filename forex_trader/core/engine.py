@@ -2787,11 +2787,13 @@ class SimulationEngine:
             _pu.kill_matching("mt5_bridge.py", force=True)
             await asyncio.sleep(1)
 
-            from forex_trader.config import USER_DATA_DIR
+            from forex_trader.config import USER_DATA_DIR, get as _cfg_get
+            from urllib.parse import urlparse as _urlparse
             _creds = str(USER_DATA_DIR / "bridge_credentials.json")
+            _bridge_port = _urlparse(_cfg_get("mt5_bridge_url", "")).port or 9010
             _env = {
                 **_os.environ,
-                "MT5_BRIDGE_PORT":   "9000",
+                "MT5_BRIDGE_PORT":   str(_bridge_port),
                 "BRIDGE_CREDS_PATH": _creds,
             }
             try:
@@ -2865,12 +2867,14 @@ class SimulationEngine:
             _bridge_win = "Z:" + _bridge_py.replace("/", "\\")
             _mac_creds  = str(USER_DATA_DIR / "bridge_credentials.json")
             _win_creds  = "Z:" + _mac_creds.replace("/", "\\")
+            from urllib.parse import urlparse as _urlparse
+            _bridge_port = _urlparse(_cfg.get("mt5_bridge_url", "")).port or 9010
 
             _env = {
                 **_os.environ,
                 "WINEPREFIX":        _bottle,
                 "WINEDEBUG":         "-all",
-                "MT5_BRIDGE_PORT":   "9000",
+                "MT5_BRIDGE_PORT":   str(_bridge_port),
                 "BRIDGE_CREDS_PATH": _win_creds,
                 **_extra_env,
             }

@@ -1924,10 +1924,12 @@ def _render_bridge_control(engine):
                 # ── Windows: run bridge natively without Wine ─────────────────
                 if sys.platform == "win32":
                     from forex_trader.config import USER_DATA_DIR
-                    _creds_path = str(USER_DATA_DIR / "bridge_credentials.json")
+                    from urllib.parse import urlparse as _urlparse
+                    _creds_path  = str(USER_DATA_DIR / "bridge_credentials.json")
+                    _bridge_port = _urlparse(cfg_module.get("mt5_bridge_url", "")).port or 9010
                     _env_vars   = {
                         **os.environ,
-                        "MT5_BRIDGE_PORT":   "9000",
+                        "MT5_BRIDGE_PORT":   str(_bridge_port),
                         "BRIDGE_CREDS_PATH": _creds_path,
                     }
                     proc = subprocess.Popen(

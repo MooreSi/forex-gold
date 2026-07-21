@@ -125,6 +125,9 @@ from forex_trader.core.core_tp_safety_net import (
     tp_safety_net_check_trade as _tp_safety_net_check_trade_impl,
     compute_be_cost_pts as _compute_be_cost_pts_impl,
 )
+from forex_trader.core.core_untracked_positions import (
+    get_untracked_mt5_positions as _get_untracked_mt5_positions_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -1860,20 +1863,7 @@ class SimulationEngine:
         These are positions opened directly in MT5 (not via the app's signal system).
         Each dict is the raw bridge position payload plus a `_untracked=True` marker.
         """
-        if not self._bridge.is_configured():
-            return []
-        try:
-            live = await self._bridge.get_positions()
-        except Exception:
-            return []
-        if not live:
-            return []
-        tracked_tickets = {
-            int(t["mt5_ticket"])
-            for t in self.get_open_trades()
-            if t.get("mt5_ticket")
-        }
-        return [dict(p, _untracked=True) for p in live if int(p["ticket"]) not in tracked_tickets]
+        return await _get_untracked_mt5_positions_impl(self._bridge)
 
     def get_all_trades(self, status: Optional[str] = None, limit: int = 100) -> list[dict]:
         return _get_all_trades_impl(status, limit)

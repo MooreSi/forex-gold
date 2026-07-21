@@ -26,10 +26,8 @@ from forex_trader.core.models import (
 from forex_trader.core.mt5_bridge import MT5BridgeClient
 from forex_trader.core.mt5_bridge_native import NativeMT5Bridge, is_available as _native_bridge_available
 from forex_trader.core.signal_parser import (
-    parse_gold_signal, parse_gd2_signal, parse_gd2_partial,
     parse_instant_entry, parse_gd2_instant_entry, is_gd2_message,
-    validate_signal, SIGNAL_PREFIX, _CURRENCY_RE, is_format_ab_signal,
-    parse_with_learned_rules, check_sl_adjustment_rules,
+    SIGNAL_PREFIX, check_sl_adjustment_rules,
 )
 from forex_trader.core import telegram_alerts
 from forex_trader.core import claude_ai
@@ -43,6 +41,17 @@ from forex_trader.core.core_monitor_loop import (
 )
 from forex_trader.core.core_scan_messages_auto_execute import (
     price_in_entry_range as _price_in_entry_range_impl,
+    execute_auto_signal as _execute_auto_signal_impl,
+)
+from forex_trader.core.core_scan_messages_edit_reparse import (
+    handle_signal_edit as _handle_signal_edit_impl,
+)
+from forex_trader.core.core_scan_messages_parse_classify import (
+    classify_and_parse as _classify_and_parse_impl,
+)
+from forex_trader.core.core_scan_messages_staleness_strategy import (
+    record_staleness_or_new as _record_staleness_or_new_impl,
+    resolve_strategy_and_skip_reason as _resolve_strategy_and_skip_reason_impl,
 )
 from forex_trader.core.core_max_tp_hit import (
     _tp_level_from_extreme,
@@ -211,20 +220,6 @@ log = logging.getLogger(__name__)
 
 _TP_NUM_RE   = re.compile(r'^TP(\d+)', re.IGNORECASE)
 _TP_CACHE_TTL = 2.5  # seconds — in-memory triggered-TP cache TTL (safe for 1s poll rate)
-
-# ── Conservative strategy fixed levels (points from fill) ──────────────────────
-# Conservative: SL 5pt, TP1 3pt, close 80% at TP1, trail remainder 3pt (floored at BE).
-_CONSERVATIVE_SL_PT    = 5.0
-_CONSERVATIVE_TP1_PT   = 3.0
-_CONSERVATIVE_TRAIL_PT = 3.0
-
-# ── Scalp Runner strategy fixed levels (points from fill) — own constants, no
-# longer shared with Conservative. SL 10pt, TP1 3pt (close 50%, SL untouched),
-# TP2 4pt (SL -> entry, start trailing remaining 50% at the 3pt trail above).
-_SCALP_RUNNER_SL_PT     = 10.0
-_SCALP_RUNNER_TP1_PT    = 3.0
-_SCALP_RUNNER_TP2_PT    = 4.0
-_SCALP_RUNNER_CLOSE_PCT = 0.50   # fraction of position closed at TP1 (runner = 50%)
 
 
 def _ema(values: list[float], period: int) -> Optional[float]:
@@ -1967,7 +1962,6 @@ class SimulationEngine:
 
             slot         = slot_groups.get(group_id, 1)
             channel_name = self._tg_reader.get_group_name(group_id) or f"Channel {slot}"
-            msg_ts_str   = msg.get("timestamp") or ""
 
             # Resolve channel parser config — auto-bootstrap on first sight
             ch_cfg = db_module.get_channel_parser_config(channel_name)
@@ -2000,229 +1994,22 @@ class SimulationEngine:
                 ).fetchone()
             if _existing:
                 _ex = db_module.row_to_dict(_existing)
-                _ex_status = _ex.get("status", "")
-                _ex_dir    = (_ex.get("direction") or "").upper()
-                _ex_text   = _ex.get("raw_text") or ""
-                _ex_fields_null = _ex.get("entry_low") is None
-                # Only worth re-parsing if the raw text actually changed
-                if text == _ex_text:
+                _edit_result = await _handle_signal_edit_impl(
+                    tg_id, group_id, channel_name, text, parser_fmt, _ex,
+                    ai_fallback_fn=self._try_ai_signal_fallback,
+                    find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
+                    close_trade_fn=self.close_trade,
+                )
+                if _edit_result is None:
                     continue
-                # Re-parse to detect a direction change or fill in missing fields
-                if parser_fmt == 'gd2':
-                    _reparse = parse_gd2_signal(text)
-                else:
-                    _reparse = parse_gold_signal(text) or parse_gd2_signal(text)
-                _INSTANT_STATUSES = ("instant_activated", "instant_pending", "instant_historical")
-                if not _reparse:
-                    # parse_gd2_signal/parse_gold_signal require full SL/TP and return
-                    # None for a bare "BUY NOW"/"SELL NOW" edit — the exact shape a
-                    # channel uses to correct an instant-entry typo. Without this
-                    # fallback that correction is silently dropped: no log, no alert,
-                    # the wrong-direction market order stays open indefinitely.
-                    if _ex_status in _INSTANT_STATUSES:
-                        if parser_fmt == 'gd2':
-                            _instant_fix = parse_gd2_instant_entry(text)
-                        else:
-                            _instant_fix = parse_instant_entry(text)
-                        if _instant_fix:
-                            _fix_dir = _instant_fix[0].upper()
-                            if _fix_dir != _ex_dir:
-                                log.warning(
-                                    "[%s] INSTANT EDIT CORRECTION tg_id=%s: %s → %s "
-                                    "(status=%s) — flattening open position",
-                                    channel_name, tg_id, _ex_dir, _fix_dir, _ex_status,
-                                )
-                                with db_module.db() as _conn:
-                                    _irow = _conn.execute(
-                                        "SELECT * FROM vantage_simulated_trades "
-                                        "WHERE status='open' AND tg_source IN (?,?) "
-                                        "ORDER BY open_time DESC LIMIT 1",
-                                        (channel_name, f"instant:{channel_name}")
-                                    ).fetchone()
-                                    _itrade = db_module.row_to_dict(_irow) if _irow else None
-                                _flat_note = "no matching open trade found — nothing to close"
-                                if (_itrade and
-                                        _itrade.get("direction", "").upper() == _ex_dir):
-                                    try:
-                                        await self.close_trade(
-                                            _itrade["trade_id"],
-                                            reason=f"instant_edit_flip:{_ex_dir}->{_fix_dir}",
-                                        )
-                                        _flat_note = f"closed trade {_itrade['trade_id'][:8]}"
-                                    except Exception as _flat_exc:
-                                        _flat_note = f"close FAILED: {_flat_exc}"
-                                        log.error(
-                                            "[%s] INSTANT EDIT CORRECTION tg_id=%s: "
-                                            "failed to flatten %s: %s",
-                                            channel_name, tg_id, _itrade["trade_id"][:8], _flat_exc,
-                                        )
-                                with db_module.db() as conn:
-                                    conn.execute(
-                                        "UPDATE vantage_tg_signals SET direction=?, raw_text=? "
-                                        "WHERE tg_message_id=?",
-                                        (_fix_dir, text, tg_id),
-                                    )
-                                _alert_txt = (
-                                    f"INSTANT SIGNAL CORRECTED via edit\n"
-                                    f"Channel: {channel_name}\n"
-                                    f"{_ex_dir} → {_fix_dir}\n"
-                                    f"Action: {_flat_note}\n"
-                                    f"No new position opened automatically — review and "
-                                    f"re-enter manually if still valid."
-                                )
-                                asyncio.create_task(
-                                    telegram_alerts.send_message(
-                                        _alert_txt, tg_id, "instant_edit_corrected"
-                                    )
-                                )
-                            else:
-                                # Same direction, still bare — nothing actionable, just
-                                # keep raw_text in sync so future edits diff correctly.
-                                with db_module.db() as conn:
-                                    conn.execute(
-                                        "UPDATE vantage_tg_signals SET raw_text=? "
-                                        "WHERE tg_message_id=?",
-                                        (text, tg_id),
-                                    )
-                            continue
-                    # Deterministic re-parse of the edited text failed — try the AI
-                    # fallback before dropping it. This is the same gap
-                    # _try_ai_signal_fallback already closes for first-time
-                    # messages: an edit that adds a non-standard SL label
-                    # ("SL/ invalid 4053") or otherwise-novel wording fails
-                    # parse_gd2_signal/parse_gold_signal just like a brand-new
-                    # message would, but this branch never tried the AI fallback
-                    # at all — the edit was silently dropped with only a debug
-                    # log, no review-tab entry, no chance to build a rule from it.
-                    _ai_edit = await self._try_ai_signal_fallback(text, channel_name, tg_id)
-                    if _ai_edit:
-                        _reparse = _ai_edit
-                    else:
-                        log.debug(
-                            "[%s] Edit to tg_id=%s (status=%s) could not be reparsed as a "
-                            "signal — dropped: %r",
-                            channel_name, tg_id, _ex_status, text[:120],
-                        )
-                        continue
-                _new_dir = _reparse["direction"].upper()
-                _promote_execute = False  # set True to fall through to trade execution
-                if _new_dir == _ex_dir:
-                    if _reparse.get("entry_low") is not None:
-                        # Full parse available — update all fields regardless of whether
-                        # they were previously NULL (null backfill) or populated (SL/TP edit).
-                        _log_reason = "backfill" if _ex_fields_null else "edit update"
-                        if _ex_status == "pending_followup":
-                            _log_reason = "pending_followup promoted"
-                        log.info(
-                            "[%s] Updating fields for tg_id=%s (%s)",
-                            channel_name, tg_id, _log_reason,
-                        )
-                        with db_module.db() as conn:
-                            conn.execute(
-                                """UPDATE vantage_tg_signals
-                                   SET raw_text=?, entry_low=?, entry_high=?, stop_loss=?,
-                                       tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?, tp7=?, tp8=?,
-                                       status=CASE WHEN status='pending_followup' THEN 'new' ELSE status END
-                                   WHERE tg_message_id=?""",
-                                (text,
-                                 _reparse["entry_low"], _reparse["entry_high"], _reparse["stop_loss"],
-                                 _reparse.get("tp1"), _reparse.get("tp2"), _reparse.get("tp3"),
-                                 _reparse.get("tp4"), _reparse.get("tp5"), _reparse.get("tp6"),
-                                 _reparse.get("tp7"), _reparse.get("tp8"),
-                                 tg_id),
-                            )
-                        if _ex_status == "pending_followup":
-                            # The partial signal now has full SL/TP from the edit.
-                            # Fall through to the normal execution path rather than skip.
-                            log.info(
-                                "[%s] pending_followup tg_id=%s now complete — executing",
-                                channel_name, tg_id,
-                            )
-                            parsed = _reparse
-                            source_label = channel_name
-                            _promote_execute = True
-                        else:
-                            # Apply updated SL/TP to any open trade from this channel
-                            if _ex_status in ("instant_activated", "instant_pending",
-                                              "activated", "new"):
-                                await self._find_and_apply_instant_followup(
-                                    channel_name, _new_dir, _reparse, tg_id,
-                                )
-                    else:
-                        # Parse returned no entry data (e.g. non-signal edit) — text only
-                        with db_module.db() as conn:
-                            conn.execute(
-                                "UPDATE vantage_tg_signals SET raw_text=? WHERE tg_message_id=?",
-                                (text, tg_id),
-                            )
-                    if not _promote_execute:
-                        continue
-                    # _promote_execute is True — fall through to execution below.
-                if not _promote_execute:
-                    # Direction has flipped (e.g. Buy → Sell)
-                    if _ex_status in ("new",):
-                        # Signal not yet executed — correct it in place
-                        log.warning(
-                            "[%s] EDIT CORRECTION tg_id=%s: %s → %s (status=%s) — updating signal",
-                            channel_name, tg_id, _ex_dir, _new_dir, _ex_status,
-                        )
-                        with db_module.db() as conn:
-                            conn.execute(
-                                """UPDATE vantage_tg_signals
-                                   SET direction=?, entry_low=?, entry_high=?, stop_loss=?,
-                                       tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?, tp7=?, tp8=?,
-                                       raw_text=?
-                                   WHERE tg_message_id=?""",
-                                (
-                                    _reparse["direction"],
-                                    _reparse["entry_low"], _reparse["entry_high"],
-                                    _reparse["stop_loss"],
-                                    _reparse.get("tp1"), _reparse.get("tp2"), _reparse.get("tp3"),
-                                    _reparse.get("tp4"), _reparse.get("tp5"), _reparse.get("tp6"),
-                                    _reparse.get("tp7"), _reparse.get("tp8"),
-                                    text, tg_id,
-                                ),
-                            )
-                        _alert_txt = (
-                            f"SIGNAL CORRECTED via edit\n"
-                            f"Channel: {channel_name}\n"
-                            f"{_ex_dir} → {_new_dir}  "
-                            f"Entry {_reparse['entry_low']}-{_reparse['entry_high']}  "
-                            f"SL {_reparse['stop_loss']}\n"
-                            f"Pending signal updated. Not yet executed."
-                        )
-                        asyncio.create_task(
-                            telegram_alerts.send_message(_alert_txt, tg_id, "signal_edit_corrected")
-                        )
-                    else:
-                        # Already executed or activated — can't auto-correct, warn the user.
-                        # Must still persist raw_text like the other two branches above,
-                        # or the dedup check at the top of this loop (text == _ex_text)
-                        # never converges — every future scan re-sees this message as
-                        # "newly edited" and re-sends the same alert forever. Confirmed
-                        # live: one edited message re-fired this warning once per scan
-                        # cycle (~1/sec) for over a minute before being caught.
-                        with db_module.db() as conn:
-                            conn.execute(
-                                "UPDATE vantage_tg_signals SET raw_text=? WHERE tg_message_id=?",
-                                (text, tg_id),
-                            )
-                        log.warning(
-                            "[%s] EDIT WARNING tg_id=%s: direction changed %s → %s "
-                            "but signal status=%s — manual review required",
-                            channel_name, tg_id, _ex_dir, _new_dir, _ex_status,
-                        )
-                        _alert_txt = (
-                            f"SIGNAL EDIT WARNING\n"
-                            f"Channel: {channel_name}\n"
-                            f"Message was edited: {_ex_dir} → {_new_dir}\n"
-                            f"Signal status: {_ex_status} — could not auto-correct.\n"
-                            f"Review any open trades manually."
-                        )
-                        asyncio.create_task(
-                            telegram_alerts.send_message(_alert_txt, tg_id, "signal_edit_warning")
-                        )
-                    continue
+                # A pending_followup signal just received its SL/TP via this
+                # edit — fall through to the normal Instant-Market-Entry /
+                # SL-adjustment / classify-and-parse pipeline below exactly
+                # like a brand-new message would (the edited raw_text now
+                # parses as a full signal on its own); _edit_result itself is
+                # deliberately unused past this point, matching the original
+                # inline code's behavior of re-deriving `parsed` from scratch
+                # rather than reusing the edit-time reparse.
 
             # ── Instant Market Entry ────────────────────────────────────────
             # format_ab: fires on "XAUUSD Buy Now" / "XAU Sell Now" (requires NOW).
@@ -2263,212 +2050,14 @@ class SimulationEngine:
                 continue
 
             # ── Channel-name-based signal parsing ────────────────────────────
-            parsed       = None
             source_label = channel_name
-
-            # AI-derived learned rules (approved via Telegram > Reader Logic >
-            # AI) get first refusal — a format the AI has already confirmed
-            # once for this channel should never need another AI call, or
-            # even the deterministic gates below, since the learned rule is
-            # more specific to this exact message shape than either.
-            parsed = parse_with_learned_rules(text, channel_name)
-
-            if parsed:
-                pass
-            elif parser_fmt == 'format_ab':
-                _ai_recovered = False
-                if not is_format_ab_signal(text, sig_prefix):
-                    # Doesn't match this channel's configured prefix at all —
-                    # try the AI fallback before giving up silently (a wording
-                    # change can break this gate exactly like it broke GD2's,
-                    # see ai_signal_extractor.py).
-                    parsed = await self._try_ai_signal_fallback(text, channel_name, tg_id)
-                    if not parsed:
-                        continue
-                    _ai_recovered = True
-                    cm = None
-                else:
-                    cm = _CURRENCY_RE.search(text)
-                if cm and cm.group(1).upper().replace("/", "").replace("-", "") != "XAUUSD":
-                    # Signal from a monitored channel for an unsupported currency.
-                    # Record it so the user can see it in the TG Signals tab and
-                    # send a Telegram notification — but do NOT execute a trade.
-                    currency = cm.group(1).upper()
-                    _is_stale = False
-                    if msg_ts_str:
-                        try:
-                            from datetime import datetime as _dt
-                            _tg_dt = _dt.fromisoformat(msg_ts_str.replace("Z", "+00:00"))
-                            if _tg_dt.tzinfo is None:
-                                from datetime import timezone as _tz
-                                _tg_dt = _tg_dt.replace(tzinfo=_tz.utc)
-                            _is_stale = time.time() - _tg_dt.timestamp() > 2 * 3600
-                        except Exception:
-                            pass
-                    else:
-                        _is_stale = True
-                    _dir_m = re.search(r'\bDirection\s+(BUY|SELL)\b', text, re.IGNORECASE)
-                    _dir   = _dir_m.group(1).upper() if _dir_m else None
-                    _was_new = False
-                    # Channels often send a short "SELL CADCHF NOW"-style alert
-                    # followed minutes later by the full signal with SL/TP —
-                    # each is a distinct tg_message_id so the INSERT OR IGNORE
-                    # above doesn't dedupe them. Both still get parsed and
-                    # recorded (for TG Signals tab visibility), but only the
-                    # first should trigger a Telegram notification — check for
-                    # a recent unsupported_currency row from the same channel,
-                    # same direction, same currency before alerting again.
-                    _RECENT_DUP_WINDOW = 15 * 60
-                    _dup_found = False
-                    with db_module.db() as conn:
-                        _cur = conn.execute(
-                            """INSERT OR IGNORE INTO vantage_tg_signals
-                               (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                                direction,entry_low,entry_high,stop_loss,
-                                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                            (tg_id, group_id, channel_name,
-                             msg.get("sender_name", ""), msg_ts_str,
-                             text, time.time(),
-                             _dir, None, None, None,
-                             None, None, None, None, None, None, None, None,
-                             "unsupported_currency"),
-                        )
-                        _was_new = _cur.rowcount > 0
-                        if _was_new:
-                            _recent_rows = conn.execute(
-                                """SELECT raw_text FROM vantage_tg_signals
-                                   WHERE group_id=? AND status='unsupported_currency'
-                                   AND direction=? AND tg_message_id!=? AND parsed_at>?""",
-                                (group_id, _dir, tg_id, time.time() - _RECENT_DUP_WINDOW),
-                            ).fetchall()
-                        else:
-                            _recent_rows = []
-                    _norm_currency = currency.replace("/", "").replace("-", "")
-                    for (_prior_text,) in _recent_rows:
-                        _prior_cm = _CURRENCY_RE.search(_prior_text or "")
-                        if _prior_cm and _prior_cm.group(1).upper().replace("/", "").replace("-", "") == _norm_currency:
-                            _dup_found = True
-                            break
-                    log.info("[%s] Non-XAUUSD signal tg_id=%s currency=%s stale=%s dup=%s",
-                             channel_name, tg_id, currency, _is_stale, _dup_found)
-                    if _was_new and not _is_stale and not _dup_found:
-                        asyncio.create_task(
-                            telegram_alerts.send_message(
-                                f"Signal received from {channel_name}\n"
-                                f"Currency: {currency} — app handles XAUUSD only, not executed.\n"
-                                f"Direction: {_dir or '?'}",
-                                tg_id, "signal_currency_skipped",
-                            )
-                        )
-                    continue
-                if not _ai_recovered:
-                    parsed = parse_gold_signal(text)
-                    if not parsed:
-                        # Matched the signal prefix but failed to parse — try the
-                        # AI fallback before flagging as unrecognised.
-                        parsed = await self._try_ai_signal_fallback(text, channel_name, tg_id)
-                        if not parsed:
-                            self._queue_unrecognised(tg_id, channel_name, text)
-                            continue
-
-            elif parser_fmt == 'gd2':
-                _ai_recovered = False
-                if not is_gd2_message(text):
-                    # Confirmed live: a "High Risk" prefix line alone breaks this
-                    # gate entirely — try the AI fallback before giving up silently.
-                    parsed = await self._try_ai_signal_fallback(text, channel_name, tg_id)
-                    if not parsed:
-                        continue
-                    _ai_recovered = True
-                if not _ai_recovered:
-                    parsed = parse_gd2_signal(text)
-                if not parsed:
-                    # Check for a partial GD2 message: direction + entry range present
-                    # but SL/TP not yet in the message.  GD2 sometimes sends the entry
-                    # first and edits to add SL/TP seconds later.  Recording it now lets
-                    # the edit handler promote it to a full executable signal.
-                    _partial = parse_gd2_partial(text)
-                    if _partial:
-                        with db_module.db() as conn:
-                            conn.execute(
-                                """INSERT OR IGNORE INTO vantage_tg_signals
-                                   (tg_message_id,group_id,group_name,sender_name,message_ts,
-                                    raw_text,parsed_at,direction,entry_low,entry_high,
-                                    stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                (tg_id, group_id, channel_name,
-                                 msg.get("sender_name", ""), msg_ts_str,
-                                 text, time.time(),
-                                 _partial["direction"],
-                                 _partial["entry_low"], _partial["entry_high"],
-                                 None, None, None, None, None, None, None, None, None,
-                                 "pending_followup"),
-                            )
-                        log.info(
-                            "[%s] Partial GD2 tg_id=%s %s entry %s-%s — awaiting SL/TP edit",
-                            channel_name, tg_id, _partial["direction"],
-                            _partial["entry_low"], _partial["entry_high"],
-                        )
-                        continue
-                    # If this looks like a GD2 bare direction trigger ("XAU USD BUY/SELL
-                    # [NOW]"), silently skip rather than flagging as unrecognised.
-                    # This check runs regardless of IME state: when IME is ON the trigger
-                    # should have been caught at the pre-parse IME block (line ~4415), but
-                    # if the channel has instant_entry_enabled=0 it bypasses that block and
-                    # would otherwise fall through to unrecognised — which is wrong.
-                    _ime_trigger = parse_gd2_instant_entry(text)
-                    if _ime_trigger:
-                        log.info(
-                            "[%s] GD2 bare direction tg_id=%s (%s) — silently skipped "
-                            "(awaiting follow-up with full levels)",
-                            channel_name, tg_id, _ime_trigger[0],
-                        )
-                        continue
-                    # Matched the GD2 gate but failed full parse — try the AI
-                    # fallback before flagging as unrecognised.
-                    parsed = await self._try_ai_signal_fallback(text, channel_name, tg_id)
-                    if not parsed:
-                        # Had XAU content but failed GD2 parse — flag as unrecognised
-                        self._queue_unrecognised(tg_id, channel_name, text)
-                        continue
-
-            else:
-                # 'auto' — try format_ab first (if prefix configured), then gd2
-                if sig_prefix and is_format_ab_signal(text, sig_prefix):
-                    cm = _CURRENCY_RE.search(text)
-                    if not cm or cm.group(1).upper().replace("/", "").replace("-", "") == "XAUUSD":
-                        parsed = parse_gold_signal(text)
-                if not parsed and is_gd2_message(text):
-                    parsed = parse_gd2_signal(text)
-                    if not parsed:
-                        _partial = parse_gd2_partial(text)
-                        if _partial:
-                            with db_module.db() as conn:
-                                conn.execute(
-                                    """INSERT OR IGNORE INTO vantage_tg_signals
-                                       (tg_message_id,group_id,group_name,sender_name,message_ts,
-                                        raw_text,parsed_at,direction,entry_low,entry_high,
-                                        stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (tg_id, group_id, channel_name,
-                                     msg.get("sender_name", ""), msg_ts_str,
-                                     text, time.time(),
-                                     _partial["direction"],
-                                     _partial["entry_low"], _partial["entry_high"],
-                                     None, None, None, None, None, None, None, None, None,
-                                     "pending_followup"),
-                                )
-                            log.info(
-                                "[%s] Partial GD2 tg_id=%s %s entry %s-%s — awaiting SL/TP edit",
-                                channel_name, tg_id, _partial["direction"],
-                                _partial["entry_low"], _partial["entry_high"],
-                            )
-                            continue
-                if not parsed:
-                    parsed = await self._try_ai_signal_fallback(text, channel_name, tg_id)
-                if not parsed:
-                    continue  # auto-format channel — skip silently when nothing matches
+            parsed = await _classify_and_parse_impl(
+                tg_id, group_id, channel_name, text, msg, parser_fmt, sig_prefix,
+                ai_fallback_fn=self._try_ai_signal_fallback,
+                queue_unrecognised_fn=self._queue_unrecognised,
+            )
+            if parsed is None:
+                continue
 
             # Staleness guard — signals are scalps: an entry zone is only valid for
             # minutes. Anything older than 4 minutes at processing time is recorded
@@ -2477,79 +2066,14 @@ class SimulationEngine:
             # (2026-07-03: toggle-off gap → backfilled signal filled 22min late at
             # a worse price → straight to SL). 4 min covers Telegram delivery
             # latency plus one scan cycle, nothing more.
-            msg_age_secs = None
-            if msg_ts_str:
-                try:
-                    from datetime import datetime as _dt
-                    _tg_dt = _dt.fromisoformat(msg_ts_str.replace("Z", "+00:00"))
-                    if _tg_dt.tzinfo is None:
-                        from datetime import timezone as _tz
-                        _tg_dt = _tg_dt.replace(tzinfo=_tz.utc)
-                    msg_age_secs = time.time() - _tg_dt.timestamp()
-                except Exception:
-                    pass
-
-            _MAX_SIGNAL_AGE_SECS = 4 * 60  # 4 minutes
-            # No timestamp = unverifiable age = do not execute. Telethon always
-            # provides message dates, so this only trips on malformed data.
-            is_stale = msg_age_secs is None or msg_age_secs > _MAX_SIGNAL_AGE_SECS
-
-            if is_stale:
-                # Record so restarts don't re-encounter this message.
-                # Still notify via Telegram so the user knows a signal arrived
-                # during the downtime (even though it won't be executed).
-                _was_new = False
-                with db_module.db() as conn:
-                    _cur = conn.execute(
-                        """INSERT OR IGNORE INTO vantage_tg_signals
-                           (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                            direction,entry_low,entry_high,stop_loss,
-                            tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (tg_id, group_id, channel_name, msg.get("sender_name", ""), msg_ts_str,
-                         text, time.time(),
-                         parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                         parsed["stop_loss"],
-                         parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                         parsed["tp6"], parsed["tp7"], parsed["tp8"],
-                         "historical"),
-                    )
-                    _was_new = _cur.rowcount > 0
-                age_hrs = (msg_age_secs or 0) / 3600
-                log.info("[%s] Stale signal tg_id=%s age=%.1fh — recorded only",
-                         source_label, tg_id, age_hrs)
-                if _was_new:
-                    # Only notify once (INSERT OR IGNORE skips duplicates)
-                    _stale_text = telegram_alerts.fmt_signal(
-                        parsed, channel_name,
-                        executed=False,
-                        skip_reason=f"Signal detected but NOT executed — {age_hrs:.1f}h old (app was offline)",
-                        strategy_name="",
-                    )
-                    asyncio.create_task(
-                        telegram_alerts.send_message(_stale_text, tg_id, "signal_stale")
-                    )
+            _is_fresh = await _record_staleness_or_new_impl(
+                tg_id, group_id, channel_name, msg, parsed, source_label,
+            )
+            if not _is_fresh:
                 continue
-
-            with db_module.db() as conn:
-                conn.execute(
-                    """INSERT OR IGNORE INTO vantage_tg_signals
-                       (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                        direction,entry_low,entry_high,stop_loss,
-                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (tg_id, group_id, channel_name, msg.get("sender_name", ""), msg_ts_str,
-                     text, time.time(),
-                     parsed["direction"], parsed["entry_low"], parsed["entry_high"], parsed["stop_loss"],
-                     parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                     parsed["tp6"], parsed["tp7"], parsed["tp8"], "new"),
-                )
 
             from forex_trader.core import latency_trace as _lt_dec
             _lt_dec.mark(tg_id, "t7_decided")
-            log.info("[%s] New signal tg_id=%s %s entry %s-%s SL %s",
-                     source_label, tg_id, parsed["direction"],
-                     parsed["entry_low"], parsed["entry_high"], parsed["stop_loss"])
 
             if parsed.get("_ai_extracted"):
                 # The deterministic parser missed this message (format drift) —
@@ -2565,467 +2089,45 @@ class SimulationEngine:
             exec_lot             = None
             exec_price           = None
             trade_result         = None
-            _per_signal_skip     = False
-            _per_signal_skip_rsn = ""
             _gap_note            = ""  # only set below if gap-adjusted execution fires
-            strategy      = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
-            # Channel override > auto-Claude rec > global Active Strategy
-            _ch_ov_tg = db_module.get_channel_strategy_override(channel_name)
-            if _ch_ov_tg == "auto":
-                if auto_execute:
-                    # Per-signal quick evaluation refines strategy for THIS signal
-                    _cfg_tg = getattr(self, "_cfg", {})
-                    if ai_provider.is_configured(_cfg_tg):
-                        try:
-                            from forex_trader.core import channel_strategy_ai as _csai_ps
-                            _sig_eval = await _csai_ps.evaluate_signal_strategy(
-                                self, parsed, channel_name, _cfg_tg
-                            )
-                            if _sig_eval.get("skip"):
-                                _per_signal_skip     = True
-                                _per_signal_skip_rsn = _sig_eval.get("reasoning", "AI rejected signal")
-                                log.info("[channel_ai] per-signal SKIP %s: %s",
-                                         channel_name, _per_signal_skip_rsn)
-                            else:
-                                strategy = _sig_eval.get("strategy") or strategy
-                                log.info("[channel_ai] per-signal %s → %s (%.0f%%)",
-                                         channel_name, strategy,
-                                         _sig_eval.get("confidence", 0) * 100)
-                        except Exception as _eval_exc:
-                            log.debug("per-signal eval failed: %s", _eval_exc)
-                            _ch_rec_tg = db_module.get_channel_strategy_rec(channel_name)
-                            strategy   = _ch_rec_tg.get("strategy") or strategy
-                    else:
-                        _ch_rec_tg = db_module.get_channel_strategy_rec(channel_name)
-                        strategy   = _ch_rec_tg.get("strategy") or strategy
-                else:
-                    _ch_rec_tg = db_module.get_channel_strategy_rec(channel_name)
-                    strategy   = _ch_rec_tg.get("strategy") or strategy
-            elif _ch_ov_tg:
-                strategy = _ch_ov_tg
-            # Per-signal "High Risk" override — the provider itself is flagging this
-            # specific trade as elevated risk in the message body, so use Conservative
-            # for just this trade regardless of the channel's normal strategy
-            # selection. Checked on the raw message text, not the parsed signal, since
-            # it's prose ("High Risk Trade" / "High Risk"), not a structured field.
-            if "high risk" in text.lower():
-                log.info("[%s] 'High Risk' flagged in message — using Conservative "
-                          "strategy for this trade only", channel_name)
-                strategy = STRATEGY_CONSERVATIVE
-            # DPM overrides the base strategy entirely
-            if bool(rs.get("dpm_enabled", 0)):
-                strategy_name = "DPM"
-            else:
-                strategy_name = STRATEGY_NAMES.get(strategy, strategy)
 
-            # Session gate check — evaluate now so the notification always reflects
-            # whether this market is active, regardless of auto-execute state.
-            _sess_ok, _sess_name = db_module.is_session_allowed(rs)
-            _SESS_HUMAN = {
-                "asian":   "Asian Market",
-                "london":  "London Market",
-                "overlap": "London & New York Market",
-                "ny":      "New York Market",
-            }
-            _market_off_msg = (
-                f"\U0001f6ab {_SESS_HUMAN.get(_sess_name, _sess_name.title())} Turned Off"
-                if not _sess_ok else ""
+            # Channel override > auto-Claude rec > global Active Strategy,
+            # plus the per-signal "High Risk" override, session gate, and
+            # trading-paused check.
+            _strat_result = await _resolve_strategy_and_skip_reason_impl(
+                rs, channel_name, text, parsed, auto_execute,
+                getattr(self, "_cfg", {}), self,
+                is_trading_paused_fn=lambda: db_module.to_db_thread(self.is_trading_paused),
             )
-            if _market_off_msg:
-                skip_reason = _market_off_msg + " — signal received but not executed."
-            elif await db_module.to_db_thread(self.is_trading_paused):
-                _halt_reason = db_module.get_app_config("risk_halt_reason") or "risk halt active"
-                _pause_until = db_module.get_app_config("trade_pause_until")
-                try:
-                    _until_str = time.strftime("%H:%M UTC", time.gmtime(float(_pause_until)))
-                    _halt_reason += f", resumes ~{_until_str}"
-                except Exception:
-                    pass
-                skip_reason = f"⏸️ Trading paused — {_halt_reason}."
-            else:
-                skip_reason = "Auto-execution is OFF — activate manually in the dashboard."
+            strategy             = _strat_result["strategy"]
+            strategy_name        = _strat_result["strategy_name"]
+            skip_reason          = _strat_result["skip_reason"]
+            _sess_ok             = _strat_result["sess_ok"]
+            _per_signal_skip     = _strat_result["per_signal_skip"]
+            _per_signal_skip_rsn = _strat_result["per_signal_skip_reason"]
 
             if auto_execute:
-                # ── Instant trade follow-up ──────────────────────────────────
-                # If IME is on and an open instant trade exists from this channel,
-                # apply the SL/TP from this full signal to that trade instead of
-                # opening a new position.
-                if bool(rs.get("immediate_market_entry", 0)):
-                    _followup_matched = await self._find_and_apply_instant_followup(
-                        channel_name, parsed["direction"], parsed, tg_id,
-                    )
-                    if _followup_matched:
-                        new_signals.append(parsed | {"tg_message_id": tg_id,
-                                                      "auto_executed": True,
-                                                      "source_label": source_label})
-                        continue
-
-                # ── Normal open-new-trade flow ───────────────────────────────
-                open_count = len(self.get_open_trades())
-                max_trades = int(rs.get("max_open_trades", 1))
-                # Session gate — block execution if this market is deselected.
-                # (open_trade() is called directly below; the gate must be
-                # enforced here because open_trade() lacks it.)
-                if not _sess_ok:
-                    pass  # skip_reason already set above; fall through to notification
-                elif _per_signal_skip:
-                    skip_reason = f"Auto-eval declined signal: {_per_signal_skip_rsn}"
-                elif open_count >= max_trades:
-                    skip_reason = f"Auto-execution skipped — max open trades ({max_trades}) reached."
-                else:
-                    tick = await self.get_tick()
-                    if not tick:
-                        skip_reason = "Auto-execution skipped — no live price available."
-                    else:
-                        # Self-managed strategies (Conservative, Conservative Trial)
-                        # derive SL and TP entirely from the actual fill price — the
-                        # signal's SL/TP geometry is irrelevant and must not block
-                        # execution.  Only validate the entry zone itself.
-                        _self_mgd = strategy in {
-                            STRATEGY_CONSERVATIVE,
-                            STRATEGY_SCALP_RUNNER,
-                            STRATEGY_CONSERVATIVE_TRIAL,
-                        }
-                        # Signal Climber / GD VIP Runner / Adaptive Runner use signal
-                        # geometry but bypass TP1 R:R validation (GD2/GDV signals have TP1
-                        # R:R ~0.75; real R:R is measured at TP5/6, or via the widened SL
-                        # for GD VIP Runner/Adaptive Runner).
-                        _climber_mode = strategy in (
-                            STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
-                        )
-                        if _self_mgd:
-                            errs = (
-                                ["entry_low must be <= entry_high"]
-                                if float(parsed["entry_low"]) > float(parsed["entry_high"])
-                                else []
-                            )
-                        elif _climber_mode:
-                            errs = validate_signal(
-                                parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                                parsed["stop_loss"],
-                                parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                                parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                            )
-                        else:
-                            errs = validate_signal(
-                                parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                                parsed["stop_loss"],
-                                parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                                parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                            )
-                        if errs:
-                            skip_reason = f"Auto-execution skipped — signal validation failed: {'; '.join(errs)}"
-                        else:
-                            # Pre-trade filters: R:R and directional cap.
-                            #
-                            # Price reference selection:
-                            #   • Price IN zone         → use live ask/bid (real execution price)
-                            #   • Price ABOVE zone (BUY hasn't pulled back yet) or
-                            #     BELOW zone (SELL hasn't bounced yet) → use zone midpoint.
-                            #     The live price gives a misleadingly bad R:R here because
-                            #     TP1 looks tiny vs SL when measured from above the zone.
-                            #     We'll re-check with live price at activation time instead.
-                            #   • Price through zone WRONG side (BUY below zone / SELL above
-                            #     zone — support/resistance already broken) → reject outright.
-                            _dir_up   = parsed["direction"].upper()
-                            _el       = float(parsed["entry_low"])
-                            _eh       = float(parsed["entry_high"])
-                            _live_px  = tick.ask if _dir_up == "BUY" else tick.bid
-                            _zone_mid = (_el + _eh) / 2.0
-                            _in_zone  = self._price_in_entry_range(_dir_up, _el, _eh, tick)
-
-                            # Detect zone breach in the wrong direction
-                            _zone_broken = (
-                                (_dir_up == "BUY"  and _live_px < _el) or
-                                (_dir_up == "SELL" and _live_px > _eh)
-                            )
-                            if _zone_broken:
-                                skip_reason = (
-                                    f"Auto-execution skipped — {_dir_up} zone ${_el:.2f}–${_eh:.2f} "
-                                    f"already breached (price ${_live_px:.2f}); setup invalidated."
-                                )
-                                log.info("[%s] Signal rejected — zone breached: %s", source_label, skip_reason)
-                            else:
-                                # Use live price if already in zone, zone-mid otherwise
-                                _rr_ref_px = _live_px if _in_zone else _zone_mid
-                                # Conservative and Conservative Trial ignore the
-                                # signal's TP levels — they calculate their own from
-                                # the actual fill price.  The channel's R:R is irrelevant.
-                                # Signal Climber uses signal TPs but TP1 R:R is intentionally
-                                # low (~0.75:1 for GD2); real R:R is at TP5/6.
-                                _self_mgd_strats = {
-                                    STRATEGY_CONSERVATIVE,
-                                    STRATEGY_SCALP_RUNNER,
-                                    STRATEGY_CONSERVATIVE_TRIAL,
-                                    STRATEGY_SIGNAL_CLIMBER,
-                                    STRATEGY_GD_VIP_RUNNER,
-                                    STRATEGY_ADAPTIVE_RUNNER,
-                                }
-                                if strategy in _self_mgd_strats:
-                                    _filter_err = None
-                                else:
-                                    _filter_err = self._check_pre_trade_filters(
-                                        parsed["direction"],
-                                        _el, _eh,
-                                        float(parsed["stop_loss"]), parsed.get("tp1"),
-                                        actual_price=_rr_ref_px,
-                                        source_name=channel_name,
-                                    )
-                                if _filter_err:
-                                    skip_reason = f"Auto-execution skipped — {_filter_err}"
-                                    log.info("[%s] Signal filtered: %s", source_label, _filter_err)
-                                else:
-                                    signal_id    = str(uuid.uuid4())[:16]
-                                    balance      = await self._get_trading_balance()
-                                    entry_mid    = (float(parsed["entry_low"]) + float(parsed["entry_high"])) / 2
-                                    lot          = self.suggest_lot_size(entry_mid, float(parsed["stop_loss"]),
-                                                                         balance, float(rs.get("risk_per_trade_pct", 0.5)))
-                                    strategy_lot = float(rs.get("strategy_lot_size", 0))
-                                    if strategy_lot > 0:
-                                        lot = strategy_lot
-    
-                                    _dir      = parsed["direction"]
-                                    _el       = float(parsed["entry_low"])
-                                    _eh       = float(parsed["entry_high"])
-                                    in_range  = self._price_in_entry_range(_dir, _el, _eh, tick)
-                                    cur_px    = tick.ask if _dir == "BUY" else tick.bid
-                                    _gap_note = ""  # set below if gap-adjusted execution fires
-
-                                    # ── Gap-adjusted market entry (GD2 / Gold Diggers VIP) ──────
-                                    # These channels publish signals after the provider enters, so
-                                    # by the time Telegram delivers the message the entry zone has
-                                    # often already been passed.  If price is within the per-channel
-                                    # gap cap, shift ALL TP/SL levels by the gap (preserving the
-                                    # same point distances from entry) and execute at market rather
-                                    # than queuing.  Anything beyond the cap is queued as normal.
-                                    #
-                                    #   GD2:        cap = 10 pts  (TPs typically 3–12 pts from zone)
-                                    #   Gold Diggers VIP: cap = 15 pts  (TPs run to 25+ pts)
-                                    #
-                                    # Only applies when IME is on — instant entry and gap-adjusted
-                                    # entry are the IME-on behaviour pair. With IME off, the signal's
-                                    # own entry point is retained as-is and a price outside the zone
-                                    # falls through to the ordinary zone-fill queue below instead.
-                                    _src_lower = source_label.lower()
-                                    _gap_cap: Optional[float] = None
-                                    if bool(rs.get("immediate_market_entry", 0)):
-                                        if "gold diggers vip" in _src_lower:
-                                            _gap_cap = 15.0
-                                        elif "gold diggers 2.0" in _src_lower:
-                                            _gap_cap = 10.0
-
-                                    if not in_range and _gap_cap is not None:
-                                        _gap = (
-                                            round(cur_px - _eh, 2) if _dir == "BUY"
-                                            else round(_el - cur_px, 2)
-                                        )
-                                        if 0 < _gap <= _gap_cap:
-                                            _sign = 1.0 if _dir == "BUY" else -1.0
-                                            parsed = dict(parsed)
-                                            parsed["stop_loss"] = round(
-                                                float(parsed["stop_loss"]) + _sign * _gap, 2
-                                            )
-                                            for _tp_i in range(1, 9):
-                                                _tp_v = parsed.get(f"tp{_tp_i}")
-                                                if _tp_v is not None:
-                                                    parsed[f"tp{_tp_i}"] = round(
-                                                        float(_tp_v) + _sign * _gap, 2
-                                                    )
-                                            parsed["entry_low"]  = round(_el + _sign * _gap, 2)
-                                            parsed["entry_high"] = round(_eh + _sign * _gap, 2)
-                                            entry_mid = (parsed["entry_low"] + parsed["entry_high"]) / 2
-                                            in_range  = True  # skip queue, fall through to execution
-                                            _gap_note = (
-                                                f"Gap-adjusted +{_gap:.1f}pt — zone was "
-                                                f"{_el:.2f}–{_eh:.2f}, market at {cur_px:.2f}. "
-                                                f"Levels shifted to match fill."
-                                            )
-                                            log.info(
-                                                "[%s] Gap-adjusted market entry: zone %.2f–%.2f, "
-                                                "market %.2f, gap=%.2f pts (cap=%.0f) → "
-                                                "SL %.2f  TP1 %.2f",
-                                                source_label, _el, _eh, cur_px, _gap, _gap_cap,
-                                                parsed["stop_loss"], parsed.get("tp1") or 0,
-                                            )
-
-                                    if not in_range:
-                                        # Price has moved outside the entry zone — queue as pending.
-                                        # The monitor loop will re-check filters when activating.
-                                        _side = "above" if _dir == "BUY" else "below"
-                                        with db_module.db() as conn:
-                                            conn.execute(
-                                                """INSERT INTO vantage_signals
-                                                   (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                                                    tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                                                    lot_size,notes,status,created_at)
-                                                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                                (signal_id, f"Telegram Auto ({source_label})",
-                                                 parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                                                 parsed["stop_loss"],
-                                                 parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                                                 parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                                                 lot,
-                                                 f"Queued: {_dir} price ${cur_px:.2f} is {_side} zone "
-                                                 f"${_el:.2f}–${_eh:.2f}",
-                                                 "pending", time.time()),
-                                            )
-                                            conn.execute(
-                                                "UPDATE vantage_tg_signals SET status='pending',signal_id=?"
-                                                " WHERE tg_message_id=?",
-                                                (signal_id, tg_id),
-                                            )
-                                        log.info("[%s] Signal queued (price $%.2f %s zone $%.2f–$%.2f)",
-                                                 source_label, cur_px, _side, _el, _eh)
-                                        skip_reason = (
-                                            f"Signal queued — {_dir} price ${cur_px:.2f} is {_side} "
-                                            f"the entry zone ${_el:.2f}–${_eh:.2f}. "
-                                            f"Will auto-activate when price returns to zone."
-                                        )
-                                    else:
-                                        with db_module.db() as conn:
-                                            conn.execute(
-                                                """INSERT INTO vantage_signals
-                                                   (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                                                    tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                                                    lot_size,notes,status,created_at,activated_at)
-                                                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                                (signal_id, f"Telegram Auto ({source_label})",
-                                                 parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                                                 parsed["stop_loss"],
-                                                 parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                                                 parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                                                 lot, f"Auto-executed from Telegram {tg_id} ({source_label})",
-                                                 "active", time.time(), time.time()),
-                                            )
-                                            conn.execute(
-                                                "UPDATE vantage_tg_signals SET status='activated',signal_id=?"
-                                                " WHERE tg_message_id=?",
-                                                (signal_id, tg_id),
-                                            )
-                                        # Conservative / Scalp Runner: use zone-mid ± fixed SL so MT5
-                                        # gets the right level; signal SL is ignored.
-                                        if strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
-                                            _tg_co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
-                                            if strategy == STRATEGY_SCALP_RUNNER:
-                                                _tg_sl_pt = _SCALP_RUNNER_SL_PT
-                                            else:
-                                                _tg_sl_pt = _CONSERVATIVE_SL_PT
-                                            _tg_sl_use  = round(entry_mid - _tg_co_sign * _tg_sl_pt, 2)
-                                        else:
-                                            _tg_sl_use = float(parsed["stop_loss"])
-                                        try:
-                                            trade_result = await self.open_trade(
-                                                signal_id=signal_id, direction=parsed["direction"],
-                                                entry_low=float(parsed["entry_low"]),
-                                                entry_high=float(parsed["entry_high"]),
-                                                stop_loss=_tg_sl_use,
-                                                tp1=parsed["tp1"], tp2=parsed["tp2"], tp3=parsed["tp3"],
-                                                tp4=parsed["tp4"], tp5=parsed["tp5"],
-                                                tp6=parsed.get("tp6"), tp7=parsed.get("tp7"),
-                                                tp8=parsed.get("tp8"),
-                                                lot_size=lot, tick=tick, strategy=strategy,
-                                                tg_source=channel_name,
-                                            )
-                                            executed   = True
-                                            exec_lot   = lot
-                                            exec_price = trade_result.get("entry_price")
-                                            # Conservative / Scalp Runner post-fill SL/TP override:
-                                            # overwrite with exact fill-relative levels and clear signal TPs.
-                                            # Scalp Runner also gets a TP2 (own constants, see
-                                            # _SCALP_RUNNER_* above) — no longer shares Conservative's levels.
-                                            # Skipped when executed_remotely: trade_id/mt5_ticket refer to
-                                            # the VPS's own DB/MT5 terminal (centralized signal generation
-                                            # forwarded this trade there — see open_trade()), so the UPDATE
-                                            # below would silently touch zero rows here and modify_order()
-                                            # would be aimed at this node's own (unrelated) MT5 bridge.
-                                            if (not trade_result.get("executed_remotely")
-                                                    and strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER)
-                                                    and trade_result.get("trade_id")):
-                                                if strategy == STRATEGY_SCALP_RUNNER:
-                                                    _sl_pt, _tp1_pt, _tp2_pt = (
-                                                        _SCALP_RUNNER_SL_PT, _SCALP_RUNNER_TP1_PT, _SCALP_RUNNER_TP2_PT,
-                                                    )
-                                                else:
-                                                    _sl_pt, _tp1_pt, _tp2_pt = (
-                                                        _CONSERVATIVE_SL_PT, _CONSERVATIVE_TP1_PT, None,
-                                                    )
-                                                _fill     = float(exec_price or entry_mid)
-                                                _co_sign  = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
-                                                exact_sl  = round(_fill - _co_sign * _sl_pt, 2)
-                                                exact_tp1 = round(_fill + _co_sign * _tp1_pt, 2)
-                                                exact_tp2 = (
-                                                    round(_fill + _co_sign * _tp2_pt, 2)
-                                                    if _tp2_pt is not None else None
-                                                )
-                                                with db_module.db() as conn:
-                                                    conn.execute(
-                                                        """UPDATE vantage_simulated_trades
-                                                           SET stop_loss=?, tp1=?, tp2=?, tp3=NULL,
-                                                               tp4=NULL, tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
-                                                           WHERE trade_id=?""",
-                                                        (exact_sl, exact_tp1, exact_tp2, trade_result["trade_id"]),
-                                                    )
-                                                mt5_tkt = trade_result.get("mt5_ticket")
-                                                if mt5_tkt:
-                                                    try:
-                                                        await self._bridge.modify_order(int(mt5_tkt), sl=exact_sl, tp=None)
-                                                    except Exception as _e:
-                                                        log.warning("[%s] TG modify_order SL sync failed: %s", strategy, _e)
-                                                trade_result["stop_loss"] = exact_sl
-                                                trade_result["tp1"]       = exact_tp1
-                                                trade_result["tp2"]       = exact_tp2
-                                                log.info(
-                                                    "[%s/tg] trade_id=%s fill=%.2f "
-                                                    "SL=%.2f(-%.1fpt) TP1=%.2f(+%.1fpt)%s",
-                                                    strategy, trade_result["trade_id"][:8], _fill,
-                                                    exact_sl, _sl_pt, exact_tp1, _tp1_pt,
-                                                    f" TP2={exact_tp2:.2f}(+{_tp2_pt:.1f}pt)" if exact_tp2 is not None else "",
-                                                )
-                                                if trade_result.get("managed_by") == "ea":
-                                                    try:
-                                                        from forex_trader.core import ea_bridge as _ea_mod
-                                                        _ea = _ea_mod.get_instance()
-                                                        if _ea is not None:
-                                                            _tg_new_tps = {1: exact_tp1}
-                                                            if exact_tp2 is not None:
-                                                                _tg_new_tps[2] = exact_tp2
-                                                            await _ea.update_trade(trade_result["trade_id"], _tg_new_tps)
-                                                    except Exception as _e:
-                                                        log.warning(
-                                                            "EA update_trade after %s TG fill failed: %s", strategy, _e
-                                                        )
-                                        except Exception as e:
-                                            _e_str = str(e)
-                                            _is_cb = "circuit breaker" in _e_str.lower()
-                                            _is_stood_down = "stood down" in _e_str.lower()
-                                            if _is_stood_down:
-                                                # Expected: this node is not the active trader.
-                                                # The other node will execute and send its own alert.
-                                                # Log quietly and suppress the Telegram notification.
-                                                log.info(
-                                                    "[%s] Signal deferred to active node (stood down): %s",
-                                                    source_label, _e_str,
-                                                )
-                                                with db_module.db() as conn:
-                                                    conn.execute(
-                                                        "UPDATE vantage_signals SET status='pending', activated_at=NULL"
-                                                        " WHERE signal_id=?",
-                                                        (signal_id,),
-                                                    )
-                                                new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
-                                                                             "source_label": source_label})
-                                                continue
-                                            elif _is_cb:
-                                                log.warning("[CB] TG trade blocked for %s: %s", source_label, _e_str)
-                                            else:
-                                                log.error("[%s] Auto-exec failed: %s", source_label, e)
-                                            with db_module.db() as conn:
-                                                conn.execute(
-                                                    "UPDATE vantage_signals SET status='pending', activated_at=NULL"
-                                                    " WHERE signal_id=?",
-                                                    (signal_id,),
-                                                )
-                                            skip_reason = _e_str if _is_cb else f"Auto-execution failed: {_e_str}"
+                _exec_result = await _execute_auto_signal_impl(
+                    parsed, tg_id, channel_name, source_label, strategy, rs,
+                    _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
+                    self._bridge,
+                    get_open_trades_fn=self.get_open_trades,
+                    find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
+                    check_pre_trade_filters_fn=self._check_pre_trade_filters,
+                    suggest_lot_size_fn=self.suggest_lot_size,
+                    get_trading_balance_fn=self._get_trading_balance,
+                    open_trade_fn=self.open_trade,
+                )
+                executed     = _exec_result["executed"]
+                exec_lot     = _exec_result["exec_lot"]
+                exec_price   = _exec_result["exec_price"]
+                trade_result = _exec_result["trade_result"]
+                skip_reason  = _exec_result["skip_reason"]
+                _gap_note    = _exec_result["gap_note"]
+                if _exec_result.get("followup_matched") or _exec_result.get("deferred_stood_down"):
+                    new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
+                                                 "source_label": source_label})
+                    continue
 
             # Forwarded trade (centralized signal generation): the VPS actually
             # placed it — trade_id/mt5_ticket belong to its DB, not this node's

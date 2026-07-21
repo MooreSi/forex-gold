@@ -15,6 +15,17 @@ shapes `_scan_messages` itself uses -- small/already-extracted helpers out
 of scope for this pack (see the parent
 `core-scan-messages-migration/README.md`). `open_trade_fn` defaults to the
 real, already-extracted `core_open_trade.open_trade`.
+
+The instant-followup-matched early return carries a `followup_matched: True`
+key (added at core-engine-wiring time, not part of the original verbatim
+extraction) -- the original inline code did `continue` immediately in this
+branch, skipping the "signal detected" Telegram alert `_scan_messages` sends
+for every other outcome (the followup path already sends its own, more
+specific notification via `find_and_apply_instant_followup_fn`). Without
+this flag, a caller delegating straight to this function would have no way
+to tell "instant followup matched, skip the alert" apart from "trade opened
+normally, send the alert" -- both return `executed: True` -- and would
+introduce a duplicate/misleading Telegram alert on every IME-followup match.
 """
 from __future__ import annotations
 
@@ -94,7 +105,8 @@ async def execute_auto_signal(
         )
         if followup_matched:
             return {"executed": True, "exec_lot": None, "exec_price": None,
-                    "trade_result": None, "skip_reason": skip_reason, "gap_note": ""}
+                    "trade_result": None, "skip_reason": skip_reason, "gap_note": "",
+                    "followup_matched": True}
 
     # ── Normal open-new-trade flow ───────────────────────────────
     open_count = len(get_open_trades_fn())

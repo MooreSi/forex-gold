@@ -18,6 +18,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import telegram_alerts
 from forex_trader.core import engine as engine_mod
+from forex_trader.core import core_scan_messages_parse_classify as pc
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -113,13 +114,14 @@ def _run(msgs, ai_return=None, force_gd2_all_fail=False, learned_rules_return=No
         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send),
     ]
     if force_gd2_all_fail:
+        import forex_trader.core.signal_parser as sp
         patches += [
-            mock.patch.object(engine_mod, "parse_gd2_signal", return_value=None),
-            mock.patch.object(engine_mod, "parse_gd2_partial", return_value=None),
-            mock.patch.object(engine_mod, "parse_gd2_instant_entry", return_value=None),
+            mock.patch.object(pc, "parse_gd2_signal", return_value=None),
+            mock.patch.object(pc, "parse_gd2_partial", return_value=None),
+            mock.patch.object(sp, "parse_gd2_instant_entry", return_value=None),
         ]
     if learned_rules_return is not None:
-        patches.append(mock.patch.object(engine_mod, "parse_with_learned_rules", return_value=learned_rules_return))
+        patches.append(mock.patch.object(pc, "parse_with_learned_rules", return_value=learned_rules_return))
     for p in patches:
         p.start()
     try:

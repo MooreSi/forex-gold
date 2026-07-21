@@ -22,6 +22,8 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
+from forex_trader.core import core_orb_report as orb
+from forex_trader.core import core_signals
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -54,9 +56,9 @@ def fresh_db():
 
 
 def _patched_now(fixed_dt):
-    """Context manager patching engine.datetime.now() while leaving direct
-    datetime(...) construction working via the real class."""
-    patcher = mock.patch("forex_trader.core.engine.datetime")
+    """Context manager patching core_orb_report.datetime.now() while
+    leaving direct datetime(...) construction working via the real class."""
+    patcher = mock.patch("forex_trader.core.core_orb_report.datetime")
     mock_dt = patcher.start()
     mock_dt.now.return_value = fixed_dt
     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -147,8 +149,8 @@ def test_bullish_breakout_computes_zone_stop_target(fresh_db):
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2414.5, ask=2415.0))
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch.object(SimulationEngine, "_get_orb_target_multiple",
-                               new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
+        with mock.patch("forex_trader.core.core_orb_report.get_orb_target_multiple",
+                        new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
             report = asyncio.run(SimulationEngine.build_orb_report(e))
     finally:
         p.stop()
@@ -172,8 +174,8 @@ def test_bearish_breakout_computes_mirrored_zone_stop_target(fresh_db):
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2385.0, ask=2385.5))
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch.object(SimulationEngine, "_get_orb_target_multiple",
-                               new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
+        with mock.patch("forex_trader.core.core_orb_report.get_orb_target_multiple",
+                        new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
             report = asyncio.run(SimulationEngine.build_orb_report(e))
     finally:
         p.stop()
@@ -193,9 +195,10 @@ def test_get_target_multiple_uses_cache_when_dated_today(fresh_db):
     db.set_app_config("orb_target_multiple", "1.8")
     db.set_app_config("orb_target_multiple_n", "15")
     e = SimulationEngine.__new__(SimulationEngine)
+    e._bridge = _FakeBridge()
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch.object(SimulationEngine, "_backtest_orb_target_multiple", new=mock.AsyncMock()) as bt:
+        with mock.patch("forex_trader.core.core_orb_report.backtest_orb_target_multiple", new=mock.AsyncMock()) as bt:
             result = asyncio.run(SimulationEngine._get_orb_target_multiple(e))
     finally:
         p.stop()
@@ -207,10 +210,11 @@ def test_get_target_multiple_recomputes_when_cache_stale(fresh_db):
     db.set_app_config("orb_target_multiple_date", "2026-07-01")
     db.set_app_config("orb_target_multiple", "1.8")
     e = SimulationEngine.__new__(SimulationEngine)
+    e._bridge = _FakeBridge()
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch.object(
-            SimulationEngine, "_backtest_orb_target_multiple",
+        with mock.patch(
+            "forex_trader.core.core_orb_report.backtest_orb_target_multiple",
             new=mock.AsyncMock(return_value={"multiple": 2.2, "n": 12, "is_default": False}),
         ) as bt:
             result = asyncio.run(SimulationEngine._get_orb_target_multiple(e))
@@ -279,6 +283,7 @@ _BULLISH_REPORT = {
 
 def test_auto_execute_not_proceeding_creates_no_signal(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
+    e._bridge = _FakeBridge()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=False):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
     with db.db() as conn:
@@ -288,6 +293,7 @@ def test_auto_execute_not_proceeding_creates_no_signal(fresh_db):
 
 def test_auto_execute_direction_inside_creates_no_signal(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
+    e._bridge = _FakeBridge()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True):
         asyncio.run(SimulationEngine._orb_auto_execute(e, {"direction": "inside"}))
     with db.db() as conn:
@@ -297,7 +303,7 @@ def test_auto_execute_direction_inside_creates_no_signal(fresh_db):
 
 def test_auto_execute_bullish_creates_pending_signal_and_strategy_override(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
-    e.create_signal = SimulationEngine.create_signal.__get__(e)
+    e._bridge = _FakeBridge()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
 
@@ -313,7 +319,7 @@ def test_auto_execute_bullish_creates_pending_signal_and_strategy_override(fresh
 def test_auto_execute_does_not_overwrite_existing_strategy_override(fresh_db):
     db.set_channel_strategy_override("ORB/IVB Report (auto)", "conservative")
     e = SimulationEngine.__new__(SimulationEngine)
-    e.create_signal = SimulationEngine.create_signal.__get__(e)
+    e._bridge = _FakeBridge()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
     assert db.get_channel_strategy_override("ORB/IVB Report (auto)") == "conservative"
@@ -324,7 +330,7 @@ def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
     rs["orb_lot_size"] = 0.05
     db.update_risk_settings(rs)
     e = SimulationEngine.__new__(SimulationEngine)
-    e.create_signal = SimulationEngine.create_signal.__get__(e)
+    e._bridge = _FakeBridge()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
     with db.db() as conn:
@@ -334,8 +340,10 @@ def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
 
 def test_auto_execute_create_signal_failure_does_not_raise(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
+    e._bridge = _FakeBridge()
     def _raise(*a, **kw):
         raise ValueError("bad signal")
-    e.create_signal = _raise
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True):
+    with mock.patch.object(core_signals, "create_signal", _raise), \
+         mock.patch.object(orb, "create_signal", _raise), \
+         mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))  # must not raise

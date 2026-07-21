@@ -174,6 +174,19 @@ from forex_trader.core.core_manual_market_order import (
 from forex_trader.core.core_open_trade_from_signal import (
     open_trade_from_signal as _open_trade_from_signal_impl,
 )
+from forex_trader.core.core_close_trade import (
+    CloseTradeContext as _CloseTradeContext,
+    get_trading_balance as _get_trading_balance_impl,
+    close_trade as _close_trade_impl,
+    record_close as _record_close_impl,
+    close_all_ladder_legs as _close_all_ladder_legs_impl,
+)
+from forex_trader.core.core_orb_report import (
+    build_orb_report as _build_orb_report_impl,
+    get_orb_target_multiple as _get_orb_target_multiple_impl,
+    backtest_orb_target_multiple as _backtest_orb_target_multiple_impl,
+    orb_auto_execute as _orb_auto_execute_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -217,57 +230,6 @@ def _ema(values: list[float], period: int) -> Optional[float]:
     for v in values[1:]:
         ema = v * k + ema * (1.0 - k)
     return ema
-
-
-def _compute_volume_profile(
-    candles: list[dict], range_low: float, range_high: float,
-    n_buckets: int = 40, value_area_pct: float = 0.70,
-) -> tuple[float, float, float]:
-    """
-    Approximate volume profile from OHLCV bars (no raw tick data available):
-    each candle's tick-volume is distributed evenly across the price buckets
-    its high-low range touches. Returns (POC, VAH, VAL) — POC is the highest-
-    volume bucket's midpoint; VAH/VAL bound the smallest contiguous band
-    around POC containing value_area_pct of total volume (the standard
-    market-profile convention), expanding to whichever neighbouring bucket
-    has more volume at each step.
-    """
-    bucket_size = max((range_high - range_low) / n_buckets, 0.01)
-    buckets = [0.0] * n_buckets
-
-    def _idx(price: float) -> int:
-        return max(0, min(int((price - range_low) / bucket_size), n_buckets - 1))
-
-    for c in candles:
-        vol = float(c.get("volume", 0) or 0)
-        if vol <= 0:
-            continue
-        i0, i1 = _idx(c["low"]), _idx(c["high"])
-        span = max(i1 - i0 + 1, 1)
-        share = vol / span
-        for i in range(i0, i1 + 1):
-            buckets[i] += share
-
-    poc_idx = max(range(n_buckets), key=lambda i: buckets[i])
-    poc = range_low + (poc_idx + 0.5) * bucket_size
-
-    total = sum(buckets) or 1.0
-    target = total * value_area_pct
-    lo_i = hi_i = poc_idx
-    covered = buckets[poc_idx]
-    while covered < target and (lo_i > 0 or hi_i < n_buckets - 1):
-        left_val = buckets[lo_i - 1] if lo_i > 0 else -1.0
-        right_val = buckets[hi_i + 1] if hi_i < n_buckets - 1 else -1.0
-        if right_val >= left_val:
-            hi_i += 1
-            covered += buckets[hi_i]
-        else:
-            lo_i -= 1
-            covered += buckets[lo_i]
-
-    val = range_low + lo_i * bucket_size
-    vah = range_low + (hi_i + 1) * bucket_size
-    return round(poc, 2), round(vah, 2), round(val, 2)
 
 
 def _make_bridge(config: dict):
@@ -547,17 +509,21 @@ class SimulationEngine:
     async def _get_trading_balance(self) -> float:
         """Current account balance for lot-size calculations.
         Prefers the live MT5 bridge balance; falls back to the local simulation account."""
-        try:
-            mt5_acc = await self.get_mt5_account()
-            if mt5_acc and float(mt5_acc.get("balance") or 0) > 0:
-                return float(mt5_acc["balance"])
-        except Exception:
-            pass
-        with db_module.db() as conn:
-            acc = db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_simulation_account WHERE id=1").fetchone()
-            )
-        return float(acc.get("balance") or self._cfg.get("starting_balance", 1000.0))
+        return await _get_trading_balance_impl(
+            self._bridge, self._cfg.get("starting_balance", 1000.0)
+        )
+
+    def _make_close_trade_ctx(self) -> _CloseTradeContext:
+        return _CloseTradeContext(
+            self._bridge,
+            starting_balance=self._cfg.get("starting_balance", 1000.0),
+            tp_cache=self._tp_trigger_cache,
+            scale_out_last_fail=self._scale_out_last_fail,
+            tp_safety_net_last_alert=self._tp_safety_net_last_alert,
+            on_profit=lambda: setattr(self, "_profit_sound_seq", self._profit_sound_seq + 1),
+            schedule_profit_sync=self._schedule_profit_sync,
+            background_close_commentary=self._background_close_commentary,
+        )
 
     async def open_trade_from_signal(self, signal_id: str,
                                      lot_size_override: Optional[float] = None,
@@ -609,282 +575,15 @@ class SimulationEngine:
         sums their real P&L, and records the parent trade closed. Used by
         close_trade() so /close and the UI's Close button don't orphan
         every leg but the anchor."""
-        direction     = row["direction"]
-        parent_entry  = float(row["entry_price"])
-        total_pnl = 0.0
-        last_price = float(row.get("close_price") or parent_entry)
-        closed_any = False
-        for leg in legs:
-            if leg["status"] != "open":
-                continue
-            ticket = leg.get("mt5_ticket")
-            if not ticket:
-                continue
-            leg_entry_price = float(leg.get("entry_price") or parent_entry)
-            try:
-                mt5_res = await self._bridge.close_position(int(ticket))
-            except Exception as _e:
-                log.warning("[adaptive_runner_ladder] manual close failed leg=%s ticket=%s: %s",
-                           leg["tier"], ticket, _e)
-                continue
-            if not mt5_res.get("success"):
-                log.warning("[adaptive_runner_ladder] manual close rejected leg=%s ticket=%s: %s",
-                           leg["tier"], ticket, mt5_res.get("error"))
-                continue
-            close_price = float(mt5_res.get("close_price", leg["tp_price"]))
-            leg_pnl = self.pnl(direction, leg_entry_price, close_price, float(leg["lots"]))
-            await db_module.to_db_thread(
-                db_module.close_ladder_leg, leg["id"], close_price, leg_pnl, "closed_manual",
-            )
-            total_pnl += leg_pnl
-            last_price = close_price
-            closed_any = True
-
-        def _apply():
-            with db_module.db() as conn:
-                if closed_any:
-                    conn.execute(
-                        "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,"
-                        "close_price,pnl,reason) VALUES (?,?,?,?,?,?)",
-                        (trade_id, time.time(),
-                         sum(float(l["lots"]) for l in legs if l["status"] == "open"),
-                         last_price, total_pnl, reason),
-                    )
-                    conn.execute(
-                        "UPDATE vantage_simulation_account SET balance=balance+? WHERE id=1",
-                        (total_pnl,),
-                    )
-                conn.execute(
-                    """UPDATE vantage_simulated_trades
-                       SET status='closed',close_time=?,close_price=?,exit_reason=?,
-                           realised_pnl=realised_pnl+?,net_pnl=net_pnl+?,remaining_lots=0
-                       WHERE trade_id=?""",
-                    (time.time(), round(last_price, 2), reason, total_pnl, total_pnl, trade_id),
-                )
-                conn.execute(
-                    "UPDATE vantage_signals SET status='closed' WHERE signal_id=?",
-                    (row["signal_id"],),
-                )
-        await db_module.to_db_thread(_apply)
-
-        result = {
-            "trade_id":    trade_id,
-            "close_price": last_price,
-            "gross_pnl":   total_pnl,
-            "net_pnl":     round(float(row.get("net_pnl", 0)) + total_pnl, 4),
-            "reason":      reason,
-        }
-        anchor_ticket = row.get("mt5_ticket")
-        if anchor_ticket:
-            asyncio.create_task(self._schedule_profit_sync(trade_id, int(anchor_ticket)))
-        return result
+        return await _close_all_ladder_legs_impl(
+            trade_id, row, legs, reason, self._make_close_trade_ctx()
+        )
 
     async def close_trade(self, trade_id: str, reason: str = "manual_close") -> dict:
-        tick = await self.get_tick()
-        with db_module.db() as conn:
-            row = db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)).fetchone()
-            )
-        if not row or row["status"] != "open":
-            raise ValueError(f"Trade {trade_id} is not open")
-
-        # Adaptive Runner ladder trades have N separate MT5 tickets —
-        # row["mt5_ticket"] is only the anchor leg. Closing just that one
-        # here (the code below) would leave every other leg open in MT5
-        # while the DB marks the whole trade closed. Close every open leg.
-        _legs = await db_module.to_db_thread(db_module.get_ladder_legs, trade_id)
-        if any(l["status"] == "open" for l in _legs):
-            return await self._close_all_ladder_legs(trade_id, row, _legs, reason)
-
-        mt5_ticket = row.get("mt5_ticket")
-        if tick:
-            close_price = tick.bid if row["direction"].upper() == "BUY" else tick.ask
-        else:
-            if not mt5_ticket:
-                log.warning(
-                    "close_trade %s: no live tick and no MT5 ticket — using entry price as close price",
-                    trade_id,
-                )
-            close_price = float(row["entry_price"])
-
-        if mt5_ticket:
-            mt5_res = await self._bridge.close_position(int(mt5_ticket))
-            if mt5_res.get("error"):
-                raise RuntimeError(
-                    f"MT5 close rejected for ticket {mt5_ticket}: {mt5_res.get('error')}"
-                )
-            if mt5_res.get("success") is False:
-                raise RuntimeError(
-                    f"MT5 close failed for ticket {mt5_ticket}: {mt5_res}"
-                )
-            if mt5_res.get("success"):
-                close_price = float(mt5_res.get("close_price", close_price))
-
-        result = await self._record_close(trade_id, float(close_price), reason)
-
-        if mt5_ticket:
-            asyncio.create_task(self._schedule_profit_sync(trade_id, int(mt5_ticket)))
-
-        if tick:
-            asyncio.create_task(self._background_close_commentary(trade_id, result, reason, tick))
-
-        return result
+        return await _close_trade_impl(trade_id, reason, self._make_close_trade_ctx())
 
     async def _record_close(self, trade_id: str, close_price: float, reason: str) -> dict:
-        def _fetch_row():
-            with db_module.db() as conn:
-                return db_module.row_to_dict(
-                    conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)).fetchone()
-                )
-        row = await db_module.to_db_thread(_fetch_row)
-        direction   = row["direction"]
-        remaining   = float(row["remaining_lots"])
-        entry_price = float(row["entry_price"])
-        gross_pnl   = self.pnl(direction, entry_price, close_price, remaining)
-        net_pnl     = gross_pnl  # actual fees already in mt5_profit; no double-counting here
-        prev_realised = float(row.get("realised_pnl", 0))
-        prev_net_pnl  = float(row.get("net_pnl", 0))
-        now = time.time()
-
-        def _apply_close():
-            with db_module.db() as conn:
-                conn.execute(
-                    """UPDATE vantage_simulated_trades
-                       SET status=?,close_time=?,close_price=?,exit_reason=?,
-                           gross_pnl=?,realised_pnl=?,swap_est=?,net_pnl=?,remaining_lots=0
-                       WHERE trade_id=?""",
-                    ("closed", now, round(close_price, 2), reason,
-                     round(gross_pnl, 4), round(prev_realised + gross_pnl, 4),
-                     0.0, round(prev_net_pnl + net_pnl, 4), trade_id),
-                )
-                conn.execute(
-                    "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                    (net_pnl,),
-                )
-                conn.execute(
-                    "UPDATE vantage_signals SET status='closed' WHERE signal_id=?",
-                    (row["signal_id"],),
-                )
-        await db_module.to_db_thread(_apply_close)
-        if gross_pnl > 0:
-            self._profit_sound_seq += 1
-
-        # Invalidate TP trigger cache for this trade (it's now closed)
-        self._tp_trigger_cache.triggered.pop(trade_id, None)
-        for _k in [k for k in self._scale_out_last_fail if k[0] == trade_id]:
-            self._scale_out_last_fail.pop(_k, None)
-        self._tp_safety_net_last_alert.pop(trade_id, None)
-
-        # Update peak balance watermark (used by total-drawdown circuit breaker).
-        # Uses the live MT5 balance, not vantage_simulation_account — that table
-        # is this app's own internally-computed running P&L ledger (updated a
-        # few lines up), which can and does drift from the real account over
-        # many trades (see the existing [ProfitSync] reconciliation elsewhere
-        # for the same known drift). Confirmed 2026-07-07: sim ledger read $707
-        # while the real MT5 balance was $1122 (account actually up ~12% from
-        # start) — comparing that against a $1340 sim-derived peak produced a
-        # bogus "47% drawdown" halt. Peak and current must come from the same
-        # (live) source for the comparison to mean anything.
-        try:
-            live_balance = await self._get_trading_balance()
-
-            def _update_peak_balance():
-                old_peak = float(db_module.get_app_config("peak_balance") or 0)
-                if live_balance > old_peak:
-                    db_module.set_app_config("peak_balance", str(round(live_balance, 4)))
-            await db_module.to_db_thread(_update_peak_balance)
-        except Exception as _pe:
-            log.debug("[RG] peak balance update failed: %s", _pe)
-            live_balance = None
-
-        result = {
-            "trade_id":    trade_id,
-            "close_price": close_price,
-            "gross_pnl":   gross_pnl,
-            "net_pnl":     net_pnl,
-            "reason":      reason,
-        }
-
-        try:
-            from forex_trader.sync.ledger import push_trade_closed
-            _rr = None
-            try:
-                _entry = row.get("entry_price")
-                _sl = row.get("stop_loss")
-                _tp1 = row.get("tp1")
-                if _entry is not None and _sl is not None and _tp1 is not None:
-                    _entry, _sl, _tp1 = float(_entry), float(_sl), float(_tp1)
-                    if _sl != _entry:
-                        _rr = abs(_tp1 - _entry) / abs(_entry - _sl)
-            except Exception:
-                _rr = None
-            push_trade_closed({
-                "trade_id":    trade_id,
-                "engine":      "main",
-                "direction":   direction,
-                "strategy":    row.get("strategy", ""),
-                "open_time":   row.get("open_time"),
-                "close_time":  now,
-                "pnl_dollars": round(prev_net_pnl + net_pnl, 4),
-                "outcome":     "win" if gross_pnl > 0.5 else ("loss" if gross_pnl < -0.5 else "be"),
-                "tg_source":   row.get("tg_source"),
-                "mt5_ticket":  row.get("mt5_ticket"),
-                "rr":          _rr,
-            })
-        except Exception as _le:
-            log.debug("[Ledger] push failed: %s", _le)
-
-        # Persist DPM learning record if DPM was active for this trade
-        try:
-            rs = await db_module.to_db_thread(db_module.get_risk_settings)
-            if bool(rs.get("dpm_enabled", 0)):
-                total_pnl = round(prev_net_pnl + net_pnl, 4)
-                await db_module.to_db_thread(
-                    self._finalize_dpm_record, trade_id, close_price, reason, total_pnl
-                )
-        except Exception as _e:
-            log.debug("[DPM] _finalize_dpm_record skipped: %s", _e)
-
-        # Tier 1 Risk Governor: re-evaluate circuit breakers after each close.
-        try:
-            _rg_rs = await db_module.to_db_thread(db_module.get_risk_settings)
-            if bool(_rg_rs.get("risk_governor_enabled", 0)):
-                # Reuse the live balance fetched above for the peak watermark —
-                # same reasoning: must be the same (live) source as the peak
-                # comparison, not vantage_simulation_account.
-                _rg_balance = live_balance if live_balance is not None else await self._get_trading_balance()
-                await db_module.to_db_thread(self._rg_apply_halts_on_close, _rg_rs, _rg_balance)
-        except Exception as _rg_e:
-            log.debug("[RG] post-close halt check skipped: %s", _rg_e)
-
-        # Global circuit breaker — only count live MT5 trade outcomes.
-        if row.get("mt5_ticket"):
-            try:
-                total_pnl = round(float(row.get("net_pnl", 0)) + net_pnl, 4)
-                new_cb = await db_module.to_db_thread(db_module.record_live_trade_outcome, won=total_pnl >= 0)
-                if new_cb.get("just_triggered"):
-                    cooldown_mins = new_cb.get("cooldown_mins", 60)
-                    threshold = new_cb.get("losses_threshold", 3)
-                    log.warning(
-                        "[CB] Circuit breaker triggered — live trading blocked for %d min.", cooldown_mins
-                    )
-                    # Previously only logged — the user has no visibility into this
-                    # at all otherwise, since the dashboard badge only shows current
-                    # state if they happen to be looking at it. Confirmed live: a
-                    # trigger on 2026-07-06 went completely unnoticed because nothing
-                    # ever alerted, which is exactly what this fixes.
-                    asyncio.create_task(telegram_alerts.send_message(
-                        f"*Circuit Breaker Triggered*\n"
-                        f"{threshold} consecutive live losses — new trade execution is "
-                        f"paused for {cooldown_mins} minutes. Signal generators keep "
-                        f"running; no new orders will be placed until the cooldown "
-                        f"expires or you reset it manually in Risk Settings.",
-                        row.get("trade_id", ""), "circuit_breaker_triggered",
-                    ))
-            except Exception as _cb_e:
-                log.debug("[CB] outcome recording skipped: %s", _cb_e)
-
-        return result
+        return await _record_close_impl(trade_id, close_price, reason, self._make_close_trade_ctx())
 
     async def partial_close_trade(self, trade_id: str, lots_to_close: float,
                                   close_price: float, reason: str = "TP") -> dict:
@@ -2313,78 +2012,7 @@ class SimulationEngine:
         VPS for execution under that mode. Still exactly one node ever acts:
         whichever one currently owns generation.
         """
-        _active_here = self._is_active_trader_node()
-        try:
-            from forex_trader.sync import server as _sync_srv_mod
-            _is_vps = _sync_srv_mod.get_instance() is not None
-        except ImportError:
-            _is_vps = False
-        _centralized = bool((await db_module.to_db_thread(db_module.get_risk_settings))
-                            .get("centralized_signal_gen_enabled"))
-        if _is_vps:
-            _proceed = _active_here and not _centralized
-        else:
-            _proceed = _active_here or _centralized
-        if not _proceed:
-            return
-
-        direction = report.get("direction")
-        if direction not in ("bullish", "bearish"):
-            log.info("[ORB auto-execute] no breakout yet — skipping")
-            return
-
-        mt5_direction = "BUY" if direction == "bullish" else "SELL"
-        rs = await db_module.to_db_thread(db_module.get_risk_settings)
-        _lot_val = float(rs.get("orb_lot_size", 0) or 0)
-        lot_size = _lot_val if _lot_val > 0 else None
-
-        # open_trade_from_signal() (called by the pending-fill watcher below)
-        # resolves its strategy via the same per-channel override lookup as
-        # every Telegram signal — auto-bootstrap it to STRATEGY_ORB_FIXED
-        # once, the same lazy-configure-on-first-sight pattern already used
-        # for Telegram channel parser configs, so this report's exact
-        # stop/target survive unmanaged rather than being overridden by
-        # whatever the global Active Strategy happens to be that morning.
-        if db_module.get_channel_strategy_override("ORB/IVB Report (auto)") is None:
-            await db_module.to_db_thread(
-                db_module.set_channel_strategy_override,
-                "ORB/IVB Report (auto)", STRATEGY_ORB_FIXED,
-            )
-
-        # Was open_manual_market_order() — a genuine MARKET order at whatever
-        # price is live the instant this fires (right at window_end, e.g.
-        # 08:00:20). That's the button semantics for the ORB tab's own manual
-        # "Execute Trade" click (a deliberate in-the-moment action), but wrong
-        # here: the whole point of the "Reload Zone Setup" this report emails
-        # out is a *volume-profile entry zone* (POC-to-VAH/VAL) to wait for a
-        # retracement into after the breakout — not "buy/sell immediately".
-        # Confirmed live 2026-07-16: reported entry zone was $4035.29-4035.31,
-        # actual auto-executed fill was $4030.24 — 5+pts away, because the
-        # code never referenced entry_zone_low/entry_zone_high at all, just
-        # fired at market. Now creates a pending signal at the reload zone
-        # instead, using the same zone-fill watcher (_try_activate_pending_signals)
-        # every other zone-entry signal in the app already goes through — it
-        # only actually opens a trade once price genuinely re-enters the zone,
-        # and expires unfilled (see the ORB-specific window there) if it never
-        # does, rather than chasing price wherever it happens to be.
-        try:
-            sig = self.create_signal(
-                source_name="ORB/IVB Report (auto)", direction=mt5_direction,
-                entry_low=report["entry_zone_low"], entry_high=report["entry_zone_high"],
-                stop_loss=report["stop"], tp1=report["target"],
-                lot_size=lot_size,
-            )
-            log.info(
-                "[ORB auto-execute] pending %s signal_id=%s zone=%.2f-%.2f stop=%.2f target=%.2f",
-                mt5_direction, sig["signal_id"], report["entry_zone_low"], report["entry_zone_high"],
-                report["stop"], report["target"],
-            )
-        except Exception as e:
-            log.warning("[ORB auto-execute] execution failed: %s", e)
-            asyncio.create_task(telegram_alerts.send_message(
-                f"*ORB/IVB Auto-Execute Failed*\nDirection: {mt5_direction}\nError: {e}",
-                None, "orb_auto_execute_failed",
-            ))
+        return await _orb_auto_execute_impl(report, self._bridge, self._is_active_trader_node())
 
     async def _try_ai_signal_fallback(self, text: str, channel_name: str, tg_id: str) -> Optional[dict]:
         """Last-resort AI extraction for a message the deterministic
@@ -3960,25 +3588,6 @@ class SimulationEngine:
     # implemented here; it needs genuine tick-level bid/ask data, which is a
     # separate, larger undertaking than this report.
 
-    _ORB_BUCKETS = 40           # volume-profile price buckets across the reference range
-    _ORB_VALUE_AREA_PCT = 0.70  # standard 70% value-area convention
-    # Stop = this fraction of the reference range's height, back from the
-    # breakout edge — the standard ORB convention (stop at 50-100% of the
-    # range from the breakout point), not an inner volume-profile boundary.
-    # See build_orb_report's own comment for why the old value-area-derived
-    # stop failed outright (100% SL-hit rate, 3 of 4 real trades under 1pt).
-    _ORB_SL_RANGE_PCT = 0.50
-    # Minimum buffer (same units as _ORB_SL_RANGE_PCT) kept between the entry
-    # zone and the stop — see the clamp in build_orb_report for why this
-    # exists: the entry zone and stop come from independent calculations
-    # with no inherent relationship, and can otherwise overlap or invert.
-    # 0.10 (~$3.79 on a real 37.9pt Asian range, 2026-07-17) was still too
-    # close to gold's normal intrabar noise to reliably survive to the
-    # target — raised to 0.30 (~$11.38 same day) so even a worst-case fill
-    # at the very bottom of the entry zone keeps a noise-resistant stop
-    # distance, not just a technically-valid one.
-    _ORB_MIN_ENTRY_STOP_BUFFER_PCT = 0.30
-
     async def build_orb_report(self) -> Optional[dict]:
         """
         Reference range is the Asian session (00:00-08:00 UTC, the same
@@ -4003,152 +3612,13 @@ class SimulationEngine:
         than only after waiting out a full extra hour for a new range to
         form — the Asian range is already complete by then.
         """
-        from zoneinfo import ZoneInfo
-
-        tick = await self.get_tick()
-        if tick is None:
-            return None
-
-        now_utc = datetime.now(timezone.utc)
-        london_now = now_utc.astimezone(ZoneInfo("Europe/London"))
-        london_open = london_now.replace(hour=8, minute=0, second=0, microsecond=0)
-        window_start = london_open.astimezone(timezone.utc).timestamp()
-        now_ts = now_utc.timestamp()
-
-        if now_ts < window_start:
-            return None  # London hasn't opened yet this cycle
-
-        asia_start = london_open.astimezone(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).timestamp()
-        asia_end = asia_start + 8 * 3600
-        asia_candles = await self._bridge.get_candles_range(asia_start, asia_end, timeframe="M1")
-        if not asia_candles:
-            return None
-
-        range_high = max(c["high"] for c in asia_candles)
-        range_low  = min(c["low"] for c in asia_candles)
-        range_height = range_high - range_low
-        if range_height <= 0:
-            return None
-
-        poc, vah, val = _compute_volume_profile(
-            asia_candles, range_low, range_high,
-            n_buckets=self._ORB_BUCKETS, value_area_pct=self._ORB_VALUE_AREA_PCT,
-        )
-
-        current_price = float(tick.ask)
-        if current_price > range_high:
-            direction = "bullish"
-        elif current_price < range_low:
-            direction = "bearish"
-        else:
-            direction = "inside"
-
-        report: dict = {
-            "current_price": current_price,
-            "window_start":  asia_start,
-            "window_end":    asia_end,
-            "range_high":    range_high,
-            "range_low":     range_low,
-            "range_height":  range_height,
-            "poc":           poc,
-            "vah":           vah,
-            "val":           val,
-            "direction":     direction,
-            "candles":       asia_candles,
-            "asia_high":     range_high,
-            "asia_low":      range_low,
-            "asia_range":    range_height,
-        }
-
-        if direction == "inside":
-            report.update({
-                "entry_zone_low": None, "entry_zone_high": None,
-                "stop": None, "target": None, "rr": None,
-                "position_note": (
-                    f"still inside the Asian range — {current_price - range_low:.1f} pts "
-                    f"above the Low, {range_high - current_price:.1f} pts below the High"
-                ),
-            })
-            return report
-
-        target_info = await self._get_orb_target_multiple()
-        breakout_edge = range_high if direction == "bullish" else range_low
-        target = (
-            breakout_edge + target_info["multiple"] * range_height if direction == "bullish"
-            else breakout_edge - target_info["multiple"] * range_height
-        )
-        # entry_zone (a volume-profile pullback pocket, POC-to-VAH/VAL) and
-        # stop (a fixed fraction of the breakout range) are computed from two
-        # independent reference frames — nothing otherwise guarantees the
-        # zone stays clear of the stop. Confirmed live 2026-07-17: a real
-        # report had entry_zone_low ($3989.23) sitting BELOW the stop
-        # ($3989.70) on a BUY — invalid (stop must be below entry), and a
-        # fill at the bottom of that zone would have been instantly stopped
-        # out or rejected outright. Clamp with a minimum buffer so a fill
-        # anywhere in the zone always keeps a meaningful risk distance.
-        if direction == "bullish":
-            entry_zone_low, entry_zone_high = poc, vah
-            stop = breakout_edge - self._ORB_SL_RANGE_PCT * range_height
-            min_entry = stop + self._ORB_MIN_ENTRY_STOP_BUFFER_PCT * range_height
-            entry_zone_low = max(entry_zone_low, min_entry)
-            entry_zone_high = max(entry_zone_high, entry_zone_low)
-        else:
-            entry_zone_low, entry_zone_high = val, poc
-            stop = breakout_edge + self._ORB_SL_RANGE_PCT * range_height
-            max_entry = stop - self._ORB_MIN_ENTRY_STOP_BUFFER_PCT * range_height
-            entry_zone_high = min(entry_zone_high, max_entry)
-            entry_zone_low = min(entry_zone_low, entry_zone_high)
-
-        entry_mid = (entry_zone_low + entry_zone_high) / 2
-        risk = abs(entry_mid - stop)
-        reward = abs(target - entry_mid)
-        rr = round(reward / risk, 2) if risk > 0 else None
-
-        report.update({
-            "entry_zone_low":  entry_zone_low,
-            "entry_zone_high": entry_zone_high,
-            "stop":            stop,
-            "target":          target,
-            "target_multiple": target_info["multiple"],
-            "target_sample_n": target_info["n"],
-            "target_is_default": target_info["is_default"],
-            "sl_range_pct": self._ORB_SL_RANGE_PCT,
-            "entry_mid": entry_mid, "risk": risk, "reward": reward, "rr": rr,
-            "position_note": (
-                f"{direction} breakout of the Asian range — "
-                f"{abs(current_price - breakout_edge):.1f} pts past the "
-                f"{'High' if direction == 'bullish' else 'Low'}"
-            ),
-        })
-        return report
+        return await _build_orb_report_impl(self._bridge)
 
     # ── Empirical target-multiple backtest ────────────────────────────────────
 
-    _ORB_BACKTEST_DAYS = 25
-    _ORB_BACKTEST_HORIZON_HOURS = 10   # rest of London + all of NY session
-    _ORB_DEFAULT_TARGET_MULTIPLE = 2.0  # standard ORB convention, used until enough real history exists
-    _ORB_MIN_SAMPLES = 8
-
     async def _get_orb_target_multiple(self) -> dict:
         """Cached wrapper — the backtest only needs to run once per day."""
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        cached_date = await db_module.to_db_thread(db_module.get_app_config, "orb_target_multiple_date")
-        if cached_date == today_str:
-            cached = await db_module.to_db_thread(db_module.get_app_config, "orb_target_multiple")
-            cached_n = await db_module.to_db_thread(db_module.get_app_config, "orb_target_multiple_n")
-            if cached:
-                try:
-                    n = int(cached_n or 0)
-                    return {"multiple": float(cached), "n": n, "is_default": n < self._ORB_MIN_SAMPLES}
-                except ValueError:
-                    pass
-        result = await self._backtest_orb_target_multiple()
-        await db_module.to_db_thread(db_module.set_app_config, "orb_target_multiple", str(result["multiple"]))
-        await db_module.to_db_thread(db_module.set_app_config, "orb_target_multiple_n", str(result["n"]))
-        await db_module.to_db_thread(db_module.set_app_config, "orb_target_multiple_date", today_str)
-        return result
+        return await _get_orb_target_multiple_impl(self._bridge)
 
     async def _backtest_orb_target_multiple(self) -> dict:
         """
@@ -4165,47 +3635,7 @@ class SimulationEngine:
         calibrate the multiplier against a different-sized unit than what
         the live report actually multiplies it by.
         """
-        from zoneinfo import ZoneInfo
-
-        multiples: list[float] = []
-        now_utc = datetime.now(timezone.utc)
-        for days_back in range(1, self._ORB_BACKTEST_DAYS + 1):
-            day_london = now_utc.astimezone(ZoneInfo("Europe/London")) - timedelta(days=days_back)
-            if day_london.weekday() >= 5:
-                continue
-            open_local = day_london.replace(hour=8, minute=0, second=0, microsecond=0)
-            w_start = open_local.astimezone(timezone.utc).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ).timestamp()  # Asian session start (00:00 UTC same day)
-            w_end = w_start + 8 * 3600  # Asian session end / London open
-            horizon_end = w_end + self._ORB_BACKTEST_HORIZON_HOURS * 3600
-
-            candles = await self._bridge.get_candles_range(w_start, horizon_end, timeframe="M1")
-            if not candles:
-                continue
-            range_c = [c for c in candles if w_start <= c["ts"] < w_end]
-            after_c = [c for c in candles if c["ts"] >= w_end]
-            if not range_c or not after_c:
-                continue
-            r_high = max(c["high"] for c in range_c)
-            r_low  = min(c["low"] for c in range_c)
-            r_height = r_high - r_low
-            if r_height <= 0:
-                continue
-
-            broke_up = any(c["high"] > r_high for c in after_c)
-            broke_down = any(c["low"] < r_low for c in after_c)
-            if broke_up and not broke_down:
-                multiples.append((max(c["high"] for c in after_c) - r_high) / r_height)
-            elif broke_down and not broke_up:
-                multiples.append((r_low - min(c["low"] for c in after_c)) / r_height)
-            # both or neither -> ambiguous/no clean breakout day, skip
-
-        if len(multiples) < self._ORB_MIN_SAMPLES:
-            return {"multiple": self._ORB_DEFAULT_TARGET_MULTIPLE, "n": len(multiples), "is_default": True}
-        multiples.sort()
-        median = multiples[len(multiples) // 2]
-        return {"multiple": round(median, 2), "n": len(multiples), "is_default": False}
+        return await _backtest_orb_target_multiple_impl(self._bridge)
 
     # ── Email scheduler ───────────────────────────────────────────────────────
 

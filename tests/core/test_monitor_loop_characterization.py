@@ -18,6 +18,8 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import telegram_alerts, ea_bridge
+from forex_trader.core import core_monitor_loop as ml
+from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -75,6 +77,10 @@ def _make_engine(bridge):
     e._dxy_cycle = 0
     e._dpm_candles = None
     e._dpm_dxy_candles = None
+    e._cfg = {}
+    e._tp_trigger_cache = _TPCache()
+    e._scale_out_last_fail = {}
+    e._tp_safety_net_last_alert = {}
     return e
 
 
@@ -115,11 +121,11 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
     record_close_calls, partial_calls, sched_calls, commentary_calls, handler_calls, alerts = \
         [], [], [], [], [], []
 
-    async def fake_record_close(self_, tid, price, reason):
+    async def fake_record_close(tid, price, reason, ctx):
         record_close_calls.append((tid, price, reason))
         return {"trade_id": tid}
 
-    async def fake_partial_close(self_, tid, lots, price, reason):
+    async def fake_partial_close(tid, lots, price, reason):
         partial_calls.append((tid, lots, price, reason))
 
     async def fake_sched(self_, tid, ticket):
@@ -143,8 +149,8 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
 
     patches = [
         mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=stop_sleep)),
-        mock.patch.object(SimulationEngine, "_record_close", fake_record_close),
-        mock.patch.object(SimulationEngine, "partial_close_trade", fake_partial_close),
+        mock.patch.object(ml, "record_close", fake_record_close),
+        mock.patch.object(ml, "partial_close_trade", fake_partial_close),
         mock.patch.object(SimulationEngine, "_schedule_profit_sync", fake_sched),
         mock.patch.object(SimulationEngine, "_background_close_commentary", fake_commentary),
         mock.patch.object(SimulationEngine, "_handle_scale_out", fake_scale_out),

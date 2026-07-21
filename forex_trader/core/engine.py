@@ -35,7 +35,12 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core import claude_ai
 from forex_trader.core import ai_provider
 from forex_trader.core import dpm_engine
-from forex_trader.core.core_monitor_loop import check_sl as _check_sl_impl
+from forex_trader.core.core_monitor_loop import (
+    check_sl as _check_sl_impl,
+    reconcile_sl_hit as _reconcile_sl_hit_impl,
+    check_profit_close_target as _check_profit_close_target_impl,
+    reclaim_ea_managed_trade as _reclaim_ea_managed_trade_impl,
+)
 from forex_trader.core.core_scan_messages_auto_execute import (
     price_in_entry_range as _price_in_entry_range_impl,
 )
@@ -1043,87 +1048,15 @@ class SimulationEngine:
                         hit = self._check_sl(trade, tick)
                         if hit:
                             trade_id, price, reason = hit
-                            mt5_ticket = trade.get("mt5_ticket")
-                            if mt5_ticket and self._bridge.is_configured():
-                                try:
-                                    live_pos = await self._bridge.get_positions()
-                                    live_vol = {int(p["ticket"]): round(float(p.get("volume", 0)), 4)
-                                                for p in live_pos}
-                                    if int(mt5_ticket) in live_vol:
-                                        mt5_vol = live_vol[int(mt5_ticket)]
-                                        app_rem = round(float(trade["remaining_lots"]), 4)
-                                        if abs(mt5_vol - app_rem) < 0.001:
-                                            # Full position still open — MT5 SL hasn't fired yet
-                                            log.debug("[SL] ticket=%s price crossed SL but MT5 open — deferring",
-                                                      mt5_ticket)
-                                            continue
-                                        # MT5 partially closed — record partial, not full close
-                                        closed_vol = round(app_rem - mt5_vol, 4)
-                                        if closed_vol > 0.001:
-                                            partial_pnl = self.pnl(
-                                                trade["direction"], float(trade["entry_price"]),
-                                                price, closed_vol,
-                                            )
-                                            try:
-                                                await self.partial_close_trade(trade_id, closed_vol,
-                                                                               price, f"MT5_{reason}")
-                                            except Exception as _pe:
-                                                log.warning("[SL] partial_close_trade failed: %s", _pe)
-                                            asyncio.create_task(telegram_alerts.send_message(
-                                                telegram_alerts.fmt_mt5_partial_close(
-                                                    trade, closed_vol, price, mt5_vol,
-                                                    partial_pnl, reason,
-                                                ),
-                                                trade_id, f"mt5_partial_{reason.lower()}",
-                                            ))
-                                        continue
-                                except Exception as _ce:
-                                    log.debug("[SL] MT5 check failed (%s), recording local close", _ce)
-                            result = await self._record_close(trade_id, price, reason)
-                            if mt5_ticket:
-                                asyncio.create_task(self._schedule_profit_sync(trade_id, int(mt5_ticket)))
-                            asyncio.create_task(
-                                self._background_close_commentary(trade_id, result, reason, tick)
+                            await _reconcile_sl_hit_impl(
+                                trade, tick, price, reason, self._bridge, self._make_close_trade_ctx(),
                             )
                             continue
                         # Profit-close target check — cumulative (partials taken + unrealised).
-                        if profit_close_usd > 0:
-                            cur = tick.bid if trade["direction"].upper() == "BUY" else tick.ask
-                            unrealized = self.pnl(
-                                trade["direction"], float(trade["entry_price"]),
-                                cur, float(trade["remaining_lots"]),
-                            )
-                            realised   = float(trade.get("realised_pnl") or 0.0)
-                            cumulative = realised + unrealized
-                            if cumulative >= profit_close_usd:
-                                log.info(
-                                    "[ProfitClose] %s hit $%.2f target "
-                                    "(realised $%.2f + unrealised $%.2f = $%.2f cumulative)",
-                                    trade["trade_id"], profit_close_usd,
-                                    realised, unrealized, cumulative,
-                                )
-                                mt5_ticket = trade.get("mt5_ticket")
-                                close_price = cur
-                                if mt5_ticket:
-                                    try:
-                                        mt5_res = await self._bridge.close_position(int(mt5_ticket))
-                                        if mt5_res.get("success"):
-                                            close_price = float(mt5_res.get("close_price", cur))
-                                    except Exception as _e:
-                                        log.warning("Profit-close MT5 error: %s", _e)
-                                result = await self._record_close(
-                                    trade["trade_id"], close_price, "profit_close_target"
-                                )
-                                if mt5_ticket:
-                                    asyncio.create_task(
-                                        self._schedule_profit_sync(trade["trade_id"], int(mt5_ticket))
-                                    )
-                                asyncio.create_task(
-                                    self._background_close_commentary(
-                                        trade["trade_id"], result, "profit_close_target", tick
-                                    )
-                                )
-                                continue
+                        if await _check_profit_close_target_impl(
+                            trade, tick, profit_close_usd, self._bridge, self._make_close_trade_ctx(),
+                        ):
+                            continue
                         # EA handoff: this trade's SL/TP/partial-close ladder is being
                         # managed tick-by-tick inside the MT5 terminal itself, not by
                         # the handlers below — skip them entirely while the EA is
@@ -1133,33 +1066,8 @@ class SimulationEngine:
                         # docstring for why Python must always be able to take back
                         # over instead of just trusting the EA blindly forever.
                         if trade.get("managed_by") == "ea":
-                            try:
-                                from forex_trader.core import ea_bridge as _ea_mod
-                                _ea = _ea_mod.get_instance()
-                                if _ea is not None and _ea.is_ea_healthy():
-                                    continue
-                            except ImportError:
-                                pass
-                            log.warning(
-                                "[EA] trade=%s ticket=%s EA unhealthy — reclaiming "
-                                "management in Python",
-                                trade["trade_id"][:8], trade.get("mt5_ticket"),
-                            )
-                            def _reclaim(tid=trade["trade_id"]):
-                                with db_module.db() as conn:
-                                    conn.execute(
-                                        "UPDATE vantage_simulated_trades SET managed_by='python' WHERE trade_id=?",
-                                        (tid,),
-                                    )
-                            await db_module.to_db_thread(_reclaim)
-                            asyncio.create_task(telegram_alerts.send_message(
-                                f"*EA Bridge Lost*\n"
-                                f"Ticket {trade.get('mt5_ticket')} ({strategy}) was being "
-                                f"managed by the local EA, which has stopped responding. "
-                                f"Management has been reclaimed by the app — no gap in "
-                                f"SL/TP coverage.",
-                                trade["trade_id"], "ea_bridge_lost",
-                            ))
+                            if await _reclaim_ea_managed_trade_impl(trade, strategy):
+                                continue
 
                         dpm_enabled = bool(rs.get("dpm_enabled", 0))
                         try:

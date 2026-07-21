@@ -105,6 +105,7 @@ from forex_trader.core.core_bot_commands_trading import (
     cmd_activate as _cmd_activate_impl,
     cmd_report as _cmd_report_impl,
 )
+from forex_trader.core.core_bridge_watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -8257,16 +8258,6 @@ class SimulationEngine:
         prevent. Two failures 60s apart is no longer explainable by one queued
         request; only then is a real problem plausible enough to act on.
         """
-        CHECK_INTERVAL   = 60    # seconds between health checks
-        RESTART_COOLDOWN = 180   # minimum seconds between restart attempts
-        STARTUP_WAIT     = 20    # seconds to wait after launching before next check
-        CONSECUTIVE_FAIL_THRESHOLD = 2
-
-        import time as _time
-        last_restart_at   = 0.0
-        was_connected     = True  # assume connected at startup; first check sets truth
-        consecutive_fails = 0
-
         # 180s, not 30s: a full VPS/OS reboot needs MT5 terminal to cold-start
         # and log into the broker before the bridge can serve ticks — observed
         # taking up to ~150s in practice. With the old 30s wait plus two 60s-
@@ -8278,76 +8269,12 @@ class SimulationEngine:
         # below once this initial window has passed.
         await asyncio.sleep(180)
 
+        state = {"last_restart_at": 0.0, "was_connected": True, "consecutive_fails": 0}
         while self._monitor_running:
-            try:
-                health    = await self._bridge.get_health()
-                connected = health.get("connected", False) or health.get("status") == "connected"
-            except Exception:
-                connected = False
-
-            if connected:
-                consecutive_fails = 0
-                if not was_connected:
-                    log.info("Bridge watchdog: bridge is back online")
-                    was_connected = True
-                    # MT5 resets AutoTrading on reconnect after a maintenance window —
-                    # re-enable it automatically, same as the manual /restart_bridge command.
-                    try:
-                        at = await self._bridge.enable_autotrading()
-                        if at.get("enabled") and at.get("method") != "already_enabled":
-                            at_msg = "Algo Trading re-enabled automatically."
-                            log.info("Bridge watchdog: %s", at_msg)
-                        elif at.get("enabled"):
-                            at_msg = "Algo Trading was already active."
-                        else:
-                            at_msg = (
-                                "Algo Trading is DISABLED — re-enable the AutoTrading "
-                                "button in MT5 manually."
-                            )
-                            log.warning("Bridge watchdog: AutoTrading re-enable failed: %s",
-                                        at.get("error", "unknown"))
-                    except Exception as _at_err:
-                        at_msg = f"AutoTrading check failed: {_at_err}"
-                        log.warning("Bridge watchdog: %s", at_msg)
-                    asyncio.create_task(
-                        telegram_alerts.send_message(
-                            f"MT5 bridge reconnected and healthy. {at_msg}"
-                        )
-                    )
-            else:
-                consecutive_fails += 1
-                if consecutive_fails < CONSECUTIVE_FAIL_THRESHOLD:
-                    log.info(
-                        "Bridge watchdog: health check failed (%d/%d) — "
-                        "not yet treating as a real outage",
-                        consecutive_fails, CONSECUTIVE_FAIL_THRESHOLD,
-                    )
-                    await asyncio.sleep(CHECK_INTERVAL)
-                    continue
-
-                if was_connected:
-                    log.warning("Bridge watchdog: bridge offline (%d consecutive failed checks) "
-                                "— auto-reconnect %s", consecutive_fails,
-                                "inhibited" if self._bridge_inhibit_reconnect else "will attempt")
-                    was_connected = False
-                    if not self._bridge_inhibit_reconnect:
-                        asyncio.create_task(
-                            telegram_alerts.send_message(
-                                "MT5 bridge offline. Attempting automatic reconnect."
-                            )
-                        )
-
-                if not self._bridge_inhibit_reconnect:
-                    now = _time.monotonic()
-                    if now - last_restart_at >= RESTART_COOLDOWN:
-                        log.info("Bridge watchdog: restarting bridge process")
-                        last_restart_at = now
-                        launched = await self._start_bridge_process()
-                        if launched:
-                            await asyncio.sleep(STARTUP_WAIT)
-                            continue  # re-check immediately after startup wait
-
-            await asyncio.sleep(CHECK_INTERVAL)
+            sleep_for = await _bridge_watchdog_check_impl(
+                self._bridge, state, self._bridge_inhibit_reconnect, self._start_bridge_process,
+            )
+            await asyncio.sleep(sleep_for)
 
     # ── Bot commands ──────────────────────────────────────────────────────────
 

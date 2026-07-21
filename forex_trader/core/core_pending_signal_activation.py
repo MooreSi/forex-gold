@@ -1,7 +1,6 @@
-"""Pending signal (zone-fill) activation watcher -- extracted verbatim (no
-logic changes) from core/engine.py's
-SimulationEngine._try_activate_pending_signals, as part of the
-core/engine.py migration series. See
+"""Pending signal (zone-fill) activation watcher -- extracted from
+core/engine.py's SimulationEngine._try_activate_pending_signals, as part
+of the core/engine.py migration series. See
 docs/todo/refactor/core-pending-signal-activation-migration/020-*.md.
 
 Calls open_trade_from_signal (pack 13) -- a real MT5 order-placement call,
@@ -13,13 +12,23 @@ function.
 as explicit parameters -- instance state that isn't derivable from the
 database, same pattern as `scale_out_last_fail` in the scale-out handler
 pack.
+
+`background_open_commentary` (added at core-engine-wiring time, not part
+of the original verbatim extraction) is threaded through to the internal
+open_trade_from_signal call the same way `open_manual_market_order` and
+`open_trade_from_signal` itself already take it -- without this, wiring
+SimulationEngine._try_activate_pending_signals straight to this function
+would have silently dropped the AI/Telegram open-commentary notification
+for every zone-fill activation, since the original bound method called
+self.open_trade_from_signal (which always injects the real callback
+internally), not this module's own open_trade_from_signal import.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
@@ -42,6 +51,7 @@ _PENDING_ACTIVATION_BACKOFF_S = 20.0
 async def try_activate_pending_signals(
     tick: Tick, rs: dict, bridge: Any, retry_after: dict, dpm_candles: list,
     starting_balance: float = 1000.0,
+    background_open_commentary: Optional[Callable[[str, dict, Tick], Awaitable[None]]] = None,
 ) -> bool:
     """Activate queued signals whose entry zone has been reached.
 
@@ -228,6 +238,7 @@ async def try_activate_pending_signals(
             trade_result = await open_trade_from_signal(
                 bridge, sig["signal_id"], age_lot_mult=_age_lot_mult,
                 dpm_candles=dpm_candles, starting_balance=starting_balance,
+                background_open_commentary=background_open_commentary,
             )
             open_count += 1
             # Flip the TG signal row from 'pending' → 'activated' so the UI updates

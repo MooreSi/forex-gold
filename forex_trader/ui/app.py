@@ -883,8 +883,8 @@ def main_page():
         _mode_switching = [False]
 
         def _mode_sub_engines():
-            from forex_trader.breakout_signal import engine as _bo_m
-            from forex_trader.test_signal import engine as _bc_m
+            from forex_trader.breakout_signal import breakout_signal_service as _bo_m
+            from forex_trader.test_signal import test_signal_service as _bc_m
             from forex_trader.gd_copy_signal import gd_copy_signal_service as _gd_m
             return _bo_m.get_instance(), _bc_m.get_instance(), _gd_m.get_instance()
 

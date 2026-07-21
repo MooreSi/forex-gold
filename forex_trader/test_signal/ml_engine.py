@@ -249,7 +249,7 @@ def _count_consecutive(m15_candles: list[dict]) -> int:
 
 def _get_recent_win_rate(n: int = 5) -> float:
     try:
-        from forex_trader.test_signal import database as _tdb
+        from forex_trader.test_signal import test_signal_repo as _tdb
         recent = _tdb.get_recent_closed_signals(limit=n)
         if not recent:
             return 0.5
@@ -527,7 +527,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     global _n_since_last_train
     _n_since_last_train += 1
 
-    from forex_trader.test_signal import database as _tdb
+    from forex_trader.test_signal import test_signal_repo as _tdb
     total = len(_tdb.get_ml_training_data())
     _log.debug("[ML] Outcome %s for SIG-%04d (labeled=%d since_train=%d)",
                outcome, signal_id, total, _n_since_last_train)
@@ -550,7 +550,7 @@ def _online_update(signal_id: int, outcome: str) -> None:
     if not _ML_AVAILABLE or _batch_scaler is None:
         return
 
-    from forex_trader.test_signal import database as _tdb
+    from forex_trader.test_signal import test_signal_repo as _tdb
     feat = _tdb.get_ml_features_for_signal(signal_id)
     if not feat:
         return
@@ -621,7 +621,7 @@ def _retrain() -> None:
     if not _ML_AVAILABLE:
         return
 
-    from forex_trader.test_signal import database as _tdb
+    from forex_trader.test_signal import test_signal_repo as _tdb
     examples = _tdb.get_ml_training_data()
 
     X_all, y_all, ts_all = [], [], []
@@ -707,7 +707,7 @@ def _retrain() -> None:
     _save_all()
 
     try:
-        from forex_trader.test_signal import database as _tdb2
+        from forex_trader.test_signal import test_signal_repo as _tdb2
         _tdb2.log_analysis({
             "ts":     time.time(),
             "result": f"ml_retrain:{len(X_all)}_samples",
@@ -792,7 +792,7 @@ def is_trained() -> bool:
 
 
 def summary() -> dict:
-    from forex_trader.test_signal import database as _tdb
+    from forex_trader.test_signal import test_signal_repo as _tdb
     labeled = len(_tdb.get_ml_training_data())
     return {
         "available":        _ML_AVAILABLE,
@@ -840,7 +840,7 @@ def get_ml_metrics() -> dict:
     Compute R-multiple regression metrics from closed signals that have ml_prob stored.
     ml_prob now stores predicted R-multiple (not win probability).
     """
-    from forex_trader.test_signal import database as _tdb
+    from forex_trader.test_signal import test_signal_repo as _tdb
     data = _tdb.get_ml_monitor_data()
 
     empty = {

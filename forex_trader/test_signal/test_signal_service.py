@@ -403,17 +403,6 @@ def init(bridge: "MT5BridgeClient") -> TestSignalEngine:
     db_path = str(USER_DATA_DIR / "data" / "test_signal.db")
     tdb.init(db_path)
 
-    # ml_engine.py is unmigrated (out of scope for this pack) and imports the
-    # OLD database module directly and independently in several functions
-    # (record_outcome, extract_features, etc.) -- before task 030, `tdb` WAS
-    # `database`, so initializing one initialized both via the same module
-    # global. Now that `tdb` is the new repo, ml_engine.py's own dependency
-    # on `database` would never get its _DB_PATH set without this. Both
-    # point at the same file -- CREATE TABLE IF NOT EXISTS makes running
-    # both schemas against it idempotent and safe.
-    from forex_trader.test_signal import database as _legacy_tdb
-    _legacy_tdb.init(db_path)
-
     _log.info("Test signal DB: %s", db_path)
 
     ml.init(USER_DATA_DIR / "data")

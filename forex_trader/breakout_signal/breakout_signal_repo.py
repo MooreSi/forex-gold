@@ -19,7 +19,18 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from forex_trader.src.db.connection import get_db, init_db
+from forex_trader.src.db import connection as _conn_mod
+
+_NAMESPACE = "breakout_signal"
+
+
+def get_db():
+    return _conn_mod.get_db(_NAMESPACE)
+
+
+def init_db(db_path: str):
+    return _conn_mod.init_db(db_path, _NAMESPACE)
+
 
 _STARTING_BALANCE = 1000.0
 

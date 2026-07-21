@@ -23,8 +23,8 @@ from forex_trader.core import database as db_module
 from forex_trader.core.engine import SimulationEngine
 from forex_trader.core.telegram_reader import TelegramReader
 
-import forex_trader.test_signal.engine as _test_engine_module
-import forex_trader.breakout_signal.engine as _breakout_engine_module
+import forex_trader.test_signal.test_signal_service as _test_engine_module
+import forex_trader.breakout_signal.breakout_signal_service as _breakout_engine_module
 import forex_trader.gd_copy_signal.gd_copy_signal_service as _gdc_engine_module
 import forex_trader.remote.client as _remote_client
 import forex_trader.remote.server as _remote_server
@@ -124,7 +124,7 @@ async def _signal_engine_watchdog_loop() -> None:
     while True:
         await asyncio.sleep(300)
         try:
-            from forex_trader.test_signal import database as _tdb
+            from forex_trader.test_signal import test_signal_repo as _tdb
             if _tdb.get_config("sg_engine_enabled", "1") != "0":
                 te = _test_engine_module.get_instance()
                 if te and not te.is_running:
@@ -133,7 +133,7 @@ async def _signal_engine_watchdog_loop() -> None:
         except Exception as _e:
             log.debug("[AppWatchdog] Bounce health check error: %s", _e)
         try:
-            from forex_trader.breakout_signal import database as _bodb_wd
+            from forex_trader.breakout_signal import breakout_signal_repo as _bodb_wd
             if _bodb_wd.get_config("bo_engine_enabled", "1") != "0":
                 bo = _breakout_engine_module.get_instance()
                 if bo and not bo.is_running:
@@ -176,9 +176,8 @@ async def startup() -> None:
     _test_engine_module.init(_engine._bridge)
 
     # Initialise breakout signal DB (completely isolated from bounce engine).
+    # breakout_signal_service.init() initializes its own repo DB internally.
     from forex_trader.config import DATA_DIR as _DATA_DIR
-    from forex_trader.breakout_signal import database as _bodb
-    _bodb.init(str(_DATA_DIR / "breakout_signal.db"))
     _breakout_engine_module.init(_engine._bridge)
 
     # Initialise GD Copy engine DB (completely isolated from other engines).
@@ -211,7 +210,7 @@ async def startup() -> None:
 
     # Respect the persistent on/off preference saved by the Stop Engine button.
     # Default is enabled (first run or preference not set).
-    from forex_trader.test_signal import database as _tdb
+    from forex_trader.test_signal import test_signal_repo as _tdb
     if _tdb.get_config("sg_engine_enabled", "1") != "0":
         te.start()
         log.info("[startup] Signal engine auto-started")
@@ -219,7 +218,7 @@ async def startup() -> None:
         log.info("[startup] Signal engine auto-start suppressed (user disabled)")
 
     # Auto-start breakout engine — respect the persistent on/off preference.
-    from forex_trader.breakout_signal import database as _bodb2
+    from forex_trader.breakout_signal import breakout_signal_repo as _bodb2
     bo_eng = _breakout_engine_module.get_instance()
     if bo_eng:
         bo_eng.set_main_engine(_engine)

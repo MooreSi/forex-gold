@@ -19,7 +19,18 @@ from typing import Optional
 
 import sqlite3
 
-from forex_trader.src.db.connection import get_db, init_db
+from forex_trader.src.db import connection as _conn_mod
+
+_NAMESPACE = "gd_copy_signal"
+
+
+def get_db():
+    return _conn_mod.get_db(_NAMESPACE)
+
+
+def init_db(db_path: str):
+    return _conn_mod.init_db(db_path, _NAMESPACE)
+
 
 _log = logging.getLogger(__name__)
 

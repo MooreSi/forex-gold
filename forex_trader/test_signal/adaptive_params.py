@@ -98,7 +98,7 @@ _DB_PREFIX = "ap:"   # key prefix used in test_config table
 
 
 def _tdb():
-    from forex_trader.test_signal import database as _db
+    from forex_trader.test_signal import test_signal_repo as _db
     return _db
 
 

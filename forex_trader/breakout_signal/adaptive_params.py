@@ -174,7 +174,7 @@ _DB_PREFIX = "bo_ap:"
 
 
 def _tdb():
-    from forex_trader.breakout_signal import database as _db
+    from forex_trader.breakout_signal import breakout_signal_repo as _db
     return _db
 
 

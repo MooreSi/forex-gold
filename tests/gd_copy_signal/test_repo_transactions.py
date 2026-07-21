@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.gd_copy_signal import gd_copy_signal_repo as repo
-from forex_trader.src.db.connection import get_db
+from forex_trader.gd_copy_signal.gd_copy_signal_repo import get_db
 
 
 @pytest.fixture

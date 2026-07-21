@@ -916,7 +916,7 @@ class SyncServer:
     @staticmethod
     def _breakout_stats() -> dict:
         try:
-            from forex_trader.breakout_signal import database as bdb
+            from forex_trader.breakout_signal import breakout_signal_repo as bdb
             from forex_trader.breakout_signal import adaptive_params as ap
             from forex_trader.breakout_signal import ml_engine as bo_ml
             return {
@@ -940,7 +940,7 @@ class SyncServer:
     @staticmethod
     def _bounce_stats() -> dict:
         try:
-            from forex_trader.test_signal import database as tdb
+            from forex_trader.test_signal import test_signal_repo as tdb
             from forex_trader.test_signal import adaptive_params as ap
             from forex_trader.test_signal import ml_engine as ml
             return {

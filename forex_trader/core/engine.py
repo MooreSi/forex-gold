@@ -149,6 +149,8 @@ from forex_trader.core.core_run_tp_ladder import (
     handle_gd_vip_runner as _handle_gd_vip_runner_impl,
     handle_adaptive_runner as _handle_adaptive_runner_impl,
 )
+from forex_trader.core.core_handle_scale_out import handle_scale_out as _handle_scale_out_impl
+from forex_trader.core.core_handle_be_runner import handle_be_runner as _handle_be_runner_impl
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -165,11 +167,6 @@ log = logging.getLogger(__name__)
 
 _TP_NUM_RE   = re.compile(r'^TP(\d+)', re.IGNORECASE)
 _TP_CACHE_TTL = 2.5  # seconds — in-memory triggered-TP cache TTL (safe for 1s poll rate)
-
-# Per-TP close percentages for Scale Out strategy: TP1 banks the most, then tapers.
-# TP5+ (index not in dict) closes all remaining lots.
-_SCALE_OUT_PCTS = {1: 0.40, 2: 0.30, 3: 0.20, 4: 0.10}
-_SCALE_OUT_RETRY_COOLDOWN_S = 30  # min seconds between partial-close retries after a failure
 
 # ── Conservative strategy fixed levels (points from fill) ──────────────────────
 # Conservative: SL 5pt, TP1 3pt, close 80% at TP1, trail remainder 3pt (floored at BE).
@@ -1929,133 +1926,16 @@ class SimulationEngine:
         return _get_remaining_lots_impl(trade_id)
 
     async def _handle_scale_out(self, trade: dict, tick: Tick) -> None:
-        tp_hits = await self._check_tp_hits(trade, tick)
-        # Determine the last defined TP so it always closes all remaining lots
-        last_tp_num = max(
-            (n for n in range(1, MAX_TP + 1) if trade.get(f"tp{n}") is not None),
-            default=None,
+        return await _handle_scale_out_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail,
+            close_full_after_tps=self._close_full_after_tps,
         )
-        for (trade_id, tp_num) in tp_hits:
-            tp_price  = trade.get(f"tp{tp_num}")
-            if tp_price is None:
-                continue
-            remaining = await db_module.to_db_thread(self._get_remaining_lots, trade_id)
-            if remaining <= 0:
-                continue
-            # Tiered close schedule: 40/30/20/10 — last TP always closes all remaining
-            if tp_num == last_tp_num:
-                lots_to_close = remaining
-            else:
-                pct = _SCALE_OUT_PCTS.get(tp_num, 0.0)
-                if pct <= 0:
-                    lots_to_close = remaining  # TP5+ with remaining lots
-                else:
-                    lots_to_close = round(float(trade["lot_size"]) * pct, 4)
-                    lots_to_close = min(lots_to_close, remaining)
-            if lots_to_close <= 0:
-                continue
-            fail_key   = (trade_id, tp_num)
-            last_fail  = self._scale_out_last_fail.get(fail_key, 0.0)
-            if time.time() - last_fail < _SCALE_OUT_RETRY_COOLDOWN_S:
-                continue
-            actual_price = float(tp_price)
-            mt5_ticket   = trade.get("mt5_ticket")
-            if mt5_ticket:
-                mt5_res = await self._bridge.partial_close(int(mt5_ticket), lots_to_close)
-                if mt5_res.get("success"):
-                    actual_price = float(mt5_res.get("close_price", tp_price))
-                    lots_to_close = float(mt5_res.get("lots_closed", lots_to_close))
-                    self._scale_out_last_fail.pop(fail_key, None)
-                elif mt5_res.get("error") or mt5_res.get("success") is False:
-                    self._scale_out_last_fail[fail_key] = time.time()
-                    log.warning("[scale_out] MT5 partial close failed ticket=%s tp=%d: %s "
-                                "(will retry in %ds)",
-                                mt5_ticket, tp_num, mt5_res, _SCALE_OUT_RETRY_COOLDOWN_S)
-                    continue
-            try:
-                res = await self.partial_close_trade(trade_id, lots_to_close, actual_price, f"TP{tp_num}")
-                asyncio.create_task(telegram_alerts.send_message(
-                    telegram_alerts.fmt_tp_hit(trade, tp_num, actual_price, lots_to_close,
-                                               res.get("partial_pnl", 0)),
-                    trade_id, f"tp{tp_num}_hit",
-                ))
-                if res.get("auto_closed") and mt5_ticket:
-                    asyncio.create_task(self._close_full_after_tps(trade_id, mt5_ticket, actual_price))
-            except Exception as exc:
-                log.warning("[scale_out] Partial close failed: %s", exc)
-                continue
-            if tp_num == 1 and not trade.get("sl_moved_to_be"):
-                entry_price = float(trade["entry_price"])
-                if mt5_ticket:
-                    await self._bridge.modify_order(int(mt5_ticket), sl=entry_price, tp=None)
-                def _apply_scale_out_be():
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1 WHERE trade_id=?",
-                            (entry_price, trade_id),
-                        )
-                await db_module.to_db_thread(_apply_scale_out_be)
-                asyncio.create_task(telegram_alerts.send_message(
-                    telegram_alerts.fmt_sl_moved(trade, 1, entry_price),
-                    trade_id, "sl_moved_be",
-                ))
 
     async def _handle_be_runner(self, trade: dict, tick: Tick) -> None:
-        # ADX gate: BE Runner only in trending markets — fall back to Scale Out when ranging.
-        if self._dpm_candles:
-            from forex_trader.core.dpm_engine import compute_adx
-            _adx = compute_adx(self._dpm_candles)
-            if _adx < 25:
-                log.debug("[be_runner] trade=%s ADX %.1f < 25 (ranging) — falling back to scale_out",
-                          trade["trade_id"][:8], _adx)
-                await self._handle_scale_out(trade, tick)
-                return
-
-        direction   = trade["direction"].upper()
-        entry_price = float(trade["entry_price"])
-        current_sl  = float(trade["stop_loss"])
-        mt5_ticket  = trade.get("mt5_ticket")
-        trade_id    = trade["trade_id"]
-        tp_vals: list[tuple[int, float]] = [
-            (i, float(trade.get(f"tp{i}"))) for i in range(1, MAX_TP + 1) if trade.get(f"tp{i}") is not None
-        ]
-        if not tp_vals:
-            return
-        sl_ladder = [entry_price] + [v for _, v in tp_vals]
-        best_step = 0
-        for step_idx, (tp_num, tp_val) in enumerate(tp_vals, 1):
-            cleared = (direction == "BUY" and tick.bid >= tp_val) or \
-                      (direction == "SELL" and tick.ask <= tp_val)
-            if cleared:
-                best_step = step_idx
-            else:
-                break
-        if best_step == 0:
-            return
-        target_sl = sl_ladder[best_step - 1]
-        should_update = (direction == "BUY" and target_sl > current_sl) or \
-                        (direction == "SELL" and target_sl < current_sl)
-        if not should_update:
-            return
-        if mt5_ticket:
-            await self._bridge.modify_order(int(mt5_ticket), sl=target_sl, tp=None)
-        trigger_tp_num = tp_vals[best_step - 1][0]
-        def _apply():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1 WHERE trade_id=?",
-                    (target_sl, trade_id),
-                )
-                conn.execute(
-                    "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                    " VALUES (?,?,?,?,?,?)",
-                    (trade_id, time.time(), 0.0, target_sl, 0.0, f"TP{best_step}_SL_LOCKED"),
-                )
-        await db_module.to_db_thread(_apply)
-        asyncio.create_task(telegram_alerts.send_message(
-            telegram_alerts.fmt_sl_moved(trade, trigger_tp_num, target_sl),
-            trade_id, "sl_moved",
-        ))
+        return await _handle_be_runner_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail,
+            dpm_candles=self._dpm_candles, close_full_after_tps=self._close_full_after_tps,
+        )
 
     async def _handle_trail_stop(self, trade: dict, tick: Tick) -> None:
         """

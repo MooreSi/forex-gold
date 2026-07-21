@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
+from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -65,7 +66,7 @@ class _FakeBridge:
 def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
-    e._tp_cache = {}
+    e._tp_trigger_cache = _TPCache()
     e._scale_out_last_fail = {}
     e._dpm_candles = None
     return e

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
+from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -58,7 +59,7 @@ class _FakeBridge:
 def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
-    e._tp_cache = {}
+    e._tp_trigger_cache = _TPCache()
     return e
 
 
@@ -173,8 +174,8 @@ def test_tp2_marker_recorded_once_while_trailing(fresh_db, engine):
     # doesn't duplicate the marker. Within the TTL window itself a
     # duplicate marker CAN occur (harmless for the UI's "at least one row"
     # chip logic) -- a real, documented quirk, not something masked here.
-    cached_set, _ = engine._tp_cache["t-1"]
-    engine._tp_cache["t-1"] = (cached_set, time.time() - 10)
+    cached_set, _ = engine._tp_trigger_cache.triggered["t-1"]
+    engine._tp_trigger_cache.triggered["t-1"] = (cached_set, time.time() - 10)
     trade2 = _trade_dict("t-1")
     asyncio.run(SimulationEngine._handle_trail_stop(engine, trade2, _tick(bid=2426.0, ask=2426.5)))
     with db.db() as conn:

@@ -63,10 +63,12 @@ def engine(fresh_db):
     self._get_triggered_tps calls inside _check_tp_hits) without running
     __init__ (which would construct a live MT5 bridge) -- same pattern as
     pack 1's Risk Governor tests. __init__ never runs, so instance state
-    normally set there (_tp_cache, _tp_wait_log_ts) is set manually."""
+    normally set there (_tp_trigger_cache, a core_tp_trigger_tracking.TPCache
+    bundling the old separate _tp_cache/_tp_wait_log_ts dicts since engine.py
+    was wired to delegate to the extracted module) is set manually."""
+    from forex_trader.core.core_tp_trigger_tracking import TPCache
     e = SimulationEngine.__new__(SimulationEngine)
-    e._tp_cache = {}
-    e._tp_wait_log_ts = {}
+    e._tp_trigger_cache = TPCache()
     return e
 
 
@@ -147,8 +149,8 @@ def test_get_triggered_tps_reloads_after_ttl_expiry(fresh_db, engine):
     asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
 
     _insert_partial_close("t-1", "TP2")
-    cached_set, _ = engine._tp_cache["t-1"]
-    engine._tp_cache["t-1"] = (cached_set, time.time() - 10)  # force TTL expiry (TTL is 2.5s)
+    cached_set, _ = engine._tp_trigger_cache.triggered["t-1"]
+    engine._tp_trigger_cache.triggered["t-1"] = (cached_set, time.time() - 10)  # force TTL expiry (TTL is 2.5s)
     reloaded = asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
     assert reloaded == {1, 2}
 
@@ -191,7 +193,7 @@ def test_log_tp_wait_diagnostic_does_not_raise(fresh_db, engine):
     SimulationEngine._log_tp_wait_diagnostic(
         engine, "t-1", "TP1_WAIT", "SELL", current_price=2400.0, target_price=2390.0, hit=True,
     )
-    assert "t-1" in engine._tp_wait_log_ts
+    assert "t-1" in engine._tp_trigger_cache.wait_log_ts
 
 
 # ── _check_sl ──────────────────────────────────────────────────────────────────

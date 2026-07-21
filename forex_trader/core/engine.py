@@ -58,6 +58,14 @@ from forex_trader.core.core_trade_reporting import (
 )
 from forex_trader.core.core_mt5_import import import_mt5_history as _import_mt5_history_impl
 from forex_trader.core.core_tg_signals import get_tg_signals as _get_tg_signals_impl
+from forex_trader.core.core_tp_trigger_tracking import (
+    TPCache as _TPCache,
+    get_triggered_tps as _get_triggered_tps_impl,
+    last_closed_tp as _last_closed_tp_impl,
+    log_tp_wait_diagnostic as _log_tp_wait_diagnostic_impl,
+    check_tp_hits as _check_tp_hits_impl,
+    get_remaining_lots as _get_remaining_lots_impl,
+)
 
 if TYPE_CHECKING:
     from forex_trader.core.telegram_reader import TelegramReader
@@ -320,7 +328,10 @@ class SimulationEngine:
         # In-memory TP trigger cache to avoid per-trade DB query every monitor cycle.
         # Maps trade_id → (set_of_triggered_tp_nums, cache_timestamp).
         # Invalidated on trade close; expires after _TP_CACHE_TTL regardless.
-        self._tp_cache: dict[str, tuple[set, float]] = {}
+        # Bundled with _tp_wait_log_ts below into a single TPCache instance
+        # (see core_tp_trigger_tracking.py) -- both are in-memory state that
+        # isn't derivable from the database.
+        self._tp_trigger_cache = _TPCache()
         # Backoff after a failed MT5 partial-close attempt. _check_tp_hits()
         # re-detects the same price-based TP hit every monitor cycle (~1s)
         # with no memory of a recent failure, so without this a persistent
@@ -338,7 +349,7 @@ class SimulationEngine:
         # gives a live, always-on trail of exactly what price/target each
         # trade was being compared against, to catch it happening again with
         # certainty instead of reconstructing it from candles after the fact.
-        self._tp_wait_log_ts: dict[str, float] = {}
+        # (bundled into self._tp_trigger_cache above, as TPCache.wait_log_ts)
         # TP Safety Net: trade_id -> last time a failed/skipped BE-move attempt
         # was alerted. Without this, a persistently-rejected modify_order (or a
         # trade where price has moved back past the point a BE move is even
@@ -1663,7 +1674,7 @@ class SimulationEngine:
             self._profit_sound_seq += 1
 
         # Invalidate TP trigger cache for this trade (it's now closed)
-        self._tp_cache.pop(trade_id, None)
+        self._tp_trigger_cache.triggered.pop(trade_id, None)
         for _k in [k for k in self._scale_out_last_fail if k[0] == trade_id]:
             self._scale_out_last_fail.pop(_k, None)
         self._tp_safety_net_last_alert.pop(trade_id, None)
@@ -1876,40 +1887,10 @@ class SimulationEngine:
     # ── TP trigger tracking ───────────────────────────────────────────────────
 
     async def _get_triggered_tps(self, trade_id: str) -> set[int]:
-        now = time.time()
-        cached = self._tp_cache.get(trade_id)
-        if cached is not None:
-            cached_set, cached_ts = cached
-            if now - cached_ts < _TP_CACHE_TTL:
-                return cached_set
-        def _fetch():
-            with db_module.db() as conn:
-                return conn.execute(
-                    "SELECT reason FROM vantage_partial_closes WHERE trade_id=?", (trade_id,)
-                ).fetchall()
-        rows = await db_module.to_db_thread(_fetch)
-        triggered: set[int] = set()
-        for row in rows:
-            m = _TP_NUM_RE.match(row[0] or "")
-            if m:
-                triggered.add(int(m.group(1)))
-        self._tp_cache[trade_id] = (triggered, now)
-        return triggered
+        return await _get_triggered_tps_impl(self._tp_trigger_cache, trade_id)
 
     def _last_closed_tp(self, trade_id: str) -> Optional[int]:
-        """Return the TP number of the most recent real partial close (lots > 0), or None."""
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT reason FROM vantage_partial_closes "
-                "WHERE trade_id=? AND lots_closed > 0 "
-                "ORDER BY ts DESC LIMIT 10",
-                (trade_id,),
-            ).fetchall()
-        for row in rows:
-            m = _TP_NUM_RE.match(row[0] or "")
-            if m:
-                return int(m.group(1))
-        return None
+        return _last_closed_tp_impl(trade_id)
 
     _TP_WAIT_LOG_INTERVAL = 60.0  # seconds between diagnostic log lines per trade
 
@@ -1919,55 +1900,22 @@ class SimulationEngine:
     ) -> None:
         """Throttled, always-on (INFO, not DEBUG) visibility into the TP1-wait
         comparison every strategy handler runs every poll. One line per trade
-        per _TP_WAIT_LOG_INTERVAL, plus always logs the transition to hit=True.
-        See the _tp_wait_log_ts docstring in __init__ for why this exists."""
-        now = time.time()
-        last = self._tp_wait_log_ts.get(trade_id, 0.0)
-        if not hit and (now - last) < self._TP_WAIT_LOG_INTERVAL:
-            return
-        self._tp_wait_log_ts[trade_id] = now
-        dist = (current_price - target_price) if direction == "BUY" else (target_price - current_price)
-        log.info(
-            "[%s] %s waiting: price=%.2f target=%.2f dist=%.2f hit=%s",
-            tag, trade_id[:8], current_price, target_price, dist, hit,
+        per _TP_WAIT_LOG_INTERVAL, plus always logs the transition to hit=True."""
+        _log_tp_wait_diagnostic_impl(
+            self._tp_trigger_cache, trade_id, tag, direction, current_price, target_price, hit,
         )
 
     def _check_sl(self, trade: dict, tick: Tick) -> Optional[tuple]:
         return _check_sl_impl(trade, tick)
 
     async def _check_tp_hits(self, trade: dict, tick: Tick) -> list[tuple]:
-        direction   = trade["direction"].upper()
-        entry_price = float(trade["entry_price"])
-        already     = await self._get_triggered_tps(trade["trade_id"])
-        hits = []
-        for i in range(1, MAX_TP + 1):
-            if i in already:
-                continue
-            tp_val = trade.get(f"tp{i}")
-            if tp_val is None:
-                continue
-            tp_val = float(tp_val)
-            # A TP on the wrong side of entry is not a profit target — skip it
-            if direction == "BUY"  and tp_val <= entry_price:
-                continue
-            if direction == "SELL" and tp_val >= entry_price:
-                continue
-            if direction == "BUY" and tick.bid >= tp_val:
-                hits.append((trade["trade_id"], i))
-            elif direction == "SELL" and tick.ask <= tp_val:
-                hits.append((trade["trade_id"], i))
-        return hits
+        return await _check_tp_hits_impl(self._tp_trigger_cache, trade, tick)
 
     # ── Strategy handlers ─────────────────────────────────────────────────────
 
     def _get_remaining_lots(self, trade_id: str) -> float:
         """Read current remaining_lots from DB to avoid stale snapshot."""
-        with db_module.db() as conn:
-            row = conn.execute(
-                "SELECT remaining_lots FROM vantage_simulated_trades WHERE trade_id=?",
-                (trade_id,)
-            ).fetchone()
-        return float(row[0]) if row else 0.0
+        return _get_remaining_lots_impl(trade_id)
 
     async def _handle_scale_out(self, trade: dict, tick: Tick) -> None:
         tp_hits = await self._check_tp_hits(trade, tick)

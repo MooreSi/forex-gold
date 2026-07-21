@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
+from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -80,7 +81,7 @@ def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     e._cfg = {"starting_balance": 1000.0}
-    e._tp_cache = {}
+    e._tp_trigger_cache = _TPCache()
     e._scale_out_last_fail = {}
     e._tp_safety_net_last_alert = {}
     e._profit_sound_seq = 0
@@ -240,13 +241,13 @@ def test_record_close_invalidates_caches(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", direction="BUY", mt5_ticket=None)
     engine._bridge = _FakeBridge(tick=None)
-    engine._tp_cache["t-1"] = ({1}, time.time())
+    engine._tp_trigger_cache.triggered["t-1"] = ({1}, time.time())
     engine._scale_out_last_fail[("t-1", 1)] = time.time()
     engine._tp_safety_net_last_alert["t-1"] = time.time()
 
     asyncio.run(SimulationEngine._record_close(engine, "t-1", 2410.0, "manual_close"))
 
-    assert "t-1" not in engine._tp_cache
+    assert "t-1" not in engine._tp_trigger_cache.triggered
     assert ("t-1", 1) not in engine._scale_out_last_fail
     assert "t-1" not in engine._tp_safety_net_last_alert
 

@@ -374,7 +374,10 @@ def _render_ea_update_button():
         # that survives that, mirroring the existing Restart button's own
         # self-relaunch pattern (ui/app.py's _do_restart) but with the MT5
         # terminal restart sandwiched in between stop and relaunch.
-        script = _EA_RESTART_PS1_TEMPLATE.format(terminal_id=terminal_id)
+        from forex_trader.config import USER_DATA_DIR as _ea_user_data_dir
+        script = _EA_RESTART_PS1_TEMPLATE.format(
+            terminal_id=terminal_id, data_folder=_ea_user_data_dir.name,
+        )
         script_path = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "ea_update_restart.ps1"
         script_path.write_text(script, encoding="utf-8")
 
@@ -417,7 +420,7 @@ def _render_ea_update_button():
 # before the terminal relaunch or its own reconnect loop races the
 # config-carrying launch and silently wins, leaving the EA never attached).
 _EA_RESTART_PS1_TEMPLATE = r'''
-$logPath = "$env:APPDATA\ForexTrader\data\ea_update_result.log"
+$logPath = "$env:APPDATA\{data_folder}\data\ea_update_result.log"
 function Log($msg) {{ "$(Get-Date -Format o)  $msg" | Out-File -FilePath $logPath -Append -Encoding utf8 }}
 Log "EA update sequence starting"
 

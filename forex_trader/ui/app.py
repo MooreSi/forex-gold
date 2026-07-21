@@ -45,6 +45,20 @@ _UITimer._get_context = _safe_timer_get_context
 _UITimer._cleanup = _safe_timer_cleanup
 # ── end patch ──────────────────────────────────────────────────────────────────
 
+# ── WebSocket buffer size patch ─────────────────────────────────────────────────
+# python-socketio/engine.io default to a 1,000,000-byte (1MB) max message size in
+# both directions. A long-lived real account's full trade history / equity curve
+# (History tab, "days=3650") is exactly the kind of single-payload push that can
+# grow past that over months of trading, and the client then refuses to send/
+# receive it at all -- "Message too long: the message is too large for WebSocket
+# transmission", followed by a reconnect loop, not a graceful degradation.
+# NiceGUI doesn't expose this as a ui.run() kwarg; core.sio is the same
+# process-wide socketio.AsyncServer every client connection shares, so this must
+# be set once, here, before any client connects.
+from nicegui import core as _nicegui_core
+_nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
+# ── end patch ──────────────────────────────────────────────────────────────────
+
 import forex_trader.config as cfg_module
 from forex_trader import __version__ as _APP_VERSION
 from forex_trader.core import database as db_module

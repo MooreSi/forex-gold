@@ -15,6 +15,7 @@ from unittest import mock
 
 import pytest
 
+from forex_trader.core import core_tp_safety_net
 from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from forex_trader.core.engine import SimulationEngine
@@ -191,7 +192,7 @@ def test_window_closed_no_move_no_write(fresh_db, engine):
     engine._bridge = _FakeBridge(candles=[{"high": 2412.0, "low": 2398.0}],
                                  tick=SimpleNamespace(bid=2400.0, ask=2400.5))
     t = _trade(tp1=2410.0)
-    with mock.patch.object(SimulationEngine, "_compute_be_cost_pts", return_value=1.0):
+    with mock.patch.object(core_tp_safety_net, "compute_be_cost_pts", return_value=1.0):
         asyncio.run(SimulationEngine._tp_safety_net_check_trade(engine, t, time.time()))
     assert engine._bridge.modify_order_calls == []
     assert _row() == {"stop_loss": 2380.0, "sl_moved_to_be": 0}
@@ -231,12 +232,12 @@ def test_no_mt5_ticket_skips_broker_still_writes_db(fresh_db, engine):
 
 def test_sweep_continues_past_per_trade_exception(fresh_db, engine):
     calls = []
-    async def fake_check(trade, now):
+    async def fake_check(trade, now, bridge, last_alert):
         calls.append(trade["trade_id"])
         if trade["trade_id"] == "bad":
             raise RuntimeError("boom")
-    with mock.patch.object(SimulationEngine, "get_open_trades",
+    with mock.patch.object(core_tp_safety_net, "get_open_trades",
                            return_value=[{"trade_id": "bad"}, {"trade_id": "good"}]), \
-         mock.patch.object(SimulationEngine, "_tp_safety_net_check_trade", side_effect=fake_check):
+         mock.patch.object(core_tp_safety_net, "tp_safety_net_check_trade", side_effect=fake_check):
         asyncio.run(SimulationEngine._tp_safety_net_sweep(engine))
     assert calls == ["bad", "good"]

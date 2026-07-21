@@ -286,8 +286,11 @@ async def startup() -> None:
     # Client only runs on non-admin machines — the admin Mac doesn't connect to itself.
     if ADMIN_AVAILABLE and password_is_set():
         _remote_server.start()
-    else:
+    elif config.get("remote_admin_client_enabled", False):
         _remote_client.start()
+    else:
+        log.info("[startup] Remote-admin client disabled (remote_admin_client_enabled=false) "
+                 "— not connecting to the fleet admin server")
 
     log.info("FOREX Trader started on port %s (env=%s db=%s)",
              config.get("port", 8888), env, config["db_path"])

@@ -20,12 +20,25 @@ BASE_DIR = Path(__file__).parent.parent  # project root — code only
 # All user data (config, databases, sessions, logs) lives outside the project
 # so that distributing a new version of the app never touches user credentials.
 # Path is platform-specific; all downstream code uses this constant.
+#
+# This checkout (forex-refactor2) is a full fork of the live, actively-trading
+# app at /Users/simon/Documents/FOREX -- it must NEVER default to that app's
+# "ForexTrader" folder, or a dev run here would boot against the live app's
+# real MT5 bridge, Telegram session, and remote-sync state (confirmed live
+# 2026-07-21: a smoke-test run reconnected the live Telegram session, wrote a
+# real signal row to the shared gd_copy_signal.db, and started the shared
+# remote-admin server, all before this fix existed). "ForexTrader-Refactor2"
+# is a separate, genuinely empty folder by default -- override with the
+# FOREX_TRADER_DATA_DIR env var if a different location is ever needed.
+_APP_DATA_FOLDER = os.environ.get("FOREX_TRADER_DATA_DIR_NAME", "ForexTrader-Refactor2")
 if sys.platform == "win32":
-    USER_DATA_DIR = Path.home() / "AppData" / "Roaming" / "ForexTrader"
+    USER_DATA_DIR = Path.home() / "AppData" / "Roaming" / _APP_DATA_FOLDER
 elif sys.platform == "darwin":
-    USER_DATA_DIR = Path.home() / "Library" / "Application Support" / "ForexTrader"
+    USER_DATA_DIR = Path.home() / "Library" / "Application Support" / _APP_DATA_FOLDER
 else:
-    USER_DATA_DIR = Path.home() / ".config" / "ForexTrader"
+    USER_DATA_DIR = Path.home() / ".config" / _APP_DATA_FOLDER
+if os.environ.get("FOREX_TRADER_DATA_DIR"):
+    USER_DATA_DIR = Path(os.environ["FOREX_TRADER_DATA_DIR"])
 CONFIG_FILE   = USER_DATA_DIR / "config.yaml"
 DATA_DIR      = USER_DATA_DIR / "data"
 SESSIONS_DIR  = DATA_DIR / "sessions"
@@ -69,7 +82,14 @@ def load() -> dict:
         # MT5
         "mt5_login":          int(_e("MT5_LOGIN", base.get("mt5_login", 0))),
         "mt5_server":         _e("MT5_SERVER", ""),
-        "mt5_bridge_url":     _e("MT5_BRIDGE_URL", "http://localhost:9000"),
+        # Port 9000 is the LIVE app's bridge port (mt5_bridge.py under Wine,
+        # always running) -- defaulting there would let this fork's engine
+        # silently query (and, if auto-execute is ever enabled, trade on)
+        # the real account through the live app's own bridge. 9010 is a
+        # separate port nothing listens on by default, so an unconfigured
+        # fork's bridge client gets connection-refused and the engine falls
+        # back to its normal "bridge not configured" behavior instead.
+        "mt5_bridge_url":     _e("MT5_BRIDGE_URL", "http://localhost:9010"),
         "mt5_bridge_enabled": str(_e("MT5_BRIDGE_ENABLED", base.get("mt5_bridge_enabled", True))).lower() != "false",
         # Native Windows can import MetaTrader5 directly in the main process
         # instead of running mt5_bridge.py as a separate HTTP-served
@@ -134,10 +154,24 @@ def load() -> dict:
         "telegram_chat_id":   _e("TELEGRAM_CHAT_ID", base.get("telegram_chat_id", "")),
 
         # App
-        "port": int(_e("PORT", base.get("port", 8888))),
+        # 8888 is the live app's UI port -- run.py's _free_port() kills
+        # whatever's already listening on this port before starting, so
+        # defaulting to 8888 here would kill the live app's web server.
+        "port": int(_e("PORT", base.get("port", 8890))),
 
         # Environment: "demo" or "live" — controls which DB file is used
         "account_env":   _e("ACCOUNT_ENV", base.get("account_env", "demo")),
+
+        # Remote-admin fleet client (forex_trader/remote/client.py): connects
+        # out to the live app's real admin server (217.155.25.160:8443) and
+        # LAN-scans for a beacon, reporting this machine in as a manageable
+        # node that can receive pushed software updates. This checkout is an
+        # isolated fork with no business joining that fleet -- default off
+        # here; the live app's own config.yaml (which never sets this key)
+        # keeps its unrelated True default via base.get() below.
+        "remote_admin_client_enabled": str(_e(
+            "REMOTE_ADMIN_CLIENT_ENABLED", base.get("remote_admin_client_enabled", False)
+        )).lower() == "true",
     }
 
     # Derive DB path from account_env (must be after the dict is partially built)

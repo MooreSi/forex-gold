@@ -2027,16 +2027,19 @@ def _render_bridge_control(engine):
                 # Convert macOS path to Wine Z: path (Wine maps / as Z:\)
                 _bridge_win = "Z:" + str(_bridge_macos).replace("/", "\\")
                 # Build the Z: path so Wine Python can read the credentials
-                # file from ~/Library/Application Support/ForexTrader/
-                _mac_creds = os.path.expanduser(
-                    "~/Library/Application Support/ForexTrader/bridge_credentials.json"
-                )
+                # file from this checkout's own USER_DATA_DIR (config.py) --
+                # NOT the live app's shared ~/Library/Application Support/
+                # ForexTrader/ folder.
+                from forex_trader import config as _cfg_mod
+                _mac_creds = str(_cfg_mod.USER_DATA_DIR / "bridge_credentials.json")
                 _win_creds = "Z:" + _mac_creds.replace("/", "\\")
+                from urllib.parse import urlparse as _urlparse
+                _bridge_port = _urlparse(_cfg_mod.get("mt5_bridge_url", "")).port or 9010
                 env_vars = {
                     **os.environ,
                     "WINEPREFIX":        _bottle,
                     "WINEDEBUG":         "-all",
-                    "MT5_BRIDGE_PORT":   "9000",
+                    "MT5_BRIDGE_PORT":   str(_bridge_port),
                     "BRIDGE_CREDS_PATH": _win_creds,
                     **_extra_env,
                 }

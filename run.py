@@ -1,7 +1,8 @@
 """
 FOREX Trader — launcher.
 Run: python run.py
-Opens the dashboard in your default browser on http://localhost:8888
+Opens the dashboard in your default browser (see forex_trader.config's
+default port for this checkout).
 """
 
 import logging
@@ -26,12 +27,11 @@ logging.basicConfig(
 # Write logs to a daily-rotating file in the user data directory.
 # Rotates at midnight; keeps 30 daily files before the oldest is removed.
 # Backup filenames:  forex_trader.log.YYYY-MM-DD
-if sys.platform == "win32":
-    _USER_DATA = Path.home() / "AppData" / "Roaming" / "ForexTrader"
-elif sys.platform == "darwin":
-    _USER_DATA = Path.home() / "Library" / "Application Support" / "ForexTrader"
-else:
-    _USER_DATA = Path.home() / ".config" / "ForexTrader"
+#
+# Must match forex_trader.config.USER_DATA_DIR exactly -- this checkout
+# (forex-refactor2) is a fork of the live app and must never default to its
+# "ForexTrader" folder (see the long comment in config.py for why).
+from forex_trader.config import USER_DATA_DIR as _USER_DATA
 _log_dir   = _USER_DATA / "data"
 _log_dir.mkdir(parents=True, exist_ok=True)
 _fh = TimedRotatingFileHandler(
@@ -108,7 +108,13 @@ def _start_mt5_bridge() -> subprocess.Popen | None:
         # bridge watchdog's own restart path (engine.py's _start_bridge_process)
         # sets this env var correctly, masking the bug as a normal startup delay.
         from forex_trader.config import USER_DATA_DIR
-        bridge_env = {**os.environ, "BRIDGE_CREDS_PATH": str(USER_DATA_DIR / "bridge_credentials.json")}
+        from urllib.parse import urlparse
+        bridge_port = urlparse(bridge_url).port or 9000
+        bridge_env = {
+            **os.environ,
+            "BRIDGE_CREDS_PATH": str(USER_DATA_DIR / "bridge_credentials.json"),
+            "MT5_BRIDGE_PORT": str(bridge_port),
+        }
 
         log.info("Starting MT5 bridge: %s", " ".join(cmd))
         proc = subprocess.Popen(cmd, env=bridge_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -133,12 +139,7 @@ def _migrate_config_yaml() -> None:
     before config.py, settings.py or any UI code is imported, so old copies of
     those files on remote machines cannot cause a crash.
     """
-    if sys.platform == "win32":
-        cfg_path = Path.home() / "AppData" / "Roaming" / "ForexTrader" / "config.yaml"
-    elif sys.platform == "darwin":
-        cfg_path = Path.home() / "Library" / "Application Support" / "ForexTrader" / "config.yaml"
-    else:
-        cfg_path = Path.home() / ".config" / "ForexTrader" / "config.yaml"
+    from forex_trader.config import CONFIG_FILE as cfg_path
 
     if not cfg_path.exists():
         return

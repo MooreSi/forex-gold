@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
 from forex_trader.core.core_db_sync import _ensure_sync_tables  # noqa: E402
+from forex_trader.core.core_db_analytics import _session_for_hour, _trade_pts  # noqa: E402
 
 _TG_GROUP_ID_MAP: dict[str, str] = {
     "1608388054": "Gold Diggers VIP",

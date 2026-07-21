@@ -151,6 +151,10 @@ from forex_trader.core.core_run_tp_ladder import (
 )
 from forex_trader.core.core_handle_scale_out import handle_scale_out as _handle_scale_out_impl
 from forex_trader.core.core_handle_be_runner import handle_be_runner as _handle_be_runner_impl
+from forex_trader.core.core_handle_trail_stop import handle_trail_stop as _handle_trail_stop_impl
+from forex_trader.core.core_handle_protected_scale import (
+    handle_protected_scale as _handle_protected_scale_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -1957,220 +1961,13 @@ class SimulationEngine:
         TP2-TP5 markers are written so the TP chips in the UI reflect the actual
         price path, even though no partial closes happen.
         """
-        direction     = trade["direction"].upper()
-        current_sl    = float(trade["stop_loss"])
-        mt5_ticket    = trade.get("mt5_ticket")
-        trade_id      = trade["trade_id"]
-        entry_price   = float(trade["entry_price"])
-        tp1           = trade.get("tp1")
-
-        # sl_moved_to_be may be stale if the DB was updated this same loop cycle;
-        # also check the DB directly to avoid a one-cycle miss on first activation.
-        trailing_active = bool(trade.get("sl_moved_to_be"))
-        if not trailing_active:
-            def _fetch_be_flag():
-                with db_module.db() as conn:
-                    return conn.execute(
-                        "SELECT sl_moved_to_be FROM vantage_simulated_trades WHERE trade_id=?",
-                        (trade_id,)
-                    ).fetchone()
-            row = await db_module.to_db_thread(_fetch_be_flag)
-            if row and row[0]:
-                trailing_active = True
-
-        if tp1:
-            tp1_f = float(tp1)
-            tp1_cleared = (
-                (direction == "BUY"  and tp1_f > entry_price and tick.bid >= tp1_f) or
-                (direction == "SELL" and tp1_f < entry_price and tick.ask <= tp1_f)
-            )
-        else:
-            tp1_cleared = False
-
-        if not tp1_cleared and not trailing_active:
-            return
-
-        rs         = await db_module.to_db_thread(db_module.get_risk_settings)
-        trail_dist = float(rs.get("trailing_stop_distance", 5.0))
-
-        # ── First activation: immediately lock SL at entry (breakeven) ────────
-        if not trailing_active:
-            new_sl = entry_price          # risk-free from this tick onward
-            should_update = True          # always write on first activation
-            def _apply_activation():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET sl_moved_to_be=1 WHERE trade_id=?",
-                        (trade_id,),
-                    )
-                    conn.execute(
-                        "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                        " VALUES (?,?,?,?,?,?)",
-                        (trade_id, time.time(), 0.0, float(tp1 or entry_price), 0.0, "TP1_TRAIL_START"),
-                    )
-            await db_module.to_db_thread(_apply_activation)
-            log.info("[trail_stop] %s TP1 cleared — SL locked at entry %.2f (trail_dist=%.2f)",
-                     trade_id[:8], entry_price, trail_dist)
-            asyncio.create_task(telegram_alerts.send_message(
-                telegram_alerts.fmt_sl_moved(trade, 1, entry_price),
-                trade_id, "sl_moved_be",
-            ))
-
-        # ── Active trailing: follow price, floored at breakeven ───────────────
-        else:
-            if direction == "BUY":
-                trail_sl  = round(tick.bid - trail_dist, 2)
-                new_sl    = max(trail_sl, entry_price)   # never below entry
-                should_update = new_sl > current_sl
-            else:
-                trail_sl  = round(tick.ask + trail_dist, 2)
-                new_sl    = min(trail_sl, entry_price)   # never above entry (for SELL)
-                should_update = new_sl < current_sl
-
-        # ── Move SL in MT5 + local DB ─────────────────────────────────────────
-        if should_update:
-            if mt5_ticket:
-                await self._bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-            def _apply_sl():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                        (new_sl, trade_id),
-                    )
-            await db_module.to_db_thread(_apply_sl)
-            log.debug("[trail_stop] %s SL → %.2f (bid=%.2f)", trade_id[:8], new_sl, tick.bid)
-
-        # ── Record TP2-TP5 markers so UI chips reflect price path ─────────────
-        triggered = await self._get_triggered_tps(trade_id)
-        for tp_num in range(2, MAX_TP + 1):
-            if tp_num in triggered:
-                continue
-            tp_val = trade.get(f"tp{tp_num}")
-            if tp_val is None:
-                continue
-            tp_val_f = float(tp_val)
-            if direction == "BUY"  and tp_val_f <= entry_price:
-                continue
-            if direction == "SELL" and tp_val_f >= entry_price:
-                continue
-            tp_hit = (direction == "BUY"  and tick.bid >= tp_val_f) or \
-                     (direction == "SELL" and tick.ask <= tp_val_f)
-            if tp_hit:
-                def _mark_tp(tp_num=tp_num, tp_val_f=tp_val_f):
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                            " VALUES (?,?,?,?,?,?)",
-                            (trade_id, time.time(), 0.0, tp_val_f, 0.0, f"TP{tp_num}_TRAIL_MARKER"),
-                        )
-                await db_module.to_db_thread(_mark_tp)
-                log.info("[trail_stop] %s TP%d marked at %.2f (trailing)", trade_id[:8], tp_num, tp_val_f)
+        return await _handle_trail_stop_impl(trade, tick, self._bridge, self._tp_trigger_cache)
 
     async def _handle_protected_scale(self, trade: dict, tick: Tick) -> None:
-        direction   = trade["direction"].upper()
-        entry_price = float(trade["entry_price"])
-        current_sl  = float(trade["stop_loss"])
-        mt5_ticket  = trade.get("mt5_ticket")
-        trade_id    = trade["trade_id"]
-        triggered   = await self._get_triggered_tps(trade_id)
-
-        if 1 not in triggered:
-            tp1_val = trade.get("tp1")
-            tp1_vf  = float(tp1_val) if tp1_val else None
-            if tp1_vf and (
-                (direction == "BUY"  and tp1_vf > entry_price and tick.bid >= tp1_vf) or
-                (direction == "SELL" and tp1_vf < entry_price and tick.ask <= tp1_vf)
-            ):
-                def _mark_tp1_skipped():
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                            " VALUES (?,?,?,?,?,?)",
-                            (trade_id, time.time(), 0.0, tp1_vf, 0.0, "TP1_SKIPPED"),
-                        )
-                await db_module.to_db_thread(_mark_tp1_skipped)
-                triggered.add(1)
-
-        if 2 not in triggered:
-            tp2_val = trade.get("tp2")
-            tp2_vf  = float(tp2_val) if tp2_val else None
-            if tp2_vf and (
-                (direction == "BUY"  and tp2_vf > entry_price and tick.bid >= tp2_vf) or
-                (direction == "SELL" and tp2_vf < entry_price and tick.ask <= tp2_vf)
-            ):
-                def _mark_tp2_be():
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                            " VALUES (?,?,?,?,?,?)",
-                            (trade_id, time.time(), 0.0, tp2_vf, 0.0, "TP2_BE_LOCKED"),
-                        )
-                await db_module.to_db_thread(_mark_tp2_be)
-                triggered.add(2)
-                should_update = (direction == "BUY" and entry_price > current_sl) or \
-                                (direction == "SELL" and entry_price < current_sl)
-                if should_update:
-                    if mt5_ticket:
-                        await self._bridge.modify_order(int(mt5_ticket), sl=entry_price, tp=None)
-                    def _apply_be_sl():
-                        with db_module.db() as conn:
-                            conn.execute(
-                                "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1 WHERE trade_id=?",
-                                (entry_price, trade_id),
-                            )
-                    await db_module.to_db_thread(_apply_be_sl)
-                    asyncio.create_task(telegram_alerts.send_message(
-                        telegram_alerts.fmt_sl_moved(trade, 2, entry_price),
-                        trade_id, "sl_moved_be",
-                    ))
-
-        close_pct = 0.20
-        for tp_num in range(3, 6):
-            if tp_num in triggered:
-                continue
-            tp_val = trade.get(f"tp{tp_num}")
-            if tp_val is None:
-                continue
-            tp_vf = float(tp_val)
-            if direction == "BUY"  and tp_vf <= entry_price:
-                continue
-            if direction == "SELL" and tp_vf >= entry_price:
-                continue
-            tp_cleared = (direction == "BUY" and tick.bid >= tp_vf) or \
-                         (direction == "SELL" and tick.ask <= tp_vf)
-            if not tp_cleared:
-                break
-            remaining = await db_module.to_db_thread(self._get_remaining_lots, trade_id)
-            if remaining <= 0:
-                break
-            lots_to_close = round(float(trade["lot_size"]) * close_pct, 4)
-            lots_to_close = min(lots_to_close, remaining)
-            if lots_to_close <= 0:
-                continue
-            actual_price = tp_vf
-            if mt5_ticket:
-                mt5_res = await self._bridge.partial_close(int(mt5_ticket), lots_to_close)
-                if mt5_res.get("success"):
-                    actual_price = float(mt5_res.get("close_price", tp_vf))
-                    lots_to_close = float(mt5_res.get("lots_closed", lots_to_close))
-                elif mt5_res.get("error") or mt5_res.get("success") is False:
-                    log.warning("[protected_scale] MT5 partial close failed ticket=%s tp=%d: %s",
-                                mt5_ticket, tp_num, mt5_res)
-                    continue
-            try:
-                res = await self.partial_close_trade(trade_id, lots_to_close, actual_price, f"TP{tp_num}")
-                triggered.add(tp_num)
-                asyncio.create_task(telegram_alerts.send_message(
-                    telegram_alerts.fmt_tp_hit(trade, tp_num, actual_price, lots_to_close,
-                                               res.get("partial_pnl", 0)),
-                    trade_id, f"tp{tp_num}_hit",
-                ))
-                if res.get("auto_closed"):
-                    if mt5_ticket:
-                        asyncio.create_task(self._close_full_after_tps(trade_id, mt5_ticket, actual_price))
-                    break
-            except Exception as exc:
-                log.warning("[protected_scale] TP%d failed: %s", tp_num, exc)
+        return await _handle_protected_scale_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache,
+            close_full_after_tps=self._close_full_after_tps,
+        )
 
     async def _handle_conservative(self, trade: dict, tick: Tick) -> None:
         """

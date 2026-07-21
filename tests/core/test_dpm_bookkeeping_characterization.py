@@ -16,6 +16,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
+from forex_trader.core.core_dpm_bookkeeping import DPMCache
 from forex_trader.core.models import CONTRACT_SIZE
 
 
@@ -43,9 +44,7 @@ def fresh_db():
 
 class _FakeEngine:
     def __init__(self):
-        self._dpm_calibrated = {}
-        self._dpm_cal_loaded_at = 0.0
-        self._dpm_recorded = set()
+        self._dpm_cache = DPMCache()
 
 
 def _insert_calibration(session="London", bucket="strong", calibrated_at=None,
@@ -122,7 +121,7 @@ def test_load_dpm_calibrated_reloads_after_ttl_expiry(fresh_db):
     SimulationEngine._load_dpm_calibrated(engine)
 
     _insert_calibration(session="London", bucket="strong", be_mult=9.0, calibrated_at=time.time() + 1)
-    engine._dpm_cal_loaded_at = time.time() - 601  # force TTL expiry
+    engine._dpm_cache.loaded_at = time.time() - 601  # force TTL expiry
     reloaded = SimulationEngine._load_dpm_calibrated(engine)
     assert reloaded["London_strong"]["be_multiplier"] == 9.0
 

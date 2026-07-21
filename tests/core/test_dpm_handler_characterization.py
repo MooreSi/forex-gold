@@ -20,6 +20,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import dpm_engine
 from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
+from forex_trader.core.core_dpm_bookkeeping import DPMCache as _DPMCache
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -76,9 +77,7 @@ def engine(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     e._tp_trigger_cache = _TPCache()
-    e._dpm_calibrated = {}
-    e._dpm_cal_loaded_at = 0.0
-    e._dpm_recorded = set()
+    e._dpm_cache = _DPMCache()
     e._dpm_candles = []
     e._dpm_dxy_candles = None
     return e
@@ -355,7 +354,7 @@ def test_calibration_runs_and_persists_results(fresh_db, engine):
         "sample_size": 20, "profit_factor": 1.8, "win_rate": 0.6, "avg_r_multiple": 1.2,
         "notes": "test",
     }
-    engine._dpm_cal_loaded_at = 12345.0
+    engine._dpm_cache.loaded_at = 12345.0
     with mock.patch.object(dpm_engine, "run_calibration", return_value=[result]):
         asyncio.run(SimulationEngine._run_dpm_calibration(engine))
 
@@ -364,7 +363,7 @@ def test_calibration_runs_and_persists_results(fresh_db, engine):
     assert len(rows) == 1
     assert db.get_app_config("dpm_cal_trade_count") == "20"
     assert float(db.get_app_config("dpm_cal_last_run")) > time.time() - 10
-    assert engine._dpm_cal_loaded_at == 0.0  # forced reload
+    assert engine._dpm_cache.loaded_at == 0.0  # forced reload
 
 
 def test_calibration_empty_results_does_not_update_app_config(fresh_db, engine):

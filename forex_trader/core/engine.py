@@ -66,6 +66,20 @@ from forex_trader.core.core_tp_trigger_tracking import (
     check_tp_hits as _check_tp_hits_impl,
     get_remaining_lots as _get_remaining_lots_impl,
 )
+from forex_trader.core.core_signals import (
+    create_signal as _create_signal_impl,
+    get_signals as _get_signals_impl,
+    activate_signal as _activate_signal_impl,
+    cancel_signal as _cancel_signal_impl,
+)
+from forex_trader.core.core_dpm_bookkeeping import (
+    DPMCache as _DPMCache,
+    load_dpm_calibrated as _load_dpm_calibrated_impl,
+    record_dpm_entry as _record_dpm_entry_impl,
+    update_dpm_peak as _update_dpm_peak_impl,
+    set_dpm_milestone as _set_dpm_milestone_impl,
+    finalize_dpm_record as _finalize_dpm_record_impl,
+)
 
 if TYPE_CHECKING:
     from forex_trader.core.telegram_reader import TelegramReader
@@ -370,11 +384,10 @@ class SimulationEngine:
         # itself within seconds.
         self._pending_activation_retry_after: dict[str, float] = {}
         self._dxy_cycle: int = 0
-        # Set of trade_ids whose DPM entry snapshot has been recorded this session
-        self._dpm_recorded: set[str] = set()
-        # Calibrated DPM params loaded from app_config; rebuilt periodically
-        self._dpm_calibrated: dict = {}
-        self._dpm_cal_loaded_at: float = 0.0
+        # DPM bookkeeping in-memory state (which trade_ids have been recorded
+        # this session, and the calibrated-params cache with its TTL) -- see
+        # core_dpm_bookkeeping.DPMCache.
+        self._dpm_cache = _DPMCache()
         # Bridge watchdog — auto-reconnect unless user manually stopped the bridge
         self._bridge_inhibit_reconnect: bool = False
         self._bridge_watchdog_task: Optional[asyncio.Task] = None
@@ -530,67 +543,19 @@ class SimulationEngine:
                       tp1=None, tp2=None, tp3=None, tp4=None, tp5=None,
                       tp6=None, tp7=None, tp8=None,
                       lot_size=None, risk_pct=None, notes: str = "") -> dict:
-        rs     = db_module.get_risk_settings()
-        errors = validate_signal(direction, entry_low, entry_high, stop_loss,
-                                 tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8)
-        if errors:
-            raise ValueError("; ".join(errors))
-        if rs.get("require_at_least_tp1") and tp1 is None:
-            raise ValueError("At least TP1 is required")
-
-        signal_id = str(uuid.uuid4())[:16]
-        with db_module.db() as conn:
-            conn.execute(
-                """INSERT INTO vantage_signals
-                   (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                    tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,lot_size,risk_pct,notes,status,created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (signal_id, source_name, direction.upper(), entry_low, entry_high, stop_loss,
-                 tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
-                 lot_size, risk_pct, notes, "pending", time.time()),
-            )
-        return {"signal_id": signal_id, "status": "pending"}
+        return _create_signal_impl(
+            source_name, direction, entry_low, entry_high, stop_loss,
+            tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8, lot_size, risk_pct, notes,
+        )
 
     def get_signals(self, status: Optional[str] = None) -> list[dict]:
-        with db_module.db() as conn:
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM vantage_signals WHERE status=? ORDER BY created_at DESC", (status,)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM vantage_signals ORDER BY created_at DESC"
-                ).fetchall()
-        result = [db_module.row_to_dict(r) for r in rows]
-        for r in result:
-            if r.get("claude_commentary"):
-                try:
-                    r["claude_commentary"] = json.loads(r["claude_commentary"])
-                except Exception:
-                    pass
-        return result
+        return _get_signals_impl(status)
 
     def activate_signal(self, signal_id: str) -> None:
-        with db_module.db() as conn:
-            row = db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_signals WHERE signal_id=?", (signal_id,)).fetchone()
-            )
-        if not row:
-            raise ValueError(f"Signal {signal_id} not found")
-        if row["status"] not in ("pending",):
-            raise ValueError(f"Signal is {row['status']}, cannot activate")
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_signals SET status='active', activated_at=? WHERE signal_id=?",
-                (time.time(), signal_id),
-            )
+        _activate_signal_impl(signal_id)
 
     def cancel_signal(self, signal_id: str) -> None:
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_signals SET status='cancelled', cancelled_at=? WHERE signal_id=?",
-                (time.time(), signal_id),
-            )
+        _cancel_signal_impl(signal_id)
 
     # ── Trade management ──────────────────────────────────────────────────────
 
@@ -3171,121 +3136,24 @@ class SimulationEngine:
         Load calibrated DPM multipliers from app_config into a flat dict keyed
         "{session}_{momentum_bucket}".  Refreshed at most once per 10 minutes.
         """
-        now = time.time()
-        if now - self._dpm_cal_loaded_at < 600:
-            return self._dpm_calibrated
-        cal: dict = {}
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT session, momentum_bucket, be_multiplier, trail_multiplier, "
-                "       tp1_partial_pct, sample_size "
-                "FROM dpm_calibration "
-                "WHERE calibrated_at = (SELECT MAX(calibrated_at) FROM dpm_calibration) "
-                "ORDER BY id"
-            ).fetchall()
-        for r in rows:
-            key = f"{r[0]}_{r[1]}"
-            cal[key] = {
-                "be_multiplier":   r[2],
-                "trail_multiplier": r[3],
-                "tp1_partial_pct": r[4],
-                "sample_size":     r[5],
-            }
-        self._dpm_calibrated    = cal
-        self._dpm_cal_loaded_at = now
-        return cal
+        return _load_dpm_calibrated_impl(self._dpm_cache)
 
     def _record_dpm_entry(self, trade: dict, params: dict) -> None:
         """Snapshot market state and DPM parameters on the first cycle for a trade."""
-        trade_id = trade["trade_id"]
-        if trade_id in self._dpm_recorded:
-            return
-        self._dpm_recorded.add(trade_id)
-        with db_module.db() as conn:
-            conn.execute(
-                """INSERT OR IGNORE INTO dpm_trade_performance
-                   (trade_id, direction, entry_price, lot_size, original_sl,
-                    atr_at_entry, session_at_entry, momentum_at_entry, momentum_label,
-                    regime_at_entry, adx_at_entry,
-                    be_multiplier_used, trail_multiplier_used,
-                    be_trigger_used, trail_dist_used, tp1_pct_used,
-                    used_calibrated, tg_source, opened_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    trade_id,
-                    trade.get("direction"),
-                    trade.get("entry_price"),
-                    trade.get("lot_size"),
-                    trade.get("stop_loss"),   # original SL at entry time
-                    params["atr"],
-                    params["session"],
-                    params["momentum"],
-                    params["momentum_label"],
-                    params["regime"],
-                    params.get("adx"),
-                    params["be_multiplier"],
-                    params["trail_multiplier"],
-                    params["be_trigger_usd"],
-                    params["trail_distance"],
-                    params["tp1_partial_pct"],
-                    1 if params.get("used_calibrated") else 0,
-                    trade.get("tg_source"),
-                    time.time(),
-                ),
-            )
+        _record_dpm_entry_impl(self._dpm_cache, trade, params)
 
     def _update_dpm_peak(self, trade_id: str, unrealized_pnl: float) -> None:
         """Keep the high-water P&L for this trade so calibration can compute capture ratio."""
-        if unrealized_pnl <= 0:
-            return
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE dpm_trade_performance SET peak_pnl = MAX(peak_pnl, ?) WHERE trade_id=?",
-                (unrealized_pnl, trade_id),
-            )
+        _update_dpm_peak_impl(trade_id, unrealized_pnl)
 
     def _set_dpm_milestone(self, trade_id: str, column: str) -> None:
         """Mark a milestone column (reached_be, reached_tp1, reached_tp2) as 1."""
-        if column not in ("reached_be", "reached_tp1", "reached_tp2"):
-            return
-        with db_module.db() as conn:
-            conn.execute(
-                f"UPDATE dpm_trade_performance SET {column}=1 WHERE trade_id=?",
-                (trade_id,),
-            )
+        _set_dpm_milestone_impl(trade_id, column)
 
     def _finalize_dpm_record(self, trade_id: str, close_price: float,
                              exit_type: str, final_pnl: float) -> None:
         """Write close-time fields to the DPM performance record."""
-        with db_module.db() as conn:
-            row = db_module.row_to_dict(
-                conn.execute(
-                    "SELECT * FROM dpm_trade_performance WHERE trade_id=?", (trade_id,)
-                ).fetchone()
-            )
-        if not row:
-            return
-
-        # R-multiple: final_pnl / initial_risk
-        entry_price = float(row.get("entry_price") or 0)
-        orig_sl     = float(row.get("original_sl") or 0)
-        lot_size    = float(row.get("lot_size")     or 0.01)
-        initial_risk = abs(entry_price - orig_sl) * lot_size * CONTRACT_SIZE if orig_sl and entry_price else 0
-        r_multiple   = round(final_pnl / initial_risk, 3) if initial_risk > 0 else 0.0
-
-        # Hold duration
-        opened_at    = float(row.get("opened_at") or time.time())
-        hold_minutes = round((time.time() - opened_at) / 60, 1)
-
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE dpm_trade_performance
-                   SET close_price=?, exit_type=?, final_pnl=?, r_multiple=?,
-                       hold_minutes=?, closed_at=?
-                   WHERE trade_id=?""",
-                (close_price, exit_type, final_pnl, r_multiple,
-                 hold_minutes, time.time(), trade_id),
-            )
+        _finalize_dpm_record_impl(trade_id, close_price, exit_type, final_pnl)
 
     async def _run_dpm_calibration(self) -> None:
         """
@@ -3350,7 +3218,7 @@ class SimulationEngine:
         db_module.set_app_config("dpm_cal_last_run", str(time.time()))
         db_module.set_app_config("dpm_cal_trade_count", str(len(trades)))
         # Force reload on next cycle
-        self._dpm_cal_loaded_at = 0.0
+        self._dpm_cache.loaded_at = 0.0
         log.info("[DPM Cal] Calibration complete — %d groups updated", len(results))
 
     # ── Dynamic Position Management ──────────────────────────────────────────

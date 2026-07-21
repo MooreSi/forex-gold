@@ -143,6 +143,12 @@ from forex_trader.core.core_instant_followup import (
 from forex_trader.core.core_instant_entry import (
     process_instant_entry as _process_instant_entry_impl,
 )
+from forex_trader.core.core_run_tp_ladder import (
+    run_tp_ladder as _run_tp_ladder_impl,
+    handle_signal_climber as _handle_signal_climber_impl,
+    handle_gd_vip_runner as _handle_gd_vip_runner_impl,
+    handle_adaptive_runner as _handle_adaptive_runner_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -2602,7 +2608,10 @@ class SimulationEngine:
         Designed for professional multi-TP signals (GD2, GDV) where TP5/6 is
         the intended target and dumping 80% at TP1 destroys the expected value.
         """
-        await self._run_tp_ladder(trade, tick, _CLIMBER_PCTS, "signal_climber", be_at_pos=0)
+        return await _handle_signal_climber_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache,
+            close_full_after_tps=self._close_full_after_tps,
+        )
 
     async def _handle_gd_vip_runner(self, trade: dict, tick: Tick) -> None:
         """
@@ -2616,7 +2625,10 @@ class SimulationEngine:
         wider entry SL is intentional (see _gdvr_sl_dist()) and moving to BE
         that early would defeat it. BE happens at TP2 instead (be_at_pos=1).
         """
-        await self._run_tp_ladder(trade, tick, _GDVR_PCTS, "gd_vip_runner", be_at_pos=1)
+        return await _handle_gd_vip_runner_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache,
+            close_full_after_tps=self._close_full_after_tps,
+        )
 
     async def _handle_adaptive_runner(self, trade: dict, tick: Tick) -> None:
         """
@@ -2638,7 +2650,10 @@ class SimulationEngine:
         separate MT5 tickets per signal) was reverted the same day after
         causing too much MT5/UI clutter for what should read as one trade.
         """
-        await self._run_tp_ladder(trade, tick, _GDVR_PCTS, "adaptive_runner", be_at_pos=0)
+        return await _handle_adaptive_runner_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache,
+            close_full_after_tps=self._close_full_after_tps,
+        )
 
     async def _run_tp_ladder(
         self, trade: dict, tick: Tick, pcts_table: dict[int, list[float]], log_tag: str,
@@ -2652,124 +2667,10 @@ class SimulationEngine:
         breakeven; every subsequent TP after that trails SL to the previous
         TP's price.
         """
-        direction   = trade["direction"].upper()
-        entry_price = float(trade["entry_price"])
-        current_sl  = float(trade["stop_loss"]) if trade.get("stop_loss") is not None else None
-        mt5_ticket  = trade.get("mt5_ticket")
-        trade_id    = trade["trade_id"]
-        lot_size    = float(trade["lot_size"])
-        triggered   = await self._get_triggered_tps(trade_id)
-
-        # Build ordered list of (tp_num, tp_price) for TPs on the correct side of entry.
-        # A gap (e.g. tp2 NULL but tp3-tp8 populated — a real shape produced by
-        # some follow-up-signal edits) must not truncate the ladder: `continue`
-        # past the gap rather than `break`, or every level beyond the first
-        # None becomes permanently invisible to this trade for its entire life.
-        all_tps: list[tuple[int, float]] = []
-        for i in range(1, MAX_TP + 1):
-            v = trade.get(f"tp{i}")
-            if v is None:
-                continue
-            tp_f = float(v)
-            if (direction == "BUY" and tp_f > entry_price) or \
-               (direction == "SELL" and tp_f < entry_price):
-                all_tps.append((i, tp_f))
-
-        n = len(all_tps)
-        if n == 0:
-            return
-
-        pcts = pcts_table.get(n, pcts_table[max(pcts_table)])
-
-        for pos, (tp_num, tp_price) in enumerate(all_tps):
-            if tp_num in triggered:
-                continue
-
-            tp_hit = (direction == "BUY"  and tick.bid >= tp_price) or \
-                     (direction == "SELL" and tick.ask <= tp_price)
-            _cur_px = tick.bid if direction == "BUY" else tick.ask
-            self._log_tp_wait_diagnostic(
-                trade_id, f"{log_tag}:TP{tp_num}", direction, _cur_px, tp_price, tp_hit,
-            )
-            if not tp_hit:
-                break  # TPs are ordered — stop at first miss
-
-            remaining = await db_module.to_db_thread(self._get_remaining_lots, trade_id)
-            if remaining <= 0:
-                break
-
-            is_last = (pos == n - 1)
-            if is_last:
-                lots_to_close = remaining
-            else:
-                lots_to_close = min(round(lot_size * pcts[pos], 4), remaining)
-
-            if lots_to_close <= 0:
-                continue
-
-            actual_price = tp_price
-            if mt5_ticket:
-                mt5_res = await self._bridge.partial_close(int(mt5_ticket), lots_to_close)
-                if mt5_res.get("success"):
-                    actual_price = float(mt5_res.get("close_price", tp_price))
-                    lots_to_close = float(mt5_res.get("lots_closed", lots_to_close))
-                elif mt5_res.get("error") or mt5_res.get("success") is False:
-                    log.warning("[%s] MT5 partial close failed ticket=%s tp=%d: %s",
-                                log_tag, mt5_ticket, tp_num, mt5_res)
-                    continue
-
-            try:
-                res = await self.partial_close_trade(trade_id, lots_to_close, actual_price, f"TP{tp_num}")
-                triggered.add(tp_num)
-                asyncio.create_task(telegram_alerts.send_message(
-                    telegram_alerts.fmt_tp_hit(trade, tp_num, actual_price, lots_to_close,
-                                               res.get("partial_pnl", 0)),
-                    trade_id, f"tp{tp_num}_hit",
-                ))
-                if res.get("auto_closed") and mt5_ticket:
-                    asyncio.create_task(self._close_full_after_tps(trade_id, mt5_ticket, actual_price))
-                    return
-            except Exception as exc:
-                log.warning("[%s] TP%d partial close failed: %s", log_tag, tp_num, exc)
-                continue
-
-            # Trail SL: stays untouched (at its original, wider level) until the
-            # TP at index be_at_pos is hit → BE; every TP after that trails SL
-            # to the previous TP's price. be_at_pos=0 means TP1 (Signal Climber);
-            # GD VIP Runner uses be_at_pos=1 so the wider entry SL isn't given
-            # up until TP2.
-            if current_sl is None:
-                continue
-            if pos < be_at_pos:
-                continue
-            if pos == be_at_pos:
-                new_sl = entry_price
-                sl_moved_be = 1
-            else:
-                new_sl = all_tps[pos - 1][1]  # previous TP price
-                sl_moved_be = trade.get("sl_moved_to_be", 0)
-
-            should_update = (direction == "BUY" and new_sl > current_sl) or \
-                            (direction == "SELL" and new_sl < current_sl)
-            if should_update:
-                if mt5_ticket:
-                    await self._bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-                def _apply_ladder_sl(new_sl=new_sl, sl_moved_be=sl_moved_be):
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=? WHERE trade_id=?",
-                            (new_sl, sl_moved_be, trade_id),
-                        )
-                await db_module.to_db_thread(_apply_ladder_sl)
-                current_sl = new_sl
-                if pos == be_at_pos:
-                    asyncio.create_task(telegram_alerts.send_message(
-                        telegram_alerts.fmt_sl_moved(trade, tp_num, new_sl),
-                        trade_id, "sl_moved_be",
-                    ))
-                else:
-                    log.info("[%s] %s SL trailed to TP%d level %.2f after TP%d",
-                             log_tag, trade_id[:8], pos, new_sl, tp_num)
+        return await _run_tp_ladder_impl(
+            trade, tick, pcts_table, log_tag, self._bridge, self._tp_trigger_cache,
+            be_at_pos=be_at_pos, close_full_after_tps=self._close_full_after_tps,
+        )
 
     async def _handle_conservative_trial(self, trade: dict, tick: Tick) -> None:
         """

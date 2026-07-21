@@ -164,6 +164,15 @@ async def run_tp_ladder(
                         (new_sl, sl_moved_be, trade_id),
                     )
             await db_module.to_db_thread(_apply_ladder_sl)
+            current_sl = new_sl
+            if pos == be_at_pos:
+                asyncio.create_task(telegram_alerts.send_message(
+                    telegram_alerts.fmt_sl_moved(trade, tp_num, new_sl),
+                    trade_id, "sl_moved_be",
+                ))
+            else:
+                log.info("[%s] %s SL trailed to TP%d level %.2f after TP%d",
+                         log_tag, trade_id[:8], pos, new_sl, tp_num)
 
 
 async def handle_signal_climber(

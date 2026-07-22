@@ -15,6 +15,7 @@ from forex_trader.core.telegram_reader import (
     AUTH_CONNECTED, AUTH_RECONNECTING, AUTH_FAILED,
 )
 from forex_trader.ui.pages import reader_logic as _reader_logic
+from forex_trader.ui.pages.trading import render_signals_card
 
 def _ts(s) -> str:
     if not s:
@@ -28,6 +29,8 @@ def _ts(s) -> str:
 
 def render(get_tg_reader: Callable):
     reader = get_tg_reader()
+
+    render_signals_card()
 
     # ── Status banner ──────────────────────────────────────────────────────────
     status_badge = ui.badge("Disconnected", color="red").classes("text-sm mb-3")

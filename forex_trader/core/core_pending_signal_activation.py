@@ -81,7 +81,22 @@ async def try_activate_pending_signals(
         pending = [
             db_module.row_to_dict(r)
             for r in conn.execute(
-                "SELECT * FROM vantage_signals WHERE status='pending' ORDER BY created_at ASC"
+                # Excludes any signal with a currently-resting genuine EA
+                # pending order (Limit Runner / ORB auto-execute) -- without
+                # this, the moment price re-enters the same entry zone that
+                # order is watching, this generic market-fill watcher would
+                # race it and open a SECOND, duplicate trade before the real
+                # pending order has even filled. Once that order resolves
+                # (filled or cancelled), vantage_pending_orders.status stops
+                # being 'working' and/or vantage_signals.status itself moves
+                # off 'pending' (see ea_bridge._on_pending_order_filled/
+                # _on_pending_order_cancelled), so this exclusion is only
+                # ever load-bearing during that narrow placed-but-not-yet-
+                # resolved window.
+                "SELECT * FROM vantage_signals WHERE status='pending' "
+                "AND signal_id NOT IN ("
+                "  SELECT signal_id FROM vantage_pending_orders WHERE status='working'"
+                ") ORDER BY created_at ASC"
             ).fetchall()
         ]
     if not pending:

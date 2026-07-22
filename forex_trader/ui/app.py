@@ -1417,7 +1417,7 @@ def main_page():
             tab_ai       = ui.tab("AI Analysis", icon="smart_toy")
             tab_chart    = ui.tab("Chart",       icon="candlestick_chart")
             tab_trading  = ui.tab("Trading",     icon="trending_up")
-            tab_telegram = ui.tab("Telegram",    icon="send")
+            tab_telegram = ui.tab("Parsing",     icon="send")
             with tab_telegram:
                 # Small red dot — shown whenever an AI-recovered signal is
                 # waiting for review/approval in Reader Logic > AI (see
@@ -1427,7 +1427,7 @@ def main_page():
             tab_test     = ui.tab("Signal Generator", icon="science")
             tab_edge     = ui.tab("Edge",        icon="insights")
             tab_backtest = ui.tab("Backtest",    icon="bar_chart")
-            tab_history  = ui.tab("History",     icon="history")
+            tab_history  = ui.tab("Analysis",    icon="history")
             tab_settings = ui.tab("Settings",    icon="settings")
             tab_about    = ui.tab("About",       icon="info")
 

@@ -56,12 +56,13 @@ class _FakeEA:
         return self._healthy
 
     async def place_pending_order(self, trade_id, direction, price, lot_size, stop_loss,
-                                  tps, pcts, be_at_pos, expire_minutes=240.0,
+                                  tps, pcts, be_at_pos, strategy, expire_minutes=240.0,
                                   close_full_on_last=True):
         self.calls.append(dict(
             trade_id=trade_id, direction=direction, price=price, lot_size=lot_size,
             stop_loss=stop_loss, tps=dict(tps), pcts=list(pcts), be_at_pos=be_at_pos,
-            expire_minutes=expire_minutes, close_full_on_last=close_full_on_last,
+            strategy=strategy, expire_minutes=expire_minutes,
+            close_full_on_last=close_full_on_last,
         ))
         if self._raise:
             raise self._raise
@@ -289,7 +290,7 @@ async def test_successful_placement_writes_db_rows(fresh_db):
 
         po_row = conn.execute(
             "SELECT signal_id, channel_name, direction, price, ea_ticket, status, tp_open, "
-            "tps_json, pcts_json, be_at_pos FROM vantage_pending_orders WHERE ea_ticket=999"
+            "tps_json, pcts_json, be_at_pos, strategy FROM vantage_pending_orders WHERE ea_ticket=999"
         ).fetchone()
         assert po_row[0] == signal_id
         assert po_row[1] == "chan_x"
@@ -302,3 +303,4 @@ async def test_successful_placement_writes_db_rows(fresh_db):
         pcts = json.loads(po_row[8])
         assert pcts == pytest.approx([0.25, 0.25, 0.25])
         assert po_row[9] == 0
+        assert po_row[10] == STRATEGY_LIMIT_RUNNER

@@ -629,11 +629,11 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 
   {chart_html}
 
-  <!-- Asian session range + volume profile (the reference range this report
-       trades the breakout of at London open) -->
+  <!-- Pre-London reference range + volume profile (the last hour before
+       London open, breakout evaluated within the first 15 min of London) -->
   <tr><td style="background:{_BG};padding:16px 24px;">
     <h3 style="margin:0 0 8px;color:{_GOLD};font-size:13px;
-               text-transform:uppercase;letter-spacing:1px;">Asian Session Range (00:00-08:00 UTC)</h3>
+               text-transform:uppercase;letter-spacing:1px;">Pre-London Range (last 1h before London open)</h3>
     <p style="margin:0 0 6px;color:{_TEXT};font-size:16px;font-family:monospace;font-weight:bold;">
       {range_str}</p>
     <p style="margin:0 0 6px;color:{_TEXT};font-size:13px;font-family:monospace;">

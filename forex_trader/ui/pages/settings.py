@@ -704,6 +704,16 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
             "MT5 order."
         ).classes("text-xs text-gray-400 mt-1 leading-relaxed")
 
+        # ── Exclude High-Risk signals ──────────────────────────────────────────
+        ui.separator().classes("my-3")
+        excl_high = ui.checkbox(
+            "Exclude High-Risk",
+            value=bool(rs.get("exclude_high_risk", 0)),
+        ).classes("text-sm text-gray-300")
+        excl_high.tooltip(
+            "When checked, any Telegram signal containing 'High Risk' is silently ignored and not traded."
+        )
+
         def save_risk():
             try:
                 db_module.update_risk_settings({
@@ -717,6 +727,7 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
                     "circuit_breaker_enabled":        int(bool(cb_enabled.value)),
                     "circuit_breaker_losses":         int(cb_losses.value     or 3),
                     "circuit_breaker_cooldown_mins":  int(cb_cooldown.value   or 60),
+                    "exclude_high_risk":              int(bool(excl_high.value)),
                 })
                 ui.notify("Risk settings saved", type="positive")
             except (TypeError, ValueError) as _save_err:

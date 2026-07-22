@@ -1113,9 +1113,10 @@ def _render_market_order_form(engine):
 
 
 def _render_orb_report(engine):
-    """London open ORB/IVB report — trades the breakout of the Asian session
-    range (00:00-08:00 UTC) at London open, volume profile, reload-zone
-    entry setup, manual execute, and an auto-execute-every-morning toggle."""
+    """London open ORB/IVB report — trades the breakout of the last hour
+    before London opens, evaluated within the first 15 minutes of London,
+    volume profile, reload-zone entry setup, manual execute, and an
+    auto-execute-every-morning toggle (places a genuine EA pending order)."""
     import base64
     from forex_trader.core import email_service
 
@@ -1136,8 +1137,9 @@ def _render_orb_report(engine):
         with container:
             if not report:
                 ui.label(
-                    "No ORB report available yet — this builds from the Asian "
-                    "session range (00:00-08:00 UTC) and is available once London opens."
+                    "No ORB report available yet — this builds from the last hour "
+                    "before London opens and is only available during the first 15 "
+                    "minutes after London opens."
                 ).classes("text-gray-500 text-sm italic p-4")
                 return
 
@@ -1158,16 +1160,16 @@ def _render_orb_report(engine):
                     )
                     ui.label(status_txt).classes(f"text-sm font-bold {status_col}")
 
-                # Asian session range + volume profile
+                # Pre-London reference range (last hour before London open) + volume profile
                 with ui.grid(columns=4).classes("w-full text-sm gap-2 mb-2"):
                     _stat_cell(
-                        "ASIAN RANGE",
+                        "PRE-LONDON RANGE",
                         f"${report['range_low']:.2f} – ${report['range_high']:.2f}  "
                         f"({report['range_height']:.1f} pts)",
                     )
                     _stat_cell("POC", f"${report['poc']:.2f}")
                     _stat_cell("VALUE AREA", f"${report['val']:.2f} – ${report['vah']:.2f}")
-                    _stat_cell("SESSION", "00:00–08:00 UTC")
+                    _stat_cell("WINDOW", "London open + 15min")
 
                 if report.get("position_note"):
                     ui.label(report["position_note"]).classes("text-xs text-gray-500 mb-3")
@@ -1397,6 +1399,150 @@ def _render_schedule():
 
     schedule = sched.get_trading_schedule()
     enabled_now = sched.is_trading_schedule_enabled()
+    rs = db_module.get_risk_settings()
+
+    # ── Trading Markets card ─────────────────────────────────────────────────
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mb-3"):
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.label("Trading Markets").classes("text-base font-bold text-yellow-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Controls which trading sessions will accept and execute signals.\n\n"
+                "Asia:     21:00–07:00 UTC (overnight / off-peak)\n"
+                "London:   07:00–16:00 UTC (includes London/NY overlap)\n"
+                "New York: 12:00–21:00 UTC (includes London/NY overlap)\n\n"
+                "Signals can still be generated at any time, but they will only "
+                "trigger and execute live trades during an enabled session.\n\n"
+                "If more than one market is selected, the overlapping hours "
+                "(12:00–16:00 UTC) are also active."
+            )
+
+        _sess_asia   = bool(rs.get("session_asia_enabled",   1))
+        _sess_london = bool(rs.get("session_london_enabled", 1))
+        _sess_ny     = bool(rs.get("session_ny_enabled",     1))
+
+        def _compute_session_label() -> tuple[str, str]:
+            """Return (label, badge_color) based on clock + enabled sessions."""
+            from datetime import datetime, timezone as _tz
+            from forex_trader.core.dpm_engine import is_weekly_market_closed
+            if is_weekly_market_closed():
+                return "Markets Closed", "grey"
+            h = datetime.now(_tz.utc).hour
+            london_open = 7  <= h < 16
+            ny_open     = 12 <= h < 21
+            asia_open   = not (london_open or ny_open)  # 21:00-07:00 UTC
+
+            latest = db_module.get_risk_settings()
+            asia_en   = bool(latest.get("session_asia_enabled",   1))
+            london_en = bool(latest.get("session_london_enabled", 1))
+            ny_en     = bool(latest.get("session_ny_enabled",     1))
+
+            if london_open and ny_open:
+                if london_en or ny_en:
+                    return "Overlap (London + NY)", "blue"
+                return "Markets Closed", "grey"
+            if london_open:
+                if london_en:
+                    return "London", "blue"
+                return "Markets Closed", "grey"
+            if ny_open:
+                if ny_en:
+                    return "New York", "blue"
+                return "Markets Closed", "grey"
+            # Asian / off-hours
+            if asia_en:
+                return "Asia", "blue"
+            return "Markets Closed", "grey"
+
+        _init_label, _init_color = _compute_session_label()
+
+        # Session indicator row
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.label("Current session:").classes("text-xs text-gray-400")
+            sess_badge = ui.badge(_init_label, color=_init_color).classes("text-xs")
+        def _refresh_sess_badge(badge=sess_badge):
+            lbl, col = _compute_session_label()
+            badge.text = lbl
+            badge.props(f"color={col}")
+        ui.timer(60, _refresh_sess_badge)
+
+        # Three market toggle buttons
+        with ui.row().classes("gap-2 flex-wrap"):
+
+            # Asia
+            asia_btn = ui.button(
+                "Asia",
+                icon="nights_stay",
+            ).props(
+                f"dense {'color=green' if _sess_asia else 'flat color=grey'}"
+            ).classes("text-xs font-semibold").tooltip(
+                "Asian session: 21:00–07:00 UTC\n"
+                "Enables signal execution during overnight / off-peak hours."
+            )
+
+            # London
+            london_btn = ui.button(
+                "London",
+                icon="location_city",
+            ).props(
+                f"dense {'color=green' if _sess_london else 'flat color=grey'}"
+            ).classes("text-xs font-semibold").tooltip(
+                "London session: 07:00–16:00 UTC\n"
+                "Includes the London/NY overlap (12:00–16:00 UTC)."
+            )
+
+            # New York
+            ny_btn = ui.button(
+                "New York",
+                icon="location_on",
+            ).props(
+                f"dense {'color=green' if _sess_ny else 'flat color=grey'}"
+            ).classes("text-xs font-semibold").tooltip(
+                "New York session: 12:00–21:00 UTC\n"
+                "Includes the London/NY overlap (12:00–16:00 UTC)."
+            )
+
+        # Status caption
+        _active = []
+        if _sess_asia:   _active.append("Asia")
+        if _sess_london: _active.append("London")
+        if _sess_ny:     _active.append("New York")
+        mkt_caption = ui.label(
+            f"Active: {', '.join(_active)}" if _active else "No sessions active — all signals blocked"
+        ).classes("text-xs text-gray-400 mt-1" if _active else "text-xs text-red-400 mt-1")
+
+        def _toggle_market(key: str, btn, caption=mkt_caption):
+            cur = bool(db_module.get_risk_settings().get(key, 1))
+            new = not cur
+            db_module.update_risk_settings({key: 1 if new else 0})
+            if new:
+                btn.props("color=green")
+                btn.props(remove="flat")
+            else:
+                btn.props("flat color=grey")
+            # Rebuild caption
+            latest = db_module.get_risk_settings()
+            parts = []
+            if latest.get("session_asia_enabled",   1): parts.append("Asia")
+            if latest.get("session_london_enabled", 1): parts.append("London")
+            if latest.get("session_ny_enabled",     1): parts.append("New York")
+            if parts:
+                caption.text = f"Active: {', '.join(parts)}"
+                caption.classes(replace="text-xs text-gray-400 mt-1")
+            else:
+                caption.text = "No sessions active — all signals blocked"
+                caption.classes(replace="text-xs text-red-400 mt-1")
+            # Update session badge immediately
+            _refresh_sess_badge()
+            sess_nm = {"session_asia_enabled": "Asia", "session_london_enabled": "London",
+                       "session_ny_enabled": "New York"}[key]
+            ui.notify(
+                f"{sess_nm} session {'enabled' if new else 'disabled'}",
+                type="positive" if new else "warning",
+            )
+
+        asia_btn.on("click",   lambda: _toggle_market("session_asia_enabled",   asia_btn))
+        london_btn.on("click", lambda: _toggle_market("session_london_enabled", london_btn))
+        ny_btn.on("click",     lambda: _toggle_market("session_ny_enabled",     ny_btn))
 
     with ui.row().classes("items-center gap-2 mb-1"):
         master_chk = ui.checkbox("Trading Schedule", value=enabled_now).classes(
@@ -1936,6 +2082,271 @@ def _render_strategy_params_card() -> None:
     _draw_body()
 
 
+def render_signals_card() -> None:
+    """Per-source live-execution toggles (Telegram/Bounce/Breakout/GD Copy) --
+    self-contained, importable by other pages (moved to the top of the
+    Parsing page, 2026-07-22 -- was previously part of Trading > Strategy)."""
+    rs = db_module.get_risk_settings()
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):
+        ui.label("Signals").classes("text-base font-bold text-yellow-300 mb-3")
+
+        with ui.row().classes("w-full gap-6 flex-wrap items-start"):
+
+            # ── Telegram Signals ──────────────────────────────────────────
+            with ui.column().classes("gap-1 min-w-52"):
+                with ui.row().classes("items-center gap-1"):
+                    ui.label("Telegram Signals").classes("text-sm font-semibold text-gray-200")
+                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                        "When ON, Telegram signals from your configured channels are parsed "
+                        "and can be auto-executed. When OFF, incoming Telegram messages are "
+                        "collected but completely ignored — no signals are created or traded."
+                    )
+                ui.label("Accept and trade signals from Telegram channels").classes(
+                    "text-xs text-gray-500 mb-1"
+                )
+                _tg_on = bool(rs.get("accept_tg_signals", 1))
+                tg_sig_badge = ui.badge(
+                    "TG SIGNALS ON" if _tg_on else "TG SIGNALS OFF",
+                    color="green" if _tg_on else "grey",
+                )
+
+                def toggle_tg_signals(badge=tg_sig_badge):
+                    cur = bool(db_module.get_risk_settings().get("accept_tg_signals", 1))
+                    db_module.update_risk_settings({"accept_tg_signals": 0 if cur else 1})
+                    new = not cur
+                    badge.props(f"color={'green' if new else 'grey'}")
+                    badge.text = "TG SIGNALS ON" if new else "TG SIGNALS OFF"
+                    ui.notify(
+                        "Telegram signals enabled" if new else "Telegram signals disabled — incoming messages will be ignored",
+                        type="positive" if new else "warning",
+                    )
+
+                ui.button("Toggle", icon="swap_horiz", on_click=toggle_tg_signals).classes(
+                    "text-xs mt-1"
+                )
+
+            ui.separator().props("vertical").classes("hidden sm:block")
+
+            # ── Bounce Generator ──────────────────────────────────────────
+            with ui.column().classes("gap-1 min-w-52"):
+                with ui.row().classes("items-center gap-1"):
+                    ui.label("Bounce Generator").classes("text-sm font-semibold text-gray-200")
+                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                        "When ON, signals generated by the Bounce Generator are "
+                        "executed as real MT5 trades using the active strategy and risk settings. "
+                        "When OFF, generated signals remain virtual only. "
+                        "Use Bounce Generator tab to start/stop the engine itself."
+                    )
+                ui.label("Route bounce signals to MT5").classes(
+                    "text-xs text-gray-500 mb-1"
+                )
+                _sg_on = bool(rs.get("sg_live_execution", 0))
+                sg_live_badge = ui.badge(
+                    "SG LIVE ON" if _sg_on else "SG LIVE OFF",
+                    color="green" if _sg_on else "grey",
+                )
+
+                def toggle_sg_live(badge=sg_live_badge):
+                    cur = bool(db_module.get_risk_settings().get("sg_live_execution", 0))
+                    new = not cur
+                    db_module.update_risk_settings({"sg_live_execution": 1 if new else 0})
+                    badge.props(f"color={'green' if new else 'grey'}")
+                    badge.text = "SG LIVE ON" if new else "SG LIVE OFF"
+                    ui.notify(
+                        "Bounce Generator live execution ON — signals will place real MT5 trades"
+                        if new else "Bounce Generator live execution OFF",
+                        type="positive" if new else "info",
+                    )
+
+                ui.button("Toggle", icon="swap_horiz", on_click=toggle_sg_live).classes(
+                    "text-xs mt-1"
+                )
+
+                ui.separator().classes("my-1")
+                ui.label("AI signal evaluation").classes("text-xs text-gray-500 mb-1")
+                _sg_claude_on = bool(rs.get("sg_claude_eval_enabled", 1))
+                sg_claude_badge = ui.badge(
+                    "AI ON" if _sg_claude_on else "AI OFF",
+                    color="blue" if _sg_claude_on else "grey",
+                )
+
+                async def toggle_sg_claude(badge=sg_claude_badge):
+                    key = "sg_claude_eval_enabled"
+                    if _is_remote_active():
+                        cli = sync_client.get_instance()
+                        if cli is None:
+                            ui.notify("Not connected to VPS", type="negative")
+                            return
+                        # Read "current" from the VPS's own confirmed settings
+                        # snapshot, not this node's local DB row — the RPC below
+                        # never updates that local row, only the periodic full
+                        # settings broadcast does, so basing "current" on the
+                        # local row made every click here recompute the same
+                        # "new" value forever (toggle stuck one-directional:
+                        # confirmed live — Bounce stuck OFF, Breakout stuck ON,
+                        # each click just re-sent the same target state).
+                        cur = bool(cli.remote_settings.get(key, 1))
+                        new = not cur
+                        try:
+                            ack = await cli.send_engine_control("bounce", "set_ai_eval", enabled=new)
+                        except Exception as exc:
+                            ui.notify(f"Failed to reach VPS: {exc}", type="negative")
+                            return
+                        if ack.get("error"):
+                            ui.notify(f"VPS rejected: {ack['error']}", type="negative")
+                            return
+                        cli.remote_settings[key] = 1 if new else 0
+                    else:
+                        cur = bool(db_module.get_risk_settings().get(key, 1))
+                        new = not cur
+                        db_module.update_risk_settings({key: 1 if new else 0})
+                    badge.props(f"color={'blue' if new else 'grey'}")
+                    badge.text = "AI ON" if new else "AI OFF"
+                    ui.notify(
+                        "Bounce: AI evaluation ON — each signal reviewed by AI"
+                        if new else
+                        "Bounce: AI evaluation OFF — ML + rules only (faster)",
+                        type="info",
+                    )
+
+                ui.button("Toggle", icon="psychology", on_click=toggle_sg_claude).classes(
+                    "text-xs mt-1"
+                )
+
+            ui.separator().props("vertical").classes("hidden sm:block")
+
+            # ── Breakout Generator ────────────────────────────────────────
+            with ui.column().classes("gap-1 min-w-52"):
+                with ui.row().classes("items-center gap-1"):
+                    ui.label("Breakout Generator").classes("text-sm font-semibold text-gray-200")
+                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                        "When ON, confirmed breakout signals are sent to MT5 as live trades. "
+                        "When OFF, the engine runs in virtual/learning-only mode. "
+                        "Use Breakout Generator tab to start/stop the engine and view signals."
+                    )
+                ui.label("Route breakout signals to MT5 as live trades").classes(
+                    "text-xs text-gray-500 mb-1"
+                )
+                _bo_live_on = bool(rs.get("bo_live_execution", 0))
+                bo_live_badge = ui.badge(
+                    "BO LIVE ON" if _bo_live_on else "BO LIVE OFF",
+                    color="green" if _bo_live_on else "grey",
+                )
+
+                def toggle_bo_live(badge=bo_live_badge):
+                    cur = bool(db_module.get_risk_settings().get("bo_live_execution", 0))
+                    new = not cur
+                    db_module.update_risk_settings({"bo_live_execution": 1 if new else 0})
+                    badge.props(f"color={'green' if new else 'grey'}")
+                    badge.text = "BO LIVE ON" if new else "BO LIVE OFF"
+                    ui.notify(
+                        "Breakout live execution ENABLED — signals will open real MT5 trades" if new
+                        else "Breakout live execution DISABLED — virtual mode only",
+                        type="positive" if new else "warning",
+                    )
+
+                # Sync badge to live state on each page refresh (30s timer)
+                def _sync_bo_badge(badge=bo_live_badge):
+                    _live = bool(db_module.get_risk_settings().get("bo_live_execution", 0))
+                    badge.text = "BO LIVE ON" if _live else "BO LIVE OFF"
+                    badge.props(f"color={'green' if _live else 'grey'}")
+                ui.timer(30, _sync_bo_badge)
+
+                ui.button("Toggle", icon="swap_horiz", on_click=toggle_bo_live).classes(
+                    "text-xs mt-1"
+                )
+
+                ui.separator().classes("my-1")
+                ui.label("AI signal evaluation").classes("text-xs text-gray-500 mb-1")
+                _bo_claude_on = bool(rs.get("bo_claude_eval_enabled", 1))
+                bo_claude_badge = ui.badge(
+                    "AI ON" if _bo_claude_on else "AI OFF",
+                    color="blue" if _bo_claude_on else "grey",
+                )
+
+                async def toggle_bo_claude(badge=bo_claude_badge):
+                    key = "bo_claude_eval_enabled"
+                    if _is_remote_active():
+                        cli = sync_client.get_instance()
+                        if cli is None:
+                            ui.notify("Not connected to VPS", type="negative")
+                            return
+                        # See toggle_sg_claude's comment above — "current" must
+                        # come from the VPS's confirmed settings snapshot, not
+                        # this node's local DB row, or the toggle sticks in one
+                        # direction forever.
+                        cur = bool(cli.remote_settings.get(key, 1))
+                        new = not cur
+                        try:
+                            ack = await cli.send_engine_control("breakout", "set_ai_eval", enabled=new)
+                        except Exception as exc:
+                            ui.notify(f"Failed to reach VPS: {exc}", type="negative")
+                            return
+                        if ack.get("error"):
+                            ui.notify(f"VPS rejected: {ack['error']}", type="negative")
+                            return
+                        cli.remote_settings[key] = 1 if new else 0
+                    else:
+                        cur = bool(db_module.get_risk_settings().get(key, 1))
+                        new = not cur
+                        db_module.update_risk_settings({key: 1 if new else 0})
+                    badge.props(f"color={'blue' if new else 'grey'}")
+                    badge.text = "AI ON" if new else "AI OFF"
+                    ui.notify(
+                        "Breakout: AI evaluation ON — each signal reviewed by AI"
+                        if new else
+                        "Breakout: AI evaluation OFF — ML + rules only (faster execution)",
+                        type="info",
+                    )
+
+                ui.button("Toggle", icon="psychology", on_click=toggle_bo_claude).classes(
+                    "text-xs mt-1"
+                )
+
+            ui.separator().props("vertical").classes("hidden sm:block")
+
+            # ── GD Copy Engine ────────────────────────────────────────────
+            with ui.column().classes("gap-1 min-w-52"):
+                with ui.row().classes("items-center gap-1"):
+                    ui.label("GD Copy Engine").classes("text-sm font-semibold text-gray-200")
+                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                        "When ON, signals generated by the GD Copy Engine are executed as "
+                        "real MT5 trades. The engine reverse-engineers Gold Diggers VIP's "
+                        "methodology to generate signals before they arrive on Telegram. "
+                        "Use Signal Generator > GD Copy tab to view signals and correlation stats."
+                    )
+                ui.label("Route GD Copy signals to MT5 as live trades").classes(
+                    "text-xs text-gray-500 mb-1"
+                )
+                _gdc_live_on = bool(rs.get("gdc_live_execution", 0))
+                gdc_live_badge = ui.badge(
+                    "GDC LIVE ON" if _gdc_live_on else "GDC LIVE OFF",
+                    color="green" if _gdc_live_on else "grey",
+                )
+
+                def toggle_gdc_live(badge=gdc_live_badge):
+                    cur = bool(db_module.get_risk_settings().get("gdc_live_execution", 0))
+                    new = not cur
+                    db_module.update_risk_settings({"gdc_live_execution": 1 if new else 0})
+                    badge.props(f"color={'green' if new else 'grey'}")
+                    badge.text = "GDC LIVE ON" if new else "GDC LIVE OFF"
+                    ui.notify(
+                        "GD Copy live execution ENABLED — signals will open real MT5 trades" if new
+                        else "GD Copy live execution DISABLED — virtual mode only",
+                        type="positive" if new else "warning",
+                    )
+
+                def _sync_gdc_badge(badge=gdc_live_badge):
+                    _live = bool(db_module.get_risk_settings().get("gdc_live_execution", 0))
+                    badge.text = "GDC LIVE ON" if _live else "GDC LIVE OFF"
+                    badge.props(f"color={'green' if _live else 'grey'}")
+                ui.timer(30, _sync_gdc_badge)
+
+                ui.button("Toggle", icon="swap_horiz", on_click=toggle_gdc_live).classes(
+                    "text-xs mt-1"
+                )
+
+
 def _render_strategy(engine):
     outer = ui.column().classes("w-full gap-4")
 
@@ -1971,419 +2382,16 @@ def _render_strategy(engine):
             cs = next((c for c in custom_strats if c["id"] == key), None)
             return (cs or {}).get("description", "")
 
-        # ── Top row: Trading Markets (half) + Channel Strategy (half) ────────
+        # ── Top row: Strategy Parameters (half) + Channel Strategy (half) ────
         with ui.row().classes("w-full gap-4 flex-wrap items-stretch"):
 
-          # ── Trading Markets card ─────────────────────────────────────────
+          # ── Strategy Parameters card ─────────────────────────────────────
           with ui.card().classes("flex-1 min-w-72 bg-gray-800 p-2 rounded-lg"):
-            with ui.row().classes("items-center gap-2 mb-1"):
-                ui.label("Trading Markets").classes("text-base font-bold text-yellow-300")
-                ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                    "Controls which trading sessions will accept and execute signals.\n\n"
-                    "Asia:     21:00–07:00 UTC (overnight / off-peak)\n"
-                    "London:   07:00–16:00 UTC (includes London/NY overlap)\n"
-                    "New York: 12:00–21:00 UTC (includes London/NY overlap)\n\n"
-                    "Signals can still be generated at any time, but they will only "
-                    "trigger and execute live trades during an enabled session.\n\n"
-                    "If more than one market is selected, the overlapping hours "
-                    "(12:00–16:00 UTC) are also active."
-                )
-
-            _sess_asia   = bool(rs.get("session_asia_enabled",   1))
-            _sess_london = bool(rs.get("session_london_enabled", 1))
-            _sess_ny     = bool(rs.get("session_ny_enabled",     1))
-
-            def _compute_session_label() -> tuple[str, str]:
-                """Return (label, badge_color) based on clock + enabled sessions."""
-                from datetime import datetime, timezone as _tz
-                from forex_trader.core.dpm_engine import is_weekly_market_closed
-                if is_weekly_market_closed():
-                    return "Markets Closed", "grey"
-                h = datetime.now(_tz.utc).hour
-                london_open = 7  <= h < 16
-                ny_open     = 12 <= h < 21
-                asia_open   = not (london_open or ny_open)  # 21:00-07:00 UTC
-
-                latest = db_module.get_risk_settings()
-                asia_en   = bool(latest.get("session_asia_enabled",   1))
-                london_en = bool(latest.get("session_london_enabled", 1))
-                ny_en     = bool(latest.get("session_ny_enabled",     1))
-
-                if london_open and ny_open:
-                    if london_en or ny_en:
-                        return "Overlap (London + NY)", "blue"
-                    return "Markets Closed", "grey"
-                if london_open:
-                    if london_en:
-                        return "London", "blue"
-                    return "Markets Closed", "grey"
-                if ny_open:
-                    if ny_en:
-                        return "New York", "blue"
-                    return "Markets Closed", "grey"
-                # Asian / off-hours
-                if asia_en:
-                    return "Asia", "blue"
-                return "Markets Closed", "grey"
-
-            _init_label, _init_color = _compute_session_label()
-
-            # Session indicator row
-            with ui.row().classes("items-center gap-2 mb-1"):
-                ui.label("Current session:").classes("text-xs text-gray-400")
-                sess_badge = ui.badge(_init_label, color=_init_color).classes("text-xs")
-            def _refresh_sess_badge(badge=sess_badge):
-                lbl, col = _compute_session_label()
-                badge.text = lbl
-                badge.props(f"color={col}")
-            ui.timer(60, _refresh_sess_badge)
-
-            # Three market toggle buttons
-            with ui.row().classes("gap-2 flex-wrap"):
-
-                # Asia
-                asia_btn = ui.button(
-                    "Asia",
-                    icon="nights_stay",
-                ).props(
-                    f"dense {'color=green' if _sess_asia else 'flat color=grey'}"
-                ).classes("text-xs font-semibold").tooltip(
-                    "Asian session: 21:00–07:00 UTC\n"
-                    "Enables signal execution during overnight / off-peak hours."
-                )
-
-                # London
-                london_btn = ui.button(
-                    "London",
-                    icon="location_city",
-                ).props(
-                    f"dense {'color=green' if _sess_london else 'flat color=grey'}"
-                ).classes("text-xs font-semibold").tooltip(
-                    "London session: 07:00–16:00 UTC\n"
-                    "Includes the London/NY overlap (12:00–16:00 UTC)."
-                )
-
-                # New York
-                ny_btn = ui.button(
-                    "New York",
-                    icon="location_on",
-                ).props(
-                    f"dense {'color=green' if _sess_ny else 'flat color=grey'}"
-                ).classes("text-xs font-semibold").tooltip(
-                    "New York session: 12:00–21:00 UTC\n"
-                    "Includes the London/NY overlap (12:00–16:00 UTC)."
-                )
-
-            # Status caption
-            _active = []
-            if _sess_asia:   _active.append("Asia")
-            if _sess_london: _active.append("London")
-            if _sess_ny:     _active.append("New York")
-            mkt_caption = ui.label(
-                f"Active: {', '.join(_active)}" if _active else "No sessions active — all signals blocked"
-            ).classes("text-xs text-gray-400 mt-1" if _active else "text-xs text-red-400 mt-1")
-
-            def _toggle_market(key: str, btn, caption=mkt_caption):
-                cur = bool(db_module.get_risk_settings().get(key, 1))
-                new = not cur
-                db_module.update_risk_settings({key: 1 if new else 0})
-                if new:
-                    btn.props("color=green")
-                    btn.props(remove="flat")
-                else:
-                    btn.props("flat color=grey")
-                # Rebuild caption
-                latest = db_module.get_risk_settings()
-                parts = []
-                if latest.get("session_asia_enabled",   1): parts.append("Asia")
-                if latest.get("session_london_enabled", 1): parts.append("London")
-                if latest.get("session_ny_enabled",     1): parts.append("New York")
-                if parts:
-                    caption.text = f"Active: {', '.join(parts)}"
-                    caption.classes(replace="text-xs text-gray-400 mt-1")
-                else:
-                    caption.text = "No sessions active — all signals blocked"
-                    caption.classes(replace="text-xs text-red-400 mt-1")
-                # Update session badge immediately
-                _refresh_sess_badge()
-                sess_nm = {"session_asia_enabled": "Asia", "session_london_enabled": "London",
-                           "session_ny_enabled": "New York"}[key]
-                ui.notify(
-                    f"{sess_nm} session {'enabled' if new else 'disabled'}",
-                    type="positive" if new else "warning",
-                )
-
-            asia_btn.on("click",   lambda: _toggle_market("session_asia_enabled",   asia_btn))
-            london_btn.on("click", lambda: _toggle_market("session_london_enabled", london_btn))
-            ny_btn.on("click",     lambda: _toggle_market("session_ny_enabled",     ny_btn))
+            _render_strategy_params_card()
 
           # ── Channel Strategy card ─────────────────────────────────────────
           with ui.card().classes("flex-1 min-w-72 bg-gray-800 p-2 rounded-lg"):
             _render_channel_strategy_card(engine, all_names, rs)
-
-        # ── Strategy Parameters card ────────────────────────────────────────
-        with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):
-            _render_strategy_params_card()
-
-        # ── Signals card ──────────────────────────────────────────────────────
-        with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):
-            ui.label("Signals").classes("text-base font-bold text-yellow-300 mb-3")
-
-            with ui.row().classes("w-full gap-6 flex-wrap items-start"):
-
-                # ── Telegram Signals ──────────────────────────────────────────
-                with ui.column().classes("gap-1 min-w-52"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Telegram Signals").classes("text-sm font-semibold text-gray-200")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "When ON, Telegram signals from your configured channels are parsed "
-                            "and can be auto-executed. When OFF, incoming Telegram messages are "
-                            "collected but completely ignored — no signals are created or traded."
-                        )
-                    ui.label("Accept and trade signals from Telegram channels").classes(
-                        "text-xs text-gray-500 mb-1"
-                    )
-                    _tg_on = bool(rs.get("accept_tg_signals", 1))
-                    tg_sig_badge = ui.badge(
-                        "TG SIGNALS ON" if _tg_on else "TG SIGNALS OFF",
-                        color="green" if _tg_on else "grey",
-                    )
-
-                    def toggle_tg_signals(badge=tg_sig_badge):
-                        cur = bool(db_module.get_risk_settings().get("accept_tg_signals", 1))
-                        db_module.update_risk_settings({"accept_tg_signals": 0 if cur else 1})
-                        new = not cur
-                        badge.props(f"color={'green' if new else 'grey'}")
-                        badge.text = "TG SIGNALS ON" if new else "TG SIGNALS OFF"
-                        ui.notify(
-                            "Telegram signals enabled" if new else "Telegram signals disabled — incoming messages will be ignored",
-                            type="positive" if new else "warning",
-                        )
-
-                    ui.button("Toggle", icon="swap_horiz", on_click=toggle_tg_signals).classes(
-                        "text-xs mt-1"
-                    )
-
-                ui.separator().props("vertical").classes("hidden sm:block")
-
-                # ── Bounce Generator ──────────────────────────────────────────
-                with ui.column().classes("gap-1 min-w-52"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Bounce Generator").classes("text-sm font-semibold text-gray-200")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "When ON, signals generated by the Bounce Generator are "
-                            "executed as real MT5 trades using the active strategy and risk settings. "
-                            "When OFF, generated signals remain virtual only. "
-                            "Use Bounce Generator tab to start/stop the engine itself."
-                        )
-                    ui.label("Route bounce signals to MT5").classes(
-                        "text-xs text-gray-500 mb-1"
-                    )
-                    _sg_on = bool(rs.get("sg_live_execution", 0))
-                    sg_live_badge = ui.badge(
-                        "SG LIVE ON" if _sg_on else "SG LIVE OFF",
-                        color="green" if _sg_on else "grey",
-                    )
-
-                    def toggle_sg_live(badge=sg_live_badge):
-                        cur = bool(db_module.get_risk_settings().get("sg_live_execution", 0))
-                        new = not cur
-                        db_module.update_risk_settings({"sg_live_execution": 1 if new else 0})
-                        badge.props(f"color={'green' if new else 'grey'}")
-                        badge.text = "SG LIVE ON" if new else "SG LIVE OFF"
-                        ui.notify(
-                            "Bounce Generator live execution ON — signals will place real MT5 trades"
-                            if new else "Bounce Generator live execution OFF",
-                            type="positive" if new else "info",
-                        )
-
-                    ui.button("Toggle", icon="swap_horiz", on_click=toggle_sg_live).classes(
-                        "text-xs mt-1"
-                    )
-
-                    ui.separator().classes("my-1")
-                    ui.label("AI signal evaluation").classes("text-xs text-gray-500 mb-1")
-                    _sg_claude_on = bool(rs.get("sg_claude_eval_enabled", 1))
-                    sg_claude_badge = ui.badge(
-                        "AI ON" if _sg_claude_on else "AI OFF",
-                        color="blue" if _sg_claude_on else "grey",
-                    )
-
-                    async def toggle_sg_claude(badge=sg_claude_badge):
-                        key = "sg_claude_eval_enabled"
-                        if _is_remote_active():
-                            cli = sync_client.get_instance()
-                            if cli is None:
-                                ui.notify("Not connected to VPS", type="negative")
-                                return
-                            # Read "current" from the VPS's own confirmed settings
-                            # snapshot, not this node's local DB row — the RPC below
-                            # never updates that local row, only the periodic full
-                            # settings broadcast does, so basing "current" on the
-                            # local row made every click here recompute the same
-                            # "new" value forever (toggle stuck one-directional:
-                            # confirmed live — Bounce stuck OFF, Breakout stuck ON,
-                            # each click just re-sent the same target state).
-                            cur = bool(cli.remote_settings.get(key, 1))
-                            new = not cur
-                            try:
-                                ack = await cli.send_engine_control("bounce", "set_ai_eval", enabled=new)
-                            except Exception as exc:
-                                ui.notify(f"Failed to reach VPS: {exc}", type="negative")
-                                return
-                            if ack.get("error"):
-                                ui.notify(f"VPS rejected: {ack['error']}", type="negative")
-                                return
-                            cli.remote_settings[key] = 1 if new else 0
-                        else:
-                            cur = bool(db_module.get_risk_settings().get(key, 1))
-                            new = not cur
-                            db_module.update_risk_settings({key: 1 if new else 0})
-                        badge.props(f"color={'blue' if new else 'grey'}")
-                        badge.text = "AI ON" if new else "AI OFF"
-                        ui.notify(
-                            "Bounce: AI evaluation ON — each signal reviewed by AI"
-                            if new else
-                            "Bounce: AI evaluation OFF — ML + rules only (faster)",
-                            type="info",
-                        )
-
-                    ui.button("Toggle", icon="psychology", on_click=toggle_sg_claude).classes(
-                        "text-xs mt-1"
-                    )
-
-                ui.separator().props("vertical").classes("hidden sm:block")
-
-                # ── Breakout Generator ────────────────────────────────────────
-                with ui.column().classes("gap-1 min-w-52"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Breakout Generator").classes("text-sm font-semibold text-gray-200")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "When ON, confirmed breakout signals are sent to MT5 as live trades. "
-                            "When OFF, the engine runs in virtual/learning-only mode. "
-                            "Use Breakout Generator tab to start/stop the engine and view signals."
-                        )
-                    ui.label("Route breakout signals to MT5 as live trades").classes(
-                        "text-xs text-gray-500 mb-1"
-                    )
-                    _bo_live_on = bool(rs.get("bo_live_execution", 0))
-                    bo_live_badge = ui.badge(
-                        "BO LIVE ON" if _bo_live_on else "BO LIVE OFF",
-                        color="green" if _bo_live_on else "grey",
-                    )
-
-                    def toggle_bo_live(badge=bo_live_badge):
-                        cur = bool(db_module.get_risk_settings().get("bo_live_execution", 0))
-                        new = not cur
-                        db_module.update_risk_settings({"bo_live_execution": 1 if new else 0})
-                        badge.props(f"color={'green' if new else 'grey'}")
-                        badge.text = "BO LIVE ON" if new else "BO LIVE OFF"
-                        ui.notify(
-                            "Breakout live execution ENABLED — signals will open real MT5 trades" if new
-                            else "Breakout live execution DISABLED — virtual mode only",
-                            type="positive" if new else "warning",
-                        )
-
-                    # Sync badge to live state on each page refresh (30s timer)
-                    def _sync_bo_badge(badge=bo_live_badge):
-                        _live = bool(db_module.get_risk_settings().get("bo_live_execution", 0))
-                        badge.text = "BO LIVE ON" if _live else "BO LIVE OFF"
-                        badge.props(f"color={'green' if _live else 'grey'}")
-                    ui.timer(30, _sync_bo_badge)
-
-                    ui.button("Toggle", icon="swap_horiz", on_click=toggle_bo_live).classes(
-                        "text-xs mt-1"
-                    )
-
-                    ui.separator().classes("my-1")
-                    ui.label("AI signal evaluation").classes("text-xs text-gray-500 mb-1")
-                    _bo_claude_on = bool(rs.get("bo_claude_eval_enabled", 1))
-                    bo_claude_badge = ui.badge(
-                        "AI ON" if _bo_claude_on else "AI OFF",
-                        color="blue" if _bo_claude_on else "grey",
-                    )
-
-                    async def toggle_bo_claude(badge=bo_claude_badge):
-                        key = "bo_claude_eval_enabled"
-                        if _is_remote_active():
-                            cli = sync_client.get_instance()
-                            if cli is None:
-                                ui.notify("Not connected to VPS", type="negative")
-                                return
-                            # See toggle_sg_claude's comment above — "current" must
-                            # come from the VPS's confirmed settings snapshot, not
-                            # this node's local DB row, or the toggle sticks in one
-                            # direction forever.
-                            cur = bool(cli.remote_settings.get(key, 1))
-                            new = not cur
-                            try:
-                                ack = await cli.send_engine_control("breakout", "set_ai_eval", enabled=new)
-                            except Exception as exc:
-                                ui.notify(f"Failed to reach VPS: {exc}", type="negative")
-                                return
-                            if ack.get("error"):
-                                ui.notify(f"VPS rejected: {ack['error']}", type="negative")
-                                return
-                            cli.remote_settings[key] = 1 if new else 0
-                        else:
-                            cur = bool(db_module.get_risk_settings().get(key, 1))
-                            new = not cur
-                            db_module.update_risk_settings({key: 1 if new else 0})
-                        badge.props(f"color={'blue' if new else 'grey'}")
-                        badge.text = "AI ON" if new else "AI OFF"
-                        ui.notify(
-                            "Breakout: AI evaluation ON — each signal reviewed by AI"
-                            if new else
-                            "Breakout: AI evaluation OFF — ML + rules only (faster execution)",
-                            type="info",
-                        )
-
-                    ui.button("Toggle", icon="psychology", on_click=toggle_bo_claude).classes(
-                        "text-xs mt-1"
-                    )
-
-                ui.separator().props("vertical").classes("hidden sm:block")
-
-                # ── GD Copy Engine ────────────────────────────────────────────
-                with ui.column().classes("gap-1 min-w-52"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("GD Copy Engine").classes("text-sm font-semibold text-gray-200")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "When ON, signals generated by the GD Copy Engine are executed as "
-                            "real MT5 trades. The engine reverse-engineers Gold Diggers VIP's "
-                            "methodology to generate signals before they arrive on Telegram. "
-                            "Use Signal Generator > GD Copy tab to view signals and correlation stats."
-                        )
-                    ui.label("Route GD Copy signals to MT5 as live trades").classes(
-                        "text-xs text-gray-500 mb-1"
-                    )
-                    _gdc_live_on = bool(rs.get("gdc_live_execution", 0))
-                    gdc_live_badge = ui.badge(
-                        "GDC LIVE ON" if _gdc_live_on else "GDC LIVE OFF",
-                        color="green" if _gdc_live_on else "grey",
-                    )
-
-                    def toggle_gdc_live(badge=gdc_live_badge):
-                        cur = bool(db_module.get_risk_settings().get("gdc_live_execution", 0))
-                        new = not cur
-                        db_module.update_risk_settings({"gdc_live_execution": 1 if new else 0})
-                        badge.props(f"color={'green' if new else 'grey'}")
-                        badge.text = "GDC LIVE ON" if new else "GDC LIVE OFF"
-                        ui.notify(
-                            "GD Copy live execution ENABLED — signals will open real MT5 trades" if new
-                            else "GD Copy live execution DISABLED — virtual mode only",
-                            type="positive" if new else "warning",
-                        )
-
-                    def _sync_gdc_badge(badge=gdc_live_badge):
-                        _live = bool(db_module.get_risk_settings().get("gdc_live_execution", 0))
-                        badge.text = "GDC LIVE ON" if _live else "GDC LIVE OFF"
-                        badge.props(f"color={'green' if _live else 'grey'}")
-                    ui.timer(30, _sync_gdc_badge)
-
-                    ui.button("Toggle", icon="swap_horiz", on_click=toggle_gdc_live).classes(
-                        "text-xs mt-1"
-                    )
 
         # ── 3-card row ────────────────────────────────────────────────────────
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
@@ -2477,15 +2485,6 @@ def _render_strategy(engine):
                     "Requires ≥20 closed trades to activate."
                 )
 
-                ui.separator().classes("my-2")
-                excl_high = ui.checkbox(
-                    "Exclude High-Risk",
-                    value=bool(rs.get("exclude_high_risk", 0)),
-                ).classes("text-sm text-gray-300")
-                excl_high.tooltip(
-                    "When checked, any Telegram signal containing 'High Risk' is silently ignored and not traded."
-                )
-
                 def save_strategy():
                     try:
                         key = sel.value
@@ -2501,7 +2500,6 @@ def _render_strategy(engine):
                             "trailing_stop_distance":  float(trail_dist.value or 3.0),
                             "strategy_lot_size":       lot_override.value,
                             "profit_close_usd":        float(tp_at_usd.value or 0),
-                            "exclude_high_risk":       int(excl_high.value),
                             "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
                             "kelly_sizing_enabled":    int(kelly_enabled.value),
                         })

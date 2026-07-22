@@ -115,6 +115,7 @@ async def handle_limit_order_signal(
     try:
         ack = await _ea.place_pending_order(
             trade_id, direction, price, lot, stop_loss, tps, pcts, be_at_pos,
+            strategy=STRATEGY_LIMIT_RUNNER,
             expire_minutes=_DEFAULT_EXPIRE_MINUTES,
             close_full_on_last=not tp_open,
         )
@@ -147,11 +148,11 @@ async def handle_limit_order_signal(
         conn.execute(
             """INSERT INTO vantage_pending_orders
                (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
-                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, tg_id, channel_name, direction, price, stop_loss,
              json.dumps(tps), json.dumps(pcts), be_at_pos, int(tp_open), lot, ticket,
-             "working", now),
+             "working", now, STRATEGY_LIMIT_RUNNER),
         )
     log.info(
         "[LimitRunner] pending order placed tg_id=%s ticket=%s %s %.2f lots @ %.2f SL=%.2f tps=%s tp_open=%s",

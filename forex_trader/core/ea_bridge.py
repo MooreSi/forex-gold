@@ -223,7 +223,7 @@ class EABridge:
 
     async def place_pending_order(self, trade_id: str, direction: str, price: float,
                                   lot_size: float, stop_loss: float, tps: dict[int, float],
-                                  pcts: list[float], be_at_pos: int,
+                                  pcts: list[float], be_at_pos: int, strategy: str,
                                   expire_minutes: float = 240.0,
                                   close_full_on_last: bool = True,
                                   timeout: float = 5.0) -> dict:
@@ -240,11 +240,23 @@ class EABridge:
         gives no synchronous fill confirmation for a pending order, only for
         the order's initial acceptance onto the book.
 
+        strategy: which management strategy the EA (and, once filled,
+        ManageTrade's dispatch) should treat this trade as — e.g.
+        "limit_runner" (ladder-managed, ManageLadder) or "orb_fixed"
+        (single-TP close-all, ManageOrbFixed). Required explicitly rather
+        than assumed, since a wrong value here silently mismanages the
+        trade once it fills — see _on_pending_order_filled, which stores
+        this on vantage_pending_orders and reads it back at fill time
+        instead of hardcoding a strategy the way earlier versions of this
+        method did.
+
         tps/pcts/be_at_pos: same shapes as open_trade()'s own ladder
-        params (flat tp1..tp8/pct1..pct8/be_at_pos fields) — every Limit
-        Runner order is ladder-managed once filled (ManageLadder in the EA,
-        trail_mode always the default previous-TP-price rule; Limit Runner
-        doesn't need a custom trail like Adaptive Runner 2's midpoint_lag2).
+        params (flat tp1..tp8/pct1..pct8/be_at_pos fields). Only meaningful
+        for ladder-managed strategies (ManageLadder reads t.pcts/t.beAtPos);
+        a single-TP strategy like orb_fixed ignores them — ManageOrbFixed
+        just closes everything the instant its one TP is touched — so callers
+        for those can pass tps={1: target}, pcts=[1.0], be_at_pos=0 as inert
+        placeholders.
 
         close_full_on_last: True (default) means the last TP closes
         everything remaining, same as every other ladder strategy. False —
@@ -261,7 +273,7 @@ class EABridge:
         msg = {
             "type": "place_pending_order", "trade_id": trade_id, "direction": direction,
             "price": price, "lot_size": lot_size, "stop_loss": stop_loss,
-            "strategy": "limit_runner", "expire_minutes": expire_minutes,
+            "strategy": strategy, "expire_minutes": expire_minutes,
             "be_at_pos": be_at_pos, "close_full_on_last": int(close_full_on_last),
         }
         for n in range(1, 9):
@@ -446,7 +458,7 @@ class EABridge:
                          row["lot_size"], row["lot_size"], row["stop_loss"],
                          tps.get("1"), tps.get("2"), tps.get("3"), tps.get("4"),
                          tps.get("5"), tps.get("6"), tps.get("7"), tps.get("8"),
-                         "open", now, 0.0, 0.0, 0.0, 0.0, "limit_runner",
+                         "open", now, 0.0, 0.0, 0.0, 0.0, row["strategy"],
                          None, "ea", row["tp_open"]),
                     )
                     conn.execute(
@@ -458,7 +470,7 @@ class EABridge:
                         (now, trade_id),
                     )
             await db_module.to_db_thread(_apply)
-            self._active[trade_id] = {"ticket": ticket, "strategy": "limit_runner"}
+            self._active[trade_id] = {"ticket": ticket, "strategy": row["strategy"]}
             self._pending_orders.pop(trade_id, None)
             asyncio.create_task(telegram_alerts.send_message(
                 f"Limit order FILLED — {row['direction']} {row['lot_size']:g} lots @ "

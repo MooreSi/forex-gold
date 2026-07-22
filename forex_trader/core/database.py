@@ -779,6 +779,11 @@ def _apply_schema() -> None:
                 created_at     REAL NOT NULL,
                 resolved_at    REAL
             )""",
+            # Which strategy the resulting trade gets registered under once this
+            # pending order fills (_on_pending_order_filled reads this instead of
+            # assuming "limit_runner" — the only strategy this table originally
+            # tracked). Default preserves existing rows' actual behaviour.
+            "ALTER TABLE vantage_pending_orders ADD COLUMN strategy TEXT NOT NULL DEFAULT 'limit_runner'",
         ]:
             try:
                 conn.execute(stmt)

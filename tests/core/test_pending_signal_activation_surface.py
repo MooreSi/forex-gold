@@ -134,6 +134,49 @@ def test_price_outside_zone_skips(fresh_db):
     assert not ot.called
 
 
+def test_working_ea_pending_order_excludes_signal_from_market_fill(fresh_db):
+    """A signal_id with a resting genuine EA pending order (Limit Runner /
+    ORB auto-execute) must be excluded from this generic market-fill
+    watcher entirely -- otherwise the moment price re-enters the same
+    entry zone the EA order is also watching, this would open a SECOND,
+    duplicate trade before the real pending order has even filled."""
+    _insert_signal()
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_pending_orders (trade_id,signal_id,channel_name,direction,"
+            "price,stop_loss,tps_json,pcts_json,be_at_pos,lot_size,status,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("t1", "sig-1", "chan", "BUY", 2401.0, 2390.0, "{}", "[]", 0, 0.10,
+             "working", time.time()),
+        )
+    with mock.patch.object(psa, "get_open_trades", return_value=[]), \
+         mock.patch.object(psa, "open_trade_from_signal", new=mock.AsyncMock()) as ot:
+        result = asyncio.run(psa.try_activate_pending_signals(_TICK, _RS, _FakeBridge(), {}, []))
+    assert result is False  # no eligible pending signals at all
+    assert not ot.called
+    assert _signal_status() == "pending"  # untouched -- not expired, not activated
+
+
+def test_resolved_ea_pending_order_no_longer_excludes_signal(fresh_db):
+    """Once the pending order resolves (filled/cancelled), status moves off
+    'working' -- the exclusion must not linger and permanently hide the
+    signal from other callers that might still reference it by signal_id."""
+    _insert_signal()
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_pending_orders (trade_id,signal_id,channel_name,direction,"
+            "price,stop_loss,tps_json,pcts_json,be_at_pos,lot_size,status,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("t1", "sig-1", "chan", "BUY", 2401.0, 2390.0, "{}", "[]", 0, 0.10,
+             "cancelled", time.time()),
+        )
+    with mock.patch.object(psa, "get_open_trades", return_value=[]), \
+         mock.patch.object(psa, "open_trade_from_signal",
+                           new=mock.AsyncMock(return_value={"entry_price": 2400.5, "trade_id": "t"})) as ot:
+        asyncio.run(psa.try_activate_pending_signals(_TICK, _RS, _FakeBridge(), {}, []))
+    assert ot.called
+
+
 def test_max_trades_reached_breaks_loop(fresh_db):
     _insert_signal("sig-1", created_at=time.time())
     _insert_signal("sig-2", created_at=time.time() + 1)

@@ -32,6 +32,7 @@ from forex_trader.sync.protocol import (
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
+    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE,
     CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
@@ -86,6 +87,12 @@ class SyncClient:
         # combined snapshot rather than a per-key dict — the whole 7-day/
         # 3-window config is edited and saved as one atomic unit in the UI.
         self._pending_trading_schedule: Optional[dict] = self._load_pending_trading_schedule()
+        self.remote_strategy_params: dict = {}  # latest confirmed {strategy: {param: value}} snapshot
+        # Same durability pattern as _pending_trading_schedule above -- a
+        # single combined snapshot (all 5 strategies) rather than a per-key
+        # dict, since _forward_strategy_params_over_sync always sends the
+        # whole current snapshot.
+        self._pending_strategy_params: Optional[dict] = self._load_pending_strategy_params()
         self._ws = None
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -156,6 +163,23 @@ class SyncClient:
             )
         except Exception as e:
             log.debug("[SyncClient] failed to persist pending trading schedule: %s", e)
+
+    @staticmethod
+    def _load_pending_strategy_params() -> Optional[dict]:
+        try:
+            raw = db_module.get_app_config("sync_pending_strategy_params")
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
+
+    def _persist_pending_strategy_params(self) -> None:
+        try:
+            db_module.set_app_config(
+                "sync_pending_strategy_params",
+                json.dumps(self._pending_strategy_params) if self._pending_strategy_params else "",
+            )
+        except Exception as e:
+            log.debug("[SyncClient] failed to persist pending strategy params: %s", e)
 
     # ── Config ───────────────────────────────────────────────────────────────
 
@@ -239,6 +263,8 @@ class SyncClient:
             self._mirror_channel_strategy_locally(self.remote_channel_strategy)
             self.remote_trading_schedule = hello_reply.get("trading_schedule", {})
             self._mirror_trading_schedule_locally(self.remote_trading_schedule)
+            self.remote_strategy_params = hello_reply.get("strategy_params", {})
+            self._mirror_strategy_params_locally(self.remote_strategy_params)
             log.info("[SyncClient] connected to VPS %s:%s", self._host, self._port)
 
             if self._pending_settings:
@@ -258,6 +284,11 @@ class SyncClient:
                 log.info("[SyncClient] resending unconfirmed local trading "
                          "schedule change after reconnect")
                 asyncio.create_task(self._flush_pending_trading_schedule())
+
+            if self._pending_strategy_params:
+                log.info("[SyncClient] resending unconfirmed local strategy "
+                         "params change after reconnect")
+                asyncio.create_task(self._flush_pending_strategy_params())
 
             asyncio.create_task(self._ledger_pull_loop())
             asyncio.create_task(self._ai_recovered_pull_loop())
@@ -324,6 +355,12 @@ class SyncClient:
             if self._pending_trading_schedule == self.remote_trading_schedule:
                 self._pending_trading_schedule = None
                 self._persist_pending_trading_schedule()
+        elif t == MSG_STRATEGY_PARAMS_STATE:
+            self.remote_strategy_params = msg.get("strategy_params", {})
+            self._mirror_strategy_params_locally(self.remote_strategy_params)
+            if self._pending_strategy_params == self.remote_strategy_params:
+                self._pending_strategy_params = None
+                self._persist_pending_strategy_params()
         elif t == MSG_STAND_DOWN_ACK:
             self._last_stand_down_ack = msg
             self._stand_down_ack_event.set()
@@ -415,6 +452,20 @@ class SyncClient:
         except Exception as e:
             log.debug("[SyncClient] trading schedule mirror failed: %s", e)
 
+    def _mirror_strategy_params_locally(self, snapshot: dict) -> None:
+        """Mirror of _mirror_settings_locally() for Strategy Parameters —
+        same pending-outbound skip to avoid a reconnect overwriting a
+        just-made local edit with the VPS's stale value."""
+        if not snapshot:
+            return
+        if self._pending_strategy_params:
+            return
+        try:
+            from forex_trader.core.core_strategy_params import apply_strategy_params_snapshot
+            apply_strategy_params_snapshot(snapshot)
+        except Exception as e:
+            log.debug("[SyncClient] strategy params mirror failed: %s", e)
+
     def get_remote_open_position(self, mt5_ticket) -> Optional[dict]:
         """Look up a VPS-side open trade's full detail (strategy, TPs, SL,
         channel) by MT5 ticket from the last heartbeat, for rendering the
@@ -490,6 +541,24 @@ class SyncClient:
                 ))
             except Exception as e:
                 log.debug("[SyncClient] trading schedule propose send failed (will retry "
+                          "on next reconnect): %s", e)
+
+    async def propose_strategy_params(self, snapshot: dict) -> None:
+        self._pending_strategy_params = snapshot
+        self._persist_pending_strategy_params()
+        await self._flush_pending_strategy_params()
+
+    async def _flush_pending_strategy_params(self) -> None:
+        """Mirror of _flush_pending_settings() for Strategy Parameters."""
+        if not self._pending_strategy_params:
+            return
+        if self._ws is not None and self.conn_state == CONN_CONNECTED:
+            try:
+                await self._ws.send(json.dumps(
+                    make(MSG_STRATEGY_PARAMS_PROPOSE, strategy_params=self._pending_strategy_params)
+                ))
+            except Exception as e:
+                log.debug("[SyncClient] strategy params propose send failed (will retry "
                           "on next reconnect): %s", e)
 
     async def request_stand_down(self, timeout: float = 15.0) -> dict:

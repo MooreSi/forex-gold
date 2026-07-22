@@ -15,9 +15,11 @@ widen/cap/floor multipliers) -- not the TP-ladder close-percentage tables
 several strategies and shaped as an 8-TP-count lookup table rather than a
 single tunable value; retuning those is a materially bigger, separate task.
 
-Not synced between Local/Remote nodes (unlike risk settings) -- a template
-applied on one node does not propagate to its pair. Revisit if that turns
-out to matter in practice.
+Live values (strategy_params_snapshot()) sync between Local/Remote nodes
+the same way Trading Schedule does -- one combined snapshot proposed/
+confirmed together, not a per-strategy message (see forex_trader.sync).
+The named-template library (strategy_param_templates table) stays
+node-local -- each node keeps its own saved presets.
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ import logging
 import time
 
 from forex_trader.core import database as db_module
+from forex_trader.core.database import _schedule_coro
 from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_GD_VIP_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
@@ -107,10 +110,20 @@ def get_strategy_params(strategy: str) -> dict[str, float]:
     return values
 
 
-def set_strategy_params(strategy: str, params: dict) -> dict:
+_applying_sync_strategy_params = False  # re-entrancy guard -- see update_risk_settings
+
+
+def set_strategy_params(strategy: str, params: dict, _from_sync: bool = False) -> dict:
     """Overwrite the live values for `strategy`. Unknown keys in `params`
     are silently dropped rather than stored -- a typo'd key would
-    otherwise be saved but never actually read by anything."""
+    otherwise be saved but never actually read by anything.
+
+    _from_sync=True is used only when APPLYING a value that arrived over
+    the Local/Remote sync channel -- without this guard, applying an
+    incoming sync value would immediately re-forward it back out, an
+    infinite propose/confirm ping-pong between the two nodes (same
+    pattern as core_db_risk_settings.update_risk_settings)."""
+    global _applying_sync_strategy_params
     if strategy not in _DEFAULTS:
         raise ValueError(f"Unknown strategy: {strategy}")
     valid_keys = set(_DEFAULTS[strategy])
@@ -118,17 +131,63 @@ def set_strategy_params(strategy: str, params: dict) -> dict:
     merged.update({k: float(v) for k, v in params.items() if k in valid_keys})
     db_module.set_app_config(f"strategy_params_{strategy}", json.dumps(merged))
     _cache.pop(strategy, None)
+
+    if not _from_sync and not _applying_sync_strategy_params:
+        _applying_sync_strategy_params = True
+        try:
+            _forward_strategy_params_over_sync()
+        finally:
+            _applying_sync_strategy_params = False
     return merged
+
+
+def _forward_strategy_params_over_sync() -> None:
+    """Send the FULL current snapshot (all 5 strategies) to the paired
+    node, whichever role this process has. Sends the whole snapshot, not
+    just the one strategy that changed -- same one-combined-message shape
+    as Trading Schedule, avoiding a race between two near-simultaneous
+    edits to different strategies. No-op (and near-zero cost) if sync
+    isn't configured."""
+    try:
+        from forex_trader.sync import client as _sync_cli_mod
+        cli = _sync_cli_mod.get_instance()
+        if cli is not None:
+            _schedule_coro(cli.propose_strategy_params(strategy_params_snapshot()))
+            return
+    except Exception as exc:
+        log.debug("[Sync] strategy params forward (client) failed: %s", exc)
+
+    try:
+        from forex_trader.sync import server as _sync_srv_mod
+        srv = _sync_srv_mod.get_instance()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_strategy_params())
+    except Exception as exc:
+        log.debug("[Sync] strategy params forward (server) failed: %s", exc)
 
 
 def reset_strategy_params(strategy: str) -> dict:
     """Delete the live override -- reverts to built-in defaults."""
     if strategy not in _DEFAULTS:
         raise ValueError(f"Unknown strategy: {strategy}")
-    defaults = default_params(strategy)
-    db_module.set_app_config(f"strategy_params_{strategy}", json.dumps(defaults))
-    _cache.pop(strategy, None)
-    return defaults
+    return set_strategy_params(strategy, default_params(strategy))
+
+
+def strategy_params_snapshot() -> dict:
+    """Full {strategy: {param: value}} snapshot for every param-based
+    strategy -- used by Local/Remote sync (mirrors core_trading_schedule's
+    trading_schedule_snapshot())."""
+    return {strategy: get_strategy_params(strategy) for strategy in PARAM_STRATEGIES}
+
+
+def apply_strategy_params_snapshot(snapshot: dict) -> None:
+    """Apply an incoming sync snapshot -- one set_strategy_params() call
+    per known strategy present in the snapshot; unknown strategy keys are
+    silently skipped (forward-compat if a future version adds a strategy
+    this node doesn't know about yet)."""
+    for strategy, params in (snapshot or {}).items():
+        if strategy in _DEFAULTS:
+            set_strategy_params(strategy, params or {}, _from_sync=True)
 
 
 # ── Named template library ───────────────────────────────────────────────────

@@ -36,6 +36,7 @@ from forex_trader.sync.protocol import (
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
+    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -254,6 +255,7 @@ class SyncServer:
                 settings=self._settings_snapshot(),
                 channel_strategy=self._channel_strategy_snapshot(),
                 trading_schedule=self._trading_schedule_snapshot(),
+                strategy_params=self._strategy_params_snapshot(),
                 active_trader=db_module.get_active_trader(),
                 node_id=db_module.get_or_create_node_id(),
             )))
@@ -307,6 +309,8 @@ class SyncServer:
             await self._handle_channel_strategy_propose(ws, msg)
         elif t == MSG_TRADING_SCHEDULE_PROPOSE:
             await self._handle_trading_schedule_propose(ws, msg)
+        elif t == MSG_STRATEGY_PARAMS_PROPOSE:
+            await self._handle_strategy_params_propose(ws, msg)
         elif t == MSG_STAND_DOWN:
             await self._handle_stand_down(ws)
         elif t == MSG_RESUME:
@@ -607,6 +611,31 @@ class SyncServer:
         changes the schedule directly."""
         await self._broadcast(make(
             MSG_TRADING_SCHEDULE_STATE, trading_schedule=self._trading_schedule_snapshot()
+        ))
+
+    # ── Strategy Parameters sync ─────────────────────────────────────────────
+
+    def _strategy_params_snapshot(self) -> dict:
+        from forex_trader.core.core_strategy_params import strategy_params_snapshot
+        return strategy_params_snapshot()
+
+    async def _handle_strategy_params_propose(self, ws, msg: dict) -> None:
+        snapshot = msg.get("strategy_params") or {}
+        try:
+            from forex_trader.core.core_strategy_params import apply_strategy_params_snapshot
+            apply_strategy_params_snapshot(snapshot)
+            log.info("[SyncServer] applied strategy params from Mac")
+        except Exception as e:
+            log.warning("[SyncServer] failed to apply strategy params from Mac: %s", e)
+            return
+        await self.broadcast_strategy_params()
+
+    async def broadcast_strategy_params(self) -> None:
+        """Mirror of broadcast_settings() for Strategy Parameters — pushed
+        after applying a Mac's proposal and whenever this VPS's own local UI
+        changes a strategy's live values directly."""
+        await self._broadcast(make(
+            MSG_STRATEGY_PARAMS_STATE, strategy_params=self._strategy_params_snapshot()
         ))
 
     # ── Stand-down / resume ──────────────────────────────────────────────────

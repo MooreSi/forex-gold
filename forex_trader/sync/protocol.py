@@ -61,6 +61,18 @@ MSG_CHANNEL_STRATEGY_STATE   = "channel_strategy_state"    # VPS -> Mac: full co
 MSG_TRADING_SCHEDULE_PROPOSE = "trading_schedule_propose"  # Mac -> VPS
 MSG_TRADING_SCHEDULE_STATE   = "trading_schedule_state"    # VPS -> Mac: full confirmed snapshot
 
+# Strategy Parameters (app_config "strategy_params_<strategy>" per fixed-
+# parameter strategy -- Conservative/Scalp Runner/GD VIP Runner/Adaptive
+# Runner/Adaptive Runner 2's live SL/TP values, core_strategy_params.py) --
+# same one-combined-snapshot-per-message shape as Trading Schedule above:
+# all 5 strategies' values are proposed/confirmed together, not as
+# separate per-strategy messages, so two near-simultaneous edits to
+# different strategies can't race each other. The named-template library
+# (strategy_param_templates table) is NOT synced -- each node keeps its
+# own saved presets.
+MSG_STRATEGY_PARAMS_PROPOSE = "strategy_params_propose"  # Mac -> VPS
+MSG_STRATEGY_PARAMS_STATE   = "strategy_params_state"    # VPS -> Mac: full confirmed snapshot
+
 # ── Trading mutual exclusion (Option A: block switch-back on open local positions) ──
 MSG_STAND_DOWN        = "stand_down"        # Mac -> VPS: taking over, stop opening new trades
 MSG_STAND_DOWN_ACK    = "stand_down_ack"    # VPS -> Mac: stood down, here is my open-position summary

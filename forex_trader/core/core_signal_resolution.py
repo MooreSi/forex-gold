@@ -25,6 +25,7 @@ from forex_trader.core import database as db_module
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_trading_schedule import check_trading_schedule
 from forex_trader.core.models import (
     Tick,
@@ -33,53 +34,40 @@ from forex_trader.core.models import (
     STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, MAX_TP,
 )
 
-# ── Per-strategy fixed point-distance constants (verbatim copies -- also
-# used by pack 13's deferred post-fill override branches) ──────────────────
-
-_CONSERVATIVE_SL_PT  = 5.0
-_CONSERVATIVE_TP1_PT = 3.0
-_SCALP_RUNNER_SL_PT  = 10.0
-_SCALP_RUNNER_TP1_PT = 3.0
-_SCALP_RUNNER_TP2_PT = 4.0
-
-_GDVR_SL_MULT     = 4.0
-_GDVR_SL_CAP_PT   = 20.0
-_GDVR_SL_FLOOR_PT = 8.0
-
-_ADAPTIVE_SL_MULT    = 4.0
-_ADAPTIVE_SL_CAP_PT  = 20.0
-_ADAPTIVE_SL_FLOOR_PT = 8.0
-_ADAPTIVE_TP_CAP_FRAC = 0.50
-
-_ADAPTIVE2_SL_PT = 10.0  # fixed SL distance -- not derived from the signal at all
-
 
 def _gdvr_sl_dist(stated_sl_dist: float) -> float:
     """GD VIP Runner SL distance (pts) from the signal's stated SL distance.
 
-    min(4x stated, 20pt cap); falls back to _GDVR_SL_FLOOR_PT if the stated
-    distance is missing or looks like bad data (too small/huge — same
-    sl_dist<=50 filter used when validating this against historical signals).
+    min(sl_mult x stated, sl_cap_pt); falls back to sl_floor_pt if the
+    stated distance is missing or looks like bad data (too small/huge —
+    same sl_dist<=50 filter used when validating this against historical
+    signals). Live-tunable via core_strategy_params (Trading > Strategy >
+    Strategy Parameters) — defaults 4x/20pt/8pt, unchanged from the
+    original hardcoded values.
     """
+    p = get_strategy_params(STRATEGY_GD_VIP_RUNNER)
     if not stated_sl_dist or stated_sl_dist < 0.5 or stated_sl_dist > 50:
-        return _GDVR_SL_FLOOR_PT
-    return min(stated_sl_dist * _GDVR_SL_MULT, _GDVR_SL_CAP_PT)
+        return p["sl_floor_pt"]
+    return min(stated_sl_dist * p["sl_mult"], p["sl_cap_pt"])
 
 
 def _adaptive_sl_dist(stated_sl_dist: float, final_tp_dist: float) -> float:
     """Adaptive Runner SL distance (pts).
 
-    Same widened formula as _gdvr_sl_dist() (min(4x stated, 20pt cap)), but
-    additionally capped at _ADAPTIVE_TP_CAP_FRAC (50%) of final_tp_dist — the
-    distance to the signal's own furthest TP — and never tightened below
-    stated_sl_dist itself. If final_tp_dist isn't known (0), falls back to
-    the plain GD VIP Runner-style widening with no TP-side cap.
+    Same widened formula as _gdvr_sl_dist() (min(sl_mult x stated,
+    sl_cap_pt)), but additionally capped at tp_cap_frac of final_tp_dist —
+    the distance to the signal's own furthest TP — and never tightened
+    below stated_sl_dist itself. If final_tp_dist isn't known (0), falls
+    back to the plain GD VIP Runner-style widening with no TP-side cap.
+    Live-tunable via core_strategy_params — defaults 4x/20pt/8pt/50%,
+    unchanged from the original hardcoded values.
     """
+    p = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER)
     if not stated_sl_dist or stated_sl_dist < 0.5 or stated_sl_dist > 50:
-        return _ADAPTIVE_SL_FLOOR_PT
-    widened = min(stated_sl_dist * _ADAPTIVE_SL_MULT, _ADAPTIVE_SL_CAP_PT)
+        return p["sl_floor_pt"]
+    widened = min(stated_sl_dist * p["sl_mult"], p["sl_cap_pt"])
     if final_tp_dist > 0:
-        tp_cap = final_tp_dist * _ADAPTIVE_TP_CAP_FRAC
+        tp_cap = final_tp_dist * p["tp_cap_frac"]
         return max(stated_sl_dist, min(widened, tp_cap))
     return widened
 
@@ -264,7 +252,8 @@ async def resolve_open_trade_params(
             stop_loss_to_use = round(entry_mid + sl_dist * 1.5, 2)
     elif strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
         # Fixed-point SL/TP from fill; signal levels ignored after fill.
-        _co_sl_pt = _CONSERVATIVE_SL_PT if strategy == STRATEGY_CONSERVATIVE else _SCALP_RUNNER_SL_PT
+        # Live-tunable via core_strategy_params (Trading > Strategy).
+        _co_sl_pt = get_strategy_params(strategy)["sl_pt"]
         # Place proxy SL at zone-mid ± SL so MT5 accepts the order.
         _co_sign      = 1.0 if sig["direction"].upper() == "BUY" else -1.0
         _co_entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
@@ -341,13 +330,15 @@ async def resolve_open_trade_params(
                 suggest_lot_size(_ar_entry_mid, stop_loss_to_use, _ar_balance, _ar_risk_pct), 2
             ))
     elif strategy == STRATEGY_ADAPTIVE_RUNNER_2:
-        # Fixed 10pt SL, full stop -- not derived from the signal's stated SL
+        # Fixed SL, full stop -- not derived from the signal's stated SL
         # or its TP spread at all (unlike Adaptive Runner's capped widening).
         # Pre-fill proxy at zone mid, overwritten with the exact fill-relative
-        # value post-fill (see core_open_trade_from_signal.py).
+        # value post-fill (see core_open_trade_from_signal.py). Live-tunable
+        # via core_strategy_params -- default 10pt, unchanged from launch.
         _ar2_entry_mid   = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
         _ar2_sign        = 1.0 if sig["direction"].upper() == "BUY" else -1.0
-        stop_loss_to_use = round(_ar2_entry_mid - _ar2_sign * _ADAPTIVE2_SL_PT, 2)
+        _ar2_sl_pt       = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2)["sl_pt"]
+        stop_loss_to_use = round(_ar2_entry_mid - _ar2_sign * _ar2_sl_pt, 2)
         if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
             _ar2_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
             _ar2_balance  = await get_trading_balance(bridge, starting_balance)

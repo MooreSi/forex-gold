@@ -20,6 +20,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_signal_resolution as sr
+from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,
@@ -50,7 +51,9 @@ def fresh_db():
     db.init(path)
     db._rs_cache = None
     db._rs_cache_ts = 0.0
+    sp._cache.clear()
     yield db
+    sp._cache.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
@@ -373,6 +376,74 @@ def test_adaptive_runner_2_sell_direction_sl_is_above_entry(fresh_db):
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
     assert result["stop_loss_to_use"] == 2410.0
+
+
+# ── Live strategy-parameter overrides (Trading > Strategy > Strategy
+# Parameters, core_strategy_params.py) actually reach resolve_open_trade_
+# params() -- these are the exact code paths a user editing that panel
+# would be changing. ──────────────────────────────────────────────────────
+
+def test_conservative_sl_pt_override_changes_resolved_sl(fresh_db):
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_CONSERVATIVE})
+    sp.set_strategy_params(STRATEGY_CONSERVATIVE, {"sl_pt": 8.0, "tp1_pt": 3.0})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2392.0   # entry_mid 2400 - 8
+
+
+def test_scalp_runner_sl_pt_override_changes_resolved_sl(fresh_db):
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_SCALP_RUNNER})
+    sp.set_strategy_params(STRATEGY_SCALP_RUNNER, {"sl_pt": 15.0, "tp1_pt": 3.0, "tp2_pt": 4.0})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2385.0   # entry_mid 2400 - 15
+
+
+def test_gd_vip_runner_sl_mult_override_changes_widened_sl(fresh_db):
+    # stated_dist = |2400 - 2395| = 5; default 4x -> 20, capped at 20pt = 20.
+    # With sl_mult overridden to 2x: min(5*2, cap) = 10.
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
+    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
+    sp.set_strategy_params(STRATEGY_GD_VIP_RUNNER, {"sl_mult": 2.0, "sl_cap_pt": 20.0, "sl_floor_pt": 8.0})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2390.0   # entry_mid 2400 - 10
+
+
+def test_gd_vip_runner_sl_floor_override_used_for_bad_data(fresh_db):
+    # stop_loss == entry (stated_dist=0) triggers the floor fallback.
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2400.0, tp1=None)
+    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
+    sp.set_strategy_params(STRATEGY_GD_VIP_RUNNER, {"sl_mult": 4.0, "sl_cap_pt": 20.0, "sl_floor_pt": 3.0})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2397.0   # entry_mid 2400 - floor 3
+
+
+def test_adaptive_runner_tp_cap_frac_override_tightens_sl(fresh_db):
+    # stated_dist=5, final_tp_dist=50 (tp1=2450, entry_mid=2400).
+    # Default: widened=min(20,20)=20, tp_cap=50*0.5=25 -> min(20,25)=20.
+    # With tp_cap_frac=0.10: tp_cap=5 -> max(stated=5, min(20,5))=5.
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=2450.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER})
+    sp.set_strategy_params(
+        STRATEGY_ADAPTIVE_RUNNER,
+        {"sl_mult": 4.0, "sl_cap_pt": 20.0, "sl_floor_pt": 8.0, "tp_cap_frac": 0.10},
+    )
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2395.0   # entry_mid 2400 - 5
+
+
+def test_adaptive_runner_2_sl_pt_override_changes_resolved_sl(fresh_db):
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2350.0, tp1=2410.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER_2})
+    sp.set_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2, {"sl_pt": 20.0})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2380.0   # entry_mid 2400 - 20
 
 
 # ── Risk Governor integration ───────────────────────────────────────────────────

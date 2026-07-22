@@ -38,6 +38,7 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import ea_bridge
 from forex_trader.core.core_open_trade import open_trade as _real_open_trade
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
@@ -48,18 +49,9 @@ from forex_trader.core.signal_parser import validate_signal
 
 log = logging.getLogger(__name__)
 
-# Conservative strategy fixed levels (points from fill)
-_CONSERVATIVE_SL_PT = 5.0
-_CONSERVATIVE_TP1_PT = 3.0
-# Scalp Runner fixed levels (points from fill)
-_SCALP_RUNNER_SL_PT = 10.0
-_SCALP_RUNNER_TP1_PT = 3.0
-_SCALP_RUNNER_TP2_PT = 4.0
-# Adaptive Runner 2 fixed SL (points from fill) -- TPs are NOT overridden,
-# unlike Conservative/Scalp Runner above (see core_signal_resolution.py's
-# _ADAPTIVE2_SL_PT, verbatim-duplicated here same as the other point
-# constants in this file).
-_ADAPTIVE2_SL_PT = 10.0
+# Conservative/Scalp Runner/Adaptive Runner 2's fixed point levels are
+# live-tunable via core_strategy_params (Trading > Strategy > Strategy
+# Parameters) -- see get_strategy_params() calls at each use site below.
 
 _SELF_MANAGED_STRATEGIES = {STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL}
 _CLIMBER_MODE_STRATEGIES = (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
@@ -286,17 +278,15 @@ async def execute_auto_signal(
                                 )
                             if strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
                                 tg_co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
-                                if strategy == STRATEGY_SCALP_RUNNER:
-                                    tg_sl_pt = _SCALP_RUNNER_SL_PT
-                                else:
-                                    tg_sl_pt = _CONSERVATIVE_SL_PT
+                                tg_sl_pt = get_strategy_params(strategy)["sl_pt"]
                                 tg_sl_use = round(entry_mid - tg_co_sign * tg_sl_pt, 2)
                             elif strategy == STRATEGY_ADAPTIVE_RUNNER_2:
-                                # Fixed 10pt SL, not derived from the signal at all --
-                                # unlike Conservative/Scalp Runner, TPs are left as the
-                                # signal sent them (see the post-fill block below).
+                                # Fixed SL, not derived from the signal at all -- unlike
+                                # Conservative/Scalp Runner, TPs are left as the signal
+                                # sent them (see the post-fill block below).
                                 tg_co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
-                                tg_sl_use = round(entry_mid - tg_co_sign * _ADAPTIVE2_SL_PT, 2)
+                                _ar2_sl_pt = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2)["sl_pt"]
+                                tg_sl_use = round(entry_mid - tg_co_sign * _ar2_sl_pt, 2)
                             else:
                                 tg_sl_use = float(parsed["stop_loss"])
                             try:
@@ -318,14 +308,11 @@ async def execute_auto_signal(
                                 if (not trade_result.get("executed_remotely")
                                         and strategy in _SL_OVERRIDE_STRATEGIES
                                         and trade_result.get("trade_id")):
+                                    _p = get_strategy_params(strategy)
                                     if strategy == STRATEGY_SCALP_RUNNER:
-                                        sl_pt, tp1_pt, tp2_pt = (
-                                            _SCALP_RUNNER_SL_PT, _SCALP_RUNNER_TP1_PT, _SCALP_RUNNER_TP2_PT,
-                                        )
+                                        sl_pt, tp1_pt, tp2_pt = _p["sl_pt"], _p["tp1_pt"], _p["tp2_pt"]
                                     else:
-                                        sl_pt, tp1_pt, tp2_pt = (
-                                            _CONSERVATIVE_SL_PT, _CONSERVATIVE_TP1_PT, None,
-                                        )
+                                        sl_pt, tp1_pt, tp2_pt = _p["sl_pt"], _p["tp1_pt"], None
                                     fill = float(exec_price or entry_mid)
                                     co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
                                     exact_sl = round(fill - co_sign * sl_pt, 2)
@@ -377,9 +364,10 @@ async def execute_auto_signal(
                                     # correction) -- TPs are the signal's own, left
                                     # untouched, unlike the Conservative/Scalp Runner
                                     # block above.
+                                    _ar2_p = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2)
                                     fill = float(exec_price or entry_mid)
                                     co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
-                                    exact_sl = round(fill - co_sign * _ADAPTIVE2_SL_PT, 2)
+                                    exact_sl = round(fill - co_sign * _ar2_p["sl_pt"], 2)
                                     with db_module.db() as conn:
                                         conn.execute(
                                             "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
@@ -394,7 +382,7 @@ async def execute_auto_signal(
                                     trade_result["stop_loss"] = exact_sl
                                     log.info(
                                         "[adaptive_runner_2/tg] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt fixed)",
-                                        trade_result["trade_id"][:8], fill, exact_sl, _ADAPTIVE2_SL_PT,
+                                        trade_result["trade_id"][:8], fill, exact_sl, _ar2_p["sl_pt"],
                                     )
                             except Exception as e:
                                 e_str = str(e)

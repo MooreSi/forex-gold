@@ -33,10 +33,8 @@ from forex_trader.core.core_open_trade import open_trade
 from forex_trader.core.core_signal_resolution import (
     resolve_open_trade_params,
     _gdvr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,
-    _CONSERVATIVE_SL_PT, _CONSERVATIVE_TP1_PT,
-    _SCALP_RUNNER_SL_PT, _SCALP_RUNNER_TP1_PT, _SCALP_RUNNER_TP2_PT,
-    _ADAPTIVE2_SL_PT,
 )
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
@@ -114,9 +112,10 @@ async def open_trade_from_signal(
     # ── Conservative: post-fill SL/TP override ──────────────────────────
     # Set exact SL (fill ∓ 5) and TP1 (fill ± 3); clear all signal TPs.
     if strategy == STRATEGY_CONSERVATIVE and result.get("trade_id"):
+        _cons_p    = get_strategy_params(STRATEGY_CONSERVATIVE)
         _fill      = float(result.get("entry_price", _entry_mid))
-        exact_sl   = round(_fill - _sign * _CONSERVATIVE_SL_PT, 2)
-        exact_tp1  = round(_fill + _sign * _CONSERVATIVE_TP1_PT, 2)
+        exact_sl   = round(_fill - _sign * _cons_p["sl_pt"], 2)
+        exact_tp1  = round(_fill + _sign * _cons_p["tp1_pt"], 2)
         with db_module.db() as conn:
             conn.execute(
                 """UPDATE vantage_simulated_trades
@@ -136,7 +135,7 @@ async def open_trade_from_signal(
         log.info(
             "[%s] trade_id=%s fill=%.2f SL=%.2f(-%.0fpt) TP1=%.2f(+%.0fpt)",
             strategy,
-            result["trade_id"][:8], _fill, exact_sl, _CONSERVATIVE_SL_PT, exact_tp1, _CONSERVATIVE_TP1_PT,
+            result["trade_id"][:8], _fill, exact_sl, _cons_p["sl_pt"], exact_tp1, _cons_p["tp1_pt"],
         )
         if result.get("managed_by") == "ea":
             try:
@@ -151,10 +150,11 @@ async def open_trade_from_signal(
     # Set exact SL (fill ∓ 10), TP1 (fill ± 3, closes 50%) and TP2
     # (fill ± 4, moves SL to entry + starts the trail); clear tp3-8.
     elif strategy == STRATEGY_SCALP_RUNNER and result.get("trade_id"):
+        _sr_p     = get_strategy_params(STRATEGY_SCALP_RUNNER)
         _fill     = float(result.get("entry_price", _entry_mid))
-        exact_sl  = round(_fill - _sign * _SCALP_RUNNER_SL_PT, 2)
-        exact_tp1 = round(_fill + _sign * _SCALP_RUNNER_TP1_PT, 2)
-        exact_tp2 = round(_fill + _sign * _SCALP_RUNNER_TP2_PT, 2)
+        exact_sl  = round(_fill - _sign * _sr_p["sl_pt"], 2)
+        exact_tp1 = round(_fill + _sign * _sr_p["tp1_pt"], 2)
+        exact_tp2 = round(_fill + _sign * _sr_p["tp2_pt"], 2)
         with db_module.db() as conn:
             conn.execute(
                 """UPDATE vantage_simulated_trades
@@ -175,8 +175,8 @@ async def open_trade_from_signal(
         log.info(
             "[%s] trade_id=%s fill=%.2f SL=%.2f(-%.0fpt) TP1=%.2f(+%.0fpt) TP2=%.2f(+%.0fpt)",
             strategy,
-            result["trade_id"][:8], _fill, exact_sl, _SCALP_RUNNER_SL_PT, exact_tp1,
-            _SCALP_RUNNER_TP1_PT, exact_tp2, _SCALP_RUNNER_TP2_PT,
+            result["trade_id"][:8], _fill, exact_sl, _sr_p["sl_pt"], exact_tp1,
+            _sr_p["tp1_pt"], exact_tp2, _sr_p["tp2_pt"],
         )
         if result.get("managed_by") == "ea":
             try:
@@ -274,13 +274,14 @@ async def open_trade_from_signal(
         )
 
     # ── Adaptive Runner 2: post-fill exact SL override (TPs untouched) ───
-    # Fixed 10pt SL from the actual fill price -- unlike Adaptive Runner,
-    # this doesn't depend on the signal's stated SL or TP spread at all,
-    # only on the real fill (slippage correction, same as every other
-    # post-fill override here).
+    # Fixed SL from the actual fill price -- unlike Adaptive Runner, this
+    # doesn't depend on the signal's stated SL or TP spread at all, only on
+    # the real fill (slippage correction, same as every other post-fill
+    # override here). Live-tunable via core_strategy_params.
     elif strategy == STRATEGY_ADAPTIVE_RUNNER_2 and result.get("trade_id"):
+        _ar2_p   = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2)
         _fill    = float(result.get("entry_price", _entry_mid))
-        exact_sl = round(_fill - _sign * _ADAPTIVE2_SL_PT, 2)
+        exact_sl = round(_fill - _sign * _ar2_p["sl_pt"], 2)
         with db_module.db() as conn:
             conn.execute(
                 "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
@@ -295,7 +296,7 @@ async def open_trade_from_signal(
         result["stop_loss"] = exact_sl
         log.info(
             "[adaptive_runner_2] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt fixed)",
-            result["trade_id"][:8], _fill, exact_sl, _ADAPTIVE2_SL_PT,
+            result["trade_id"][:8], _fill, exact_sl, _ar2_p["sl_pt"],
         )
 
     # ── Trail Stop: post-fill SL + TP1-TP8 override ─────────────────────

@@ -426,6 +426,19 @@ CREATE TABLE IF NOT EXISTS app_config (
     value TEXT NOT NULL
 );
 
+-- Named parameter presets for the fixed-point-SL strategies (Conservative,
+-- Scalp Runner, GD VIP Runner, Adaptive Runner, Adaptive Runner 2) -- see
+-- core_strategy_params.py. The LIVE value for each strategy lives in
+-- app_config (key f"strategy_params_{strategy}"); this table is only the
+-- saved/named library a user can apply from later.
+CREATE TABLE IF NOT EXISTS strategy_param_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy    TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    created_at  REAL NOT NULL
+);
+
 -- Per-position spread cache — computed once from historical MT5 ticks at
 -- trade-open time, then reused forever (spread at a past moment never
 -- changes). Keyed by position_id since Closed Trades reads directly from

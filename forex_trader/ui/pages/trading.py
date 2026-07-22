@@ -1793,6 +1793,149 @@ def _rec_label_text(rec: dict, strat_opts: dict) -> str:
     return f"Rec: {strat_name}{conf_str}{reasoning_str}"
 
 
+def _render_strategy_params_card() -> None:
+    """
+    Strategy Parameters: live-editable SL/TP point values for the
+    fixed-parameter strategies (Conservative, Scalp Runner, GD VIP Runner,
+    Adaptive Runner, Adaptive Runner 2), plus a small named-template
+    library to save/reapply a parameter set later. A change here applies
+    to the next trade opened under that strategy -- no restart, no code
+    change. Mirrors a third-party EA's "Settings Templates" panel
+    investigated 2026-07-22; see core_strategy_params.py's module
+    docstring for why this needed no MQL5 changes at all (these five
+    strategies are already fully resolved to concrete SL/TP prices by
+    Python before any EA sees the trade).
+    """
+    from forex_trader.core import core_strategy_params as sp
+
+    with ui.row().classes("items-center gap-2 mb-2"):
+        ui.label("Strategy Parameters").classes("text-base font-bold text-yellow-300")
+        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+            "Live-editable SL/TP values for the fixed-parameter strategies -- "
+            "a change applies to the next trade opened under that strategy, "
+            "no restart needed. Save named presets below to switch between "
+            "setups quickly."
+        )
+
+    state = {"strategy": sp.PARAM_STRATEGIES[0]}
+    fields: dict[str, object] = {}
+
+    def _on_strategy_change(e) -> None:
+        v = e.value
+        if isinstance(v, dict):  # NiceGUI dict-options returns {label,value} obj
+            v = v.get("value")
+        if v:
+            state["strategy"] = v
+            _draw_body()
+
+    ui.select(
+        sp.STRATEGY_LABELS, value=state["strategy"], label="Strategy",
+    ).classes("w-56 mb-2").props("dense outlined").on_value_change(_on_strategy_change)
+
+    body = ui.column().classes("w-full gap-2")
+
+    def _current_values() -> dict:
+        return {k: f.value for k, f in fields.items()}
+
+    def _draw_body() -> None:
+        body.clear()
+        strategy = state["strategy"]
+        specs = sp.PARAM_SPECS[strategy]
+        live = sp.get_strategy_params(strategy)
+        fields.clear()
+        with body:
+            with ui.row().classes("w-full gap-3 flex-wrap items-end"):
+                for key, label, default, unit in specs:
+                    step = 0.05 if unit in ("x", "frac") else 1.0
+                    fields[key] = ui.number(
+                        label=f"{label} ({unit})", value=live.get(key, default), step=step,
+                        format="%.2f",
+                    ).classes("w-36").props("dense outlined")
+
+            with ui.row().classes("gap-2 mt-1"):
+                ui.button("Save & Apply", on_click=_save_live).classes(
+                    "text-xs bg-green-800 text-white"
+                ).props("dense")
+                ui.button("Reset to Default", on_click=_reset_default).classes(
+                    "text-xs"
+                ).props("dense outline")
+
+            ui.separator().classes("my-2 border-gray-700")
+            ui.label("Saved Templates").classes("text-sm font-semibold text-gray-300")
+
+            templates = sp.list_templates(strategy)
+            if not templates:
+                ui.label("No saved templates for this strategy yet.").classes(
+                    "text-xs text-gray-500"
+                )
+            else:
+                for t in templates:
+                    with ui.row().classes("items-center gap-2"):
+                        ui.label(t["name"]).classes(
+                            "text-xs text-gray-200 truncate"
+                        ).style("width:10rem").tooltip(t["name"])
+                        ui.button("Apply", on_click=lambda _t=t: _apply_tpl(_t)).classes(
+                            "text-xs"
+                        ).props("dense flat color=blue")
+                        ui.button(icon="delete_outline", on_click=lambda _t=t: _delete_tpl(_t)).props(
+                            "dense flat color=red"
+                        )
+
+            with ui.row().classes("items-center gap-2 mt-2"):
+                name_input = ui.input(placeholder="Template name").classes("w-48").props(
+                    "dense outlined"
+                )
+                ui.button(
+                    "Save as Template", on_click=lambda: _save_as_template(name_input)
+                ).classes("text-xs").props("dense outline color=blue")
+
+    def _save_live() -> None:
+        strategy = state["strategy"]
+        try:
+            sp.set_strategy_params(strategy, _current_values())
+            ui.notify(
+                f"{sp.STRATEGY_LABELS[strategy]} parameters saved — applies to new trades",
+                type="positive",
+            )
+        except Exception as exc:
+            ui.notify(f"Save failed: {exc}", type="negative")
+
+    def _reset_default() -> None:
+        strategy = state["strategy"]
+        sp.reset_strategy_params(strategy)
+        ui.notify(f"{sp.STRATEGY_LABELS[strategy]} reset to defaults", type="info")
+        _draw_body()
+
+    def _apply_tpl(t: dict) -> None:
+        try:
+            sp.apply_template(t["id"])
+            ui.notify(f"Applied template '{t['name']}'", type="positive")
+            _draw_body()
+        except Exception as exc:
+            ui.notify(f"Apply failed: {exc}", type="negative")
+
+    def _delete_tpl(t: dict) -> None:
+        sp.delete_template(t["id"])
+        ui.notify(f"Deleted template '{t['name']}'", type="info")
+        _draw_body()
+
+    def _save_as_template(name_input) -> None:
+        strategy = state["strategy"]
+        name = (name_input.value or "").strip()
+        if not name:
+            ui.notify("Enter a template name first", type="warning")
+            return
+        try:
+            sp.save_template(strategy, name, _current_values())
+            name_input.value = ""
+            ui.notify(f"Saved template '{name}'", type="positive")
+            _draw_body()
+        except Exception as exc:
+            ui.notify(f"Save failed: {exc}", type="negative")
+
+    _draw_body()
+
+
 def _render_strategy(engine):
     outer = ui.column().classes("w-full gap-4")
 
@@ -1977,6 +2120,10 @@ def _render_strategy(engine):
           # ── Channel Strategy card ─────────────────────────────────────────
           with ui.card().classes("flex-1 min-w-72 bg-gray-800 p-2 rounded-lg"):
             _render_channel_strategy_card(engine, all_names, rs)
+
+        # ── Strategy Parameters card ────────────────────────────────────────
+        with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):
+            _render_strategy_params_card()
 
         # ── Signals card ──────────────────────────────────────────────────────
         with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):

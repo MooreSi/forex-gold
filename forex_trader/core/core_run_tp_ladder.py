@@ -45,9 +45,10 @@ async def run_tp_ladder(
     be_at_pos: int = 0,
     close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
     sl_rule: Optional[Callable[[int, list[tuple[int, float]]], float]] = None,
+    close_full_on_last: bool = True,
 ) -> None:
     """Shared TP-ladder walk used by Signal Climber, GD VIP Runner,
-    Adaptive Runner, and Adaptive Runner 2.
+    Adaptive Runner, Adaptive Runner 2, and Limit Runner.
 
     Closes fractions of the original lot at each signal TP (per pcts_table,
     keyed by TP count). SL is left untouched until the TP at index
@@ -59,6 +60,18 @@ async def run_tp_ladder(
     `sl_rule` is None, so Signal Climber/GD VIP Runner/Adaptive Runner are
     unaffected -- Adaptive Runner 2 is the only caller that passes a
     different rule (trail to the midpoint of the two TPs before this one).
+
+    close_full_on_last: when True (every caller before Limit Runner), the
+    last TP in the ladder always closes 100% of whatever lots remain,
+    regardless of its own pcts_table entry -- there is never anything left
+    open once the signal's final TP is hit. Limit Runner passes False for
+    signals with a literal "TP OPEN" line: the last TP then only closes its
+    own pcts_table share like every earlier TP, and the remainder is left
+    open indefinitely (no further TP to trigger a close) -- riding purely on
+    the SL trail until stopped out or manually closed. See
+    core_limit_order_signal.py for how the pcts_table itself is computed in
+    that case (100% minus the configured runner reserve, split across the
+    signal's own numeric TPs).
     """
     direction   = trade["direction"].upper()
     entry_price = float(trade["entry_price"])
@@ -107,7 +120,7 @@ async def run_tp_ladder(
             break
 
         is_last = (pos == n - 1)
-        if is_last:
+        if is_last and close_full_on_last:
             lots_to_close = remaining
         else:
             lots_to_close = min(round(lot_size * pcts[pos], 4), remaining)
@@ -272,3 +285,56 @@ async def handle_adaptive_runner_2(
     await run_tp_ladder(trade, tick, _GDVR_PCTS, "adaptive_runner_2", bridge, tp_cache,
                        be_at_pos=1, close_full_after_tps=close_full_after_tps,
                        sl_rule=_adaptive_runner_2_sl_rule)
+
+
+def _limit_runner_pcts_table(trade: dict) -> tuple[dict[int, list[float]], bool]:
+    """Dynamic pcts_table for a single Limit Runner trade -- unlike every
+    other ladder strategy's fixed 8-TP-count table, the split depends on how
+    many numeric TPs this specific signal actually had and whether it
+    carried a "TP OPEN" runner leg (trade['tp_open'], set at fill time from
+    the parsed signal -- see core_limit_order_signal.py). Returns
+    (pcts_table, close_full_on_last); a single-entry table since n is
+    already fixed for this trade -- run_tp_ladder's own n-keyed lookup
+    resolves straight to it."""
+    from forex_trader.core.core_strategy_params import get_strategy_params
+    from forex_trader.core.models import STRATEGY_LIMIT_RUNNER
+    n = sum(1 for i in range(1, MAX_TP + 1) if trade.get(f"tp{i}") is not None)
+    if n == 0:
+        return {1: [1.0]}, True
+    if trade.get("tp_open"):
+        reserve = get_strategy_params(STRATEGY_LIMIT_RUNNER)["runner_reserve_pct"] / 100.0
+        reserve = min(max(reserve, 0.0), 0.95)
+        each = (1.0 - reserve) / n
+        return {n: [each] * n}, False
+    return {n: [1.0 / n] * n}, True
+
+
+async def handle_limit_runner(
+    trade: dict, tick: Tick, bridge: Any, tp_cache: TPCache,
+    close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
+) -> None:
+    """
+    Limit Runner: the Python-side fallback ladder handler for a Limit Runner
+    trade if the EA goes unhealthy mid-trade (every such trade starts out
+    EA-managed -- core_limit_order_signal.py only ever places the pending
+    order when the EA is connected, so this is purely a reclaim path, same
+    as every other EA-portable ladder strategy). Splits the position evenly
+    across whatever numeric TPs the originating signal actually had (see
+    _limit_runner_pcts_table) rather than a fixed 8-TP table, since the
+    signal's own TP count varies message to message. SL moves to breakeven
+    at the configured be_at_pos (Strategy Parameters: 1-based "TP#",
+    converted here to run_tp_ladder's 0-indexed compacted position), then
+    trails to the previous TP price each level after -- same trail rule as
+    GD VIP Runner (sl_rule=None). If the signal carried a "TP OPEN" line,
+    the last numeric TP only closes its own share instead of everything
+    remaining (close_full_on_last=False) -- whatever's left keeps riding on
+    the trailing SL with no further target.
+    """
+    from forex_trader.core.core_strategy_params import get_strategy_params
+    from forex_trader.core.models import STRATEGY_LIMIT_RUNNER
+    pcts_table, close_full_on_last = _limit_runner_pcts_table(trade)
+    be_at_pos_1based = int(get_strategy_params(STRATEGY_LIMIT_RUNNER).get("be_at_pos", 1))
+    be_at_pos = max(be_at_pos_1based - 1, 0)
+    await run_tp_ladder(trade, tick, pcts_table, "limit_runner", bridge, tp_cache,
+                       be_at_pos=be_at_pos, close_full_after_tps=close_full_after_tps,
+                       close_full_on_last=close_full_on_last)

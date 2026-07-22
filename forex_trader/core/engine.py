@@ -21,7 +21,7 @@ from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
     STRATEGY_GD_VIP_RUNNER, STRATEGY_ORB_FIXED, STRATEGY_ADAPTIVE_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
     STRATEGY_NAMES, MAX_TP,
 )
 from forex_trader.core.mt5_bridge import MT5BridgeClient
@@ -43,6 +43,9 @@ from forex_trader.core.core_monitor_loop import (
 from forex_trader.core.core_scan_messages_auto_execute import (
     price_in_entry_range as _price_in_entry_range_impl,
     execute_auto_signal as _execute_auto_signal_impl,
+)
+from forex_trader.core.core_limit_order_signal import (
+    handle_limit_order_signal as _handle_limit_order_signal_impl,
 )
 from forex_trader.core.core_scan_messages_edit_reparse import (
     handle_signal_edit as _handle_signal_edit_impl,
@@ -164,6 +167,7 @@ from forex_trader.core.core_run_tp_ladder import (
     handle_gd_vip_runner as _handle_gd_vip_runner_impl,
     handle_adaptive_runner as _handle_adaptive_runner_impl,
     handle_adaptive_runner_2 as _handle_adaptive_runner_2_impl,
+    handle_limit_runner as _handle_limit_runner_impl,
 )
 from forex_trader.core.core_handle_scale_out import handle_scale_out as _handle_scale_out_impl
 from forex_trader.core.core_handle_be_runner import handle_be_runner as _handle_be_runner_impl
@@ -809,6 +813,29 @@ class SimulationEngine:
             close_full_after_tps=self._close_full_after_tps,
         )
 
+    async def _handle_limit_runner(self, trade: dict, tick: Tick) -> None:
+        """
+        Limit Runner: Python-side fallback ladder handler, used only if the
+        EA goes unhealthy mid-trade — every Limit Runner trade is placed as
+        a genuine EA pending order to begin with (core_limit_order_signal.py
+        only fires when the EA is connected), so this is a reclaim path, not
+        the normal case. Splits the position across however many numeric TPs
+        the originating signal actually had (varies message to message,
+        unlike every other ladder strategy's fixed 8-TP table) and, if the
+        signal carried a literal "TP OPEN" line, leaves the configured
+        reserve permanently open once the last numeric TP closes its share
+        instead of closing everything. See
+        STRATEGY_DESCRIPTIONS[STRATEGY_LIMIT_RUNNER] in core/models.py.
+
+        Called from _tp_ladder_fast_loop, same as the other ladder
+        strategies — see _handle_adaptive_runner's docstring for why
+        (sub-second polling, not _monitor_loop).
+        """
+        return await _handle_limit_runner_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache,
+            close_full_after_tps=self._close_full_after_tps,
+        )
+
     async def _run_tp_ladder(
         self, trade: dict, tick: Tick, pcts_table: dict[int, list[float]], log_tag: str,
         be_at_pos: int = 0,
@@ -1108,8 +1135,9 @@ class SimulationEngine:
                             elif strategy == STRATEGY_SCALP_RUNNER:
                                 await self._handle_scalp_runner(trade, tick)
                             elif strategy in (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
-                                              STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2):
-                                # TP-crossing detection for these four moved to
+                                              STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+                                              STRATEGY_LIMIT_RUNNER):
+                                # TP-crossing detection for these five moved to
                                 # _tp_ladder_fast_loop (sub-second polling instead
                                 # of this loop's 1-5s cadence — see that method's
                                 # docstring). DPM still takes priority when
@@ -1191,6 +1219,7 @@ class SimulationEngine:
     _TP_LADDER_STRATEGIES = (
         STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
         STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+        STRATEGY_LIMIT_RUNNER,
     )
     # 50ms — below this, polling faster stops buying real coverage: MT5's own
     # XAUUSD tick feed doesn't reliably update faster than this even in
@@ -1266,6 +1295,8 @@ class SimulationEngine:
                                         await self._handle_gd_vip_runner(trade, tick)
                                     elif strat == STRATEGY_ADAPTIVE_RUNNER_2:
                                         await self._handle_adaptive_runner_2(trade, tick)
+                                    elif strat == STRATEGY_LIMIT_RUNNER:
+                                        await self._handle_limit_runner(trade, tick)
                                     else:
                                         await self._handle_adaptive_runner(trade, tick)
                                 except Exception as exc:
@@ -2133,27 +2164,53 @@ class SimulationEngine:
             _per_signal_skip_rsn = _strat_result["per_signal_skip_reason"]
 
             if auto_execute:
-                _exec_result = await _execute_auto_signal_impl(
-                    parsed, tg_id, channel_name, source_label, strategy, rs,
-                    _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
-                    self._bridge,
-                    get_open_trades_fn=self.get_open_trades,
-                    find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
-                    check_pre_trade_filters_fn=self._check_pre_trade_filters,
-                    suggest_lot_size_fn=self.suggest_lot_size,
-                    get_trading_balance_fn=self._get_trading_balance,
-                    open_trade_fn=self.open_trade,
-                )
-                executed     = _exec_result["executed"]
-                exec_lot     = _exec_result["exec_lot"]
-                exec_price   = _exec_result["exec_price"]
-                trade_result = _exec_result["trade_result"]
-                skip_reason  = _exec_result["skip_reason"]
-                _gap_note    = _exec_result["gap_note"]
-                if _exec_result.get("followup_matched") or _exec_result.get("deferred_stood_down"):
-                    new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
-                                                 "source_label": source_label})
-                    continue
+                # Limit Runner: a genuine EA pending order, not a market-fill
+                # signal — parse_limit_order_signal's `tp_open` marker (always
+                # present, True or False, only on its own return dicts) means
+                # this signal always uses Limit Runner regardless of whatever
+                # channel-override/active-strategy _resolve_strategy_and_skip_
+                # reason_impl above just computed, since the strategy here is
+                # format-triggered, not channel-configured. Nothing has filled
+                # yet, so there's no exec_lot/exec_price/trade_result — the
+                # shared fmt_signal() alert below reports the placement (or
+                # skip) purely via skip_reason, same wording pattern as the
+                # existing "signal queued" zone-wait case.
+                if parsed.get("tp_open") is not None:
+                    strategy      = STRATEGY_LIMIT_RUNNER
+                    strategy_name = STRATEGY_NAMES[STRATEGY_LIMIT_RUNNER]
+                    _exec_result = await _handle_limit_order_signal_impl(
+                        parsed, tg_id, channel_name, source_label, rs,
+                        _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
+                        get_trading_balance_fn=self._get_trading_balance,
+                        suggest_lot_size_fn=self.suggest_lot_size,
+                    )
+                    executed     = False
+                    exec_lot     = None
+                    exec_price   = None
+                    trade_result = None
+                    skip_reason  = _exec_result["skip_reason"]
+                else:
+                    _exec_result = await _execute_auto_signal_impl(
+                        parsed, tg_id, channel_name, source_label, strategy, rs,
+                        _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
+                        self._bridge,
+                        get_open_trades_fn=self.get_open_trades,
+                        find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
+                        check_pre_trade_filters_fn=self._check_pre_trade_filters,
+                        suggest_lot_size_fn=self.suggest_lot_size,
+                        get_trading_balance_fn=self._get_trading_balance,
+                        open_trade_fn=self.open_trade,
+                    )
+                    executed     = _exec_result["executed"]
+                    exec_lot     = _exec_result["exec_lot"]
+                    exec_price   = _exec_result["exec_price"]
+                    trade_result = _exec_result["trade_result"]
+                    skip_reason  = _exec_result["skip_reason"]
+                    _gap_note    = _exec_result["gap_note"]
+                    if _exec_result.get("followup_matched") or _exec_result.get("deferred_stood_down"):
+                        new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
+                                                     "source_label": source_label})
+                        continue
 
             # Forwarded trade (centralized signal generation): the VPS actually
             # placed it — trade_id/mt5_ticket belong to its DB, not this node's

@@ -40,6 +40,7 @@ EA_PORTABLE_STRATEGIES = frozenset({
     "conservative", "scalp_runner", "conservative_trial",
     "signal_climber", "gd_vip_runner", "no_sl_scale",
     "adaptive_runner", "adaptive_runner_2", "orb_fixed",
+    "limit_runner",
 })
 
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy
@@ -67,6 +68,9 @@ class EABridge:
         # handed to the EA — used to validate/enrich incoming events and by
         # the fallback watchdog to know what needs reclaiming if the EA dies.
         self._active: dict[str, dict] = {}
+        # trade_id -> {"ticket": int} for Limit Runner orders currently
+        # resting on the broker (placed, not yet filled/cancelled/expired).
+        self._pending_orders: dict[str, dict] = {}
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -217,6 +221,74 @@ class EABridge:
             }
         return ack_box
 
+    async def place_pending_order(self, trade_id: str, direction: str, price: float,
+                                  lot_size: float, stop_loss: float, tps: dict[int, float],
+                                  pcts: list[float], be_at_pos: int,
+                                  expire_minutes: float = 240.0,
+                                  close_full_on_last: bool = True,
+                                  timeout: float = 5.0) -> dict:
+        """Ask the EA to place a genuine resting BuyLimit/SellLimit order —
+        unlike open_trade(), this does NOT fill immediately, so the returned
+        ack only confirms the order was accepted onto the broker's book, not
+        that a trade has opened. Raises TimeoutError if the EA doesn't
+        respond. There is no Python-bridge fallback for this call (see
+        core_limit_order_signal.py) — a raised/failed result here means the
+        signal is simply not captured, not "retry a different way."
+
+        The eventual fill is reported later, asynchronously, as an
+        unsolicited "pending_order_filled" message (see _dispatch) — MT5
+        gives no synchronous fill confirmation for a pending order, only for
+        the order's initial acceptance onto the book.
+
+        tps/pcts/be_at_pos: same shapes as open_trade()'s own ladder
+        params (flat tp1..tp8/pct1..pct8/be_at_pos fields) — every Limit
+        Runner order is ladder-managed once filled (ManageLadder in the EA,
+        trail_mode always the default previous-TP-price rule; Limit Runner
+        doesn't need a custom trail like Adaptive Runner 2's midpoint_lag2).
+
+        close_full_on_last: True (default) means the last TP closes
+        everything remaining, same as every other ladder strategy. False —
+        sent only when the originating signal had a literal "TP OPEN" line
+        (core_limit_order_signal.py) — means the last TP only closes its own
+        pcts[] share, leaving the rest open indefinitely with no further TP
+        to close it (ManageLadder's own close_full_on_last branch handles
+        this the same way core_run_tp_ladder.run_tp_ladder's Python-side
+        fallback does). Sent as an int (0/1), matching this EA's minimal
+        JSON parser (no native boolean support — see be_at_pos above it).
+        """
+        if not self.is_ea_healthy():
+            raise ConnectionError("EA not connected/healthy")
+        msg = {
+            "type": "place_pending_order", "trade_id": trade_id, "direction": direction,
+            "price": price, "lot_size": lot_size, "stop_loss": stop_loss,
+            "strategy": "limit_runner", "expire_minutes": expire_minutes,
+            "be_at_pos": be_at_pos, "close_full_on_last": int(close_full_on_last),
+        }
+        for n in range(1, 9):
+            if n in tps:
+                msg[f"tp{n}"] = tps[n]
+        for i, p in enumerate(pcts, start=1):
+            msg[f"pct{i}"] = p
+        ack_event = asyncio.Event()
+        ack_box: dict = {}
+
+        def _on_ack(payload: dict) -> None:
+            ack_box.update(payload)
+            ack_event.set()
+
+        self._pending_open_acks = getattr(self, "_pending_open_acks", {})
+        self._pending_open_acks[trade_id] = _on_ack
+        try:
+            if not await self._send(msg):
+                raise ConnectionError("EA send failed")
+            await asyncio.wait_for(ack_event.wait(), timeout=timeout)
+        finally:
+            self._pending_open_acks.pop(trade_id, None)
+
+        if ack_box.get("type") == "pending_order_placed":
+            self._pending_orders[trade_id] = {"ticket": ack_box.get("ticket")}
+        return ack_box
+
     async def update_trade(self, trade_id: str, tps: dict[int, float]) -> bool:
         """Push corrected TP levels to a trade the EA is already managing.
 
@@ -249,7 +321,8 @@ class EABridge:
                      msg.get("account"), msg.get("symbol"))
         elif t == "ping":
             await self._send({"type": "pong"})
-        elif t in ("trade_opened", "trade_open_failed"):
+        elif t in ("trade_opened", "trade_open_failed",
+                   "pending_order_placed", "pending_order_open_failed"):
             cb = getattr(self, "_pending_open_acks", {}).get(msg.get("trade_id"))
             if cb:
                 cb(msg)
@@ -259,6 +332,10 @@ class EABridge:
             await self._on_sl_moved(msg)
         elif t == "trade_closed":
             await self._on_trade_closed(msg)
+        elif t == "pending_order_filled":
+            await self._on_pending_order_filled(msg)
+        elif t == "pending_order_cancelled":
+            await self._on_pending_order_cancelled(msg)
         else:
             log.debug("[EABridge] unhandled message type: %s", t)
 
@@ -332,6 +409,113 @@ class EABridge:
             log.warning("[EABridge] trade_closed handling failed for %s: %s", trade_id, e)
         finally:
             self._active.pop(trade_id, None)
+
+    async def _on_pending_order_filled(self, msg: dict) -> None:
+        """A resting Limit Runner order has filled — register it as a
+        normal EA-managed trade, mirroring exactly what open_trade()'s own
+        EA-ack branch does synchronously for a market order
+        (core_open_trade.py), just deferred until the real broker fill
+        instead of immediate. From here on this trade is indistinguishable
+        from any other EA-managed trade — same vantage_simulated_trades
+        row shape, same self._active tracking, same fallback-watchdog
+        reclaim path if the EA later goes unhealthy."""
+        from forex_trader.core import database as db_module
+        from forex_trader.core import telegram_alerts
+        trade_id   = msg.get("trade_id")
+        ticket     = msg.get("ticket")
+        fill_price = float(msg.get("fill_price", 0))
+        try:
+            row = await self._fetch_pending_order(trade_id)
+            if not row:
+                log.warning("[EABridge] pending_order_filled for unknown trade_id=%s", trade_id)
+                return
+            tps = json.loads(row["tps_json"])
+            now = time.time()
+
+            def _apply():
+                with db_module.db() as conn:
+                    conn.execute(
+                        """INSERT INTO vantage_simulated_trades
+                           (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
+                            lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
+                            status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
+                            tg_source,managed_by,tp_open)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (trade_id, row["signal_id"], ticket, row["direction"],
+                         row["price"], row["price"], fill_price,
+                         row["lot_size"], row["lot_size"], row["stop_loss"],
+                         tps.get("1"), tps.get("2"), tps.get("3"), tps.get("4"),
+                         tps.get("5"), tps.get("6"), tps.get("7"), tps.get("8"),
+                         "open", now, 0.0, 0.0, 0.0, 0.0, "limit_runner",
+                         None, "ea", row["tp_open"]),
+                    )
+                    conn.execute(
+                        "UPDATE vantage_signals SET status='active' WHERE signal_id=?",
+                        (row["signal_id"],),
+                    )
+                    conn.execute(
+                        "UPDATE vantage_pending_orders SET status='filled',resolved_at=? WHERE trade_id=?",
+                        (now, trade_id),
+                    )
+            await db_module.to_db_thread(_apply)
+            self._active[trade_id] = {"ticket": ticket, "strategy": "limit_runner"}
+            self._pending_orders.pop(trade_id, None)
+            asyncio.create_task(telegram_alerts.send_message(
+                f"Limit order FILLED — {row['direction']} {row['lot_size']:g} lots @ "
+                f"{fill_price:.2f} (ticket {ticket}), SL {row['stop_loss']:.2f}",
+                trade_id, "pending_order_filled",
+            ))
+        except Exception as e:
+            log.warning("[EABridge] pending_order_filled handling failed for %s: %s", trade_id, e)
+
+    async def _on_pending_order_cancelled(self, msg: dict) -> None:
+        """A resting Limit Runner order was removed from the broker's book
+        without filling — either it expired (expire_minutes elapsed, same
+        4h default as the Python-simulated zone-wait signals' own pending
+        expiry) or was cancelled manually in the terminal; the EA can't
+        reliably distinguish the two from a bare "order gone, no matching
+        position" observation, so `reason` is best-effort, not authoritative."""
+        from forex_trader.core import database as db_module
+        from forex_trader.core import telegram_alerts
+        trade_id = msg.get("trade_id")
+        reason   = msg.get("reason", "cancelled")
+        try:
+            row = await self._fetch_pending_order(trade_id)
+            if not row:
+                log.warning("[EABridge] pending_order_cancelled for unknown trade_id=%s", trade_id)
+                return
+            now = time.time()
+
+            def _apply():
+                with db_module.db() as conn:
+                    conn.execute(
+                        "UPDATE vantage_pending_orders SET status='cancelled',resolved_at=? WHERE trade_id=?",
+                        (now, trade_id),
+                    )
+                    conn.execute(
+                        "UPDATE vantage_signals SET status='cancelled',cancelled_at=? WHERE signal_id=?",
+                        (now, row["signal_id"]),
+                    )
+            await db_module.to_db_thread(_apply)
+            self._pending_orders.pop(trade_id, None)
+            asyncio.create_task(telegram_alerts.send_message(
+                f"Limit order not filled — {row['direction']} @ {float(row['price']):.2f} "
+                f"{reason} before price reached the zone.",
+                trade_id, "pending_order_cancelled",
+            ))
+        except Exception as e:
+            log.warning("[EABridge] pending_order_cancelled handling failed for %s: %s", trade_id, e)
+
+    async def _fetch_pending_order(self, trade_id: str) -> Optional[dict]:
+        from forex_trader.core import database as db_module
+        def _fetch():
+            with db_module.db() as conn:
+                return db_module.row_to_dict(
+                    conn.execute(
+                        "SELECT * FROM vantage_pending_orders WHERE trade_id=?", (trade_id,)
+                    ).fetchone()
+                )
+        return await db_module.to_db_thread(_fetch)
 
     async def _fetch_trade(self, trade_id: str) -> Optional[dict]:
         from forex_trader.core import database as db_module

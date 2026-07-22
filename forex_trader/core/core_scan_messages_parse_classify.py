@@ -25,6 +25,7 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core.signal_parser import (
     parse_gold_signal, parse_gd2_signal, parse_gd2_partial,
     is_gd2_message, is_format_ab_signal, parse_with_learned_rules, _CURRENCY_RE,
+    parse_limit_order_signal,
 )
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,16 @@ async def classify_and_parse(
 
     if parsed:
         return parsed
+
+    # Limit Runner's "BUY/SELL [LIMITS] GOLD @ high/low AREA" layout -- any
+    # channel, format-matched only, checked ahead of the parser_fmt
+    # branching below so a channel configured for format_ab (whose branch
+    # never tries GD2-shaped parsing at all) doesn't silently miss it. See
+    # core_limit_order_signal.py for what happens with the returned dict's
+    # `tp_open` marker.
+    _limit_parsed = parse_limit_order_signal(text)
+    if _limit_parsed:
+        return _limit_parsed
 
     if parser_fmt == "format_ab":
         _ai_recovered = False

@@ -80,9 +80,46 @@ struct ManagedTrade
                              // (adaptive_runner_2) = trail to the midpoint of
                              // the two TPs before the one just hit. See
                              // ManageLadder().
+   bool     closeFullOnLast; // ladder strategies: true (default, every
+                             // strategy before limit_runner) = the last
+                             // defined TP always closes 100% of whatever
+                             // remains, regardless of its own pcts[] entry.
+                             // false (limit_runner only, when the signal had
+                             // a literal "TP OPEN" line) = the last defined
+                             // TP only closes its own pcts[] share; whatever
+                             // remains keeps riding on the trailing SL with
+                             // no further TP to close it — see
+                             // core_run_tp_ladder.run_tp_ladder's
+                             // close_full_on_last parameter, which this must
+                             // stay in lockstep with.
 };
 
 ManagedTrade g_trades[];
+
+// A resting BuyLimit/SellLimit order placed for the Limit Runner strategy
+// (STRATEGY_LIMIT_RUNNER / "limit_runner") — the only strategy that places
+// a genuine pending order instead of an immediate market fill. Tracked
+// separately from g_trades[] (which only ever holds OPEN positions) until
+// CheckPendingOrders() (called each OnTick, alongside CheckForClosures())
+// observes it fill, expire, or get cancelled. Carries the same ladder
+// fields ManagedTrade does so a fill can be promoted straight into
+// g_trades[] with zero data loss.
+struct PendingOrder
+{
+   ulong    ticket;
+   string   trade_id;
+   string   strategy;
+   string   direction;      // "BUY" / "SELL"
+   double   lots;
+   double   tp[MAX_TPS];
+   bool     hasTp[MAX_TPS];
+   double   pcts[MAX_TPS];
+   int      beAtPos;
+   string   trailMode;
+   bool     closeFullOnLast;
+};
+
+PendingOrder g_pending[];
 
 //+------------------------------------------------------------------+
 //| Minimal JSON helpers — the wire protocol is a fixed, flat set of  |
@@ -270,6 +307,7 @@ void HandleMessage(const string line)
    if(type == "ping") { SendJson("{\"type\":\"pong\"}"); return; }
    if(type == "open_trade") { HandleOpenTrade(line); return; }
    if(type == "update_trade") { HandleUpdateTrade(line); return; }
+   if(type == "place_pending_order") { HandlePlacePendingOrder(line); return; }
 }
 
 // Corrects an already-tracked trade's TP levels — tp[]/hasTp[] are otherwise
@@ -377,6 +415,7 @@ void HandleOpenTrade(const string json)
    }
    mt.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
    mt.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
+   mt.closeFullOnLast = true; // every open_trade() caller wants the original behaviour
 
    int n = ArraySize(g_trades);
    ArrayResize(g_trades, n + 1);
@@ -387,6 +426,73 @@ void HandleOpenTrade(const string json)
             ",\"fill_price\":" + DoubleToString(fillPrice, _Digits) + "}");
    Print("[EABridge] opened ", direction, " ticket=", ticket, " strategy=", strategy,
          " @ ", fillPrice, " SL=", sl);
+}
+
+// Places a genuine resting BuyLimit/SellLimit order (Limit Runner) instead
+// of an immediate market fill — does NOT add to g_trades[] (that only
+// tracks OPEN positions); the order goes into g_pending[] instead, and
+// CheckPendingOrders() promotes it to a managed trade once it actually
+// fills. GTC-with-expiration (ORDER_TIME_SPECIFIED) so a signal whose zone
+// never gets touched cleans itself up broker-side rather than resting
+// forever — expire_minutes matches core_limit_order_signal.py's own 4h
+// default (same window the Python-simulated zone-wait signals already use).
+void HandlePlacePendingOrder(const string json)
+{
+   string trade_id  = JsonGetString(json, "trade_id");
+   string direction = JsonGetString(json, "direction");
+   double price     = JsonGetDouble(json, "price");
+   double lots      = JsonGetDouble(json, "lot_size");
+   double sl        = JsonGetDouble(json, "stop_loss");
+   string strategy  = JsonGetString(json, "strategy");
+   double expireMin = JsonGetDouble(json, "expire_minutes", 240.0);
+
+   trade.SetExpertMagicNumber(InpMagic);
+   datetime expiration = TimeCurrent() + (datetime)(expireMin * 60);
+   string comment = "ea:" + StringSubstr(trade_id, 0, 12);
+   bool ok;
+   if(direction == "BUY")
+      ok = trade.BuyLimit(lots, price, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment);
+   else
+      ok = trade.SellLimit(lots, price, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment);
+
+   if(!ok)
+   {
+      SendJson("{\"type\":\"pending_order_open_failed\",\"trade_id\":\"" + JsonEsc(trade_id) +
+               "\",\"error\":\"" + JsonEsc(trade.ResultRetcodeDescription()) + "\"}");
+      return;
+   }
+
+   ulong ticket = trade.ResultOrder();
+
+   PendingOrder p;
+   p.ticket = ticket;
+   p.trade_id = trade_id;
+   p.strategy = strategy;
+   p.direction = direction;
+   p.lots = lots;
+   for(int i = 0; i < MAX_TPS; i++)
+   {
+      string key = "tp" + (string)(i + 1);
+      p.hasTp[i] = JsonHasKey(json, key);
+      p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+      p.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
+   }
+   p.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
+   p.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
+   // Sent as an integer (0/1), not a native JSON bool -- this EA's minimal
+   // JSON helpers only parse strings/numbers, matching every other flag in
+   // this protocol (see be_at_pos above).
+   p.closeFullOnLast = JsonHasKey(json, "close_full_on_last")
+      ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
+
+   int n = ArraySize(g_pending);
+   ArrayResize(g_pending, n + 1);
+   g_pending[n] = p;
+
+   SendJson("{\"type\":\"pending_order_placed\",\"trade_id\":\"" + JsonEsc(trade_id) +
+            "\",\"ticket\":" + (string)ticket + "}");
+   Print("[EABridge] pending order placed ", direction, " ticket=", ticket,
+         " strategy=", strategy, " price=", price, " SL=", sl, " expiresMin=", expireMin);
 }
 
 //+------------------------------------------------------------------+
@@ -701,20 +807,25 @@ void ManageConservativeTrial(ManagedTrade &t, const MqlTick &tick)
 
 //+------------------------------------------------------------------+
 //| Strategy: signal_climber / gd_vip_runner / adaptive_runner /       |
-//| adaptive_runner_2 (_run_tp_ladder) — SL stays put until beAtPos,   |
-//| then -> entry; every TP after that trails SL per t.trailMode      |
-//| ("" = previous TP price, the original/default rule; "midpoint_    |
-//| lag2" = midpoint of the two TPs before this one, adaptive_        |
-//| runner_2 only). Close-% per TP, the BE trigger position, and the  |
-//| trail mode are sent by Python at open time (t.pcts / t.beAtPos /  |
-//| t.trailMode — see ManagedTrade and HandleOpenTrade), so a tuning  |
-//| change to an existing strategy needs zero EA changes — only a     |
-//| Python-side edit. A genuinely new trail RULE (not just new pcts/  |
-//| be_at_pos values) still needs an EA change, same as adaptive_     |
-//| runner_2 itself did — see the trailMode branch below. Falls back  |
-//| to the hardcoded table below only if be_at_pos wasn't sent by     |
-//| Python (a protocol-version-mismatch safety net; shouldn't happen  |
-//| normally).                                                        |
+//| adaptive_runner_2 / limit_runner (_run_tp_ladder) — SL stays put    |
+//| until beAtPos, then -> entry; every TP after that trails SL per    |
+//| t.trailMode ("" = previous TP price, the original/default rule;    |
+//| "midpoint_lag2" = midpoint of the two TPs before this one,         |
+//| adaptive_runner_2 only). Close-% per TP, the BE trigger position,  |
+//| the trail mode, and closeFullOnLast are sent by Python at open     |
+//| time (t.pcts / t.beAtPos / t.trailMode / t.closeFullOnLast — see   |
+//| ManagedTrade and HandleOpenTrade/HandlePlacePendingOrder), so a    |
+//| tuning change to an existing strategy needs zero EA changes — only |
+//| a Python-side edit. A genuinely new trail RULE (not just new       |
+//| pcts/be_at_pos values) still needs an EA change, same as           |
+//| adaptive_runner_2 itself did — see the trailMode branch below.     |
+//| limit_runner's own closeFullOnLast=false path (only when the       |
+//| signal had a literal "TP OPEN" line) is the second such case: the  |
+//| last defined TP only closes its own pcts[] share instead of        |
+//| everything, leaving the rest riding on the trailing SL with no     |
+//| further TP to close it. Falls back to the hardcoded table below    |
+//| only if be_at_pos wasn't sent by Python (a protocol-version-       |
+//| mismatch safety net; shouldn't happen normally).                   |
 //+------------------------------------------------------------------+
 void ManageLadder(ManagedTrade &t, const MqlTick &tick)
 {
@@ -753,8 +864,8 @@ void ManageLadder(ManagedTrade &t, const MqlTick &tick)
       bool isLast = (compactPos == n - 1);
 
       bool closedAll = false;
-      if(isLast) closedAll = DoCloseAll(t, idx);
-      else       DoPartialClose(t, idx, pcts[compactPos]);
+      if(isLast && t.closeFullOnLast) closedAll = DoCloseAll(t, idx);
+      else                            DoPartialClose(t, idx, pcts[compactPos]);
 
       if(compactPos >= beAtPos)
       {
@@ -899,7 +1010,8 @@ void ManageTrade(ManagedTrade &t, const MqlTick &tick)
    else if(t.strategy == "scalp_runner") ManageScalpRunner(t, tick);
    else if(t.strategy == "conservative_trial") ManageConservativeTrial(t, tick);
    else if(t.strategy == "signal_climber" || t.strategy == "gd_vip_runner" ||
-           t.strategy == "adaptive_runner" || t.strategy == "adaptive_runner_2") ManageLadder(t, tick);
+           t.strategy == "adaptive_runner" || t.strategy == "adaptive_runner_2" ||
+           t.strategy == "limit_runner") ManageLadder(t, tick);
    else if(t.strategy == "no_sl_scale") ManageNoSlScale(t, tick);
    else if(t.strategy == "unattended") ManageUnattended(t, tick);
    else if(t.strategy == "orb_fixed") ManageOrbFixed(t, tick);
@@ -965,6 +1077,79 @@ void CheckForClosures()
 }
 
 //+------------------------------------------------------------------+
+//| Detect a resting Limit Runner order that filled, expired, or was   |
+//| cancelled — no MT5 event handler exists for pending-order fills    |
+//| (OnTradeTransaction is not used anywhere in this EA; every other    |
+//| lifecycle event here is polled, e.g. CheckForClosures() above), so |
+//| this checks the same way: does the order still exist? If not, did  |
+//| a position with the same ticket appear (filled) or not (gone)?     |
+//+------------------------------------------------------------------+
+void CheckPendingOrders()
+{
+   for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
+   {
+      ulong ticket = g_pending[i].ticket;
+      if(OrderSelect(ticket)) continue;  // still resting on the book
+
+      if(PositionSelectByTicket(ticket))
+      {
+         // Filled — a resting order that opens a brand-new position gets a
+         // position ticket equal to its own order ticket (same assumption
+         // HandleOpenTrade's trade.ResultOrder() already relies on for a
+         // market fill). Promote straight into g_trades[] so this trade is
+         // indistinguishable from any other EA-managed trade from here on.
+         double fillPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+
+         ManagedTrade mt;
+         mt.ticket = ticket;
+         mt.trade_id = g_pending[i].trade_id;
+         mt.strategy = g_pending[i].strategy;
+         mt.direction = g_pending[i].direction;
+         mt.entry_price = fillPrice;
+         mt.orig_lots = g_pending[i].lots;
+         mt.trailing_active = false;
+         mt.last_step = 0;
+         mt.trail_dist = InpConservativeTrailPts;
+         for(int j = 0; j < MAX_TPS; j++)
+         {
+            mt.hasTp[j] = g_pending[i].hasTp[j];
+            mt.tp[j] = g_pending[i].tp[j];
+            mt.triggered[j] = false;
+            mt.pcts[j] = g_pending[i].pcts[j];
+         }
+         mt.beAtPos = g_pending[i].beAtPos;
+         mt.trailMode = g_pending[i].trailMode;
+         mt.closeFullOnLast = g_pending[i].closeFullOnLast;
+
+         int n = ArraySize(g_trades);
+         ArrayResize(g_trades, n + 1);
+         g_trades[n] = mt;
+
+         SendJson("{\"type\":\"pending_order_filled\",\"trade_id\":\"" + JsonEsc(mt.trade_id) +
+                  "\",\"ticket\":" + (string)ticket +
+                  ",\"fill_price\":" + DoubleToString(fillPrice, _Digits) + "}");
+         Print("[EABridge] pending order filled -> managed ticket=", ticket,
+               " strategy=", mt.strategy, " @ ", fillPrice);
+      }
+      else
+      {
+         // Gone with no resulting position — either the broker-side
+         // expiration we set fired, or it was cancelled manually in the
+         // terminal. Can't reliably tell these apart from this observation
+         // alone, so "reason" is best-effort, not authoritative.
+         SendJson("{\"type\":\"pending_order_cancelled\",\"trade_id\":\"" + JsonEsc(g_pending[i].trade_id) +
+                  "\",\"reason\":\"expired_or_cancelled\"}");
+         Print("[EABridge] pending order gone (expired/cancelled) ticket=", ticket,
+               " trade_id=", g_pending[i].trade_id);
+      }
+
+      int total = ArraySize(g_pending);
+      for(int k = i; k < total - 1; k++) g_pending[k] = g_pending[k + 1];
+      ArrayResize(g_pending, total - 1);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| MT5 event handlers                                                 |
 //+------------------------------------------------------------------+
 int OnInit()
@@ -1006,9 +1191,10 @@ void DiagHeartbeat()
 
 void OnTick()
 {
-   if(ArraySize(g_trades) == 0) return;
+   if(ArraySize(g_trades) == 0 && ArraySize(g_pending) == 0) return;
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick)) return;
+   CheckPendingOrders();
    CheckForClosures();
    for(int i = 0; i < ArraySize(g_trades); i++)
       ManageTrade(g_trades[i], tick);

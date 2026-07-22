@@ -754,6 +754,31 @@ def _apply_schema() -> None:
             # Defaults off: changes which node's signals actually trade and
             # removes the VPS's ability to self-generate if the Mac drops.
             "ALTER TABLE vantage_risk_settings ADD COLUMN centralized_signal_gen_enabled INTEGER NOT NULL DEFAULT 0",
+            # Limit Runner (STRATEGY_LIMIT_RUNNER): True once a resting pending
+            # order fills if the originating signal contained a literal "TP OPEN"
+            # line — the portion left after the last numeric TP has no fixed
+            # target and rides as a runner (run_tp_ladder's close_full_on_last=
+            # False path) instead of closing everything on the last TP like
+            # every other ladder strategy. See core_limit_order_signal.py.
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN tp_open INTEGER NOT NULL DEFAULT 0",
+            """CREATE TABLE IF NOT EXISTS vantage_pending_orders (
+                trade_id       TEXT PRIMARY KEY,
+                signal_id      TEXT NOT NULL,
+                tg_message_id  TEXT,
+                channel_name   TEXT NOT NULL,
+                direction      TEXT NOT NULL,
+                price          REAL NOT NULL,
+                stop_loss      REAL NOT NULL,
+                tps_json       TEXT NOT NULL,
+                pcts_json      TEXT NOT NULL,
+                be_at_pos      INTEGER NOT NULL,
+                tp_open        INTEGER NOT NULL DEFAULT 0,
+                lot_size       REAL NOT NULL,
+                ea_ticket      INTEGER,
+                status         TEXT NOT NULL DEFAULT 'working',
+                created_at     REAL NOT NULL,
+                resolved_at    REAL
+            )""",
         ]:
             try:
                 conn.execute(stmt)

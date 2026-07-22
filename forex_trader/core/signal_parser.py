@@ -86,6 +86,11 @@ _GD2_SL_ZONE_RE        = re.compile(r'SL[\s\xa0]*/[\s\xa0]*invalid[\s\xa0]+([\d.
 _GD2_LIMITS_DIRECTION_RE = re.compile(r'\b(BUY|SELL)\s+(?:LIMITS?\s+)?GOLD\s+@', re.IGNORECASE)
 _GD2_AT_RANGE_RE         = re.compile(r'@\s*([\d.,]+)\s*/\s*([\d.,]+)')
 _GD2_TP_PLAIN_RE         = re.compile(r'^TP\s+([\d.,]+)\s*$', re.IGNORECASE | re.MULTILINE)
+# A literal "TP OPEN" line — the final, unfixed-target leg that rides as a
+# runner once every numeric TP above it has closed its portion (see
+# core_limit_order_signal.py). Distinct from _GD2_TP_PLAIN_RE, which only
+# matches a numeric value and therefore never matches this line at all.
+_GD2_TP_OPEN_RE          = re.compile(r'^TP\s+OPEN\s*$', re.IGNORECASE | re.MULTILINE)
 
 
 def _parse_gd2_zone_targets(text: str, start: int = 0) -> dict[int, float]:
@@ -558,6 +563,34 @@ def is_gd2_message(text: str) -> bool:
         _GD2_ZONE_DIRECTION_RE.search(text) is not None or
         _GD2_LIMITS_DIRECTION_RE.search(text) is not None
     )
+
+
+def is_limit_order_signal(text: str) -> bool:
+    """True for the "BUY/SELL [LIMITS] GOLD @ x/y AREA" pending-order layout
+    (GD2 Format C3) — checked independently of any channel's configured
+    parser_format/is_gd2_message gate, so a genuine broker-side pending
+    order can be placed for this exact shape no matter which channel it
+    arrives from (any channel, format-matched only)."""
+    return _GD2_LIMITS_DIRECTION_RE.search(text) is not None
+
+
+def parse_limit_order_signal(text: str) -> Optional[dict]:
+    """Parse the C3 pending-order layout into a signal dict — same shape as
+    parse_gd2_signal() (direction/entry_low/entry_high/stop_loss/tp1..tp8)
+    plus a `tp_open` flag: True if the message contains a literal "TP OPEN"
+    line, meaning the portion left after the last numeric TP has no fixed
+    target and rides as a runner (see core_limit_order_signal.py). Delegates
+    the actual field extraction to parse_gd2_signal — this function only
+    adds the format gate + the tp_open flag, so C3's parsing logic has a
+    single source of truth."""
+    if not is_limit_order_signal(text):
+        return None
+    parsed = parse_gd2_signal(text)
+    if not parsed:
+        return None
+    parsed = dict(parsed)
+    parsed["tp_open"] = bool(_GD2_TP_OPEN_RE.search(text))
+    return parsed
 
 
 def validate_signal(direction: str, entry_low: float, entry_high: float,

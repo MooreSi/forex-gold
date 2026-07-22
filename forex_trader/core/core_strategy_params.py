@@ -1,13 +1,17 @@
 """Live-tunable per-strategy point/multiplier parameters -- lets Conservative,
-Scalp Runner, GD VIP Runner, Adaptive Runner, and Adaptive Runner 2's fixed
-SL/TP constants be edited from Trading > Strategy without a code change or
-restart, plus a small named-template library to save/reapply parameter sets.
+Scalp Runner, GD VIP Runner, Adaptive Runner, Adaptive Runner 2, and Limit
+Runner's fixed SL/TP constants be edited from Trading > Strategy without a
+code change or restart, plus a small named-template library to save/reapply
+parameter sets.
 
 Inspired by a third-party EA's "Settings Templates" panel (2026-07-22
-investigation) -- Python-only by design, no MQL5 involved: every strategy
-covered here is already fully resolved to concrete SL/TP price levels by
-Python before the EA (if any) ever sees the trade, so there's no EA-side
-constant to retune to get the same "no recompile" effect.
+investigation) -- Python-only by design, no MQL5 involved (Limit Runner's own
+EA-side pending-order fields are sent fresh on every placement from whatever
+this module currently holds, so a tuning change here still needs no EA
+rebuild): every strategy covered here is already fully resolved to concrete
+SL/TP price levels/positions by Python before the EA (if any) ever sees the
+trade, so there's no EA-side constant to retune to get the same "no
+recompile" effect.
 
 Scope: SL-shaping constants only (a strategy's fixed point distance, or its
 widen/cap/floor multipliers) -- not the TP-ladder close-percentage tables
@@ -31,7 +35,7 @@ from forex_trader.core import database as db_module
 from forex_trader.core.database import _schedule_coro
 from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_GD_VIP_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
 )
 
 log = logging.getLogger(__name__)
@@ -61,6 +65,21 @@ PARAM_SPECS: dict[str, list[tuple[str, str, float, str]]] = {
     STRATEGY_ADAPTIVE_RUNNER_2: [
         ("sl_pt", "Stop Loss (fixed)", 10.0, "pt"),
     ],
+    # Limit Runner has no SL-shaping constant here -- its SL comes straight
+    # from the signal's own "SL <price>" line, unmodified (see
+    # core_limit_order_signal.py). be_at_pos is 1-based ("1" = TP1, "2" =
+    # TP2, ...) -- converted to run_tp_ladder's 0-indexed compacted position
+    # (value - 1) at the one call site that reads it
+    # (core_run_tp_ladder.handle_limit_runner). runner_reserve_pct is only
+    # meaningful when the signal contains a literal "TP OPEN" line -- the
+    # fraction of the position left permanently open (no fixed target,
+    # trailing SL only) once every numeric TP has closed its share; ignored
+    # (100% split across the numeric TPs, last one closes all remaining)
+    # when the signal has no "TP OPEN" line.
+    STRATEGY_LIMIT_RUNNER: [
+        ("be_at_pos",          "Breakeven at TP#",       1.0,  "tp#"),
+        ("runner_reserve_pct", "Runner reserve (TP OPEN)", 25.0, "%"),
+    ],
 }
 
 STRATEGY_LABELS: dict[str, str] = {
@@ -69,12 +88,13 @@ STRATEGY_LABELS: dict[str, str] = {
     STRATEGY_GD_VIP_RUNNER:     "GD VIP Runner",
     STRATEGY_ADAPTIVE_RUNNER:   "Adaptive Runner",
     STRATEGY_ADAPTIVE_RUNNER_2: "Adaptive Runner 2",
+    STRATEGY_LIMIT_RUNNER:      "Limit Runner",
 }
 
 # Strategies in display order for the UI's strategy picker.
 PARAM_STRATEGIES: list[str] = [
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_GD_VIP_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
 ]
 
 _DEFAULTS: dict[str, dict[str, float]] = {

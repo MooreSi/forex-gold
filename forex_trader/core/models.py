@@ -117,6 +117,7 @@ STRATEGY_GD_VIP_RUNNER        = "gd_vip_runner"
 STRATEGY_ORB_FIXED           = "orb_fixed"
 STRATEGY_ADAPTIVE_RUNNER      = "adaptive_runner"
 STRATEGY_ADAPTIVE_RUNNER_2    = "adaptive_runner_2"
+STRATEGY_LIMIT_RUNNER         = "limit_runner"
 
 STRATEGY_NAMES = {
     STRATEGY_SCALE_OUT:          "Scale Out + Breakeven",
@@ -133,6 +134,7 @@ STRATEGY_NAMES = {
     STRATEGY_ORB_FIXED:          "ORB/IVB Fixed",
     STRATEGY_ADAPTIVE_RUNNER:    "Adaptive Runner",
     STRATEGY_ADAPTIVE_RUNNER_2:  "Adaptive Runner 2",
+    STRATEGY_LIMIT_RUNNER:       "Limit Runner",
 }
 
 STRATEGY_DESCRIPTIONS = {
@@ -427,6 +429,30 @@ STRATEGY_DESCRIPTIONS = {
         "**Best for:** signals where a flat 10pt stop is an acceptable, predictable "
         "risk regardless of the signal's own SL quality, and where a two-level trail "
         "cushion is preferred over snapping the stop to the immediately-prior TP."
+    ),
+    STRATEGY_LIMIT_RUNNER: (
+        "**Limit Runner** — the only strategy that places a genuine broker-side "
+        "pending order instead of waiting for price to re-enter a zone. Triggered "
+        "exclusively by the \"BUY/SELL [LIMITS] GOLD @ high/low AREA\" message "
+        "layout (any channel, format-matched only) — every other strategy in this "
+        "list only ever manages a trade that already filled.\n\n"
+        "**Entry:** a real BuyLimit/SellLimit order is sent to the EA at the near "
+        "edge of the quoted AREA (the top of the zone for BUY, the bottom for "
+        "SELL — the edge price reaches first), good until it fills or expires "
+        "(4h default). No Python zone-wait, no simulated market fill.\n\n"
+        "**Close schedule:** the signal's own numeric TP lines split evenly across "
+        "whatever's left after the runner reserve (Strategy Parameters: "
+        "runner_reserve_pct, default 25%) — e.g. 3 TPs → 25/25/25% with 25% left "
+        "open. SL moves to breakeven once the configured TP position closes "
+        "(Strategy Parameters: be_at_pos, default TP1), then trails to the "
+        "previous TP price each level after, same as GD VIP Runner.\n\n"
+        "**\"TP OPEN\":** a literal \"TP OPEN\" line in the signal means the "
+        "portion left after the last numeric TP has no fixed target — it isn't "
+        "closed by anything in the ladder, just keeps riding behind the "
+        "trailing SL until stopped out or manually closed. Without a \"TP OPEN\" "
+        "line, the last TP closes the entire remaining position as usual.\n\n"
+        "**Best for:** signal providers who post a specific entry AREA meant to "
+        "be caught with a resting order rather than chased at market."
     ),
 }
 

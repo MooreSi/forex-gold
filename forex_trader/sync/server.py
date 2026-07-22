@@ -35,6 +35,7 @@ from forex_trader.sync.protocol import (
     MSG_SIGNAL_FOLLOWUP, MSG_SIGNAL_FOLLOWUP_ACK,
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
+    MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -252,6 +253,7 @@ class SyncServer:
                 MSG_WELCOME,
                 settings=self._settings_snapshot(),
                 channel_strategy=self._channel_strategy_snapshot(),
+                trading_schedule=self._trading_schedule_snapshot(),
                 active_trader=db_module.get_active_trader(),
                 node_id=db_module.get_or_create_node_id(),
             )))
@@ -303,6 +305,8 @@ class SyncServer:
             await self._handle_settings_propose(ws, msg)
         elif t == MSG_CHANNEL_STRATEGY_PROPOSE:
             await self._handle_channel_strategy_propose(ws, msg)
+        elif t == MSG_TRADING_SCHEDULE_PROPOSE:
+            await self._handle_trading_schedule_propose(ws, msg)
         elif t == MSG_STAND_DOWN:
             await self._handle_stand_down(ws)
         elif t == MSG_RESUME:
@@ -578,6 +582,31 @@ class SyncServer:
         local UI changes a channel's strategy directly."""
         await self._broadcast(make(
             MSG_CHANNEL_STRATEGY_STATE, channel_strategy=self._channel_strategy_snapshot()
+        ))
+
+    # ── Trading Schedule sync ────────────────────────────────────────────────
+
+    def _trading_schedule_snapshot(self) -> dict:
+        from forex_trader.core.core_trading_schedule import trading_schedule_snapshot
+        return trading_schedule_snapshot()
+
+    async def _handle_trading_schedule_propose(self, ws, msg: dict) -> None:
+        snapshot = msg.get("trading_schedule") or {}
+        try:
+            from forex_trader.core.core_trading_schedule import apply_trading_schedule_snapshot
+            apply_trading_schedule_snapshot(snapshot)
+            log.info("[SyncServer] applied trading schedule from Mac")
+        except Exception as e:
+            log.warning("[SyncServer] failed to apply trading schedule from Mac: %s", e)
+            return
+        await self.broadcast_trading_schedule()
+
+    async def broadcast_trading_schedule(self) -> None:
+        """Mirror of broadcast_settings() for the Trading Schedule — pushed
+        after applying a Mac's proposal and whenever this VPS's own local UI
+        changes the schedule directly."""
+        await self._broadcast(make(
+            MSG_TRADING_SCHEDULE_STATE, trading_schedule=self._trading_schedule_snapshot()
         ))
 
     # ── Stand-down / resume ──────────────────────────────────────────────────

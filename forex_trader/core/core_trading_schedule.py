@@ -29,7 +29,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from forex_trader.core.database import db
+from forex_trader.core.database import db, _schedule_coro
 from forex_trader.core import database as db_module
 
 log = logging.getLogger(__name__)
@@ -78,16 +78,79 @@ def get_trading_schedule() -> dict:
     return schedule
 
 
-def set_trading_schedule(schedule: dict) -> None:
+def set_trading_schedule(schedule: dict, _from_sync: bool = False) -> None:
     db_module.set_app_config("trading_schedule", json.dumps(schedule))
+    _maybe_forward_trading_schedule(_from_sync)
 
 
 def is_trading_schedule_enabled() -> bool:
     return db_module.get_app_config("trading_schedule_enabled") == "1"
 
 
-def set_trading_schedule_enabled(enabled: bool) -> None:
+def set_trading_schedule_enabled(enabled: bool, _from_sync: bool = False) -> None:
     db_module.set_app_config("trading_schedule_enabled", "1" if enabled else "0")
+    _maybe_forward_trading_schedule(_from_sync)
+
+
+_applying_sync_trading_schedule = False  # re-entrancy guard — see set_trading_schedule/set_trading_schedule_enabled
+
+
+def _maybe_forward_trading_schedule(_from_sync: bool) -> None:
+    """Forward this node's current combined schedule snapshot to the paired
+    Local/Remote node, unless this call is itself applying a value that just
+    arrived over sync (_from_sync=True) or a forward is already in flight —
+    without this guard, mirroring an incoming sync snapshot would immediately
+    re-forward it back out, an infinite propose/confirm ping-pong between
+    the two nodes. Same pattern as update_risk_settings()."""
+    global _applying_sync_trading_schedule
+    if _from_sync or _applying_sync_trading_schedule:
+        return
+    _applying_sync_trading_schedule = True
+    try:
+        _forward_trading_schedule_over_sync()
+    finally:
+        _applying_sync_trading_schedule = False
+
+
+def trading_schedule_snapshot() -> dict:
+    """Combined {enabled, schedule} snapshot -- the unit sent/received over
+    the Local/Remote sync channel, since the UI edits and saves both pieces
+    as one atomic action."""
+    return {"enabled": is_trading_schedule_enabled(), "schedule": get_trading_schedule()}
+
+
+def apply_trading_schedule_snapshot(snapshot: dict) -> None:
+    """Apply a combined snapshot that just arrived over sync from the paired
+    node -- always applies with _from_sync=True, since receiving IS the sync
+    path (forwarding it again would ping-pong back to the sender)."""
+    if snapshot.get("schedule"):
+        set_trading_schedule(snapshot["schedule"], _from_sync=True)
+    if "enabled" in snapshot:
+        set_trading_schedule_enabled(bool(snapshot["enabled"]), _from_sync=True)
+
+
+def _forward_trading_schedule_over_sync() -> None:
+    """Send this node's current trading schedule snapshot to the paired
+    node, whichever role this process has. No-op (and near-zero cost) if
+    sync isn't configured -- both get_instance() calls return None until
+    sync.server.init()/sync.client.get_instance() have actually been used.
+    Mirrors core_db_risk_settings._forward_settings_over_sync() exactly."""
+    try:
+        from forex_trader.sync import client as _sync_cli_mod
+        cli = _sync_cli_mod.get_instance()
+        if cli is not None:
+            _schedule_coro(cli.propose_trading_schedule(trading_schedule_snapshot()))
+            return
+    except Exception as e:
+        log.debug("[Sync] trading schedule forward (client) failed: %s", e)
+
+    try:
+        from forex_trader.sync import server as _sync_srv_mod
+        srv = _sync_srv_mod.get_instance()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_trading_schedule())
+    except Exception as e:
+        log.debug("[Sync] trading schedule forward (server) failed: %s", e)
 
 
 def _parse_hm(hhmm: str) -> int:

@@ -51,6 +51,16 @@ MSG_AI_CONFIG_SYNC = "ai_config_sync"  # Mac -> VPS: mirror ai_provider/model/de
 MSG_CHANNEL_STRATEGY_PROPOSE = "channel_strategy_propose"  # Mac -> VPS
 MSG_CHANNEL_STRATEGY_STATE   = "channel_strategy_state"    # VPS -> Mac: full confirmed snapshot
 
+# Trading Schedule (app_config "trading_schedule"/"trading_schedule_enabled",
+# not vantage_risk_settings — a separate storage layer like AI config above,
+# so it needs its own pair rather than joining MSG_SETTINGS_PROPOSE). One
+# combined snapshot ({"enabled": bool, "schedule": {...}}) per message, same
+# shape as _channel_strategy_snapshot's single-dict bundle, since the whole
+# 7-day/3-window config is edited and saved as one atomic unit in the UI —
+# no per-key filtering/rejection case exists here, so no REJECTED variant.
+MSG_TRADING_SCHEDULE_PROPOSE = "trading_schedule_propose"  # Mac -> VPS
+MSG_TRADING_SCHEDULE_STATE   = "trading_schedule_state"    # VPS -> Mac: full confirmed snapshot
+
 # ── Trading mutual exclusion (Option A: block switch-back on open local positions) ──
 MSG_STAND_DOWN        = "stand_down"        # Mac -> VPS: taking over, stop opening new trades
 MSG_STAND_DOWN_ACK    = "stand_down_ack"    # VPS -> Mac: stood down, here is my open-position summary

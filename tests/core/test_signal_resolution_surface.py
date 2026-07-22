@@ -24,6 +24,7 @@ from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
 
@@ -353,6 +354,25 @@ def test_adaptive_runner_widens_and_caps_sl(fresh_db):
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
     assert result["stop_loss_to_use"] == 2395.0
+
+
+def test_adaptive_runner_2_uses_fixed_10pt_sl_ignoring_signal_sl(fresh_db):
+    # entry_mid = 2400.0; signal's own stop_loss (2350.0, 50pts away) must be
+    # completely ignored -- only the fixed 10pt distance matters.
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2350.0, tp1=2410.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER_2})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2390.0
+
+
+def test_adaptive_runner_2_sell_direction_sl_is_above_entry(fresh_db):
+    _insert_signal(direction="SELL", entry_low=2399.0, entry_high=2401.0,
+                   stop_loss=2450.0, tp1=2390.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER_2})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["stop_loss_to_use"] == 2410.0
 
 
 # ── Risk Governor integration ───────────────────────────────────────────────────

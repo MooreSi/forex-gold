@@ -44,15 +44,21 @@ async def run_tp_ladder(
     tp_cache: TPCache,
     be_at_pos: int = 0,
     close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
+    sl_rule: Optional[Callable[[int, list[tuple[int, float]]], float]] = None,
 ) -> None:
-    """Shared TP-ladder walk used by Signal Climber, GD VIP Runner, and
-    Adaptive Runner.
+    """Shared TP-ladder walk used by Signal Climber, GD VIP Runner,
+    Adaptive Runner, and Adaptive Runner 2.
 
     Closes fractions of the original lot at each signal TP (per pcts_table,
     keyed by TP count). SL is left untouched until the TP at index
     `be_at_pos` (0 = TP1, 1 = TP2, ...) is hit, at which point it moves to
-    breakeven; every subsequent TP after that trails SL to the previous
-    TP's price.
+    breakeven; every TP after that trails SL according to `sl_rule(pos,
+    all_tps)` -- pos is the 0-indexed compacted TP position just hit,
+    all_tps the compacted list of (tp_num, tp_price) tuples. Defaults to
+    the original trail-to-previous-TP rule (`all_tps[pos - 1][1]`) when
+    `sl_rule` is None, so Signal Climber/GD VIP Runner/Adaptive Runner are
+    unaffected -- Adaptive Runner 2 is the only caller that passes a
+    different rule (trail to the midpoint of the two TPs before this one).
     """
     direction   = trade["direction"].upper()
     entry_price = float(trade["entry_price"])
@@ -149,7 +155,7 @@ async def run_tp_ladder(
             new_sl = entry_price
             sl_moved_be = 1
         else:
-            new_sl = all_tps[pos - 1][1]  # previous TP price
+            new_sl = sl_rule(pos, all_tps) if sl_rule else all_tps[pos - 1][1]
             sl_moved_be = trade.get("sl_moved_to_be", 0)
 
         should_update = (direction == "BUY" and new_sl > current_sl) or \
@@ -171,8 +177,8 @@ async def run_tp_ladder(
                     trade_id, "sl_moved_be",
                 ))
             else:
-                log.info("[%s] %s SL trailed to TP%d level %.2f after TP%d",
-                         log_tag, trade_id[:8], pos, new_sl, tp_num)
+                log.info("[%s] %s SL trailed to %.2f after TP%d",
+                         log_tag, trade_id[:8], new_sl, tp_num)
 
 
 async def handle_signal_climber(
@@ -236,3 +242,33 @@ async def handle_adaptive_runner(
     """
     await run_tp_ladder(trade, tick, _GDVR_PCTS, "adaptive_runner", bridge, tp_cache,
                        be_at_pos=0, close_full_after_tps=close_full_after_tps)
+
+
+def _adaptive_runner_2_sl_rule(pos: int, all_tps: list[tuple[int, float]]) -> float:
+    """Adaptive Runner 2's trail rule: SL steps to the midpoint of the two
+    TPs before the one just hit (TP3 -> mid(TP1,TP2), TP4 -> mid(TP2,TP3),
+    ...), instead of the other ladder strategies' single-previous-TP trail.
+    Only ever called by run_tp_ladder() for pos > be_at_pos (=1 for this
+    strategy, see handle_adaptive_runner_2), so pos is always >= 2 here and
+    pos - 2 never goes negative."""
+    return (all_tps[pos - 2][1] + all_tps[pos - 1][1]) / 2
+
+
+async def handle_adaptive_runner_2(
+    trade: dict, tick: Tick, bridge: Any, tp_cache: TPCache,
+    close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
+) -> None:
+    """
+    Adaptive Runner 2: fixed 10pt SL (see _ADAPTIVE2_SL_PT in
+    core_signal_resolution.py -- not derived from the signal at all, unlike
+    every other ladder strategy), GD VIP Runner's back-loaded close
+    schedule (_GDVR_PCTS -- an exact match for this strategy's own stated
+    5/5/10/10/15/15/15/25 split), and a different SL trail: breakeven at
+    TP2 (be_at_pos=1), then from TP3 onward the SL steps to the midpoint of
+    the two TPs before the one just cleared instead of snapping to the
+    single immediately-previous TP price (_adaptive_runner_2_sl_rule) --
+    see STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER_2] in core/models.py.
+    """
+    await run_tp_ladder(trade, tick, _GDVR_PCTS, "adaptive_runner_2", bridge, tp_cache,
+                       be_at_pos=1, close_full_after_tps=close_full_after_tps,
+                       sl_rule=_adaptive_runner_2_sl_rule)

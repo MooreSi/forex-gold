@@ -23,7 +23,7 @@ from forex_trader.core import core_open_trade_from_signal as otfs
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_GD_VIP_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
 
@@ -100,7 +100,7 @@ class _FakeEA:
         return True
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None):
+                         pcts=None, be_at_pos=None, trail_mode=None):
         return self._ack
 
     async def update_trade(self, trade_id, tps):
@@ -259,6 +259,48 @@ def test_adaptive_runner_post_fill_override(fresh_db):
 
     trade = _get_trade_by_signal("sig-1")
     assert trade["stop_loss"] == 2395.5
+
+
+def test_adaptive_runner_2_post_fill_override_leaves_tps_untouched(fresh_db):
+    # Signal's own stop_loss (2350.0, 50pts away) must be ignored entirely --
+    # only the fixed 10pt distance from the real fill price matters.
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2350.0, tp1=2410.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER_2})
+    bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
+    asyncio.run(otfs.open_trade_from_signal(bridge, "sig-1"))
+
+    trade = _get_trade_by_signal("sig-1")
+    assert trade["stop_loss"] == 2390.5
+    assert trade["tp1"] == 2410.0  # untouched, unlike Conservative/Scalp Runner
+    assert bridge.modify_order_calls == [{"ticket": 555, "sl": 2390.5, "tp": None}]
+
+
+def test_adaptive_runner_2_ea_managed_calls_ea_open_trade_with_trail_mode(fresh_db):
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2350.0, tp1=2410.0)
+    db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER_2, "ea_bridge_enabled": 1})
+
+    class _RecordingEA(_FakeEA):
+        def __init__(self, ack=None):
+            super().__init__(ack)
+            self.open_trade_calls = []
+
+        async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
+                             pcts=None, be_at_pos=None, trail_mode=None):
+            self.open_trade_calls.append(
+                {"pcts": pcts, "be_at_pos": be_at_pos, "trail_mode": trail_mode}
+            )
+            return await super().open_trade(trade_id, direction, lot_size, stop_loss, tps, strategy,
+                                             pcts=pcts, be_at_pos=be_at_pos, trail_mode=trail_mode)
+
+    fake_ea = _RecordingEA(ack={"type": "trade_opened", "ticket": 8001, "fill_price": 2400.5})
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(otfs.open_trade_from_signal(bridge, "sig-1"))
+
+    assert fake_ea.open_trade_calls == [
+        {"pcts": [1.00], "be_at_pos": 1, "trail_mode": "midpoint_lag2"}
+    ]
 
 
 def test_trail_stop_post_fill_override(fresh_db):

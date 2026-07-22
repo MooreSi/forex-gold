@@ -176,6 +176,44 @@ def test_today_signal_count_matches_db(engine, fresh_db):
     assert engine._today_signal_count() == 2
 
 
+# ── create_signal() column safety ────────────────────────────────────────────
+# gd_copy_signal_repo.create_signal() builds its INSERT column list directly
+# from dict.keys() -- any key that isn't a real gdc_signals column raises
+# "no such column" and silently kills every signal-creation cycle. This bit
+# _run_cycle's ML-candidate-ranking rework (2026-07-22): ML-only context
+# fields (news_proximity_norm, regime_score, etc.) were briefly being set on
+# the SAME dict passed to create_signal(), not a separate feat_input copy.
+
+def test_build_signal_output_plus_strategy_is_a_valid_create_signal_dict(engine, fresh_db):
+    from forex_trader.gd_copy_signal import signal_generator as sg
+
+    level = {"price": 4000.0, "type": "swing_high", "score": 0.8}
+    context = {
+        "atr": 8.0, "adx": 20.0, "htf_bias": "neutral", "h1_bias": "neutral",
+        "session": "london", "price_at_signal": 4000.0,
+    }
+    sig_data = sg.build_signal(level, "BUY", context)
+    sig_data["strategy"] = "scale_out"
+
+    sig_id = fresh_db.create_signal(sig_data)
+    assert sig_id
+
+
+def test_ml_context_fields_are_not_valid_gdc_signals_columns(fresh_db):
+    """Documents exactly which fields must stay out of create_signal()'s
+    dict -- these are extract_features() inputs only, never persisted as
+    their own columns (the feature VECTOR is stored separately via
+    store_ml_features)."""
+    ml_only_fields = {
+        "news_proximity_norm", "regime_score", "equity_drawdown_pct",
+        "vip_discipline_score", "vip_aggression_score",
+        "minutes_since_last_vip", "vip_signals_today", "concurrent_agreement",
+    }
+    for field in ml_only_fields:
+        with pytest.raises(Exception, match="has no column named"):
+            fresh_db.create_signal({"direction": "BUY", "signal_ref": f"bad-{field}", field: 0.5})
+
+
 # ── get_status ────────────────────────────────────────────────────────────────
 
 def test_get_status_reflects_running_state(engine):

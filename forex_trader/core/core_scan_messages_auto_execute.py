@@ -42,6 +42,7 @@ from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
 )
 from forex_trader.core.signal_parser import validate_signal
 
@@ -54,9 +55,15 @@ _CONSERVATIVE_TP1_PT = 3.0
 _SCALP_RUNNER_SL_PT = 10.0
 _SCALP_RUNNER_TP1_PT = 3.0
 _SCALP_RUNNER_TP2_PT = 4.0
+# Adaptive Runner 2 fixed SL (points from fill) -- TPs are NOT overridden,
+# unlike Conservative/Scalp Runner above (see core_signal_resolution.py's
+# _ADAPTIVE2_SL_PT, verbatim-duplicated here same as the other point
+# constants in this file).
+_ADAPTIVE2_SL_PT = 10.0
 
 _SELF_MANAGED_STRATEGIES = {STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL}
-_CLIMBER_MODE_STRATEGIES = (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER)
+_CLIMBER_MODE_STRATEGIES = (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
+                             STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2)
 _PRE_TRADE_FILTER_BYPASS_STRATEGIES = _SELF_MANAGED_STRATEGIES | set(_CLIMBER_MODE_STRATEGIES)
 _SL_OVERRIDE_STRATEGIES = (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER)
 
@@ -284,6 +291,12 @@ async def execute_auto_signal(
                                 else:
                                     tg_sl_pt = _CONSERVATIVE_SL_PT
                                 tg_sl_use = round(entry_mid - tg_co_sign * tg_sl_pt, 2)
+                            elif strategy == STRATEGY_ADAPTIVE_RUNNER_2:
+                                # Fixed 10pt SL, not derived from the signal at all --
+                                # unlike Conservative/Scalp Runner, TPs are left as the
+                                # signal sent them (see the post-fill block below).
+                                tg_co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
+                                tg_sl_use = round(entry_mid - tg_co_sign * _ADAPTIVE2_SL_PT, 2)
                             else:
                                 tg_sl_use = float(parsed["stop_loss"])
                             try:
@@ -357,6 +370,32 @@ async def execute_auto_signal(
                                             log.warning(
                                                 "EA update_trade after %s TG fill failed: %s", strategy, _e
                                             )
+                                elif (not trade_result.get("executed_remotely")
+                                        and strategy == STRATEGY_ADAPTIVE_RUNNER_2
+                                        and trade_result.get("trade_id")):
+                                    # SL-only post-fill exact recompute (slippage
+                                    # correction) -- TPs are the signal's own, left
+                                    # untouched, unlike the Conservative/Scalp Runner
+                                    # block above.
+                                    fill = float(exec_price or entry_mid)
+                                    co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
+                                    exact_sl = round(fill - co_sign * _ADAPTIVE2_SL_PT, 2)
+                                    with db_module.db() as conn:
+                                        conn.execute(
+                                            "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
+                                            (exact_sl, trade_result["trade_id"]),
+                                        )
+                                    mt5_tkt = trade_result.get("mt5_ticket")
+                                    if mt5_tkt:
+                                        try:
+                                            await bridge.modify_order(int(mt5_tkt), sl=exact_sl, tp=None)
+                                        except Exception as _e:
+                                            log.warning("[adaptive_runner_2] TG modify_order SL sync failed: %s", _e)
+                                    trade_result["stop_loss"] = exact_sl
+                                    log.info(
+                                        "[adaptive_runner_2/tg] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt fixed)",
+                                        trade_result["trade_id"][:8], fill, exact_sl, _ADAPTIVE2_SL_PT,
+                                    )
                             except Exception as e:
                                 e_str = str(e)
                                 is_cb = "circuit breaker" in e_str.lower()

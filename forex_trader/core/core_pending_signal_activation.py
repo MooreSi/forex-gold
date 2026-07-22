@@ -38,6 +38,7 @@ from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
     Tick,
 )
 
@@ -97,15 +98,16 @@ async def try_activate_pending_signals(
         effective_strategy = channel_strategy or current_strategy
         # GD2 signals are published after the provider enters — price typically needs
         # time to pull back to the zone.  Give them 15 min instead of 2 min so brief
-        # retracements are not missed.  GD VIP Runner and Adaptive Runner keep the
-        # 4h window — Adaptive Runner can end up on the same slow-to-fill zone
-        # signals if a channel is overridden to it, and the wider window is
-        # harmless for faster-filling signals (they still fire the moment price
-        # re-enters the zone; this only raises how long they're allowed to wait).
+        # retracements are not missed.  GD VIP Runner, Adaptive Runner, and Adaptive
+        # Runner 2 keep the 4h window — any of them can end up on the same
+        # slow-to-fill zone signals if a channel is overridden to it, and the wider
+        # window is harmless for faster-filling signals (they still fire the moment
+        # price re-enters the zone; this only raises how long they're allowed to wait).
         _src = (sig.get("source_name") or "").lower()
         _is_gd2_src = "gold diggers 2.0" in _src
         _is_orb_src = "orb/ivb report" in _src
-        if effective_strategy in (STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER):
+        if effective_strategy in (STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+                                   STRATEGY_ADAPTIVE_RUNNER_2):
             _expiry = _GDVR_PENDING_EXPIRY_SEC
         elif _is_gd2_src:
             _expiry = 15 * 60  # 15 minutes — GD2 limit orders often need a pullback
@@ -174,7 +176,8 @@ async def try_activate_pending_signals(
             _pw_strategy = current_strategy
         _self_mgd = {STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
                      STRATEGY_SIGNAL_CLIMBER,
-                     STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER}
+                     STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+                     STRATEGY_ADAPTIVE_RUNNER_2}
         _act_px = tick.ask if sig["direction"].upper() == "BUY" else tick.bid
         filter_err = None if _pw_strategy in _self_mgd else check_pre_trade_filters(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]),

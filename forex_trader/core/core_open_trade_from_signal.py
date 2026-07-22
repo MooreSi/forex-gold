@@ -35,11 +35,13 @@ from forex_trader.core.core_signal_resolution import (
     _gdvr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,
     _CONSERVATIVE_SL_PT, _CONSERVATIVE_TP1_PT,
     _SCALP_RUNNER_SL_PT, _SCALP_RUNNER_TP1_PT, _SCALP_RUNNER_TP2_PT,
+    _ADAPTIVE2_SL_PT,
 )
 from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
-    STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_TRAIL_STOP,
+    STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_TRAIL_STOP,
 )
 
 log = logging.getLogger(__name__)
@@ -269,6 +271,31 @@ async def open_trade_from_signal(
             "[adaptive_runner] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt, stated=%.1fpt)",
             result["trade_id"][:8], _fill, exact_sl, _ar_sl_pt2,
             abs(_entry_mid - float(sig["stop_loss"])),
+        )
+
+    # ── Adaptive Runner 2: post-fill exact SL override (TPs untouched) ───
+    # Fixed 10pt SL from the actual fill price -- unlike Adaptive Runner,
+    # this doesn't depend on the signal's stated SL or TP spread at all,
+    # only on the real fill (slippage correction, same as every other
+    # post-fill override here).
+    elif strategy == STRATEGY_ADAPTIVE_RUNNER_2 and result.get("trade_id"):
+        _fill    = float(result.get("entry_price", _entry_mid))
+        exact_sl = round(_fill - _sign * _ADAPTIVE2_SL_PT, 2)
+        with db_module.db() as conn:
+            conn.execute(
+                "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
+                (exact_sl, result["trade_id"]),
+            )
+        mt5_tkt = result.get("mt5_ticket")
+        if mt5_tkt:
+            try:
+                await bridge.modify_order(int(mt5_tkt), sl=exact_sl, tp=None)
+            except Exception as _e:
+                log.warning("[adaptive_runner_2] modify_order SL sync failed: %s", _e)
+        result["stop_loss"] = exact_sl
+        log.info(
+            "[adaptive_runner_2] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt fixed)",
+            result["trade_id"][:8], _fill, exact_sl, _ADAPTIVE2_SL_PT,
         )
 
     # ── Trail Stop: post-fill SL + TP1-TP8 override ─────────────────────

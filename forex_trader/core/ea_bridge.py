@@ -39,7 +39,7 @@ EA_PORTABLE_STRATEGIES = frozenset({
     "scale_out", "be_runner", "trail_stop", "protected_scale",
     "conservative", "scalp_runner", "conservative_trial",
     "signal_climber", "gd_vip_runner", "no_sl_scale",
-    "adaptive_runner", "orb_fixed",
+    "adaptive_runner", "adaptive_runner_2", "orb_fixed",
 })
 
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy
@@ -150,6 +150,7 @@ class EABridge:
                          stop_loss: float, tps: dict[int, float], strategy: str,
                          pcts: Optional[list[float]] = None,
                          be_at_pos: Optional[int] = None,
+                         trail_mode: Optional[str] = None,
                          timeout: float = 5.0) -> dict:
         """Ask the EA to place the order and take over its management.
         Returns the trade_opened/trade_open_failed payload. Raises
@@ -157,14 +158,26 @@ class EABridge:
         existing Python/bridge open_trade path in that case.
 
         pcts/be_at_pos: for the ladder-shaped strategies (signal_climber,
-        gd_vip_runner, adaptive_runner) — the per-TP close percentage table
-        and the compacted TP position where SL first moves to breakeven.
-        Sent over the wire as flat pct1..pct8 + be_at_pos fields (matching
-        tp1..tp8's existing pattern — the EA's JSON parser is deliberately
-        flat/non-nested, see ForexTraderBridge.mq5's own comment on this).
-        Python is the single source of truth for these tables; the EA no
-        longer hardcodes its own copy for these three strategies, so a new
-        ladder-shaped strategy or a tuning change needs no EA rebuild.
+        gd_vip_runner, adaptive_runner, adaptive_runner_2) — the per-TP
+        close percentage table and the compacted TP position where SL
+        first moves to breakeven. Sent over the wire as flat pct1..pct8 +
+        be_at_pos fields (matching tp1..tp8's existing pattern — the EA's
+        JSON parser is deliberately flat/non-nested, see
+        ForexTraderBridge.mq5's own comment on this). Python is the single
+        source of truth for these tables; the EA no longer hardcodes its
+        own copy for these strategies, so a tuning change needs no EA
+        rebuild.
+
+        trail_mode: which SL rule to apply to every TP after be_at_pos.
+        None/omitted (the default, and what every strategy before Adaptive
+        Runner 2 sends) means "trail to the single immediately-previous TP
+        price" — the EA's original, still-hardcoded fallback behaviour.
+        "midpoint_lag2" means "trail to the midpoint of the two TPs before
+        this one" (Adaptive Runner 2) — unlike pcts/be_at_pos, this DOES
+        require its own branch in the EA's ManageLadder(), since the rule
+        itself (not just its parameters) differs; see
+        core_run_tp_ladder.run_tp_ladder's sl_rule parameter for the
+        Python-side equivalent, which must stay in lockstep with this.
         """
         if not self.is_ea_healthy():
             raise ConnectionError("EA not connected/healthy")
@@ -180,6 +193,8 @@ class EABridge:
                 msg[f"pct{i}"] = p
             if be_at_pos is not None:
                 msg["be_at_pos"] = be_at_pos
+            if trail_mode is not None:
+                msg["trail_mode"] = trail_mode
         ack_event = asyncio.Event()
         ack_box: dict = {}
 

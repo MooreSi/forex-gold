@@ -28,6 +28,7 @@ from forex_trader.core.core_risk_governor import is_trading_paused
 from forex_trader.core.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
 log = logging.getLogger(__name__)
@@ -66,11 +67,25 @@ _EA_LADDER_PCTS = {
     STRATEGY_SIGNAL_CLIMBER: _CLIMBER_PCTS,
     STRATEGY_GD_VIP_RUNNER: _GDVR_PCTS,
     STRATEGY_ADAPTIVE_RUNNER: _GDVR_PCTS,
+    # Adaptive Runner 2's own stated 8-TP schedule (5/5/10/10/15/15/15/25) is
+    # an exact match for _GDVR_PCTS -- reuses the same table rather than
+    # duplicating it, same as Adaptive Runner does.
+    STRATEGY_ADAPTIVE_RUNNER_2: _GDVR_PCTS,
 }
 _EA_LADDER_BE_AT_POS = {
     STRATEGY_SIGNAL_CLIMBER: 0,
     STRATEGY_GD_VIP_RUNNER: 1,
     STRATEGY_ADAPTIVE_RUNNER: 0,
+    STRATEGY_ADAPTIVE_RUNNER_2: 1,   # BE at TP2, not TP1
+}
+# EA-side SL-trail rule -- see ManageLadder() in ForexTraderBridge.mq5.
+# "prev_tp" (the default the EA already had, sent when this key is absent)
+# trails to the single immediately-previous TP price. Adaptive Runner 2 is
+# the first strategy to need a different rule -- see run_tp_ladder()'s
+# sl_rule parameter (core_run_tp_ladder.py) for the Python-side equivalent,
+# which this table must stay in lockstep with.
+_EA_LADDER_TRAIL_MODE = {
+    STRATEGY_ADAPTIVE_RUNNER_2: "midpoint_lag2",
 }
 
 
@@ -242,13 +257,15 @@ async def open_trade(
                 ) if v is not None}
                 _ea_pcts = None
                 _ea_be_at_pos = None
+                _ea_trail_mode = None
                 if strategy in _EA_LADDER_PCTS and _tps:
                     _ea_table = _EA_LADDER_PCTS[strategy]
                     _ea_pcts = _ea_table.get(len(_tps), _ea_table[max(_ea_table)])
                     _ea_be_at_pos = _EA_LADDER_BE_AT_POS[strategy]
+                    _ea_trail_mode = _EA_LADDER_TRAIL_MODE.get(strategy)
                 ea_ack = await _ea.open_trade(
                     trade_id, direction.upper(), lot_size, stop_loss, _tps, strategy,
-                    pcts=_ea_pcts, be_at_pos=_ea_be_at_pos,
+                    pcts=_ea_pcts, be_at_pos=_ea_be_at_pos, trail_mode=_ea_trail_mode,
                 )
                 if ea_ack.get("type") == "trade_opened":
                     mt5_ticket  = ea_ack.get("ticket")

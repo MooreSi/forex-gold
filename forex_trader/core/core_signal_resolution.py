@@ -30,7 +30,7 @@ from forex_trader.core.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
-    STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, MAX_TP,
+    STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, MAX_TP,
 )
 
 # ── Per-strategy fixed point-distance constants (verbatim copies -- also
@@ -50,6 +50,8 @@ _ADAPTIVE_SL_MULT    = 4.0
 _ADAPTIVE_SL_CAP_PT  = 20.0
 _ADAPTIVE_SL_FLOOR_PT = 8.0
 _ADAPTIVE_TP_CAP_FRAC = 0.50
+
+_ADAPTIVE2_SL_PT = 10.0  # fixed SL distance -- not derived from the signal at all
 
 
 def _gdvr_sl_dist(stated_sl_dist: float) -> float:
@@ -165,11 +167,14 @@ async def resolve_open_trade_params(
     # GD VIP Runner skip this — the first three override signal TPs from fill price;
     # the latter two use the full TP ladder (not TP1 alone), and GD VIP Runner's SL
     # is deliberately widened past TP1, so the TP1 R:R check is misleadingly low.
-    # Adaptive Runner joins them for the same reason.
+    # Adaptive Runner joins them for the same reason. Adaptive Runner 2 also
+    # joins: it overrides the signal SL entirely with a fixed 10pt distance,
+    # so the TP1 R:R check would be measuring against a stop that isn't
+    # actually going to be used.
     _self_level_strategies = (
         STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
         STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
-        STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+        STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     )
     if strategy not in _self_level_strategies:
         filter_err = check_pre_trade_filters(
@@ -334,6 +339,20 @@ async def resolve_open_trade_params(
             _ar_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_ar_entry_mid, stop_loss_to_use, _ar_balance, _ar_risk_pct), 2
+            ))
+    elif strategy == STRATEGY_ADAPTIVE_RUNNER_2:
+        # Fixed 10pt SL, full stop -- not derived from the signal's stated SL
+        # or its TP spread at all (unlike Adaptive Runner's capped widening).
+        # Pre-fill proxy at zone mid, overwritten with the exact fill-relative
+        # value post-fill (see core_open_trade_from_signal.py).
+        _ar2_entry_mid   = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+        _ar2_sign        = 1.0 if sig["direction"].upper() == "BUY" else -1.0
+        stop_loss_to_use = round(_ar2_entry_mid - _ar2_sign * _ADAPTIVE2_SL_PT, 2)
+        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
+            _ar2_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+            _ar2_balance  = await get_trading_balance(bridge, starting_balance)
+            lot_size = max(0.01, round(
+                suggest_lot_size(_ar2_entry_mid, stop_loss_to_use, _ar2_balance, _ar2_risk_pct), 2
             ))
 
     # ── Tier 1 Risk Governor: authoritative sizing + hard gates ───────────

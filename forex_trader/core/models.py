@@ -116,6 +116,7 @@ STRATEGY_GDC                 = "gold_diggers_copy"
 STRATEGY_GD_VIP_RUNNER        = "gd_vip_runner"
 STRATEGY_ORB_FIXED           = "orb_fixed"
 STRATEGY_ADAPTIVE_RUNNER      = "adaptive_runner"
+STRATEGY_ADAPTIVE_RUNNER_2    = "adaptive_runner_2"
 
 STRATEGY_NAMES = {
     STRATEGY_SCALE_OUT:          "Scale Out + Breakeven",
@@ -131,6 +132,7 @@ STRATEGY_NAMES = {
     STRATEGY_GD_VIP_RUNNER:      "GD VIP Runner",
     STRATEGY_ORB_FIXED:          "ORB/IVB Fixed",
     STRATEGY_ADAPTIVE_RUNNER:    "Adaptive Runner",
+    STRATEGY_ADAPTIVE_RUNNER_2:  "Adaptive Runner 2",
 }
 
 STRATEGY_DESCRIPTIONS = {
@@ -396,6 +398,35 @@ STRATEGY_DESCRIPTIONS = {
         "past the first target.\n\n"
         "**Best for:** channels/signals of unknown or mixed TP-ladder length, where a single "
         "wide-SL formula tuned for one signal shape would be wrong for another."
+    ),
+    STRATEGY_ADAPTIVE_RUNNER_2: (
+        "**Adaptive Runner 2** — fixed 10pt SL, GD VIP Runner's back-loaded close "
+        "schedule, and a lagging-midpoint trail instead of trail-to-previous-TP.\n\n"
+        "Signal SL is ignored entirely — the SL is always exactly 10pts from the "
+        "actual fill price, regardless of the signal's stated SL or TP spread. "
+        "TP levels are kept exactly as the signal sent them.\n\n"
+        "**Close schedule:** TP1 = 5%, TP2 = 5%, TP3 = 10%, TP4 = 10%, TP5 = 15%, "
+        "TP6 = 15%, TP7 = 15%, TP8 = all remaining (same table as GD VIP Runner, "
+        "scaled the same way for signals with fewer than 8 TPs).\n\n"
+        "**SL trail — the part that's different from every other ladder strategy:**\n"
+        "- TP1: no SL change (still the fixed 10pt stop)\n"
+        "- TP2: SL → entry (breakeven)\n"
+        "- TP3 onward: SL → the **midpoint of the two TPs before the one just hit** "
+        "(TP3 → mid(TP1, TP2), TP4 → mid(TP2, TP3), TP5 → mid(TP3, TP4), and so on) — "
+        "not the single previous TP price the other ladder strategies use. This keeps "
+        "roughly a two-TP-wide cushion behind price instead of snapping the stop right "
+        "up to the last level cleared, trading a bit of give-back room for fewer "
+        "single-tick stop-outs on minor pullbacks between levels.\n\n"
+        "**Example** (0.10 lot, 5 TPs: 4056 / 4058 / 4060 / 4062 / 4065, fill 4053, "
+        "10pt SL at 4043 — 5-TP close schedule is 10/10/15/25/remaining):\n"
+        "- TP1 hit @ 4056: 0.01 lots closed, SL unchanged at 4043\n"
+        "- TP2 hit @ 4058: 0.01 lots closed, **SL → 4053 (breakeven)**\n"
+        "- TP3 hit @ 4060: 0.015 lots closed, SL → mid(4056, 4058) = 4057\n"
+        "- TP4 hit @ 4062: 0.025 lots closed, SL → mid(4058, 4060) = 4059\n"
+        "- TP5 hit @ 4065: close final 0.04 lots — trade fully closed\n\n"
+        "**Best for:** signals where a flat 10pt stop is an acceptable, predictable "
+        "risk regardless of the signal's own SL quality, and where a two-level trail "
+        "cushion is preferred over snapping the stop to the immediately-prior TP."
     ),
 }
 

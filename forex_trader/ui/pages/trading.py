@@ -1342,6 +1342,7 @@ from forex_trader.core.models import (
     STRATEGY_SIGNAL_CLIMBER as _SC,
     STRATEGY_GD_VIP_RUNNER as _GVR,
     STRATEGY_ADAPTIVE_RUNNER as _AR,
+    STRATEGY_ADAPTIVE_RUNNER_2 as _AR2,
 )
 
 # ── Strategy builder (Claude) ─────────────────────────────────────────────────
@@ -1382,8 +1383,8 @@ async def _call_strategy_builder(description: str, cfg: dict) -> dict:
         raw   = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
     return json.loads(raw)
 
-_STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _GVR, _AR]
-_PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _GVR, _AR})
+_STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _GVR, _AR, _AR2]
+_PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _GVR, _AR, _AR2})
 
 
 def _render_schedule():
@@ -1496,6 +1497,8 @@ _COMPARE_ROWS = [
         _GVR: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (signal's own TPs used)",
         _AR:  "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (same ladder as GD VIP Runner, "
               "capped-widened SL — signal's own TPs used)",
+        _AR2: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (same ladder as GD VIP Runner, "
+              "fixed 10-pt SL — signal's own TPs used)",
     }),
     ("SL moves to BE", {
         _SO:  "After TP1",
@@ -1511,6 +1514,9 @@ _COMPARE_ROWS = [
         _AR:  "Immediately at TP1 → entry (BE); after TP2+ → trails to previous TP price "
               "(GD VIP Runner waits until TP2 — Adaptive Runner doesn't need to, since its "
               "SL is already capped proportionate to the reachable reward)",
+        _AR2: "At TP2 → entry (BE); after TP3+ → trails to the midpoint of the two TPs "
+              "before the one just hit — not the single previous TP price every other "
+              "ladder strategy uses",
     }),
     ("Max upside", {
         _SO:  "Capped at each TP",
@@ -1525,6 +1531,8 @@ _COMPARE_ROWS = [
         _GVR: "Signal's final TP (TP8 if present) — widened SL keeps the full ladder alive",
         _AR:  "Signal's final TP (TP8 if present) — SL widened only up to 50% of that "
               "distance, so the stop can never exceed the reward it's protecting",
+        _AR2: "Signal's final TP (TP8 if present) — SL is a flat 10pts regardless of "
+              "how far away that target actually is",
     }),
     ("Risk after TP1", {
         _SO:  "Zero (SL at entry from TP1)",
@@ -1538,6 +1546,8 @@ _COMPARE_ROWS = [
         _SC:  "Zero after TP1 — SL locks to previous TP price after each subsequent level",
         _GVR: "Zero after TP1 — SL locks to previous TP price after each subsequent level",
         _AR:  "Zero after TP1 — SL locks to previous TP price after each subsequent level",
+        _AR2: "Full 10-pt SL until TP2, then zero — SL locks to a two-TP-wide trailing "
+              "midpoint after each subsequent level",
     }),
     ("Signal quality filter", {
         _SO:  "None",
@@ -1552,6 +1562,8 @@ _COMPARE_ROWS = [
         _GVR: "Full geometry validation — signal SL widened to min(4×, 20pt floor); TPs as-is",
         _AR:  "Full geometry validation — signal SL widened to min(4×, 20pt) then capped at "
               "50% of the final TP distance (never below the signal's own stated SL); TPs as-is",
+        _AR2: "Direction + TP structure only — signal SL ignored entirely (fixed 10-pt SL "
+              "from fill); TPs as-is",
     }),
     ("Best market", {
         _SO:  "Any",
@@ -1570,13 +1582,16 @@ _COMPARE_ROWS = [
               "strategy tested there) and 309 Breakout/Bounce signals (still unprofitable "
               "there, like every strategy tested — that's an entry-quality issue, not "
               "something exit-strategy choice fixes)",
+        _AR2: "Signals where a flat, predictable 10pt risk is preferred over the signal's "
+              "own SL quality, and a two-level trail cushion is wanted instead of snapping "
+              "to the immediately-prior TP — untested judgment call, not backtested",
     }),
 ]
 
 # Table 1: core built-in strategies (left half)
 _COMPARE_GROUP_1 = [_SO, _BE, _TS, _PS, _CO, _NSS]
 # Table 2: advanced / specialised strategies + custom (right half)
-_COMPARE_GROUP_2 = [_CT, _SR, _SC, _GVR, _AR]
+_COMPARE_GROUP_2 = [_CT, _SR, _SC, _GVR, _AR, _AR2]
 
 
 # ── Strategy ───────────────────────────────────────────────────────────────────

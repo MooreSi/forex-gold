@@ -391,20 +391,27 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
             sig_data = sg.build_signal(level, direction, context)
             sig_data["strategy"] = self._active_strategy()
-            sig_data["news_proximity_norm"]    = news_proximity_norm
-            sig_data["regime_score"]           = regime_score
-            sig_data["equity_drawdown_pct"]    = equity_drawdown_pct
-            sig_data["vip_discipline_score"]   = vip_discipline_score
-            sig_data["vip_aggression_score"]   = vip_aggression_score
-            sig_data["minutes_since_last_vip"] = cadence[0]
-            sig_data["vip_signals_today"]      = cadence[1]
+
+            # ML-only context -- NOT real gdc_signals columns, so this must
+            # stay a separate dict from sig_data. create_signal() builds its
+            # INSERT column list directly from dict.keys(), so passing any
+            # of these through it raises "no such column" and silently
+            # kills every signal-creation cycle.
+            feat_input = dict(sig_data)
+            feat_input["news_proximity_norm"]    = news_proximity_norm
+            feat_input["regime_score"]           = regime_score
+            feat_input["equity_drawdown_pct"]    = equity_drawdown_pct
+            feat_input["vip_discipline_score"]   = vip_discipline_score
+            feat_input["vip_aggression_score"]   = vip_aggression_score
+            feat_input["minutes_since_last_vip"] = cadence[0]
+            feat_input["vip_signals_today"]      = cadence[1]
             try:
                 from forex_trader.core import database as _cdb_agree
-                sig_data["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("gd_copy", direction)
+                feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("gd_copy", direction)
             except Exception:
-                sig_data["concurrent_agreement"] = 0.0
+                feat_input["concurrent_agreement"] = 0.0
 
-            feats = gdc_ml.extract_features(sig_data, win_rate)
+            feats = gdc_ml.extract_features(feat_input, win_rate)
             prob  = gdc_ml.predict(feats) if feats else None
             eligible.append((level, direction, sig_data, feats, prob))
 

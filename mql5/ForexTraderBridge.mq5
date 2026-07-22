@@ -73,6 +73,13 @@ struct ManagedTrade
    int      beAtPos;        // ladder strategies: compacted TP position where
                              // SL first moves to breakeven; -1 = not sent
                              // (falls back to the hardcoded table below).
+   string   trailMode;      // ladder strategies: SL rule for every TP after
+                             // beAtPos. "" (default, every strategy before
+                             // adaptive_runner_2) = trail to the single
+                             // immediately-previous TP price. "midpoint_lag2"
+                             // (adaptive_runner_2) = trail to the midpoint of
+                             // the two TPs before the one just hit. See
+                             // ManageLadder().
 };
 
 ManagedTrade g_trades[];
@@ -369,6 +376,7 @@ void HandleOpenTrade(const string json)
       mt.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
    }
    mt.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
+   mt.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
 
    int n = ArraySize(g_trades);
    ArrayResize(g_trades, n + 1);
@@ -692,15 +700,21 @@ void ManageConservativeTrial(ManagedTrade &t, const MqlTick &tick)
 }
 
 //+------------------------------------------------------------------+
-//| Strategy: signal_climber / gd_vip_runner / adaptive_runner          |
-//| (_run_tp_ladder) — SL stays put until beAtPos, then -> entry;      |
-//| every TP after that trails SL to the previous TP's price. Close-%  |
-//| per TP and the BE trigger position are sent by Python at open time |
-//| (t.pcts / t.beAtPos — see ManagedTrade and HandleOpenTrade), so a  |
-//| new ladder-shaped strategy, or a tuning change to an existing one, |
-//| needs zero EA changes — only a Python-side edit. Falls back to the |
-//| hardcoded table below only if be_at_pos wasn't sent by Python (a   |
-//| protocol-version-mismatch safety net; shouldn't happen normally).  |
+//| Strategy: signal_climber / gd_vip_runner / adaptive_runner /       |
+//| adaptive_runner_2 (_run_tp_ladder) — SL stays put until beAtPos,   |
+//| then -> entry; every TP after that trails SL per t.trailMode      |
+//| ("" = previous TP price, the original/default rule; "midpoint_    |
+//| lag2" = midpoint of the two TPs before this one, adaptive_        |
+//| runner_2 only). Close-% per TP, the BE trigger position, and the  |
+//| trail mode are sent by Python at open time (t.pcts / t.beAtPos /  |
+//| t.trailMode — see ManagedTrade and HandleOpenTrade), so a tuning  |
+//| change to an existing strategy needs zero EA changes — only a     |
+//| Python-side edit. A genuinely new trail RULE (not just new pcts/  |
+//| be_at_pos values) still needs an EA change, same as adaptive_     |
+//| runner_2 itself did — see the trailMode branch below. Falls back  |
+//| to the hardcoded table below only if be_at_pos wasn't sent by     |
+//| Python (a protocol-version-mismatch safety net; shouldn't happen  |
+//| normally).                                                        |
 //+------------------------------------------------------------------+
 void ManageLadder(ManagedTrade &t, const MqlTick &tick)
 {
@@ -717,7 +731,7 @@ void ManageLadder(ManagedTrade &t, const MqlTick &tick)
    {
       bool isGdvr = (t.strategy != "signal_climber");
       GetLadderPcts(n, isGdvr, pcts);
-      beAtPos = (t.strategy == "gd_vip_runner") ? 1 : 0;
+      beAtPos = (t.strategy == "gd_vip_runner" || t.strategy == "adaptive_runner_2") ? 1 : 0;
       Print("[EABridge][WARN] ladder trade ", t.trade_id, " strategy=", t.strategy,
             " had no be_at_pos from Python — using hardcoded fallback table");
    }
@@ -744,8 +758,29 @@ void ManageLadder(ManagedTrade &t, const MqlTick &tick)
 
       if(compactPos >= beAtPos)
       {
-         double newSl = (compactPos == beAtPos) ? t.entry_price : PrevTpPrice(t, idx);
-         MoveSl(t, newSl, (compactPos == beAtPos) ? "be" : "trail_prev_tp", idx);
+         double newSl;
+         string moveTag;
+         if(compactPos == beAtPos)
+         {
+            newSl = t.entry_price;
+            moveTag = "be";
+         }
+         else if(t.trailMode == "midpoint_lag2" && compactPos >= 2)
+         {
+            // adaptive_runner_2: SL steps to the midpoint of the two TPs
+            // before the one just hit, not the single immediately-previous
+            // TP price — see run_tp_ladder()'s sl_rule parameter
+            // (core_run_tp_ladder.py) for the Python-side equivalent this
+            // must stay in lockstep with.
+            newSl = (CompactedTpPrice(t, compactPos - 2) + CompactedTpPrice(t, compactPos - 1)) / 2.0;
+            moveTag = "trail_midpoint_lag2";
+         }
+         else
+         {
+            newSl = PrevTpPrice(t, idx);
+            moveTag = "trail_prev_tp";
+         }
+         MoveSl(t, newSl, moveTag, idx);
       }
       if(closedAll) return;
       compactPos++;
@@ -756,6 +791,22 @@ double PrevTpPrice(const ManagedTrade &t, const int pos)
 {
    for(int j = pos - 1; j >= 0; j--) if(t.hasTp[j]) return t.tp[j];
    return t.entry_price;
+}
+
+// Price of the Nth (0-indexed) defined TP in compacted order — matching
+// Python's all_tps[wantPos][1] (see run_tp_ladder()'s sl_rule callback).
+// Unlike PrevTpPrice (which walks back from a raw slot to the nearest
+// defined TP below it), this looks up an exact compacted position.
+double CompactedTpPrice(const ManagedTrade &t, const int wantPos)
+{
+   int count = 0;
+   for(int idx = 0; idx < MAX_TPS; idx++)
+   {
+      if(!t.hasTp[idx]) continue;
+      if(count == wantPos) return t.tp[idx];
+      count++;
+   }
+   return t.entry_price; // shouldn't happen -- wantPos is always derived from a real compactPos
 }
 
 void GetLadderPcts(const int n, const bool isGdvr, double &out[])
@@ -848,7 +899,7 @@ void ManageTrade(ManagedTrade &t, const MqlTick &tick)
    else if(t.strategy == "scalp_runner") ManageScalpRunner(t, tick);
    else if(t.strategy == "conservative_trial") ManageConservativeTrial(t, tick);
    else if(t.strategy == "signal_climber" || t.strategy == "gd_vip_runner" ||
-           t.strategy == "adaptive_runner") ManageLadder(t, tick);
+           t.strategy == "adaptive_runner" || t.strategy == "adaptive_runner_2") ManageLadder(t, tick);
    else if(t.strategy == "no_sl_scale") ManageNoSlScale(t, tick);
    else if(t.strategy == "unattended") ManageUnattended(t, tick);
    else if(t.strategy == "orb_fixed") ManageOrbFixed(t, tick);

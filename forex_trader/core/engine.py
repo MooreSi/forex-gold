@@ -21,6 +21,7 @@ from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
     STRATEGY_GD_VIP_RUNNER, STRATEGY_ORB_FIXED, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
     STRATEGY_NAMES, MAX_TP,
 )
 from forex_trader.core.mt5_bridge import MT5BridgeClient
@@ -162,6 +163,7 @@ from forex_trader.core.core_run_tp_ladder import (
     handle_signal_climber as _handle_signal_climber_impl,
     handle_gd_vip_runner as _handle_gd_vip_runner_impl,
     handle_adaptive_runner as _handle_adaptive_runner_impl,
+    handle_adaptive_runner_2 as _handle_adaptive_runner_2_impl,
 )
 from forex_trader.core.core_handle_scale_out import handle_scale_out as _handle_scale_out_impl
 from forex_trader.core.core_handle_be_runner import handle_be_runner as _handle_be_runner_impl
@@ -788,6 +790,25 @@ class SimulationEngine:
             close_full_after_tps=self._close_full_after_tps,
         )
 
+    async def _handle_adaptive_runner_2(self, trade: dict, tick: Tick) -> None:
+        """
+        Adaptive Runner 2: fixed 10pt SL (not derived from the signal at
+        all -- see _ADAPTIVE2_SL_PT in core_signal_resolution.py), GD VIP
+        Runner's back-loaded close schedule (_GDVR_PCTS), and a different
+        SL trail: breakeven at TP2 (be_at_pos=1), then from TP3 onward SL
+        steps to the midpoint of the two TPs before the one just cleared
+        instead of the single immediately-previous TP price. See
+        STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER_2] in core/models.py.
+
+        Called from _tp_ladder_fast_loop, same as the other three
+        _run_tp_ladder-shaped strategies — see _handle_adaptive_runner's
+        docstring for why (sub-second polling, not _monitor_loop).
+        """
+        return await _handle_adaptive_runner_2_impl(
+            trade, tick, self._bridge, self._tp_trigger_cache,
+            close_full_after_tps=self._close_full_after_tps,
+        )
+
     async def _run_tp_ladder(
         self, trade: dict, tick: Tick, pcts_table: dict[int, list[float]], log_tag: str,
         be_at_pos: int = 0,
@@ -1087,8 +1108,8 @@ class SimulationEngine:
                             elif strategy == STRATEGY_SCALP_RUNNER:
                                 await self._handle_scalp_runner(trade, tick)
                             elif strategy in (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
-                                              STRATEGY_ADAPTIVE_RUNNER):
-                                # TP-crossing detection for these three moved to
+                                              STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2):
+                                # TP-crossing detection for these four moved to
                                 # _tp_ladder_fast_loop (sub-second polling instead
                                 # of this loop's 1-5s cadence — see that method's
                                 # docstring). DPM still takes priority when
@@ -1167,7 +1188,10 @@ class SimulationEngine:
 
     # ── Fast TP-ladder polling ──────────────────────────────────────────────
 
-    _TP_LADDER_STRATEGIES = (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER)
+    _TP_LADDER_STRATEGIES = (
+        STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
+        STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    )
     # 50ms — below this, polling faster stops buying real coverage: MT5's own
     # XAUUSD tick feed doesn't reliably update faster than this even in
     # volatile conditions, and every fetch shares NativeMT5Bridge._call()'s
@@ -1240,6 +1264,8 @@ class SimulationEngine:
                                         await self._handle_signal_climber(trade, tick)
                                     elif strat == STRATEGY_GD_VIP_RUNNER:
                                         await self._handle_gd_vip_runner(trade, tick)
+                                    elif strat == STRATEGY_ADAPTIVE_RUNNER_2:
+                                        await self._handle_adaptive_runner_2(trade, tick)
                                     else:
                                         await self._handle_adaptive_runner(trade, tick)
                                 except Exception as exc:

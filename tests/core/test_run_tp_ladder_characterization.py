@@ -222,6 +222,88 @@ def test_adaptive_runner_tp1_hit_closes_15pct_moves_sl_to_be_immediately(fresh_d
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # BE at TP1
 
 
+# ── Adaptive Runner 2 (be_at_pos=1, GDVR table, midpoint-lag2 trail) ──────────
+# The behavior that's actually new here: every other ladder strategy trails
+# SL to the single immediately-previous TP price after BE. Adaptive Runner 2
+# trails to the MIDPOINT of the two TPs before the one just hit instead.
+
+def test_adaptive_runner_2_tp1_hit_closes_10pct_does_not_move_sl_yet(fresh_db, engine):
+    # n=5 -> _GDVR_PCTS[5] = [0.10, 0.10, 0.15, 0.25, 0.40]
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
+    trade = _trade_dict("t-1")
+    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+
+    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.01}]
+    assert engine._bridge.modify_order_calls == []  # be_at_pos=1, this is pos=0
+
+
+def test_adaptive_runner_2_tp2_hit_after_tp1_moves_sl_to_be(fresh_db, engine):
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.09, stop_loss=2380.0,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
+    _insert_partial_close("t-1", "TP1", lots_closed=0.01)
+    trade = _trade_dict("t-1")
+    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2425.0, ask=2425.5)))
+
+    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.01}]
+    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # BE
+
+
+def test_adaptive_runner_2_tp3_hit_trails_to_midpoint_of_tp1_and_tp2(fresh_db, engine):
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.08,
+                  stop_loss=2400.0, sl_moved_to_be=1,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
+    _insert_partial_close("t-1", "TP1", lots_closed=0.01)
+    _insert_partial_close("t-1", "TP2", lots_closed=0.01)
+    trade = _trade_dict("t-1")
+    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2435.0, ask=2435.5)))
+
+    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.015}]
+    # midpoint(tp1=2410, tp2=2420) = 2415 -- NOT tp2 (2420), which is what
+    # every other ladder strategy would trail to at this position.
+    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2415.0, "tp": None}]
+
+
+def test_adaptive_runner_2_tp4_hit_trails_to_midpoint_of_tp2_and_tp3(fresh_db, engine):
+    """The exact scenario named in the strategy's own spec: at TP4, SL sits
+    between TP2 and TP3."""
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.065,
+                  stop_loss=2415.0, sl_moved_to_be=0,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
+    _insert_partial_close("t-1", "TP1", lots_closed=0.01)
+    _insert_partial_close("t-1", "TP2", lots_closed=0.01)
+    _insert_partial_close("t-1", "TP3", lots_closed=0.015)
+    trade = _trade_dict("t-1")
+    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2445.0, ask=2445.5)))
+
+    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]
+    # midpoint(tp2=2420, tp3=2430) = 2425
+    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2425.0, "tp": None}]
+
+
+def test_adaptive_runner_2_never_loosens_sl_below_a_lower_midpoint(fresh_db, engine):
+    """should_update's existing (direction-aware) guard must still hold --
+    a degenerate/out-of-order TP set producing a midpoint below the current
+    SL must not move it backward."""
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.08,
+                  stop_loss=2426.0, sl_moved_to_be=1,   # already ahead of the midpoint below
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
+    _insert_partial_close("t-1", "TP1", lots_closed=0.01)
+    _insert_partial_close("t-1", "TP2", lots_closed=0.01)
+    trade = _trade_dict("t-1")
+    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2435.0, ask=2435.5)))
+
+    # midpoint(tp1, tp2) = 2415 < current_sl (2426) -- must not loosen.
+    assert engine._bridge.modify_order_calls == []
+    trade_after = _trade_dict("t-1")
+    assert trade_after["stop_loss"] == 2426.0
+
+
 # ── shared engine behaviors ──────────────────────────────────────────────────────
 
 def test_wrong_side_tp_excluded_from_ladder(fresh_db, engine):

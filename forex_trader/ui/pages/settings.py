@@ -79,9 +79,18 @@ def render(get_engine: Callable, get_tg_reader: Callable):
             from forex_trader.ui.pages.update_panel import render as _render_update
             _render_update()
 
+    _diag_refresh_timer = [None]
+
     def _on_settings_tab_change(e):
         if e.value == t_diag:
             asyncio.create_task(_run_diag())
+            if _diag_refresh_timer[0] is None:
+                _diag_refresh_timer[0] = ui.timer(15.0, _run_diag)
+        elif _diag_refresh_timer[0] is not None:
+            # Only bridge/EA/tick calls, no heavier work -- fine to keep
+            # cheap, but no reason to poll it while the user isn't looking.
+            _diag_refresh_timer[0].cancel()
+            _diag_refresh_timer[0] = None
 
     stabs.on_value_change(_on_settings_tab_change)
 

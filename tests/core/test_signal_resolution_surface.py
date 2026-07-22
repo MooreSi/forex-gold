@@ -159,6 +159,19 @@ def test_raises_when_channel_paused(fresh_db):
         asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
 
 
+def test_raises_when_outside_trading_schedule(fresh_db):
+    """Proves the gate is actually wired in, not just correct in isolation.
+    Enabled with every block left disabled -- blocks regardless of the
+    actual wall-clock time the test happens to run at."""
+    from forex_trader.core import core_trading_schedule as sched
+    sched.set_trading_schedule_enabled(True)
+    sched.set_trading_schedule(sched._default_schedule())
+    _insert_signal()
+    bridge = _FakeBridge()
+    with pytest.raises(ValueError, match="Trading Schedule"):
+        asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+
+
 # ── strategy resolution ────────────────────────────────────────────────────────
 
 def test_strategy_resolution_uses_channel_override(fresh_db):

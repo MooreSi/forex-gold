@@ -25,6 +25,7 @@ from forex_trader.core import database as db_module
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
+from forex_trader.core.core_trading_schedule import check_trading_schedule
 from forex_trader.core.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
@@ -140,6 +141,13 @@ async def resolve_open_trade_params(
             f"Trading session '{_sess_name}' is not active in your Trading Markets selection "
             "(Trading > Strategy > Trading Markets)"
         )
+
+    # Trading Schedule gate — per-day/per-window profit-target discipline cap.
+    # Automated-only by construction: this function is never reached from the
+    # manual market order path (see core_manual_market_order.py).
+    _sched_ok, _sched_reason = check_trading_schedule()
+    if not _sched_ok:
+        raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
 
     # Resolve strategy: channel override > auto-Claude rec > global Active Strategy.
     _ch_src_early = sig.get("source_name") or ""

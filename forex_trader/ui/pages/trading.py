@@ -161,6 +161,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         t_strategy = ui.tab("Strategy")
         t_tg_sigs  = ui.tab("TG Signals")
         t_orb      = ui.tab("ORB/IVB Report")
+        t_schedule = ui.tab("Schedule")
 
     with ui.tab_panels(trade_tabs, value=t_active).classes("bg-gray-900 p-4"):
 
@@ -184,6 +185,9 @@ def render(get_engine: Callable, get_tg_reader: Callable):
 
         with ui.tab_panel(t_orb):
             _render_orb_report(engine)
+
+        with ui.tab_panel(t_schedule):
+            _render_schedule()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -1380,6 +1384,89 @@ async def _call_strategy_builder(description: str, cfg: dict) -> dict:
 
 _STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _GVR, _AR]
 _PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _GVR, _AR})
+
+
+def _render_schedule():
+    """Trading Schedule tab — per-day, per-window profit-target discipline
+    cap on AUTOMATED order execution (manual orders are always exempt).
+    Signal generation and Telegram ingestion are never affected -- see
+    core_trading_schedule.py / core_signal_resolution.py for the gate this
+    UI configures."""
+    from forex_trader.core import core_trading_schedule as sched
+
+    schedule = sched.get_trading_schedule()
+    enabled_now = sched.is_trading_schedule_enabled()
+
+    with ui.row().classes("items-center gap-2 mb-1"):
+        master_chk = ui.checkbox("Trading Schedule", value=enabled_now).classes(
+            "text-cyan-300 font-bold text-lg"
+        )
+    ui.label(
+        "Caps automated order execution per day and per time window, once a window's "
+        "profit target is met trading pauses until the next window. Signal generation "
+        "and Telegram ingestion keep running regardless -- this only blocks the final "
+        "order-placement step, and only for automated (not manual) orders."
+    ).classes("text-xs text-gray-500 mb-3")
+
+    _day_widgets: dict[str, list[dict]] = {}
+
+    with ui.column().classes("w-full gap-2"):
+        for day in sched.DAY_NAMES:
+            with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):
+                ui.label(day.title()).classes("font-bold text-yellow-300 text-sm mb-1")
+                blocks = schedule[day]
+                _day_widgets[day] = []
+                for i, block in enumerate(blocks):
+                    with ui.row().classes("items-center gap-2 flex-wrap"):
+                        en = ui.checkbox("", value=block["enabled"]).props("dense")
+                        ui.label(f"Window {i + 1}").classes("text-xs text-gray-400 w-16")
+                        start = ui.input("Start", value=block["start"]).props(
+                            "dense outlined"
+                        ).classes("w-24").tooltip("24-hour HH:MM")
+                        ui.label("to").classes("text-xs text-gray-500")
+                        end = ui.input("End", value=block["end"]).props(
+                            "dense outlined"
+                        ).classes("w-24").tooltip("24-hour HH:MM")
+                        target = ui.number(
+                            "Target $", value=block["target"], min=0, step=1.0
+                        ).props("dense outlined").classes("w-28").tooltip(
+                            "0 = no profit cap, only the time window applies"
+                        )
+                        _day_widgets[day].append(
+                            {"enabled": en, "start": start, "end": end, "target": target}
+                        )
+
+    def _save():
+        try:
+            new_schedule = {}
+            for day, rows in _day_widgets.items():
+                blocks = []
+                for w in rows:
+                    start_val = str(w["start"].value or "00:00").strip()
+                    end_val   = str(w["end"].value or "23:59").strip()
+                    sched._parse_hm(start_val)  # validates HH:MM, raises on bad input
+                    sched._parse_hm(end_val)
+                    blocks.append({
+                        "enabled": bool(w["enabled"].value),
+                        "start":   start_val,
+                        "end":     end_val,
+                        "target":  float(w["target"].value or 0),
+                    })
+                new_schedule[day] = blocks
+        except Exception as e:
+            ui.notify(f"Invalid time — use 24-hour HH:MM (e.g. 09:00): {e}", type="negative")
+            return
+        sched.set_trading_schedule(new_schedule)
+        sched.set_trading_schedule_enabled(bool(master_chk.value))
+        ui.notify(
+            "Trading Schedule saved and enabled" if master_chk.value
+            else "Trading Schedule saved (currently disabled — automated orders are not restricted)",
+            type="positive" if master_chk.value else "info",
+        )
+
+    ui.button("Save Schedule", icon="save", on_click=_save).classes(
+        "bg-blue-700 text-white px-4 py-2 mt-2"
+    )
 
 
 def _get_hidden_strategies() -> set:

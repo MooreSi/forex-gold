@@ -338,3 +338,28 @@ def get_instance() -> Optional[EABridge]:
 def set_instance(bridge: Optional[EABridge]) -> None:
     global _instance
     _instance = bridge
+
+
+def get_effective_ea_status() -> tuple[bool, str]:
+    """Return (ea_connected, scope_label) for whichever node is actually
+    executing trades right now.
+
+    If a paired Local/Remote node is the active trader, this node's own EA
+    connection is irrelevant -- it isn't placing any orders -- so this
+    reflects the active node's EA state via the sync heartbeat instead
+    (SyncServer._status_payload's "ea_connected" field, refreshed every 3s
+    on its own). Otherwise (standalone, or this node itself is the active
+    trader) this reflects this node's own EABridge connection directly.
+
+    Used by the top-bar EA badge (see ui/app.py) so it stays accurate no
+    matter which node is actually doing the trading."""
+    try:
+        from forex_trader.core import database as db_module
+        from forex_trader.sync import client as _sync_cli_mod
+        cli = _sync_cli_mod.get_instance()
+        if cli is not None and cli.conn_state == "connected" and db_module.get_active_trader() != "local":
+            return bool(cli.remote_status.get("ea_connected")), "VPS"
+    except Exception:
+        pass
+    _ea = get_instance()
+    return (_ea is not None and _ea.is_ea_healthy()), "this node"

@@ -280,6 +280,11 @@ def fmt_instant_followup(instant_trade: dict, parsed: dict, channel_name: str) -
         lines.append(tp_block)
     lines.append(f"Strategy: {_md_esc(strategy_name)}")
     lines.append(f"Channel: {_md_esc(channel_name)}")
+    # Same "Executed via" line as fmt_trade_open() — worth knowing on a
+    # follow-up too, since the SL/TP just applied here either went straight
+    # into the EA's own on-tick management or is now polled by Python,
+    # exactly the same portable-strategy/healthy-EA condition as at open time.
+    lines.append(f"Executed via: {'EA' if instant_trade.get('managed_by') == 'ea' else 'Python'}")
     lines.append(f"Node: {_node_label()}")
     return "\n".join(lines)
 

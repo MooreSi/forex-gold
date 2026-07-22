@@ -859,6 +859,7 @@ def main_page():
             else "XAUUSD Simulation"
         ).classes("text-xs text-gray-500 px-2 shrink-0")
         conn_badge  = ui.badge("MT5 —", color="grey").classes("text-xs shrink-0")
+        ea_badge    = ui.badge("EA", color="grey").classes("text-xs shrink-0 ml-1")
         mode_btn = ui.button("LOCAL").props("dense outline size=sm color=amber").classes(
             "text-xs ml-1 shrink-0"
         ).style("min-height:20px; padding:0 8px;").tooltip(
@@ -1145,6 +1146,24 @@ def main_page():
             else:
                 conn_badge.props("color=red")
                 conn_badge.text = "MT5 Disconnected"
+
+            # EA badge — logic lives in ea_bridge.get_effective_ea_status()
+            # (testable, and shared if any other page ever needs it) so this
+            # stays a thin render step. That heartbeat/health check already
+            # refreshes on its own (sync heartbeat every 3s; local EABridge
+            # health computed fresh here), so no extra polling is needed.
+            try:
+                from forex_trader.core import ea_bridge as _ea_bridge_mod
+                ea_ok, ea_scope = _ea_bridge_mod.get_effective_ea_status()
+                ea_badge.props(f"color={'green' if ea_ok else 'red'}")
+                ea_badge.tooltip(
+                    f"EA connected on {ea_scope} — trades can be managed natively in MT5"
+                    if ea_ok else
+                    f"EA not connected on {ea_scope} — trades still work, "
+                    "falling back to Python-managed instead of native on-tick management"
+                )
+            except Exception:
+                pass
 
             await _refresh_mode_btn()
 

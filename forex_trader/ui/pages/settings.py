@@ -2544,20 +2544,24 @@ def _render_diagnostics(engine):
                             ui.badge("AutoTrading ON", color="green")
 
                     from forex_trader.core import ea_bridge as _ea_bridge_mod
-                    _ea = _ea_bridge_mod.get_instance()
-                    _ea_ok = _ea is not None and _ea.is_ea_healthy()
+                    _ea_ok, _ea_scope = _ea_bridge_mod.get_effective_ea_status()
                     ui.badge(
-                        "EA Connected" if _ea_ok else "EA Not Connected",
+                        f"EA {'Connected' if _ea_ok else 'Not Connected'}"
+                        + ("" if _ea_scope == "this node" else f" ({_ea_scope})"),
                         color="green" if _ea_ok else "red",
                     )
                 if health.get("last_error"):
                     ui.label(f"Last error: {health['last_error']}").classes("text-red-300 text-sm mt-1")
                 if not _ea_ok:
-                    _ea_hint = (
-                        "No MQL5 EA has ever connected this session."
-                        if _ea is None or _ea._last_seen == 0 else
-                        f"EA connection lost {round(_time_mod.time() - _ea._last_seen)}s ago."
-                    )
+                    if _ea_scope == "this node":
+                        _ea = _ea_bridge_mod.get_instance()
+                        _ea_hint = (
+                            "No MQL5 EA has ever connected this session."
+                            if _ea is None or _ea._last_seen == 0 else
+                            f"EA connection lost {round(_time_mod.time() - _ea._last_seen)}s ago."
+                        )
+                    else:
+                        _ea_hint = f"The {_ea_scope} (active trader) has no EA connected."
                     ui.label(
                         f"{_ea_hint} Trades will still be managed by the Python bridge -- "
                         "this only affects EA-native on-tick management. If unexpected, check "

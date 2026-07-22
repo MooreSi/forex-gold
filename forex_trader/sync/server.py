@@ -860,6 +860,14 @@ class SyncServer:
                 row[f"tp{n}"] = p.get(f"tp{n}")
             open_positions.append(row)
 
+        ea_connected = False
+        try:
+            from forex_trader.core import ea_bridge as _ea_bridge_mod
+            _ea = _ea_bridge_mod.get_instance()
+            ea_connected = _ea is not None and _ea.is_ea_healthy()
+        except Exception:
+            pass
+
         return {
             "ts":             time.time(),
             "balance":        balance,
@@ -870,6 +878,7 @@ class SyncServer:
                 for name, e in self._sub_engines().items()
             },
             "active_trader": db_module.get_active_trader(),
+            "ea_connected":  ea_connected,
             **_get_resource_usage(),
         }
 

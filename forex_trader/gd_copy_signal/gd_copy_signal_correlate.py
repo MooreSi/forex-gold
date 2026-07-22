@@ -265,9 +265,26 @@ class _CorrelationMixin:
             return "round_10"
         if abs(price - (nearest_10 + 5)) < 2:
             return "round_5"
-        # Compare against known Asia range
+        # Compare against the bot's own top scored/proximity-filtered
+        # candidates from the last cycle first (cheap, and usually right --
+        # these are the levels the bot itself was actually watching).
         cached_lvls = self._cached.get("levels", [])
         for lvl in cached_lvls:
             if abs(lvl.get("price", 0) - price) < 4:
                 return lvl.get("type", "unknown")
-        return "swing_high"  # most common for GD VIP BUY signals
+
+        # Fall back to the FULL level set (asia/swing/round/congestion, no
+        # proximity/score cutoff) rather than guessing "swing_high" -- the
+        # cached top-8 candidates above are filtered to levels within
+        # PROXIMITY_THRESHOLD_PTS of the bot's own price at cycle time, which
+        # routinely excludes the level a VIP signal actually fired at. That
+        # previously meant almost every miss silently mislabeled the
+        # ML pattern-learning data as "swing_high" regardless of what type
+        # the level actually was.
+        all_lvls = self._cached.get("all_levels", [])
+        if all_lvls:
+            nearest = min(all_lvls, key=lambda lvl: abs(lvl.get("price", 0) - price))
+            if abs(nearest.get("price", 0) - price) < 10:
+                return nearest.get("type", "unknown")
+
+        return "unknown"

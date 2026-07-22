@@ -125,6 +125,81 @@ def get_swing_levels(h1_candles: list[dict], lookback: int = SWING_LOOKBACK) -> 
     return merged
 
 
+CONGESTION_WINDOW     = 5    # rolling window size (candles) checked for consolidation
+CONGESTION_RANGE_MULT = 2.5  # window's overall high-low range must be <= this many x
+                              # the window's own average single-candle range to count
+                              # as "tight" -- a trending window's overall range grows
+                              # much faster than its average single-candle range,
+                              # since each candle adds net directional movement rather
+                              # than overlapping the last one. Not backtested against
+                              # real channel history the way score_level()'s type
+                              # weights were (see that function's docstring) -- a
+                              # reasoned starting heuristic, worth recalibrating once
+                              # enough real congestion-level signals have closed.
+
+
+def get_congestion_zones(h1_candles: list[dict], lookback: int = SWING_LOOKBACK) -> list[dict]:
+    """
+    Identify recent congestion/consolidation zones -- the fourth VIP-style
+    level source alongside Asia range, swing points, and round numbers (see
+    module docstring). Documented and scored (score_level's "congestion"
+    type, 0.65 base) and referenced in ml_engine.FEATURE_NAMES since
+    inception, but never actually detected until now -- get_candidate_levels()
+    only ever built asia/swing/round/unicorn candidates.
+
+    A window of CONGESTION_WINDOW candles counts as a congestion zone when
+    its overall high-low range is tight relative to its own average single-
+    candle range (see CONGESTION_RANGE_MULT). Non-overlapping windows are
+    scanned left to right; once a zone is found the scan resumes after it
+    rather than reporting overlapping sub-zones of the same consolidation.
+
+    Returns level dicts shaped like get_swing_levels()'s output:
+    {price, type="congestion", strength, idx} -- price is the zone's
+    midpoint.
+    """
+    if len(h1_candles) < CONGESTION_WINDOW:
+        return []
+
+    candles = h1_candles[-lookback:] if len(h1_candles) > lookback else h1_candles
+    highs = [float(c.get("high", c.get("h", 0))) for c in candles]
+    lows  = [float(c.get("low",  c.get("l", 0))) for c in candles]
+    n = len(candles)
+    if n < CONGESTION_WINDOW:
+        return []
+
+    zones = []
+    i = 0
+    while i <= n - CONGESTION_WINDOW:
+        window_highs = highs[i:i + CONGESTION_WINDOW]
+        window_lows  = lows[i:i + CONGESTION_WINDOW]
+        if any(h <= 0 for h in window_highs) or any(l <= 0 for l in window_lows):
+            i += 1
+            continue
+
+        window_high = max(window_highs)
+        window_low  = min(window_lows)
+        window_range = window_high - window_low
+        avg_single_range = sum(
+            h - l for h, l in zip(window_highs, window_lows)
+        ) / CONGESTION_WINDOW
+        if avg_single_range <= 0:
+            i += 1
+            continue
+
+        if window_range <= avg_single_range * CONGESTION_RANGE_MULT:
+            zones.append({
+                "price":    round((window_high + window_low) / 2, 2),
+                "type":     "congestion",
+                "strength": CONGESTION_WINDOW,
+                "idx":      i,
+            })
+            i += CONGESTION_WINDOW  # don't report overlapping sub-zones of the same consolidation
+        else:
+            i += 1
+
+    return _deduplicate_levels(zones)
+
+
 def get_round_levels(price: float, count: int = 6) -> list[dict]:
     """
     Return the nearest round-10 and round-5 levels around current price.
@@ -275,6 +350,49 @@ def get_unicorn_candidates(m15_candles: list[dict], current_price: float) -> lis
     }]
 
 
+def get_all_levels(h1_candles: list[dict], current_price: float) -> list[dict]:
+    """
+    Every known candidate S/R level (asia/swing/round/congestion), deduped,
+    with no proximity or score filtering applied -- the raw material
+    get_candidate_levels() scores and truncates from. Exposed separately so
+    callers that need the full picture (e.g. classifying an arbitrary VIP
+    price against "what levels exist right now", not just the handful the
+    bot itself was close enough to act on) don't have to reimplement the
+    asia+swing+round+congestion assembly themselves.
+    """
+    if not h1_candles or current_price <= 0:
+        return []
+
+    asia_low, asia_high = get_asia_range(h1_candles)
+    swing_levels        = get_swing_levels(h1_candles)
+    round_levels        = get_round_levels(current_price)
+    congestion_zones     = get_congestion_zones(h1_candles)
+
+    candidates: list[dict] = []
+
+    # Asia levels
+    if asia_low > 0:
+        candidates.append({"price": asia_low,  "type": "asia_low",  "strength": 5})
+    if asia_high > 0:
+        candidates.append({"price": asia_high, "type": "asia_high", "strength": 5})
+
+    # Swing levels
+    candidates.extend(swing_levels)
+
+    # Congestion zones (only those within 50pts of price, same window as round numbers)
+    for z in congestion_zones:
+        if abs(z["price"] - current_price) <= 50:
+            candidates.append(z)
+
+    # Round number levels (only those within 50pts of price)
+    for r in round_levels:
+        if abs(r["price"] - current_price) <= 50:
+            candidates.append(r)
+
+    # Deduplicate across all sources
+    return _deduplicate_levels(candidates)
+
+
 def get_candidate_levels(
     h1_candles: list[dict],
     current_price: float,
@@ -294,27 +412,7 @@ def get_candidate_levels(
         return []
 
     asia_low, asia_high = get_asia_range(h1_candles)
-    swing_levels        = get_swing_levels(h1_candles)
-    round_levels        = get_round_levels(current_price)
-
-    candidates: list[dict] = []
-
-    # Asia levels
-    if asia_low > 0:
-        candidates.append({"price": asia_low,  "type": "asia_low",  "strength": 5})
-    if asia_high > 0:
-        candidates.append({"price": asia_high, "type": "asia_high", "strength": 5})
-
-    # Swing levels
-    candidates.extend(swing_levels)
-
-    # Round number levels (only those within 50pts of price)
-    for r in round_levels:
-        if abs(r["price"] - current_price) <= 50:
-            candidates.append(r)
-
-    # Deduplicate across all sources
-    candidates = _deduplicate_levels(candidates)
+    candidates = get_all_levels(h1_candles, current_price)
 
     # Score and annotate
     scored = []

@@ -50,8 +50,9 @@ class _LiveExecuteMixin:
             try:
                 h1_candles  = await self._bridge.get_candles("H1", 50)
                 m15_candles = await self._bridge.get_candles("M15", 80)
+                h4_candles  = await self._bridge.get_candles("H4", 6)
                 if h1_candles:
-                    fresh_htf = ld.get_htf_bias(h1_candles)
+                    fresh_htf = ld.get_htf_bias(h1_candles, h4_candles)
                     fresh_atr = self._calc_atr(m15_candles or h1_candles)
                     fresh_adx = self._calc_adx(h1_candles)
                     fresh_session = ld.get_session(datetime.now(timezone.utc).hour)

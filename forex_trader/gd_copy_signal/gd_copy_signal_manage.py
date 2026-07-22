@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import time
 
+from forex_trader.core.models import STRATEGY_CONSERVATIVE
 from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
 
 _log = logging.getLogger("gd_copy_signal")
@@ -20,6 +21,50 @@ _LIVE_MISSING_THRESHOLD = 3   # consecutive get_positions() misses before treati
 
 # Lot size for virtual P&L tracking (not live yet)
 _VIRTUAL_LOT = 0.1
+
+# GD2/Institutional signals are identified by source_channel, not strategy --
+# sig["strategy"] is overwritten with whatever real STRATEGY_* the "GD Copy
+# Engine" channel override (or the global default) currently resolves to
+# (see gd_copy_signal_service._run_cycle: `sig_data["strategy"] =
+# self._active_strategy()`, applied AFTER signal_generator.build_signal()
+# tags it "gd2_unicorn"/"signal_climber"). "gd2_unicorn" is not a real
+# STRATEGY_* name, so a check against it here can never match -- every GD2
+# signal was silently falling through to the VIP 8-level ladder branch below,
+# where its missing tp4/tp7 fields resolve via the `or` fallbacks to tp3 (as
+# tp_mid) and tp1 (as tp7), closing the runner early instead of riding it to
+# calculate_gd2_tp_structure's actual 6R target.
+_GD2_SOURCE_CHANNEL = "GOLD DIGGERS 2.0 ⚡️"  # matches signal_generator.build_signal
+
+# Partial-close ladder fractions for the VIP-style/GD2 ladder -- retuned
+# from the original 33/33/34 split (2026-07-16 GD Copy improvements pack).
+# The fork's real trade history shows a 72% win rate that's still net
+# losing: most trades only ever reach TP1 before reversing back out at the
+# BE stop, and at 33% that leg doesn't bank enough to outweigh a full SL
+# loss (0% banked, the entire sl_dist risked) -- sl_distance_for_level is
+# 4-7pts against TP1's fixed 3pt offset, already an unfavourable R:R on
+# the first leg alone, so the loss:win $ ratio stays lopsided even at a
+# 72% hit rate. Front-loading more onto the leg that's actually reached
+# most reliably is a reasoned rebalance, NOT a backtested optimum -- only
+# ~25 real trades exist so far on this fork, nowhere near enough to fit
+# these numbers rigorously (unlike score_level()'s type weights, which
+# were fit against 767 real signals). Revisit once there's a larger
+# real sample.
+_TP1_FRAC   = 0.50
+_MID_FRAC   = 0.30
+_FINAL_FRAC = 0.20   # implicit: whatever remains rides to the final target
+_POST_TP1_REMAINING = round(1.0 - _TP1_FRAC, 4)                 # remaining right after TP1 (0.50)
+_POST_MID_REMAINING = round(_POST_TP1_REMAINING - _MID_FRAC, 4)  # remaining right after mid (0.20)
+
+# STRATEGY_CONSERVATIVE (see core/models.py's STRATEGY_DESCRIPTIONS): fixed
+# SL/TP1 from the actual fill price, signal levels discarded entirely, 80%
+# booked at TP1, then a tight trail on the runner. Modelled here so the
+# virtual ML labels for a signal reflect the SAME management style that
+# would actually be applied to a real trade under this setting, rather than
+# the VIP-ladder model built for the (different) default/scale_out style.
+_CONSERVATIVE_SL_PTS    = 5.0
+_CONSERVATIVE_TP1_PTS   = 3.0
+_CONSERVATIVE_TP1_FRAC  = 0.80
+_CONSERVATIVE_TRAIL_PTS = 3.0
 
 
 class _ManagementMixin:
@@ -45,31 +90,50 @@ class _ManagementMixin:
             return gross, gross
 
     async def _manage_triggered_signal(self, sig: dict, tick) -> None:
-        """VIP-style ladder scale-out for a signal that is triggered and NOT
-        live-managed (see _check_outcomes: live-executed signals are routed
-        to _reconcile_live_signal instead, never here).
+        """Dispatches to the management model matching this signal's actual
+        source/strategy -- a triggered, NOT live-managed signal (see
+        _check_outcomes: live-executed signals are routed to
+        _reconcile_live_signal instead, never here) can be either a GD2/
+        Unicorn setup (own tp1/tp2/tp3 mapping, see below) or a VIP-style
+        signal, whose virtual management should itself vary by whichever
+        STRATEGY_* is actually configured for the "GD Copy Engine" channel
+        (see _active_strategy) so the ML labels reflect what a real trade
+        under that setting would have done."""
+        if sig.get("source_channel") == _GD2_SOURCE_CHANNEL:
+            await self._manage_gd2_signal(sig, tick)
+        elif sig.get("strategy") == STRATEGY_CONSERVATIVE:
+            await self._manage_conservative_signal(sig, tick)
+        else:
+            await self._manage_vip_ladder_signal(sig, tick)
+
+    async def _manage_gd2_signal(self, sig: dict, tick) -> None:
+        """GD2/Unicorn signals only ever carry tp1/tp2/tp3 (see
+        signal_generator.calculate_gd2_tp_structure -- 1R partial, 2R
+        partial+BE, 6R runner), not the VIP 8-level ladder -- reuses the
+        same ladder mechanics as _manage_vip_ladder_signal with tp2/tp3
+        mapped onto the mid/final slots instead of tp4/tp7."""
+        await self._manage_vip_ladder_signal(
+            sig, tick, tp_mid_field="tp2", tp7_field="tp3", tp_mid_idx=2)
+
+    async def _manage_vip_ladder_signal(self, sig: dict, tick,
+                                        tp_mid_field: str = "tp4", tp7_field: str = "tp7",
+                                        tp_mid_idx: int = 4) -> None:
+        """VIP-style ladder scale-out for the default/scale_out family of
+        strategies -- uses the signal's own SL/TP levels as sent.
 
         The old logic moved SL to raw entry at TP1 and only counted a "win"
         at TP7 -- 88 of 118 TP1-hitting signals closed 'be' with $0 banked,
         tanking both the reported win rate and the ML labels. GD VIP itself
-        calls TP1 a win; we bank 33% there, 33% at the mid-ladder TP, and
-        let 34% ride to TP7."""
+        calls TP1 a win; we bank _TP1_FRAC there, _MID_FRAC at the
+        mid-ladder TP, and let _FINAL_FRAC ride to TP7 (see the module-level
+        constants' docstring for why this is 50/30/20, not the original
+        33/33/34)."""
         sig_id     = sig["id"]
         direction  = sig["direction"]
         sl         = sig["stop_loss"]
         tp1        = sig["tp1"]
-        # GD2/Unicorn signals only ever carry tp1/tp2/tp3 (see
-        # signal_generator.calculate_gd2_tp_structure -- 1R partial, 2R
-        # partial+BE, 6R runner), not the VIP 8-level ladder, so they
-        # need their own mapping rather than falling through the VIP
-        # tp4/tp7 lookups (which would otherwise resolve to None and
-        # leave a GD2 signal that can never reach its "final" branch).
-        if sig.get("strategy") == "gd2_unicorn":
-            tp_mid = sig.get("tp2") or tp1
-            tp7    = sig.get("tp3") or tp1
-        else:
-            tp_mid = sig.get("tp4") or sig.get("tp3") or tp1   # mid-ladder partial
-            tp7    = sig.get("tp7") or sig.get("tp8") or tp1
+        tp_mid = sig.get(tp_mid_field) or sig.get("tp3") or tp1   # mid-ladder partial
+        tp7    = sig.get(tp7_field) or sig.get("tp8") or tp1
         entry_lo  = sig["entry_low"]
         entry_hi  = sig["entry_high"]
         entry_mid = (entry_lo + entry_hi) / 2
@@ -82,13 +146,13 @@ class _ManagementMixin:
             hit_sl    = price <= sl
             hit_tp1   = price >= tp1 and remaining >= 1.0 - 1e-6
             hit_mid   = (tp_mid and price >= float(tp_mid)
-                         and 0.34 < remaining <= 0.67 + 1e-6)
+                         and _POST_MID_REMAINING < remaining <= _POST_TP1_REMAINING + 1e-6)
             hit_final = tp7 and price >= float(tp7)
         else:
             hit_sl    = price >= sl
             hit_tp1   = price <= tp1 and remaining >= 1.0 - 1e-6
             hit_mid   = (tp_mid and price <= float(tp_mid)
-                         and 0.34 < remaining <= 0.67 + 1e-6)
+                         and _POST_MID_REMAINING < remaining <= _POST_TP1_REMAINING + 1e-6)
             hit_final = tp7 and price <= float(tp7)
 
         # Round-trip cost in points for BE placement (spread + slippage).
@@ -151,15 +215,15 @@ class _ManagementMixin:
             exit_fill = self._realistic_fill(tick, direction, closing=True)
             leg_pts   = _leg_pts(exit_fill)
             _gross, _net = self._net_pnl(sig, leg_pts, tick)
-            leg_net   = round(_net * 0.33, 2)
-            gdc_db.book_partial_close(sig_id, leg_net, 0.33, tp_idx=1)
+            leg_net   = round(_net * _TP1_FRAC, 2)
+            gdc_db.book_partial_close(sig_id, leg_net, _TP1_FRAC, tp_idx=1)
             be_px = round(
                 entry_ref + _cost_pts if direction == "BUY" else entry_ref - _cost_pts, 2
             )
             gdc_db.move_sl_to_be(sig_id, be_price=be_px)
             _log.info(
-                "[GDC-Engine] TP1 hit %s -> banked $%.2f (33%%), SL -> BE+cost %.2f",
-                sig.get("signal_ref", sig_id), leg_net, be_px
+                "[GDC-Engine] TP1 hit %s -> banked $%.2f (%.0f%%), SL -> BE+cost %.2f",
+                sig.get("signal_ref", sig_id), leg_net, _TP1_FRAC * 100, be_px
             )
             self._notify_refresh()
 
@@ -167,12 +231,12 @@ class _ManagementMixin:
             exit_fill = self._realistic_fill(tick, direction, closing=True)
             leg_pts   = _leg_pts(exit_fill)
             _gross, _net = self._net_pnl(sig, leg_pts, tick)
-            leg_net   = round(_net * 0.33, 2)
-            gdc_db.book_partial_close(sig_id, leg_net, 0.33, tp_idx=4)
+            leg_net   = round(_net * _MID_FRAC, 2)
+            gdc_db.book_partial_close(sig_id, leg_net, _MID_FRAC, tp_idx=tp_mid_idx)
             gdc_db.set_stop_loss(sig_id, float(tp1))   # trail to TP1
             _log.info(
-                "[GDC-Engine] TP4 hit %s -> banked $%.2f (33%%), SL -> TP1 %.2f",
-                sig.get("signal_ref", sig_id), leg_net, float(tp1)
+                "[GDC-Engine] TP%d hit %s -> banked $%.2f (%.0f%%), SL -> TP1 %.2f",
+                tp_mid_idx, sig.get("signal_ref", sig_id), leg_net, _MID_FRAC * 100, float(tp1)
             )
             self._notify_refresh()
 
@@ -217,6 +281,118 @@ class _ManagementMixin:
                 sig.get("signal_ref", sig_id), total_net, partial_booked, net_leg
             )
             self._notify_refresh()
+
+    async def _manage_conservative_signal(self, sig: dict, tick) -> None:
+        """Mirrors STRATEGY_CONSERVATIVE's real management (see
+        core/models.py's STRATEGY_DESCRIPTIONS): the signal's own SL/TP
+        levels are discarded entirely in favour of fixed distances from the
+        actual fill price -- 5pt SL, 3pt TP1. TP1 books 80% and moves SL to
+        breakeven (the fill price itself, no cost padding, per the
+        documented behaviour); the remaining 20% then trails by 3pts,
+        floored at breakeven, never loosening."""
+        sig_id     = sig["id"]
+        direction  = sig["direction"]
+        entry_lo   = sig["entry_low"]
+        entry_hi   = sig["entry_high"]
+        entry_mid  = (entry_lo + entry_hi) / 2
+        entry_ref  = float(sig.get("trigger_price") or entry_mid)
+        remaining  = float(sig.get("remaining_frac") if sig.get("remaining_frac") is not None else 1.0)
+        partial_booked = float(sig.get("partial_pnl_dollars") or 0.0)
+        price      = float(tick.mid or tick.bid or 0)
+        sign       = 1.0 if direction == "BUY" else -1.0
+
+        fixed_sl  = entry_ref - sign * _CONSERVATIVE_SL_PTS
+        fixed_tp1 = entry_ref + sign * _CONSERVATIVE_TP1_PTS
+
+        def _leg_pts(exit_px: float) -> float:
+            return (exit_px - entry_ref) if direction == "BUY" else (entry_ref - exit_px)
+
+        def _close_remaining(outcome: str) -> None:
+            exit_fill = self._realistic_fill(tick, direction, closing=True)
+            leg_pts   = _leg_pts(exit_fill)
+            gross_leg, net_leg = self._net_pnl(sig, leg_pts, tick)
+            gross_leg *= remaining
+            net_leg   *= remaining
+            total_net = round(partial_booked + net_leg, 2)
+            final_outcome = outcome
+            if outcome != "win":
+                # Total realized result, same "banked partials count" rule
+                # as the VIP ladder's SL branch -- a trade that already
+                # banked its 80% TP1 partial before the trail stops out is
+                # still a net win, matching how a real account would read.
+                if total_net > 0.5:
+                    final_outcome = "win"
+                elif total_net < -0.5:
+                    final_outcome = "loss"
+                else:
+                    final_outcome = "be"
+            gdc_db.close_signal(
+                sig_id, exit_fill, final_outcome, round(leg_pts, 2),
+                net_pnl_dollars=total_net,
+                pnl_dollars=round(partial_booked + gross_leg, 2),
+                balance_delta=round(net_leg, 2),
+            )
+            from forex_trader.gd_copy_signal import ml_engine as gdc_ml
+            gdc_ml.record_outcome(sig_id, final_outcome)
+            try:
+                from forex_trader.core import database as _cdb_bus_cons
+                _cdb_bus_cons.close_bus_entry("gd_copy", sig_id)
+            except Exception:
+                pass
+            try:
+                from forex_trader.sync.ledger import push_trade_closed
+                push_trade_closed({
+                    "trade_id":    sig.get("signal_ref") or str(sig_id),
+                    "engine":      "gd_copy",
+                    "direction":   direction,
+                    "strategy":    sig.get("strategy", ""),
+                    "open_time":   sig.get("created_at"),
+                    "close_time":  time.time(),
+                    "pnl_dollars": total_net,
+                    "outcome":     final_outcome,
+                    "tg_source":   "GD Copy Engine",
+                    "mt5_ticket":  sig.get("mt5_ticket"),
+                })
+            except Exception as _le:
+                _log.debug("[Ledger] push failed: %s", _le)
+            _log.info(
+                "[GDC-Engine] CLOSED %s (conservative) outcome=%s total_net=$%.2f "
+                "(partials $%.2f + leg $%.2f)",
+                sig.get("signal_ref", sig_id), final_outcome, total_net, partial_booked, net_leg
+            )
+            self._notify_refresh()
+
+        if remaining >= 1.0 - 1e-6:
+            hit_sl  = price <= fixed_sl if direction == "BUY" else price >= fixed_sl
+            hit_tp1 = price >= fixed_tp1 if direction == "BUY" else price <= fixed_tp1
+            if hit_sl:
+                _close_remaining("loss")
+            elif hit_tp1:
+                exit_fill = self._realistic_fill(tick, direction, closing=True)
+                leg_pts   = _leg_pts(exit_fill)
+                _gross, _net = self._net_pnl(sig, leg_pts, tick)
+                leg_net   = round(_net * _CONSERVATIVE_TP1_FRAC, 2)
+                gdc_db.book_partial_close(sig_id, leg_net, _CONSERVATIVE_TP1_FRAC, tp_idx=1)
+                gdc_db.move_sl_to_be(sig_id, be_price=round(entry_ref, 2))
+                _log.info(
+                    "[GDC-Engine] TP1 hit %s (conservative) -> banked $%.2f (80%%), SL -> BE %.2f",
+                    sig.get("signal_ref", sig_id), leg_net, entry_ref
+                )
+                self._notify_refresh()
+            return
+
+        # Runner phase: trail 3pts behind price, never loosening, floored at
+        # the breakeven level move_sl_to_be already set above.
+        current_sl = float(sig["stop_loss"])
+        candidate_sl = price - sign * _CONSERVATIVE_TRAIL_PTS
+        new_sl = max(current_sl, candidate_sl) if direction == "BUY" else min(current_sl, candidate_sl)
+        if new_sl != current_sl:
+            gdc_db.set_stop_loss(sig_id, new_sl)
+            current_sl = new_sl
+
+        hit_trail = price <= current_sl if direction == "BUY" else price >= current_sl
+        if hit_trail:
+            _close_remaining("win")
 
     async def _reconcile_live_signal(self, sig: dict) -> None:
         """Mirror a live-executed signal's outcome/P&L from the real MT5

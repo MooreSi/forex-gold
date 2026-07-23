@@ -1037,6 +1037,7 @@ from forex_trader.core.core_db_channel import (  # noqa: E402,F401
     CANONICAL_CHANNELS,
     CANONICAL_CHANNEL_ORDER,
     _canonical,
+    register_canonical_channel,
     get_channel_strategy_override,
     _applying_sync_channel_strategy,
     set_channel_strategy_override,

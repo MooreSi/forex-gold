@@ -471,6 +471,10 @@ class TelegramReader:
         self._group_ids[slot]      = int(group_id)
         self._group_names[slot]    = group_name
         self._group_entities[slot] = None
+        if slot >= 2:  # slots beyond the two hardcoded VIP/GD2 channels aren't
+            # pre-registered in CANONICAL_CHANNEL_ORDER -- do it here so this
+            # channel shows up on the Channel Strategy tab.
+            db_module.register_canonical_channel(group_name)
         await self._resolve_entity(slot)
         db_module.save_telegram_reader_event("group", "selected",
                                               f"Slot {slot+1}: {group_name} ({group_id})")
@@ -848,6 +852,8 @@ class TelegramReader:
                     continue
                 self._group_ids[s]   = int(item["group_id"])
                 self._group_names[s] = item.get("group_name", "")
+                if s >= 2:
+                    db_module.register_canonical_channel(self._group_names[s])
                 log.info("Restoring listener slot=%d group=%s (%s)",
                          s + 1, self._group_names[s], self._group_ids[s])
                 try:

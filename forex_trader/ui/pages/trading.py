@@ -154,16 +154,19 @@ def render(get_engine: Callable, get_tg_reader: Callable):
 
     # ── Sub-tabs ───────────────────────────────────────────────────────────────
     with ui.tabs().classes("bg-gray-800") as trade_tabs:
+        t_strategy = ui.tab("Strategy")
         t_active   = ui.tab("Active Trades")
         t_pending  = ui.tab("Pending Signals")
         t_signal   = ui.tab("Limit Order")
         t_market   = ui.tab("Market Order")
-        t_strategy = ui.tab("Strategy")
         t_tg_sigs  = ui.tab("TG Signals")
         t_orb      = ui.tab("ORB/IVB Report")
         t_schedule = ui.tab("Schedule")
 
-    with ui.tab_panels(trade_tabs, value=t_active).classes("bg-gray-900 p-4"):
+    with ui.tab_panels(trade_tabs, value=t_strategy).classes("bg-gray-900 p-4"):
+
+        with ui.tab_panel(t_strategy):
+            _render_strategy(engine)
 
         with ui.tab_panel(t_active):
             _render_active_trades(engine)
@@ -176,9 +179,6 @@ def render(get_engine: Callable, get_tg_reader: Callable):
 
         with ui.tab_panel(t_market):
             _render_market_order_form(engine)
-
-        with ui.tab_panel(t_strategy):
-            _render_strategy(engine)
 
         with ui.tab_panel(t_tg_sigs):
             _render_tg_signals(engine)

@@ -344,6 +344,23 @@ def _canonical(source: str) -> str:
     return CANONICAL_CHANNELS.get(source, source)
 
 
+def register_canonical_channel(name: str) -> None:
+    """Add a brand-new channel to the Channel Strategy tab's fixed bucket
+    list -- used when a Telegram listener slot beyond the two hardcoded
+    VIP/GD2 channels (_TG_GROUP_ID_MAP) gets a group assigned, since that
+    channel's name isn't known ahead of time the way GD VIP/GD2 are.
+    No-op if the name is blank or already tracked (directly or via an
+    existing CANONICAL_CHANNELS variant mapping)."""
+    name = (name or "").strip()
+    if not name:
+        return
+    canon = _canonical(name)
+    if canon in CANONICAL_CHANNEL_ORDER:
+        return
+    CANONICAL_CHANNEL_ORDER.append(canon)
+    CANONICAL_CHANNELS[canon] = canon
+
+
 def get_channel_strategy_override(source: str):
     """Return the per-channel strategy override string, or None (inherit global).
 

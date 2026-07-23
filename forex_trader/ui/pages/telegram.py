@@ -79,12 +79,11 @@ def _render_logic_keywords_section() -> None:
                                  type="positive" if e.value else "info")
                     sw.on_value_change(_on_toggle)
 
-        ui.separator().classes("my-2")
-
-        # ── Auto-Execution / Immediate Market Buy-Sell (moved here from
-        # Trading > Strategy, 2026-07-23; restyled to match the Logic
-        # Keywords toggle cards above, 2026-07-23) ───────────────────────────
-        with ui.grid(columns=2).classes("w-full gap-3 mb-2"):
+        # ── Auto-Execution / Immediate Market Buy-Sell / Entry Realignment
+        # (moved here from Trading > Strategy, 2026-07-23; restyled to match
+        # the Logic Keywords toggle cards above, 2026-07-23; no separator
+        # from the toggles above -- sits within the same section, 2026-07-23) ──
+        with ui.grid(columns=3).classes("w-full gap-3 mb-4"):
             with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
                 auto_sw = ui.switch(
                     "Auto-Execution", value=bool(rs.get("auto_execute_signals", 0)),
@@ -119,7 +118,23 @@ def _render_logic_keywords_section() -> None:
                              type="positive" if e.value else "info")
                 ime_sw.on_value_change(_on_ime_toggle)
 
-        ui.separator().classes("my-2")
+            with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+                realign_sw = ui.switch(
+                    "Entry Realignment", value=bool(rs.get("lk_entry_realignment", 0)),
+                ).classes("text-sm")
+                ui.label(
+                    "Limit Runner only. If the market has already moved through "
+                    "the signalled zone by the time the order would be placed, "
+                    "enters at current market price instead and shifts SL/TP by "
+                    "the same distance — otherwise the broker rejects a "
+                    "now-invalid limit price and the trade is lost entirely."
+                ).classes("text-xs text-gray-500 mt-1")
+
+                def _on_realign_toggle(e):
+                    db_module.update_risk_settings({"lk_entry_realignment": 1 if e.value else 0})
+                    ui.notify(f"Entry realignment {'enabled' if e.value else 'disabled'}",
+                             type="positive" if e.value else "info")
+                realign_sw.on_value_change(_on_realign_toggle)
 
         # ── Lexicon boxes ──────────────────────────────────────────────────
         lexicons = logic_kw.get_all_lexicons()

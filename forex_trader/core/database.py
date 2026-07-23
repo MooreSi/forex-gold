@@ -864,6 +864,14 @@ def _apply_schema() -> None:
             # can show open_time - pending_placed_at as "time pending".
             "ALTER TABLE vantage_simulated_trades ADD COLUMN order_type TEXT NOT NULL DEFAULT 'market'",
             "ALTER TABLE vantage_simulated_trades ADD COLUMN pending_placed_at REAL",
+            # Entry Realignment (2026-07-23) -- off by default. When a Limit
+            # Runner signal's zone has already been breached by the time the
+            # EA would place the resting order (root-caused live 2026-07-23:
+            # a BuyLimit above/at current ask is broker-rejected as "Invalid
+            # price"), this lets handle_limit_order_signal enter at market
+            # instead and shift SL/TPs by the breach delta rather than losing
+            # the signal outright.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_entry_realignment INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)

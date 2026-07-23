@@ -14,6 +14,16 @@ genuine pending order -- if the EA is unavailable, this signal is skipped
 with an explanatory skip_reason rather than silently falling back to a
 different (misleading) execution model. The message still gets recorded in
 vantage_tg_signals either way, same as every other skipped signal.
+
+Entry Realignment (Parsing > Logic Keywords, off by default): if the
+market has already moved through the signalled zone by the time this runs,
+a resting BuyLimit/SellLimit at the near edge of that zone is no longer a
+valid broker price -- root-caused live 2026-07-23 (GOLD DIGGERS
+INSTITUTIONAL tg_id=24828, rejected "Invalid price" because gold had
+already rallied through the zone a full minute before the signal was even
+posted). When enabled, that case enters at market instead and shifts SL/
+TPs by the breach delta, preserving the signal's original risk and R:R
+distances rather than losing the trade outright.
 """
 from __future__ import annotations
 
@@ -21,7 +31,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from forex_trader.core import database as db_module
 from forex_trader.core.core_strategy_params import get_strategy_params
@@ -61,6 +71,7 @@ async def handle_limit_order_signal(
     skip_reason: str,
     get_trading_balance_fn: Callable[[], Awaitable[float]],
     suggest_lot_size_fn: Callable[[float, float, float, float], float],
+    bridge: Any = None,
 ) -> dict:
     """Places a genuine pending limit order via the EA for a parsed
     "BUY/SELL [LIMITS] GOLD @ high/low AREA" signal. Returns
@@ -68,7 +79,13 @@ async def handle_limit_order_signal(
     equivalent since nothing has filled yet; the caller's Telegram alert
     reports the placement (or skip) via skip_reason, same as the existing
     "signal queued, will auto-activate" wording used by the zone-wait path
-    for every other strategy.
+    for every other strategy. (Entry Realignment is the one exception --
+    it genuinely fills at market, but still reports purely via skip_reason
+    to avoid touching the caller's alert-building logic.)
+
+    `bridge` (the HTTP MT5 bridge, for get_tick()) is only used by Entry
+    Realignment's breach check; every other path ignores it. None is a
+    valid value -- realignment then simply can't fire.
     """
     if not sess_ok:
         return {"skip_reason": skip_reason}
@@ -110,6 +127,18 @@ async def handle_limit_order_signal(
     strategy_lot = float(rs.get("strategy_lot_size", 0))
     if strategy_lot > 0:
         lot = strategy_lot
+
+    if bool(rs.get("lk_entry_realignment", 0)) and bridge is not None:
+        tick = await bridge.get_tick()
+        breached = tick is not None and (
+            tick.ask >= price if direction == "BUY" else tick.bid <= price
+        )
+        if breached:
+            return await _open_realigned_market_order(
+                _ea, tg_id, channel_name, source_label, direction, lot,
+                tick, price, stop_loss, tps, pcts, be_at_pos, tp_open,
+                entry_low, entry_high,
+            )
 
     trade_id = str(uuid.uuid4())[:16]
     try:
@@ -162,5 +191,88 @@ async def handle_limit_order_signal(
         "skip_reason": (
             f"Limit order placed — {direction} {lot:g} lots @ {price:.2f} "
             f"(EA ticket {ticket}), SL {stop_loss:.2f}. Will notify on fill."
+        ),
+    }
+
+
+async def _open_realigned_market_order(
+    ea: Any, tg_id: str, channel_name: str, source_label: str, direction: str,
+    lot: float, tick: Any, original_price: float, stop_loss: float,
+    tps: dict[int, float], pcts: list[float], be_at_pos: int, tp_open: bool,
+    entry_low: float, entry_high: float,
+) -> dict:
+    """Entry Realignment fallback -- opens a genuine immediate market order
+    via the EA (the same low-level call every ladder-shaped strategy's EA
+    handoff uses, see core_open_trade.py) with SL/TPs shifted by the breach
+    delta, instead of attempting a resting order the broker would reject
+    outright. Writes directly to vantage_simulated_trades (order_type=
+    'market', managed_by='ea') -- there is no vantage_pending_orders row
+    since nothing was ever left resting.
+    """
+    market_px = tick.ask if direction == "BUY" else tick.bid
+    delta = market_px - original_price
+    realigned_sl  = round(stop_loss + delta, 2)
+    realigned_tps = {n: round(v + delta, 2) for n, v in tps.items()}
+
+    trade_id = str(uuid.uuid4())[:16]
+    try:
+        ack = await ea.open_trade(
+            trade_id, direction, lot, realigned_sl, realigned_tps,
+            strategy=STRATEGY_LIMIT_RUNNER, pcts=pcts, be_at_pos=be_at_pos,
+        )
+    except Exception as exc:
+        log.warning("[LimitRunner] realigned open_trade failed for tg_id=%s: %s", tg_id, exc)
+        return {"skip_reason": f"Entry realignment failed — {exc}"}
+
+    if ack.get("type") != "trade_opened":
+        return {"skip_reason": f"Entry realignment rejected by EA — {ack.get('error', 'unknown error')}"}
+
+    ticket = ack.get("ticket")
+    fill_price = float(ack.get("fill_price", market_px))
+    now = time.time()
+    signal_id = str(uuid.uuid4())[:16]
+    with db_module.db() as conn:
+        conn.execute(
+            """INSERT INTO vantage_signals
+               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
+                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,lot_size,notes,status,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (signal_id, f"Telegram Auto ({source_label})", direction, entry_low, entry_high,
+             realigned_sl, realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
+             realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
+             realigned_tps.get(7), realigned_tps.get(8), lot,
+             f"Limit Runner entry realigned — zone already breached, entered at "
+             f"market {fill_price:.2f} (was {original_price:.2f}), EA ticket {ticket}",
+             "active", now),
+        )
+        conn.execute(
+            "UPDATE vantage_tg_signals SET status='active',signal_id=? WHERE tg_message_id=?",
+            (signal_id, tg_id),
+        )
+        conn.execute(
+            """INSERT INTO vantage_simulated_trades
+               (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
+                lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
+                status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
+                tg_source,managed_by,tp_open,order_type,pending_placed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (trade_id, signal_id, ticket, direction, entry_low, entry_high, fill_price,
+             lot, lot, realigned_sl,
+             realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
+             realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
+             realigned_tps.get(7), realigned_tps.get(8),
+             "open", now, 0.0, 0.0, 0.0, 0.0, STRATEGY_LIMIT_RUNNER,
+             channel_name, "ea", int(tp_open), "market", None),
+        )
+    log.info(
+        "[LimitRunner] entry realigned tg_id=%s ticket=%s %s %.2f lots @ %.2f "
+        "(was %.2f, delta %+.2f) SL=%.2f tps=%s",
+        tg_id, ticket, direction, lot, fill_price, original_price, delta, realigned_sl, realigned_tps,
+    )
+    return {
+        "skip_reason": (
+            f"Entry realigned — zone already breached, entered at market "
+            f"{fill_price:.2f} lots {lot:g} (was {original_price:.2f}), "
+            f"SL {realigned_sl:.2f} (EA ticket {ticket})."
         ),
     }

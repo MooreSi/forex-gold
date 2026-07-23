@@ -14,7 +14,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import core_limit_order_signal as los
 from forex_trader.core import core_strategy_params as sp
-from forex_trader.core.models import STRATEGY_LIMIT_RUNNER
+from forex_trader.core.models import STRATEGY_LIMIT_RUNNER, Tick
 
 
 def _reset_thread_local_connection():
@@ -46,11 +46,17 @@ def fresh_db():
 
 
 class _FakeEA:
-    def __init__(self, healthy=True, ack=None, raise_exc=None):
+    def __init__(self, healthy=True, ack=None, raise_exc=None,
+                 open_trade_ack=None, open_trade_raise=None):
         self._healthy = healthy
         self._ack = ack if ack is not None else {"type": "pending_order_placed", "ticket": 555}
         self._raise = raise_exc
+        self._open_trade_ack = open_trade_ack if open_trade_ack is not None else {
+            "type": "trade_opened", "ticket": 777, "fill_price": 0.0,
+        }
+        self._open_trade_raise = open_trade_raise
         self.calls = []
+        self.open_trade_calls = []
 
     def is_ea_healthy(self):
         return self._healthy
@@ -67,6 +73,29 @@ class _FakeEA:
         if self._raise:
             raise self._raise
         return self._ack
+
+    async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None,
+                         timeout=5.0):
+        self.open_trade_calls.append(dict(
+            trade_id=trade_id, direction=direction, lot_size=lot_size,
+            stop_loss=stop_loss, tps=dict(tps), strategy=strategy,
+            pcts=list(pcts) if pcts is not None else None, be_at_pos=be_at_pos,
+        ))
+        if self._open_trade_raise:
+            raise self._open_trade_raise
+        return self._open_trade_ack
+
+
+class _FakeBridge:
+    def __init__(self, bid, ask):
+        self._tick = Tick(
+            bid=bid, ask=ask, mid=(bid + ask) / 2, spread=ask - bid,
+            spread_points=(ask - bid) * 100, timestamp=0.0, source="fake",
+        )
+
+    async def get_tick(self):
+        return self._tick
 
 
 def _parsed(direction="BUY", tp_open=True, n_tps=3):
@@ -91,8 +120,9 @@ def _lot_size(entry, sl, balance, risk_pct):
     return 0.10
 
 
-def _rs():
-    return {"risk_per_trade_pct": 0.5, "strategy_lot_size": 0}
+def _rs(realign=False):
+    return {"risk_per_trade_pct": 0.5, "strategy_lot_size": 0,
+            "lk_entry_realignment": 1 if realign else 0}
 
 
 async def _insert_tg_row(tg_id="tg1"):
@@ -304,3 +334,168 @@ async def test_successful_placement_writes_db_rows(fresh_db):
         assert pcts == pytest.approx([0.25, 0.25, 0.25])
         assert po_row[9] == 0
         assert po_row[10] == STRATEGY_LIMIT_RUNNER
+
+
+# ── Entry Realignment ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_realignment_off_by_default_ignores_price_breach(fresh_db):
+    """rs() defaults lk_entry_realignment to 0 -- even with a bridge whose
+    tick shows the zone already breached, behaviour must be unchanged: a
+    resting pending order attempt, not a market fallback."""
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA()
+    bridge = _FakeBridge(bid=4149.8, ask=4150.0)  # ask 4150 > entry_high 4148
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        await los.handle_limit_order_signal(
+            _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=False),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    assert len(fake_ea.calls) == 1
+    assert fake_ea.open_trade_calls == []
+
+
+@pytest.mark.asyncio
+async def test_realignment_enabled_no_bridge_falls_back_to_pending(fresh_db):
+    """Toggle on but no bridge wired through (defensive default) -- must
+    not error, just behave as if realignment were off."""
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA()
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        await los.handle_limit_order_signal(
+            _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+        )
+    assert len(fake_ea.calls) == 1
+    assert fake_ea.open_trade_calls == []
+
+
+@pytest.mark.asyncio
+async def test_realignment_enabled_zone_not_breached_still_places_pending(fresh_db):
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA()
+    bridge = _FakeBridge(bid=4146.8, ask=4147.0)  # ask 4147 < entry_high 4148 -- not breached
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        await los.handle_limit_order_signal(
+            _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    assert len(fake_ea.calls) == 1
+    assert fake_ea.open_trade_calls == []
+
+
+@pytest.mark.asyncio
+async def test_realignment_buy_breach_opens_at_market_with_shifted_levels(fresh_db):
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 777, "fill_price": 4150.0})
+    bridge = _FakeBridge(bid=4149.8, ask=4150.0)  # breaches entry_high 4148 by 2.0
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan", "chan", _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    assert fake_ea.calls == []  # never attempted the resting order
+    assert len(fake_ea.open_trade_calls) == 1
+    call = fake_ea.open_trade_calls[0]
+    assert call["direction"] == "BUY"
+    assert call["strategy"] == STRATEGY_LIMIT_RUNNER
+    # delta = 4150.0 (ask) - 4148.0 (entry_high) = +2.0, shifted onto SL/TPs
+    assert call["stop_loss"] == pytest.approx(4143.0)  # 4141.0 + 2.0
+    assert call["tps"] == pytest.approx({1: 4153.0, 2: 4157.0, 3: 4162.0})
+    assert "realigned" in result["skip_reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_realignment_sell_breach_opens_at_market_with_shifted_levels(fresh_db):
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 778, "fill_price": 4140.0})
+    bridge = _FakeBridge(bid=4140.0, ask=4140.2)  # breaches entry_low 4142 by -2.0
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("SELL", tp_open=False, n_tps=3), "tg1", "chan", "chan", _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    assert fake_ea.calls == []
+    call = fake_ea.open_trade_calls[0]
+    assert call["direction"] == "SELL"
+    # delta = 4140.0 (bid) - 4142.0 (entry_low) = -2.0
+    assert call["stop_loss"] == pytest.approx(4187.0)  # 4189.0 - 2.0
+    assert call["tps"] == pytest.approx({1: 4174.0, 2: 4170.0, 3: 4166.0})
+    assert "realigned" in result["skip_reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_realignment_ea_rejection_reported_as_skip_reason(fresh_db):
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA(open_trade_ack={"type": "trade_open_failed", "error": "No money"})
+    bridge = _FakeBridge(bid=4149.8, ask=4150.0)
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    assert "No money" in result["skip_reason"]
+
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT status FROM vantage_tg_signals WHERE tg_message_id='tg1'"
+        ).fetchone()
+        assert row[0] == "new"  # unchanged -- no signal_id was ever assigned
+
+
+@pytest.mark.asyncio
+async def test_realignment_writes_market_order_row_no_pending_order_row(fresh_db):
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 900, "fill_price": 4150.0})
+    bridge = _FakeBridge(bid=4149.8, ask=4150.0)
+    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=True, n_tps=3), "tg1", "chan_x", "chan_x", _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    with db.db() as conn:
+        tg_row = conn.execute(
+            "SELECT status, signal_id FROM vantage_tg_signals WHERE tg_message_id='tg1'"
+        ).fetchone()
+        assert tg_row[0] == "active"
+        signal_id = tg_row[1]
+
+        trade_row = conn.execute(
+            "SELECT mt5_ticket, entry_price, stop_loss, status, strategy, tg_source, "
+            "managed_by, order_type, pending_placed_at FROM vantage_simulated_trades "
+            "WHERE signal_id=?", (signal_id,),
+        ).fetchone()
+        assert trade_row[0] == 900
+        assert trade_row[1] == pytest.approx(4150.0)
+        assert trade_row[2] == pytest.approx(4143.0)
+        assert trade_row[3] == "open"
+        assert trade_row[4] == STRATEGY_LIMIT_RUNNER
+        assert trade_row[5] == "chan_x"
+        assert trade_row[6] == "ea"
+        assert trade_row[7] == "market"
+        assert trade_row[8] is None
+
+        po_count = conn.execute(
+            "SELECT COUNT(*) FROM vantage_pending_orders WHERE signal_id=?", (signal_id,),
+        ).fetchone()[0]
+        assert po_count == 0

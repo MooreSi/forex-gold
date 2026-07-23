@@ -2234,6 +2234,7 @@ class SimulationEngine:
                         _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
                         get_trading_balance_fn=self._get_trading_balance,
                         suggest_lot_size_fn=self.suggest_lot_size,
+                        bridge=self._bridge,
                     )
                     executed     = False
                     exec_lot     = None

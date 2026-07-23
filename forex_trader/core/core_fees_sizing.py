@@ -8,7 +8,7 @@ extract cleanly as plain functions taking explicit parameters, calling
 the shared forex_trader.core.database module (db_module) directly. No
 parallel repo needed: db_module already provides real transactional
 semantics (thread-local, re-entrant db()), unlike the isolated per-engine
-databases the gd_copy_signal/breakout_signal/test_signal packs migrated.
+databases the reversal_engine/breakout_signal/test_signal packs migrated.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
-"""Repo-specific tests: proves gd_copy_signal_repo.py's transaction()
+"""Repo-specific tests: proves reversal_engine_repo.py's transaction()
 wrapping actually fixes the atomicity gap database.py has -- see
-docs/todo/refactor/backend-foundation/030-migrate-gd-copy-repo-layer.md.
+docs/todo/refactor/backend-foundation/030-migrate-reversal-engine-repo-layer.md.
 
 Not parametrized against database.py -- these scenarios (forcing a crash
 mid-write to check both statements roll back together) are exactly what
@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as repo
-from forex_trader.gd_copy_signal.gd_copy_signal_repo import get_db
+from forex_trader.reversal_engine import reversal_engine_repo as repo
+from forex_trader.reversal_engine.reversal_engine_repo import get_db
 
 
 @pytest.fixture

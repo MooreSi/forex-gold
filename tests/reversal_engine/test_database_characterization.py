@@ -1,10 +1,10 @@
-"""Characterizes the CURRENT behavior of forex_trader.gd_copy_signal.database
+"""Characterizes the CURRENT behavior of forex_trader.reversal_engine.database
 before it's touched by task 030 (repo/adapter migration) or task 040
 (service extraction) -- see
-docs/todo/refactor/backend-foundation/020-characterize-gd-copy-current-behavior.md.
+docs/todo/refactor/backend-foundation/020-characterize-reversal-engine-current-behavior.md.
 
 Every test here runs against BOTH the original database.py and the new
-gd_copy_signal_repo.py (030) -- the `fresh_db` fixture is parametrized over
+reversal_engine_repo.py (030) -- the `fresh_db` fixture is parametrized over
 both modules, so the same assertions prove behavior equivalence without
 being duplicated or edited per backend. That's the whole point: this file
 is the contract task 030 (and eventually 040) is held to.
@@ -14,8 +14,8 @@ import tempfile
 
 import pytest
 
-from forex_trader.gd_copy_signal import database as database_module
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as repo_module
+from forex_trader.reversal_engine import database as database_module
+from forex_trader.reversal_engine import reversal_engine_repo as repo_module
 
 
 @pytest.fixture
@@ -291,17 +291,17 @@ def test_get_ml_training_data_only_returns_closed_signals_with_features(fresh_db
 
 def test_update_correlation_marks_confirmed(fresh_db):
     sig_id = fresh_db.create_signal({"direction": "BUY", "signal_ref": "s"})
-    fresh_db.update_correlation(sig_id, vip_signal_id="vip-1", time_delta_s=-120.5, distance_pts=1.2)
+    fresh_db.update_correlation(sig_id, ref_signal_id="ref-1", time_delta_s=-120.5, distance_pts=1.2)
     row = fresh_db.get_signal_by_id(sig_id)
-    assert row["correlated_vip_signal_id"] == "vip-1"
+    assert row["correlated_ref_signal_id"] == "ref-1"
     assert row["correlation_confirmed"] == 1
     assert row["correlation_time_delta_s"] == -120.5
 
 
 def test_log_near_miss_is_idempotent_per_pair(fresh_db):
     sig_id = fresh_db.create_signal({"direction": "BUY", "signal_ref": "s"})
-    fresh_db.log_near_miss(sig_id, "vip-1", "BUY", 400.0, 5.0, "time")
-    fresh_db.log_near_miss(sig_id, "vip-1", "BUY", 400.0, 5.0, "time")  # duplicate, should not insert again
+    fresh_db.log_near_miss(sig_id, "ref-1", "BUY", 400.0, 5.0, "time")
+    fresh_db.log_near_miss(sig_id, "ref-1", "BUY", 400.0, 5.0, "time")  # duplicate, should not insert again
     misses = fresh_db.get_near_misses()
     assert len(misses) == 1
 
@@ -310,17 +310,17 @@ def test_count_today_signals_and_correlated(fresh_db):
     sig_id = fresh_db.create_signal({"direction": "BUY", "signal_ref": "s"})
     assert fresh_db.count_today_signals() == 1
     assert fresh_db.count_today_correlated() == 0
-    fresh_db.update_correlation(sig_id, vip_signal_id="vip-1", time_delta_s=0, distance_pts=0)
+    fresh_db.update_correlation(sig_id, ref_signal_id="ref-1", time_delta_s=0, distance_pts=0)
     assert fresh_db.count_today_correlated() == 1
 
 
 def test_upsert_daily_correlation_inserts_then_updates(fresh_db):
-    fresh_db.upsert_daily_correlation("2026-07-19", gdc_signals_sent=1)
-    fresh_db.upsert_daily_correlation("2026-07-19", gdc_signals_sent=2, gdc_correlated=1)
+    fresh_db.upsert_daily_correlation("2026-07-19", re_signals_sent=1)
+    fresh_db.upsert_daily_correlation("2026-07-19", re_signals_sent=2, re_correlated=1)
     rows = fresh_db.get_correlation_history(days=5)
     assert len(rows) == 1  # updated in place, not duplicated
-    assert rows[0]["gdc_signals_sent"] == 2
-    assert rows[0]["gdc_correlated"] == 1
+    assert rows[0]["re_signals_sent"] == 2
+    assert rows[0]["re_correlated"] == 1
 
 
 # ── Live execution tracking ───────────────────────────────────────────────────
@@ -389,15 +389,15 @@ def test_upsert_level_far_price_creates_a_new_row(fresh_db):
     assert len(fresh_db.get_active_levels()) == 2
 
 
-def test_deactivate_old_levels_skips_vip_sourced_levels(fresh_db):
+def test_deactivate_old_levels_skips_ref_sourced_levels(fresh_db):
     fresh_db.upsert_level("swing_high", 2450.0, "SELL", source="engine")
-    fresh_db.upsert_level("round_10", 2500.0, "BUY", source="vip")
+    fresh_db.upsert_level("round_10", 2500.0, "BUY", source="ref")
     # Force every row to look old enough to deactivate using only the public
     # API: a large negative older_than_hours pushes the cutoff far into the
     # future, so every row's updated_at (set moments ago) falls before it.
     fresh_db.deactivate_old_levels(older_than_hours=-999999)
     remaining = {r["level_type"] for r in fresh_db.get_active_levels()}
-    assert remaining == {"round_10"}  # vip-sourced survives, engine-sourced doesn't
+    assert remaining == {"round_10"}  # ref-sourced survives, engine-sourced doesn't
 
 
 # ── Analysis log ──────────────────────────────────────────────────────────────

@@ -136,11 +136,11 @@ def test_ea_managed_no_instance_proceeds(fresh_db):
     assert bridge.modify_order_calls != []
 
 
-def test_gd_vip_runner_uses_tp2_not_tp1(fresh_db):
+def test_reversal_runner_uses_tp2_not_tp1(fresh_db):
     _insert_trade_row(stop_loss=2380.0)
     bridge = _FakeBridge(candles=[{"high": 2422.0, "low": 2398.0}],
                          tick=SimpleNamespace(bid=2405.0, ask=2405.5))
-    t = _trade(strategy="gd_vip_runner", tp1=2410.0, tp2=2420.0)
+    t = _trade(strategy="reversal_runner", tp1=2410.0, tp2=2420.0)
     asyncio.run(tpsn.tp_safety_net_check_trade(t, time.time(), bridge, {}))
     assert bridge.modify_order_calls != []
 

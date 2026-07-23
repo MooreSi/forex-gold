@@ -98,7 +98,7 @@ def test_insert_signal_returns_id_and_ref(fresh_db):
 
 
 def test_get_signal_by_id_missing_returns_empty_dict(fresh_db):
-    # NOTE: unlike gd_copy_signal/breakout_signal (which return None), this
+    # NOTE: unlike reversal_engine/breakout_signal (which return None), this
     # module's _row() helper returns {} for a missing row.
     assert fresh_db.get_signal_by_id(999999) == {}
 

@@ -127,12 +127,12 @@ _SYNCED_SETTINGS_KEYS = (
     # the other — whichever node takes over trading later would manage
     # positions without DPM even though the user explicitly turned it on.
     "dpm_enabled",
-    # Same gap again, found 2026-07-07: GD Copy Engine's live-execution
+    # Same gap again, found 2026-07-07: Reversal Engine's live-execution
     # toggle was never added here, so every propose from either node was
     # silently rejected outright ("no recognised settings keys in
     # proposal") — the two nodes could show opposite ON/OFF states
     # indefinitely with no error surfaced to the user.
-    "gdc_live_execution",
+    "re_live_execution",
     # Same gap again, found 2026-07-07: five more fields saved by the same
     # Strategy panel save_strategy() call as trade_strategy/profit_close_usd/
     # exclude_high_risk/kelly_sizing_enabled (all already synced above) were
@@ -154,7 +154,7 @@ _SYNCED_SETTINGS_KEYS = (
     # silently a no-op on the node that matters.
     "orb_auto_execute_enabled",
     # Bounce Generator's live-execution toggle (its sibling toggles,
-    # bo_live_execution for Breakout and gdc_live_execution for GD Copy,
+    # bo_live_execution for Breakout and re_live_execution for Reversal Engine,
     # were both already synced) — same deterministic naming gap as those
     # two, found 2026-07-10 investigating a "no recognised settings keys
     # in proposal" rejection on every Mac reconnect.
@@ -175,11 +175,11 @@ _SYNCED_SETTINGS_KEYS = (
 
 class SyncServer:
     def __init__(self, main_engine=None, breakout_engine=None,
-                 bounce_engine=None, gdc_engine=None):
+                 bounce_engine=None, re_engine=None):
         self._main_engine     = main_engine
         self._breakout_engine = breakout_engine
         self._bounce_engine   = bounce_engine
-        self._gdc_engine      = gdc_engine
+        self._re_engine      = re_engine
         self._clients: set = set()
         self._server_obj = None
         self._token: Optional[str] = None
@@ -412,7 +412,7 @@ class SyncServer:
 
     async def _handle_signal_order(self, ws, msg: dict) -> None:
         """Execute a fully-resolved trade forwarded from the Mac's own
-        generators (Breakout/TestSignal/GDCopy/GD2-GD-VIP) under centralized
+        generators (Breakout/TestSignal/REopy/GD2-GD-VIP) under centralized
         signal generation (Settings > Remote Node) — this node has stopped
         analyzing anything itself under that mode (see
         core.database.should_generate_signals_here), so this is the only
@@ -644,7 +644,7 @@ class SyncServer:
         return {
             "breakout": self._breakout_engine,
             "bounce":   self._bounce_engine,
-            "gd_copy":  self._gdc_engine,
+            "reversal_engine":  self._re_engine,
         }
 
     async def _handle_stand_down(self, ws) -> None:
@@ -1031,41 +1031,41 @@ class SyncServer:
             return {}
 
     @staticmethod
-    def _gd_copy_stats() -> dict:
+    def _reversal_engine_stats() -> dict:
         try:
-            from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-            from forex_trader.gd_copy_signal import ml_engine as gdc_ml
+            from forex_trader.reversal_engine import reversal_engine_repo as re_db
+            from forex_trader.reversal_engine import ml_engine as re_ml
             return {
-                "virtual_balance":      gdc_db.get_virtual_balance(),
-                "max_drawdown":         gdc_db.get_max_drawdown(),
-                "stats":                gdc_db.get_stats(),
-                "correlation_history":  gdc_db.get_correlation_history(days=7),
-                "active_levels":        gdc_db.get_active_levels(),
-                "open_signals":         gdc_db.get_open_signals(),
-                "all_signals":          gdc_db.get_all_signals(limit=60),
+                "virtual_balance":      re_db.get_virtual_balance(),
+                "max_drawdown":         re_db.get_max_drawdown(),
+                "stats":                re_db.get_stats(),
+                "correlation_history":  re_db.get_correlation_history(days=7),
+                "active_levels":        re_db.get_active_levels(),
+                "open_signals":         re_db.get_open_signals(),
+                "all_signals":          re_db.get_all_signals(limit=60),
                 # These four were missing here (unlike the breakout/bounce
                 # snapshots above, which already included their equivalents) —
                 # the panel/facade side (remote_stats_facade.py's _DbFacade/
                 # _MlFacade) already expected these exact keys, so under Remote
-                # mode the GD Copy panel's Performance Analytics and "Is it
+                # mode the Reversal Engine panel's Performance Analytics and "Is it
                 # learning?" sections would silently render empty even though
                 # the underlying data existed on this node, until this was
                 # actually generated on both sides.
-                "perf_by_session":      gdc_db.get_perf_by_session(),
-                "perf_by_bias":         gdc_db.get_perf_by_bias(),
-                "perf_by_level_type":   gdc_db.get_perf_by_level_type(),
-                "ml_summary":           gdc_ml.summary(),
-                "ml_metrics":           gdc_ml.get_ml_metrics(),
+                "perf_by_session":      re_db.get_perf_by_session(),
+                "perf_by_bias":         re_db.get_perf_by_bias(),
+                "perf_by_level_type":   re_db.get_perf_by_level_type(),
+                "ml_summary":           re_ml.summary(),
+                "ml_metrics":           re_ml.get_ml_metrics(),
             }
         except Exception as e:
-            log.debug("[SyncServer] gd_copy stats snapshot failed: %s", e)
+            log.debug("[SyncServer] reversal_engine stats snapshot failed: %s", e)
             return {}
 
     async def _signal_gen_stats_payload(self) -> dict:
         return {
             "breakout": await asyncio.to_thread(self._breakout_stats),
             "bounce":   await asyncio.to_thread(self._bounce_stats),
-            "gd_copy":  await asyncio.to_thread(self._gd_copy_stats),
+            "reversal_engine":  await asyncio.to_thread(self._reversal_engine_stats),
         }
 
     async def _signal_gen_stats_loop(self) -> None:
@@ -1085,7 +1085,7 @@ def get_instance() -> Optional[SyncServer]:
     return _instance
 
 
-def init(main_engine=None, breakout_engine=None, bounce_engine=None, gdc_engine=None) -> SyncServer:
+def init(main_engine=None, breakout_engine=None, bounce_engine=None, re_engine=None) -> SyncServer:
     global _instance
-    _instance = SyncServer(main_engine, breakout_engine, bounce_engine, gdc_engine)
+    _instance = SyncServer(main_engine, breakout_engine, bounce_engine, re_engine)
     return _instance

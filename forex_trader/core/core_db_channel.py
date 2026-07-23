@@ -36,15 +36,65 @@ def _normalise_tg_source(src: str) -> str:
     return _TG_GROUP_ID_MAP.get(str(src).strip(), src) if src else src
 
 
+# Channel-name tables that key rows by the channel's display name string
+# rather than its stable numeric Telegram group ID -- every one of these
+# needs the same rename applied together, or a renamed channel silently
+# forks into two disconnected rows (old name keeps its override/history,
+# new name starts blank) instead of continuing under its existing settings.
+_CHANNEL_NAME_TABLES = (
+    ("channel_parser_config", "channel_name"),
+    ("channel_performance", "source"),
+    ("channel_strategy_rec", "source"),
+    ("vantage_simulated_trades", "tg_source"),
+    ("vantage_pending_orders", "channel_name"),
+    ("consolidated_trades", "tg_source"),
+)
+
+
+def sync_channel_rename(old_name: str, new_name: str) -> None:
+    """Cascade a channel display-name change (e.g. the Telegram group's real
+    title was edited, or a signal generator's own name changed) across every
+    table that keys rows by that name string. Called automatically when the
+    Telegram reader notices its configured group's live title no longer
+    matches what was stored (see telegram_reader.TelegramReader._resolve_entity),
+    and can also be called for internal signal-source renames. No-op if the
+    names are equal or either is empty."""
+    old_name = (old_name or "").strip()
+    new_name = (new_name or "").strip()
+    if not old_name or not new_name or old_name == new_name:
+        return
+    with db() as conn:
+        for tbl, col in _CHANNEL_NAME_TABLES:
+            try:
+                conn.execute(f"UPDATE {tbl} SET {col}=? WHERE {col}=?", (new_name, old_name))
+            except Exception:
+                pass  # table/column doesn't exist on this schema version
+    # If the old name was itself one of the fixed canonical bucket names (the
+    # Channel Strategy tab's five rows), swap the bucket to the new name in
+    # place -- otherwise get_all_channel_strategy_settings() would keep
+    # looking for the old, now-nonexistent name and the renamed channel's
+    # freshly-updated rows above would have nowhere to bucket into.
+    if old_name in CANONICAL_CHANNEL_ORDER:
+        CANONICAL_CHANNEL_ORDER[CANONICAL_CHANNEL_ORDER.index(old_name)] = new_name
+    # Every existing variant that used to resolve to old_name must now
+    # resolve to new_name instead, and the new live title itself must map
+    # to new_name (self-map) so future messages/trades canonicalise correctly.
+    for variant, canon in list(CANONICAL_CHANNELS.items()):
+        if canon == old_name:
+            CANONICAL_CHANNELS[variant] = new_name
+    CANONICAL_CHANNELS[new_name] = new_name
+    log.info("[Channel] Renamed channel '%s' -> '%s' across all tracking tables", old_name, new_name)
+
+
 def get_channel_scorecard(days: int = 30) -> list[dict]:
     """Per signal-source performance over the last `days`, sorted by net P&L desc.
     Each row: source, trades, wins, losses, win_rate, avg_pts, payoff_rr,
     net_pnl, and a per-session {london/ny/overlap/asian: net_pnl} split.
 
     Merges in the consolidated ledger as a fallback for trades the OTHER
-    paired node closed (e.g. GD Copy Engine's live-executed trades, which
-    live in gd_copy_signal's own DB and never get a vantage_simulated_trades
-    row at all — see gd_copy_signal/engine.py's _reconcile_live_signal,
+    paired node closed (e.g. Reversal Engine's live-executed trades, which
+    live in reversal_engine's own DB and never get a vantage_simulated_trades
+    row at all — see reversal_engine/engine.py's _reconcile_live_signal,
     which pushes to the ledger via push_trade_closed regardless of which
     node ran the trade). Ledger rows have no entry_price/close_price, so
     their points-based contribution (avg_pts/payoff_rr) is 0 — win/loss
@@ -274,16 +324,16 @@ CANONICAL_CHANNELS: dict[str, str] = {
     "Bounce Generator":                         "Bounce Engine",
     "Bounce Engine":                            "Bounce Engine",
     "Breakout Engine":                          "Breakout Engine",
-    # GD Copy engine
-    "GD Copy Engine":                           "GD Copy Engine",
-    "Gold Diggers VIP Copy":                    "GD Copy Engine",
+    # Reversal Engine
+    "Reversal Engine":                           "Reversal Engine",
+    "Gold Diggers VIP Copy":                    "Reversal Engine",
 }
 
 
 CANONICAL_CHANNEL_ORDER = [
     "Gold Diggers 2.0",
     "Gold Diggers VIP",
-    "GD Copy Engine",
+    "Reversal Engine",
     "Bounce Engine",
     "Breakout Engine",
 ]

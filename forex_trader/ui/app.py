@@ -469,7 +469,7 @@ def _render_about():
                                 "On the VPS, go to Settings > Remote Node, enable 'This machine is the VPS', and note the fingerprint and shared token shown.",
                                 "On your Mac or other local machine, go to Settings > Remote Node > 'Connect to a remote VPS', enter the VPS's IP or hostname and the shared token, then click Save & Connect.",
                                 "Use the Local/Remote toggle in the top header bar to choose which node actively places trades. Only one node should be the active trader at a time — both sides still receive every Telegram signal independently, but the one that isn't active stands down from placing real orders, so you never get duplicate trades on the same MT5 account.",
-                                "Signal generator panels (Bounce, Breakout, GD Copy) mirror whichever node is active: when the VPS is active, the Mac's own panels show the VPS's real balance, stats and Circuit Breaker status, and Start/Stop/Run Now/Reset buttons act on the VPS instead of the Mac's stood-down local copy.",
+                                "Signal generator panels (Bounce, Breakout, Reversal Engine) mirror whichever node is active: when the VPS is active, the Mac's own panels show the VPS's real balance, stats and Circuit Breaker status, and Start/Stop/Run Now/Reset buttons act on the VPS instead of the Mac's stood-down local copy.",
                             ],
                         ),
                     ]
@@ -876,7 +876,7 @@ def main_page():
         # Replaces the old strategy badge. Switching modes runs the
         # STAND_DOWN/RESUME handshake over the sync channel (see
         # forex_trader/sync/) so exactly one node ever executes new trades.
-        # This node's own sub-engines (breakout/bounce/gd_copy) are fully
+        # This node's own sub-engines (breakout/bounce/reversal_engine) are fully
         # stopped/started as part of the switch; the Telegram reader itself
         # keeps running either way to avoid MTProto reconnect churn, but
         # SimulationEngine.open_trade() refuses every new order while stood
@@ -886,7 +886,7 @@ def main_page():
         def _mode_sub_engines():
             from forex_trader.breakout_signal import breakout_signal_service as _bo_m
             from forex_trader.test_signal import test_signal_service as _bc_m
-            from forex_trader.gd_copy_signal import gd_copy_signal_service as _gd_m
+            from forex_trader.reversal_engine import reversal_engine_service as _gd_m
             return _bo_m.get_instance(), _bc_m.get_instance(), _gd_m.get_instance()
 
         async def _refresh_mode_btn():

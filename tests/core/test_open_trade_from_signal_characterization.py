@@ -23,7 +23,7 @@ from forex_trader.core import ea_bridge
 from forex_trader.core.engine import SimulationEngine
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
-    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_GD_VIP_RUNNER,
+    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER,
 )
 
@@ -258,9 +258,9 @@ def test_conservative_trial_post_fill_override(fresh_db, engine):
     assert trade["tp7"] is None
 
 
-def test_gd_vip_runner_post_fill_override_leaves_tps_untouched(fresh_db, engine):
+def test_reversal_runner_post_fill_override_leaves_tps_untouched(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
-    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
+    db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
     asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
 

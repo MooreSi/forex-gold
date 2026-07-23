@@ -38,7 +38,7 @@ log = logging.getLogger("ea_bridge")
 EA_PORTABLE_STRATEGIES = frozenset({
     "scale_out", "be_runner", "trail_stop", "protected_scale",
     "conservative", "scalp_runner", "conservative_trial",
-    "signal_climber", "gd_vip_runner", "no_sl_scale",
+    "signal_climber", "reversal_runner", "no_sl_scale",
     "adaptive_runner", "adaptive_runner_2", "orb_fixed",
     "limit_runner",
 })
@@ -162,7 +162,7 @@ class EABridge:
         existing Python/bridge open_trade path in that case.
 
         pcts/be_at_pos: for the ladder-shaped strategies (signal_climber,
-        gd_vip_runner, adaptive_runner, adaptive_runner_2) — the per-TP
+        reversal_runner, adaptive_runner, adaptive_runner_2) — the per-TP
         close percentage table and the compacted TP position where SL
         first moves to breakeven. Sent over the wire as flat pct1..pct8 +
         be_at_pos fields (matching tp1..tp8's existing pattern — the EA's
@@ -226,6 +226,7 @@ class EABridge:
                                   pcts: list[float], be_at_pos: int, strategy: str,
                                   expire_minutes: float = 240.0,
                                   close_full_on_last: bool = True,
+                                  trail_mode: Optional[str] = None,
                                   timeout: float = 5.0) -> dict:
         """Ask the EA to place a genuine resting BuyLimit/SellLimit order —
         unlike open_trade(), this does NOT fill immediately, so the returned
@@ -267,6 +268,12 @@ class EABridge:
         this the same way core_run_tp_ladder.run_tp_ladder's Python-side
         fallback does). Sent as an int (0/1), matching this EA's minimal
         JSON parser (no native boolean support — see be_at_pos above it).
+
+        trail_mode: same meaning as open_trade()'s own trail_mode param
+        (None/omitted = trail to previous TP; "midpoint_lag2" = Adaptive
+        Runner 2's rule) — needed because place_pending_order() is now
+        reused by more than just Limit Runner (e.g. Reversal Engine's LIMIT
+        ORDER toggle can resolve to any strategy, including AR2).
         """
         if not self.is_ea_healthy():
             raise ConnectionError("EA not connected/healthy")
@@ -276,6 +283,8 @@ class EABridge:
             "strategy": strategy, "expire_minutes": expire_minutes,
             "be_at_pos": be_at_pos, "close_full_on_last": int(close_full_on_last),
         }
+        if trail_mode is not None:
+            msg["trail_mode"] = trail_mode
         for n in range(1, 9):
             if n in tps:
                 msg[f"tp{n}"] = tps[n]

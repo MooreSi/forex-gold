@@ -767,7 +767,7 @@ def _gather_signal_generator_data(db_path: str, days: int) -> dict:
         _LABELS = {
             "bounce":           "Bounce Engine",
             "breakout":         "Breakout Engine",
-            "gold_diggers_copy": "GD Copy Engine",
+            "gold_diggers_copy": "Reversal Engine",
         }
 
         def _half_stats(trades: list[dict]) -> dict:
@@ -836,7 +836,7 @@ _SIGNAL_GEN_SYSTEM = (
     "improve level detection and entry timing over time.\n"
     "- Breakout Engine: detects breakouts from consolidation ranges. Uses ML to classify "
     "genuine breakouts vs fakeouts, improving with each labelled outcome.\n"
-    "- GD Copy Engine: reverse-engineers the Gold Diggers VIP telegram signal methodology. "
+    "- Reversal Engine: reverse-engineers the Gold Diggers VIP telegram signal methodology. "
     "Tracks Asia range, swing levels, and round numbers. Has an ML component that compares "
     "its generated signals against real VIP signals to improve correlation over time.\n\n"
     "Your task is to assess:\n"

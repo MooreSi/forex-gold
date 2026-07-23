@@ -1,10 +1,10 @@
 """
-GD Copy Engine panel — UI tab inside Signal Generator.
+Reversal Engine panel — UI tab inside Signal Generator.
 
 Shows:
   - Engine controls (Start/Stop/Run Now)
   - Balance / P&L banner
-  - Correlation scorecard (vs actual GD VIP signals)
+  - Correlation scorecard (vs actual reference-channel signals)
   - Active levels (candidate S/R currently tracked)
   - Open signals (pending/triggered)
   - Signal history with correlation indicators
@@ -22,9 +22,9 @@ from forex_trader.core import database as db_module
 
 from nicegui import ui
 
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdc_db_real
-from forex_trader.gd_copy_signal import gd_copy_signal_service as gdc_engine_module
-from forex_trader.gd_copy_signal import ml_engine as _gdc_ml_real
+from forex_trader.reversal_engine import reversal_engine_repo as _re_db_real
+from forex_trader.reversal_engine import reversal_engine_service as re_engine_module
+from forex_trader.reversal_engine import ml_engine as _re_ml_real
 from forex_trader.sync import client as sync_client
 from forex_trader.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode
 
@@ -32,7 +32,7 @@ from forex_trader.sync.remote_stats_facade import make_facades, _is_remote_activ
 # the mirrored remote signal-gen stats instead of this node's own local
 # data — see sync/remote_stats_facade.py. Every other call site below is
 # unchanged; the facades expose the same functions as the real modules.
-gdc_db, gdc_ml, _ = make_facades("gd_copy", _gdc_db_real, _gdc_ml_real)
+re_db, re_ml, _ = make_facades("reversal_engine", _re_db_real, _re_ml_real)
 
 _STARTING_BALANCE = 1000.0
 
@@ -104,14 +104,14 @@ def _level_type_badge(ltype: str) -> tuple[str, str]:
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
-    eng = gdc_engine_module.get_instance()
+    eng = re_engine_module.get_instance()
 
     # ── Header bar ────────────────────────────────────────────────────────────
     with ui.row().classes(
         "w-full items-center gap-3 px-4 py-2 bg-gray-800 border-b border-gray-700"
     ):
         ui.label("content_copy").classes("material-icons text-yellow-400 text-xl")
-        ui.label("GD Copy Engine").classes(
+        ui.label("Reversal Engine").classes(
             "text-yellow-400 font-bold text-sm tracking-widest"
         )
         live_exec_lbl = ui.label("• VIRTUAL — NO MT5 ORDERS •").classes(
@@ -127,19 +127,19 @@ def render() -> None:
 
         async def _start():
             if _is_remote_active():
-                await _remote_control("start", "GD Copy Engine started (VPS)")
+                await _remote_control("start", "Reversal Engine started (VPS)")
                 return
             if eng:
                 eng.start()
-            ui.notify("GD Copy Engine started", type="positive")
+            ui.notify("Reversal Engine started", type="positive")
 
         async def _stop():
             if _is_remote_active():
-                await _remote_control("stop", "GD Copy Engine stopped (VPS)")
+                await _remote_control("stop", "Reversal Engine stopped (VPS)")
                 return
             if eng:
                 eng.stop()
-            ui.notify("GD Copy Engine stopped", type="info")
+            ui.notify("Reversal Engine stopped", type="info")
 
         async def _run_now():
             if _is_remote_active():
@@ -150,7 +150,7 @@ def render() -> None:
             ui.notify("Cycle triggered", type="info")
 
         async def _remote_control(action: str, success_msg: str) -> None:
-            """Send Start/Stop/Run Now to the VPS's own gd_copy engine instead
+            """Send Start/Stop/Run Now to the VPS's own Reversal Engine instead
             of this node's local one, which is stood down in Remote mode and
             would do nothing while the button looked like it worked."""
             cli = sync_client.get_instance()
@@ -158,7 +158,7 @@ def render() -> None:
                 ui.notify("Not connected to VPS", type="negative")
                 return
             try:
-                ack = await cli.send_engine_control("gd_copy", action)
+                ack = await cli.send_engine_control("reversal_engine", action)
                 if ack.get("error"):
                     ui.notify(f"VPS rejected request: {ack['error']}", type="negative")
                 else:
@@ -203,7 +203,7 @@ def render() -> None:
     # ── Stats cards ───────────────────────────────────────────────────────────
     stat_cards: dict = {}
     with ui.row().classes("w-full px-4 py-2 gap-3 flex-wrap"):
-        for key in ["Total", "Wins", "Losses", "B/E", "Win Rate", "Corr Rate", "Avg P&L", "Total P&L"]:
+        for key in ["Total", "Wins", "Losses", "B/E", "Win Rate", "Avg P&L", "Total P&L"]:
             with ui.card().classes("bg-gray-800 px-3 py-2 rounded"):
                 ui.label(key).classes("text-xs text-gray-500")
                 stat_cards[key] = ui.label("—").classes("text-sm font-bold font-mono text-white")
@@ -225,9 +225,31 @@ def render() -> None:
 
             # ── Open signals ──────────────────────────────────────────────────
             with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):
-                ui.label("Active Positions").classes(
-                    "text-sm font-bold text-yellow-300 mb-2"
-                )
+                with ui.row().classes("items-center gap-2 mb-2"):
+                    ui.label("Active Positions").classes(
+                        "text-sm font-bold text-yellow-300"
+                    )
+                    _limit_order_val = bool(db_module.get_risk_settings().get("re_use_limit_order", 0))
+                    limit_order_sw = ui.switch(
+                        "LIMIT ORDER", value=_limit_order_val,
+                    ).classes("text-xs").props("dense color=amber")
+                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                        "ON: live-executed signals are routed via the EA as a genuine "
+                        "MT5 pending limit order at the signal's entry zone. If the EA "
+                        "is unreachable when a signal triggers, falls back to the normal "
+                        "market-fill flow automatically. OFF: acts as it does now "
+                        "(immediate market fill)."
+                    )
+
+                    def _toggle_limit_order(e):
+                        db_module.update_risk_settings({"re_use_limit_order": 1 if e.value else 0})
+                        ui.notify(
+                            f"Reversal Engine LIMIT ORDER {'enabled' if e.value else 'disabled'}",
+                            type="positive" if e.value else "info",
+                        )
+
+                    limit_order_sw.on_value_change(_toggle_limit_order)
+
                 open_container = ui.column().classes("w-full gap-2")
 
             # ── Signal history ────────────────────────────────────────────────
@@ -249,7 +271,7 @@ def render() -> None:
 
             # ── Performance Analytics ─────────────────────────────────────────
             # Same shape as Bounce/Breakout's Performance Analytics card — was
-            # missing entirely for GD Copy.
+            # missing entirely for Reversal Engine.
             with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):
                 ui.label("Performance Analytics").classes(
                     "text-sm font-bold text-yellow-300 mb-2"
@@ -274,7 +296,7 @@ def render() -> None:
         try:
             from forex_trader.core import database as _main_db
             _rs = await _main_db.to_db_thread(_main_db.get_risk_settings)
-            _live = bool(_rs.get("gdc_live_execution", 0))
+            _live = bool(_rs.get("re_live_execution", 0))
         except Exception:
             _live = False
         live_exec_lbl.text = (
@@ -291,7 +313,7 @@ def render() -> None:
         # here even while the VPS is actively running it.
         if _is_remote_active():
             cli = sync_client.get_instance()
-            is_r = bool((cli.remote_status.get("engines", {}) if cli else {}).get("gd_copy"))
+            is_r = bool((cli.remote_status.get("engines", {}) if cli else {}).get("reversal_engine"))
             status_badge.props(f"color={'green' if is_r else 'grey'}")
             status_badge.text = "Running - Remote" if is_r else "Stopped - Remote"
             detail_lbl.text = ""
@@ -308,9 +330,9 @@ def render() -> None:
 
         # Balance
         try:
-            bal  = await db_module.to_db_thread(gdc_db.get_virtual_balance)
+            bal  = await db_module.to_db_thread(re_db.get_virtual_balance)
             pnl  = bal - _STARTING_BALANCE
-            dd   = await db_module.to_db_thread(gdc_db.get_max_drawdown)
+            dd   = await db_module.to_db_thread(re_db.get_max_drawdown)
             balance_lbl.text = f"${bal:,.2f}"
             balance_lbl.classes(
                 replace="text-2xl font-bold font-mono "
@@ -325,13 +347,12 @@ def render() -> None:
 
         # Stats
         try:
-            stats = await db_module.to_db_thread(gdc_db.get_stats)
+            stats = await db_module.to_db_thread(re_db.get_stats)
             stat_cards["Total"].text    = str(stats["total"])
             stat_cards["Wins"].text     = str(stats["wins"])
             stat_cards["Losses"].text   = str(stats["losses"])
             stat_cards["B/E"].text      = str(stats["bes"])
             stat_cards["Win Rate"].text = f"{stats['win_rate']:.1f}%"
-            stat_cards["Corr Rate"].text= f"{stats['correlation_rate']:.1f}%"
             stat_cards["Avg P&L"].text  = f"${stats['avg_pnl']:+.2f}"
             stat_cards["Total P&L"].text= f"${stats['total_pnl']:+.2f}"
             wr_lbl.text = f"{stats['win_rate']:.1f}%"
@@ -343,7 +364,7 @@ def render() -> None:
         levels_container.clear()
         try:
             cached_levels = eng._cached.get("levels", []) if eng else []
-            db_levels     = await db_module.to_db_thread(gdc_db.get_active_levels)
+            db_levels     = await db_module.to_db_thread(re_db.get_active_levels)
             display_lvls  = cached_levels[:6] if cached_levels else []
 
             if display_lvls:
@@ -368,14 +389,13 @@ def render() -> None:
         # Open signals
         open_container.clear()
         try:
-            open_sigs = await db_module.to_db_thread(gdc_db.get_open_signals)
+            open_sigs = await db_module.to_db_thread(re_db.get_open_signals)
             if open_sigs:
                 with open_container:
                     for sig in open_sigs:
                         direction = sig.get("direction", "")
                         border    = "border-green-700" if direction == "BUY" else "border-red-700"
                         badge_text, badge_color = _level_type_badge(sig.get("level_type", ""))
-                        corr = sig.get("correlation_confirmed", 0)
 
                         with ui.card().classes(f"w-full bg-gray-900 border-l-2 {border} p-2"):
                             with ui.row().classes("items-center gap-2 mb-1"):
@@ -388,8 +408,6 @@ def render() -> None:
                                 status = sig.get("status", "")
                                 ui.badge(status, color="yellow" if status == "pending" else "blue"
                                          ).classes("text-xs ml-auto")
-                                if corr:
-                                    ui.badge("VIP MATCH", color="green").classes("text-xs")
 
                             with ui.row().classes("text-xs text-gray-400 gap-4 flex-wrap"):
                                 ui.label(f"Entry: {sig.get('entry_low', 0):.2f}–{sig.get('entry_high', 0):.2f}")
@@ -398,13 +416,6 @@ def render() -> None:
                                 ui.label(f"TP7: {sig.get('tp7') or sig.get('tp6', '—')}")
                                 ui.label(f"Level: {sig.get('level_price', 0):.2f}")
                                 ui.label(f"Score: {sig.get('level_score', 0):.2f}")
-
-                            if corr:
-                                td = sig.get("correlation_time_delta_s")
-                                dp = sig.get("correlation_distance_pts")
-                                td_txt = f"{abs(td):.0f}s {'early' if td < 0 else 'late'}" if td else "?"
-                                with ui.row().classes("text-xs text-green-600 gap-2 mt-1"):
-                                    ui.label(f"VIP match: {td_txt}, {dp:.1f}pts apart" if dp else "VIP matched")
             else:
                 with open_container:
                     ui.label("No open signals").classes("text-xs text-gray-600 italic")
@@ -412,12 +423,12 @@ def render() -> None:
             pass
 
         # Signal history — same column set/shape as Bounce (test_panel.py) and
-        # Breakout (breakout_panel.py)'s history tables, adapted to GD Copy's
+        # Breakout (breakout_panel.py)'s history tables, adapted to Reversal Engine's
         # own fields (level_type/level_price instead of pattern/broken_level,
-        # plus the VIP correlation lead/lag column those two don't have).
+        # plus the REF correlation lead/lag column those two don't have).
         history_container.clear()
         try:
-            all_sigs = await db_module.to_db_thread(gdc_db.get_all_signals, limit=80)
+            all_sigs = await db_module.to_db_thread(re_db.get_all_signals, limit=80)
             closed   = [s for s in all_sigs if s.get("status") == "closed"][:60]
 
             if closed:
@@ -427,7 +438,7 @@ def render() -> None:
                             with ui.element("tr").classes("text-gray-500 border-b border-gray-700"):
                                 _HDR_TIPS = {
                                     "Live Trade": "MT5 ticket if a real trade was opened. VIRTUAL = learning only.",
-                                    "Level Type": "The GD-VIP-style price level this signal was based on: round_5/round_10, asia_high/low, swing_high/low",
+                                    "Level Type": "The reference-style price level this signal was based on: round_5/round_10, asia_high/low, swing_high/low",
                                     "R:R":        "Risk-to-reward ratio for TP1",
                                     "Session":    "Market session when the signal fired",
                                     "Bias":       "H1 higher-timeframe trend bias at signal time",
@@ -512,8 +523,8 @@ def render() -> None:
         # Bounce/Breakout's ML Learning panels (ported from breakout_panel.py).
         ml_container.clear()
         try:
-            ml_sum = await db_module.to_db_thread(gdc_ml.summary)
-            mets   = await db_module.to_db_thread(gdc_ml.get_ml_metrics)
+            ml_sum = await db_module.to_db_thread(re_ml.summary)
+            mets   = await db_module.to_db_thread(re_ml.get_ml_metrics)
             with ml_container:
                 with ui.row().classes("w-full gap-2 flex-wrap"):
                     ui.badge(
@@ -565,14 +576,14 @@ def render() -> None:
                     _chip("Labeled", str(mets.get("n_data", 0)), "text-blue-300",
                           "Closed signals with ML probability stored.")
 
-                    needed  = gdc_ml.MIN_TRAIN_SAMPLES
+                    needed  = re_ml.MIN_TRAIN_SAMPLES
                     have    = ml_sum.get("labeled_count", 0)
                     next_in = max(0, needed - have) if not ml_sum.get("trained") else \
-                              gdc_ml.RETRAIN_EVERY - (have % gdc_ml.RETRAIN_EVERY or gdc_ml.RETRAIN_EVERY)
+                              re_ml.RETRAIN_EVERY - (have % re_ml.RETRAIN_EVERY or re_ml.RETRAIN_EVERY)
                     next_str = f"+{next_in}" if ml_sum.get("trained") else f"{have}/{needed}"
                     _chip("Next Train", next_str, "text-cyan-300",
-                          f"Retrains every {gdc_ml.RETRAIN_EVERY} new labeled examples "
-                          f"once {gdc_ml.MIN_TRAIN_SAMPLES} minimum reached.")
+                          f"Retrains every {re_ml.RETRAIN_EVERY} new labeled examples "
+                          f"once {re_ml.MIN_TRAIN_SAMPLES} minimum reached.")
 
                 # ── Is it learning? ────────────────────────────────────────────
                 sig_ids      = mets.get("signal_ids", [])
@@ -648,7 +659,7 @@ def render() -> None:
                                             ui.label(v)
                 else:
                     ui.label(
-                        f"No calibration data yet. Need {gdc_ml.MIN_TRAIN_SAMPLES} "
+                        f"No calibration data yet. Need {re_ml.MIN_TRAIN_SAMPLES} "
                         f"closed signals with ML probability stored."
                     ).classes("text-gray-600 text-xs italic mt-1")
 
@@ -663,9 +674,9 @@ def render() -> None:
         # shape as Bounce/Breakout's Performance Analytics card.
         analytics_container.clear()
         try:
-            by_session = await db_module.to_db_thread(gdc_db.get_perf_by_session)
-            by_bias    = await db_module.to_db_thread(gdc_db.get_perf_by_bias)
-            by_level   = await db_module.to_db_thread(gdc_db.get_perf_by_level_type)
+            by_session = await db_module.to_db_thread(re_db.get_perf_by_session)
+            by_bias    = await db_module.to_db_thread(re_db.get_perf_by_bias)
+            by_level   = await db_module.to_db_thread(re_db.get_perf_by_level_type)
             with analytics_container:
                 def _perf_table(title: str, rows: list[dict], key_col: str):
                     if not rows:
@@ -704,7 +715,7 @@ def render() -> None:
         # Cycle log
         log_container.clear()
         try:
-            log_entries = await db_module.to_db_thread(gdc_db.get_analysis_log, limit=30)
+            log_entries = await db_module.to_db_thread(re_db.get_analysis_log, limit=30)
             with log_container:
                 for entry in log_entries:
                     is_signal = entry.get("result") == "signal"

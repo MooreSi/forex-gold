@@ -1,7 +1,7 @@
-"""Characterizes SimulationEngine._gd_copy_research_loop's per-cycle
+"""Characterizes SimulationEngine._reversal_engine_research_loop's per-cycle
 check-and-run body (core/engine.py) against UNMODIFIED engine.py, ahead of
-extraction into forex_trader/core/core_gd_copy_research.py -- see
-docs/todo/refactor/core-gd-copy-research-migration/010-*.md.
+extraction into forex_trader/core/core_reversal_research.py -- see
+docs/todo/refactor/core-reversal-research-migration/010-*.md.
 
 Gates a nightly ML-feature research job -- no MT5 order is ever placed,
 closed, or modified.
@@ -45,11 +45,11 @@ def fresh_db():
 
 
 def _patched_now(fixed_dt):
-    """Context manager patching core_gd_copy_research.datetime.now() (where
-    engine.py's now-wired _gd_copy_research_loop actually computes the
-    current time, having delegated to gd_copy_research_sweep) while leaving
+    """Context manager patching core_reversal_research.datetime.now() (where
+    engine.py's now-wired _reversal_engine_research_loop actually computes the
+    current time, having delegated to reversal_engine_research_sweep) while leaving
     direct datetime(...) construction working via the real class."""
-    patcher = mock.patch("forex_trader.core.core_gd_copy_research.datetime")
+    patcher = mock.patch("forex_trader.core.core_reversal_research.datetime")
     mock_dt = patcher.start()
     mock_dt.now.return_value = fixed_dt
     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -73,7 +73,7 @@ def _stop_after_second_sleep(engine):
     return _sleep
 
 
-_TARGET = "forex_trader.gd_copy_signal.telegram_research.run_nightly_research"
+_TARGET = "forex_trader.reversal_engine.telegram_research.run_nightly_research"
 
 
 def test_not_2200_no_pipeline_call_no_dedup_write(fresh_db):
@@ -88,11 +88,11 @@ def test_not_2200_no_pipeline_call_no_dedup_write(fresh_db):
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch(_TARGET, side_effect=runner):
-            asyncio.run(e._gd_copy_research_loop())
+            asyncio.run(e._reversal_engine_research_loop())
     finally:
         p.stop()
     assert calls == []
-    assert db.get_app_config("gdc_research_last") is None
+    assert db.get_app_config("re_research_last") is None
 
 
 def test_remote_node_skips_even_at_2200(fresh_db):
@@ -108,14 +108,14 @@ def test_remote_node_skips_even_at_2200(fresh_db):
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch.object(db, "is_remote_node", return_value=True), \
              mock.patch(_TARGET, side_effect=runner):
-            asyncio.run(e._gd_copy_research_loop())
+            asyncio.run(e._reversal_engine_research_loop())
     finally:
         p.stop()
     assert calls == []
 
 
 def test_already_ran_today_skips(fresh_db):
-    db.set_app_config("gdc_research_last", "2026-07-20")
+    db.set_app_config("re_research_last", "2026-07-20")
     e = _make_engine()
     p = _patched_now(datetime(2026, 7, 20, 22, 0, 0))
     calls = []
@@ -128,7 +128,7 @@ def test_already_ran_today_skips(fresh_db):
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch.object(db, "is_remote_node", return_value=False), \
              mock.patch(_TARGET, side_effect=runner):
-            asyncio.run(e._gd_copy_research_loop())
+            asyncio.run(e._reversal_engine_research_loop())
     finally:
         p.stop()
     assert calls == []
@@ -147,11 +147,11 @@ def test_runs_with_engine_and_marks_dedup_when_ran_true(fresh_db):
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch.object(db, "is_remote_node", return_value=False), \
              mock.patch(_TARGET, side_effect=runner):
-            asyncio.run(e._gd_copy_research_loop())
+            asyncio.run(e._reversal_engine_research_loop())
     finally:
         p.stop()
     assert calls == [e]
-    assert db.get_app_config("gdc_research_last") == "2026-07-20"
+    assert db.get_app_config("re_research_last") == "2026-07-20"
 
 
 def test_ran_false_does_not_mark_dedup(fresh_db):
@@ -165,10 +165,10 @@ def test_ran_false_does_not_mark_dedup(fresh_db):
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch.object(db, "is_remote_node", return_value=False), \
              mock.patch(_TARGET, side_effect=runner):
-            asyncio.run(e._gd_copy_research_loop())
+            asyncio.run(e._reversal_engine_research_loop())
     finally:
         p.stop()
-    assert db.get_app_config("gdc_research_last") is None
+    assert db.get_app_config("re_research_last") is None
 
 
 def test_pipeline_exception_swallowed_no_dedup_write(fresh_db):
@@ -182,10 +182,10 @@ def test_pipeline_exception_swallowed_no_dedup_write(fresh_db):
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch.object(db, "is_remote_node", return_value=False), \
              mock.patch(_TARGET, side_effect=runner):
-            asyncio.run(e._gd_copy_research_loop())  # must not raise
+            asyncio.run(e._reversal_engine_research_loop())  # must not raise
     finally:
         p.stop()
-    assert db.get_app_config("gdc_research_last") is None
+    assert db.get_app_config("re_research_last") is None
 
 
 def test_is_remote_node_checked_unconditionally_outside_window(fresh_db):
@@ -200,7 +200,7 @@ def test_is_remote_node_checked_unconditionally_outside_window(fresh_db):
     try:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=_stop_after_second_sleep(e))), \
              mock.patch.object(db, "is_remote_node", side_effect=spy_is_remote_node):
-            asyncio.run(e._gd_copy_research_loop())
+            asyncio.run(e._reversal_engine_research_loop())
     finally:
         p.stop()
     assert len(check_calls) == 1

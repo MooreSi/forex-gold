@@ -1,5 +1,5 @@
 """Live-tunable per-strategy point/multiplier parameters -- lets Conservative,
-Scalp Runner, GD VIP Runner, Adaptive Runner, Adaptive Runner 2, and Limit
+Scalp Runner, Reversal Runner, Adaptive Runner, Adaptive Runner 2, and Limit
 Runner's fixed SL/TP constants be edited from Trading > Strategy without a
 code change or restart, plus a small named-template library to save/reapply
 parameter sets.
@@ -34,7 +34,7 @@ import time
 from forex_trader.core import database as db_module
 from forex_trader.core.database import _schedule_coro
 from forex_trader.core.models import (
-    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_GD_VIP_RUNNER,
+    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
 )
 
@@ -51,7 +51,7 @@ PARAM_SPECS: dict[str, list[tuple[str, str, float, str]]] = {
         ("tp1_pt", "TP1",       3.0,  "pt"),
         ("tp2_pt", "TP2",       4.0,  "pt"),
     ],
-    STRATEGY_GD_VIP_RUNNER: [
+    STRATEGY_REVERSAL_RUNNER: [
         ("sl_mult",     "SL widen multiplier", 4.0,  "x"),
         ("sl_cap_pt",   "SL widen cap",        20.0, "pt"),
         ("sl_floor_pt", "SL floor (bad data)", 8.0,  "pt"),
@@ -85,7 +85,7 @@ PARAM_SPECS: dict[str, list[tuple[str, str, float, str]]] = {
 STRATEGY_LABELS: dict[str, str] = {
     STRATEGY_CONSERVATIVE:      "Conservative",
     STRATEGY_SCALP_RUNNER:      "Scalp Runner",
-    STRATEGY_GD_VIP_RUNNER:     "GD VIP Runner",
+    STRATEGY_REVERSAL_RUNNER:     "Reversal Runner",
     STRATEGY_ADAPTIVE_RUNNER:   "Adaptive Runner",
     STRATEGY_ADAPTIVE_RUNNER_2: "Adaptive Runner 2",
     STRATEGY_LIMIT_RUNNER:      "Limit Runner",
@@ -93,7 +93,7 @@ STRATEGY_LABELS: dict[str, str] = {
 
 # Strategies in display order for the UI's strategy picker.
 PARAM_STRATEGIES: list[str] = [
-    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_GD_VIP_RUNNER,
+    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
 ]
 

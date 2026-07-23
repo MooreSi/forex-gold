@@ -27,14 +27,14 @@ from forex_trader.core import database as db_module
 from forex_trader.core.core_risk_governor import is_trading_paused
 from forex_trader.core.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
-    STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
 log = logging.getLogger(__name__)
 
 # ── EA-ladder lookup tables (verbatim copies -- also used elsewhere in
-# engine.py by the signal_climber/gd_vip_runner handlers, out of scope here) ──
+# engine.py by the signal_climber/reversal_runner handlers, out of scope here) ──
 
 _CLIMBER_PCTS: dict[int, list[float]] = {
     1: [1.00],
@@ -65,7 +65,7 @@ _GDVR_PCTS: dict[int, list[float]] = {
 # tuning change here takes effect on EA-managed trades with no MQL5 rebuild.
 _EA_LADDER_PCTS = {
     STRATEGY_SIGNAL_CLIMBER: _CLIMBER_PCTS,
-    STRATEGY_GD_VIP_RUNNER: _GDVR_PCTS,
+    STRATEGY_REVERSAL_RUNNER: _GDVR_PCTS,
     STRATEGY_ADAPTIVE_RUNNER: _GDVR_PCTS,
     # Adaptive Runner 2's own stated 8-TP schedule (5/5/10/10/15/15/15/25) is
     # an exact match for _GDVR_PCTS -- reuses the same table rather than
@@ -74,7 +74,7 @@ _EA_LADDER_PCTS = {
 }
 _EA_LADDER_BE_AT_POS = {
     STRATEGY_SIGNAL_CLIMBER: 0,
-    STRATEGY_GD_VIP_RUNNER: 1,
+    STRATEGY_REVERSAL_RUNNER: 1,
     STRATEGY_ADAPTIVE_RUNNER: 0,
     STRATEGY_ADAPTIVE_RUNNER_2: 1,   # BE at TP2, not TP1
 }
@@ -122,7 +122,7 @@ async def open_trade(
     # is_standing_down() check only ever fires on whichever node runs the
     # sync SERVER (the VPS), so without this the Mac's own open_trade()
     # was never actually gated by the Local/Remote toggle at all: setting
-    # the Mac to "Remote" mode stopped its Breakout/Bounce/GD Copy sub-
+    # the Mac to "Remote" mode stopped its Breakout/Bounce/Reversal Engine sub-
     # engines but left its own Telegram-signal execution running
     # unconditionally, causing the same incoming signal (both nodes run
     # separate Telethon sessions on the same Telegram account) to open

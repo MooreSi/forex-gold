@@ -12,7 +12,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.models import (
-    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_GD_VIP_RUNNER,
+    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
@@ -99,10 +99,10 @@ def test_set_strategy_params_partial_update_keeps_other_fields_at_default(fresh_
 
 
 def test_reset_strategy_params_reverts_to_defaults(fresh_db):
-    sp.set_strategy_params(STRATEGY_GD_VIP_RUNNER, {"sl_mult": 9.0})
-    assert sp.get_strategy_params(STRATEGY_GD_VIP_RUNNER)["sl_mult"] == 9.0
-    sp.reset_strategy_params(STRATEGY_GD_VIP_RUNNER)
-    assert sp.get_strategy_params(STRATEGY_GD_VIP_RUNNER) == sp.default_params(STRATEGY_GD_VIP_RUNNER)
+    sp.set_strategy_params(STRATEGY_REVERSAL_RUNNER, {"sl_mult": 9.0})
+    assert sp.get_strategy_params(STRATEGY_REVERSAL_RUNNER)["sl_mult"] == 9.0
+    sp.reset_strategy_params(STRATEGY_REVERSAL_RUNNER)
+    assert sp.get_strategy_params(STRATEGY_REVERSAL_RUNNER) == sp.default_params(STRATEGY_REVERSAL_RUNNER)
 
 
 def test_cache_is_invalidated_on_set_not_stale_for_ttl(fresh_db):

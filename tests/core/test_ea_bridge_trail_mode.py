@@ -59,7 +59,7 @@ def test_open_trade_omits_trail_mode_when_not_provided():
     bridge = _healthy_bridge()
     with pytest.raises(asyncio.TimeoutError):
         asyncio.run(bridge.open_trade(
-            "trade-2", "BUY", 0.10, 2390.0, {1: 2410.0}, "gd_vip_runner",
+            "trade-2", "BUY", 0.10, 2390.0, {1: 2410.0}, "reversal_runner",
             pcts=[1.00], be_at_pos=1, timeout=0.05,
         ))
     msg = _sent_message(bridge)

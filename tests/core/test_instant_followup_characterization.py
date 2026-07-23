@@ -127,13 +127,13 @@ def test_self_managed_no_mismatch_acknowledged_only(fresh_db, engine):
 def test_self_managed_channel_override_mismatch_corrects_and_applies(fresh_db, engine):
     _insert_trade(strategy="conservative")
     _insert_tg("tg-2")
-    db.set_channel_strategy_override("Chan", "gd_vip_runner")
+    db.set_channel_strategy_override("Chan", "reversal_runner")
     trade = _trade_dict("trade-abc")
     asyncio.run(SimulationEngine._apply_followup_to_instant_trade(
         engine, trade, _PARSED_2TP, "tg-2", "Chan", "Chan",
     ))
     trade_after = _trade_dict("trade-abc")
-    assert trade_after["strategy"] == "gd_vip_runner"
+    assert trade_after["strategy"] == "reversal_runner"
     assert trade_after["stop_loss"] == 2400.0
     assert trade_after["tp1"] == 2420.0
     assert trade_after["tp2"] == 2425.0

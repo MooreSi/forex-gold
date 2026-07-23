@@ -806,7 +806,7 @@ void ManageConservativeTrial(ManagedTrade &t, const MqlTick &tick)
 }
 
 //+------------------------------------------------------------------+
-//| Strategy: signal_climber / gd_vip_runner / adaptive_runner /       |
+//| Strategy: signal_climber / reversal_runner / adaptive_runner /       |
 //| adaptive_runner_2 / limit_runner (_run_tp_ladder) — SL stays put    |
 //| until beAtPos, then -> entry; every TP after that trails SL per    |
 //| t.trailMode ("" = previous TP price, the original/default rule;    |
@@ -842,7 +842,7 @@ void ManageLadder(ManagedTrade &t, const MqlTick &tick)
    {
       bool isGdvr = (t.strategy != "signal_climber");
       GetLadderPcts(n, isGdvr, pcts);
-      beAtPos = (t.strategy == "gd_vip_runner" || t.strategy == "adaptive_runner_2") ? 1 : 0;
+      beAtPos = (t.strategy == "reversal_runner" || t.strategy == "adaptive_runner_2") ? 1 : 0;
       Print("[EABridge][WARN] ladder trade ", t.trade_id, " strategy=", t.strategy,
             " had no be_at_pos from Python — using hardcoded fallback table");
    }
@@ -1009,7 +1009,7 @@ void ManageTrade(ManagedTrade &t, const MqlTick &tick)
    else if(t.strategy == "conservative") ManageConservativeLike(t, tick, 0.80, false);
    else if(t.strategy == "scalp_runner") ManageScalpRunner(t, tick);
    else if(t.strategy == "conservative_trial") ManageConservativeTrial(t, tick);
-   else if(t.strategy == "signal_climber" || t.strategy == "gd_vip_runner" ||
+   else if(t.strategy == "signal_climber" || t.strategy == "reversal_runner" ||
            t.strategy == "adaptive_runner" || t.strategy == "adaptive_runner_2" ||
            t.strategy == "limit_runner") ManageLadder(t, tick);
    else if(t.strategy == "no_sl_scale") ManageNoSlScale(t, tick);

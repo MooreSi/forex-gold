@@ -42,7 +42,7 @@ def test_get_returns_none_when_no_row_matches(adapter):
 
 
 def test_run_lastrowid_is_none_on_a_no_op_insert(adapter):
-    """Regression test: found via gd_copy_signal's characterization suite.
+    """Regression test: found via reversal_engine's characterization suite.
     sqlite3's cursor.lastrowid is connection-level state -- since this
     adapter reuses one persistent connection, an INSERT OR IGNORE that hits
     a UNIQUE conflict (writes nothing) would otherwise still report the

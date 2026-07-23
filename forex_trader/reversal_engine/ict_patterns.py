@@ -1,5 +1,5 @@
 """
-ICT/Smart-Money-Concept pattern detection, shared by both GD Copy profiles
+ICT/Smart-Money-Concept pattern detection, shared by both Reversal Engine profiles
 (Gold Diggers VIP and Gold Diggers 2.0 / Institutional).
 
 Reverse-engineered 2026-07 from four weeks of real channel history (message

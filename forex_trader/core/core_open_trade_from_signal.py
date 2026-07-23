@@ -11,7 +11,7 @@ no order and modifies no order itself; it only calls whatever `bridge`
 (and whatever ea_bridge singleton is configured) its caller supplies.
 
 Calls core_signal_resolution.resolve_open_trade_params (pack 12) then
-core_open_trade.open_trade (pack 11). Reuses pack 12's _gdvr_sl_dist/
+core_open_trade.open_trade (pack 11). Reuses pack 12's _rr_sl_dist/
 _adaptive_sl_dist/_adaptive_final_tp_dist and point-distance constants
 rather than duplicating them a third time. The pre-fill entry-mid fallback
 values the original computed as front-half locals (only used when
@@ -32,13 +32,13 @@ from forex_trader.core import database as db_module
 from forex_trader.core.core_open_trade import open_trade
 from forex_trader.core.core_signal_resolution import (
     resolve_open_trade_params,
-    _gdvr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,
+    _rr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,
 )
 from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
-    STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     STRATEGY_TRAIL_STOP,
 )
 
@@ -220,12 +220,12 @@ async def open_trade_from_signal(
             "/".join(f"{v:.2f}" for v in ct_tps),
         )
 
-    # ── GD VIP Runner: post-fill exact SL override (TPs untouched) ───────
+    # ── Reversal Runner: post-fill exact SL override (TPs untouched) ───────
     # Recompute the widened SL from the actual fill price (slippage
     # correction); the signal's own TP ladder is left exactly as opened.
-    elif strategy == STRATEGY_GD_VIP_RUNNER and result.get("trade_id"):
+    elif strategy == STRATEGY_REVERSAL_RUNNER and result.get("trade_id"):
         _fill      = float(result.get("entry_price", _entry_mid))
-        _gv_sl_pt2 = _gdvr_sl_dist(abs(_entry_mid - float(sig["stop_loss"])))
+        _gv_sl_pt2 = _rr_sl_dist(abs(_entry_mid - float(sig["stop_loss"])))
         exact_sl   = round(_fill - _sign * _gv_sl_pt2, 2)
         with db_module.db() as conn:
             conn.execute(
@@ -237,10 +237,10 @@ async def open_trade_from_signal(
             try:
                 await bridge.modify_order(int(mt5_tkt), sl=exact_sl, tp=None)
             except Exception as _e:
-                log.warning("[gd_vip_runner] modify_order SL sync failed: %s", _e)
+                log.warning("[reversal_runner] modify_order SL sync failed: %s", _e)
         result["stop_loss"] = exact_sl
         log.info(
-            "[gd_vip_runner] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt, stated=%.1fpt)",
+            "[reversal_runner] trade_id=%s fill=%.2f SL=%.2f(-%.1fpt, stated=%.1fpt)",
             result["trade_id"][:8], _fill, exact_sl, _gv_sl_pt2,
             abs(_entry_mid - float(sig["stop_loss"])),
         )

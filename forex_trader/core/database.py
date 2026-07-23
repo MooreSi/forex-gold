@@ -113,7 +113,7 @@ def init(db_path: str) -> None:
     # it silently re-applied the schema to the OLD file instead of the new
     # one -- the new file stayed schema-less until the next full process
     # restart, and background loops that read fresh (not cached) connections
-    # against the new path (e.g. gd_copy_signal_correlate.py's VIP fetch)
+    # against the new path (e.g. reversal_engine_correlate.py's VIP fetch)
     # broke immediately with "no such table".
     _close_thread_local_conn()
     _db_executor.submit(_close_thread_local_conn).result(timeout=5)
@@ -427,7 +427,7 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 
 -- Named parameter presets for the fixed-point-SL strategies (Conservative,
--- Scalp Runner, GD VIP Runner, Adaptive Runner, Adaptive Runner 2) -- see
+-- Scalp Runner, Reversal Runner, Adaptive Runner, Adaptive Runner 2) -- see
 -- core_strategy_params.py. The LIVE value for each strategy lives in
 -- app_config (key f"strategy_params_{strategy}"); this table is only the
 -- saved/named library a user can apply from later.
@@ -641,6 +641,18 @@ CREATE TABLE IF NOT EXISTS channel_performance (
 def _apply_schema() -> None:
     with db() as conn:
         conn.executescript(_SCHEMA)
+        # Rename-in-place for pre-existing databases whose column still carries
+        # the old "gdc_" prefix (2026-07-23 rebrand: GD Copy Engine -> Reversal
+        # Engine) -- must run BEFORE the ADD COLUMN loop below, which now
+        # creates the new name directly on a fresh install and would otherwise
+        # leave an existing install's real toggle state stranded on the old
+        # column while reading back a fresh, always-off one.
+        try:
+            conn.execute(
+                "ALTER TABLE vantage_risk_settings RENAME COLUMN gdc_live_execution TO re_live_execution"
+            )
+        except Exception:
+            pass  # already renamed, or fresh DB never had the old column
         # Migrations for existing databases (idempotent)
         for stmt in [
             "ALTER TABLE vantage_tg_signals ADD COLUMN group_name TEXT",
@@ -696,7 +708,7 @@ def _apply_schema() -> None:
             "ALTER TABLE vantage_risk_settings ADD COLUMN bo_claude_eval_enabled INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE vantage_risk_settings ADD COLUMN atr_collapse_threshold REAL NOT NULL DEFAULT 0.65",
             "ALTER TABLE vantage_risk_settings ADD COLUMN kelly_sizing_enabled INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE vantage_risk_settings ADD COLUMN gdc_live_execution INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN re_live_execution INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE channel_performance ADD COLUMN strategy_override TEXT",
             "ALTER TABLE channel_performance ADD COLUMN auto_strategy INTEGER NOT NULL DEFAULT 0",
             """CREATE TABLE IF NOT EXISTS channel_strategy_rec (
@@ -749,7 +761,7 @@ def _apply_schema() -> None:
             "ALTER TABLE vantage_risk_settings ADD COLUMN orb_lot_size REAL NOT NULL DEFAULT 0",
             # Centralized signal generation — when on and this VPS is the
             # active trader, the VPS stops running its own Breakout/TestSignal
-            # /GDCopy/GD2-GD-VIP analysis entirely and only executes trades
+            # /REopy/GD2-GD-VIP analysis entirely and only executes trades
             # forwarded from the Mac (see should_generate_signals_here()).
             # Defaults off: changes which node's signals actually trade and
             # removes the VPS's ability to self-generate if the Mac drops.
@@ -807,11 +819,54 @@ def _apply_schema() -> None:
             "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_tp_hit_parsing INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE vantage_risk_settings ADD COLUMN lk_ignore_media_messages INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE vantage_risk_settings ADD COLUMN lk_ignore_forwarded_messages INTEGER NOT NULL DEFAULT 0",
+            # Reversal Engine page's "Active Positions" LIMIT ORDER toggle
+            # (2026-07-23) -- off by default, same market-fill flow as today.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN re_use_limit_order INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)
             except Exception:
                 pass  # column already exists
+        # 2026-07-23 rebrand: any strategy value stored under the old
+        # "gd_vip_runner" identifier (channel overrides, open/closed trades,
+        # pending orders, strategy-param templates) must keep pointing at the
+        # same management logic under its new name, or those rows silently
+        # fall back to whatever the global default strategy is on next read.
+        for _tbl, _col in (
+            ("vantage_risk_settings", "trade_strategy"),
+            ("vantage_signals", "strategy"),
+            ("vantage_simulated_trades", "strategy"),
+            ("vantage_pending_orders", "strategy"),
+            ("channel_performance", "strategy_override"),
+            ("channel_strategy_rec", "strategy"),
+            ("strategy_param_templates", "strategy"),
+        ):
+            try:
+                conn.execute(
+                    f"UPDATE {_tbl} SET {_col}='reversal_runner' WHERE {_col}='gd_vip_runner'"
+                )
+            except Exception:
+                pass  # table/column doesn't exist on this schema version
+        # Same 2026-07-23 rebrand, for the signal-source/channel-name string
+        # itself ("GD Copy Engine" -> "Reversal Engine") -- without this,
+        # historical rows keep the old name forever and the Channel Strategy
+        # tab shows it as a second, orphaned row with none of the new row's
+        # override/stats history.
+        for _tbl, _col in (
+            ("channel_parser_config", "channel_name"),
+            ("channel_performance", "source"),
+            ("channel_strategy_rec", "source"),
+            ("vantage_simulated_trades", "tg_source"),
+            ("vantage_signals", "source_name"),
+            ("vantage_pending_orders", "channel_name"),
+            ("consolidated_trades", "tg_source"),
+        ):
+            try:
+                conn.execute(
+                    f"UPDATE {_tbl} SET {_col}='Reversal Engine' WHERE {_col}='GD Copy Engine'"
+                )
+            except Exception:
+                pass  # table/column doesn't exist on this schema version
         # Enable instant_entry for any GD2 channel configs that were bootstrapped
         # before the GD2 IME support was added (they defaulted to 0).
         conn.execute(
@@ -938,6 +993,7 @@ from forex_trader.core.core_db_analytics import (  # noqa: E402,F401
 from forex_trader.core.core_db_channel import (  # noqa: E402,F401
     _TG_GROUP_ID_MAP,
     _normalise_tg_source,
+    sync_channel_rename,
     get_channel_scorecard,
     _CHANNEL_MIN_SAMPLE,
     _CHANNEL_PAUSE_PF,

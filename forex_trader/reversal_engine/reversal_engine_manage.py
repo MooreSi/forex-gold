@@ -1,8 +1,8 @@
-"""TP/SL/partial-close management for triggered GD Copy signals -- extracted
+"""TP/SL/partial-close management for triggered Reversal Engine signals -- extracted
 verbatim (no logic changes) from engine.py's _check_outcomes as part of
 task 040. See docs/todo/refactor/backend-foundation/040-*.md.
 
-_ManagementMixin is composed into GDCopyEngine (gd_copy_signal_service.py)
+_ManagementMixin is composed into ReversalEngine (reversal_engine_service.py)
 -- these methods rely on `self` attributes (_main_eng, _live_missing_streak,
 _notify_refresh) defined there, exactly as they did when this code lived
 inline in engine.py.
@@ -13,9 +13,9 @@ import logging
 import time
 
 from forex_trader.core.models import STRATEGY_CONSERVATIVE
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
+from forex_trader.reversal_engine import reversal_engine_repo as re_db
 
-_log = logging.getLogger("gd_copy_signal")
+_log = logging.getLogger("reversal_engine")
 
 _LIVE_MISSING_THRESHOLD = 3   # consecutive get_positions() misses before treating a live ticket as closed
 
@@ -23,20 +23,20 @@ _LIVE_MISSING_THRESHOLD = 3   # consecutive get_positions() misses before treati
 _VIRTUAL_LOT = 0.1
 
 # GD2/Institutional signals are identified by source_channel, not strategy --
-# sig["strategy"] is overwritten with whatever real STRATEGY_* the "GD Copy
+# sig["strategy"] is overwritten with whatever real STRATEGY_* the "Reversal Engine
 # Engine" channel override (or the global default) currently resolves to
-# (see gd_copy_signal_service._run_cycle: `sig_data["strategy"] =
+# (see reversal_engine_service._run_cycle: `sig_data["strategy"] =
 # self._active_strategy()`, applied AFTER signal_generator.build_signal()
 # tags it "gd2_unicorn"/"signal_climber"). "gd2_unicorn" is not a real
 # STRATEGY_* name, so a check against it here can never match -- every GD2
-# signal was silently falling through to the VIP 8-level ladder branch below,
+# signal was silently falling through to the REF 8-level ladder branch below,
 # where its missing tp4/tp7 fields resolve via the `or` fallbacks to tp3 (as
 # tp_mid) and tp1 (as tp7), closing the runner early instead of riding it to
 # calculate_gd2_tp_structure's actual 6R target.
 _GD2_SOURCE_CHANNEL = "GOLD DIGGERS 2.0 ⚡️"  # matches signal_generator.build_signal
 
-# Partial-close ladder fractions for the VIP-style/GD2 ladder -- retuned
-# from the original 33/33/34 split (2026-07-16 GD Copy improvements pack).
+# Partial-close ladder fractions for the REF-style/GD2 ladder -- retuned
+# from the original 33/33/34 split (2026-07-16 Reversal Engine improvements pack).
 # The fork's real trade history shows a 72% win rate that's still net
 # losing: most trades only ever reach TP1 before reversing back out at the
 # BE stop, and at 33% that leg doesn't bank enough to outweigh a full SL
@@ -60,7 +60,7 @@ _POST_MID_REMAINING = round(_POST_TP1_REMAINING - _MID_FRAC, 4)  # remaining rig
 # booked at TP1, then a tight trail on the runner. Modelled here so the
 # virtual ML labels for a signal reflect the SAME management style that
 # would actually be applied to a real trade under this setting, rather than
-# the VIP-ladder model built for the (different) default/scale_out style.
+# the REF-ladder model built for the (different) default/scale_out style.
 _CONSERVATIVE_SL_PTS    = 5.0
 _CONSERVATIVE_TP1_PTS   = 3.0
 _CONSERVATIVE_TP1_FRAC  = 0.80
@@ -76,7 +76,7 @@ class _ManagementMixin:
 
     def _net_pnl(self, sig: dict, pnl_pts: float, exit_tick) -> tuple[float, float]:
         """(gross_pnl_dollars, net_pnl_dollars) after spread/commission/slippage,
-        using the same fee model as real GD VIP trades on the main engine."""
+        using the same fee model as real the reference channel trades on the main engine."""
         gross = pnl_pts * _VIRTUAL_LOT * 100
         if self._main_eng is None:
             return gross, gross
@@ -94,9 +94,9 @@ class _ManagementMixin:
         source/strategy -- a triggered, NOT live-managed signal (see
         _check_outcomes: live-executed signals are routed to
         _reconcile_live_signal instead, never here) can be either a GD2/
-        Unicorn setup (own tp1/tp2/tp3 mapping, see below) or a VIP-style
+        Unicorn setup (own tp1/tp2/tp3 mapping, see below) or a REF-style
         signal, whose virtual management should itself vary by whichever
-        STRATEGY_* is actually configured for the "GD Copy Engine" channel
+        STRATEGY_* is actually configured for the "Reversal Engine" channel
         (see _active_strategy) so the ML labels reflect what a real trade
         under that setting would have done."""
         if sig.get("source_channel") == _GD2_SOURCE_CHANNEL:
@@ -104,26 +104,26 @@ class _ManagementMixin:
         elif sig.get("strategy") == STRATEGY_CONSERVATIVE:
             await self._manage_conservative_signal(sig, tick)
         else:
-            await self._manage_vip_ladder_signal(sig, tick)
+            await self._manage_ref_ladder_signal(sig, tick)
 
     async def _manage_gd2_signal(self, sig: dict, tick) -> None:
         """GD2/Unicorn signals only ever carry tp1/tp2/tp3 (see
         signal_generator.calculate_gd2_tp_structure -- 1R partial, 2R
-        partial+BE, 6R runner), not the VIP 8-level ladder -- reuses the
-        same ladder mechanics as _manage_vip_ladder_signal with tp2/tp3
+        partial+BE, 6R runner), not the REF 8-level ladder -- reuses the
+        same ladder mechanics as _manage_ref_ladder_signal with tp2/tp3
         mapped onto the mid/final slots instead of tp4/tp7."""
-        await self._manage_vip_ladder_signal(
+        await self._manage_ref_ladder_signal(
             sig, tick, tp_mid_field="tp2", tp7_field="tp3", tp_mid_idx=2)
 
-    async def _manage_vip_ladder_signal(self, sig: dict, tick,
+    async def _manage_ref_ladder_signal(self, sig: dict, tick,
                                         tp_mid_field: str = "tp4", tp7_field: str = "tp7",
                                         tp_mid_idx: int = 4) -> None:
-        """VIP-style ladder scale-out for the default/scale_out family of
+        """REF-style ladder scale-out for the default/scale_out family of
         strategies -- uses the signal's own SL/TP levels as sent.
 
         The old logic moved SL to raw entry at TP1 and only counted a "win"
         at TP7 -- 88 of 118 TP1-hitting signals closed 'be' with $0 banked,
-        tanking both the reported win rate and the ML labels. GD VIP itself
+        tanking both the reported win rate and the ML labels. the reference channel itself
         calls TP1 a win; we bank _TP1_FRAC there, _MID_FRAC at the
         mid-ladder TP, and let _FINAL_FRAC ride to TP7 (see the module-level
         constants' docstring for why this is 50/30/20, not the original
@@ -169,44 +169,44 @@ class _ManagementMixin:
             net_leg   *= remaining
             total_net = round(partial_booked + net_leg, 2)
             # Outcome by TOTAL realized result -- a trade that banked TP1
-            # partials before the BE stop is a win, matching VIP accounting.
+            # partials before the BE stop is a win, matching REF accounting.
             if total_net > 0.5:
                 outcome = "win"
             elif total_net < -0.5:
                 outcome = "loss"
             else:
                 outcome = "be"
-            gdc_db.close_signal(
+            re_db.close_signal(
                 sig_id, exit_fill, outcome, round(leg_pts, 2),
                 net_pnl_dollars=total_net,
                 pnl_dollars=round(partial_booked + gross_leg, 2),
                 balance_delta=round(net_leg, 2),
             )
-            from forex_trader.gd_copy_signal import ml_engine as gdc_ml
-            gdc_ml.record_outcome(sig_id, outcome)
+            from forex_trader.reversal_engine import ml_engine as re_ml
+            re_ml.record_outcome(sig_id, outcome)
             try:
                 from forex_trader.core import database as _cdb_bus_sl
-                _cdb_bus_sl.close_bus_entry("gd_copy", sig_id)
+                _cdb_bus_sl.close_bus_entry("reversal_engine", sig_id)
             except Exception:
                 pass
             try:
                 from forex_trader.sync.ledger import push_trade_closed
                 push_trade_closed({
                     "trade_id":    sig.get("signal_ref") or str(sig_id),
-                    "engine":      "gd_copy",
+                    "engine":      "reversal_engine",
                     "direction":   direction,
                     "strategy":    sig.get("strategy", ""),
                     "open_time":   sig.get("created_at"),
                     "close_time":  time.time(),
                     "pnl_dollars": total_net,
                     "outcome":     outcome,
-                    "tg_source":   "GD Copy Engine",
+                    "tg_source":   "Reversal Engine",
                     "mt5_ticket":  sig.get("mt5_ticket"),
                 })
             except Exception as _le:
                 _log.debug("[Ledger] push failed: %s", _le)
             _log.info(
-                "[GDC-Engine] CLOSED %s SL outcome=%s total_net=$%.2f (partials $%.2f + leg $%.2f)",
+                "[RE-Engine] CLOSED %s SL outcome=%s total_net=$%.2f (partials $%.2f + leg $%.2f)",
                 sig.get("signal_ref", sig_id), outcome, total_net, partial_booked, net_leg
             )
             self._notify_refresh()
@@ -216,13 +216,13 @@ class _ManagementMixin:
             leg_pts   = _leg_pts(exit_fill)
             _gross, _net = self._net_pnl(sig, leg_pts, tick)
             leg_net   = round(_net * _TP1_FRAC, 2)
-            gdc_db.book_partial_close(sig_id, leg_net, _TP1_FRAC, tp_idx=1)
+            re_db.book_partial_close(sig_id, leg_net, _TP1_FRAC, tp_idx=1)
             be_px = round(
                 entry_ref + _cost_pts if direction == "BUY" else entry_ref - _cost_pts, 2
             )
-            gdc_db.move_sl_to_be(sig_id, be_price=be_px)
+            re_db.move_sl_to_be(sig_id, be_price=be_px)
             _log.info(
-                "[GDC-Engine] TP1 hit %s -> banked $%.2f (%.0f%%), SL -> BE+cost %.2f",
+                "[RE-Engine] TP1 hit %s -> banked $%.2f (%.0f%%), SL -> BE+cost %.2f",
                 sig.get("signal_ref", sig_id), leg_net, _TP1_FRAC * 100, be_px
             )
             self._notify_refresh()
@@ -232,10 +232,10 @@ class _ManagementMixin:
             leg_pts   = _leg_pts(exit_fill)
             _gross, _net = self._net_pnl(sig, leg_pts, tick)
             leg_net   = round(_net * _MID_FRAC, 2)
-            gdc_db.book_partial_close(sig_id, leg_net, _MID_FRAC, tp_idx=tp_mid_idx)
-            gdc_db.set_stop_loss(sig_id, float(tp1))   # trail to TP1
+            re_db.book_partial_close(sig_id, leg_net, _MID_FRAC, tp_idx=tp_mid_idx)
+            re_db.set_stop_loss(sig_id, float(tp1))   # trail to TP1
             _log.info(
-                "[GDC-Engine] TP%d hit %s -> banked $%.2f (%.0f%%), SL -> TP1 %.2f",
+                "[RE-Engine] TP%d hit %s -> banked $%.2f (%.0f%%), SL -> TP1 %.2f",
                 tp_mid_idx, sig.get("signal_ref", sig_id), leg_net, _MID_FRAC * 100, float(tp1)
             )
             self._notify_refresh()
@@ -247,37 +247,37 @@ class _ManagementMixin:
             gross_leg *= remaining
             net_leg   *= remaining
             total_net = round(partial_booked + net_leg, 2)
-            gdc_db.close_signal(
+            re_db.close_signal(
                 sig_id, exit_fill, "win", round(leg_pts, 2),
                 net_pnl_dollars=total_net,
                 pnl_dollars=round(partial_booked + gross_leg, 2),
                 balance_delta=round(net_leg, 2),
             )
-            from forex_trader.gd_copy_signal import ml_engine as gdc_ml
-            gdc_ml.record_outcome(sig_id, "win")
+            from forex_trader.reversal_engine import ml_engine as re_ml
+            re_ml.record_outcome(sig_id, "win")
             try:
                 from forex_trader.core import database as _cdb_bus_tp
-                _cdb_bus_tp.close_bus_entry("gd_copy", sig_id)
+                _cdb_bus_tp.close_bus_entry("reversal_engine", sig_id)
             except Exception:
                 pass
             try:
                 from forex_trader.sync.ledger import push_trade_closed
                 push_trade_closed({
                     "trade_id":    sig.get("signal_ref") or str(sig_id),
-                    "engine":      "gd_copy",
+                    "engine":      "reversal_engine",
                     "direction":   direction,
                     "strategy":    sig.get("strategy", ""),
                     "open_time":   sig.get("created_at"),
                     "close_time":  time.time(),
                     "pnl_dollars": total_net,
                     "outcome":     "win",
-                    "tg_source":   "GD Copy Engine",
+                    "tg_source":   "Reversal Engine",
                     "mt5_ticket":  sig.get("mt5_ticket"),
                 })
             except Exception as _le:
                 _log.debug("[Ledger] push failed: %s", _le)
             _log.info(
-                "[GDC-Engine] TP7 hit %s total_net=$%.2f (partials $%.2f + runner $%.2f)",
+                "[RE-Engine] TP7 hit %s total_net=$%.2f (partials $%.2f + runner $%.2f)",
                 sig.get("signal_ref", sig_id), total_net, partial_booked, net_leg
             )
             self._notify_refresh()
@@ -317,7 +317,7 @@ class _ManagementMixin:
             final_outcome = outcome
             if outcome != "win":
                 # Total realized result, same "banked partials count" rule
-                # as the VIP ladder's SL branch -- a trade that already
+                # as the REF ladder's SL branch -- a trade that already
                 # banked its 80% TP1 partial before the trail stops out is
                 # still a net win, matching how a real account would read.
                 if total_net > 0.5:
@@ -326,37 +326,37 @@ class _ManagementMixin:
                     final_outcome = "loss"
                 else:
                     final_outcome = "be"
-            gdc_db.close_signal(
+            re_db.close_signal(
                 sig_id, exit_fill, final_outcome, round(leg_pts, 2),
                 net_pnl_dollars=total_net,
                 pnl_dollars=round(partial_booked + gross_leg, 2),
                 balance_delta=round(net_leg, 2),
             )
-            from forex_trader.gd_copy_signal import ml_engine as gdc_ml
-            gdc_ml.record_outcome(sig_id, final_outcome)
+            from forex_trader.reversal_engine import ml_engine as re_ml
+            re_ml.record_outcome(sig_id, final_outcome)
             try:
                 from forex_trader.core import database as _cdb_bus_cons
-                _cdb_bus_cons.close_bus_entry("gd_copy", sig_id)
+                _cdb_bus_cons.close_bus_entry("reversal_engine", sig_id)
             except Exception:
                 pass
             try:
                 from forex_trader.sync.ledger import push_trade_closed
                 push_trade_closed({
                     "trade_id":    sig.get("signal_ref") or str(sig_id),
-                    "engine":      "gd_copy",
+                    "engine":      "reversal_engine",
                     "direction":   direction,
                     "strategy":    sig.get("strategy", ""),
                     "open_time":   sig.get("created_at"),
                     "close_time":  time.time(),
                     "pnl_dollars": total_net,
                     "outcome":     final_outcome,
-                    "tg_source":   "GD Copy Engine",
+                    "tg_source":   "Reversal Engine",
                     "mt5_ticket":  sig.get("mt5_ticket"),
                 })
             except Exception as _le:
                 _log.debug("[Ledger] push failed: %s", _le)
             _log.info(
-                "[GDC-Engine] CLOSED %s (conservative) outcome=%s total_net=$%.2f "
+                "[RE-Engine] CLOSED %s (conservative) outcome=%s total_net=$%.2f "
                 "(partials $%.2f + leg $%.2f)",
                 sig.get("signal_ref", sig_id), final_outcome, total_net, partial_booked, net_leg
             )
@@ -372,10 +372,10 @@ class _ManagementMixin:
                 leg_pts   = _leg_pts(exit_fill)
                 _gross, _net = self._net_pnl(sig, leg_pts, tick)
                 leg_net   = round(_net * _CONSERVATIVE_TP1_FRAC, 2)
-                gdc_db.book_partial_close(sig_id, leg_net, _CONSERVATIVE_TP1_FRAC, tp_idx=1)
-                gdc_db.move_sl_to_be(sig_id, be_price=round(entry_ref, 2))
+                re_db.book_partial_close(sig_id, leg_net, _CONSERVATIVE_TP1_FRAC, tp_idx=1)
+                re_db.move_sl_to_be(sig_id, be_price=round(entry_ref, 2))
                 _log.info(
-                    "[GDC-Engine] TP1 hit %s (conservative) -> banked $%.2f (80%%), SL -> BE %.2f",
+                    "[RE-Engine] TP1 hit %s (conservative) -> banked $%.2f (80%%), SL -> BE %.2f",
                     sig.get("signal_ref", sig_id), leg_net, entry_ref
                 )
                 self._notify_refresh()
@@ -387,7 +387,7 @@ class _ManagementMixin:
         candidate_sl = price - sign * _CONSERVATIVE_TRAIL_PTS
         new_sl = max(current_sl, candidate_sl) if direction == "BUY" else min(current_sl, candidate_sl)
         if new_sl != current_sl:
-            gdc_db.set_stop_loss(sig_id, new_sl)
+            re_db.set_stop_loss(sig_id, new_sl)
             current_sl = new_sl
 
         hit_trail = price <= current_sl if direction == "BUY" else price >= current_sl
@@ -410,7 +410,7 @@ class _ManagementMixin:
         try:
             live_positions = await self._bridge.get_positions()
         except Exception as exc:
-            _log.debug("[GDC-Engine] live reconcile: get_positions failed ticket=%s: %s", ticket, exc)
+            _log.debug("[RE-Engine] live reconcile: get_positions failed ticket=%s: %s", ticket, exc)
             return
         if any(int(p.get("ticket", 0)) == ticket for p in live_positions):
             self._live_missing_streak.pop(ticket, None)
@@ -424,7 +424,7 @@ class _ManagementMixin:
         try:
             deals = await self._bridge.get_position_history(ticket)
         except Exception as exc:
-            _log.debug("[GDC-Engine] live reconcile: get_position_history failed ticket=%s: %s", ticket, exc)
+            _log.debug("[RE-Engine] live reconcile: get_position_history failed ticket=%s: %s", ticket, exc)
             return
         if not deals:
             return  # nothing to reconcile yet -- try again next cycle
@@ -454,36 +454,36 @@ class _ManagementMixin:
         else:
             outcome = "be"
 
-        gdc_db.close_signal(
+        re_db.close_signal(
             sig_id, float(close_price or entry_ref), outcome, pnl_pts,
             net_pnl_dollars=net_pnl, pnl_dollars=net_pnl, balance_delta=net_pnl,
         )
-        from forex_trader.gd_copy_signal import ml_engine as gdc_ml
-        gdc_ml.record_outcome(sig_id, outcome)
+        from forex_trader.reversal_engine import ml_engine as re_ml
+        re_ml.record_outcome(sig_id, outcome)
         self._live_missing_streak.pop(ticket, None)
         try:
             from forex_trader.core import database as _cdb_bus_live
-            _cdb_bus_live.close_bus_entry("gd_copy", sig_id)
+            _cdb_bus_live.close_bus_entry("reversal_engine", sig_id)
         except Exception:
             pass
         try:
             from forex_trader.sync.ledger import push_trade_closed
             push_trade_closed({
                 "trade_id":    sig.get("signal_ref") or str(sig_id),
-                "engine":      "gd_copy",
+                "engine":      "reversal_engine",
                 "direction":   direction,
                 "strategy":    sig.get("strategy", ""),
                 "open_time":   sig.get("created_at"),
                 "close_time":  time.time(),
                 "pnl_dollars": net_pnl,
                 "outcome":     outcome,
-                "tg_source":   "GD Copy Engine",
+                "tg_source":   "Reversal Engine",
                 "mt5_ticket":  ticket,
             })
         except Exception as _le:
             _log.debug("[Ledger] push failed: %s", _le)
         _log.info(
-            "[GDC-Engine] live reconciled %s ticket=%s outcome=%s real_net=$%.2f",
+            "[RE-Engine] live reconciled %s ticket=%s outcome=%s real_net=$%.2f",
             sig.get("signal_ref", sig_id), ticket, outcome, net_pnl,
         )
         self._notify_refresh()

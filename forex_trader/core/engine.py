@@ -20,7 +20,7 @@ from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP, STRATEGY_PROTECTED_SCALE,
     STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
-    STRATEGY_GD_VIP_RUNNER, STRATEGY_ORB_FIXED, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_REVERSAL_RUNNER, STRATEGY_ORB_FIXED, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
     STRATEGY_NAMES, MAX_TP,
 )
@@ -101,7 +101,7 @@ from forex_trader.core.core_signals import (
     activate_signal as _activate_signal_impl,
     cancel_signal as _cancel_signal_impl,
 )
-from forex_trader.core.core_gd_copy_research import gd_copy_research_sweep as _gd_copy_research_sweep_impl
+from forex_trader.core.core_reversal_research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
 from forex_trader.core.core_email_scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
 from forex_trader.core.core_bot_commands_readonly import (
     cmd_help as _cmd_help_impl,
@@ -171,7 +171,7 @@ from forex_trader.core.core_instant_entry import (
 from forex_trader.core.core_run_tp_ladder import (
     run_tp_ladder as _run_tp_ladder_impl,
     handle_signal_climber as _handle_signal_climber_impl,
-    handle_gd_vip_runner as _handle_gd_vip_runner_impl,
+    handle_reversal_runner as _handle_reversal_runner_impl,
     handle_adaptive_runner as _handle_adaptive_runner_impl,
     handle_adaptive_runner_2 as _handle_adaptive_runner_2_impl,
     handle_limit_runner as _handle_limit_runner_impl,
@@ -343,7 +343,7 @@ class SimulationEngine:
         self._channel_ai_task: Optional[asyncio.Task] = None
         self._ai_model_refresh_task: Optional[asyncio.Task] = None
         self._data_retention_task: Optional[asyncio.Task] = None
-        self._gd_copy_research_task: Optional[asyncio.Task] = None
+        self._reversal_engine_research_task: Optional[asyncio.Task] = None
     def set_telegram_reader(self, reader: "TelegramReader") -> None:
         self._tg_reader = reader
 
@@ -368,7 +368,7 @@ class SimulationEngine:
         self._channel_ai_task     = asyncio.create_task(self._channel_ai_auto_eval_loop())
         self._ai_model_refresh_task = asyncio.create_task(self._ai_model_refresh_loop())
         self._data_retention_task = asyncio.create_task(self._data_retention_loop())
-        self._gd_copy_research_task = asyncio.create_task(self._gd_copy_research_loop())
+        self._reversal_engine_research_task = asyncio.create_task(self._reversal_engine_research_loop())
         from forex_trader.core.self_healer import SelfHealer
         self._self_healer = SelfHealer(self)
         self._self_healer.start()
@@ -392,7 +392,7 @@ class SimulationEngine:
                   self._max_tp_task, self._signal_bus_prune_task,
                   self._tp_safety_net_task, self._channel_ai_task,
                   self._ai_model_refresh_task, self._data_retention_task,
-                  self._gd_copy_research_task):
+                  self._reversal_engine_research_task):
             if t and not t.done():
                 t.cancel()
         if hasattr(self, "_self_healer"):
@@ -759,34 +759,34 @@ class SimulationEngine:
             close_full_after_tps=self._close_full_after_tps,
         )
 
-    async def _handle_gd_vip_runner(self, trade: dict, tick: Tick) -> None:
+    async def _handle_reversal_runner(self, trade: dict, tick: Tick) -> None:
         """
-        GD VIP Runner: same trail-to-prior-TP ladder mechanism as Signal Climber,
+        Reversal Runner: same trail-to-prior-TP ladder mechanism as Signal Climber,
         but with a back-loaded close schedule (_GDVR_PCTS) — see
-        STRATEGY_DESCRIPTIONS[STRATEGY_GD_VIP_RUNNER] for the backtest this is
+        STRATEGY_DESCRIPTIONS[STRATEGY_REVERSAL_RUNNER] for the backtest this is
         derived from. The SL itself is widened at open time (see
-        _gdvr_sl_dist()); this handler only manages TP-ladder exits and SL trail.
+        _rr_sl_dist()); this handler only manages TP-ladder exits and SL trail.
 
         Unlike Signal Climber, SL does not move to breakeven at TP1 — the
-        wider entry SL is intentional (see _gdvr_sl_dist()) and moving to BE
+        wider entry SL is intentional (see _rr_sl_dist()) and moving to BE
         that early would defeat it. BE happens at TP2 instead (be_at_pos=1).
         """
-        return await _handle_gd_vip_runner_impl(
+        return await _handle_reversal_runner_impl(
             trade, tick, self._bridge, self._tp_trigger_cache,
             close_full_after_tps=self._close_full_after_tps,
         )
 
     async def _handle_adaptive_runner(self, trade: dict, tick: Tick) -> None:
         """
-        Adaptive Runner: same back-loaded ladder mechanism as GD VIP Runner
+        Adaptive Runner: same back-loaded ladder mechanism as Reversal Runner
         (_GDVR_PCTS), but the SL widened at open time is capped at 50% of the
         distance to the signal's own final TP (see _adaptive_sl_dist()) —
         never wider than that, and never tightened below the signal's own
         stated SL. See STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER] in
-        core/models.py for why GD VIP Runner's flat 4x/20pt widening is wrong
+        core/models.py for why Reversal Runner's flat 4x/20pt widening is wrong
         for signals with a short TP ladder.
 
-        Unlike GD VIP Runner, SL moves to breakeven at TP1 (be_at_pos=0) —
+        Unlike Reversal Runner, SL moves to breakeven at TP1 (be_at_pos=0) —
         since the stop is already proportionate to the reachable reward,
         there's no need to keep full risk on the table past the first target.
 
@@ -804,7 +804,7 @@ class SimulationEngine:
     async def _handle_adaptive_runner_2(self, trade: dict, tick: Tick) -> None:
         """
         Adaptive Runner 2: fixed 10pt SL (not derived from the signal at
-        all -- see _ADAPTIVE2_SL_PT in core_signal_resolution.py), GD VIP
+        all -- see _ADAPTIVE2_SL_PT in core_signal_resolution.py), the reference channel
         Runner's back-loaded close schedule (_GDVR_PCTS), and a different
         SL trail: breakeven at TP2 (be_at_pos=1), then from TP3 onward SL
         steps to the midpoint of the two TPs before the one just cleared
@@ -847,7 +847,7 @@ class SimulationEngine:
         self, trade: dict, tick: Tick, pcts_table: dict[int, list[float]], log_tag: str,
         be_at_pos: int = 0,
     ) -> None:
-        """Shared TP-ladder walk used by Signal Climber and GD VIP Runner.
+        """Shared TP-ladder walk used by Signal Climber and Reversal Runner.
 
         Closes fractions of the original lot at each signal TP (per pcts_table,
         keyed by TP count). SL is left untouched until the TP at index
@@ -1037,15 +1037,15 @@ class SimulationEngine:
         filled within 2 minutes are expired — the market context will have
         changed and the zone level is stale for a scalping strategy.
 
-        Exception: GD VIP Runner's edge depends on zone signals that often
+        Exception: Reversal Runner's edge depends on zone signals that often
         take well over an hour to fill (median ~101min in the backtest this
         strategy is derived from) — signals get _GDVR_PENDING_EXPIRY_SEC (4h)
-        instead of the default whenever GD VIP Runner applies to that signal,
+        instead of the default whenever Reversal Runner applies to that signal,
         either as the global Active Strategy or as a per-channel override on
         the signal's own source channel (Channel Strategy tab) — a signal
-        from a channel overridden to gd_vip_runner must get the long window
+        from a channel overridden to reversal_runner must get the long window
         even while some other channel is driving the global strategy, or
-        every GD VIP zone signal expires in 2 minutes before the ~101min
+        every the reference channel zone signal expires in 2 minutes before the ~101min
         median fill time, silently starving that strategy of any fills.
 
         Returns whether any signal was pending at the start of this cycle —
@@ -1141,7 +1141,7 @@ class SimulationEngine:
                                 await self._handle_conservative(trade, tick)
                             elif strategy == STRATEGY_SCALP_RUNNER:
                                 await self._handle_scalp_runner(trade, tick)
-                            elif strategy in (STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
+                            elif strategy in (STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER,
                                               STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
                                               STRATEGY_LIMIT_RUNNER):
                                 # TP-crossing detection for these five moved to
@@ -1224,7 +1224,7 @@ class SimulationEngine:
     # ── Fast TP-ladder polling ──────────────────────────────────────────────
 
     _TP_LADDER_STRATEGIES = (
-        STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER,
+        STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER,
         STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
         STRATEGY_LIMIT_RUNNER,
     )
@@ -1298,8 +1298,8 @@ class SimulationEngine:
                                     strat = trade["strategy"]
                                     if strat == STRATEGY_SIGNAL_CLIMBER:
                                         await self._handle_signal_climber(trade, tick)
-                                    elif strat == STRATEGY_GD_VIP_RUNNER:
-                                        await self._handle_gd_vip_runner(trade, tick)
+                                    elif strat == STRATEGY_REVERSAL_RUNNER:
+                                        await self._handle_reversal_runner(trade, tick)
                                     elif strat == STRATEGY_ADAPTIVE_RUNNER_2:
                                         await self._handle_adaptive_runner_2(trade, tick)
                                     elif strat == STRATEGY_LIMIT_RUNNER:
@@ -1975,7 +1975,7 @@ class SimulationEngine:
     async def _scan_messages(self) -> list[dict]:
         # Centralized signal generation (Settings > Remote Node): once this
         # VPS is the active trader and generation has moved to the Mac, skip
-        # parsing/creating GD2/GD VIP/Format-AB signals entirely here rather
+        # parsing/creating GD2/the reference channel/Format-AB signals entirely here rather
         # than just letting a later open_trade() gate discard the work —
         # this is what actually saves the CPU, not just the execution.
         if not await db_module.to_db_thread(db_module.should_generate_signals_here):
@@ -1991,7 +1991,7 @@ class SimulationEngine:
 
         if not bool(rs.get("accept_tg_signals", 1)):
             # Dropping signals must never be silent — an accidental toggle-off
-            # cost a valid GD VIP signal on 2026-07-03 with zero log evidence.
+            # cost a valid the reference channel signal on 2026-07-03 with zero log evidence.
             # Warn (throttled to once per 5 min) whenever messages are being
             # discarded while the switch is off.
             now_ts = time.time()
@@ -2170,7 +2170,7 @@ class SimulationEngine:
             # Staleness guard — signals are scalps: an entry zone is only valid for
             # minutes. Anything older than 4 minutes at processing time is recorded
             # as historical and never executed. The previous 2-hour window let a
-            # 22-minute-old GD VIP signal execute at market after a downtime
+            # 22-minute-old the reference channel signal execute at market after a downtime
             # (2026-07-03: toggle-off gap → backfilled signal filled 22min late at
             # a worse price → straight to SL). 4 min covers Telegram delivery
             # latency plus one scan cycle, nothing more.
@@ -2483,21 +2483,21 @@ class SimulationEngine:
                 log.debug("_data_retention_loop error: %s", e)
             await asyncio.sleep(86400)  # once a day
 
-    async def _gd_copy_research_loop(self) -> None:
+    async def _reversal_engine_research_loop(self) -> None:
         """Once a day at 22:00 Europe/London, read the day's Gold Diggers
-        VIP + GD2 Telegram messages (text + chart images) and have Claude
+        REF + GD2 Telegram messages (text + chart images) and have Claude
         synthesise the real trader's risk-management/entry-logic behaviour
-        into two scores that feed GD Copy's ML model (ml_engine.py's
-        vip_discipline_score / vip_aggression_score features), force an
+        into two scores that feed Reversal Engine's ML model (ml_engine.py's
+        ref_discipline_score / ref_aggression_score features), force an
         immediate retrain, and email a summary. See
-        gd_copy_signal/telegram_research.py for the full pipeline. Checked
+        reversal_engine/telegram_research.py for the full pipeline. Checked
         every minute like the ORB report job above — zoneinfo handles the
         BST/GMT switch automatically. Dedup'd by date via app_config so a
         restart near 22:00 can't fire it twice the same day.
 
         Gated to the physical local node only (is_remote_node(), same gate
-        GD Copy's own signal generator uses) — NOT _is_active_trader_node().
-        The ML model this enriches/retrains (gdc_ml_batch.pkl/gdc_ml_online.pkl)
+        Reversal Engine's own signal generator uses) — NOT _is_active_trader_node().
+        The ML model this enriches/retrains (re_ml_batch.pkl/re_ml_online.pkl)
         is a per-node file, never auto-synced between Mac and VPS, and GD
         Copy's signal generation is now local-node-only regardless of which
         side executes trades — so this must follow generation, not execution,
@@ -2508,11 +2508,11 @@ class SimulationEngine:
         await asyncio.sleep(90)  # let the app settle before the first check
         while self._monitor_running:
             try:
-                await _gd_copy_research_sweep_impl(self)
+                await _reversal_engine_research_sweep_impl(self)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log.warning("_gd_copy_research_loop error: %s", e)
+                log.warning("_reversal_engine_research_loop error: %s", e)
             await asyncio.sleep(60)
 
     # ── Morning ORB / IVB report ──────────────────────────────────────────────
@@ -3033,7 +3033,7 @@ class SimulationEngine:
         restarting — a single failed /health call is not trusted on its own.
         The bridge's HTTP server processes one request at a time; under the
         concurrent polling load from four engines (main + breakout + bounce +
-        gd_copy all hitting /tick, /candles, /positions, /account on their own
+        reversal_engine all hitting /tick, /candles, /positions, /account on their own
         schedules) a slow request ahead of a health check in the queue can
         make that check exceed its 4s timeout with MT5 itself perfectly fine.
         That false positive triggered a real, disruptive bridge restart —

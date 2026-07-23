@@ -29,7 +29,7 @@ from forex_trader.core.engine import SimulationEngine
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,
-    STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
 )
 
 
@@ -343,10 +343,10 @@ def test_signal_climber_uses_signal_sl_exactly(fresh_db, engine):
     assert engine._bridge.place_order_calls[0]["sl"] == 2385.0
 
 
-def test_gd_vip_runner_widens_sl(fresh_db, engine):
+def test_reversal_runner_widens_sl(fresh_db, engine):
     # stated dist 5pt -> widened to min(5*4, 20) = 20pt
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
-    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
+    db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
     asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2380.0  # mid(2400) - 20pt
 

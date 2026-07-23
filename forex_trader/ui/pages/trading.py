@@ -1342,7 +1342,7 @@ from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE as _CO, STRATEGY_NO_SL_SCALE as _NSS,
     STRATEGY_CONSERVATIVE_TRIAL as _CT, STRATEGY_SCALP_RUNNER as _SR,
     STRATEGY_SIGNAL_CLIMBER as _SC,
-    STRATEGY_GD_VIP_RUNNER as _GVR,
+    STRATEGY_REVERSAL_RUNNER as _RVR,
     STRATEGY_ADAPTIVE_RUNNER as _AR,
     STRATEGY_ADAPTIVE_RUNNER_2 as _AR2,
 )
@@ -1385,8 +1385,8 @@ async def _call_strategy_builder(description: str, cfg: dict) -> dict:
         raw   = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
     return json.loads(raw)
 
-_STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _GVR, _AR, _AR2]
-_PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _GVR, _AR, _AR2})
+_STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _RVR, _AR, _AR2]
+_PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _RVR, _AR, _AR2})
 
 
 def _render_schedule():
@@ -1640,10 +1640,10 @@ _COMPARE_ROWS = [
         _CT:  "5% TP1 · 30% TP2 · 20% TP3 · 40% TP4 · 5% TP5 · rest at TP6",
         _SR:  "50% at TP1 (+3 pts from fill), SL untouched · remainder trails via 3-pt stop from TP2 (+4 pts)",
         _SC:  "20% TP1 · 15% TP2/3/4 · 20% TP5 · rest at TP6+ (signal's own TPs used)",
-        _GVR: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (signal's own TPs used)",
-        _AR:  "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (same ladder as GD VIP Runner, "
+        _RVR: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (signal's own TPs used)",
+        _AR:  "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (same ladder as Reversal Runner, "
               "capped-widened SL — signal's own TPs used)",
-        _AR2: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (same ladder as GD VIP Runner, "
+        _AR2: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (same ladder as Reversal Runner, "
               "fixed 10-pt SL — signal's own TPs used)",
     }),
     ("SL moves to BE", {
@@ -1656,9 +1656,9 @@ _COMPARE_ROWS = [
         _CT:  "At TP2 (+10 pts from fill)",
         _SR:  "At TP2 (+4 pts from fill) — SL moves to fill price (entry)",
         _SC:  "After TP1 → entry (BE); after TP2+ → trails to previous TP price",
-        _GVR: "After TP1 → entry (BE); after TP2+ → trails to previous TP price",
+        _RVR: "After TP1 → entry (BE); after TP2+ → trails to previous TP price",
         _AR:  "Immediately at TP1 → entry (BE); after TP2+ → trails to previous TP price "
-              "(GD VIP Runner waits until TP2 — Adaptive Runner doesn't need to, since its "
+              "(Reversal Runner waits until TP2 — Adaptive Runner doesn't need to, since its "
               "SL is already capped proportionate to the reachable reward)",
         _AR2: "At TP2 → entry (BE); after TP3+ → trails to the midpoint of the two TPs "
               "before the one just hit — not the single previous TP price every other "
@@ -1674,7 +1674,7 @@ _COMPARE_ROWS = [
         _CT:  "+35 pts from fill price (TP6 fixed target)",
         _SR:  "Unlimited (3-pt trailing stop after TP2 — full 50% runner)",
         _SC:  "Signal's final TP (TP6 typically 10-46 pts from entry on GD2 signals)",
-        _GVR: "Signal's final TP (TP8 if present) — widened SL keeps the full ladder alive",
+        _RVR: "Signal's final TP (TP8 if present) — widened SL keeps the full ladder alive",
         _AR:  "Signal's final TP (TP8 if present) — SL widened only up to 50% of that "
               "distance, so the stop can never exceed the reward it's protecting",
         _AR2: "Signal's final TP (TP8 if present) — SL is a flat 10pts regardless of "
@@ -1690,7 +1690,7 @@ _COMPARE_ROWS = [
         _CT:  "Full SL until TP2",
         _SR:  "Full 10-pt SL until TP2, then zero — trail floored at breakeven",
         _SC:  "Zero after TP1 — SL locks to previous TP price after each subsequent level",
-        _GVR: "Zero after TP1 — SL locks to previous TP price after each subsequent level",
+        _RVR: "Zero after TP1 — SL locks to previous TP price after each subsequent level",
         _AR:  "Zero after TP1 — SL locks to previous TP price after each subsequent level",
         _AR2: "Full 10-pt SL until TP2, then zero — SL locks to a two-TP-wide trailing "
               "midpoint after each subsequent level",
@@ -1705,7 +1705,7 @@ _COMPARE_ROWS = [
         _CT:  "Direction only — signal SL/TP ignored entirely",
         _SR:  "Direction only — signal SL/TP ignored entirely (10-pt SL / 3-pt TP1 / 4-pt TP2 from fill)",
         _SC:  "Full geometry validation — uses signal's SL and all TPs as-is",
-        _GVR: "Full geometry validation — signal SL widened to min(4×, 20pt floor); TPs as-is",
+        _RVR: "Full geometry validation — signal SL widened to min(4×, 20pt floor); TPs as-is",
         _AR:  "Full geometry validation — signal SL widened to min(4×, 20pt) then capped at "
               "50% of the final TP distance (never below the signal's own stated SL); TPs as-is",
         _AR2: "Direction + TP structure only — signal SL ignored entirely (fixed 10-pt SL "
@@ -1721,7 +1721,7 @@ _COMPARE_ROWS = [
         _CT:  "Any — fixed targets, low-maintenance",
         _SR:  "Any — tight scalp with two-stage confirmation before the 50% runner trails",
         _SC:  "Multi-TP professional signals (GD2, GDV) — built to ride the full TP ladder",
-        _GVR: "Gold Diggers VIP zone-entry signals — built on 259-signal GDV backtest",
+        _RVR: "Gold Diggers VIP zone-entry signals — built on 259-signal GDV backtest",
         _AR:  "Any multi-TP signal source of unknown/mixed ladder length — Gold Diggers VIP/"
               "GD2 and shorter-ladder channels alike; backtested 2026-07-15 against 226 real "
               "GDV/GD2 signals (+$400.29, PF 1.80, 5.8% max DD — lowest drawdown of every "
@@ -1737,7 +1737,7 @@ _COMPARE_ROWS = [
 # Table 1: core built-in strategies (left half)
 _COMPARE_GROUP_1 = [_SO, _BE, _TS, _PS, _CO, _NSS]
 # Table 2: advanced / specialised strategies + custom (right half)
-_COMPARE_GROUP_2 = [_CT, _SR, _SC, _GVR, _AR, _AR2]
+_COMPARE_GROUP_2 = [_CT, _SR, _SC, _RVR, _AR, _AR2]
 
 
 # ── Strategy ───────────────────────────────────────────────────────────────────
@@ -1942,7 +1942,7 @@ def _rec_label_text(rec: dict, strat_opts: dict) -> str:
 def _render_strategy_params_card() -> None:
     """
     Strategy Parameters: live-editable SL/TP point values for the
-    fixed-parameter strategies (Conservative, Scalp Runner, GD VIP Runner,
+    fixed-parameter strategies (Conservative, Scalp Runner, Reversal Runner,
     Adaptive Runner, Adaptive Runner 2), plus a small named-template
     library to save/reapply a parameter set later. A change here applies
     to the next trade opened under that strategy -- no restart, no code
@@ -2083,7 +2083,7 @@ def _render_strategy_params_card() -> None:
 
 
 def render_signals_card() -> None:
-    """Per-source live-execution toggles (Telegram/Bounce/Breakout/GD Copy) --
+    """Per-source live-execution toggles (Telegram/Bounce/Breakout/Reversal Engine) --
     self-contained, importable by other pages (moved to the top of the
     Parsing page, 2026-07-22 -- was previously part of Trading > Strategy)."""
     rs = db_module.get_risk_settings()
@@ -2305,44 +2305,44 @@ def render_signals_card() -> None:
 
             ui.separator().props("vertical").classes("hidden sm:block")
 
-            # ── GD Copy Engine ────────────────────────────────────────────
+            # ── Reversal Engine ────────────────────────────────────────────
             with ui.column().classes("gap-1 min-w-52"):
                 with ui.row().classes("items-center gap-1"):
-                    ui.label("GD Copy Engine").classes("text-sm font-semibold text-gray-200")
+                    ui.label("Reversal Engine").classes("text-sm font-semibold text-gray-200")
                     ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                        "When ON, signals generated by the GD Copy Engine are executed as "
+                        "When ON, signals generated by the Reversal Engine are executed as "
                         "real MT5 trades. The engine reverse-engineers Gold Diggers VIP's "
                         "methodology to generate signals before they arrive on Telegram. "
-                        "Use Signal Generator > GD Copy tab to view signals and correlation stats."
+                        "Use Signal Generator > Reversal Engine tab to view signals and correlation stats."
                     )
-                ui.label("Route GD Copy signals to MT5 as live trades").classes(
+                ui.label("Route Reversal Engine signals to MT5 as live trades").classes(
                     "text-xs text-gray-500 mb-1"
                 )
-                _gdc_live_on = bool(rs.get("gdc_live_execution", 0))
-                gdc_live_badge = ui.badge(
-                    "GDC LIVE ON" if _gdc_live_on else "GDC LIVE OFF",
-                    color="green" if _gdc_live_on else "grey",
+                _re_live_on = bool(rs.get("re_live_execution", 0))
+                re_live_badge = ui.badge(
+                    "RE LIVE ON" if _re_live_on else "RE LIVE OFF",
+                    color="green" if _re_live_on else "grey",
                 )
 
-                def toggle_gdc_live(badge=gdc_live_badge):
-                    cur = bool(db_module.get_risk_settings().get("gdc_live_execution", 0))
+                def toggle_re_live(badge=re_live_badge):
+                    cur = bool(db_module.get_risk_settings().get("re_live_execution", 0))
                     new = not cur
-                    db_module.update_risk_settings({"gdc_live_execution": 1 if new else 0})
+                    db_module.update_risk_settings({"re_live_execution": 1 if new else 0})
                     badge.props(f"color={'green' if new else 'grey'}")
-                    badge.text = "GDC LIVE ON" if new else "GDC LIVE OFF"
+                    badge.text = "RE LIVE ON" if new else "RE LIVE OFF"
                     ui.notify(
-                        "GD Copy live execution ENABLED — signals will open real MT5 trades" if new
-                        else "GD Copy live execution DISABLED — virtual mode only",
+                        "Reversal Engine live execution ENABLED — signals will open real MT5 trades" if new
+                        else "Reversal Engine live execution DISABLED — virtual mode only",
                         type="positive" if new else "warning",
                     )
 
-                def _sync_gdc_badge(badge=gdc_live_badge):
-                    _live = bool(db_module.get_risk_settings().get("gdc_live_execution", 0))
-                    badge.text = "GDC LIVE ON" if _live else "GDC LIVE OFF"
+                def _sync_re_badge(badge=re_live_badge):
+                    _live = bool(db_module.get_risk_settings().get("re_live_execution", 0))
+                    badge.text = "RE LIVE ON" if _live else "RE LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
-                ui.timer(30, _sync_gdc_badge)
+                ui.timer(30, _sync_re_badge)
 
-                ui.button("Toggle", icon="swap_horiz", on_click=toggle_gdc_live).classes(
+                ui.button("Toggle", icon="swap_horiz", on_click=toggle_re_live).classes(
                     "text-xs mt-1"
                 )
 
@@ -2514,35 +2514,7 @@ def _render_strategy(engine):
                     "bg-blue-700 text-white mt-3 px-4 py-2 text-sm"
                 )
 
-                ui.separator().classes("my-3")
-                with ui.row().classes("items-center gap-1"):
-                    ui.label("Auto-Execution").classes("text-sm font-semibold text-yellow-300")
-                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                        "Ensure you enable Algo Trading in the MetaTrader 5 Terminal. "
-                        "Click the AutoTrading robot icon in the MT5 toolbar — it must be green/active "
-                        "for the app to place trades. MT5 disables it automatically after restarts or account switches."
-                    )
-                auto_enabled = bool(rs.get("auto_execute_signals", 0))
-                auto_badge = ui.badge(
-                    "AUTO-EXEC ON" if auto_enabled else "AUTO-EXEC OFF",
-                    color="green" if auto_enabled else "grey",
-                )
-
-                def toggle_auto():
-                    cur = bool(db_module.get_risk_settings().get("auto_execute_signals", 0))
-                    db_module.update_risk_settings({"auto_execute_signals": 0 if cur else 1})
-                    new = not cur
-                    auto_badge.props(f"color={'green' if new else 'grey'}")
-                    auto_badge.text = "AUTO-EXEC ON" if new else "AUTO-EXEC OFF"
-                    ui.notify(f"Auto-execution {'enabled' if new else 'disabled'}", type="info")
-
-                ui.button("Toggle Auto-Execute", on_click=toggle_auto).classes(
-                    "bg-gray-700 text-white mt-2 px-4 py-2 text-sm"
-                )
-                ui.label(
-                    "When ON: incoming Telegram signals are automatically traded. "
-                    "Manual signals always require explicit execution."
-                ).classes("text-xs text-gray-400 mt-1")
+                # Auto-Execution moved to Parsing > Logic Keywords tab (2026-07-23).
 
                 # ── Dynamic Position Management ───────────────────────────────
                 ui.separator().classes("my-3")
@@ -2627,43 +2599,7 @@ def _render_strategy(engine):
                     "otherwise DPM decides entirely."
                 ).classes("text-xs text-gray-400 mt-2 leading-relaxed")
 
-                # ── Immediate Market Buy/Sell ─────────────────────────────────
-                ui.separator().classes("my-3")
-                ime_enabled_val = bool(rs.get("immediate_market_entry", 0))
-
-                with ui.row().classes("items-center gap-2 mb-1"):
-                    ui.icon("flash_on").classes("text-amber-400 text-base")
-                    ui.label("Immediate Market Buy/Sell").classes(
-                        "text-sm font-semibold text-amber-300"
-                    )
-                    ime_badge = ui.badge(
-                        "IME ON" if ime_enabled_val else "IME OFF",
-                        color="amber" if ime_enabled_val else "grey",
-                    )
-
-                ime_chk = ui.checkbox(
-                    "Execute instant market orders",
-                    value=ime_enabled_val,
-                ).classes("text-sm text-gray-200")
-
-                def _ime_toggle(e):
-                    db_module.update_risk_settings({"immediate_market_entry": 1 if e.value else 0})
-                    ime_badge.props(f"color={'amber' if e.value else 'grey'}")
-                    ime_badge.text = "IME ON" if e.value else "IME OFF"
-                    ui.notify(
-                        "Immediate market entry enabled" if e.value
-                        else "Immediate market entry disabled",
-                        type="positive" if e.value else "info",
-                    )
-
-                ime_chk.on_value_change(_ime_toggle)
-
-                ui.label(
-                    "When ON, reads both Telegram channels for bare 'Buy Now'/'Sell Now' "
-                    "messages and enters at current market price immediately. "
-                    "When the follow-up signal with SL and TP levels arrives the open "
-                    "trade is updated automatically. Applies to all strategies."
-                ).classes("text-xs text-gray-400 mt-1 leading-relaxed")
+                # Immediate Market Buy/Sell moved to Parsing > Logic Keywords tab (2026-07-23).
 
             # ── Card 1b: Risk Settings (linked to Active Strategy) ────────────
             _set_risk_lot = render_risk_card("bg-gray-800 p-4 rounded-lg shrink-0 w-72")

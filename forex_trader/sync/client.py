@@ -582,7 +582,7 @@ class SyncClient:
 
     async def send_engine_control(self, engine: str, action: str,
                                   enabled: Optional[bool] = None, timeout: float = 10.0) -> dict:
-        """Start/Stop/Run Now/set_ai_eval a sub-engine (breakout/bounce/gd_copy)
+        """Start/Stop/Run Now/set_ai_eval a sub-engine (breakout/bounce/reversal_engine)
         on the VPS, for use when this node is in Remote mode — the Signal
         Generator panels' buttons must act on the VPS's own engine, not this
         node's own local instance, which is stood down and would do nothing
@@ -633,7 +633,7 @@ class SyncClient:
                                 tg_source: Optional[str] = None,
                                 timeout: float = 15.0) -> dict:
         """Forward a fully-resolved trade from one of this node's own
-        generators (Breakout/TestSignal/GDCopy/GD2-GD-VIP) to the VPS for
+        generators (Breakout/TestSignal/REopy/GD2-GD-VIP) to the VPS for
         execution — used only when centralized_signal_gen_enabled is on and
         the VPS is the active trader, so this node's generators keep
         analyzing while the VPS has stopped analyzing entirely (see

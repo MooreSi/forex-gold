@@ -108,9 +108,9 @@ def test_expired_signal_marked_expired_no_activation(fresh_db, engine):
     assert "sig-1" not in engine._pending_activation_retry_after
 
 
-def test_gd_vip_runner_gets_four_hour_expiry(fresh_db, engine):
+def test_reversal_runner_gets_four_hour_expiry(fresh_db, engine):
     _insert_signal(created_at=time.time() - 200, tp1=2410.0)
-    rs = {"max_open_trades": 1, "trade_strategy": "gd_vip_runner"}
+    rs = {"max_open_trades": 1, "trade_strategy": "reversal_runner"}
     with mock.patch.object(psa, "get_open_trades", return_value=[]), \
          mock.patch.object(psa, "open_trade_from_signal",
                            new=mock.AsyncMock(return_value={"entry_price": 2400.5, "trade_id": "t"})) as ot:

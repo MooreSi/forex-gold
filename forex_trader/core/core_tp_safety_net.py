@@ -23,7 +23,7 @@ from typing import Any
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_trade_reporting import get_open_trades
-from forex_trader.core.models import STRATEGY_BE_RUNNER, STRATEGY_GD_VIP_RUNNER, STRATEGY_SCALP_RUNNER
+from forex_trader.core.models import STRATEGY_BE_RUNNER, STRATEGY_REVERSAL_RUNNER, STRATEGY_SCALP_RUNNER
 
 log = logging.getLogger(__name__)
 
@@ -65,12 +65,12 @@ async def tp_safety_net_check_trade(trade: dict, now: float, bridge: Any, last_a
             pass
     # Which TP is the real breakeven trigger for this strategy — must match
     # the strategy's own handler, or this safety net would "protect" a
-    # trade at the wrong TP. GD VIP Runner and Scalp Runner both
+    # trade at the wrong TP. Reversal Runner and Scalp Runner both
     # deliberately keep their wider entry SL until TP2 (see
-    # _handle_gd_vip_runner / _handle_scalp_runner) — confirmed live on
+    # _handle_reversal_runner / _handle_scalp_runner) — confirmed live on
     # ticket 1556670216, where scalp_runner defaulting to TP1 here caused
     # a premature breakeven lock after only TP1 territory was touched.
-    be_tp_field = "tp2" if trade.get("strategy") in (STRATEGY_GD_VIP_RUNNER, STRATEGY_SCALP_RUNNER) else "tp1"
+    be_tp_field = "tp2" if trade.get("strategy") in (STRATEGY_REVERSAL_RUNNER, STRATEGY_SCALP_RUNNER) else "tp1"
     be_tp_label = be_tp_field.upper()
     be_trigger_tp = trade.get(be_tp_field)
     if be_trigger_tp is None:

@@ -65,7 +65,7 @@ except ImportError:
 
 try:
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-    from sklearn.linear_model import SGDClassifier, SGDRegressor
+    from sklearn.linear_model import SRElassifier, SGDRegressor
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
     import joblib

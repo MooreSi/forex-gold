@@ -2,7 +2,7 @@
 Facades exposing the same function names as each signal engine's `database`,
 `ml_engine`, and `adaptive_params` modules — transparently switching between
 this node's own local data and the mirrored remote-VPS snapshot based on the
-app's Local/Remote mode, so the Breakout/Bounce/GD Copy panel rendering code
+app's Local/Remote mode, so the Breakout/Bounce/Reversal Engine panel rendering code
 needs no changes at any individual call site.
 
 Per-signal helpers with no remote equivalent (get_ml_features_for_signal,
@@ -195,7 +195,7 @@ class _ParamsFacade:
 def make_facades(key: str, db_module, ml_module=None, params_module=None):
     """Return (db_facade, ml_facade, params_facade) for one engine.
     Pass None for ml_module/params_module if that engine doesn't have one
-    (GD Copy has no adaptive_params)."""
+    (Reversal Engine has no adaptive_params)."""
     db_facade = _DbFacade(key, db_module)
     ml_facade = _MlFacade(key, ml_module) if ml_module is not None else None
     params_facade = _ParamsFacade(key, params_module) if params_module is not None else None

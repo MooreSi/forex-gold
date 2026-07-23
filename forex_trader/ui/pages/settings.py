@@ -265,7 +265,7 @@ def _render_mt5(engine):
                 "When **ON** and a companion MQL5 EA is attached to the XAUUSD chart "
                 "on this node's MT5 terminal, new trades for portable strategies "
                 "(Scale Out, BE Runner, Trail Stop, Protected Scale, Conservative, "
-                "Scalp Runner, Conservative Trial, Signal Climber, GD VIP Runner, "
+                "Scalp Runner, Conservative Trial, Signal Climber, Reversal Runner, "
                 "Adaptive Runner, ORB Fixed, Trend Ratchet) are placed "
                 "and managed by the EA directly inside MT5's own tick loop, instead "
                 "of this app's polling cycle. DPM always stays app-managed — its "

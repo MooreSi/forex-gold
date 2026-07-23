@@ -29,10 +29,10 @@ _BROKER_TZ_OFFSET    = 10_800   # Vantage MT5 candle ts is UTC+3; signal ts is U
 
 _TRAIL_DIST_PTS      = 5.0      # trailing stop (matches live engine default)
 
-# GD VIP Runner constants (must stay in sync with engine.py's _GDVR_* values).
+# Reversal Runner constants (must stay in sync with engine.py's _GDVR_* values).
 # Validated against 259 Gold Diggers VIP signals (May-Jun 2026): baseline
 # (stated SL, full close @ TP1) averages -0.127R/trade; this ladder averages
-# +0.167R/trade at 88.7% win rate. See STRATEGY_DESCRIPTIONS[STRATEGY_GD_VIP_RUNNER].
+# +0.167R/trade at 88.7% win rate. See STRATEGY_DESCRIPTIONS[STRATEGY_REVERSAL_RUNNER].
 _GDVR_SL_MULT        = 4.0
 _GDVR_SL_CAP_PT       = 20.0
 _GDVR_SL_FLOOR_PT     = 8.0
@@ -45,7 +45,7 @@ _GDVR_MAX_HOLD_BARS   = 288       # ~24h on M5 — matches the 1440min MAX_HOLD 
 # (fractions 0.05+0.05+0.10 = 0.20 of the lot), silently leaving 80% of the
 # position open with no TP left to close it, exposed only to the (widened) SL
 # or the 24h timeout. That understated every non-8-TP signal's real P&L and
-# made GD VIP Runner look far worse than engine.py's live version (which was
+# made Reversal Runner look far worse than engine.py's live version (which was
 # already count-aware) would actually perform. Confirmed 2026-07-15 via a
 # side-by-side backtest against 730 live-executed signals: 313 of them
 # (Breakout/Bounce/Signal Generator sources) carry only 3 TPs.
@@ -61,7 +61,7 @@ _GDVR_PCTS: dict[int, list[float]] = {
 }
 
 # Signal Climber ladder (mirrors engine.py's _CLIMBER_PCTS). Front-loaded vs
-# GD VIP Runner's back-loaded shape — BE at TP1 instead of TP2.
+# Reversal Runner's back-loaded shape — BE at TP1 instead of TP2.
 _CLIMBER_PCTS: dict[int, list[float]] = {
     1: [1.00],
     2: [0.40, 0.60],
@@ -73,7 +73,7 @@ _CLIMBER_PCTS: dict[int, list[float]] = {
     8: [0.20, 0.10, 0.10, 0.10, 0.15, 0.15, 0.10, 0.10],
 }
 
-# Adaptive Runner — same widened-SL idea as GD VIP Runner, but the widened
+# Adaptive Runner — same widened-SL idea as Reversal Runner, but the widened
 # distance is additionally capped at a fraction of the signal's own final
 # (furthest) TP, so the stop can never end up wider than — or too close to —
 # the maximum reachable reward. Never tightened below the signal's own
@@ -733,7 +733,7 @@ def _run_ladder_strategy(
     pcts_table: dict[int, list[float]], be_at_pos: int, max_hold_bars: int,
 ) -> BtTrade:
     """
-    Shared TP-ladder walk used by GD VIP Runner, Signal Climber, and Adaptive
+    Shared TP-ladder walk used by Reversal Runner, Signal Climber, and Adaptive
     Runner. Closes fractions of the original lot at each of the signal's
     ACTUAL TPs (looked up from pcts_table by however many TPs the signal has —
     e.g. a 3-TP signal uses pcts_table[3], which sums to 1.0 over exactly
@@ -828,12 +828,12 @@ def _run_ladder_strategy(
     return trade
 
 
-def _simulate_gd_vip_runner(
+def _simulate_reversal_runner(
     candles: list[dict], sig: BtSignal, fill_bar: int, fill_price: float,
     is_buy: bool, balance: float, risk_pct: float, fixed_lots: float = 0.0,
 ) -> BtTrade:
     """
-    GD VIP Runner: keeps the signal's own TP ladder, widens only the SL.
+    Reversal Runner: keeps the signal's own TP ladder, widens only the SL.
 
     SL = min(4x stated SL distance, 20pt), floored at 8pt if the stated
     distance is missing/bad data. Back-loaded ladder (5/5/10/10/15/15/15/25%
@@ -847,14 +847,14 @@ def _simulate_gd_vip_runner(
     else:
         sl_dist = min(stated_dist * _GDVR_SL_MULT, _GDVR_SL_CAP_PT)
     lot = _lot_size(balance, sl_dist, risk_pct, fixed_lots)
-    # be_at_pos=1: BE at TP2, matching engine.py's live _handle_gd_vip_runner
+    # be_at_pos=1: BE at TP2, matching engine.py's live _handle_reversal_runner
     # docstring ("moving to BE that early [at TP1] would defeat" the wider
     # SL's purpose). The previous version of this simulator moved to BE at
     # TP1 (ti==0) — a real discrepancy from the documented live behaviour,
     # fixed here alongside the ladder-count bug.
     return _run_ladder_strategy(
         candles, sig, fill_bar, fill_price, is_buy, sl_dist, lot,
-        "gd_vip_runner", _GDVR_PCTS, be_at_pos=1, max_hold_bars=_GDVR_MAX_HOLD_BARS,
+        "reversal_runner", _GDVR_PCTS, be_at_pos=1, max_hold_bars=_GDVR_MAX_HOLD_BARS,
     )
 
 
@@ -869,7 +869,7 @@ def _simulate_signal_climber(
     """
     sl_dist = abs(fill_price - sig.stop_loss) if sig.stop_loss else 0.0
     if not sl_dist or sl_dist < 0.5 or sl_dist > 50:
-        sl_dist = _GDVR_SL_FLOOR_PT  # same bad-data fallback as GD VIP Runner
+        sl_dist = _GDVR_SL_FLOOR_PT  # same bad-data fallback as Reversal Runner
     lot = _lot_size(balance, sl_dist, risk_pct, fixed_lots)
     return _run_ladder_strategy(
         candles, sig, fill_bar, fill_price, is_buy, sl_dist, lot,
@@ -882,12 +882,12 @@ def _simulate_adaptive_runner(
     is_buy: bool, balance: float, risk_pct: float, fixed_lots: float = 0.0,
 ) -> BtTrade:
     """
-    Adaptive Runner: same widened-SL idea as GD VIP Runner, but the widened
+    Adaptive Runner: same widened-SL idea as Reversal Runner, but the widened
     distance is capped at _ADAPTIVE_TP_CAP_FRAC (50%) of the distance to the
     signal's own final (furthest) TP — never wider than that, and never
     tightened below the signal's own stated SL. See
     STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER] in core/models.py for why:
-    GD VIP Runner's fixed 4x/20pt widening was tuned for Gold Diggers VIP's
+    Reversal Runner's fixed 4x/20pt widening was tuned for Gold Diggers VIP's
     own signal shape (~4-5pt stated SL, ~25-30pt final target) and produces a
     stop wider than the maximum reachable win on shorter-ladder signals
     (e.g. a 3-TP Breakout signal with an 8pt stated SL and a ~15pt final TP).
@@ -971,8 +971,8 @@ def _simulate(
         trade = _simulate_protected_scale(candles, sig, fill_bar, fill_price, is_buy, sl_dist, balance, risk_pct, fixed_lots)
     elif strategy == "trail_stop":
         trade = _simulate_trail_stop(candles, sig, fill_bar, fill_price, is_buy, sl_dist, balance, risk_pct, fixed_lots)
-    elif strategy == "gd_vip_runner":
-        trade = _simulate_gd_vip_runner(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)
+    elif strategy == "reversal_runner":
+        trade = _simulate_reversal_runner(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)
     elif strategy == "signal_climber":
         trade = _simulate_signal_climber(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)
     elif strategy == "adaptive_runner":

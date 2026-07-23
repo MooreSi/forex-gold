@@ -1,9 +1,9 @@
 """
-GD Copy Engine -- Gold Diggers VIP emulation signal generator.
+Reversal Engine -- Gold Diggers VIP emulation signal generator.
 
 This is the thin orchestrator (task 040): lifecycle, the signal-generation
 cycle, and the outcome-loop's pending/triggered routing live here; the
-TP/SL/partial-close ladder (_ManagementMixin), VIP correlation
+TP/SL/partial-close ladder (_ManagementMixin), REF correlation
 (_CorrelationMixin), and live order dispatch (_LiveExecuteMixin) are each
 their own file. Replaces engine.py -- see
 docs/todo/refactor/backend-foundation/040-*.md for what moved where and why.
@@ -13,17 +13,17 @@ Strategy:
   2. Generate pending limit-zone signals when price approaches a level
   3. Trigger (activate) when price enters the entry zone
   4. Monitor outcomes; move SL to BE after TP1; learn from results
-  5. Continuously correlate our signals with actual GD VIP signals to
-     benchmark accuracy -- goal is to fire BEFORE GD VIP (negative lead time)
+  5. Continuously correlate our signals with actual the reference channel signals to
+     benchmark accuracy -- goal is to fire BEFORE the reference channel (negative lead time)
 
-Session: 04:00-16:00 UTC -- measured from 591 real GD VIP signals: 23% arrive
+Session: 04:00-16:00 UTC -- measured from 591 real the reference channel signals: 23% arrive
   04:00-06:59 (late-Asia push on the Asia range), 72% 07:00-14:59, 5% after
   15:00. Asia range is used as a level source (not a trading session).
 Signal expiry: 2 hours (matches bounce engine)
 
 Lead time (correlation_time_delta_s) is SIGNED:
   negative = we fired first (good -- we predicted the level)
-  positive = GD VIP fired first (we lagged)
+  positive = the reference channel fired first (we lagged)
 """
 from __future__ import annotations
 
@@ -36,22 +36,22 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import forex_trader.config as _cfg_module
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-from forex_trader.gd_copy_signal import level_detector as ld
-from forex_trader.gd_copy_signal import ml_engine as gdc_ml
-from forex_trader.gd_copy_signal import signal_generator as sg
-from forex_trader.gd_copy_signal.gd_copy_signal_correlate import _CorrelationMixin
-from forex_trader.gd_copy_signal.gd_copy_signal_live_execute import _LiveExecuteMixin
-from forex_trader.gd_copy_signal.gd_copy_signal_manage import _ManagementMixin
+from forex_trader.reversal_engine import reversal_engine_repo as re_db
+from forex_trader.reversal_engine import level_detector as ld
+from forex_trader.reversal_engine import ml_engine as re_ml
+from forex_trader.reversal_engine import signal_generator as sg
+from forex_trader.reversal_engine.reversal_engine_correlate import _CorrelationMixin
+from forex_trader.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
+from forex_trader.reversal_engine.reversal_engine_manage import _ManagementMixin
 
-_log = logging.getLogger("gd_copy_signal")
+_log = logging.getLogger("reversal_engine")
 
 
 def _setup_logger() -> None:
-    """Attach a rotating file handler to the gd_copy_signal logger."""
+    """Attach a rotating file handler to the reversal_engine logger."""
     try:
         data_dir = Path(_cfg_module.DATA_DIR)
-        log_path = data_dir / "gd_copy_signal.log"
+        log_path = data_dir / "reversal_engine.log"
         if not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in _log.handlers):
             h = logging.handlers.RotatingFileHandler(
                 str(log_path), maxBytes=5 * 1024 * 1024, backupCount=3
@@ -100,22 +100,22 @@ def rank_eligible_candidates(
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
-_instance: Optional["GDCopyEngine"] = None
+_instance: Optional["ReversalEngine"] = None
 
 
-def get_instance() -> Optional["GDCopyEngine"]:
+def get_instance() -> Optional["ReversalEngine"]:
     return _instance
 
 
-def init(bridge) -> "GDCopyEngine":
+def init(bridge) -> "ReversalEngine":
     global _instance
     if _instance is None:
         _setup_logger()
-        _instance = GDCopyEngine(bridge)
+        _instance = ReversalEngine(bridge)
     return _instance
 
 
-class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
+class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
     def __init__(self, bridge):
         self._bridge    = bridge
         self._main_eng  = None
@@ -160,14 +160,14 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             return
         self.is_running = True
         self._status_msg = "Running"
-        gdc_db.set_config("gdc_user_stopped", "0")
+        re_db.set_config("re_user_stopped", "0")
         loop = asyncio.get_event_loop()
         self._tasks = [
             loop.create_task(self._cycle_loop()),
             loop.create_task(self._outcome_loop()),
             loop.create_task(self._correlation_loop()),
         ]
-        _log.info("[GDC-Engine] started")
+        _log.info("[RE-Engine] started")
 
     def stop(self, persist: bool = True) -> None:
         self.is_running = False
@@ -175,11 +175,11 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         if persist:
             # Only write when the user explicitly stops -- app shutdown calls
             # stop(persist=False) so the preference survives across restarts.
-            gdc_db.set_config("gdc_user_stopped", "1")
+            re_db.set_config("re_user_stopped", "1")
         for t in self._tasks:
             t.cancel()
         self._tasks = []
-        _log.info("[GDC-Engine] stopped (persist=%s)", persist)
+        _log.info("[RE-Engine] stopped (persist=%s)", persist)
 
     # ── Main cycle ────────────────────────────────────────────────────────────
 
@@ -191,7 +191,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.warning("[GDC-Engine] cycle error: %s", exc)
+                _log.warning("[RE-Engine] cycle error: %s", exc)
             await asyncio.sleep(_CYCLE_INTERVAL_S)
 
     async def _run_cycle(self) -> None:
@@ -214,7 +214,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         utc_hour = now_utc.hour
 
         # Session gate -- was a hardcoded 00:00-16:00 UTC window (measured
-        # GD VIP posting hours), which fought the user-facing
+        # the reference channel posting hours), which fought the user-facing
         # Trading Markets toggles (Settings > Strategy): a session the user
         # explicitly enabled could still be silently skipped, and a session
         # they'd disabled could still generate outside that window. Now uses
@@ -224,7 +224,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         _sess_ok, _sess_name = await _db_module.to_db_thread(_db_module.is_session_allowed)
         if not _sess_ok:
             self._status_msg = f"Session '{_sess_name}' not enabled in Trading Markets"
-            gdc_db.log_analysis({
+            re_db.log_analysis({
                 "result": "session_closed",
                 "reason": f"Session '{_sess_name}' (UTC {utc_hour:02d}:xx) not enabled in Trading Markets",
             })
@@ -246,7 +246,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             h4_candles  = await self._bridge.get_candles("H4", 6)
             tick        = await self._bridge.get_tick()
         except Exception as exc:
-            _log.debug("[GDC-Engine] candle fetch error: %s", exc)
+            _log.debug("[RE-Engine] candle fetch error: %s", exc)
             self._status_msg = "MT5 bridge offline"
             return
 
@@ -278,7 +278,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             return
 
         # Open position cap
-        open_sigs = gdc_db.get_open_signals()
+        open_sigs = re_db.get_open_signals()
         if len(open_sigs) >= _MAX_OPEN_SIGNALS:
             self._status_msg = f"Cap: {len(open_sigs)} open signals"
             return
@@ -287,14 +287,14 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         candidates = ld.get_candidate_levels(h1_candles, price, htf_bias=htf, m15_candles=m15_candles)
         self._cached["levels"] = candidates
         # Full, unfiltered level set (asia/swing/round/congestion, no proximity
-        # or score cutoff) -- used by _classify_vip_level() for VIP-level
+        # or score cutoff) -- used by _classify_ref_level() for REF-level
         # pattern learning, which needs to classify prices the bot itself
         # never got close enough to act on this cycle.
         self._cached["all_levels"] = ld.get_all_levels(h1_candles, price)
 
         if not candidates:
             self._status_msg = "No candidate levels near price"
-            gdc_db.log_analysis({
+            re_db.log_analysis({
                 "ts": time.time(), "session": session, "htf_bias": htf,
                 "price": price, "atr": atr, "adx": adx,
                 "result": "no_levels",
@@ -311,14 +311,14 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         }
 
         # Deactivate stale levels
-        gdc_db.deactivate_old_levels()
+        re_db.deactivate_old_levels()
 
         # Touch-track every candidate level type seen this cycle (matched or not) --
-        # builds the true denominator for vip_match_rate_for_type.
+        # builds the true denominator for ref_match_rate_for_type.
         for level in candidates:
-            gdc_ml.record_level_touch(level["type"])
+            re_ml.record_level_touch(level["type"])
 
-        cadence = await self._vip_cadence_stats()
+        cadence = await self._ref_cadence_stats()
 
         # Context that's the same regardless of which candidate ends up
         # chosen -- computed once per cycle rather than repeated (or, as
@@ -336,10 +336,10 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             regime_score        = 0.5
             equity_drawdown_pct = 0.0
         try:
-            vip_discipline_score, vip_aggression_score = gdc_ml.get_daily_research_scores()
+            ref_discipline_score, ref_aggression_score = re_ml.get_daily_research_scores()
         except Exception:
-            vip_discipline_score, vip_aggression_score = 0.5, 0.5
-        win_rate = gdc_db.get_recent_win_rate(20)
+            ref_discipline_score, ref_aggression_score = 0.5, 0.5
+        win_rate = re_db.get_recent_win_rate(20)
 
         # Gather up to _ML_CANDIDATE_POOL gate-passing candidates (built +
         # feature-extracted, not yet persisted) so the ML model can weigh in
@@ -371,11 +371,11 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # Consecutive-loss direction cooldown
             try:
                 _cl_cutoff = time.time() - _CONSEC_LOSS_WINDOW
-                _cl_outcomes = gdc_db.get_recent_outcomes_by_direction(
+                _cl_outcomes = re_db.get_recent_outcomes_by_direction(
                     direction, _cl_cutoff, _CONSEC_LOSS_LIMIT
                 )
                 if len(_cl_outcomes) >= _CONSEC_LOSS_LIMIT and all(o == "loss" for o in _cl_outcomes):
-                    _log.info("[GDC-Engine] %s cooldown: %d consec losses in 2h", direction, _CONSEC_LOSS_LIMIT)
+                    _log.info("[RE-Engine] %s cooldown: %d consec losses in 2h", direction, _CONSEC_LOSS_LIMIT)
                     continue
             except Exception:
                 pass
@@ -383,8 +383,8 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # Cross-engine conflict suppression
             try:
                 from forex_trader.core import database as _cdb_cf
-                if _cdb_cf.has_conflict_on_bus("gd_copy", direction, window_seconds=180.0):
-                    _log.info("[GDC-Engine] %s suppressed — cross-engine conflict", direction)
+                if _cdb_cf.has_conflict_on_bus("reversal_engine", direction, window_seconds=180.0):
+                    _log.info("[RE-Engine] %s suppressed — cross-engine conflict", direction)
                     continue
             except Exception:
                 pass
@@ -392,7 +392,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             sig_data = sg.build_signal(level, direction, context)
             sig_data["strategy"] = self._active_strategy()
 
-            # ML-only context -- NOT real gdc_signals columns, so this must
+            # ML-only context -- NOT real re_signals columns, so this must
             # stay a separate dict from sig_data. create_signal() builds its
             # INSERT column list directly from dict.keys(), so passing any
             # of these through it raises "no such column" and silently
@@ -401,31 +401,31 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             feat_input["news_proximity_norm"]    = news_proximity_norm
             feat_input["regime_score"]           = regime_score
             feat_input["equity_drawdown_pct"]    = equity_drawdown_pct
-            feat_input["vip_discipline_score"]   = vip_discipline_score
-            feat_input["vip_aggression_score"]   = vip_aggression_score
-            feat_input["minutes_since_last_vip"] = cadence[0]
-            feat_input["vip_signals_today"]      = cadence[1]
+            feat_input["ref_discipline_score"]   = ref_discipline_score
+            feat_input["ref_aggression_score"]   = ref_aggression_score
+            feat_input["minutes_since_last_ref"] = cadence[0]
+            feat_input["ref_signals_today"]      = cadence[1]
             try:
                 from forex_trader.core import database as _cdb_agree
-                feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("gd_copy", direction)
+                feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("reversal_engine", direction)
             except Exception:
                 feat_input["concurrent_agreement"] = 0.0
 
-            feats = gdc_ml.extract_features(feat_input, win_rate)
-            prob  = gdc_ml.predict(feats) if feats else None
+            feats = re_ml.extract_features(feat_input, win_rate)
+            prob  = re_ml.predict(feats) if feats else None
             eligible.append((level, direction, sig_data, feats, prob))
 
         signal_created = False
         if eligible:
             level, direction, sig_data, feats, prob = rank_eligible_candidates(eligible)[0]
 
-            sig_id = gdc_db.create_signal(sig_data)
+            sig_id = re_db.create_signal(sig_data)
             if sig_id:
                 # Write to shared signal bus
                 try:
                     from forex_trader.core import database as _cdb_bus
                     _cdb_bus.write_signal_bus(
-                        "gd_copy", direction,
+                        "reversal_engine", direction,
                         confidence=float(level.get("score", 0.5)),
                         signal_id=sig_id,
                     )
@@ -433,12 +433,12 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                     pass
 
                 if feats:
-                    gdc_db.store_ml_features(sig_id, feats)
+                    re_db.store_ml_features(sig_id, feats)
                     if prob is not None:
-                        gdc_db.store_ml_prob(sig_id, prob)
+                        re_db.store_ml_prob(sig_id, prob)
 
                 # Track level
-                gdc_db.upsert_level(
+                re_db.upsert_level(
                     level["type"], level["price"], direction,
                     source="engine",
                     notes=f"score={level['score']:.2f} atr={atr:.1f}"
@@ -446,10 +446,10 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
                 # Update daily correlation tally (signal already in DB, no +1)
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                gdc_db.upsert_daily_correlation(today, gdc_signals_sent=gdc_db.count_today_signals())
+                re_db.upsert_daily_correlation(today, re_signals_sent=re_db.count_today_signals())
 
                 _log.info(
-                    "[GDC-Engine] SIGNAL %s %s %s level=%.2f score=%.2f ml_prob=%s (%d candidate(s) considered)",
+                    "[RE-Engine] SIGNAL %s %s %s level=%.2f score=%.2f ml_prob=%s (%d candidate(s) considered)",
                     sig_data["signal_ref"], direction, level["type"],
                     level["price"], level["score"],
                     f"{prob:.2f}" if prob is not None else "?", len(eligible),
@@ -468,7 +468,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         else:
             self._status_msg = "Signal created"
 
-        gdc_db.log_analysis({
+        re_db.log_analysis({
             "ts": time.time(), "session": session, "htf_bias": htf,
             "price": price, "atr": atr, "adx": adx,
             "levels": [{"p": l["price"], "t": l["type"], "s": l["score"]}
@@ -486,7 +486,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.debug("[GDC-Engine] outcome error: %s", exc)
+                _log.debug("[RE-Engine] outcome error: %s", exc)
             await asyncio.sleep(_OUTCOME_INTERVAL_S)
 
     async def _check_outcomes(self) -> None:
@@ -500,7 +500,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         except Exception:
             return
 
-        open_sigs = gdc_db.get_open_signals()
+        open_sigs = re_db.get_open_signals()
         now = time.time()
 
         for sig in open_sigs:
@@ -513,8 +513,8 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
             # Expire old pending signals
             if status == "pending" and (now - created) > _SIGNAL_MAX_AGE_S:
-                gdc_db.expire_signal(sig_id, "max_age_exceeded")
-                _log.info("[GDC-Engine] signal %s expired (>2h pending)", sig["signal_ref"])
+                re_db.expire_signal(sig_id, "max_age_exceeded")
+                _log.info("[RE-Engine] signal %s expired (>2h pending)", sig["signal_ref"])
                 self._notify_refresh()
                 continue
 
@@ -522,9 +522,9 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             if status == "pending":
                 if entry_lo <= price <= entry_hi:
                     fill = self._realistic_fill(tick, direction, closing=False)
-                    gdc_db.trigger_signal(sig_id, fill)
+                    re_db.trigger_signal(sig_id, fill)
                     _log.info(
-                        "[GDC-Engine] TRIGGERED %s @ %.2f (fill, mid=%.2f)",
+                        "[RE-Engine] TRIGGERED %s @ %.2f (fill, mid=%.2f)",
                         sig.get("signal_ref", sig_id), fill, price
                     )
                     # Optionally execute live trade
@@ -542,11 +542,11 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             if (trigger_time > 0
                     and not sig.get("live_exec_status")
                     and (now - trigger_time) > 120):
-                gdc_db.update_live_exec(
+                re_db.update_live_exec(
                     sig_id, status="failed:orphaned_no_response"
                 )
                 _log.warning(
-                    "[GDC-Engine] signal %s triggered %ds ago but live_exec_status "
+                    "[RE-Engine] signal %s triggered %ds ago but live_exec_status "
                     "never written — marking orphaned",
                     sig.get("signal_ref", sig_id), int(now - trigger_time),
                 )
@@ -559,7 +559,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # simulated ladder in _manage_triggered_signal -- confirmed
             # live: simulated P&L bore no relation to real P&L, and in
             # several cases even had the opposite sign. See
-            # _reconcile_live_signal (gd_copy_signal_manage.py).
+            # _reconcile_live_signal (reversal_engine_manage.py).
             if sig.get("mt5_ticket") and sig.get("live_exec_status") == "executed":
                 await self._reconcile_live_signal(sig)
                 continue
@@ -569,7 +569,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
     # ── Correlation loop ──────────────────────────────────────────────────────
 
     async def _correlation_loop(self) -> None:
-        """30-second loop: match our signals against actual GD VIP signals.
+        """30-second loop: match our signals against actual the reference channel signals.
         Lead time is SIGNED: negative = we fired first (goal), positive = we lagged.
         """
         while self.is_running:
@@ -578,19 +578,19 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.debug("[GDC-Engine] correlation error: %s", exc)
+                _log.debug("[RE-Engine] correlation error: %s", exc)
             await asyncio.sleep(_CORR_INTERVAL_S)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _active_strategy(self) -> str:
-        """The strategy actually selected for the GD VIP channel -- same one used to
-        manage real GD VIP trades -- so GDC's virtual outcomes are modelled on the
+        """The strategy actually selected for the the reference channel channel -- same one used to
+        manage real the reference channel trades -- so RE's virtual outcomes are modelled on the
         same SL/TP management rules, not an unrelated leftover default."""
         try:
             from forex_trader.core import database as core_db
             from forex_trader.core.models import STRATEGY_SCALE_OUT
-            override = core_db.get_channel_strategy_override("GD Copy Engine")
+            override = core_db.get_channel_strategy_override("Reversal Engine")
             if override and override != "auto":
                 return override
             rs = core_db.get_risk_settings()
@@ -601,7 +601,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
     def _level_on_cooldown(self, price: float, direction: str) -> bool:
         """True if a signal for this level+direction was created within the cooldown window."""
         cutoff = time.time() - _LEVEL_COOLDOWN_S
-        recent = gdc_db.get_all_signals(limit=20)
+        recent = re_db.get_all_signals(limit=20)
         for s in recent:
             if (s.get("direction") == direction
                     and abs(float(s.get("level_price", 0) or 0) - price) <= 3.0
@@ -611,7 +611,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
     def _already_open(self, direction: str, level_price: float) -> bool:
         """True if there's already an open signal for this direction+level."""
-        for s in gdc_db.get_open_signals():
+        for s in re_db.get_open_signals():
             if (s.get("direction") == direction
                     and abs(float(s.get("level_price", 0) or 0) - level_price) <= 3.0):
                 return True
@@ -619,7 +619,7 @@ class GDCopyEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
     def _today_signal_count(self) -> int:
         """Count of signals created today (UTC). Uses SQL COUNT -- not capped by limit."""
-        return gdc_db.count_today_signals()
+        return re_db.count_today_signals()
 
     @staticmethod
     def _calc_atr(candles: list[dict], period: int = 14) -> float:

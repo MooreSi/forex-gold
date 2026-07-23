@@ -122,7 +122,7 @@ def get_stored_messages(limit: int = 100, offset: int = 0, group_id: Optional[st
 
 def get_messages_for_research(group_ids: list[str], since_iso: str) -> list[dict]:
     """Telegram messages for the given group_ids received since since_iso
-    (UTC ISO string) — feeds the nightly GD Copy research job. Includes
+    (UTC ISO string) — feeds the nightly Reversal Engine research job. Includes
     has_media/media_type so the caller can decide which ones to fetch
     images for; does not itself touch Telegram, just the local log."""
     placeholders = ",".join("?" for _ in group_ids)

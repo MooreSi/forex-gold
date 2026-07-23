@@ -252,7 +252,7 @@ def get_consecutive_losses() -> int:
 
 def get_signal_by_id(signal_id: int) -> dict:
     """Returns {} for a missing row -- matches database.py's behavior
-    (via its own _row() helper), NOT None like gd_copy_signal/breakout_signal."""
+    (via its own _row() helper), NOT None like reversal_engine/breakout_signal."""
     row = get_db().get("SELECT * FROM test_signals WHERE id=?", signal_id)
     return _row(row)
 

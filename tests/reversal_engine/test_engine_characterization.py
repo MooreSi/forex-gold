@@ -1,17 +1,17 @@
-"""Characterizes the testable surface of GDCopyEngine. Originally written
-against engine.py during task 020; re-pointed at gd_copy_signal_service.py
+"""Characterizes the testable surface of ReversalEngine. Originally written
+against engine.py during task 020; re-pointed at reversal_engine_service.py
 in task 040 by changing only the import + fixture module (database.py ->
-gd_copy_signal_repo.py, since the service now depends on the repo) -- every
+reversal_engine_repo.py, since the service now depends on the repo) -- every
 assertion below is unchanged. See
-docs/todo/refactor/backend-foundation/020-characterize-gd-copy-current-behavior.md
-and 040-extract-gd-copy-service-layer.md.
+docs/todo/refactor/backend-foundation/020-characterize-reversal-engine-current-behavior.md
+and 040-extract-reversal-engine-service-layer.md.
 
 Scope note (unchanged from 020): the async orchestration loops
 (_run_cycle, _check_outcomes, _check_correlation) are heavily coupled to
 externals this file doesn't attempt to fully mock -- a live MT5 bridge
 (self._bridge), the main SimulationEngine (self._main_eng), and
 forex_trader.core.database. Covered instead: every pure/isolable method
-GDCopyEngine exposes, plus the money math and the DB-backed helper methods
+ReversalEngine exposes, plus the money math and the DB-backed helper methods
 (_level_on_cooldown, _already_open, _today_signal_count).
 """
 import os
@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as db
-from forex_trader.gd_copy_signal.gd_copy_signal_service import GDCopyEngine
+from forex_trader.reversal_engine import reversal_engine_repo as db
+from forex_trader.reversal_engine.reversal_engine_service import ReversalEngine
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def fresh_db():
 
 @pytest.fixture
 def engine(fresh_db):
-    return GDCopyEngine(bridge=None)
+    return ReversalEngine(bridge=None)
 
 
 def _tick(bid: float, ask: float, mid: float | None = None, spread: float = 0.0):
@@ -105,7 +105,7 @@ def test_calc_atr_computes_true_range_average():
         {"high": 2415, "low": 2403, "close": 2408},
         {"high": 2420, "low": 2405, "close": 2412},
     ]
-    atr = GDCopyEngine._calc_atr(candles, period=14)
+    atr = ReversalEngine._calc_atr(candles, period=14)
     assert atr > 0
 
 
@@ -113,23 +113,23 @@ def test_calc_adx_with_insufficient_candles_returns_default(engine):
     assert engine._calc_adx([{"high": 1, "low": 1}], period=14) == 25.0
 
 
-# ── _classify_vip_level ───────────────────────────────────────────────────────
+# ── _classify_ref_level ───────────────────────────────────────────────────────
 
-def test_classify_vip_level_round_10(engine):
-    assert engine._classify_vip_level(2450.5) == "round_10"
-
-
-def test_classify_vip_level_round_5(engine):
-    assert engine._classify_vip_level(2454.5) == "round_5"
+def test_classify_ref_level_round_10(engine):
+    assert engine._classify_ref_level(2450.5) == "round_10"
 
 
-def test_classify_vip_level_zero_price_is_unknown(engine):
-    assert engine._classify_vip_level(0) == "unknown"
+def test_classify_ref_level_round_5(engine):
+    assert engine._classify_ref_level(2454.5) == "round_5"
 
 
-def test_classify_vip_level_matches_cached_level(engine):
+def test_classify_ref_level_zero_price_is_unknown(engine):
+    assert engine._classify_ref_level(0) == "unknown"
+
+
+def test_classify_ref_level_matches_cached_level(engine):
     engine._cached["levels"] = [{"price": 2461.0, "type": "asia_high"}]
-    assert engine._classify_vip_level(2462.5) == "asia_high"
+    assert engine._classify_ref_level(2462.5) == "asia_high"
 
 
 # ── DB-backed helpers (_level_on_cooldown / _already_open / count) ───────────
@@ -177,15 +177,15 @@ def test_today_signal_count_matches_db(engine, fresh_db):
 
 
 # ── create_signal() column safety ────────────────────────────────────────────
-# gd_copy_signal_repo.create_signal() builds its INSERT column list directly
-# from dict.keys() -- any key that isn't a real gdc_signals column raises
+# reversal_engine_repo.create_signal() builds its INSERT column list directly
+# from dict.keys() -- any key that isn't a real re_signals column raises
 # "no such column" and silently kills every signal-creation cycle. This bit
 # _run_cycle's ML-candidate-ranking rework (2026-07-22): ML-only context
 # fields (news_proximity_norm, regime_score, etc.) were briefly being set on
 # the SAME dict passed to create_signal(), not a separate feat_input copy.
 
 def test_build_signal_output_plus_strategy_is_a_valid_create_signal_dict(engine, fresh_db):
-    from forex_trader.gd_copy_signal import signal_generator as sg
+    from forex_trader.reversal_engine import signal_generator as sg
 
     level = {"price": 4000.0, "type": "swing_high", "score": 0.8}
     context = {
@@ -199,15 +199,15 @@ def test_build_signal_output_plus_strategy_is_a_valid_create_signal_dict(engine,
     assert sig_id
 
 
-def test_ml_context_fields_are_not_valid_gdc_signals_columns(fresh_db):
+def test_ml_context_fields_are_not_valid_re_signals_columns(fresh_db):
     """Documents exactly which fields must stay out of create_signal()'s
     dict -- these are extract_features() inputs only, never persisted as
     their own columns (the feature VECTOR is stored separately via
     store_ml_features)."""
     ml_only_fields = {
         "news_proximity_norm", "regime_score", "equity_drawdown_pct",
-        "vip_discipline_score", "vip_aggression_score",
-        "minutes_since_last_vip", "vip_signals_today", "concurrent_agreement",
+        "ref_discipline_score", "ref_aggression_score",
+        "minutes_since_last_ref", "ref_signals_today", "concurrent_agreement",
     }
     for field in ml_only_fields:
         with pytest.raises(Exception, match="has no column named"):

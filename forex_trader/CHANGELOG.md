@@ -9,7 +9,7 @@
 - Added R:R (reward:risk) column to Trade History, computed per trade from its own entry/stop/TP1 levels
 - Fixed Max TP Hit not populating for trades opened by the other paired node — now falls back to the cross-node consolidated ledger
 
-### GD Copy Engine
+### Reversal Engine
 - Recalibrated signal-scoring weights against a backtest of 767 real Gold Diggers VIP/GD2 signals — round-number levels (round_5 especially) weighted up, Asia range/swing levels weighted down to match measured real-world hit rates
 - Fixed nightly research silently failing on high-message nights — AI call timeout widened from 60s to 240s, plus a dedicated failure-alert email
 
@@ -18,7 +18,7 @@
 
 ## v0.7.1 — ML Engine Overhaul, Signal Bus & Silent Mac Launcher
 
-### Signal generator ML engines (all three: Bounce, Breakout, GD Copy)
+### Signal generator ML engines (all three: Bounce, Breakout, Reversal Engine)
 - Switched from binary win/loss classifier to R-multiple regressor (LightGBM/SGDRegressor)
 - Gate threshold changed from probability > 0.5 to predicted R > 0.0
 - Lot sizing now scales with predicted R-multiple (0.5× to 1.3×) when model is trained
@@ -59,8 +59,8 @@
 - Push updates to remote clients directly from the admin panel
 - Remote client agent runs on all instances, auto-reconnects, applies pushed updates and restarts
 - Settings > Update: shows app version, connection status, registration token, changelog
-- GD Copy Engine: reverse-engineers Gold Diggers VIP methodology (Asia range, swing levels, round numbers)
-- GD Copy Engine: ML correlation tracking vs real VIP signals
+- Reversal Engine: reverse-engineers Gold Diggers VIP methodology (Asia range, swing levels, round numbers)
+- Reversal Engine: ML correlation tracking vs real VIP signals
 - Performance heatmap: AI analysis panel (Claude-powered, cached daily at 8am)
 - AI trade analysis: TP1 = win evaluation, SL width analysis, entry drift = latency context
 - AI trade analysis: signal generator development section (ML progress, self-learning assessment)

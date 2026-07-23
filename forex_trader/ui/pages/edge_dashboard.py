@@ -29,8 +29,8 @@ _ENGINES: dict[str, dict] = {
         "db": "test_signal.db", "table": "test_signals",
         "pnl": "pnl_dollars", "tcol": "COALESCE(trigger_time, close_time)",
     },
-    "GD Copy": {
-        "db": "gd_copy_signal.db", "table": "gdc_signals",
+    "Reversal Engine": {
+        "db": "reversal_engine.db", "table": "re_signals",
         "pnl": "net_pnl_dollars", "tcol": "COALESCE(trigger_time, close_time)",
     },
 }

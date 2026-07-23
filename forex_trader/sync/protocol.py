@@ -23,11 +23,11 @@ MSG_PING              = "ping"
 MSG_PONG              = "pong"
 
 # Full signal-generator stats (win rates, performance breakdowns, ML learning
-# panels) for the Breakout/Bounce/GD Copy engines — sent far less often than
+# panels) for the Breakout/Bounce/Reversal Engines — sent far less often than
 # the 3s status heartbeat since this data only changes when a signal closes
 # or a periodic ML retrain happens. Deliberately excludes cycle logs (raw
 # per-cycle diagnostic dumps, not a "progress" metric).
-MSG_SIGNAL_GEN_STATS = "signal_gen_stats"   # VPS -> Mac: {"breakout": {...}, "bounce": {...}, "gd_copy": {...}}
+MSG_SIGNAL_GEN_STATS = "signal_gen_stats"   # VPS -> Mac: {"breakout": {...}, "bounce": {...}, "reversal_engine": {...}}
 
 # ── Settings sync (VPS is authoritative) ─────────────────────────────────────
 MSG_SETTINGS_PROPOSE = "settings_propose" # Mac -> VPS: "please apply this change"
@@ -62,7 +62,7 @@ MSG_TRADING_SCHEDULE_PROPOSE = "trading_schedule_propose"  # Mac -> VPS
 MSG_TRADING_SCHEDULE_STATE   = "trading_schedule_state"    # VPS -> Mac: full confirmed snapshot
 
 # Strategy Parameters (app_config "strategy_params_<strategy>" per fixed-
-# parameter strategy -- Conservative/Scalp Runner/GD VIP Runner/Adaptive
+# parameter strategy -- Conservative/Scalp Runner/Reversal Runner/Adaptive
 # Runner/Adaptive Runner 2's live SL/TP values, core_strategy_params.py) --
 # same one-combined-snapshot-per-message shape as Trading Schedule above:
 # all 5 strategies' values are proposed/confirmed together, not as
@@ -81,10 +81,10 @@ MSG_RESUME_ACK        = "resume_ack"        # VPS -> Mac: resumed accepting new 
 
 # ── Remote engine control (Signal Generator panels, Remote mode) ────────────
 # When this node is in Remote mode, the Start/Stop/Run Now buttons on the
-# Breakout/Bounce/GD Copy panels must act on the VPS's own engine instance,
+# Breakout/Bounce/Reversal Engine panels must act on the VPS's own engine instance,
 # not this node's own (stood-down) local one — otherwise "Start Engine"
 # silently does nothing useful while looking like it worked.
-MSG_ENGINE_CONTROL     = "engine_control"      # Mac -> VPS: {"engine": "gd_copy", "action": "start"/"stop"/"run_now"}
+MSG_ENGINE_CONTROL     = "engine_control"      # Mac -> VPS: {"engine": "reversal_engine", "action": "start"/"stop"/"run_now"}
 MSG_ENGINE_CONTROL_ACK = "engine_control_ack"  # VPS -> Mac: {"engine", "action", "is_running", "error"?}
 
 # Same problem as engine control above, for the Trading tab's manual "Market
@@ -96,7 +96,7 @@ MSG_MARKET_ORDER_ACK = "market_order_ack"  # VPS -> Mac: {"result": {...}} or {"
 
 # Centralized signal generation (Settings > Remote Node > "Generate signals on
 # this node only") — a fully-resolved trade decision from one of the Mac's own
-# generators (Breakout/TestSignal/GDCopy/GD2-GD-VIP), forwarded to the VPS for
+# generators (Breakout/TestSignal/REopy/GD2-GD-VIP), forwarded to the VPS for
 # execution because the VPS has stopped analyzing anything itself under this
 # mode (see core.database.should_generate_signals_here). Unlike MSG_MARKET_ORDER
 # (a raw manual order), this carries open_trade()'s full parameter set — the

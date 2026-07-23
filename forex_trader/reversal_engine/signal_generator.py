@@ -1,10 +1,10 @@
 """
-Signal construction for GD Copy engine.
+Signal construction for Reversal Engine.
 
 Builds signals that match the Gold Diggers VIP format exactly:
   - 2-4pt entry zone
   - SL 4pts below zone (modal value from 294-signal analysis)
-  - TP1-TP8 cascade matching GD VIP spacing pattern
+  - TP1-TP8 cascade matching the reference channel spacing pattern
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import hashlib
 import time
 
 
-# GD VIP modal SL distances by bias strength
+# the reference channel modal SL distances by bias strength
 _SL_DIST_BY_SCORE = {
     "high":   7,   # score > 0.85 — wider SL for strong levels
     "medium": 5,   # score 0.65-0.85
@@ -20,17 +20,17 @@ _SL_DIST_BY_SCORE = {
 }
 
 # TP cascade offsets from entry_mid (points)
-# Derived from GD VIP TP spacing analysis: TP1-TP7 gaps [2,2,2,2,2,4] or [1,1,1,2,3,5]
+# Derived from the reference channel TP spacing analysis: TP1-TP7 gaps [2,2,2,2,2,4] or [1,1,1,2,3,5]
 # We use a slightly wider cascade to capture more of the move
 _TP_OFFSETS = [3, 4, 5, 6, 8, 10, 15, 30]
 
 # Entry zone half-width
-_ZONE_HALF = 2.0  # 4pt zone total (matches GD VIP median 3pt but rounds nicely)
+_ZONE_HALF = 2.0  # 4pt zone total (matches the reference channel median 3pt but rounds nicely)
 
 
 def make_signal_ref() -> str:
-    raw = f"GDC-{time.time()}"
-    return "GDC-" + hashlib.md5(raw.encode()).hexdigest()[:6].upper()
+    raw = f"RE-{time.time()}"
+    return "RE-" + hashlib.md5(raw.encode()).hexdigest()[:6].upper()
 
 
 def entry_zone_from_level(level_price: float, atr: float, direction: str) -> tuple[float, float]:
@@ -57,10 +57,10 @@ def entry_zone_from_level(level_price: float, atr: float, direction: str) -> tup
 
 def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float) -> dict:
     """
-    Build the 8-level TP cascade matching GD VIP format.
+    Build the 8-level TP cascade matching the reference channel format.
 
     TPs are placed at fixed offsets from entry mid.
-    Uses GD VIP observed spacing but scales with sl_dist for proportionality.
+    Uses the reference channel observed spacing but scales with sl_dist for proportionality.
     """
     tps = {}
     for i, offset in enumerate(_TP_OFFSETS, start=1):
@@ -71,7 +71,7 @@ def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float) -> di
     return tps
 
 
-# GD2/Institutional TP structure — NOT the VIP 8-level ladder. Four weeks of
+# GD2/Institutional TP structure — NOT the REF 8-level ladder. Four weeks of
 # real follow-up messages show a scale-out-then-breakeven playbook instead:
 # "+30 pips from best entries, making my trade risk free by taking partial
 # profits" (TP1, partial + SL->BE), "Close your first entries and set

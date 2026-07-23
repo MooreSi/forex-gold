@@ -27,7 +27,7 @@ log = logging.getLogger("sync")
 _MODEL_GLOBS = (
     "bo_ml_*.joblib",
     "ml_signal_*.joblib",
-    "gdc_ml_*.pkl",
+    "re_ml_*.pkl",
 )
 
 

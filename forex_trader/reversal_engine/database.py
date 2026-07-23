@@ -1,7 +1,7 @@
 """
-Isolated SQLite store for the GD Copy signal engine.
+Isolated SQLite store for the Reversal Engine signal engine.
 
-All tables are prefixed gdc_ and live in gd_copy_signal.db, completely
+All tables are prefixed re_ and live in reversal_engine.db, completely
 separate from the main forex_trader.db, bounce engine, and breakout engine.
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _conn():
 def _create_schema() -> None:
     with _conn() as con:
         con.executescript("""
-        CREATE TABLE IF NOT EXISTS gdc_signals (
+        CREATE TABLE IF NOT EXISTS re_signals (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at      REAL    NOT NULL,
             signal_ref      TEXT    UNIQUE,
@@ -91,13 +91,13 @@ def _create_schema() -> None:
             vantage_signal_id TEXT,
             live_exec_status TEXT,
             strategy        TEXT    DEFAULT 'signal_climber',
-            correlated_vip_signal_id TEXT,
+            correlated_ref_signal_id TEXT,
             correlation_time_delta_s REAL,
             correlation_distance_pts REAL,
             correlation_confirmed INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_levels (
+        CREATE TABLE IF NOT EXISTS re_levels (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             updated_at  REAL,
             level_type  TEXT,
@@ -109,18 +109,18 @@ def _create_schema() -> None:
             notes       TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_correlation (
+        CREATE TABLE IF NOT EXISTS re_correlation (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             date            TEXT UNIQUE,
-            gdc_signals_sent INTEGER DEFAULT 0,
-            gdc_correlated  INTEGER DEFAULT 0,
-            vip_signals_sent INTEGER DEFAULT 0,
-            vip_predicted   INTEGER DEFAULT 0,
+            re_signals_sent INTEGER DEFAULT 0,
+            re_correlated  INTEGER DEFAULT 0,
+            ref_signals_sent INTEGER DEFAULT 0,
+            ref_predicted   INTEGER DEFAULT 0,
             avg_lead_time_s REAL,
             correlation_rate REAL
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_analysis_log (
+        CREATE TABLE IF NOT EXISTS re_analysis_log (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             ts          REAL,
             session     TEXT,
@@ -133,12 +133,12 @@ def _create_schema() -> None:
             reason      TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_config (
+        CREATE TABLE IF NOT EXISTS re_config (
             key     TEXT PRIMARY KEY,
             value   TEXT NOT NULL DEFAULT ''
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_balance_log (
+        CREATE TABLE IF NOT EXISTS re_balance_log (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             ts          REAL,
             balance     REAL,
@@ -147,18 +147,18 @@ def _create_schema() -> None:
             signal_id   INTEGER
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_near_miss (
+        CREATE TABLE IF NOT EXISTS re_near_miss (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             ts              REAL,
-            gdc_signal_id   INTEGER,
-            vip_signal_id   TEXT,
+            re_signal_id   INTEGER,
+            ref_signal_id   TEXT,
             direction       TEXT,
             time_delta_s    REAL,
             distance_pts    REAL,
             reason          TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS gdc_daily_research (
+        CREATE TABLE IF NOT EXISTS re_daily_research (
             date                TEXT PRIMARY KEY,
             discipline_score    REAL,
             aggression_score    REAL,
@@ -175,25 +175,25 @@ def _create_schema() -> None:
 
 
 def _run_migrations() -> None:
-    # Ladder scale-out support: partials banked at TP1/TP4 (VIP-style) with the
+    # Ladder scale-out support: partials banked at TP1/TP4 (REF-style) with the
     # remainder riding to TP7. max_tp_hit records ladder progress for analytics
-    # and honest win-rate accounting (TP1 touch = win, like the VIP channel).
+    # and honest win-rate accounting (TP1 touch = win, like the REF channel).
     _migrations = [
-        "ALTER TABLE gdc_signals ADD COLUMN partial_pnl_dollars REAL DEFAULT 0",
-        "ALTER TABLE gdc_signals ADD COLUMN remaining_frac REAL DEFAULT 1.0",
-        "ALTER TABLE gdc_signals ADD COLUMN max_tp_hit INTEGER DEFAULT 0",
+        "ALTER TABLE re_signals ADD COLUMN partial_pnl_dollars REAL DEFAULT 0",
+        "ALTER TABLE re_signals ADD COLUMN remaining_frac REAL DEFAULT 1.0",
+        "ALTER TABLE re_signals ADD COLUMN max_tp_hit INTEGER DEFAULT 0",
         # Which real channel this signal is modelled on -- added 2026-07 when
-        # GD Copy grew a second profile (Gold Diggers 2.0 / Institutional,
+        # Reversal Engine grew a second profile (Gold Diggers 2.0 / Institutional,
         # via the ICT Unicorn detector in ict_patterns.py) alongside the
-        # original Gold Diggers VIP one. correlated_vip_signal_id is reused
+        # original Gold Diggers VIP one. correlated_ref_signal_id is reused
         # generically for whichever channel this row's source_channel says,
         # to avoid a second parallel correlation-column set.
-        "ALTER TABLE gdc_signals ADD COLUMN source_channel TEXT DEFAULT 'Gold Diggers VIP'",
+        "ALTER TABLE re_signals ADD COLUMN source_channel TEXT DEFAULT 'Gold Diggers VIP'",
         # Fresh fill-time re-evaluation (2026-07-17) — see
         # store_ml_prob_at_fill and engine.py's _try_live_execute. Separate
         # from ml_prob/htf_bias (creation-time) so both remain visible.
-        "ALTER TABLE gdc_signals ADD COLUMN ml_prob_at_fill REAL",
-        "ALTER TABLE gdc_signals ADD COLUMN htf_bias_at_fill TEXT",
+        "ALTER TABLE re_signals ADD COLUMN ml_prob_at_fill REAL",
+        "ALTER TABLE re_signals ADD COLUMN htf_bias_at_fill TEXT",
     ]
     with _conn() as con:
         for stmt in _migrations:
@@ -208,7 +208,7 @@ def _run_migrations() -> None:
 def get_config(key: str, default: str = "") -> str:
     try:
         with _conn() as con:
-            row = con.execute("SELECT value FROM gdc_config WHERE key=?", (key,)).fetchone()
+            row = con.execute("SELECT value FROM re_config WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
     except Exception:
         return default
@@ -217,7 +217,7 @@ def get_config(key: str, default: str = "") -> str:
 def set_config(key: str, value: str) -> None:
     with _conn() as con:
         con.execute(
-            "INSERT INTO gdc_config (key,value) VALUES (?,?) "
+            "INSERT INTO re_config (key,value) VALUES (?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, str(value)),
         )
@@ -238,7 +238,7 @@ def _update_balance(delta: float, reason: str, signal_id: Optional[int] = None) 
     set_config("virtual_balance", str(round(bal, 4)))
     with _conn() as con:
         con.execute(
-            "INSERT INTO gdc_balance_log (ts,balance,change_amt,reason,signal_id) VALUES (?,?,?,?,?)",
+            "INSERT INTO re_balance_log (ts,balance,change_amt,reason,signal_id) VALUES (?,?,?,?,?)",
             (time.time(), bal, delta, reason, signal_id),
         )
     return bal
@@ -248,7 +248,7 @@ def reconcile_balance_with_trades() -> Optional[float]:
     try:
         with _conn() as con:
             row = con.execute(
-                "SELECT COALESCE(SUM(net_pnl_dollars),0) FROM gdc_signals "
+                "SELECT COALESCE(SUM(net_pnl_dollars),0) FROM re_signals "
                 "WHERE status='closed' AND net_pnl_dollars IS NOT NULL"
             ).fetchone()
         total_pnl = float(row[0]) if row and row[0] else 0.0
@@ -256,10 +256,10 @@ def reconcile_balance_with_trades() -> Optional[float]:
         current = get_virtual_balance()
         if abs(correct - current) > 0.01:
             set_config("virtual_balance", str(correct))
-            _log.info("[GDC-DB] Balance reconciled: %.2f → %.2f", current, correct)
+            _log.info("[RE-DB] Balance reconciled: %.2f → %.2f", current, correct)
         return correct
     except Exception as exc:
-        _log.debug("[GDC-DB] reconcile failed: %s", exc)
+        _log.debug("[RE-DB] reconcile failed: %s", exc)
         return None
 
 
@@ -267,7 +267,7 @@ def get_max_drawdown() -> float:
     try:
         with _conn() as con:
             rows = con.execute(
-                "SELECT balance FROM gdc_balance_log ORDER BY ts"
+                "SELECT balance FROM re_balance_log ORDER BY ts"
             ).fetchall()
         if not rows:
             return 0.0
@@ -293,7 +293,7 @@ def create_signal(data: dict) -> int:
     placeholders = ", ".join("?" for _ in data)
     with _conn() as con:
         cur = con.execute(
-            f"INSERT OR IGNORE INTO gdc_signals ({cols}) VALUES ({placeholders})",
+            f"INSERT OR IGNORE INTO re_signals ({cols}) VALUES ({placeholders})",
             list(data.values()),
         )
     return cur.lastrowid or 0
@@ -302,7 +302,7 @@ def create_signal(data: dict) -> int:
 def get_open_signals() -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_signals WHERE status IN ('pending','triggered') ORDER BY created_at DESC"
+            "SELECT * FROM re_signals WHERE status IN ('pending','triggered') ORDER BY created_at DESC"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -310,21 +310,21 @@ def get_open_signals() -> list[dict]:
 def get_all_signals(limit: int = 100) -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_signals ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM re_signals ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_signal_by_id(sig_id: int) -> Optional[dict]:
     with _conn() as con:
-        row = con.execute("SELECT * FROM gdc_signals WHERE id=?", (sig_id,)).fetchone()
+        row = con.execute("SELECT * FROM re_signals WHERE id=?", (sig_id,)).fetchone()
     return dict(row) if row else None
 
 
 def trigger_signal(sig_id: int, price: float) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET status='triggered', trigger_price=?, trigger_time=? WHERE id=?",
+            "UPDATE re_signals SET status='triggered', trigger_price=?, trigger_time=? WHERE id=?",
             (price, time.time(), sig_id),
         )
 
@@ -343,13 +343,13 @@ def close_signal(sig_id: int, close_price: float, outcome: str,
         balance_delta = net_pnl_dollars
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET status='closed', outcome=?, close_price=?, close_time=?, "
+            "UPDATE re_signals SET status='closed', outcome=?, close_price=?, close_time=?, "
             "pnl_pts=?, pnl_dollars=?, net_pnl_dollars=? WHERE id=?",
             (outcome, close_price, now, pnl_pts, pnl_dollars, net_pnl_dollars, sig_id),
         )
     bal = _update_balance(balance_delta, f"signal_close_{outcome}", sig_id)
     with _conn() as con:
-        con.execute("UPDATE gdc_signals SET balance_after=? WHERE id=?", (bal, sig_id))
+        con.execute("UPDATE re_signals SET balance_after=? WHERE id=?", (bal, sig_id))
 
 
 def move_sl_to_be(sig_id: int, be_price: float | None = None) -> None:
@@ -357,13 +357,13 @@ def move_sl_to_be(sig_id: int, be_price: float | None = None) -> None:
     BE exit on the remaining fraction nets $0 instead of losing the spread."""
     with _conn() as con:
         row = con.execute(
-            "SELECT entry_low, entry_high FROM gdc_signals WHERE id=?", (sig_id,)
+            "SELECT entry_low, entry_high FROM re_signals WHERE id=?", (sig_id,)
         ).fetchone()
         if not row:
             return
         px = be_price if be_price is not None else (row[0] + row[1]) / 2
         con.execute(
-            "UPDATE gdc_signals SET stop_loss=?, sl_moved_to_be=1 WHERE id=?",
+            "UPDATE re_signals SET stop_loss=?, sl_moved_to_be=1 WHERE id=?",
             (round(px, 2), sig_id),
         )
 
@@ -372,7 +372,7 @@ def set_stop_loss(sig_id: int, price: float) -> None:
     """Trail the stop (e.g. to TP1 after the TP4 partial books)."""
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET stop_loss=? WHERE id=?", (round(price, 2), sig_id)
+            "UPDATE re_signals SET stop_loss=? WHERE id=?", (round(price, 2), sig_id)
         )
 
 
@@ -384,7 +384,7 @@ def book_partial_close(sig_id: int, leg_net_dollars: float, frac_closed: float,
     with _conn() as con:
         row = con.execute(
             "SELECT remaining_frac, partial_pnl_dollars, max_tp_hit "
-            "FROM gdc_signals WHERE id=?", (sig_id,)
+            "FROM re_signals WHERE id=?", (sig_id,)
         ).fetchone()
         if not row:
             return 0.0
@@ -393,19 +393,19 @@ def book_partial_close(sig_id: int, leg_net_dollars: float, frac_closed: float,
         max_tp    = int(row[2] or 0)
         new_remaining = round(max(0.0, remaining - frac_closed), 4)
         con.execute(
-            "UPDATE gdc_signals SET partial_pnl_dollars=?, remaining_frac=?, max_tp_hit=? "
+            "UPDATE re_signals SET partial_pnl_dollars=?, remaining_frac=?, max_tp_hit=? "
             "WHERE id=?",
             (round(booked + leg_net_dollars, 2), new_remaining,
              max(max_tp, tp_idx), sig_id),
         )
-    _update_balance(leg_net_dollars, f"gdc_partial_tp{tp_idx}", sig_id)
+    _update_balance(leg_net_dollars, f"re_partial_tp{tp_idx}", sig_id)
     return new_remaining
 
 
 def expire_signal(sig_id: int, reason: str) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET status='expired', outcome='expired', close_time=? WHERE id=?",
+            "UPDATE re_signals SET status='expired', outcome='expired', close_time=? WHERE id=?",
             (time.time(), sig_id),
         )
 
@@ -413,7 +413,7 @@ def expire_signal(sig_id: int, reason: str) -> None:
 def store_ml_features(sig_id: int, features: list) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET ml_features_json=? WHERE id=?",
+            "UPDATE re_signals SET ml_features_json=? WHERE id=?",
             (json.dumps(features), sig_id),
         )
 
@@ -421,7 +421,7 @@ def store_ml_features(sig_id: int, features: list) -> None:
 def store_ml_prob(sig_id: int, prob: float) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET ml_prob=? WHERE id=?", (prob, sig_id)
+            "UPDATE re_signals SET ml_prob=? WHERE id=?", (prob, sig_id)
         )
 
 
@@ -433,37 +433,37 @@ def store_ml_prob_at_fill(sig_id: int, prob: float, htf_bias: str) -> None:
     (the creation-time values) so both are visible for comparison."""
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET ml_prob_at_fill=?, htf_bias_at_fill=? WHERE id=?",
+            "UPDATE re_signals SET ml_prob_at_fill=?, htf_bias_at_fill=? WHERE id=?",
             (prob, htf_bias, sig_id),
         )
 
 
-def update_correlation(sig_id: int, vip_signal_id: str,
+def update_correlation(sig_id: int, ref_signal_id: str,
                        time_delta_s: float, distance_pts: float) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET correlated_vip_signal_id=?, correlation_time_delta_s=?, "
+            "UPDATE re_signals SET correlated_ref_signal_id=?, correlation_time_delta_s=?, "
             "correlation_distance_pts=?, correlation_confirmed=1 WHERE id=?",
-            (vip_signal_id, time_delta_s, distance_pts, sig_id),
+            (ref_signal_id, time_delta_s, distance_pts, sig_id),
         )
 
 
-def log_near_miss(gdc_signal_id: int, vip_signal_id: str, direction: str,
+def log_near_miss(re_signal_id: int, ref_signal_id: str, direction: str,
                   time_delta_s: float, distance_pts: float, reason: str) -> None:
     """Record a correlation attempt that matched direction but missed the
     price/time match window — used to empirically tune the match thresholds.
-    Idempotent: each GDC/VIP pair is only recorded once."""
+    Idempotent: each RE/REF pair is only recorded once."""
     with _conn() as con:
         already = con.execute(
-            "SELECT id FROM gdc_near_miss WHERE gdc_signal_id=? AND vip_signal_id=?",
-            (gdc_signal_id, vip_signal_id),
+            "SELECT id FROM re_near_miss WHERE re_signal_id=? AND ref_signal_id=?",
+            (re_signal_id, ref_signal_id),
         ).fetchone()
         if already:
             return
         con.execute(
-            "INSERT INTO gdc_near_miss (ts, gdc_signal_id, vip_signal_id, direction, "
+            "INSERT INTO re_near_miss (ts, re_signal_id, ref_signal_id, direction, "
             "time_delta_s, distance_pts, reason) VALUES (?,?,?,?,?,?,?)",
-            (time.time(), gdc_signal_id, vip_signal_id, direction,
+            (time.time(), re_signal_id, ref_signal_id, direction,
              time_delta_s, distance_pts, reason),
         )
 
@@ -471,7 +471,7 @@ def log_near_miss(gdc_signal_id: int, vip_signal_id: str, direction: str,
 def get_near_misses(limit: int = 200) -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_near_miss ORDER BY ts DESC LIMIT ?", (limit,)
+            "SELECT * FROM re_near_miss ORDER BY ts DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -480,7 +480,7 @@ def update_live_exec(sig_id: int, mt5_ticket: Optional[int] = None,
                      vantage_sig_id: Optional[str] = None, status: str = "") -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_signals SET mt5_ticket=?, vantage_signal_id=?, live_exec_status=? WHERE id=?",
+            "UPDATE re_signals SET mt5_ticket=?, vantage_signal_id=?, live_exec_status=? WHERE id=?",
             (mt5_ticket, vantage_sig_id, status, sig_id),
         )
 
@@ -488,7 +488,7 @@ def update_live_exec(sig_id: int, mt5_ticket: Optional[int] = None,
 def get_ml_training_data() -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_signals WHERE status='closed' AND ml_features_json IS NOT NULL"
+            "SELECT * FROM re_signals WHERE status='closed' AND ml_features_json IS NOT NULL"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -501,7 +501,7 @@ def store_daily_research(date: str, discipline_score: float, aggression_score: f
     (INSERT OR REPLACE) rather than duplicating."""
     with _conn() as con:
         con.execute(
-            "INSERT OR REPLACE INTO gdc_daily_research "
+            "INSERT OR REPLACE INTO re_daily_research "
             "(date, discipline_score, aggression_score, summary, notable_trades, "
             "entry_logic_notes, risk_mgmt_notes, n_messages, n_images_analyzed, raw_json, created_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -514,7 +514,7 @@ def store_daily_research(date: str, discipline_score: float, aggression_score: f
 def get_latest_daily_research() -> Optional[dict]:
     with _conn() as con:
         row = con.execute(
-            "SELECT * FROM gdc_daily_research ORDER BY date DESC LIMIT 1"
+            "SELECT * FROM re_daily_research ORDER BY date DESC LIMIT 1"
         ).fetchone()
     return dict(row) if row else None
 
@@ -522,7 +522,7 @@ def get_latest_daily_research() -> Optional[dict]:
 def get_recent_win_rate(n: int = 20) -> float:
     with _conn() as con:
         rows = con.execute(
-            "SELECT outcome FROM gdc_signals WHERE status='closed' ORDER BY close_time DESC LIMIT ?",
+            "SELECT outcome FROM re_signals WHERE status='closed' ORDER BY close_time DESC LIMIT ?",
             (n,),
         ).fetchall()
     if not rows:
@@ -545,7 +545,7 @@ def get_stats() -> dict:
                     AVG(CASE WHEN status='closed' THEN net_pnl_dollars END) as avg_pnl,
                     SUM(CASE WHEN status='closed' THEN net_pnl_dollars ELSE 0 END) as total_pnl,
                     SUM(CASE WHEN correlation_confirmed=1 THEN 1 ELSE 0 END) as correlated
-                FROM gdc_signals
+                FROM re_signals
             """).fetchone()
         closed = (r["wins"] or 0) + (r["losses"] or 0) + (r["bes"] or 0)
         win_rate = (r["wins"] / closed * 100) if closed > 0 else 0.0
@@ -571,8 +571,8 @@ def get_stats() -> dict:
 
 # ── Performance breakdowns ─────────────────────────────────────────────────────
 # Same shape as breakout_signal/database.py's get_perf_by_*() — feeds the
-# Performance Analytics section in the GD Copy UI panel (parity with Bounce/
-# Breakout, which already had this; GD Copy didn't).
+# Performance Analytics section in the Reversal Engine UI panel (parity with Bounce/
+# Breakout, which already had this; Reversal Engine didn't).
 
 def get_perf_by_session() -> list[dict]:
     with _conn() as conn:
@@ -582,7 +582,7 @@ def get_perf_by_session() -> list[dict]:
                    SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
                    AVG(net_pnl_dollars) as avg_pnl,
                    SUM(net_pnl_dollars) as total_pnl
-            FROM gdc_signals WHERE status='closed' AND outcome IN ('win','loss','be')
+            FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
             GROUP BY session ORDER BY total_pnl DESC
         """).fetchall()
     return [dict(r) for r in rows]
@@ -596,7 +596,7 @@ def get_perf_by_bias() -> list[dict]:
                    SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
                    AVG(net_pnl_dollars) as avg_pnl,
                    SUM(net_pnl_dollars) as total_pnl
-            FROM gdc_signals WHERE status='closed' AND outcome IN ('win','loss','be')
+            FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
             GROUP BY htf_bias ORDER BY total_pnl DESC
         """).fetchall()
     return [dict(r) for r in rows]
@@ -610,7 +610,7 @@ def get_perf_by_level_type() -> list[dict]:
                    SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
                    AVG(net_pnl_dollars) as avg_pnl,
                    SUM(net_pnl_dollars) as total_pnl
-            FROM gdc_signals WHERE status='closed' AND outcome IN ('win','loss','be')
+            FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
             GROUP BY level_type ORDER BY total_pnl DESC
         """).fetchall()
     return [dict(r) for r in rows]
@@ -621,19 +621,19 @@ def get_perf_by_level_type() -> list[dict]:
 def upsert_daily_correlation(date: str, **kwargs) -> None:
     with _conn() as con:
         existing = con.execute(
-            "SELECT * FROM gdc_correlation WHERE date=?", (date,)
+            "SELECT * FROM re_correlation WHERE date=?", (date,)
         ).fetchone()
         if existing:
             sets = ", ".join(f"{k}=?" for k in kwargs)
             con.execute(
-                f"UPDATE gdc_correlation SET {sets} WHERE date=?",
+                f"UPDATE re_correlation SET {sets} WHERE date=?",
                 list(kwargs.values()) + [date],
             )
         else:
             kwargs["date"] = date
             cols = ", ".join(kwargs.keys())
             ph = ", ".join("?" for _ in kwargs)
-            con.execute(f"INSERT INTO gdc_correlation ({cols}) VALUES ({ph})", list(kwargs.values()))
+            con.execute(f"INSERT INTO re_correlation ({cols}) VALUES ({ph})", list(kwargs.values()))
 
 
 def count_today_signals() -> int:
@@ -645,7 +645,7 @@ def count_today_signals() -> int:
         ).timestamp()
         with _conn() as con:
             row = con.execute(
-                "SELECT COUNT(*) FROM gdc_signals WHERE created_at >= ?", (today_start,)
+                "SELECT COUNT(*) FROM re_signals WHERE created_at >= ?", (today_start,)
             ).fetchone()
         return int(row[0]) if row else 0
     except Exception:
@@ -661,7 +661,7 @@ def count_today_correlated() -> int:
         ).timestamp()
         with _conn() as con:
             row = con.execute(
-                "SELECT COUNT(*) FROM gdc_signals WHERE created_at >= ? AND correlation_confirmed=1",
+                "SELECT COUNT(*) FROM re_signals WHERE created_at >= ? AND correlation_confirmed=1",
                 (today_start,),
             ).fetchone()
         return int(row[0]) if row else 0
@@ -672,7 +672,7 @@ def count_today_correlated() -> int:
 def get_correlation_history(days: int = 30) -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_correlation ORDER BY date DESC LIMIT ?", (days,)
+            "SELECT * FROM re_correlation ORDER BY date DESC LIMIT ?", (days,)
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -684,17 +684,17 @@ def upsert_level(level_type: str, price: float, direction: str,
     price = round(price, 2)
     with _conn() as con:
         existing = con.execute(
-            "SELECT id, strength FROM gdc_levels WHERE level_type=? AND ABS(price-?)<=1 AND direction=?",
+            "SELECT id, strength FROM re_levels WHERE level_type=? AND ABS(price-?)<=1 AND direction=?",
             (level_type, price, direction),
         ).fetchone()
         if existing:
             con.execute(
-                "UPDATE gdc_levels SET strength=strength+1, updated_at=?, price=?, active=1 WHERE id=?",
+                "UPDATE re_levels SET strength=strength+1, updated_at=?, price=?, active=1 WHERE id=?",
                 (time.time(), price, existing[0]),
             )
         else:
             con.execute(
-                "INSERT INTO gdc_levels (updated_at,level_type,price,direction,source,notes) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO re_levels (updated_at,level_type,price,direction,source,notes) VALUES (?,?,?,?,?,?)",
                 (time.time(), level_type, price, direction, source, notes),
             )
 
@@ -702,7 +702,7 @@ def upsert_level(level_type: str, price: float, direction: str,
 def get_active_levels() -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_levels WHERE active=1 ORDER BY updated_at DESC LIMIT 50"
+            "SELECT * FROM re_levels WHERE active=1 ORDER BY updated_at DESC LIMIT 50"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -711,7 +711,7 @@ def deactivate_old_levels(older_than_hours: int = 48) -> None:
     cutoff = time.time() - older_than_hours * 3600
     with _conn() as con:
         con.execute(
-            "UPDATE gdc_levels SET active=0 WHERE updated_at < ? AND source != 'vip'",
+            "UPDATE re_levels SET active=0 WHERE updated_at < ? AND source != 'ref'",
             (cutoff,),
         )
 
@@ -722,7 +722,7 @@ def log_analysis(entry: dict) -> None:
     try:
         with _conn() as con:
             con.execute(
-                "INSERT INTO gdc_analysis_log (ts,session,htf_bias,price,atr,adx,levels_json,result,reason) "
+                "INSERT INTO re_analysis_log (ts,session,htf_bias,price,atr,adx,levels_json,result,reason) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     entry.get("ts", time.time()),
@@ -733,13 +733,13 @@ def log_analysis(entry: dict) -> None:
                 ),
             )
     except Exception as exc:
-        _log.debug("[GDC-DB] log_analysis error: %s", exc)
+        _log.debug("[RE-DB] log_analysis error: %s", exc)
 
 
 def get_analysis_log(limit: int = 50) -> list[dict]:
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM gdc_analysis_log ORDER BY ts DESC LIMIT ?", (limit,)
+            "SELECT * FROM re_analysis_log ORDER BY ts DESC LIMIT ?", (limit,)
         ).fetchall()
     result = []
     for r in rows:

@@ -50,7 +50,7 @@ async def apply_followup_to_instant_trade(
     if instant_trade.get("strategy") in _IME_SELF_MANAGED:
         # Guard: the IME path previously ignored channel strategy overrides and
         # opened trades with the global default (e.g. conservative) even when the
-        # channel explicitly uses a different strategy (e.g. gd_vip_runner).
+        # channel explicitly uses a different strategy (e.g. reversal_runner).
         # Detect this mismatch now: if the channel override points to a different
         # strategy, correct the trade's strategy record and fall through to apply
         # the actual SL/TP from the full signal.

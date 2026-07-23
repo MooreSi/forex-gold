@@ -6,7 +6,7 @@ the single to_db_thread() worker) kept silently reading/writing the OLD
 database file. This meant _apply_schema() itself could reuse a stale
 connection and never actually touch the new file, leaving it schema-less
 until the next full process restart -- and any code that opens a fresh
-connection against the new path (e.g. gd_copy_signal_correlate.py's VIP
+connection against the new path (e.g. reversal_engine_correlate.py's VIP
 fetch) broke immediately with "no such table".
 """
 import asyncio

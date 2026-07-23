@@ -28,7 +28,7 @@ from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP,
     STRATEGY_PROTECTED_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
-    STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     STRATEGY_NAMES,
 )
 
@@ -45,7 +45,7 @@ async def cmd_help(args: list) -> str:
         "/close all — Close all open trades\n"
         "/close `<ticket>` — Close a specific trade\n"
         "/strategy `<name>` — Change strategy:\n"
-        "    `scale_out`  `be_runner`  `trail_stop`  `protected_scale`  `conservative`  `no_sl_scale`  `conservative_trial` (alias: `ct`)  `scalp_runner`  `signal_climber` (alias: `climber`)  `gd_vip_runner` (alias: `gdvr`)  `adaptive_runner` (alias: `adaptive`)  `adaptive_runner_2` (alias: `ar2`)\n"
+        "    `scale_out`  `be_runner`  `trail_stop`  `protected_scale`  `conservative`  `no_sl_scale`  `conservative_trial` (alias: `ct`)  `scalp_runner`  `signal_climber` (alias: `climber`)  `reversal_runner` (alias: `rr`)  `adaptive_runner` (alias: `adaptive`)  `adaptive_runner_2` (alias: `ar2`)\n"
         "/risk `<pct>` — Set risk per trade (e.g. `/risk 1.5`)\n"
         "/marketbuy — Buy XAUUSD at current market price\n"
         "/marketsell — Sell XAUUSD at current market price\n"
@@ -478,9 +478,9 @@ _STRATEGY_ALIASES = {
     "climber":              STRATEGY_SIGNAL_CLIMBER,
     "ladder":               STRATEGY_SIGNAL_CLIMBER,
     "sc":                   STRATEGY_SIGNAL_CLIMBER,
-    "gd_vip_runner":        STRATEGY_GD_VIP_RUNNER,
-    "gdvr":                 STRATEGY_GD_VIP_RUNNER,
-    "gvr":                  STRATEGY_GD_VIP_RUNNER,
+    "reversal_runner":        STRATEGY_REVERSAL_RUNNER,
+    "rr":                 STRATEGY_REVERSAL_RUNNER,
+    "rvr":                  STRATEGY_REVERSAL_RUNNER,
     "adaptive_runner":      STRATEGY_ADAPTIVE_RUNNER,
     "adaptive":             STRATEGY_ADAPTIVE_RUNNER,
     "ar":                   STRATEGY_ADAPTIVE_RUNNER,
@@ -506,14 +506,14 @@ async def cmd_strategy(args: list) -> str:
             "`conservative_trial` — Conservative Trial (ct)\n"
             "`scalp_runner` — Scalp Runner (scalp)\n"
             "`signal_climber` — Signal Climber (climber / ladder / sc)\n"
-            "`gd_vip_runner` — GD VIP Runner (gdvr / gvr) — SL widened min(4×, 20pt), "
+            "`reversal_runner` — Reversal Runner (rr / rvr) — SL widened min(4×, 20pt), "
             "signal's own TP ladder\n"
             "`adaptive_runner` — Adaptive Runner (adaptive / ar) — SL widened like GD VIP "
             "Runner but capped at 50% of the signal's final TP distance; backtested "
             "+$400/PF 1.80/5.8% max DD on 226 real Gold Diggers VIP/GD2 signals "
             "(2026-07-15), lowest drawdown of any strategy tested there\n"
             "`adaptive_runner_2` — Adaptive Runner 2 (adaptive2 / ar2) — fixed 10pt SL "
-            "(not derived from the signal at all), GD VIP Runner's back-loaded close "
+            "(not derived from the signal at all), Reversal Runner's back-loaded close "
             "schedule, BE at TP2 then trails to the midpoint of the two TPs before "
             "the one just hit (not the single previous TP price) — untested judgment "
             "call, not backtested"
@@ -526,7 +526,7 @@ async def cmd_strategy(args: list) -> str:
             f"Unknown strategy `{args[0]}`.\n"
             "Options: `scale_out`  `be_runner`  `trail_stop`  `protected_scale`"
             "  `conservative`  `no_sl_scale`  `conservative_trial`  `scalp_runner`"
-            "  `signal_climber`  `gd_vip_runner`  `adaptive_runner`  `adaptive_runner_2`"
+            "  `signal_climber`  `reversal_runner`  `adaptive_runner`  `adaptive_runner_2`"
         )
     db_module.update_risk_settings({"trade_strategy": strategy, "display_strategy_id": strategy})
     name = STRATEGY_NAMES.get(strategy, strategy)

@@ -6,7 +6,7 @@ levels became the signal (only on whether a live-money fill went ahead
 afterwards, via _try_live_execute's separate re-check). _run_cycle now
 builds up to _ML_CANDIDATE_POOL gate-passing candidates, feature-extracts
 and predicts each one, then calls this function to pick the winner."""
-from forex_trader.gd_copy_signal.gd_copy_signal_service import rank_eligible_candidates
+from forex_trader.reversal_engine.reversal_engine_service import rank_eligible_candidates
 
 
 def _candidate(level_price: float, prob):

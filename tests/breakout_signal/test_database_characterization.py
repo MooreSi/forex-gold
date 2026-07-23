@@ -216,7 +216,7 @@ def test_full_lifecycle_create_trigger_two_partials_close(fresh_db):
     remainder (34%).
 
     IMPORTANT -- this pins down a real bug in current behavior, not the
-    intended design. Unlike gd_copy_signal's close_signal (which takes a
+    intended design. Unlike reversal_engine's close_signal (which takes a
     separate `balance_delta` for only the still-unbanked leg),
     breakout_signal's close_signal applies the FULL `net_pnl_dollars` value
     as the balance delta. The real caller (engine.py's _close_and_learn)

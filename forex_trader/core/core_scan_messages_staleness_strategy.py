@@ -9,7 +9,7 @@ No MT5 order is ever placed, closed, or modified by either function.
 `engine_for_eval` is forwarded unchanged to
 `channel_strategy_ai.evaluate_signal_strategy`, which needs the full
 engine instance -- same "forward the engine through" pattern as
-`core_gd_copy_research.gd_copy_research_sweep`. `is_trading_paused_fn` is
+`core_reversal_research.reversal_engine_research_sweep`. `is_trading_paused_fn` is
 a required injected async callable bound to the caller's own
 `self.is_trading_paused`.
 """

@@ -26,7 +26,7 @@ BASE_DIR = Path(__file__).parent.parent  # project root — code only
 # "ForexTrader" folder, or a dev run here would boot against the live app's
 # real MT5 bridge, Telegram session, and remote-sync state (confirmed live
 # 2026-07-21: a smoke-test run reconnected the live Telegram session, wrote a
-# real signal row to the shared gd_copy_signal.db, and started the shared
+# real signal row to the shared reversal_engine.db, and started the shared
 # remote-admin server, all before this fix existed). "ForexTrader-Refactor2"
 # is a separate, genuinely empty folder by default -- override with the
 # FOREX_TRADER_DATA_DIR env var if a different location is ever needed.

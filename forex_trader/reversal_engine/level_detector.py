@@ -1,5 +1,5 @@
 """
-Level detection for GD Copy engine.
+Level detection for Reversal Engine.
 
 Identifies key support/resistance levels using two complementary
 methodologies, both reverse-engineered from real channel history:
@@ -13,7 +13,7 @@ methodologies, both reverse-engineered from real channel history:
   Gold Diggers 2.0 / Institutional style (added 2026-07, from four weeks of
   channel history including posted chart screenshots): a genuine ICT
   "Unicorn" setup — liquidity sweep, market structure shift, then an FVG
-  overlapping a breaker block — see gd_copy_signal.ict_patterns for the
+  overlapping a breaker block — see reversal_engine.ict_patterns for the
   detection logic and the evidence behind it (the channel's own charts run
   TradingView's FVG/iFVG indicator across multiple timeframes, mark equal
   highs/lows with "£" annotations, and one caption names the setup
@@ -29,7 +29,7 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.gd_copy_signal import ict_patterns as ict
+from forex_trader.reversal_engine import ict_patterns as ict
 
 _log = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ CONGESTION_RANGE_MULT = 2.5  # window's overall high-low range must be <= this m
 
 def get_congestion_zones(h1_candles: list[dict], lookback: int = SWING_LOOKBACK) -> list[dict]:
     """
-    Identify recent congestion/consolidation zones -- the fourth VIP-style
+    Identify recent congestion/consolidation zones -- the fourth REF-style
     level source alongside Asia range, swing points, and round numbers (see
     module docstring). Documented and scored (score_level's "congestion"
     type, 0.65 base) and referenced in ml_engine.FEATURE_NAMES since
@@ -242,7 +242,7 @@ def score_level(level: dict, current_price: float, htf_bias: str,
     """
     Score a candidate level 0.0-1.0.
 
-    Higher scores = more likely GD VIP would trade this level.
+    Higher scores = more likely the reference channel would trade this level.
 
     Recalibrated 2026-07-16 from a direct backtest of 767 real, fully-parsed
     Gold Diggers VIP/GD2 signal entries (2026-06-04 to 2026-07-15) against a
@@ -321,7 +321,7 @@ def get_unicorn_candidates(m15_candles: list[dict], current_price: float) -> lis
     GD2/Institutional-style candidate: a confirmed ICT Unicorn setup
     (liquidity sweep -> structure shift -> FVG/breaker confluence) on M15.
 
-    Unlike the VIP-style levels below (a static price the engine waits for
+    Unlike the REF-style levels below (a static price the engine waits for
     price to *approach*), a unicorn setup is only reported once fully
     confirmed — it's already a live, directional trigger, not a level to
     wait on. Scored high (0.80 base) since all three ICT stages already
@@ -355,7 +355,7 @@ def get_all_levels(h1_candles: list[dict], current_price: float) -> list[dict]:
     Every known candidate S/R level (asia/swing/round/congestion), deduped,
     with no proximity or score filtering applied -- the raw material
     get_candidate_levels() scores and truncates from. Exposed separately so
-    callers that need the full picture (e.g. classifying an arbitrary VIP
+    callers that need the full picture (e.g. classifying an arbitrary REF
     price against "what levels exist right now", not just the handful the
     bot itself was close enough to act on) don't have to reimplement the
     asia+swing+round+congestion assembly themselves.

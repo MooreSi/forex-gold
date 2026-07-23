@@ -29,7 +29,7 @@ from typing import Optional
 from forex_trader.core import database as db_module
 from forex_trader.core.models import (
     CONTRACT_SIZE, Tick,
-    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
@@ -180,14 +180,14 @@ def rg_size_and_check(*, direction: str, ref_price: float,
         )
 
     # (E) Minimum TP1 R:R — only when the strategy honours signal TPs.
-    # GD VIP Runner and Adaptive Runner deliberately widen SL well beyond
+    # Reversal Runner and Adaptive Runner deliberately widen SL well beyond
     # TP1 distance — real R:R is measured across the full ladder, not at
     # TP1 alone. Adaptive Runner 2's SL is a flat 10pt distance with zero
     # relationship to the signal's own TP1 target, so the same reasoning
     # applies even more directly.
     if tp1 is not None and strategy not in (
         STRATEGY_CONSERVATIVE_TRIAL,
-        STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+        STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     ):
         tp1_dist = abs(float(tp1) - float(ref_price))
         if tp1_dist / stop_dist < RG_MIN_TP1_RR:

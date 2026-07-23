@@ -25,7 +25,7 @@ from forex_trader.core.telegram_reader import TelegramReader
 
 import forex_trader.test_signal.test_signal_service as _test_engine_module
 import forex_trader.breakout_signal.breakout_signal_service as _breakout_engine_module
-import forex_trader.gd_copy_signal.gd_copy_signal_service as _gdc_engine_module
+import forex_trader.reversal_engine.reversal_engine_service as _re_engine_module
 import forex_trader.remote.client as _remote_client
 import forex_trader.remote.server as _remote_server
 from forex_trader.remote.auth import password_is_set
@@ -142,14 +142,14 @@ async def _signal_engine_watchdog_loop() -> None:
         except Exception as _e:
             log.debug("[AppWatchdog] Breakout health check error: %s", _e)
         try:
-            from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdcdb_wd
-            if _gdcdb_wd.get_config("gdc_user_stopped", "0") != "1":
-                gdc = _gdc_engine_module.get_instance()
-                if gdc and not gdc.is_running:
-                    log.warning("[AppWatchdog] GD Copy engine not running — auto-restarting")
-                    gdc.start()
+            from forex_trader.reversal_engine import reversal_engine_repo as _re_repo_wd
+            if _re_repo_wd.get_config("re_user_stopped", "0") != "1":
+                re_eng = _re_engine_module.get_instance()
+                if re_eng and not re_eng.is_running:
+                    log.warning("[AppWatchdog] Reversal Engine not running — auto-restarting")
+                    re_eng.start()
         except Exception as _e:
-            log.debug("[AppWatchdog] GD Copy health check error: %s", _e)
+            log.debug("[AppWatchdog] Reversal Engine health check error: %s", _e)
 
 
 async def startup() -> None:
@@ -180,12 +180,20 @@ async def startup() -> None:
     from forex_trader.config import DATA_DIR as _DATA_DIR
     _breakout_engine_module.init(_engine._bridge)
 
-    # Initialise GD Copy engine DB (completely isolated from other engines).
-    from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdcdb
-    _gdcdb.init(str(_DATA_DIR / "gd_copy_signal.db"))
-    from forex_trader.gd_copy_signal import ml_engine as _gdc_ml
-    _gdc_ml.init(str(_DATA_DIR))
-    _gdc_engine_module.init(_engine._bridge)
+    # Initialise Reversal Engine DB (completely isolated from other engines).
+    # 2026-07-23 rebrand (was "GD Copy Engine" / gd_copy_signal.db) -- an
+    # install that already has the old file on disk gets it renamed in place
+    # so its accumulated signal history and ML training data survive; a
+    # fresh install just creates reversal_engine.db directly.
+    _old_re_db = _DATA_DIR / "gd_copy_signal.db"
+    _new_re_db = _DATA_DIR / "reversal_engine.db"
+    if _old_re_db.exists() and not _new_re_db.exists():
+        _old_re_db.rename(_new_re_db)
+    from forex_trader.reversal_engine import reversal_engine_repo as _re_repo
+    _re_repo.init(str(_new_re_db))
+    from forex_trader.reversal_engine import ml_engine as _re_ml
+    _re_ml.init(str(_DATA_DIR))
+    _re_engine_module.init(_engine._bridge)
 
     # Protect each startup step independently so a failure in one does not
     # prevent the signal engine from starting.
@@ -228,18 +236,18 @@ async def startup() -> None:
         else:
             log.info("[startup] Breakout engine auto-start suppressed (user disabled)")
 
-    # Auto-start GD Copy engine — always on unless the user explicitly stopped it.
-    # Uses gdc_user_stopped="1" (not gdc_engine_enabled) so normal app restarts
+    # Auto-start Reversal Engine — always on unless the user explicitly stopped it.
+    # Uses re_user_stopped="1" (not re_engine_enabled) so normal app restarts
     # don't reset the preference; only a deliberate UI stop persists a "0".
-    from forex_trader.gd_copy_signal import gd_copy_signal_repo as _gdcdb2
-    gdc_eng = _gdc_engine_module.get_instance()
-    if gdc_eng:
-        gdc_eng.set_main_engine(_engine)
-        if _gdcdb2.get_config("gdc_user_stopped", "0") != "1":
-            gdc_eng.start()
-            log.info("[startup] GD Copy engine auto-started")
+    from forex_trader.reversal_engine import reversal_engine_repo as _re_repo2
+    re_eng = _re_engine_module.get_instance()
+    if re_eng:
+        re_eng.set_main_engine(_engine)
+        if _re_repo2.get_config("re_user_stopped", "0") != "1":
+            re_eng.start()
+            log.info("[startup] Reversal Engine auto-started")
         else:
-            log.info("[startup] GD Copy engine skipped (user manually stopped)")
+            log.info("[startup] Reversal Engine skipped (user manually stopped)")
 
     # Local/Remote sync — resume whichever role was last configured so a
     # headless VPS reboot (nobody present to click the settings toggle) still
@@ -258,7 +266,7 @@ async def startup() -> None:
                 port = int(db_module.get_app_config("sync_server_port") or 8765)
                 srv = _sync_srv_mod.init(
                     main_engine=_engine, breakout_engine=bo_eng,
-                    bounce_engine=te, gdc_engine=gdc_eng,
+                    bounce_engine=te, re_engine=re_eng,
                 )
                 await srv.start(host, port, token)
                 log.info("[startup] Sync server auto-started on port %d", port)
@@ -302,9 +310,9 @@ async def shutdown() -> None:
     bo = _breakout_engine_module.get_instance()
     if bo:
         bo.stop()
-    gdc = _gdc_engine_module.get_instance()
-    if gdc:
-        gdc.stop(persist=False)
+    re_eng = _re_engine_module.get_instance()
+    if re_eng:
+        re_eng.stop(persist=False)
     _remote_client.stop()
     _remote_server.stop()
     try:

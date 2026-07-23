@@ -152,26 +152,26 @@ def test_climber_tp3_last_closes_full_remaining_returns_before_sl_trail(fresh_db
     assert bridge.modify_order_calls == []
 
 
-def test_gdvr_tp1_hit_closes_15pct_does_not_move_sl_yet(fresh_db):
+def test_rr_tp1_hit_closes_15pct_does_not_move_sl_yet(fresh_db):
     _insert_signal()
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                   tp1=2410.0, tp2=2420.0, tp3=2430.0)
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
-    asyncio.run(ladder.handle_gd_vip_runner(trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache()))
+    asyncio.run(ladder.handle_reversal_runner(trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache()))
 
     assert bridge.partial_close_calls == [{"ticket": 555, "lots": 0.015}]
     assert bridge.modify_order_calls == []
 
 
-def test_gdvr_tp2_hit_after_tp1_moves_sl_to_be(fresh_db):
+def test_rr_tp2_hit_after_tp1_moves_sl_to_be(fresh_db):
     _insert_signal()
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.085,
                   stop_loss=2380.0, tp1=2410.0, tp2=2420.0, tp3=2430.0)
     _insert_partial_close("t-1", "TP1", lots_closed=0.015)
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
-    asyncio.run(ladder.handle_gd_vip_runner(trade, _tick(bid=2425.0, ask=2425.5), bridge, TPCache()))
+    asyncio.run(ladder.handle_reversal_runner(trade, _tick(bid=2425.0, ask=2425.5), bridge, TPCache()))
 
     assert bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]
     assert bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]
@@ -183,7 +183,7 @@ def test_single_tick_clearing_multiple_tps_processes_both_in_one_call(fresh_db):
                   tp1=2410.0, tp2=2420.0, tp3=2430.0)
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
-    asyncio.run(ladder.handle_gd_vip_runner(trade, _tick(bid=2425.0, ask=2425.5), bridge, TPCache()))
+    asyncio.run(ladder.handle_reversal_runner(trade, _tick(bid=2425.0, ask=2425.5), bridge, TPCache()))
 
     assert bridge.partial_close_calls == [
         {"ticket": 555, "lots": 0.015},

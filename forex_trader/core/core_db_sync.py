@@ -27,7 +27,7 @@ from forex_trader.core.core_db_risk_settings import get_risk_settings  # noqa: E
 
 # ── Local/Remote sync — consolidated ledger, active-trader flag, node config ──
 # Additive only: this never touches the per-engine operational tables
-# (bo_signals, test_signals, gdc_signals, vantage_simulated_trades). Those
+# (bo_signals, test_signals, re_signals, vantage_simulated_trades). Those
 # use autoincrement integer ids that would collide if two independent
 # installs' rows were ever merged directly. consolidated_trades is a
 # separate, append-only table keyed by (node_id, trade_id) — trade_id is
@@ -209,7 +209,7 @@ def is_remote_node() -> bool:
     """True iff this process is running in the VPS/remote-server sync role
     (sync_server_enabled) — a fixed physical-machine fact, independent of
     which side is currently the active trader or whether centralized signal
-    generation is toggled on. Used to keep the Breakout, Bounce, and GD Copy
+    generation is toggled on. Used to keep the Breakout, Bounce, and Reversal Engine
     analytical signal generators local-node-only unconditionally, rather than
     only as a side effect of centralized_signal_gen_enabled staying on (see
     should_generate_signals_here below, which is execution-routing-focused

@@ -1,9 +1,9 @@
 """
-ML engine for GD Copy signal generator.
+ML engine for Reversal Engine signal generator.
 
 Two learning axes:
   1. OUTCOME learning  — which of our signals win/lose (R-multiple regression)
-  2. VIP PATTERN learning — which level types GD VIP preferentially trades,
+  2. REF PATTERN learning — which level types the reference channel preferentially trades,
      used to update the level scoring function over time
 
 Uses LightGBMRegressor + SGDRegressor; predicts R-multiple (positive = profitable).
@@ -22,31 +22,31 @@ _log = logging.getLogger(__name__)
 _MIN_TRAIN = 15
 _RETRAIN_EVERY = 5
 # Public aliases — the UI panel reads these directly (matches breakout_signal/
-# ml_engine.py's naming, which the GD Copy panel's ML section is ported from).
+# ml_engine.py's naming, which the Reversal Engine panel's ML section is ported from).
 MIN_TRAIN_SAMPLES = _MIN_TRAIN
 RETRAIN_EVERY = _RETRAIN_EVERY
 
 _data_dir: Optional[Path] = None
 _model_batch  = None   # LightGBM or RandomForest
-_model_online = None   # SGDClassifier
+_model_online = None   # SRElassifier
 _labeled_count = 0
 # v3 switches to R-multiple regression and adds 4 new features (news_proximity_norm,
 # regime_score, equity_drawdown_pct, concurrent_agreement) — discards v2 models so
 # dimension and label format mismatches can't happen; retrains from scratch.
-# v4 adds vip_discipline_score/vip_aggression_score — daily values derived by
-# telegram_research.py's nightly AI read of GD VIP/GD2 messages+images, cached
-# in gdc_config and refreshed once per night. Same discard-and-retrain-from-
+# v4 adds ref_discipline_score/ref_aggression_score — daily values derived by
+# telegram_research.py's nightly AI read of the reference channel/GD2 messages+images, cached
+# in re_config and refreshed once per night. Same discard-and-retrain-from-
 # scratch handling as v3 for the same reason (dimension mismatch).
-_version = "gdc_ml_v4"
+_version = "re_ml_v4"
 _train_history: list[dict] = []
 
-# VIP pattern counters: level_type → {trades, wins, touches}
+# REF pattern counters: level_type → {trades, wins, touches}
 #   trades  = correlation matches recorded for this level type (existing semantics)
 #   wins    = of those matches, how many were winners
 #   touches = every time our engine *saw* a candidate of this level type, matched
 #             or not — the true denominator needed to know if a level type is
-#             genuinely VIP-preferred vs. just frequently detected by our engine
-_vip_level_stats: dict[str, dict] = {}
+#             genuinely REF-preferred vs. just frequently detected by our engine
+_ref_level_stats: dict[str, dict] = {}
 
 
 def init(data_dir: str) -> None:
@@ -64,41 +64,41 @@ def _save_all() -> None:
             "version":      _version,
             "labeled_count": _labeled_count,
             "train_history": _train_history[-20:],
-            "vip_level_stats": _vip_level_stats,
+            "ref_level_stats": _ref_level_stats,
         }
-        joblib.dump(meta, _data_dir / "gdc_ml_meta.pkl")
+        joblib.dump(meta, _data_dir / "re_ml_meta.pkl")
         if _model_batch is not None:
-            joblib.dump(_model_batch, _data_dir / "gdc_ml_batch.pkl")
+            joblib.dump(_model_batch, _data_dir / "re_ml_batch.pkl")
         if _model_online is not None:
-            joblib.dump(_model_online, _data_dir / "gdc_ml_online.pkl")
+            joblib.dump(_model_online, _data_dir / "re_ml_online.pkl")
     except Exception as exc:
-        _log.debug("[GDC-ML] save error: %s", exc)
+        _log.debug("[RE-ML] save error: %s", exc)
 
 
 def _load_all() -> None:
-    global _model_batch, _model_online, _labeled_count, _train_history, _vip_level_stats
+    global _model_batch, _model_online, _labeled_count, _train_history, _ref_level_stats
     if _data_dir is None:
         return
     try:
         import joblib
-        meta_path = _data_dir / "gdc_ml_meta.pkl"
+        meta_path = _data_dir / "re_ml_meta.pkl"
         if meta_path.exists():
             meta = joblib.load(meta_path)
             if meta.get("version") != _version:
-                _log.info("[GDC-ML] version mismatch — discarding saved models")
+                _log.info("[RE-ML] version mismatch — discarding saved models")
                 return
             _labeled_count  = meta.get("labeled_count", 0)
             _train_history  = meta.get("train_history", [])
-            _vip_level_stats = meta.get("vip_level_stats", {})
-        batch_path  = _data_dir / "gdc_ml_batch.pkl"
-        online_path = _data_dir / "gdc_ml_online.pkl"
+            _ref_level_stats = meta.get("ref_level_stats", {})
+        batch_path  = _data_dir / "re_ml_batch.pkl"
+        online_path = _data_dir / "re_ml_online.pkl"
         if batch_path.exists():
             _model_batch = joblib.load(batch_path)
         if online_path.exists():
             _model_online = joblib.load(online_path)
-        _log.info("[GDC-ML] loaded — labeled=%d", _labeled_count)
+        _log.info("[RE-ML] loaded — labeled=%d", _labeled_count)
     except Exception as exc:
-        _log.debug("[GDC-ML] load error: %s", exc)
+        _log.debug("[RE-ML] load error: %s", exc)
 
 
 # ── Feature extraction ────────────────────────────────────────────────────────
@@ -120,17 +120,17 @@ FEATURE_NAMES = [
     "hour_sin",             # sin(hour * 2π/24)
     "hour_cos",             # cos(hour * 2π/24)
     "distance_norm",        # level distance / atr, clamped [0,5]
-    "recent_win_rate",      # last 20 closed gdc signals
-    "vip_level_win_rate",   # historical VIP win rate for this level type
+    "recent_win_rate",      # last 20 closed signals
+    "ref_level_win_rate",   # historical REF win rate for this level type
     "rr_tp1",               # risk:reward to TP1 clamped [0,5]
-    "minutes_since_vip_norm",   # minutes since the last real VIP signal / 240, clamped [0,1]
-    "vip_signals_today_norm",   # real VIP signals received so far today / 10, clamped [0,1]
+    "minutes_since_ref_norm",   # minutes since the last real REF signal / 240, clamped [0,1]
+    "ref_signals_today_norm",   # real REF signals received so far today / 10, clamped [0,1]
     "news_proximity_norm",      # minutes to next high-impact event / 120, clamped [0,1]; 0=imminent, 1=safe
     "regime_score",             # trending=1.0, ranging=0.0, volatile=0.5 (derived from ADX+ATR)
     "equity_drawdown_pct",      # current drawdown from peak equity [0,1]
     "concurrent_agreement",     # +1 same-dir signal from another engine in last 15min, -1 opposite, 0 none
-    "vip_discipline_score",     # 0-1, AI-derived nightly: how closely GD VIP/GD2 stuck to stated SL/sizing that day
-    "vip_aggression_score",     # 0-1, AI-derived nightly: how aggressively they scaled in/chased entries that day
+    "ref_discipline_score",     # 0-1, AI-derived nightly: how closely the reference channel/GD2 stuck to stated SL/sizing that day
+    "ref_aggression_score",     # 0-1, AI-derived nightly: how aggressively they scaled in/chased entries that day
 ]
 
 
@@ -171,17 +171,17 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
         h_sin     = math.sin(hour * 2 * math.pi / 24)
         h_cos     = math.cos(hour * 2 * math.pi / 24)
 
-        # VIP win rate for this level type
-        vip_wr = _vip_win_rate_for_type(level_type)
+        # REF win rate for this level type
+        ref_wr = _ref_win_rate_for_type(level_type)
 
-        # Cadence — how "due" GD VIP is to post, based on real signal timing.
+        # Cadence — how "due" the reference channel is to post, based on real signal timing.
         # Populated by engine.py once per cycle from vantage_tg_signals; default
         # to a neutral/unfavourable prior (4h since last signal, 0 today) so
         # signals built without this context don't get an artificial boost.
-        mins_since_vip = float(signal_data.get("minutes_since_last_vip", 240) or 240)
-        vip_today      = float(signal_data.get("vip_signals_today", 0) or 0)
-        mins_since_norm = min(mins_since_vip / 240.0, 1.0)
-        vip_today_norm  = min(vip_today / 10.0, 1.0)
+        mins_since_ref = float(signal_data.get("minutes_since_last_ref", 240) or 240)
+        ref_today      = float(signal_data.get("ref_signals_today", 0) or 0)
+        mins_since_norm = min(mins_since_ref / 240.0, 1.0)
+        ref_today_norm  = min(ref_today / 10.0, 1.0)
 
         return [
             level_score,
@@ -198,37 +198,37 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
             h_cos,
             dist_norm,
             recent_win_rate,
-            vip_wr,
+            ref_wr,
             min(rr_tp1, 5.0),
             mins_since_norm,
-            vip_today_norm,
+            ref_today_norm,
             float(signal_data.get("news_proximity_norm") or 1.0),   # news_proximity_norm
             float(signal_data.get("regime_score")        or 0.5),   # regime_score
             float(signal_data.get("equity_drawdown_pct") or 0.0),   # equity_drawdown_pct
             float(signal_data.get("concurrent_agreement")or 0.0),   # concurrent_agreement
-            float(signal_data.get("vip_discipline_score") or 0.5),  # vip_discipline_score
-            float(signal_data.get("vip_aggression_score") or 0.5),  # vip_aggression_score
+            float(signal_data.get("ref_discipline_score") or 0.5),  # ref_discipline_score
+            float(signal_data.get("ref_aggression_score") or 0.5),  # ref_aggression_score
         ]
     except Exception as exc:
-        _log.debug("[GDC-ML] extract_features error: %s", exc)
+        _log.debug("[RE-ML] extract_features error: %s", exc)
         return None
 
 
-def _vip_win_rate_for_type(level_type: str) -> float:
-    """Return historical VIP win rate for a given level type (from VIP pattern learning)."""
-    stats = _vip_level_stats.get(level_type)
+def _ref_win_rate_for_type(level_type: str) -> float:
+    """Return historical REF win rate for a given level type (from REF pattern learning)."""
+    stats = _ref_level_stats.get(level_type)
     if not stats or stats.get("trades", 0) < 3:
-        return 0.65  # prior: GD VIP has ~66% historical WR
+        return 0.65  # prior: the reference channel has ~66% historical WR
     return stats["wins"] / stats["trades"]
 
 
-def vip_match_rate_for_type(level_type: str) -> Optional[float]:
+def ref_match_rate_for_type(level_type: str) -> Optional[float]:
     """Of every time we *saw* a candidate of this level type (touches), what
-    fraction actually correlated with a real VIP signal (trades). This is the
-    true precision signal — distinct from _vip_win_rate_for_type, which only
+    fraction actually correlated with a real REF signal (trades). This is the
+    true precision signal — distinct from _ref_win_rate_for_type, which only
     looks at outcome quality among matches, not how often this level type
-    predicts a VIP signal will appear at all. Returns None until enough data."""
-    stats = _vip_level_stats.get(level_type)
+    predicts a REF signal will appear at all. Returns None until enough data."""
+    stats = _ref_level_stats.get(level_type)
     if not stats or stats.get("touches", 0) < 5:
         return None
     return stats["trades"] / stats["touches"]
@@ -239,8 +239,8 @@ def vip_match_rate_for_type(level_type: str) -> Optional[float]:
 def _get_training_data():
     """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
     try:
-        from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-        rows = gdc_db.get_ml_training_data()
+        from forex_trader.reversal_engine import reversal_engine_repo as re_db
+        rows = re_db.get_ml_training_data()
         X, y = [], []
         for r in rows:
             feats = r.get("ml_features_json")
@@ -252,7 +252,7 @@ def _get_training_data():
                 continue
             # Guards against a ragged X array when older rows were labeled
             # under a previous _version with a different feature count (e.g.
-            # pre-v4 rows missing vip_discipline_score/vip_aggression_score).
+            # pre-v4 rows missing ref_discipline_score/ref_aggression_score).
             if len(f) != len(FEATURE_NAMES):
                 continue
             outcome = r.get("outcome", "")
@@ -264,7 +264,7 @@ def _get_training_data():
             y.append(label)
         return X, y
     except Exception as exc:
-        _log.debug("[GDC-ML] training data error: %s", exc)
+        _log.debug("[RE-ML] training data error: %s", exc)
         return [], []
 
 
@@ -304,7 +304,7 @@ def _retrain() -> None:
         "ts": time.time(), "n": len(X), "mean_r": round(float(np.mean(ya)), 4), "backend": backend
     })
     _save_all()
-    _log.info("[GDC-ML] retrained — n=%d backend=%s", len(X), backend)
+    _log.info("[RE-ML] retrained — n=%d backend=%s", len(X), backend)
 
 
 def retrain_now() -> None:
@@ -320,9 +320,9 @@ def get_daily_research_scores() -> tuple[float, float]:
     nightly Telegram research run, read at signal-generation time. Neutral
     0.5/0.5 prior until the first research run has completed."""
     try:
-        from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-        d = float(gdc_db.get_config("vip_discipline_score", "0.5") or 0.5)
-        a = float(gdc_db.get_config("vip_aggression_score", "0.5") or 0.5)
+        from forex_trader.reversal_engine import reversal_engine_repo as re_db
+        d = float(re_db.get_config("ref_discipline_score", "0.5") or 0.5)
+        a = float(re_db.get_config("ref_aggression_score", "0.5") or 0.5)
         return d, a
     except Exception:
         return 0.5, 0.5
@@ -365,8 +365,8 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     """Called when a signal closes — update online learner + maybe retrain batch."""
     global _model_online, _labeled_count
 
-    from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-    sig = gdc_db.get_signal_by_id(signal_id)
+    from forex_trader.reversal_engine import reversal_engine_repo as re_db
+    sig = re_db.get_signal_by_id(signal_id)
     if not sig:
         return
 
@@ -392,7 +392,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
         )
     # Check if saved model is an old classifier and reset it
     if hasattr(_model_online, "classes_"):
-        _log.info("[GDC-ML] Online model is old classifier — resetting to SGDRegressor")
+        _log.info("[RE-ML] Online model is old classifier — resetting to SGDRegressor")
         from sklearn.linear_model import SGDRegressor
         _model_online = SGDRegressor(
             loss="huber", epsilon=0.1, random_state=42
@@ -412,21 +412,21 @@ def record_outcome(signal_id: int, outcome: str) -> None:
         _save_all()
 
 
-def record_vip_signal(level_type: str, was_win: Optional[bool] = None) -> None:
+def record_ref_signal(level_type: str, was_win: Optional[bool] = None) -> None:
     """
-    Update VIP level pattern stats when a GD VIP signal is observed.
+    Update REF level pattern stats when a the reference channel signal is observed.
     This is how the engine learns which level types the real trader prefers.
     was_win=None when signal arrives (outcome unknown yet), True/False when closed.
     """
-    global _vip_level_stats
-    if level_type not in _vip_level_stats:
-        _vip_level_stats[level_type] = {"trades": 0, "wins": 0, "touches": 0}
-    _vip_level_stats[level_type].setdefault("touches", 0)
+    global _ref_level_stats
+    if level_type not in _ref_level_stats:
+        _ref_level_stats[level_type] = {"trades": 0, "wins": 0, "touches": 0}
+    _ref_level_stats[level_type].setdefault("touches", 0)
 
     if was_win is None:
-        _vip_level_stats[level_type]["trades"] += 1
+        _ref_level_stats[level_type]["trades"] += 1
     elif was_win is True:
-        _vip_level_stats[level_type]["wins"] += 1
+        _ref_level_stats[level_type]["wins"] += 1
 
     # Persist
     _save_all()
@@ -434,16 +434,16 @@ def record_vip_signal(level_type: str, was_win: Optional[bool] = None) -> None:
 
 def record_level_touch(level_type: str) -> None:
     """Called once per cycle for every candidate level our engine evaluates,
-    matched or not. Builds the true denominator for vip_match_rate_for_type —
+    matched or not. Builds the true denominator for ref_match_rate_for_type —
     without this, a level type that's simply detected often looks identical
-    to one VIP actually trades often, since both currently only count matches.
+    to one REF actually trades often, since both currently only count matches.
     Not persisted on every call (cheap in-memory increment); flushed by the
-    next _save_all() triggered elsewhere (record_vip_signal/record_outcome)."""
-    global _vip_level_stats
-    if level_type not in _vip_level_stats:
-        _vip_level_stats[level_type] = {"trades": 0, "wins": 0, "touches": 0}
-    _vip_level_stats[level_type].setdefault("touches", 0)
-    _vip_level_stats[level_type]["touches"] += 1
+    next _save_all() triggered elsewhere (record_ref_signal/record_outcome)."""
+    global _ref_level_stats
+    if level_type not in _ref_level_stats:
+        _ref_level_stats[level_type] = {"trades": 0, "wins": 0, "touches": 0}
+    _ref_level_stats[level_type].setdefault("touches", 0)
+    _ref_level_stats[level_type]["touches"] += 1
 
 
 def is_trained() -> bool:
@@ -458,7 +458,7 @@ def summary() -> dict:
         "has_batch":     _model_batch is not None,
         "has_online":    _model_online is not None,
         "train_history": _train_history[-5:],
-        "vip_level_stats": _vip_level_stats,
+        "ref_level_stats": _ref_level_stats,
         "features":      FEATURE_NAMES,
         "n_features":    len(FEATURE_NAMES),
     }
@@ -467,7 +467,7 @@ def summary() -> dict:
 def get_ml_metrics() -> dict:
     """Regression learning metrics: mean predicted R, mean actual R, directional
     accuracy — ported from breakout_signal/ml_engine.py's get_ml_metrics() for
-    UI parity (feeds the "Is it learning?" chart in the GD Copy ML panel,
+    UI parity (feeds the "Is it learning?" chart in the Reversal Engine ML panel,
     previously missing entirely)."""
     _blank = {
         "n_data":           0,
@@ -482,10 +482,10 @@ def get_ml_metrics() -> dict:
         "labeled_count":    _labeled_count,
     }
     try:
-        from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-        rows = gdc_db.get_db().all(
+        from forex_trader.reversal_engine import reversal_engine_repo as re_db
+        rows = re_db.get_db().all(
             "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
-            "FROM gdc_signals "
+            "FROM re_signals "
             "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
             "ORDER BY id"
         )
@@ -532,5 +532,5 @@ def get_ml_metrics() -> dict:
             "labeled_count":    _labeled_count,
         }
     except Exception as e:
-        _log.debug("[GDC-ML] metrics error: %s", e)
+        _log.debug("[RE-ML] metrics error: %s", e)
         return _blank

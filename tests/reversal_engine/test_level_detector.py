@@ -1,10 +1,10 @@
-"""level_detector.py had zero test coverage before tonight's GD Copy
+"""level_detector.py had zero test coverage before tonight's Reversal Engine
 improvements. Covers: get_htf_bias()'s H4-confirmation logic (written but
 never actually reachable until both call sites started passing h4_candles),
 and get_congestion_zones() (documented/scored since inception but never
 actually implemented until now).
 """
-from forex_trader.gd_copy_signal import level_detector as ld
+from forex_trader.reversal_engine import level_detector as ld
 
 
 def _candle(high, low):

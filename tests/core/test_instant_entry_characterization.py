@@ -191,9 +191,9 @@ def test_governor_off_fixed_lot_uses_150_cap_distance(fresh_db, engine):
 
 def test_channel_override_auto_uses_last_claude_rec(fresh_db, engine):
     db.set_channel_strategy_override("Chan", "auto")
-    db.set_channel_strategy_rec("Chan", "gd_vip_runner", "trending", 0.8)
+    db.set_channel_strategy_rec("Chan", "reversal_runner", "trending", 0.8)
     ot = _run_open_trade_path(engine, _rs(), tg_id="tg-13")
-    assert ot.call_args.kwargs["strategy"] == "gd_vip_runner"
+    assert ot.call_args.kwargs["strategy"] == "reversal_runner"
 
 
 def test_channel_override_explicit_used_directly(fresh_db, engine):

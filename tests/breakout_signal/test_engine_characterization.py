@@ -1,7 +1,7 @@
 """Characterizes the testable surface of BreakoutEngine before task 030
 splits it -- see docs/todo/refactor/breakout-signal-migration/010-*.md.
 
-Scope note (same as gd_copy_signal's 020): the async orchestration loops
+Scope note (same as reversal_engine's 020): the async orchestration loops
 (_run_cycle, _velocity_loop, _outcome_loop, _execute_live,
 _run_batch_analysis) are heavily externally coupled (MT5 bridge,
 self._main_engine, forex_trader.core.database, ai_provider/Claude) --

@@ -26,11 +26,11 @@ RELEASES: list[tuple] = [
             "Fixed Max TP Hit not populating on trades opened by the other "
             "paired node — now falls back to the cross-node consolidated "
             "ledger, same as the Channel and Strategy columns already did.",
-            "GD Copy Engine: recalibrated signal-scoring weights against a "
+            "Reversal Engine: recalibrated signal-scoring weights against a "
             "backtest of 767 real Gold Diggers VIP/GD2 signals — round-number "
             "levels (round_5 especially) weighted up, Asia range/swing levels "
             "weighted down to match their measured real-world hit rates.",
-            "Fixed GD Copy nightly research silently failing on high-message "
+            "Fixed Reversal Engine nightly research silently failing on high-message "
             "nights — AI call timeout widened from 60s to 240s, plus a "
             "dedicated failure-alert email so a failed run is never silent.",
             "Fixed app version reporting: Settings > Update 'Installed "
@@ -79,7 +79,7 @@ RELEASES: list[tuple] = [
             "'Setup & Start FOREX.bat' now auto-launches the MetaTrader 5 terminal on startup if it isn't already running, mirroring the macOS '.command' script — reads the saved terminal path from bridge_credentials.json, waits for MT5 to initialise before the bridge attaches.",
             "Fixed two hardcoded macOS-only data paths (history.py trend report, signal_generator_report.py) that would have crashed on Windows — both now use the platform-aware DATA_DIR constant.",
             "Self-healer's bridge-restart-failure message is now platform-aware (\"check the MT5 terminal\" on Windows vs \"check Wine/CrossOver\" on macOS).",
-            "GD VIP Runner strategy added — new climber-ladder strategy wired through signal generation, pending-signal fill, tick dispatch, backtesting, and the Strategy dropdown.",
+            "Reversal Runner strategy added — new climber-ladder strategy wired through signal generation, pending-signal fill, tick dispatch, backtesting, and the Strategy dropdown.",
             "Setup Instructions page overhauled — added dedicated Windows setup steps (native MT5 install, running the .bat), corrected the Licence Key step to match the real activation flow (Machine ID detection, automated Request Registration, Manual Activation fallback), and clarified which steps are macOS-only vs Windows-only.",
             "Admin now receives a Telegram notification whenever a new user submits a registration / licence request, in addition to the existing admin console alert.",
         ],

@@ -1,5 +1,5 @@
 """Module-level DbAdapter registry -- generalizes the global-_DB_PATH
-pattern gd_copy_signal/database.py already uses, for reuse across engines.
+pattern reversal_engine/database.py already uses, for reuse across engines.
 See docs/todo/refactor/backend-foundation/010-*.md.
 
 Keyed by an explicit `namespace` string (default: a single shared slot,
@@ -13,7 +13,7 @@ most-recently-initialized engine had a working connection and every other
 engine's queries silently ran against the wrong database file (or raised
 "no such table", depending on schema overlap). Confirmed live 2026-07-21
 wiring breakout_signal + test_signal alongside the already-wired
-gd_copy_signal. Each engine's own `<engine>_repo.py` wraps `get_db()`/
+reversal_engine. Each engine's own `<engine>_repo.py` wraps `get_db()`/
 `init_db()` with its own fixed namespace baked in, so every existing
 internal call site (`get_db().run(...)` etc., unchanged in call shape)
 transparently gets its own connection with no other code needing to

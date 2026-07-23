@@ -1,7 +1,7 @@
-"""Proves forex_trader.core.core_gd_copy_research's extracted
-gd_copy_research_sweep behaves identically to SimulationEngine's original,
-characterized in test_gd_copy_research_characterization.py -- see
-docs/todo/refactor/core-gd-copy-research-migration/020-*.md.
+"""Proves forex_trader.core.core_reversal_research's extracted
+reversal_engine_research_sweep behaves identically to SimulationEngine's original,
+characterized in test_reversal_engine_research_characterization.py -- see
+docs/todo/refactor/core-reversal-research-migration/020-*.md.
 
 Same assertions as 010, called through the new module instead of the class
 (now/research_runner passed explicitly instead of mocking engine.datetime).
@@ -17,7 +17,7 @@ import pytest
 from unittest import mock
 
 from forex_trader.core import database as db
-from forex_trader.core import core_gd_copy_research as gdc
+from forex_trader.core import core_reversal_research as re_research
 
 
 def _reset_thread_local_connection():
@@ -54,10 +54,10 @@ def test_not_2200_no_pipeline_call_no_dedup_write(fresh_db):
         return {"ran": True}
 
     with mock.patch.object(db, "is_remote_node", return_value=False):
-        asyncio.run(gdc.gd_copy_research_sweep(
+        asyncio.run(re_research.reversal_engine_research_sweep(
             "engine", now=datetime(2026, 7, 20, 21, 59, 0), research_runner=runner))
     assert calls == []
-    assert db.get_app_config("gdc_research_last") is None
+    assert db.get_app_config("re_research_last") is None
 
 
 def test_remote_node_skips_even_at_2200(fresh_db):
@@ -68,13 +68,13 @@ def test_remote_node_skips_even_at_2200(fresh_db):
         return {"ran": True}
 
     with mock.patch.object(db, "is_remote_node", return_value=True):
-        asyncio.run(gdc.gd_copy_research_sweep(
+        asyncio.run(re_research.reversal_engine_research_sweep(
             "engine", now=datetime(2026, 7, 20, 22, 0, 0), research_runner=runner))
     assert calls == []
 
 
 def test_already_ran_today_skips(fresh_db):
-    db.set_app_config("gdc_research_last", "2026-07-20")
+    db.set_app_config("re_research_last", "2026-07-20")
     calls = []
 
     async def runner(engine):
@@ -82,7 +82,7 @@ def test_already_ran_today_skips(fresh_db):
         return {"ran": True}
 
     with mock.patch.object(db, "is_remote_node", return_value=False):
-        asyncio.run(gdc.gd_copy_research_sweep(
+        asyncio.run(re_research.reversal_engine_research_sweep(
             "engine", now=datetime(2026, 7, 20, 22, 0, 0), research_runner=runner))
     assert calls == []
 
@@ -96,10 +96,10 @@ def test_runs_with_engine_and_marks_dedup_when_ran_true(fresh_db):
 
     sentinel = object()
     with mock.patch.object(db, "is_remote_node", return_value=False):
-        asyncio.run(gdc.gd_copy_research_sweep(
+        asyncio.run(re_research.reversal_engine_research_sweep(
             sentinel, now=datetime(2026, 7, 20, 22, 0, 0), research_runner=runner))
     assert calls == [sentinel]
-    assert db.get_app_config("gdc_research_last") == "2026-07-20"
+    assert db.get_app_config("re_research_last") == "2026-07-20"
 
 
 def test_ran_false_does_not_mark_dedup(fresh_db):
@@ -107,9 +107,9 @@ def test_ran_false_does_not_mark_dedup(fresh_db):
         return {"ran": False}
 
     with mock.patch.object(db, "is_remote_node", return_value=False):
-        asyncio.run(gdc.gd_copy_research_sweep(
+        asyncio.run(re_research.reversal_engine_research_sweep(
             "engine", now=datetime(2026, 7, 20, 22, 0, 0), research_runner=runner))
-    assert db.get_app_config("gdc_research_last") is None
+    assert db.get_app_config("re_research_last") is None
 
 
 def test_pipeline_exception_propagates(fresh_db):
@@ -121,9 +121,9 @@ def test_pipeline_exception_propagates(fresh_db):
 
     with mock.patch.object(db, "is_remote_node", return_value=False):
         with pytest.raises(RuntimeError, match="pipeline boom"):
-            asyncio.run(gdc.gd_copy_research_sweep(
+            asyncio.run(re_research.reversal_engine_research_sweep(
                 "engine", now=datetime(2026, 7, 20, 22, 0, 0), research_runner=runner))
-    assert db.get_app_config("gdc_research_last") is None
+    assert db.get_app_config("re_research_last") is None
 
 
 def test_is_remote_node_checked_unconditionally_outside_window(fresh_db):
@@ -134,6 +134,6 @@ def test_is_remote_node_checked_unconditionally_outside_window(fresh_db):
         return False
 
     with mock.patch.object(db, "is_remote_node", side_effect=spy_is_remote_node):
-        asyncio.run(gdc.gd_copy_research_sweep(
+        asyncio.run(re_research.reversal_engine_research_sweep(
             "engine", now=datetime(2026, 7, 20, 12, 30, 0)))
     assert len(check_calls) == 1

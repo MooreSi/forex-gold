@@ -98,21 +98,21 @@ def _pnl_str(val: Optional[float], prefix: str = "") -> str:
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render(get_engine: Callable) -> None:
-    """Entry point — renders Bounce, Breakout, and GD Copy engine tabs."""
+    """Entry point — renders Bounce, Breakout, and Reversal Engine tabs."""
     from forex_trader.ui.pages import breakout_panel
-    from forex_trader.ui.pages import gd_copy_panel
+    from forex_trader.ui.pages import reversal_panel
 
     with ui.tabs().classes("bg-gray-900 border-b border-gray-700") as sg_tabs:
         t_bounce   = ui.tab("Bounce",   icon="water")
         t_breakout = ui.tab("Breakout", icon="trending_up")
-        t_gd_copy  = ui.tab("GD Copy",  icon="content_copy")
+        t_reversal_engine  = ui.tab("Reversal Engine",  icon="content_copy")
 
     # animated=False: Quasar's slide transition tracks each panel's position via
     # an internally registered index tied to component identity. NiceGUI re-keys
     # elements on every content rebuild (this page's periodic refresh loops
     # rebuild large chunks of each panel's content), so that index goes stale —
-    # confirmed live: switching to GD Copy left "aria-selected" correctly true
-    # on the GD Copy tab while the DOM kept rendering Bounce's content
+    # confirmed live: switching to Reversal Engine left "aria-selected" correctly true
+    # on the Reversal Engine tab while the DOM kept rendering Bounce's content
     # underneath, indefinitely, not just a brief flash. Disabling the animation
     # removes the transform-based positioning calculation that gets this wrong.
     with ui.tab_panels(sg_tabs, value=t_bounce).props("animated=false").classes("bg-gray-900 w-full").style("padding:0"):
@@ -120,8 +120,8 @@ def render(get_engine: Callable) -> None:
             _render_main()
         with ui.tab_panel(t_breakout).style("padding:0"):
             breakout_panel.render()
-        with ui.tab_panel(t_gd_copy).style("padding:0"):
-            gd_copy_panel.render()
+        with ui.tab_panel(t_reversal_engine).style("padding:0"):
+            reversal_panel.render()
 
 
 # ── Bounce (main) panel ───────────────────────────────────────────────────────

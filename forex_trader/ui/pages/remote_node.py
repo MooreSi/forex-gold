@@ -21,7 +21,7 @@ _DEFAULT_PORT = tls_util.DEFAULT_SYNC_PORT
 def _get_sub_engines():
     from forex_trader.breakout_signal import breakout_signal_service as _bo_mod
     from forex_trader.test_signal import test_signal_service as _bc_mod
-    from forex_trader.gd_copy_signal import gd_copy_signal_service as _gd_mod
+    from forex_trader.reversal_engine import reversal_engine_service as _gd_mod
     return _bo_mod.get_instance(), _bc_mod.get_instance(), _gd_mod.get_instance()
 
 
@@ -78,7 +78,7 @@ def render(get_engine=None) -> None:
                     main_eng = get_engine() if get_engine else None
                     srv = sync_server.init(
                         main_engine=main_eng, breakout_engine=bo,
-                        bounce_engine=bc, gdc_engine=gd,
+                        bounce_engine=bc, re_engine=gd,
                     )
                     try:
                         await srv.start(host, int(port_input.value), token)
@@ -205,7 +205,7 @@ def render(get_engine=None) -> None:
             )
             ui.label(
                 "When on and the VPS is the active trader (Remote mode): the "
-                "VPS stops running Breakout/Bounce/GD Copy analysis and GD2/"
+                "VPS stops running Breakout/Bounce/Reversal Engine analysis and GD2/"
                 "GD VIP Telegram parsing entirely, and only executes trades "
                 "forwarded to it from this Mac's own generators. Reduces load "
                 "on the VPS, but this Mac becomes the only source of new "

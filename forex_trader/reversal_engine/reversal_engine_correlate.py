@@ -1,9 +1,9 @@
-"""VIP-signal correlation tracking for GD Copy -- extracted verbatim (no
-logic changes) from engine.py's _check_correlation/_classify_vip_level/
-_vip_cadence_stats as part of task 040. See
+"""REF-signal correlation tracking for Reversal Engine -- extracted verbatim (no
+logic changes) from engine.py's _check_correlation/_classify_ref_level/
+_ref_cadence_stats as part of task 040. See
 docs/todo/refactor/backend-foundation/040-*.md.
 
-_CorrelationMixin is composed into GDCopyEngine (gd_copy_signal_service.py).
+_CorrelationMixin is composed into ReversalEngine (reversal_engine_service.py).
 
 Note (carried over from the 020 characterization scope note): this module
 reaches into the CORE engine's database directly via a raw sqlite3
@@ -18,36 +18,36 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
+from forex_trader.reversal_engine import reversal_engine_repo as re_db
 
-_log = logging.getLogger("gd_copy_signal")
+_log = logging.getLogger("reversal_engine")
 
-# Correlation semantics: our signal PREDICTS a VIP signal when the VIP entry
+# Correlation semantics: our signal PREDICTS a REF signal when the REF entry
 # arrives at the same level while our pending signal is still alive. We create
-# zone signals as price APPROACHES a level; VIP posts when price ARRIVES -- so
+# zone signals as price APPROACHES a level; REF posts when price ARRIVES -- so
 # legitimate matches routinely lead by 10-30 minutes (near-miss data: 498 of
 # 511 direction+price matches failed only on the old symmetric +/-300s window,
 # with avg lead -836s and avg price distance 1.1pts). The window is therefore
 # asymmetric: we may lead by up to the signal lifetime, or lag by 5 minutes
 # (Telegram delivery latency).
-_SIGNAL_MAX_AGE_S    = 7200    # 2-hour pending expiry (must match gd_copy_signal_service._SIGNAL_MAX_AGE_S)
-_VIP_CORR_LEAD_MAX_S = _SIGNAL_MAX_AGE_S  # we fired first: up to 2h (signal lifetime)
-_VIP_CORR_LAG_MAX_S  = 300     # VIP fired first: 5 min grace (delivery latency)
-_VIP_CORR_PRICE_DELTA = 3.0    # pts between entry-zone midpoints (zones are 3-4pts wide)
+_SIGNAL_MAX_AGE_S    = 7200    # 2-hour pending expiry (must match reversal_engine_service._SIGNAL_MAX_AGE_S)
+_REF_CORR_LEAD_MAX_S = _SIGNAL_MAX_AGE_S  # we fired first: up to 2h (signal lifetime)
+_REF_CORR_LAG_MAX_S  = 300     # REF fired first: 5 min grace (delivery latency)
+_REF_CORR_PRICE_DELTA = 3.0    # pts between entry-zone midpoints (zones are 3-4pts wide)
 
 
 class _CorrelationMixin:
     async def _check_correlation(self) -> None:
         """
         Scan recent real signals from BOTH covered channels (Gold Diggers
-        VIP and Gold Diggers 2.0 / Institutional) in vantage_tg_signals and
-        match them against our recent GDC signals.
+        REF and Gold Diggers 2.0 / Institutional) in vantage_tg_signals and
+        match them against our recent RE signals.
 
         A match is:
           - Same direction
-          - Entry zone midpoints within _VIP_CORR_PRICE_DELTA points
+          - Entry zone midpoints within _REF_CORR_PRICE_DELTA points
           - Time difference within the asymmetric lead/lag window
-          - Same channel: a GDC signal only matches real signals from the
+          - Same channel: a RE signal only matches real signals from the
             channel it was modelled on (source_channel), never cross-channel.
         """
         _COVERED_CHANNELS = ("Gold Diggers VIP", "GOLD DIGGERS 2.0 ⚡️")
@@ -55,7 +55,7 @@ class _CorrelationMixin:
         # for the actual matching window.
         cutoff = time.time() - 14400
 
-        def _fetch_vip_data():
+        def _fetch_ref_data():
             import sqlite3
             from forex_trader.config import get as cfg_get
             db_path = cfg_get("db_path", "")
@@ -65,7 +65,7 @@ class _CorrelationMixin:
             con.row_factory = sqlite3.Row
             try:
                 _ph = ",".join("?" for _ in _COVERED_CHANNELS)
-                vip_rows = con.execute(f"""
+                ref_rows = con.execute(f"""
                     SELECT id, group_name, direction, entry_low, entry_high, parsed_at, status
                     FROM vantage_tg_signals
                     WHERE group_name IN ({_ph})
@@ -75,18 +75,18 @@ class _CorrelationMixin:
                     LIMIT 100
                 """, (*_COVERED_CHANNELS, cutoff)).fetchall()
                 # True count of real signals received so far *today* (UTC), both
-                # channels combined -- distinct from vip_rows above, which is only
+                # channels combined -- distinct from ref_rows above, which is only
                 # a 4h rolling window used for matching.
                 day_start = datetime.now(timezone.utc).replace(
                     hour=0, minute=0, second=0, microsecond=0
                 ).timestamp()
-                vip_today_count = con.execute(f"""
+                ref_today_count = con.execute(f"""
                     SELECT COUNT(*) FROM vantage_tg_signals
                     WHERE group_name IN ({_ph})
                     AND direction IN ('BUY','SELL')
                     AND parsed_at >= ?
                 """, (*_COVERED_CHANNELS, day_start)).fetchone()[0]
-                return vip_rows, vip_today_count
+                return ref_rows, ref_today_count
             finally:
                 con.close()
 
@@ -95,17 +95,17 @@ class _CorrelationMixin:
             # _reconcile_live_pnl for why a raw sqlite3.connect() here is a
             # whole-app hazard, not just a slow-task-local one.
             from forex_trader.core import database as _mdb
-            _fetch_result = await _mdb.to_db_thread(_fetch_vip_data)
+            _fetch_result = await _mdb.to_db_thread(_fetch_ref_data)
         except Exception as exc:
-            _log.debug("[GDC-Engine] VIP fetch error: %s", exc)
+            _log.debug("[RE-Engine] REF fetch error: %s", exc)
             return
         if _fetch_result is None:
             return
-        vip_rows, vip_today_count = _fetch_result
+        ref_rows, ref_today_count = _fetch_result
 
-        # Build lookup of recent GDC signals (pending/triggered, last 4h)
-        gdc_recent = [
-            s for s in gdc_db.get_all_signals(limit=50)
+        # Build lookup of recent RE signals (pending/triggered, last 4h)
+        re_recent = [
+            s for s in re_db.get_all_signals(limit=50)
             if float(s.get("created_at", 0)) > cutoff
         ]
 
@@ -113,58 +113,58 @@ class _CorrelationMixin:
         predicted = 0
         lead_times: list[float] = []
 
-        for gdc_sig in gdc_recent:
-            if gdc_sig.get("correlation_confirmed"):
+        for re_sig in re_recent:
+            if re_sig.get("correlation_confirmed"):
                 continue  # already matched
 
-            gdc_ts      = float(gdc_sig.get("created_at", 0))
-            gdc_mid     = (float(gdc_sig.get("entry_low", 0) or 0)
-                           + float(gdc_sig.get("entry_high", 0) or 0)) / 2
-            gdc_dir     = gdc_sig.get("direction", "")
-            gdc_channel = gdc_sig.get("source_channel") or "Gold Diggers VIP"
+            re_ts      = float(re_sig.get("created_at", 0))
+            re_mid     = (float(re_sig.get("entry_low", 0) or 0)
+                           + float(re_sig.get("entry_high", 0) or 0)) / 2
+            re_dir     = re_sig.get("direction", "")
+            re_channel = re_sig.get("source_channel") or "Gold Diggers VIP"
 
-            for vip in vip_rows:
+            for ref in ref_rows:
                 # Never cross-correlate a GD2-modelled signal against a real
-                # VIP message or vice versa -- each GDC signal is only ever
+                # REF message or vice versa -- each RE signal is only ever
                 # trying to predict the one channel it was built from.
-                if vip["group_name"] != gdc_channel:
+                if ref["group_name"] != re_channel:
                     continue
 
-                vip_mid = ((float(vip["entry_low"] or 0) + float(vip["entry_high"] or 0)) / 2)
-                if vip_mid <= 0:
+                ref_mid = ((float(ref["entry_low"] or 0) + float(ref["entry_high"] or 0)) / 2)
+                if ref_mid <= 0:
                     continue
 
                 # Use parsed_at (already a float unix timestamp) -- more reliable
                 # than parsing message_ts text which can have format variations.
-                vip_ts = float(vip["parsed_at"] or 0)
-                if vip_ts <= 0:
+                ref_ts = float(ref["parsed_at"] or 0)
+                if ref_ts <= 0:
                     continue
 
-                time_delta = gdc_ts - vip_ts   # negative = we were first
-                dist = abs(gdc_mid - vip_mid)
-                # Asymmetric window: our signal may LEAD the VIP post by its
+                time_delta = re_ts - ref_ts   # negative = we were first
+                dist = abs(re_mid - ref_mid)
+                # Asymmetric window: our signal may LEAD the REF post by its
                 # whole pending lifetime (we predict the level before price
                 # arrives) but only LAG it by the Telegram delivery grace.
-                time_ok = -_VIP_CORR_LEAD_MAX_S <= time_delta <= _VIP_CORR_LAG_MAX_S
-                matched = (vip["direction"] == gdc_dir
-                           and dist <= _VIP_CORR_PRICE_DELTA
+                time_ok = -_REF_CORR_LEAD_MAX_S <= time_delta <= _REF_CORR_LAG_MAX_S
+                matched = (ref["direction"] == re_dir
+                           and dist <= _REF_CORR_PRICE_DELTA
                            and time_ok)
 
                 # Near-miss: direction matched but price/time missed the window --
                 # log these (within widened tolerance) so thresholds can be tuned
                 # empirically against real data instead of guessed constants.
-                if (not matched and vip["direction"] == gdc_dir
-                        and dist <= _VIP_CORR_PRICE_DELTA * 4
-                        and -_VIP_CORR_LEAD_MAX_S * 2 <= time_delta <= _VIP_CORR_LAG_MAX_S * 4):
+                if (not matched and ref["direction"] == re_dir
+                        and dist <= _REF_CORR_PRICE_DELTA * 4
+                        and -_REF_CORR_LEAD_MAX_S * 2 <= time_delta <= _REF_CORR_LAG_MAX_S * 4):
                     reason = []
-                    if dist > _VIP_CORR_PRICE_DELTA:
+                    if dist > _REF_CORR_PRICE_DELTA:
                         reason.append("price")
                     if not time_ok:
                         reason.append("time")
-                    gdc_db.log_near_miss(
-                        gdc_signal_id=gdc_sig["id"],
-                        vip_signal_id=str(vip["id"]),
-                        direction=gdc_dir,
+                    re_db.log_near_miss(
+                        re_signal_id=re_sig["id"],
+                        ref_signal_id=str(ref["id"]),
+                        direction=re_dir,
                         time_delta_s=round(time_delta, 1),
                         distance_pts=round(dist, 2),
                         reason="+".join(reason) or "unknown",
@@ -172,13 +172,13 @@ class _CorrelationMixin:
 
                 if matched:
 
-                    gdc_db.update_correlation(
-                        sig_id=gdc_sig["id"],
-                        vip_signal_id=str(vip["id"]),
+                    re_db.update_correlation(
+                        sig_id=re_sig["id"],
+                        ref_signal_id=str(ref["id"]),
                         time_delta_s=round(time_delta, 1),
                         distance_pts=round(dist, 2),
                     )
-                    gdc_sig["correlation_confirmed"] = 1  # keep in-memory snapshot in sync for corr_total below
+                    re_sig["correlation_confirmed"] = 1  # keep in-memory snapshot in sync for corr_total below
 
                     if time_delta < 0:  # we fired first -- that's the goal
                         predicted += 1
@@ -186,35 +186,35 @@ class _CorrelationMixin:
                     # Signed lead time: negative = we led, positive = we lagged
                     lead_times.append(time_delta)
 
-                    # Feed VIP level type back to ML (pattern learning)
-                    vip_level_type = self._classify_vip_level(vip_mid)
-                    from forex_trader.gd_copy_signal import ml_engine as gdc_ml
-                    gdc_ml.record_vip_signal(vip_level_type)
+                    # Feed REF level type back to ML (pattern learning)
+                    ref_level_type = self._classify_ref_level(ref_mid)
+                    from forex_trader.reversal_engine import ml_engine as re_ml
+                    re_ml.record_ref_signal(ref_level_type)
 
-                    break  # one VIP match per GDC signal
+                    break  # one REF match per RE signal
 
-        # avg_lead_time_s is signed: negative = we're ahead of GD VIP on average
+        # avg_lead_time_s is signed: negative = we're ahead of the reference channel on average
         avg_lead = sum(lead_times) / len(lead_times) if lead_times else None
 
         # Query actual daily counts from DB rather than from the rolling 4h window.
         # The 4h window ages out confirmed signals within the same day, causing
-        # gdc_correlated to be overwritten to 0 once correlations are >4h old.
-        corr_total = gdc_db.count_today_correlated()
-        today_sent = gdc_db.count_today_signals()
+        # re_correlated to be overwritten to 0 once correlations are >4h old.
+        corr_total = re_db.count_today_correlated()
+        today_sent = re_db.count_today_signals()
         corr_rate  = corr_total / today_sent if today_sent else 0.0
 
-        gdc_db.upsert_daily_correlation(
+        re_db.upsert_daily_correlation(
             today,
-            vip_signals_sent=vip_today_count,
-            vip_predicted=predicted,
-            gdc_correlated=corr_total,
+            ref_signals_sent=ref_today_count,
+            ref_predicted=predicted,
+            re_correlated=corr_total,
             avg_lead_time_s=avg_lead,
             correlation_rate=round(corr_rate, 3),
         )
 
-    async def _vip_cadence_stats(self) -> tuple[float, int]:
-        """(minutes_since_last_real_vip_signal, vip_signals_received_today).
-        Feeds the ML cadence features so the model can learn GD VIP's posting
+    async def _ref_cadence_stats(self) -> tuple[float, int]:
+        """(minutes_since_last_real_ref_signal, ref_signals_received_today).
+        Feeds the ML cadence features so the model can learn the reference channel's posting
         rhythm (e.g. quiet for 3h+ -> higher chance one is "due") instead of
         relying purely on static level geometry."""
         def _fetch():
@@ -248,7 +248,7 @@ class _CorrelationMixin:
             from forex_trader.core import database as _mdb
             _result = await _mdb.to_db_thread(_fetch)
         except Exception as exc:
-            _log.debug("[GDC-Engine] cadence stats error: %s", exc)
+            _log.debug("[RE-Engine] cadence stats error: %s", exc)
             return 240.0, 0
         if _result is None:
             return 240.0, 0
@@ -256,8 +256,8 @@ class _CorrelationMixin:
         mins_since = (time.time() - last_parsed_at) / 60.0 if last_parsed_at else 240.0
         return mins_since, today_count
 
-    def _classify_vip_level(self, price: float) -> str:
-        """Heuristic: classify a VIP signal's level type for pattern learning."""
+    def _classify_ref_level(self, price: float) -> str:
+        """Heuristic: classify a REF signal's level type for pattern learning."""
         if price <= 0:
             return "unknown"
         nearest_10 = round(price / 10) * 10
@@ -277,7 +277,7 @@ class _CorrelationMixin:
         # proximity/score cutoff) rather than guessing "swing_high" -- the
         # cached top-8 candidates above are filtered to levels within
         # PROXIMITY_THRESHOLD_PTS of the bot's own price at cycle time, which
-        # routinely excludes the level a VIP signal actually fired at. That
+        # routinely excludes the level a REF signal actually fired at. That
         # previously meant almost every miss silently mislabeled the
         # ML pattern-learning data as "swing_high" regardless of what type
         # the level actually was.

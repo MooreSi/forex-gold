@@ -210,11 +210,11 @@ def test_rg_size_and_check_rejects_low_tp1_rr(engine):
     assert "R:R" in reason
 
 
-def test_rg_size_and_check_exempts_gd_vip_runner_from_tp1_rr(engine):
+def test_rg_size_and_check_exempts_reversal_runner_from_tp1_rr(engine):
     rs = db.get_risk_settings()
     lot, reason = engine._rg_size_and_check(
         direction="BUY", ref_price=2400.0, stop_loss=2390.0, tp1=2401.0,
-        strategy="gd_vip_runner", atr=8.0, balance=1000.0, rs=rs,
+        strategy="reversal_runner", atr=8.0, balance=1000.0, rs=rs,
     )
     assert reason is None
     assert lot is not None

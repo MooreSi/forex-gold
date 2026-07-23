@@ -1,10 +1,10 @@
 """_manage_triggered_signal() used to only ever run one ladder model,
 keyed on a `sig["strategy"] == "gd2_unicorn"` check that could never
-actually be true: gd_copy_signal_service._run_cycle overwrites
-sig_data["strategy"] with whatever real STRATEGY_* the "GD Copy Engine"
+actually be true: reversal_engine_service._run_cycle overwrites
+sig_data["strategy"] with whatever real STRATEGY_* the "Reversal Engine"
 channel resolves to (never the literal "gd2_unicorn" signal_generator.
 build_signal originally tagged it with), so every GD2 signal fell through
-to the VIP-ladder branch, where its missing tp4/tp7 fields resolved via
+to the REF-ladder branch, where its missing tp4/tp7 fields resolved via
 `or` fallbacks to tp3 (as the mid target) and tp1 (as the "final" target)
 -- closing the whole runner the moment price cleared tp1 again, instead of
 riding it to the real 6R target.
@@ -26,8 +26,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as db
-from forex_trader.gd_copy_signal.gd_copy_signal_service import GDCopyEngine
+from forex_trader.reversal_engine import reversal_engine_repo as db
+from forex_trader.reversal_engine.reversal_engine_service import ReversalEngine
 
 
 @pytest.fixture
@@ -41,14 +41,14 @@ def fresh_db():
 
 @pytest.fixture
 def engine(fresh_db):
-    return GDCopyEngine(bridge=None)
+    return ReversalEngine(bridge=None)
 
 
 @pytest.fixture(autouse=True)
 def _no_external_side_effects(monkeypatch):
     """Prevent close-path side effects from touching real app state."""
     monkeypatch.setattr(
-        "forex_trader.gd_copy_signal.ml_engine.record_outcome",
+        "forex_trader.reversal_engine.ml_engine.record_outcome",
         lambda signal_id, outcome: None,
     )
     monkeypatch.setattr(
@@ -123,12 +123,12 @@ def test_gd2_signal_rides_full_ladder_to_its_real_6r_target(engine, fresh_db):
     assert sig["outcome"] == "win"
 
 
-def test_non_gd2_signal_with_strategy_named_scale_out_uses_vip_ladder(engine, fresh_db):
-    """Sanity check the dispatch doesn't mis-route a normal VIP-style
+def test_non_gd2_signal_with_strategy_named_scale_out_uses_ref_ladder(engine, fresh_db):
+    """Sanity check the dispatch doesn't mis-route a normal REF-style
     signal -- default source_channel, non-conservative strategy -- into
     either the GD2 or conservative models."""
     sig_id = fresh_db.create_signal({
-        "signal_ref":     "vip-1",
+        "signal_ref":     "ref-1",
         "direction":      "BUY",
         "entry_low":      3999.0,
         "entry_high":     4001.0,
@@ -145,8 +145,8 @@ def test_non_gd2_signal_with_strategy_named_scale_out_uses_vip_ladder(engine, fr
     import asyncio
     asyncio.run(engine._manage_triggered_signal(sig, _tick(4003.5, 4003.8)))
     sig = _refetch(fresh_db, sig_id)
-    # 50% (VIP ladder's _TP1_FRAC, not conservative's 80%) banked at tp1 --
-    # proves the generic VIP ladder ran, not _manage_conservative_signal.
+    # 50% (REF ladder's _TP1_FRAC, not conservative's 80%) banked at tp1 --
+    # proves the generic REF ladder ran, not _manage_conservative_signal.
     assert sig["remaining_frac"] == pytest.approx(0.50, abs=1e-6)
 
 

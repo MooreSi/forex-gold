@@ -11,7 +11,7 @@ found while extracting _reconcile_live_pnl) now go through the new repo
 functions `get_closed_or_expired_signals_with_mt5_ticket()` and
 `promote_expired_to_closed()` instead -- same behavior, proper API. The
 cross-engine read into the CORE database's `vantage_simulated_trades` table
-is left as-is (same precedent as gd_copy_signal_correlate.py's VIP read --
+is left as-is (same precedent as reversal_engine_correlate.py's VIP read --
 inherent cross-engine coupling, not a bypass of this module's own repo).
 """
 from __future__ import annotations

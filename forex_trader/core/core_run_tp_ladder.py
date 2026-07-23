@@ -1,6 +1,6 @@
 """TP-ladder walk engine + its three thin strategy wrappers -- extracted
 verbatim (no logic changes) from core/engine.py's SimulationEngine.
-_run_tp_ladder/_handle_signal_climber/_handle_gd_vip_runner/
+_run_tp_ladder/_handle_signal_climber/_handle_reversal_runner/
 _handle_adaptive_runner, as part of the core/engine.py migration series.
 See docs/todo/refactor/core-tp-ladder-handlers-migration/020-*.md.
 
@@ -47,7 +47,7 @@ async def run_tp_ladder(
     sl_rule: Optional[Callable[[int, list[tuple[int, float]]], float]] = None,
     close_full_on_last: bool = True,
 ) -> None:
-    """Shared TP-ladder walk used by Signal Climber, GD VIP Runner,
+    """Shared TP-ladder walk used by Signal Climber, Reversal Runner,
     Adaptive Runner, Adaptive Runner 2, and Limit Runner.
 
     Closes fractions of the original lot at each signal TP (per pcts_table,
@@ -57,7 +57,7 @@ async def run_tp_ladder(
     all_tps)` -- pos is the 0-indexed compacted TP position just hit,
     all_tps the compacted list of (tp_num, tp_price) tuples. Defaults to
     the original trail-to-previous-TP rule (`all_tps[pos - 1][1]`) when
-    `sl_rule` is None, so Signal Climber/GD VIP Runner/Adaptive Runner are
+    `sl_rule` is None, so Signal Climber/Reversal Runner/Adaptive Runner are
     unaffected -- Adaptive Runner 2 is the only caller that passes a
     different rule (trail to the midpoint of the two TPs before this one).
 
@@ -158,7 +158,7 @@ async def run_tp_ladder(
         # Trail SL: stays untouched (at its original, wider level) until the
         # TP at index be_at_pos is hit → BE; every TP after that trails SL
         # to the previous TP's price. be_at_pos=0 means TP1 (Signal Climber);
-        # GD VIP Runner uses be_at_pos=1 so the wider entry SL isn't given
+        # Reversal Runner uses be_at_pos=1 so the wider entry SL isn't given
         # up until TP2.
         if current_sl is None:
             continue
@@ -217,22 +217,22 @@ async def handle_signal_climber(
                        be_at_pos=0, close_full_after_tps=close_full_after_tps)
 
 
-async def handle_gd_vip_runner(
+async def handle_reversal_runner(
     trade: dict, tick: Tick, bridge: Any, tp_cache: TPCache,
     close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
 ) -> None:
     """
-    GD VIP Runner: same trail-to-prior-TP ladder mechanism as Signal Climber,
+    Reversal Runner: same trail-to-prior-TP ladder mechanism as Signal Climber,
     but with a back-loaded close schedule (_GDVR_PCTS) — see
-    STRATEGY_DESCRIPTIONS[STRATEGY_GD_VIP_RUNNER] for the backtest this is
+    STRATEGY_DESCRIPTIONS[STRATEGY_REVERSAL_RUNNER] for the backtest this is
     derived from. The SL itself is widened at open time (see
-    _gdvr_sl_dist()); this handler only manages TP-ladder exits and SL trail.
+    _rr_sl_dist()); this handler only manages TP-ladder exits and SL trail.
 
     Unlike Signal Climber, SL does not move to breakeven at TP1 — the
-    wider entry SL is intentional (see _gdvr_sl_dist()) and moving to BE
+    wider entry SL is intentional (see _rr_sl_dist()) and moving to BE
     that early would defeat it. BE happens at TP2 instead (be_at_pos=1).
     """
-    await run_tp_ladder(trade, tick, _GDVR_PCTS, "gd_vip_runner", bridge, tp_cache,
+    await run_tp_ladder(trade, tick, _GDVR_PCTS, "reversal_runner", bridge, tp_cache,
                        be_at_pos=1, close_full_after_tps=close_full_after_tps)
 
 
@@ -241,15 +241,15 @@ async def handle_adaptive_runner(
     close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
 ) -> None:
     """
-    Adaptive Runner: same back-loaded ladder mechanism as GD VIP Runner
+    Adaptive Runner: same back-loaded ladder mechanism as Reversal Runner
     (_GDVR_PCTS), but the SL widened at open time is capped at 50% of the
     distance to the signal's own final TP (see _adaptive_sl_dist()) —
     never wider than that, and never tightened below the signal's own
     stated SL. See STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER] in
-    core/models.py for why GD VIP Runner's flat 4x/20pt widening is wrong
+    core/models.py for why Reversal Runner's flat 4x/20pt widening is wrong
     for signals with a short TP ladder.
 
-    Unlike GD VIP Runner, SL moves to breakeven at TP1 (be_at_pos=0) —
+    Unlike Reversal Runner, SL moves to breakeven at TP1 (be_at_pos=0) —
     since the stop is already proportionate to the reachable reward,
     there's no need to keep full risk on the table past the first target.
     """
@@ -274,7 +274,7 @@ async def handle_adaptive_runner_2(
     """
     Adaptive Runner 2: fixed 10pt SL (see _ADAPTIVE2_SL_PT in
     core_signal_resolution.py -- not derived from the signal at all, unlike
-    every other ladder strategy), GD VIP Runner's back-loaded close
+    every other ladder strategy), Reversal Runner's back-loaded close
     schedule (_GDVR_PCTS -- an exact match for this strategy's own stated
     5/5/10/10/15/15/15/25 split), and a different SL trail: breakeven at
     TP2 (be_at_pos=1), then from TP3 onward the SL steps to the midpoint of
@@ -325,7 +325,7 @@ async def handle_limit_runner(
     at the configured be_at_pos (Strategy Parameters: 1-based "TP#",
     converted here to run_tp_ladder's 0-indexed compacted position), then
     trails to the previous TP price each level after -- same trail rule as
-    GD VIP Runner (sl_rule=None). If the signal carried a "TP OPEN" line,
+    Reversal Runner (sl_rule=None). If the signal carried a "TP OPEN" line,
     the last numeric TP only closes its own share instead of everything
     remaining (close_full_on_last=False) -- whatever's left keeps riding on
     the trailing SL with no further target.

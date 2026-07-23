@@ -1,8 +1,8 @@
-"""The VIP-style ladder was retuned from 33/33/34 to 50/30/20 (task #35 of
-the 2026-07-22 GD Copy improvements pack): the fork's real trade history
+"""The REF-style ladder was retuned from 33/33/34 to 50/30/20 (task #35 of
+the 2026-07-22 Reversal Engine improvements pack): the fork's real trade history
 showed a 72% win rate that was still net losing, because the original
 33% TP1 leg didn't bank enough to outweigh a full SL loss (0% banked, the
-whole sl_dist risked) even at a 72% hit rate -- see gd_copy_signal_manage.
+whole sl_dist risked) even at a 72% hit rate -- see reversal_engine_manage.
 py's _TP1_FRAC/_MID_FRAC/_FINAL_FRAC constants for the full reasoning.
 Front-loading more onto TP1 (the leg actually reached most reliably) is a
 judgment call, not a backtested optimum -- these tests pin the exact
@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.gd_copy_signal import gd_copy_signal_manage as manage
-from forex_trader.gd_copy_signal import gd_copy_signal_repo as db
-from forex_trader.gd_copy_signal.gd_copy_signal_service import GDCopyEngine
+from forex_trader.reversal_engine import reversal_engine_manage as manage
+from forex_trader.reversal_engine import reversal_engine_repo as db
+from forex_trader.reversal_engine.reversal_engine_service import ReversalEngine
 
 
 @pytest.fixture
@@ -33,13 +33,13 @@ def fresh_db():
 
 @pytest.fixture
 def engine(fresh_db):
-    return GDCopyEngine(bridge=None)
+    return ReversalEngine(bridge=None)
 
 
 @pytest.fixture(autouse=True)
 def _no_external_side_effects(monkeypatch):
     monkeypatch.setattr(
-        "forex_trader.gd_copy_signal.ml_engine.record_outcome",
+        "forex_trader.reversal_engine.ml_engine.record_outcome",
         lambda signal_id, outcome: None,
     )
     monkeypatch.setattr(
@@ -71,7 +71,7 @@ def test_remaining_thresholds_match_the_fractions():
     assert manage._POST_MID_REMAINING == pytest.approx(manage._FINAL_FRAC, abs=1e-9)
 
 
-def _build_vip_signal(fresh_db, direction="BUY"):
+def _build_ref_signal(fresh_db, direction="BUY"):
     return fresh_db.create_signal({
         "signal_ref":     "ladder-1",
         "direction":      direction,
@@ -89,7 +89,7 @@ def _build_vip_signal(fresh_db, direction="BUY"):
 
 
 def test_full_ladder_books_50_30_20_and_final_close_uses_the_last_20(engine, fresh_db):
-    sig_id = _build_vip_signal(fresh_db)
+    sig_id = _build_ref_signal(fresh_db)
 
     sig = fresh_db.get_signal_by_id(sig_id)
     asyncio.run(engine._manage_triggered_signal(sig, _tick(4003.5, 4003.8)))  # TP1
@@ -113,7 +113,7 @@ def test_sl_before_tp1_still_risks_the_full_unbanked_position(engine, fresh_db):
     any partial has been booked still closes 100% of the position as a
     loss (the exact dynamic that motivated front-loading TP1 in the first
     place -- a full loss dwarfs a 33% partial win)."""
-    sig_id = _build_vip_signal(fresh_db)
+    sig_id = _build_ref_signal(fresh_db)
     sig = fresh_db.get_signal_by_id(sig_id)
     asyncio.run(engine._manage_triggered_signal(sig, _tick(3989.8, 3990.0)))
     sig = fresh_db.get_signal_by_id(sig_id)

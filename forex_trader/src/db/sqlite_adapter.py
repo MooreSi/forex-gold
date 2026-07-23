@@ -31,7 +31,7 @@ class SqliteAdapter:
         # threads even with check_same_thread=False (that flag only lifts the
         # same-thread assertion, it doesn't add internal locking) -- confirmed
         # live 2026-07-21: wiring breakout_signal + test_signal alongside
-        # gd_copy_signal surfaced "SQLite objects created in a thread can only
+        # reversal_engine surfaced "SQLite objects created in a thread can only
         # be used in that same thread" the moment more than one engine's
         # to_db_thread-wrapped UI panel and main-thread engine loop were both
         # hitting their own adapter. An RLock (not a plain Lock) so

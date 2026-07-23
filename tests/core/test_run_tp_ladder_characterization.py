@@ -1,5 +1,5 @@
 """Characterizes _run_tp_ladder and its three thin wrapper handlers
-(_handle_signal_climber/_handle_gd_vip_runner/_handle_adaptive_runner) on
+(_handle_signal_climber/_handle_reversal_runner/_handle_adaptive_runner) on
 SimulationEngine (core/engine.py) before task 020 extracts them -- see
 docs/todo/refactor/core-tp-ladder-handlers-migration/010-*.md.
 
@@ -168,27 +168,27 @@ def test_climber_tp3_last_closes_full_remaining_returns_before_sl_trail(fresh_db
     assert engine._bridge.modify_order_calls == []  # early return -- no SL trail attempted
 
 
-# ── GD VIP Runner (be_at_pos=1) ─────────────────────────────────────────────────
+# ── Reversal Runner (be_at_pos=1) ─────────────────────────────────────────────────
 
-def test_gdvr_tp1_hit_closes_15pct_does_not_move_sl_yet(fresh_db, engine):
+def test_rr_tp1_hit_closes_15pct_does_not_move_sl_yet(fresh_db, engine):
     # n=3 -> _GDVR_PCTS[3] = [0.15, 0.25, 0.60]
     _insert_signal()
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                   tp1=2410.0, tp2=2420.0, tp3=2430.0)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_gd_vip_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+    asyncio.run(SimulationEngine._handle_reversal_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
 
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.015}]
     assert engine._bridge.modify_order_calls == []  # SL untouched -- be_at_pos=1, this is pos=0
 
 
-def test_gdvr_tp2_hit_after_tp1_moves_sl_to_be(fresh_db, engine):
+def test_rr_tp2_hit_after_tp1_moves_sl_to_be(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.085,
                   stop_loss=2380.0, tp1=2410.0, tp2=2420.0, tp3=2430.0)
     _insert_partial_close("t-1", "TP1", lots_closed=0.015)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_gd_vip_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
+    asyncio.run(SimulationEngine._handle_reversal_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
 
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # now BE
@@ -201,7 +201,7 @@ def test_single_tick_clearing_multiple_tps_processes_both_in_one_call(fresh_db, 
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                   tp1=2410.0, tp2=2420.0, tp3=2430.0)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_gd_vip_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
+    asyncio.run(SimulationEngine._handle_reversal_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
 
     assert engine._bridge.partial_close_calls == [
         {"ticket": 555, "lots": 0.015},  # TP1: 15%

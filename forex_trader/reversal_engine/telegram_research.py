@@ -1,5 +1,5 @@
 """
-Nightly Telegram research job for GD Copy.
+Nightly Telegram research job for Reversal Engine.
 
 Reads the day's Gold Diggers VIP + GD2 messages (including chart images),
 asks the AI provider selected in Settings > AI to synthesise the real
@@ -8,7 +8,7 @@ scores, feeds those scores into ml_engine's feature set as live inputs,
 forces an immediate retrain, and emails a summary of what was learned.
 
 Called once nightly (22:00 Europe/London) by
-SimulationEngine._gd_copy_research_loop in core/engine.py.
+SimulationEngine._reversal_engine_research_loop in core/engine.py.
 """
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ from forex_trader.core import ai_provider
 
 _log = logging.getLogger(__name__)
 
-_VIP_GROUP_ID = "1608388054"
+_REF_GROUP_ID = "1608388054"
 _GD2_GROUP_ID = "2616846888"
-_GROUP_IDS = [_VIP_GROUP_ID, _GD2_GROUP_ID]
+_GROUP_IDS = [_REF_GROUP_ID, _GD2_GROUP_ID]
 
 _MAX_IMAGES = 12          # per-night cap — cost/time control
 _MAX_TEXT_MESSAGES = 400  # per-night cap on messages included in the text prompt
@@ -96,9 +96,9 @@ async def _download_images(engine, messages: list[dict]) -> list[bytes]:
                     if data:
                         images.append(data)
                 except Exception as e:
-                    _log.debug("[GDC-Research] image download failed for msg %s: %s", tg_msg.id, e)
+                    _log.debug("[RE-Research] image download failed for msg %s: %s", tg_msg.id, e)
         except Exception as e:
-            _log.warning("[GDC-Research] entity/message fetch failed for group %s: %s", gid, e)
+            _log.warning("[RE-Research] entity/message fetch failed for group %s: %s", gid, e)
 
     return images
 
@@ -160,7 +160,7 @@ async def _send_failure_alert(date_str: str, n_messages: int, reason: str) -> No
     from forex_trader.core import email_service
     html = (
         f'<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;">'
-        f'<h2 style="color:#ef4444;">GD Copy — Nightly Research FAILED</h2>'
+        f'<h2 style="color:#ef4444;">Reversal Engine — Nightly Research FAILED</h2>'
         f'<p style="color:#6b7280;font-size:13px;">{date_str} &middot; {n_messages} messages were '
         f'available but the run did not complete.</p>'
         f'<p style="color:#374151;">Reason: <code>{reason}</code></p>'
@@ -171,22 +171,22 @@ async def _send_failure_alert(date_str: str, n_messages: int, reason: str) -> No
     )
     try:
         ok, err = await email_service.send_email(
-            f"GD Copy — Nightly Research FAILED — {date_str}", html,
+            f"Reversal Engine — Nightly Research FAILED — {date_str}", html,
         )
         if not ok:
-            _log.warning("[GDC-Research] failure-alert email also failed to send: %s", err)
+            _log.warning("[RE-Research] failure-alert email also failed to send: %s", err)
     except Exception as e:
-        _log.warning("[GDC-Research] failure-alert email build/send error: %s", e)
+        _log.warning("[RE-Research] failure-alert email build/send error: %s", e)
 
 
 async def run_nightly_research(engine) -> dict:
-    """Entry point called once nightly by SimulationEngine._gd_copy_research_loop.
-    Safe to call more than once for the same date — gdc_daily_research is
+    """Entry point called once nightly by SimulationEngine._reversal_engine_research_loop.
+    Safe to call more than once for the same date — re_daily_research is
     keyed by date and store_daily_research does INSERT OR REPLACE, and a
     duplicate run simply overwrites the cached scores and retrains again
     rather than corrupting anything."""
-    from forex_trader.gd_copy_signal import gd_copy_signal_repo as gdc_db
-    from forex_trader.gd_copy_signal import ml_engine as gdc_ml
+    from forex_trader.reversal_engine import reversal_engine_repo as re_db
+    from forex_trader.reversal_engine import ml_engine as re_ml
     from forex_trader.core import database as db_module
     from forex_trader.core import email_service
 
@@ -201,9 +201,9 @@ async def run_nightly_research(engine) -> dict:
     # does not mean *this* job used Claude; confirmed live 2026-07-16 that a
     # run failure was misattributed to exactly that unrelated Claude error
     # before this line existed to rule it out at a glance).
-    _log.info("[GDC-Research] using AI provider: %s", cfg.get("ai_provider", "claude"))
+    _log.info("[RE-Research] using AI provider: %s", cfg.get("ai_provider", "claude"))
     if not ai_provider.is_configured(cfg):
-        _log.info("[GDC-Research] skipped — no AI provider configured")
+        _log.info("[RE-Research] skipped — no AI provider configured")
         return {"ran": False, "reason": "ai_not_configured"}
 
     date_str = _uk_today_str()
@@ -211,7 +211,7 @@ async def run_nightly_research(engine) -> dict:
 
     messages = db_module.get_messages_for_research(_GROUP_IDS, since_iso)
     if not messages:
-        _log.info("[GDC-Research] no messages today (%s) — skipping", date_str)
+        _log.info("[RE-Research] no messages today (%s) — skipping", date_str)
         return {"ran": False, "reason": "no_messages", "date": date_str}
 
     images = await _download_images(engine, messages)
@@ -242,7 +242,7 @@ async def run_nightly_research(engine) -> dict:
             # fall back to a text-only call on the SAME provider rather than
             # silently switching to a different one the user didn't choose.
             _log.info(
-                "[GDC-Research] vision call failed on %s (%s) — falling back to text-only synthesis",
+                "[RE-Research] vision call failed on %s (%s) — falling back to text-only synthesis",
                 cfg.get("ai_provider", "claude"), repr(e),
             )
     if raw is None:
@@ -251,13 +251,13 @@ async def run_nightly_research(engine) -> dict:
                 cfg, _SYSTEM_PROMPT, prompt, max_tokens=1500, timeout=_RESEARCH_TIMEOUT_S
             )
         except Exception as e:
-            _log.warning("[GDC-Research] AI call failed: %s", repr(e))
+            _log.warning("[RE-Research] AI call failed: %s", repr(e))
             await _send_failure_alert(date_str, len(messages), f"AI call failed: {e!r}")
             return {"ran": False, "reason": f"ai_error: {e!r}", "date": date_str}
 
     parsed = _parse_ai_json(raw)
     if parsed is None:
-        _log.warning("[GDC-Research] could not parse AI response as JSON: %s", raw[:300])
+        _log.warning("[RE-Research] could not parse AI response as JSON: %s", raw[:300])
         await _send_failure_alert(date_str, len(messages), "AI response could not be parsed as JSON")
         return {"ran": False, "reason": "parse_error", "date": date_str}
 
@@ -275,22 +275,22 @@ async def run_nightly_research(engine) -> dict:
         # score — carry forward yesterday's cached value rather than writing
         # a low-confidence number (e.g. a quiet day's 0.0) into the live ML
         # feature, which would misrepresent "no data" as "worst behaviour".
-        discipline, aggression = gdc_ml.get_daily_research_scores()
-        _log.info("[GDC-Research] %s — insufficient data, carrying forward prior scores (%.2f/%.2f)",
+        discipline, aggression = re_ml.get_daily_research_scores()
+        _log.info("[RE-Research] %s — insufficient data, carrying forward prior scores (%.2f/%.2f)",
                    date_str, discipline, aggression)
 
-    gdc_db.store_daily_research(
+    re_db.store_daily_research(
         date_str, discipline, aggression, summary, notable, entry_notes, risk_notes,
         len(messages), images_analyzed, json.dumps(parsed),
     )
-    gdc_db.set_config("vip_discipline_score", str(discipline))
-    gdc_db.set_config("vip_aggression_score", str(aggression))
+    re_db.set_config("ref_discipline_score", str(discipline))
+    re_db.set_config("ref_aggression_score", str(aggression))
 
     try:
-        gdc_ml.retrain_now()
+        re_ml.retrain_now()
         retrained = True
     except Exception as e:
-        _log.warning("[GDC-Research] retrain failed: %s", e)
+        _log.warning("[RE-Research] retrain failed: %s", e)
         retrained = False
 
     try:
@@ -299,15 +299,15 @@ async def run_nightly_research(engine) -> dict:
             entry_notes, risk_notes, len(messages), images_analyzed, retrained, data_sufficient,
         )
         ok, err = await email_service.send_email(
-            f"GD Copy — Nightly Telegram Research — {date_str}", html,
+            f"Reversal Engine — Nightly Telegram Research — {date_str}", html,
         )
         if not ok:
-            _log.warning("[GDC-Research] email send failed: %s", err)
+            _log.warning("[RE-Research] email send failed: %s", err)
     except Exception as e:
-        _log.warning("[GDC-Research] email build/send error: %s", e)
+        _log.warning("[RE-Research] email build/send error: %s", e)
 
     _log.info(
-        "[GDC-Research] %s — %d messages, %d images, discipline=%.2f aggression=%.2f retrained=%s",
+        "[RE-Research] %s — %d messages, %d images, discipline=%.2f aggression=%.2f retrained=%s",
         date_str, len(messages), images_analyzed, discipline, aggression, retrained,
     )
     return {
@@ -336,7 +336,7 @@ def _build_email_html(date_str, discipline, aggression, summary, notable,
     )
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;">
-      <h2 style="color:#f59e0b;">GD Copy — Nightly Telegram Research</h2>
+      <h2 style="color:#f59e0b;">Reversal Engine — Nightly Telegram Research</h2>
       <p style="color:#6b7280;font-size:13px;">{date_str} &middot; {n_messages} messages analysed &middot; {n_images} chart images reviewed</p>
       {carried_forward_note}
       <table style="border-collapse:collapse;margin:16px 0;">
@@ -352,8 +352,8 @@ def _build_email_html(date_str, discipline, aggression, summary, notable,
       <h3 style="color:#111827;">Risk management observed</h3>
       <p style="color:#374151;">{risk_notes or "None noted"}</p>
       <p style="color:#6b7280;font-size:12px;margin-top:24px;">
-        These two scores are now feeding GD Copy's ML model as live features
-        (vip_discipline_score / vip_aggression_score), and the model was {retrain_note}
+        These two scores are now feeding Reversal Engine's ML model as live features
+        (ref_discipline_score / ref_aggression_score), and the model was {retrain_note}
         to incorporate them.
       </p>
     </div>

@@ -37,7 +37,7 @@ from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
-    STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
     Tick,
 )
@@ -60,13 +60,13 @@ async def try_activate_pending_signals(
     filled within 2 minutes are expired — the market context will have
     changed and the zone level is stale for a scalping strategy.
 
-    Exception: GD VIP Runner's edge depends on zone signals that often
+    Exception: Reversal Runner's edge depends on zone signals that often
     take well over an hour to fill (median ~101min in the backtest this
     strategy is derived from) — signals get _GDVR_PENDING_EXPIRY_SEC (4h)
-    instead of the default whenever GD VIP Runner applies to that signal,
+    instead of the default whenever Reversal Runner applies to that signal,
     either as the global Active Strategy or as a per-channel override on
     the signal's own source channel (Channel Strategy tab) — a signal
-    from a channel overridden to gd_vip_runner must get the long window
+    from a channel overridden to reversal_runner must get the long window
     even while some other channel is driving the global strategy, or
     every GD VIP zone signal expires in 2 minutes before the ~101min
     median fill time, silently starving that strategy of any fills.
@@ -113,7 +113,7 @@ async def try_activate_pending_signals(
         effective_strategy = channel_strategy or current_strategy
         # GD2 signals are published after the provider enters — price typically needs
         # time to pull back to the zone.  Give them 15 min instead of 2 min so brief
-        # retracements are not missed.  GD VIP Runner, Adaptive Runner, and Adaptive
+        # retracements are not missed.  Reversal Runner, Adaptive Runner, and Adaptive
         # Runner 2 keep the 4h window — any of them can end up on the same
         # slow-to-fill zone signals if a channel is overridden to it, and the wider
         # window is harmless for faster-filling signals (they still fire the moment
@@ -121,7 +121,7 @@ async def try_activate_pending_signals(
         _src = (sig.get("source_name") or "").lower()
         _is_gd2_src = "gold diggers 2.0" in _src
         _is_orb_src = "orb/ivb report" in _src
-        if effective_strategy in (STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+        if effective_strategy in (STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
                                    STRATEGY_ADAPTIVE_RUNNER_2):
             _expiry = _GDVR_PENDING_EXPIRY_SEC
         elif _is_gd2_src:
@@ -191,7 +191,7 @@ async def try_activate_pending_signals(
             _pw_strategy = current_strategy
         _self_mgd = {STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
                      STRATEGY_SIGNAL_CLIMBER,
-                     STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+                     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
                      STRATEGY_ADAPTIVE_RUNNER_2}
         _act_px = tick.ask if sig["direction"].upper() == "BUY" else tick.bid
         filter_err = None if _pw_strategy in _self_mgd else check_pre_trade_filters(

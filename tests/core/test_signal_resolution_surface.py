@@ -24,7 +24,7 @@ from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,
-    STRATEGY_SIGNAL_CLIMBER, STRATEGY_GD_VIP_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
@@ -343,9 +343,9 @@ def test_signal_climber_uses_signal_sl_exactly(fresh_db):
     assert result["stop_loss_to_use"] == 2385.0
 
 
-def test_gd_vip_runner_widens_sl(fresh_db):
+def test_reversal_runner_widens_sl(fresh_db):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
-    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
+    db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
     assert result["stop_loss_to_use"] == 2380.0
@@ -401,22 +401,22 @@ def test_scalp_runner_sl_pt_override_changes_resolved_sl(fresh_db):
     assert result["stop_loss_to_use"] == 2385.0   # entry_mid 2400 - 15
 
 
-def test_gd_vip_runner_sl_mult_override_changes_widened_sl(fresh_db):
+def test_reversal_runner_sl_mult_override_changes_widened_sl(fresh_db):
     # stated_dist = |2400 - 2395| = 5; default 4x -> 20, capped at 20pt = 20.
     # With sl_mult overridden to 2x: min(5*2, cap) = 10.
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
-    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
-    sp.set_strategy_params(STRATEGY_GD_VIP_RUNNER, {"sl_mult": 2.0, "sl_cap_pt": 20.0, "sl_floor_pt": 8.0})
+    db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
+    sp.set_strategy_params(STRATEGY_REVERSAL_RUNNER, {"sl_mult": 2.0, "sl_cap_pt": 20.0, "sl_floor_pt": 8.0})
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
     assert result["stop_loss_to_use"] == 2390.0   # entry_mid 2400 - 10
 
 
-def test_gd_vip_runner_sl_floor_override_used_for_bad_data(fresh_db):
+def test_reversal_runner_sl_floor_override_used_for_bad_data(fresh_db):
     # stop_loss == entry (stated_dist=0) triggers the floor fallback.
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2400.0, tp1=None)
-    db.update_risk_settings({"trade_strategy": STRATEGY_GD_VIP_RUNNER})
-    sp.set_strategy_params(STRATEGY_GD_VIP_RUNNER, {"sl_mult": 4.0, "sl_cap_pt": 20.0, "sl_floor_pt": 3.0})
+    db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
+    sp.set_strategy_params(STRATEGY_REVERSAL_RUNNER, {"sl_mult": 4.0, "sl_cap_pt": 20.0, "sl_floor_pt": 3.0})
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
     assert result["stop_loss_to_use"] == 2397.0   # entry_mid 2400 - floor 3

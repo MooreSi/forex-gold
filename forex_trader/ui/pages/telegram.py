@@ -81,6 +81,77 @@ def _render_logic_keywords_section() -> None:
 
         ui.separator().classes("my-2")
 
+        # ── Auto-Execution (moved here from Trading > Strategy, 2026-07-23) ──
+        with ui.row().classes("items-center gap-1"):
+            ui.label("Auto-Execution").classes("text-sm font-semibold text-yellow-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Ensure you enable Algo Trading in the MetaTrader 5 Terminal. "
+                "Click the AutoTrading robot icon in the MT5 toolbar — it must be green/active "
+                "for the app to place trades. MT5 disables it automatically after restarts or account switches."
+            )
+        auto_enabled = bool(rs.get("auto_execute_signals", 0))
+        auto_badge = ui.badge(
+            "AUTO-EXEC ON" if auto_enabled else "AUTO-EXEC OFF",
+            color="green" if auto_enabled else "grey",
+        )
+
+        def toggle_auto():
+            cur = bool(db_module.get_risk_settings().get("auto_execute_signals", 0))
+            db_module.update_risk_settings({"auto_execute_signals": 0 if cur else 1})
+            new = not cur
+            auto_badge.props(f"color={'green' if new else 'grey'}")
+            auto_badge.text = "AUTO-EXEC ON" if new else "AUTO-EXEC OFF"
+            ui.notify(f"Auto-execution {'enabled' if new else 'disabled'}", type="info")
+
+        ui.button("Toggle Auto-Execute", on_click=toggle_auto).classes(
+            "bg-gray-700 text-white mt-2 px-4 py-2 text-sm"
+        )
+        ui.label(
+            "When ON: incoming Telegram signals are automatically traded. "
+            "Manual signals always require explicit execution."
+        ).classes("text-xs text-gray-400 mt-1")
+
+        # ── Immediate Market Buy/Sell (moved here from Trading > Strategy,
+        # 2026-07-23) ─────────────────────────────────────────────────────────
+        ui.separator().classes("my-3")
+        ime_enabled_val = bool(rs.get("immediate_market_entry", 0))
+
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.icon("flash_on").classes("text-amber-400 text-base")
+            ui.label("Immediate Market Buy/Sell").classes(
+                "text-sm font-semibold text-amber-300"
+            )
+            ime_badge = ui.badge(
+                "IME ON" if ime_enabled_val else "IME OFF",
+                color="amber" if ime_enabled_val else "grey",
+            )
+
+        ime_chk = ui.checkbox(
+            "Execute instant market orders",
+            value=ime_enabled_val,
+        ).classes("text-sm text-gray-200")
+
+        def _ime_toggle(e):
+            db_module.update_risk_settings({"immediate_market_entry": 1 if e.value else 0})
+            ime_badge.props(f"color={'amber' if e.value else 'grey'}")
+            ime_badge.text = "IME ON" if e.value else "IME OFF"
+            ui.notify(
+                "Immediate market entry enabled" if e.value
+                else "Immediate market entry disabled",
+                type="positive" if e.value else "info",
+            )
+
+        ime_chk.on_value_change(_ime_toggle)
+
+        ui.label(
+            "When ON, reads both Telegram channels for bare 'Buy Now'/'Sell Now' "
+            "messages and enters at current market price immediately. "
+            "When the follow-up signal with SL and TP levels arrives the open "
+            "trade is updated automatically. Applies to all strategies."
+        ).classes("text-xs text-gray-400 mt-1 leading-relaxed")
+
+        ui.separator().classes("my-2")
+
         # ── Lexicon boxes ──────────────────────────────────────────────────
         lexicons = logic_kw.get_all_lexicons()
         boxes: dict[str, object] = {}

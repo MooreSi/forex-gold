@@ -525,12 +525,40 @@ class TelegramReader:
                 entity = d.entity
                 if int(getattr(entity, "id", 0) or 0) == int(self._group_ids[slot]):
                     self._group_entities[slot] = entity
+                    self._check_group_renamed(slot, d.name or getattr(entity, "title", ""))
                     return entity
             self._group_entities[slot] = await self._client.get_entity(self._group_ids[slot])
+            self._check_group_renamed(slot, getattr(self._group_entities[slot], "title", ""))
             return self._group_entities[slot]
         except Exception as e:
             self._add_error(f"Could not resolve entity slot {slot+1}: {e}")
             return None
+
+    def _check_group_renamed(self, slot: int, live_title: str) -> None:
+        """The Telegram group's real title is the source of truth -- if it no
+        longer matches what we stored at select_group() time, the channel was
+        renamed on Telegram's side. Cascade the rename across every DB table
+        keyed by that name string (channel_parser_config, channel_performance,
+        channel_strategy_rec, trade history, pending orders) so the app's
+        Channel Strategy tab keeps showing one continuous row under the new
+        name instead of forking into a stale orphan and a blank new one.
+        Runs every time the entity is freshly resolved (reconnect, restart,
+        or first select) -- cheap no-op UPDATEs once names already match."""
+        live_title = (live_title or "").strip()
+        old_name   = self._group_names[slot]
+        if not live_title or not old_name or live_title == old_name:
+            return
+        try:
+            db_module.sync_channel_rename(old_name, live_title)
+            db_module.save_telegram_reader_event(
+                "group", "renamed",
+                f"Slot {slot+1}: '{old_name}' -> '{live_title}' ({self._group_ids[slot]})",
+            )
+        except Exception as e:
+            self._add_error(f"Channel rename sync failed slot {slot+1}: {e}")
+            return
+        self._group_names[slot] = live_title
+        self.save_group_selections()
 
     @staticmethod
     def _extract_sender_fields(sender) -> tuple[Optional[int], str]:

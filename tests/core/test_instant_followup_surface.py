@@ -302,7 +302,7 @@ def test_find_followup_match_found_applies_and_returns_true(fresh_db):
 # ── ime_timeout_watchdog ─────────────────────────────────────────────────────
 
 def _insert_stale(trade_id, strategy="scale_out", mt5_ticket=777,
-                  entry_price=2415.0, stop_loss=2403.0, age_s=200):
+                  entry_price=2415.0, stop_loss=2403.0, age_s=200, managed_by="python"):
     with db.db() as conn:
         conn.execute(
             "INSERT INTO vantage_signals (signal_id, direction, entry_low, entry_high, "
@@ -312,9 +312,9 @@ def _insert_stale(trade_id, strategy="scale_out", mt5_ticket=777,
         conn.execute(
             "INSERT INTO vantage_simulated_trades (trade_id, signal_id, mt5_ticket, direction, "
             "entry_low, entry_high, entry_price, lot_size, remaining_lots, stop_loss, status, "
-            "open_time, strategy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "open_time, strategy, managed_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (trade_id, f"sig-{trade_id}", mt5_ticket, "BUY", entry_price, entry_price,
-             entry_price, 0.10, 0.10, stop_loss, "open", time.time() - age_s, strategy),
+             entry_price, 0.10, 0.10, stop_loss, "open", time.time() - age_s, strategy, managed_by),
         )
 
 
@@ -355,3 +355,46 @@ def test_watchdog_moves_sl_to_be_when_tp1_already_cleared(fresh_db):
     assert trade["stop_loss"] == 2415.0
     assert trade["sl_moved_to_be"] == 1
     assert bridge.modify_order_calls == [{"ticket": 777, "sl": 2415.0, "tp": None}]
+
+
+def test_watchdog_skips_ea_managed_trade_when_ea_healthy(fresh_db, monkeypatch):
+    """EA-managed trades (built-in ladder strategies and EA Templates
+    alike) are protected by the EA's own on-tick logic -- confirmed live
+    2026-07-23 that without this guard, a template with tpsl_mode="off"
+    (no TP by design) got hijacked after 3 minutes: a generic fallback TP
+    ladder was force-assigned and SL was moved to breakeven via a raw MT5
+    modify_order call, undermining the template's own management."""
+    _insert_stale("t-ea", strategy="template:StealthTest", managed_by="ea", age_s=200)
+    tick = SimpleNamespace(bid=2419.0, ask=2419.5)  # would otherwise clear auto-TP1
+    bridge = _FakeBridge()
+
+    class _FakeEA:
+        def is_ea_healthy(self):
+            return True
+
+    from forex_trader.core import ea_bridge
+    monkeypatch.setattr(ea_bridge, "_instance", _FakeEA())
+    asyncio.run(followup.ime_timeout_watchdog(tick, bridge))
+    trade = _trade_dict("t-ea")
+    assert trade["tp1"] is None
+    assert trade["stop_loss"] == 2403.0
+    assert trade["sl_moved_to_be"] == 0
+    assert bridge.modify_order_calls == []
+
+
+def test_watchdog_falls_through_for_ea_managed_trade_when_ea_unhealthy(fresh_db, monkeypatch):
+    """If the EA isn't there to protect it, the watchdog's generic
+    fallback is better than leaving the trade completely unmanaged."""
+    _insert_stale("t-ea-down", strategy="template:StealthTest", managed_by="ea", age_s=200)
+    tick = SimpleNamespace(bid=2416.0, ask=2416.5)
+    bridge = _FakeBridge()
+
+    class _FakeEA:
+        def is_ea_healthy(self):
+            return False
+
+    from forex_trader.core import ea_bridge
+    monkeypatch.setattr(ea_bridge, "_instance", _FakeEA())
+    asyncio.run(followup.ime_timeout_watchdog(tick, bridge))
+    trade = _trade_dict("t-ea-down")
+    assert trade["tp1"] == 2418.0

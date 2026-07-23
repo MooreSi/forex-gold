@@ -357,6 +357,25 @@ async def ime_timeout_watchdog(tick: "Tick", bridge: Any) -> None:
         mt5_ticket  = trade.get("mt5_ticket")
         age_min     = int((now - float(trade["open_time"])) / 60)
 
+        # EA-managed trades (built-in ladder strategies and EA Templates
+        # alike) are protected by the EA's own on-tick logic -- this
+        # watchdog must not also guess a generic fallback TP ladder and
+        # force SL to breakeven out from under it. Same class of bug as
+        # core_tp_safety_net.py's own managed_by=='ea' guard (ticket
+        # 1556670216); confirmed live 2026-07-23 on an EA Template with
+        # tpsl_mode="off"/"stealth" and no TP by design -- this watchdog
+        # force-assigned a 6-level fallback ladder and moved SL to
+        # breakeven via a raw MT5 modify_order call, completely bypassing
+        # the template's own stealth/harvest/trail management.
+        if trade.get("managed_by") == "ea":
+            try:
+                from forex_trader.core import ea_bridge as _ea_mod
+                _ea = _ea_mod.get_instance()
+                if _ea is not None and _ea.is_ea_healthy():
+                    continue
+            except Exception:
+                pass
+
         # Self-managing strategies set their own SL/TP immediately after fill.
         # If tp1 is still NULL something went wrong with that block — log a
         # warning but do NOT overwrite with generic auto-assign levels.

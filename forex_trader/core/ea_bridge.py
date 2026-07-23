@@ -226,8 +226,15 @@ class EABridge:
             msg["tpl_be_mode"]        = template["be_mode"]
             msg["tpl_be_buffer_pts"]  = template["be_buffer_pts"]
             msg["tpl_be_trigger"]     = template["be_trigger"]
-            msg["tpl_cancel_pending"] = template["cancel_pending"]
-            msg["tpl_harvest_enabled"]   = template["harvest_enabled"]
+            # Sent as 1/0, not a native JSON bool -- the EA's minimal JSON
+            # parser only understands numbers/strings for flag fields (same
+            # convention as close_full_on_last above). Confirmed live
+            # 2026-07-23: sending a native Python bool here silently
+            # evaluates false on the EA side (StringToInteger("true") == 0),
+            # so harvest and grid cancel-pending never fired regardless of
+            # the template's actual setting.
+            msg["tpl_cancel_pending"] = 1 if template["cancel_pending"] else 0
+            msg["tpl_harvest_enabled"]   = 1 if template["harvest_enabled"] else 0
             msg["tpl_harvest_threshold"] = template["harvest_threshold"]
         ack_event = asyncio.Event()
         ack_box: dict = {}

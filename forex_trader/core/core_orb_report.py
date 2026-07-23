@@ -380,6 +380,38 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     mt5_direction = "BUY" if direction == "bullish" else "SELL"
     rs = await db_module.to_db_thread(db_module.get_risk_settings)
 
+    # Channel Strategy override (Trading > Strategy) -- same resolution
+    # order as core_signal_resolution.resolve_open_trade_params: manual
+    # override > auto-Claude rec > this channel's own default (orb_fixed,
+    # not the global Active Strategy, since orb_fixed is what actually
+    # suits a single-target breakout entry).
+    from forex_trader.core import core_ea_templates as ea_templates
+    _ch_override = await db_module.to_db_thread(
+        db_module.get_channel_strategy_override, "ORB/IVB Report (auto)"
+    )
+    if _ch_override == "auto":
+        _rec = await db_module.to_db_thread(
+            db_module.get_channel_strategy_rec, "ORB/IVB Report (auto)"
+        )
+        strategy = _rec.get("strategy") or STRATEGY_ORB_FIXED
+    elif _ch_override:
+        strategy = _ch_override
+    else:
+        strategy = STRATEGY_ORB_FIXED
+
+    if ea_templates.is_template_override(strategy):
+        _tpl_name = ea_templates.template_name_from_override(strategy)
+        log.info("[ORB auto-execute] channel assigned to EA Template '%s' -- not supported "
+                 "for ORB/IVB's pending zone-entry order, skipping this morning", _tpl_name)
+        asyncio.create_task(telegram_alerts.send_message(
+            f"*ORB/IVB Auto-Execute Skipped*\nChannel Strategy for 'ORB/IVB Report' is set to "
+            f"EA Template '{_tpl_name}', which isn't supported for ORB/IVB's pending zone-entry "
+            f"order (EA Templates only manage immediate-fill trades). Reassign it to a regular "
+            f"strategy in Trading > Strategy > Channel Strategy.",
+            None, "orb_auto_execute_skipped",
+        ))
+        return
+
     from forex_trader.core import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()
     if _ea is None or not _ea.is_ea_healthy():
@@ -411,7 +443,7 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     try:
         ack = await _ea.place_pending_order(
             trade_id, mt5_direction, price, lot, stop_loss,
-            {1: target}, [1.0], 0, STRATEGY_ORB_FIXED,
+            {1: target}, [1.0], 0, strategy,
             expire_minutes=_ORB_PENDING_EXPIRE_MINUTES, close_full_on_last=True,
         )
     except Exception as e:
@@ -452,7 +484,7 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, None, "ORB/IVB Report (auto)", mt5_direction, price, stop_loss,
              json.dumps({1: target}), json.dumps([1.0]), 0, 0, lot, ticket,
-             "working", now, STRATEGY_ORB_FIXED),
+             "working", now, strategy),
         )
     log.info(
         "[ORB auto-execute] pending %s ticket=%s @ %.2f stop=%.2f target=%.2f lot=%.2f",

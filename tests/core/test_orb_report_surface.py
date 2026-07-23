@@ -393,3 +393,59 @@ def test_auto_execute_ea_rejection_does_not_write_db_rows(fresh_db):
     with db.db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
     assert n == 0
+
+
+# ── Channel Strategy override (2026-07-23: ORB/IVB Report is now a regular
+# canonical channel -- Trading > Strategy > Channel Strategy) ────────────────
+
+def test_auto_execute_respects_channel_strategy_override(fresh_db):
+    db.set_channel_strategy_override("ORB/IVB Report (auto)", "trend_ratchet")
+    fake_ea = _FakeEA()
+    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        asyncio.run(orb.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
+    assert fake_ea.calls[0]["strategy"] == "trend_ratchet"
+    with db.db() as conn:
+        strat = conn.execute("SELECT strategy FROM vantage_pending_orders").fetchone()[0]
+    assert strat == "trend_ratchet"
+
+
+def test_auto_execute_auto_mode_uses_channel_strategy_rec(fresh_db):
+    db.set_channel_strategy_override("ORB/IVB Report (auto)", None, auto=True)
+    db.set_channel_strategy_rec("ORB/IVB Report (auto)", "breakeven_runner", "trending", 0.8)
+    fake_ea = _FakeEA()
+    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        asyncio.run(orb.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
+    assert fake_ea.calls[0]["strategy"] == "breakeven_runner"
+
+
+def test_auto_execute_no_override_still_defaults_to_orb_fixed(fresh_db):
+    fake_ea = _FakeEA()
+    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        asyncio.run(orb.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
+    assert fake_ea.calls[0]["strategy"] == "orb_fixed"
+
+
+def test_orb_report_is_a_canonical_channel(fresh_db):
+    from forex_trader.core.core_db_channel import CANONICAL_CHANNEL_ORDER, _canonical
+    assert "ORB/IVB Report" in CANONICAL_CHANNEL_ORDER
+    assert _canonical("ORB/IVB Report (auto)") == "ORB/IVB Report"
+
+
+def test_auto_execute_ea_template_override_skips_with_no_ea_call(fresh_db):
+    """EA Templates manage immediate-fill trades end-to-end -- they don't fit
+    ORB/IVB's pending zone-entry order, so this must skip cleanly rather
+    than silently placing a template-tagged pending order the EA's grid/
+    single-mode dispatch was never built to receive."""
+    from forex_trader.core import core_ea_templates as ea_templates
+    ea_templates.save_ea_template("Scalp Grid", {"mode": "grid"})
+    db.set_channel_strategy_override(
+        "ORB/IVB Report (auto)", ea_templates.override_for_template("Scalp Grid"),
+    )
+    fake_ea = _FakeEA()
+    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+        with mock.patch("forex_trader.core.telegram_alerts.send_message"):
+            asyncio.run(orb.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
+    assert fake_ea.calls == []
+    with db.db() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
+    assert n == 0

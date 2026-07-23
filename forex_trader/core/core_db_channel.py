@@ -327,6 +327,9 @@ CANONICAL_CHANNELS: dict[str, str] = {
     # Reversal Engine
     "Reversal Engine":                           "Reversal Engine",
     "Gold Diggers VIP Copy":                    "Reversal Engine",
+    # ORB/IVB morning report — fixed tg_source stamped by orb_auto_execute()
+    "ORB/IVB Report (auto)":                    "ORB/IVB Report",
+    "ORB/IVB Report":                           "ORB/IVB Report",
 }
 
 
@@ -336,6 +339,7 @@ CANONICAL_CHANNEL_ORDER = [
     "Reversal Engine",
     "Bounce Engine",
     "Breakout Engine",
+    "ORB/IVB Report",
 ]
 
 

@@ -26,6 +26,8 @@ import logging
 import time
 from typing import Optional
 
+from forex_trader.core.core_trading_schedule import check_trading_schedule
+
 log = logging.getLogger("ea_bridge")
 
 # Strategies whose per-tick SL/TP/partial-close rules are fixed, deterministic
@@ -527,6 +529,28 @@ class EABridge:
             await db_module.to_db_thread(_apply)
             self._active[trade_id] = {"ticket": ticket, "strategy": row["strategy"]}
             self._pending_orders.pop(trade_id, None)
+
+            # Trading Schedule gate -- the resting order was accepted by the
+            # broker before we could know whether the window's profit target
+            # would still allow it by the time it actually filled. ORB/IVB is
+            # exempt (its own once-a-day dedup already caps volume, and it's
+            # never reached resolve_open_trade_params() by design); every
+            # other pending-order strategy (Limit Runner today) must not add
+            # risk once the target is hit. The fill already happened -- an
+            # immediate real close is the only protective action left.
+            if row["strategy"] != "orb_fixed":
+                _sched_ok, _sched_reason = check_trading_schedule()
+                if not _sched_ok and self._engine is not None:
+                    try:
+                        await self._engine.close_trade(trade_id, "trading_schedule_blocked")
+                        asyncio.create_task(telegram_alerts.send_message(
+                            f"Limit order filled then immediately closed — {_sched_reason}",
+                            trade_id, "pending_order_filled_schedule_blocked",
+                        ))
+                    except Exception as e:
+                        log.warning("[EABridge] schedule-blocked close failed for %s: %s", trade_id, e)
+                    return
+
             asyncio.create_task(telegram_alerts.send_message(
                 f"Limit order FILLED — {row['direction']} {row['lot_size']:g} lots @ "
                 f"{fill_price:.2f} (ticket {ticket}), SL {row['stop_loss']:.2f}",
@@ -573,6 +597,23 @@ class EABridge:
                         "row found for original trade_id=%s", leg_trade_id, original_id)
             return
         self._active[original_id] = {"ticket": ticket, "strategy": row["strategy"]}
+
+        # Trading Schedule gate -- same reasoning as _on_pending_order_filled's
+        # own check: the leg was accepted by the broker before we could know
+        # whether the window's profit target would still allow it by fill
+        # time, and the only protective action left is an immediate real close.
+        _sched_ok, _sched_reason = check_trading_schedule()
+        if not _sched_ok and self._engine is not None:
+            try:
+                await self._engine.close_trade(original_id, "trading_schedule_blocked")
+                asyncio.create_task(telegram_alerts.send_message(
+                    f"EA Template grid leg filled then immediately closed — {_sched_reason}",
+                    original_id, "template_grid_leg_filled_schedule_blocked",
+                ))
+            except Exception as e:
+                log.warning("[EABridge] schedule-blocked close failed for %s: %s", original_id, e)
+            return
+
         asyncio.create_task(telegram_alerts.send_message(
             f"EA Template grid leg FILLED — {row['direction']} {row['lot_size']:g} lots @ "
             f"{fill_price:.2f} (ticket {ticket})",

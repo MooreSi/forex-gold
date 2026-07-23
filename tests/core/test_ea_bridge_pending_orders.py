@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import time
+from unittest import mock
 
 import pytest
 
@@ -296,3 +297,87 @@ def test_on_pending_order_cancelled_marks_rows_cancelled(fresh_db):
             "SELECT COUNT(*) FROM vantage_simulated_trades WHERE trade_id='t1'"
         ).fetchone()[0]
         assert row == 0  # no trade was ever opened
+
+
+# ── Trading Schedule gate on pending-order fills ──────────────────────────────
+# A resting order is accepted by the broker before we can know whether the
+# window's profit target will still allow it by the time it actually fills.
+# Confirmed live 2026-07-23 that a hit target did not stop Limit Runner or EA
+# Template grid fills -- the only protective action left once the fill has
+# already happened is an immediate real close.
+
+class _FakeEngine:
+    def __init__(self):
+        self.close_trade_calls: list[dict] = []
+
+    async def close_trade(self, trade_id, reason):
+        self.close_trade_calls.append({"trade_id": trade_id, "reason": reason})
+        return {"trade_id": trade_id, "close_price": 0.0, "net_pnl": 0.0}
+
+
+def test_limit_runner_fill_closed_when_schedule_blocked(fresh_db):
+    _insert_pending_order(strategy="limit_runner")
+    engine = _FakeEngine()
+    bridge = ea_bridge.EABridge(engine=engine)
+    with mock.patch.object(
+        ea_bridge, "check_trading_schedule",
+        return_value=(False, "profit target reached for this window"),
+    ):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "t1", "ticket": 999, "fill_price": 4148.5,
+        }))
+    assert engine.close_trade_calls == [{"trade_id": "t1", "reason": "trading_schedule_blocked"}]
+
+
+def test_limit_runner_fill_not_closed_when_schedule_allows(fresh_db):
+    _insert_pending_order(strategy="limit_runner")
+    engine = _FakeEngine()
+    bridge = ea_bridge.EABridge(engine=engine)
+    with mock.patch.object(ea_bridge, "check_trading_schedule", return_value=(True, "")):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "t1", "ticket": 999, "fill_price": 4148.5,
+        }))
+    assert engine.close_trade_calls == []
+
+
+def test_orb_fixed_fill_exempt_from_schedule_gate(fresh_db):
+    """ORB/IVB is deliberately exempt -- its own once-a-day dedup already
+    caps volume, and orb_auto_execute() never reaches
+    resolve_open_trade_params() by design (see core_orb_report.py)."""
+    _insert_pending_order(strategy="orb_fixed")
+    engine = _FakeEngine()
+    bridge = ea_bridge.EABridge(engine=engine)
+    with mock.patch.object(
+        ea_bridge, "check_trading_schedule",
+        return_value=(False, "profit target reached for this window"),
+    ):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "t1", "ticket": 999, "fill_price": 4148.5,
+        }))
+    assert engine.close_trade_calls == []
+    assert bridge._active["t1"]["strategy"] == "orb_fixed"
+
+
+def test_grid_leg_fill_closed_when_schedule_blocked(fresh_db):
+    _insert_grid_placeholder_trade()
+    engine = _FakeEngine()
+    bridge = ea_bridge.EABridge(engine=engine)
+    with mock.patch.object(
+        ea_bridge, "check_trading_schedule",
+        return_value=(False, "profit target reached for this window"),
+    ):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+        }))
+    assert engine.close_trade_calls == [{"trade_id": "grid1", "reason": "trading_schedule_blocked"}]
+
+
+def test_grid_leg_fill_not_closed_when_schedule_allows(fresh_db):
+    _insert_grid_placeholder_trade()
+    engine = _FakeEngine()
+    bridge = ea_bridge.EABridge(engine=engine)
+    with mock.patch.object(ea_bridge, "check_trading_schedule", return_value=(True, "")):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+        }))
+    assert engine.close_trade_calls == []

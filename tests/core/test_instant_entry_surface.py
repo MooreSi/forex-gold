@@ -116,6 +116,19 @@ def test_session_blocked_no_signal(fresh_db):
     assert _signals_count() == 0
 
 
+def test_trading_schedule_blocked_no_signal(fresh_db):
+    """IME previously never checked the Trading Schedule at all (only
+    resolve_open_trade_params()'s automated-signal path did), so a hit
+    profit target did not stop new instant-entry trades -- confirmed live
+    2026-07-23."""
+    with mock.patch.object(
+        ime, "check_trading_schedule",
+        return_value=(False, "profit target reached for this window ($50.00 of $50.00)"),
+    ):
+        _run(_FakeBridge(), {"timestamp": _FRESH_TS}, "tg-4b", "BUY", None, _rs(), True)
+    assert _signals_count() == 0
+
+
 def test_no_tick_no_signal(fresh_db):
     _run(_FakeBridge(tick=None), {"timestamp": _FRESH_TS}, "tg-5", "BUY", None, _rs(), True)
     assert _signals_count() == 0

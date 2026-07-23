@@ -180,6 +180,44 @@ def test_on_pending_order_filled_creates_managed_trade_row(fresh_db):
     assert bridge._active["t1"]["strategy"] == "limit_runner"
 
 
+def test_on_pending_order_filled_carries_channel_and_pending_timing(fresh_db):
+    """channel_name was known and stored on vantage_pending_orders at
+    placement time but never carried over to the promoted trade row --
+    confirmed live 2026-07-23 that every Limit Runner fill lost its real
+    channel attribution (showed as an unattributed trade in Trade
+    Analysis) and had no way to tell it apart from an immediate market
+    open or see how long it sat pending before filling."""
+    placed_at = time.time() - 42.0
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_signals (signal_id,source_name,direction,entry_low,entry_high,"
+            "stop_loss,lot_size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("s2", "Telegram Auto (Gold Diggers VIP)", "BUY", 4148.0, 4148.0, 4141.0, 0.10,
+             "pending", placed_at),
+        )
+        conn.execute(
+            "INSERT INTO vantage_pending_orders (trade_id,signal_id,tg_message_id,channel_name,"
+            "direction,price,stop_loss,tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,"
+            "status,created_at,strategy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("t2", "s2", "tg2", "Gold Diggers VIP", "BUY", 4148.0, 4141.0,
+             json.dumps({1: 4151.0}), json.dumps([1.0]), 0, 0, 0.10, 998, "working",
+             placed_at, "limit_runner"),
+        )
+    bridge = ea_bridge.EABridge(engine=None)
+    asyncio.run(bridge._on_pending_order_filled({
+        "trade_id": "t2", "ticket": 998, "fill_price": 4148.5,
+    }))
+
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT tg_source,order_type,pending_placed_at FROM vantage_simulated_trades "
+            "WHERE trade_id='t2'"
+        ).fetchone()
+    assert row[0] == "Gold Diggers VIP"
+    assert row[1] == "limit"
+    assert row[2] == placed_at
+
+
 def test_on_pending_order_filled_uses_the_strategy_stored_at_placement_time(fresh_db):
     """The strategy label must come from what was actually placed (e.g.
     orb_fixed), not be hardcoded to limit_runner -- a wrong label here would
@@ -208,20 +246,21 @@ def test_on_pending_order_filled_unknown_trade_id_is_a_noop(fresh_db):
     assert bridge._active == {}
 
 
-def _insert_grid_placeholder_trade(trade_id="grid1", strategy="template:GridVerify"):
+def _insert_grid_placeholder_trade(trade_id="grid1", strategy="template:GridVerify", open_time=None):
+    open_time = open_time if open_time is not None else time.time()
     with db.db() as conn:
         conn.execute(
             "INSERT INTO vantage_signals (signal_id,source_name,direction,entry_low,entry_high,"
             "stop_loss,lot_size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (f"sig-{trade_id}", "Manual Market Order", "BUY", 4148.0, 4148.0, 4141.0, 0.10,
-             "active", time.time()),
+             "active", open_time),
         )
         conn.execute(
             "INSERT INTO vantage_simulated_trades (trade_id,signal_id,mt5_ticket,direction,"
             "entry_low,entry_high,entry_price,lot_size,remaining_lots,stop_loss,status,open_time,"
             "strategy,managed_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (trade_id, f"sig-{trade_id}", 0, "BUY", 4148.0, 4148.0, 0.0, 0.10, 0.10, 4141.0,
-             "open", time.time(), strategy, "ea"),
+             "open", open_time, strategy, "ea"),
         )
 
 
@@ -246,6 +285,26 @@ def test_on_pending_order_filled_promotes_grid_leg_placeholder_row(fresh_db):
 
     assert bridge._active["grid1"]["ticket"] == 555
     assert bridge._active["grid1"]["strategy"] == "template:GridVerify"
+
+
+def test_grid_leg_fill_records_order_type_and_pending_placed_at(fresh_db):
+    """The placeholder row's own open_time (when open_trade() placed the
+    grid legs) is the only placement timestamp that exists for a leg --
+    grid legs never get their own vantage_pending_orders row -- so it must
+    be captured before the UPDATE overwrites open_time to the fill time."""
+    placed_at = time.time() - 17.0
+    _insert_grid_placeholder_trade(open_time=placed_at)
+    bridge = ea_bridge.EABridge(engine=None)
+    asyncio.run(bridge._on_pending_order_filled({
+        "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+    }))
+
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT order_type,pending_placed_at FROM vantage_simulated_trades WHERE trade_id='grid1'"
+        ).fetchone()
+    assert row[0] == "limit"
+    assert row[1] == placed_at
 
 
 def test_on_pending_order_filled_second_grid_leg_is_noop_once_promoted(fresh_db):

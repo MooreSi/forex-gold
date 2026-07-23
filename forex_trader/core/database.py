@@ -852,11 +852,38 @@ def _apply_schema() -> None:
             # Reversal Engine page's "Active Positions" LIMIT ORDER toggle
             # (2026-07-23) -- off by default, same market-fill flow as today.
             "ALTER TABLE vantage_risk_settings ADD COLUMN re_use_limit_order INTEGER NOT NULL DEFAULT 0",
+            # Order Type / pending-duration tracking (2026-07-23) -- Trade
+            # Analysis had no way to tell a Limit Runner/EA Template grid fill
+            # apart from an immediate market open, or to see how long a
+            # resting order sat before it filled. order_type defaults to
+            # 'market' (every immediate open_trade() caller); the two
+            # EA-bridge fill-promotion paths (_on_pending_order_filled,
+            # _promote_grid_leg_fill) explicitly set 'limit' and
+            # pending_placed_at (copied from vantage_pending_orders.created_at
+            # / the grid placeholder row's own open_time) so Trade Analysis
+            # can show open_time - pending_placed_at as "time pending".
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN order_type TEXT NOT NULL DEFAULT 'market'",
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN pending_placed_at REAL",
         ]:
             try:
                 conn.execute(stmt)
             except Exception:
                 pass  # column already exists
+        # One-off backfill (2026-07-23): every trade that filled before the
+        # order_type column existed defaulted to 'market' regardless of how
+        # it actually opened. Correct the two strategies whose identity
+        # alone already proves they were a genuine resting pending order
+        # (Limit Runner, ORB/IVB) -- their pending_placed_at can't be
+        # recovered (never captured pre-migration), so "Pending For" stays
+        # blank for these, but Order Type is now correct. Idempotent: the
+        # WHERE clause only ever matches a row once.
+        try:
+            conn.execute(
+                "UPDATE vantage_simulated_trades SET order_type='limit' "
+                "WHERE strategy IN ('limit_runner','orb_fixed') AND order_type='market'"
+            )
+        except Exception:
+            pass  # column doesn't exist on this schema version yet
         # 2026-07-23 rebrand: any strategy value stored under the old
         # "gd_vip_runner" identifier (channel overrides, open/closed trades,
         # pending orders, strategy-param templates) must keep pointing at the

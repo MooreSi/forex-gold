@@ -508,15 +508,22 @@ class EABridge:
                            (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                             lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                             status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                            tg_source,managed_by,tp_open)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            tg_source,managed_by,tp_open,order_type,pending_placed_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (trade_id, row["signal_id"], ticket, row["direction"],
                          row["price"], row["price"], fill_price,
                          row["lot_size"], row["lot_size"], row["stop_loss"],
                          tps.get("1"), tps.get("2"), tps.get("3"), tps.get("4"),
                          tps.get("5"), tps.get("6"), tps.get("7"), tps.get("8"),
                          "open", now, 0.0, 0.0, 0.0, 0.0, row["strategy"],
-                         None, "ea", row["tp_open"]),
+                         # channel_name was known and stored at placement time
+                         # (core_limit_order_signal.py / orb_auto_execute) but
+                         # never carried over here -- confirmed live 2026-07-23
+                         # that every Limit Runner fill lost its real channel
+                         # attribution and showed as an unattributed trade in
+                         # Trade Analysis.
+                         row["channel_name"], "ea", row["tp_open"],
+                         "limit", row["created_at"]),
                     )
                     conn.execute(
                         "UPDATE vantage_signals SET status='active' WHERE signal_id=?",
@@ -586,9 +593,13 @@ class EABridge:
                 if not row:
                     return None
                 conn.execute(
-                    "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=? "
-                    "WHERE trade_id=?",
-                    (ticket, fill_price, now, original_id),
+                    "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=?,"
+                    "order_type='limit',pending_placed_at=? WHERE trade_id=?",
+                    # row["open_time"] (read above, before this UPDATE overwrites
+                    # it) is when open_trade() placed the grid legs -- the only
+                    # placement timestamp that exists for a leg, since grid legs
+                    # never get their own vantage_pending_orders row.
+                    (ticket, fill_price, now, row["open_time"], original_id),
                 )
                 return row
         row = await db_module.to_db_thread(_apply)

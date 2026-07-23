@@ -83,6 +83,26 @@ def _uk(ts) -> str:
         return str(ts)[:16]
 
 
+def _fmt_duration(seconds: Optional[float]) -> str:
+    """Compact human-readable duration -- "45s", "12m", "2h 15m", "3d 4h".
+    Used for both how long a closed trade was held (open->close) and how
+    long a Limit Runner/EA Template grid order sat pending before it filled
+    (pending_placed_at->open)."""
+    if seconds is None or seconds < 0:
+        return "—"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s" if seconds else f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h" if hours else f"{days}d"
+
+
 def _to_date(ts) -> Optional[date]:
     try:
         return datetime.fromtimestamp(float(ts), tz=timezone.utc).date()
@@ -339,16 +359,32 @@ def _render_equity_curve(engine):
 
 # ── Trade history table (live from MT5) ───────────────────────────────────────
 
-def _render_trade_table(engine):
-    # Short display names for the strategy column
-    _STRAT_LABEL = {
-        "scale_out":       "Scale Out",
-        "be_runner":       "BE Runner",
-        "trail_stop":      "Trail Stop",
-        "protected_scale": "Protected Scale",
-        "conservative":    "Conservative",
-    }
+# Short display names for the strategy column
+_STRAT_LABEL = {
+    "scale_out":       "Scale Out",
+    "be_runner":       "BE Runner",
+    "trail_stop":      "Trail Stop",
+    "protected_scale": "Protected Scale",
+    "conservative":    "Conservative",
+}
 
+
+def _strategy_display_label(strategy: str) -> str:
+    """Human-readable label for a trade's strategy, including EA Templates
+    ("template:<name>") -- these are user-defined, not one of the fixed
+    built-in strategies, so they were never in STRATEGY_NAMES/_STRAT_LABEL
+    and fell through to the "—" placeholder instead of a readable name.
+    Confirmed live 2026-07-23 that every EA Template trade showed a blank
+    Strategy column in Trade Analysis."""
+    if not strategy:
+        return "—"
+    from forex_trader.core import core_ea_templates as _et
+    if _et.is_template_override(strategy):
+        return f"Template: {_et.template_name_from_override(strategy)}"
+    return _STRAT_LABEL.get(strategy, STRATEGY_NAMES.get(strategy, "—"))
+
+
+def _render_trade_table(engine):
     def _ticket_source_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: channel_or_source_label}.
 
@@ -419,7 +455,7 @@ def _render_trade_table(engine):
         try:
             _, ledger_strategies, _ = db_module.get_consolidated_ticket_maps()
             for ticket, strategy in ledger_strategies.items():
-                result[ticket] = _STRAT_LABEL.get(strategy or "", STRATEGY_NAMES.get(strategy or "", "—"))
+                result[ticket] = _strategy_display_label(strategy or "")
         except Exception:
             pass
         try:
@@ -435,7 +471,7 @@ def _render_trade_table(engine):
                 if dpm_trade_id:
                     label = "DPM"
                 else:
-                    label = _STRAT_LABEL.get(strategy or "", STRATEGY_NAMES.get(strategy or "", "—"))
+                    label = _strategy_display_label(strategy or "")
                 result[str(mt5_ticket)] = label
         except Exception:
             pass
@@ -451,8 +487,7 @@ def _render_trade_table(engine):
                     (cutoff,),
                 ).fetchall()
             for mt5_ticket, strategy in rows:
-                result[str(mt5_ticket)] = _STRAT_LABEL.get(
-                    strategy or "", STRATEGY_NAMES.get(strategy or "", "—"))
+                result[str(mt5_ticket)] = _strategy_display_label(strategy or "")
         except Exception:
             pass
         return result
@@ -485,6 +520,28 @@ def _render_trade_table(engine):
             pass
         try:
             result.update(db_module.get_rr_map_by_ticket())
+        except Exception:
+            pass
+        return result
+
+    def _ticket_order_type_map(days: int) -> dict[str, tuple[str, Optional[float]]]:
+        """Return {mt5_ticket_str: (order_type, pending_placed_at)} from this
+        node's own vantage_simulated_trades. order_type/pending_placed_at
+        (2026-07-23) aren't part of the Local/Remote consolidated-ledger sync
+        protocol yet, so — unlike every other map above — a ticket the OTHER
+        node opened just falls back to "Market"/no pending time here rather
+        than showing the real value; local-only for now."""
+        cutoff = time.time() - days * 86400
+        result: dict[str, tuple[str, Optional[float]]] = {}
+        try:
+            with db_module.db() as conn:
+                rows = conn.execute(
+                    "SELECT mt5_ticket, order_type, pending_placed_at FROM vantage_simulated_trades "
+                    "WHERE mt5_ticket IS NOT NULL AND open_time >= ?",
+                    (cutoff,),
+                ).fetchall()
+            for mt5_ticket, order_type, pending_placed_at in rows:
+                result[str(mt5_ticket)] = (order_type or "market", pending_placed_at)
         except Exception:
             pass
         return result
@@ -541,6 +598,7 @@ def _render_trade_table(engine):
             {"name": "time",      "label": "Closed",      "field": "time",      "align": "left",   "sortable": True},
             {"name": "ticket",    "label": "Ticket",      "field": "ticket",    "align": "right"},
             {"name": "channel",   "label": "Channel",     "field": "channel",   "align": "left"},
+            {"name": "order_type","label": "Order Type",  "field": "order_type","align": "center"},
             {"name": "direction", "label": "Dir",         "field": "direction", "align": "center", "sortable": True},
             {"name": "entry",     "label": "Entry",       "field": "entry",     "align": "right"},
             {"name": "exit",      "label": "Exit",        "field": "exit",      "align": "right"},
@@ -553,6 +611,8 @@ def _render_trade_table(engine):
             {"name": "reason",    "label": "Reason",      "field": "reason",    "align": "center"},
             {"name": "rr",        "label": "R:R",         "field": "rr",        "align": "right",  "sortable": True},
             {"name": "max_tp",    "label": "Max TP Hit",  "field": "max_tp",    "align": "center", "sortable": True},
+            {"name": "duration",  "label": "Held",        "field": "duration",  "align": "right",  "sortable": True},
+            {"name": "pending",   "label": "Pending For", "field": "pending",   "align": "right",  "sortable": True},
         ]
         trade_table = ui.table(
             columns=_columns, rows=[], row_key="_id"
@@ -653,6 +713,7 @@ def _render_trade_table(engine):
             strat_map  = await db_module.to_db_thread(_ticket_strategy_map, _days_now)
             max_tp_map = await db_module.to_db_thread(_ticket_max_tp_map)
             rr_map     = await db_module.to_db_thread(_ticket_rr_map)
+            order_type_map = await db_module.to_db_thread(_ticket_order_type_map, _days_now)
             comm_rate  = await db_module.to_db_thread(_platform_fee_rate)
             try:
                 deals = await engine._bridge.get_deal_history(int(days_sel.value))
@@ -725,7 +786,22 @@ def _render_trade_table(engine):
                         exit_p       = float(close_deal.get("price", 0))
                         pnl, fees_display = _apply_fee(pos_deals, open_lots, comm_rate)
                         close_ts = float(close_deal.get("time", 0))
+                        open_ts  = float(open_deal.get("time", 0)) if open_deal else 0.0
                         reason   = _parse_reason(close_deal.get("comment") or "", pnl)
+
+                        # Order Type / Pending For: distinguishes a genuine
+                        # resting Limit Runner/EA Template grid fill from an
+                        # immediate market open, and shows how long it sat on
+                        # the broker's book before it filled -- so a widening
+                        # gap between placement and fill (stale pending
+                        # orders) can be spotted and weighed against its P&L.
+                        _otype, _pending_at = order_type_map.get(str(ticket), ("market", None))
+                        order_type_display = "Limit" if _otype == "limit" else "Market"
+                        pending_display = (
+                            _fmt_duration(open_ts - _pending_at)
+                            if _pending_at and open_ts else "—"
+                        )
+                        duration_display = _fmt_duration(close_ts - open_ts) if open_ts and close_ts else "—"
 
                         # Spread paid at entry — already embedded in pnl via MT5's real
                         # fill prices; shown here as an informational cost breakdown, not
@@ -779,6 +855,7 @@ def _render_trade_table(engine):
                             "time":      _uk(close_ts),
                             "ticket":    str(ticket),
                             "channel":   src_map.get(str(ticket), "—"),
+                            "order_type": order_type_display,
                             "direction": direction,
                             "entry":     f"{entry:.2f}" if entry else "—",
                             "exit":      f"{exit_p:.2f}",
@@ -791,6 +868,8 @@ def _render_trade_table(engine):
                             "reason":    reason,
                             "rr":        rr_display,
                             "max_tp":    max_tp_display,
+                            "duration":  duration_display,
+                            "pending":   pending_display,
                         }
             except Exception as exc:
                 mt5_error = str(exc)
@@ -832,6 +911,7 @@ def _render_trade_table(engine):
                     "time":        last_close["time"],
                     "ticket":      f"{arrow} {len(members)} legs",
                     "channel":     anchor["channel"],
+                    "order_type":  anchor["order_type"],
                     "direction":   anchor["direction"],
                     "entry":       anchor["entry"],
                     "exit":        "Multiple",
@@ -844,6 +924,8 @@ def _render_trade_table(engine):
                     "reason":      f"{len(tp_hits)}/{len(members)} TP",
                     "rr":          anchor["rr"],
                     "max_tp":      anchor["max_tp"],
+                    "duration":    anchor["duration"],
+                    "pending":     anchor["pending"],
                 })
                 if expanded:
                     for m in members:
@@ -984,7 +1066,7 @@ def _render_calendar(engine):
                 strat = ledger_strategies.get(ticket, "")
                 info[ticket] = (
                     label,
-                    STRATEGY_NAMES.get(strat, strat or "—"),
+                    _strategy_display_label(strat or ""),
                     ledger_directions.get(ticket, ""),
                 )
         except Exception:
@@ -999,7 +1081,7 @@ def _render_calendar(engine):
                 ch = trade_channel_label(src or "")
                 label = ch if ch else trade_source_label(src or "")
                 # Local data always wins where both exist.
-                info[str(tk)] = (label, STRATEGY_NAMES.get(strat or "", strat or "—"), dir_ or "")
+                info[str(tk)] = (label, _strategy_display_label(strat or ""), dir_ or "")
         except Exception:
             pass
         try:
@@ -1015,7 +1097,7 @@ def _render_calendar(engine):
             for tk, src, strat, dir_ in rows:
                 ch = trade_channel_label(src or "")
                 label = ch if ch else trade_source_label(src or "")
-                info[str(tk)] = (label, STRATEGY_NAMES.get(strat or "", strat or "—"), dir_ or "")
+                info[str(tk)] = (label, _strategy_display_label(strat or ""), dir_ or "")
         except Exception:
             pass
         return info

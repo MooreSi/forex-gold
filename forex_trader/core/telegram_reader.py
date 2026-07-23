@@ -43,7 +43,7 @@ AUTH_CONNECTED     = "connected"
 AUTH_RECONNECTING  = "reconnecting"
 AUTH_FAILED        = "failed"
 
-_NUM_SLOTS = 2
+_NUM_SLOTS = 3
 
 
 def _safe_phone_log(phone: Optional[str]) -> str:
@@ -78,15 +78,15 @@ class TelegramReader:
         self._runtime_phone:   Optional[str] = None
         self._client: Optional["TelegramClient"] = None
 
-        # Slot state (2 slots)
-        self._group_ids:      list[Optional[int]]  = [None, None]
-        self._group_names:    list[Optional[str]]  = [None, None]
-        self._group_entities: list                 = [None, None]
-        self._listener_active: list[bool]          = [False, False]
-        self._listener_tasks:  list                = [None, None]
-        self._poller_active:   list[bool]          = [False, False]
-        self._last_poll_at:    list[Optional[str]] = [None, None]
-        self._last_poll_error: list[Optional[str]] = [None, None]
+        # Slot state (_NUM_SLOTS slots)
+        self._group_ids:      list[Optional[int]]  = [None] * _NUM_SLOTS
+        self._group_names:    list[Optional[str]]  = [None] * _NUM_SLOTS
+        self._group_entities: list                 = [None] * _NUM_SLOTS
+        self._listener_active: list[bool]          = [False] * _NUM_SLOTS
+        self._listener_tasks:  list                = [None] * _NUM_SLOTS
+        self._poller_active:   list[bool]          = [False] * _NUM_SLOTS
+        self._last_poll_at:    list[Optional[str]] = [None] * _NUM_SLOTS
+        self._last_poll_error: list[Optional[str]] = [None] * _NUM_SLOTS
         self._pending_tasks:   set                 = set()
 
         # Stats

@@ -207,6 +207,74 @@ def test_on_pending_order_filled_unknown_trade_id_is_a_noop(fresh_db):
     assert bridge._active == {}
 
 
+def _insert_grid_placeholder_trade(trade_id="grid1", strategy="template:GridVerify"):
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_signals (signal_id,source_name,direction,entry_low,entry_high,"
+            "stop_loss,lot_size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (f"sig-{trade_id}", "Manual Market Order", "BUY", 4148.0, 4148.0, 4141.0, 0.10,
+             "active", time.time()),
+        )
+        conn.execute(
+            "INSERT INTO vantage_simulated_trades (trade_id,signal_id,mt5_ticket,direction,"
+            "entry_low,entry_high,entry_price,lot_size,remaining_lots,stop_loss,status,open_time,"
+            "strategy,managed_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (trade_id, f"sig-{trade_id}", 0, "BUY", 4148.0, 4148.0, 0.0, 0.10, 0.10, 4141.0,
+             "open", time.time(), strategy, "ea"),
+        )
+
+
+def test_on_pending_order_filled_promotes_grid_leg_placeholder_row(fresh_db):
+    """EA Template grid legs (HandleOpenTemplateGrid) never get a
+    vantage_pending_orders row -- each leg only exists in the EA's own
+    g_pending[], keyed "<original trade_id>-g<N>". The fill must promote
+    the open_trade()-written placeholder row (mt5_ticket=0) in place
+    instead of being silently dropped as an unknown trade_id."""
+    _insert_grid_placeholder_trade()
+    bridge = ea_bridge.EABridge(engine=None)
+    asyncio.run(bridge._on_pending_order_filled({
+        "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+    }))
+
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT mt5_ticket,entry_price,strategy,status FROM vantage_simulated_trades "
+            "WHERE trade_id='grid1'"
+        ).fetchone()
+        assert tuple(row) == (555, 4149.2, "template:GridVerify", "open")
+
+    assert bridge._active["grid1"]["ticket"] == 555
+    assert bridge._active["grid1"]["strategy"] == "template:GridVerify"
+
+
+def test_on_pending_order_filled_second_grid_leg_is_noop_once_promoted(fresh_db):
+    """cancel_pending=off could in principle let a second leg fill too --
+    with the placeholder already consumed (mt5_ticket no longer 0), the
+    second fill must not raise or clobber the first leg's real ticket."""
+    _insert_grid_placeholder_trade()
+    bridge = ea_bridge.EABridge(engine=None)
+    asyncio.run(bridge._on_pending_order_filled({
+        "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+    }))
+    asyncio.run(bridge._on_pending_order_filled({
+        "trade_id": "grid1-g2", "ticket": 556, "fill_price": 4149.5,
+    }))  # must not raise
+
+    with db.db() as conn:
+        ticket = conn.execute(
+            "SELECT mt5_ticket FROM vantage_simulated_trades WHERE trade_id='grid1'"
+        ).fetchone()[0]
+        assert ticket == 555  # untouched by the second fill
+
+
+def test_on_pending_order_filled_grid_leg_no_placeholder_row_is_noop(fresh_db):
+    bridge = ea_bridge.EABridge(engine=None)
+    asyncio.run(bridge._on_pending_order_filled({
+        "trade_id": "nonexistent-g1", "ticket": 1, "fill_price": 1.0,
+    }))  # must not raise
+    assert bridge._active == {}
+
+
 def test_on_pending_order_cancelled_marks_rows_cancelled(fresh_db):
     _insert_pending_order()
     bridge = ea_bridge.EABridge(engine=None)

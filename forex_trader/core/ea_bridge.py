@@ -478,7 +478,16 @@ class EABridge:
         try:
             row = await self._fetch_pending_order(trade_id)
             if not row:
-                log.warning("[EABridge] pending_order_filled for unknown trade_id=%s", trade_id)
+                # EA Template grid legs (core_ea_templates.py / HandleOpenTemplateGrid
+                # in the EA) never get a vantage_pending_orders row -- each leg is
+                # tracked only in the EA's own g_pending[], keyed "<original
+                # trade_id>-g<N>". Fall back to promoting the original open_trade()
+                # placeholder row (mt5_ticket=0, entry_price=0.0) instead of
+                # dropping the fill silently.
+                if "-g" in trade_id:
+                    await self._promote_grid_leg_fill(trade_id, ticket, fill_price)
+                else:
+                    log.warning("[EABridge] pending_order_filled for unknown trade_id=%s", trade_id)
                 return
             tps = json.loads(row["tps_json"])
             now = time.time()
@@ -518,6 +527,50 @@ class EABridge:
             ))
         except Exception as e:
             log.warning("[EABridge] pending_order_filled handling failed for %s: %s", trade_id, e)
+
+    async def _promote_grid_leg_fill(self, leg_trade_id: str, ticket, fill_price: float) -> None:
+        """A leg of an EA Template grid (HandleOpenTemplateGrid in the EA)
+        filled -- leg_trade_id is "<original trade_id>-g<N>". The EA already
+        has this trade fully in its own g_trades[] (isTemplate + tpl* fields
+        copied over at promotion time) and manages it correctly regardless
+        of what happens here; this only updates Python's own record so the
+        trade shows up as a real, trackable row instead of the permanent
+        mt5_ticket=0 placeholder open_trade() wrote at grid-open time.
+        Only the first leg to fill promotes the row -- with cancel_pending
+        on (the common case) that's the only leg that ever will; with it
+        off, later legs' fills are still managed live by the EA but aren't
+        separately reflected here (same single-row shape every other
+        strategy uses)."""
+        from forex_trader.core import database as db_module
+        from forex_trader.core import telegram_alerts
+        original_id = leg_trade_id.rsplit("-g", 1)[0]
+        now = time.time()
+
+        def _apply():
+            with db_module.db() as conn:
+                row = db_module.row_to_dict(conn.execute(
+                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=? AND mt5_ticket=0",
+                    (original_id,),
+                ).fetchone())
+                if not row:
+                    return None
+                conn.execute(
+                    "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=? "
+                    "WHERE trade_id=?",
+                    (ticket, fill_price, now, original_id),
+                )
+                return row
+        row = await db_module.to_db_thread(_apply)
+        if row is None:
+            log.warning("[EABridge] grid leg filled (trade_id=%s) but no open placeholder "
+                        "row found for original trade_id=%s", leg_trade_id, original_id)
+            return
+        self._active[original_id] = {"ticket": ticket, "strategy": row["strategy"]}
+        asyncio.create_task(telegram_alerts.send_message(
+            f"EA Template grid leg FILLED — {row['direction']} {row['lot_size']:g} lots @ "
+            f"{fill_price:.2f} (ticket {ticket})",
+            original_id, "template_grid_leg_filled",
+        ))
 
     async def _on_pending_order_cancelled(self, msg: dict) -> None:
         """A resting Limit Runner order was removed from the broker's book

@@ -47,6 +47,13 @@ from forex_trader.core.core_scan_messages_auto_execute import (
 from forex_trader.core.core_limit_order_signal import (
     handle_limit_order_signal as _handle_limit_order_signal_impl,
 )
+from forex_trader.core.core_logic_keyword_triggers import (
+    should_skip_media_or_forwarded,
+    should_skip_for_exclusion,
+    try_handle_close_all_trigger,
+    try_handle_risk_free_be_trigger,
+    try_handle_tp_hit_trigger,
+)
 from forex_trader.core.core_scan_messages_edit_reparse import (
     handle_signal_edit as _handle_signal_edit_impl,
 )
@@ -2042,6 +2049,28 @@ class SimulationEngine:
             if parser_fmt == 'none' or not bool(ch_cfg.get('enabled', 1)):
                 continue
 
+            # ── Logic Keywords (Parsing page) ────────────────────────────────
+            # Global, user-editable phrase lexicons -- checked ahead of
+            # everything else below since Ignore Media/Forwarded and the
+            # CLOSE ALL/RISK FREE-BE/TP HIT triggers are orthogonal to normal
+            # signal parsing (a "CLOSE ALL" message, say, would never parse as
+            # a signal anyway, but skipping it here avoids it falling through
+            # to the unrecognised-message queue). See core_logic_keyword_triggers.py.
+            _lk_skip = should_skip_media_or_forwarded(msg, rs)
+            if _lk_skip:
+                log.debug("[LogicKeywords] tg_id=%s skipped — %s", tg_id, _lk_skip)
+                continue
+            if await try_handle_close_all_trigger(
+                text, channel_name, tg_id, rs, close_trade_fn=self.close_trade,
+            ):
+                continue
+            if await try_handle_risk_free_be_trigger(
+                text, channel_name, tg_id, rs, bridge=self._bridge,
+            ):
+                continue
+            if await try_handle_tp_hit_trigger(text, channel_name, tg_id, rs):
+                continue
+
             # Dedup — skip already-processed messages, but re-parse edited ones
             # if the signal hasn't been executed yet (direction correction).
             with db_module.db() as conn:
@@ -2106,6 +2135,16 @@ class SimulationEngine:
                 await self._apply_sl_adjustment(_sl_adj, channel_name, tg_id, via="learned_rule")
                 continue
 
+            # ── Logic Keywords: exclusion pre-check ──────────────────────────
+            # Gates only the new-signal-parsing path below (unlike the
+            # triggers above, which run regardless) -- see
+            # should_skip_for_exclusion's own docstring for why this doesn't
+            # also gate on symbol_tokens.
+            _lk_parse_skip = should_skip_for_exclusion(text, rs)
+            if _lk_parse_skip:
+                log.debug("[LogicKeywords] tg_id=%s skipped — %s", tg_id, _lk_parse_skip)
+                continue
+
             # ── Channel-name-based signal parsing ────────────────────────────
             source_label = channel_name
             parsed = await _classify_and_parse_impl(
@@ -2115,6 +2154,18 @@ class SimulationEngine:
             )
             if parsed is None:
                 continue
+
+            # ── Logic Keywords: Enable TP/SL Parsing toggles ─────────────────
+            # OFF means "don't use this signal's own stated TP/SL levels" --
+            # strips the field(s) right after parsing so every downstream
+            # consumer (validation, strategy resolution, execution) sees
+            # exactly the same "missing field" shape it already handles for
+            # a signal that never had one, rather than a new code path.
+            if not bool(rs.get("lk_enable_tp_parsing", 1)):
+                for _tp_i in range(1, 9):
+                    parsed[f"tp{_tp_i}"] = None
+            if not bool(rs.get("lk_enable_sl_parsing", 1)):
+                parsed["stop_loss"] = None
 
             # Staleness guard — signals are scalps: an entry zone is only valid for
             # minutes. Anything older than 4 minutes at processing time is recorded

@@ -67,6 +67,7 @@ def _make_engine(msgs):
     e = SimulationEngine.__new__(SimulationEngine)
     e._tg_reader = _FakeTgReader(msgs)
     e._cfg = {}
+    e._bridge = mock.Mock()  # Logic Keywords' RISK FREE/BE trigger check needs this attribute to exist
     return e
 
 
@@ -312,3 +313,34 @@ def test_auto_neither_matches_ai_recovers(fresh_db):
     )
     assert len(result) == 1
     assert result[0]["direction"] == "BUY"
+
+
+# ── Logic Keywords: Enable TP/SL Parsing toggles ────────────────────────────
+# Stripping happens in _scan_messages itself, right after classify_and_parse
+# returns -- not inside core_scan_messages_parse_classify.py -- see
+# core_logic_keyword_triggers.py / engine.py's _scan_messages.
+
+def test_tp_parsing_disabled_strips_all_tp_fields(fresh_db):
+    _setup_channel("format_ab")
+    db.update_risk_settings({"lk_enable_tp_parsing": 0})
+    result, uq, alerts = _run([{"id": "b20", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    assert len(result) == 1
+    assert all(result[0].get(f"tp{i}") is None for i in range(1, 9))
+    assert result[0]["stop_loss"] is not None  # SL untouched by this toggle
+
+
+def test_sl_parsing_disabled_strips_stop_loss(fresh_db):
+    _setup_channel("format_ab")
+    db.update_risk_settings({"lk_enable_sl_parsing": 0})
+    result, uq, alerts = _run([{"id": "b21", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    assert len(result) == 1
+    assert result[0]["stop_loss"] is None
+    assert result[0]["tp1"] is not None  # TP untouched by this toggle
+
+
+def test_tp_and_sl_parsing_enabled_by_default_unchanged(fresh_db):
+    _setup_channel("format_ab")
+    result, uq, alerts = _run([{"id": "b22", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    assert len(result) == 1
+    assert result[0]["tp1"] is not None
+    assert result[0]["stop_loss"] is not None

@@ -69,6 +69,7 @@ def _make_engine(msgs):
     e = SimulationEngine.__new__(SimulationEngine)
     e._tg_reader = _FakeTgReader(msgs)
     e._cfg = {}
+    e._bridge = mock.Mock()  # Logic Keywords' RISK FREE/BE trigger check needs this attribute to exist
     return e
 
 

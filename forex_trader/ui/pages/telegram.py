@@ -10,6 +10,7 @@ from typing import Callable
 from nicegui import ui
 
 from forex_trader.core import database as db_module
+from forex_trader.core import core_logic_keywords as logic_kw
 from forex_trader.core.telegram_reader import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,
     AUTH_CONNECTED, AUTH_RECONNECTING, AUTH_FAILED,
@@ -27,10 +28,95 @@ def _ts(s) -> str:
         return str(s)[:8]
 
 
+# (toggle_key, label, tooltip) -- persisted immediately on change, matching
+# the existing Toxic-Hour Blocklist toggle's convention (Risk Settings tab),
+# not the Logic Keywords lexicon boxes below (which need the SAVE button).
+_LK_TOGGLES: list[tuple[str, str, str]] = [
+    ("lk_enable_tp_parsing", "Enable TP Parsing",
+     "Use this signal's own stated TP levels when a new entry parses. "
+     "When OFF, TP levels are stripped before execution."),
+    ("lk_enable_close_all_parsing", "Enable CLOSE ALL Parsing",
+     "Automatically close the triggering channel's own open trade when it "
+     "sends a CLOSE ALL trigger phrase."),
+    ("lk_ignore_forwarded_messages", "Ignore Forwarded Messages",
+     "Do not execute trades from messages forwarded from other channels."),
+    ("lk_enable_tp_hit_parsing", "Enable TP HIT Parsing",
+     "Detect and log/notify \"TP1 HIT\"-style messages. Never moves SL or "
+     "closes anything by itself."),
+    ("lk_enable_risk_free_be_parsing", "Enable RISK FREE / BE Parsing",
+     "Move SL to entry price (breakeven) when the channel sends a "
+     "breakeven/risk-free trigger phrase."),
+    ("lk_enable_sl_parsing", "Enable SL Parsing",
+     "Use this signal's own stated Stop Loss when a new entry parses. "
+     "When OFF, Stop Loss is stripped before execution."),
+    ("lk_ignore_media_messages", "Ignore Media Messages",
+     "Ignore messages containing photos, videos, or documents (only parse plain text)."),
+]
+
+
+def _render_logic_keywords_section() -> None:
+    rs = db_module.get_risk_settings()
+
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
+        with ui.row().classes("items-center gap-2 mb-3"):
+            ui.icon("key", size="sm").classes("text-yellow-400")
+            ui.label("Logic Keywords").classes("text-base font-bold text-yellow-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Global, editable trigger phrases used by the Telegram message "
+                "parser — independent of any per-channel learned rules."
+            )
+
+        # ── Toggles ────────────────────────────────────────────────────────
+        with ui.grid(columns=3).classes("w-full gap-3 mb-4"):
+            for key, label, tip in _LK_TOGGLES:
+                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+                    sw = ui.switch(label, value=bool(rs.get(key, 1))).classes("text-sm")
+                    ui.label(tip).classes("text-xs text-gray-500 mt-1")
+
+                    def _on_toggle(e, key=key, label=label):
+                        db_module.update_risk_settings({key: 1 if e.value else 0})
+                        ui.notify(f"{label} {'enabled' if e.value else 'disabled'}",
+                                 type="positive" if e.value else "info")
+                    sw.on_value_change(_on_toggle)
+
+        ui.separator().classes("my-2")
+
+        # ── Lexicon boxes ──────────────────────────────────────────────────
+        lexicons = logic_kw.get_all_lexicons()
+        boxes: dict[str, object] = {}
+        with ui.grid(columns=2).classes("w-full gap-4"):
+            for category in ("symbol_tokens", "close_all", "risk_free_be",
+                             "exclusion", "buy_orders", "limit_orders"):
+                with ui.column().classes("gap-1"):
+                    ui.label(logic_kw.LEXICON_LABELS[category]).classes(
+                        "text-sm font-semibold text-cyan-300"
+                    )
+                    ui.label(logic_kw.LEXICON_HELP[category]).classes(
+                        "text-xs text-gray-500"
+                    )
+                    boxes[category] = ui.textarea(
+                        value=", ".join(lexicons[category]),
+                    ).classes("w-full font-mono text-sm").props("outlined dense rows=3")
+
+        def _save():
+            try:
+                for category, box in boxes.items():
+                    phrases = [p.strip() for p in str(box.value or "").split(",")]
+                    logic_kw.set_lexicon(category, phrases)
+                ui.notify("Logic Keywords saved", type="positive")
+            except Exception as exc:
+                ui.notify(f"Save failed: {exc}", type="negative")
+
+        ui.button("Save", icon="save", on_click=_save).classes(
+            "bg-blue-700 text-white mt-3 px-4 py-2"
+        )
+
+
 def render(get_tg_reader: Callable):
     reader = get_tg_reader()
 
     render_signals_card()
+    _render_logic_keywords_section()
 
     # ── Status banner ──────────────────────────────────────────────────────────
     status_badge = ui.badge("Disconnected", color="red").classes("text-sm mb-3")

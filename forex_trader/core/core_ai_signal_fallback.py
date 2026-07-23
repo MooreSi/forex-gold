@@ -239,10 +239,15 @@ async def apply_sl_adjustment(
             "[%s] SL adjustment (tg_id=%s, via=%s) applied to trade=%s (ticket %s): %s -> %s",
             channel_name, tg_id, via, trade_id[:8], mt5_ticket, old_sl, new_sl,
         )
+        _via_label = {
+            "learned_rule": "learned rule",
+            "ai_fallback": "AI-recovered instruction",
+            "logic_keyword": "Logic Keywords (RISK FREE/BE lexicon)",
+        }.get(via, via)
         _alert = (
             f"SL adjusted — {channel_name}\n"
             f"Trade {trade_id[:8]} (ticket {mt5_ticket}): {old_sl} → {new_sl}\n"
-            f"Source: {'learned rule' if via == 'learned_rule' else 'AI-recovered instruction'}"
+            f"Source: {_via_label}"
         )
         asyncio.create_task(
             telegram_alerts.send_message(_alert, tg_id, "sl_adjustment_applied")

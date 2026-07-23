@@ -784,6 +784,29 @@ def _apply_schema() -> None:
             # assuming "limit_runner" — the only strategy this table originally
             # tracked). Default preserves existing rows' actual behaviour.
             "ALTER TABLE vantage_pending_orders ADD COLUMN strategy TEXT NOT NULL DEFAULT 'limit_runner'",
+            # Logic Keywords (Parsing page, 2026-07-22) -- editable phrase
+            # lexicons for CLOSE ALL / RISK FREE-BE / TP HIT triggers, symbol
+            # tokens, and exclusion filtering. See core_logic_keywords.py.
+            """CREATE TABLE IF NOT EXISTS logic_keyword_lexicons (
+                category     TEXT PRIMARY KEY,
+                phrases_json TEXT NOT NULL
+            )""",
+            # Dedup guard for the CLOSE ALL / RISK FREE-BE / TP HIT triggers --
+            # same problem/shape as sl_adjustment_applied above (the buffered
+            # message keeps getting re-scanned every cycle without this).
+            """CREATE TABLE IF NOT EXISTS logic_keyword_triggers_applied (
+                tg_message_id TEXT NOT NULL,
+                trigger_type  TEXT NOT NULL,
+                applied_at    REAL NOT NULL,
+                PRIMARY KEY (tg_message_id, trigger_type)
+            )""",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_tp_parsing INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_sl_parsing INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_close_all_parsing INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_risk_free_be_parsing INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_tp_hit_parsing INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_ignore_media_messages INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_ignore_forwarded_messages INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)

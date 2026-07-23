@@ -26,6 +26,7 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Optional
 
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_logic_keywords import claim_trigger, get_lexicon, text_matches_any
@@ -49,6 +50,17 @@ def _find_channel_open_trade(channel_name: str) -> Optional[dict]:
             (channel_name, f"instant:{channel_name}", f"Telegram Auto ({channel_name})"),
         ).fetchone()
     return db_module.row_to_dict(row) if row else None
+
+
+def _tg_cmd_blocked(trade: dict) -> bool:
+    """True if `trade` is managed by an EA Template whose TG CMD toggle is
+    OFF -- Logic Keywords triggers (CLOSE ALL / RISK FREE-BE) must not act
+    on it. Every non-template trade is unaffected (never blocked here)."""
+    strategy = trade.get("strategy") or ""
+    if not ea_templates.is_template_override(strategy):
+        return False
+    tpl = ea_templates.get_ea_template(ea_templates.template_name_from_override(strategy))
+    return bool(tpl) and not tpl["tg_cmd_enabled"]
 
 
 def should_skip_media_or_forwarded(msg: dict, rs: dict) -> Optional[str]:
@@ -103,6 +115,10 @@ async def try_handle_close_all_trigger(
         log.info("[LogicKeywords] CLOSE ALL trigger (%s) matched '%s' -- no open trade for this channel",
                  channel_name, phrase)
         return True
+    if await db_module.to_db_thread(_tg_cmd_blocked, trade):
+        log.info("[LogicKeywords] CLOSE ALL trigger (%s) matched '%s' -- trade=%s's template has "
+                 "TG CMD off, not acting", channel_name, phrase, trade["trade_id"][:8])
+        return True
     trade_id = trade["trade_id"]
     try:
         await close_trade_fn(trade_id, "logic_keyword_close_all")
@@ -148,6 +164,10 @@ async def try_handle_risk_free_be_trigger(
     if not trade:
         log.info("[LogicKeywords] RISK FREE/BE trigger (%s) matched '%s' -- no open trade for this channel",
                  channel_name, phrase)
+        return True
+    if await db_module.to_db_thread(_tg_cmd_blocked, trade):
+        log.info("[LogicKeywords] RISK FREE/BE trigger (%s) matched '%s' -- trade=%s's template has "
+                 "TG CMD off, not acting", channel_name, phrase, trade["trade_id"][:8])
         return True
     entry_price = float(trade["entry_price"])
     from forex_trader.core.core_ai_signal_fallback import apply_sl_adjustment

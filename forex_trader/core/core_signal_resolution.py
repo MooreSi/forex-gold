@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
@@ -88,6 +89,18 @@ def _adaptive_final_tp_dist(sig: dict, entry_mid: float, is_buy: bool) -> float:
     return max(dists, default=0.0)
 
 
+def _sig_guard_blocks(channel_name: str, direction: str) -> bool:
+    """True if a template-managed trade is already open for this channel +
+    direction -- Sig Guard blocks a new one from opening alongside it."""
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM vantage_simulated_trades WHERE status='open' "
+            "AND tg_source=? AND direction=? AND strategy LIKE ? LIMIT 1",
+            (channel_name, direction.upper(), f"{ea_templates.TEMPLATE_OVERRIDE_PREFIX}%"),
+        ).fetchone()
+    return row is not None
+
+
 async def resolve_open_trade_params(
     bridge: Any,
     signal_id: str,
@@ -150,6 +163,25 @@ async def resolve_open_trade_params(
     else:
         strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
 
+    # ── EA Template override ────────────────────────────────────────────
+    # A template fully replaces strategy dispatch (Trading > Strategy >
+    # EA Templates) -- the EA manages the trade end-to-end from the raw
+    # signal levels plus the template's own fields, so none of the
+    # strategy-specific SL/lot logic below applies. See
+    # core_ea_templates.py's module docstring.
+    _is_template = ea_templates.is_template_override(_ch_override)
+    _template: Optional[dict] = None
+    if _is_template:
+        _tpl_name = ea_templates.template_name_from_override(_ch_override)
+        _template = ea_templates.get_ea_template(_tpl_name)
+        if _template is None:
+            raise ValueError(f"Template '{_tpl_name}' no longer exists — reassign this channel")
+        if _template["sig_guard"] and _sig_guard_blocks(_ch_src_early, sig["direction"]):
+            raise ValueError(
+                f"Sig Guard: a template-managed trade is already open for "
+                f"'{_ch_src_early}' {sig['direction']}"
+            )
+
     # Pre-trade filters: R:R and directional cap.
     # Conservative, Conservative Trial, Trail Stop, Signal Climber, and
     # Reversal Runner skip this — the first three override signal TPs from fill price;
@@ -158,13 +190,14 @@ async def resolve_open_trade_params(
     # Adaptive Runner joins them for the same reason. Adaptive Runner 2 also
     # joins: it overrides the signal SL entirely with a fixed 10pt distance,
     # so the TP1 R:R check would be measuring against a stop that isn't
-    # actually going to be used.
+    # actually going to be used. EA Templates join them too — the EA computes
+    # its own management independent of the raw TP1 distance.
     _self_level_strategies = (
         STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
         STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
         STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     )
-    if strategy not in _self_level_strategies:
+    if strategy not in _self_level_strategies and not _is_template:
         filter_err = check_pre_trade_filters(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]),
             float(sig["stop_loss"]), sig.get("tp1"),
@@ -234,7 +267,9 @@ async def resolve_open_trade_params(
     # SL override: each strategy may modify the broker SL placed with the order.
     # Lot sizing always uses the signal SL for position-size calculation.
     stop_loss_to_use = float(sig["stop_loss"])
-    if strategy == STRATEGY_NO_SL_SCALE:
+    if _is_template:
+        pass  # EA computes its own SL/TP management from the template fields
+    elif strategy == STRATEGY_NO_SL_SCALE:
         # ADX > 30 gate: only open Trend Ratchet in confirmed trending conditions
         if dpm_candles:
             from forex_trader.core.dpm_engine import compute_adx
@@ -373,4 +408,6 @@ async def resolve_open_trade_params(
         "lot_size": lot_size,
         "stop_loss_to_use": stop_loss_to_use,
         "tick": tick,
+        "is_template": _is_template,
+        "template": _template,
     }

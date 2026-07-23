@@ -91,6 +91,15 @@ class EABridge:
         return self._writer is not None and (time.time() - self._last_seen) < _HEARTBEAT_TIMEOUT_S
 
     def is_strategy_portable(self, strategy: str) -> bool:
+        # EA Templates (Trading > Strategy > EA Templates, "template:<name>"
+        # channel overrides) are always EA-portable by design -- a template
+        # IS an EA-native management definition, there's no Python-managed
+        # equivalent to fall back to (see core_open_trade.open_trade's
+        # template branch, which raises rather than falling through to the
+        # Python bridge path when the EA isn't reachable).
+        from forex_trader.core.core_ea_templates import is_template_override
+        if is_template_override(strategy):
+            return True
         return strategy in EA_PORTABLE_STRATEGIES
 
     # ── Connection handling ──────────────────────────────────────────────────
@@ -155,6 +164,7 @@ class EABridge:
                          pcts: Optional[list[float]] = None,
                          be_at_pos: Optional[int] = None,
                          trail_mode: Optional[str] = None,
+                         template: Optional[dict] = None,
                          timeout: float = 5.0) -> dict:
         """Ask the EA to place the order and take over its management.
         Returns the trade_opened/trade_open_failed payload. Raises
@@ -182,6 +192,13 @@ class EABridge:
         itself (not just its parameters) differs; see
         core_run_tp_ladder.run_tp_ladder's sl_rule parameter for the
         Python-side equivalent, which must stay in lockstep with this.
+
+        template: the full EA Template field dict (core_ea_templates.py)
+        for a "template:<name>" strategy -- sent as flat tpl_* fields
+        (same flat-JSON convention as pct1..pct8/be_at_pos above) so the
+        EA can run Grid/Stealth/Anchor/Trail/BE/Cancel-Pending/Harvest
+        management natively, no recompile needed when a template's values
+        change. None for every other (built-in) strategy.
         """
         if not self.is_ea_healthy():
             raise ConnectionError("EA not connected/healthy")
@@ -199,6 +216,19 @@ class EABridge:
                 msg["be_at_pos"] = be_at_pos
             if trail_mode is not None:
                 msg["trail_mode"] = trail_mode
+        if template is not None:
+            msg["tpl_mode"]           = template["mode"]
+            msg["tpl_grid_step_pts"]  = template["grid_step_pts"]
+            msg["tpl_grid_legs"]      = template["grid_legs"]
+            msg["tpl_tpsl_mode"]      = template["tpsl_mode"]
+            msg["tpl_anchor"]         = template["anchor"]
+            msg["tpl_trail_mode"]     = template["trail_mode"]
+            msg["tpl_be_mode"]        = template["be_mode"]
+            msg["tpl_be_buffer_pts"]  = template["be_buffer_pts"]
+            msg["tpl_be_trigger"]     = template["be_trigger"]
+            msg["tpl_cancel_pending"] = template["cancel_pending"]
+            msg["tpl_harvest_enabled"]   = template["harvest_enabled"]
+            msg["tpl_harvest_threshold"] = template["harvest_threshold"]
         ack_event = asyncio.Event()
         ack_box: dict = {}
 

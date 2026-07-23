@@ -92,6 +92,23 @@ struct ManagedTrade
                              // core_run_tp_ladder.run_tp_ladder's
                              // close_full_on_last parameter, which this must
                              // stay in lockstep with.
+
+   // ── EA Template fields (strategy == "template:<name>") ──────────────
+   // Sent flat as tpl_* on open_trade -- see core_ea_templates.py and
+   // ea_bridge.EABridge.open_trade's docstring. Only meaningful when
+   // isTemplate is true; every other strategy leaves these at their
+   // zero-value defaults and ManageTrade() never reads them.
+   bool     isTemplate;
+   string   tplTpslMode;     // "off" / "on" / "stealth"
+   string   tplTrailMode;    // "off" / "candle" / "step" / "fractal" / "tp"
+   string   tplBeMode;       // "entry" / "entry_buffer"
+   double   tplBeBufferPts;
+   int      tplBeTrigger;    // 1-based TP# that arms breakeven
+   bool     tplBeDone;       // breakeven already applied once
+   bool     tplCancelPending;
+   int      tplGridGroup;    // shared id for sibling grid legs, -1 if none
+   bool     tplHarvestEnabled;
+   double   tplHarvestThreshold;
 };
 
 ManagedTrade g_trades[];
@@ -117,6 +134,20 @@ struct PendingOrder
    int      beAtPos;
    string   trailMode;
    bool     closeFullOnLast;
+
+   // ── EA Template fields — see ManagedTrade's own copies for meaning.
+   // Carried on the resting order so CheckPendingOrders() can populate a
+   // complete ManagedTrade the moment a leg fills.
+   bool     isTemplate;
+   string   tplTpslMode;
+   string   tplTrailMode;
+   string   tplBeMode;
+   double   tplBeBufferPts;
+   int      tplBeTrigger;
+   bool     tplCancelPending;
+   int      tplGridGroup;    // shared id across this grid's sibling legs
+   bool     tplHarvestEnabled;
+   double   tplHarvestThreshold;
 };
 
 PendingOrder g_pending[];
@@ -148,6 +179,15 @@ string JsonGetString(const string &json, const string key)
    int end = (end2 >= 0 && (end3 < 0 || end2 < end3)) ? end2 : end3;
    if(end < 0) end = StringLen(json);
    return StringSubstr(json, p, end - p);
+}
+
+// Overload with a default -- every existing call site before EA Templates
+// only ever needed the bare 2-arg form (an empty string was itself a valid
+// "not present" signal to those callers), so this is purely additive.
+string JsonGetString(const string &json, const string key, const string def)
+{
+   string s = JsonGetString(json, key);
+   return (s == "") ? def : s;
 }
 
 double JsonGetDouble(const string &json, const string key, double def = 0.0)
@@ -348,14 +388,29 @@ void HandleOpenTrade(const string json)
    double lots      = JsonGetDouble(json, "lot_size");
    double sl        = JsonGetDouble(json, "stop_loss");
    string strategy  = JsonGetString(json, "strategy");
+   bool   isTemplate = (StringFind(strategy, "template:") == 0);
+
+   // EA Template, Grid mode: places tpl_grid_legs resting BuyLimit/SellLimit
+   // orders instead of a single market fill — a completely different
+   // placement flow, handled by its own function so the market-order path
+   // below stays exactly as every non-template strategy already relies on.
+   if(isTemplate && JsonGetString(json, "tpl_mode") == "grid")
+   {
+      HandleOpenTemplateGrid(json);
+      return;
+   }
 
    // be_runner is the one strategy where Python's own bridge path sets a real
    // broker-side TP too (the highest defined TP, as a backstop in case the
    // ladder-management logic itself never catches the final level) — mirror
    // that here. Every other strategy manages TPs purely via partial closes,
-   // so no broker TP is set for them (tp=0).
+   // so no broker TP is set for them (tp=0). EA Templates join be_runner
+   // for tpsl_mode=="on" (full visible TP) but NOT for "off" (no target) or
+   // "stealth" (target tracked internally in tp[], deliberately never
+   // written to the broker order — see ManageTemplate()).
    double brokerTp = 0.0;
-   if(strategy == "be_runner")
+   string tplTpslModeEarly = isTemplate ? JsonGetString(json, "tpl_tpsl_mode", "on") : "";
+   if(strategy == "be_runner" || (isTemplate && tplTpslModeEarly == "on"))
    {
       for(int i = MAX_TPS - 1; i >= 0; i--)
       {
@@ -416,6 +471,18 @@ void HandleOpenTrade(const string json)
    mt.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
    mt.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
    mt.closeFullOnLast = true; // every open_trade() caller wants the original behaviour
+
+   mt.isTemplate = isTemplate;
+   mt.tplTpslMode = isTemplate ? JsonGetString(json, "tpl_tpsl_mode", "on") : "";
+   mt.tplTrailMode = isTemplate ? JsonGetString(json, "tpl_trail_mode", "off") : "off";
+   mt.tplBeMode = isTemplate ? JsonGetString(json, "tpl_be_mode", "entry") : "entry";
+   mt.tplBeBufferPts = isTemplate ? JsonGetDouble(json, "tpl_be_buffer_pts", 1.0) : 0.0;
+   mt.tplBeTrigger = isTemplate ? (int)JsonGetLong(json, "tpl_be_trigger", 1) : 1;
+   mt.tplBeDone = false;
+   mt.tplCancelPending = isTemplate && JsonGetLong(json, "tpl_cancel_pending", 0) != 0;
+   mt.tplGridGroup = -1; // single-mode template trades are never part of a grid group
+   mt.tplHarvestEnabled = isTemplate && JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
+   mt.tplHarvestThreshold = isTemplate ? JsonGetDouble(json, "tpl_harvest_threshold", 50.0) : 0.0;
 
    int n = ArraySize(g_trades);
    ArrayResize(g_trades, n + 1);
@@ -484,6 +551,12 @@ void HandlePlacePendingOrder(const string json)
    // this protocol (see be_at_pos above).
    p.closeFullOnLast = JsonHasKey(json, "close_full_on_last")
       ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
+   // This is the Limit Runner / ORB pending-order path, never a template --
+   // MQL5 zero-initialises struct members by default so this is already
+   // implied (isTemplate=false, tplGridGroup=0), but set it explicitly so
+   // ManageTrade()'s isTemplate dispatch check never depends on that.
+   p.isTemplate = false;
+   p.tplGridGroup = -1;
 
    int n = ArraySize(g_pending);
    ArrayResize(g_pending, n + 1);
@@ -493,6 +566,115 @@ void HandlePlacePendingOrder(const string json)
             "\",\"ticket\":" + (string)ticket + "}");
    Print("[EABridge] pending order placed ", direction, " ticket=", ticket,
          " strategy=", strategy, " price=", price, " SL=", sl, " expiresMin=", expireMin);
+}
+
+int g_nextGridGroup = 1;
+
+// EA Template, Grid mode: places tpl_grid_legs resting BuyLimit/SellLimit
+// orders staggered tpl_grid_step_pts apart, averaging INTO the position
+// (BUY legs below current price, SELL legs above) rather than a single
+// market fill. All legs share one tplGridGroup id -- when tplCancelPending
+// is set and any leg fills (CheckPendingOrders), every other still-resting
+// sibling leg is cancelled instead of also filling later and stacking
+// exposure the template didn't intend.
+void HandleOpenTemplateGrid(const string json)
+{
+   string trade_id  = JsonGetString(json, "trade_id");
+   string direction = JsonGetString(json, "direction");
+   double lots      = JsonGetDouble(json, "lot_size");
+   double sl        = JsonGetDouble(json, "stop_loss");
+   string strategy  = JsonGetString(json, "strategy");
+   double stepPts   = JsonGetDouble(json, "tpl_grid_step_pts", 10.0);
+   int    legs       = (int)JsonGetLong(json, "tpl_grid_legs", 3);
+   if(legs < 1) legs = 1;
+   // Same convention as every other *_pts field in this EA (trail_dist,
+   // InpDefaultTrailStopPts, trail_stop_sl_pts) -- a raw price delta, not a
+   // broker _Point-scaled value. See core_ea_templates.py's DEFAULTS.
+   double stepPrice = stepPts;
+
+   MqlTick tick;
+   SymbolInfoTick(_Symbol, tick);
+   double basePrice = (direction == "BUY") ? tick.bid : tick.ask;
+
+   trade.SetExpertMagicNumber(InpMagic);
+   int groupId = g_nextGridGroup++;
+   int placed = 0;
+   string expireMinKey = "tpl_grid_expire_minutes";
+   double expireMin = JsonGetDouble(json, expireMinKey, 240.0);
+   datetime expiration = TimeCurrent() + (datetime)(expireMin * 60);
+
+   for(int leg = 1; leg <= legs; leg++)
+   {
+      double legPrice = (direction == "BUY")
+         ? basePrice - stepPrice * leg
+         : basePrice + stepPrice * leg;
+      legPrice = NormalizeDouble(legPrice, _Digits);
+      string legTradeId = trade_id + "-g" + (string)leg;
+      string comment = "ea:" + StringSubstr(trade_id, 0, 10) + "g" + (string)leg;
+
+      bool ok = (direction == "BUY")
+         ? trade.BuyLimit(lots, legPrice, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment)
+         : trade.SellLimit(lots, legPrice, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment);
+
+      if(!ok)
+      {
+         Print("[EABridge] grid leg ", leg, "/", legs, " failed: ", trade.ResultRetcodeDescription());
+         continue;
+      }
+
+      PendingOrder p;
+      p.ticket = trade.ResultOrder();
+      p.trade_id = legTradeId;
+      p.strategy = strategy;
+      p.direction = direction;
+      p.lots = lots;
+      for(int i = 0; i < MAX_TPS; i++)
+      {
+         string key = "tp" + (string)(i + 1);
+         p.hasTp[i] = JsonHasKey(json, key);
+         p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+         p.pcts[i] = 0.0;
+      }
+      p.beAtPos = -1;
+      p.trailMode = "";
+      p.closeFullOnLast = true;
+      p.isTemplate = true;
+      p.tplTpslMode = JsonGetString(json, "tpl_tpsl_mode", "on");
+      p.tplTrailMode = JsonGetString(json, "tpl_trail_mode", "off");
+      p.tplBeMode = JsonGetString(json, "tpl_be_mode", "entry");
+      p.tplBeBufferPts = JsonGetDouble(json, "tpl_be_buffer_pts", 1.0);
+      p.tplBeTrigger = (int)JsonGetLong(json, "tpl_be_trigger", 1);
+      p.tplCancelPending = JsonGetLong(json, "tpl_cancel_pending", 0) != 0;
+      p.tplGridGroup = groupId;
+      p.tplHarvestEnabled = JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
+      p.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
+
+      int n = ArraySize(g_pending);
+      ArrayResize(g_pending, n + 1);
+      g_pending[n] = p;
+      placed++;
+   }
+
+   if(placed == 0)
+   {
+      SendJson("{\"type\":\"trade_open_failed\",\"trade_id\":\"" + JsonEsc(trade_id) +
+               "\",\"error\":\"all grid legs failed to place\"}");
+      return;
+   }
+
+   // Acked as a normal "trade_opened" (ticket=0, no immediate fill) so
+   // Python's open_trade() caller doesn't need a third response shape --
+   // the real per-leg fills/tickets arrive later via the existing
+   // pending_order_placed-equivalent path once CheckPendingOrders()
+   // promotes each leg. Python's open flow only checks ack.type=="trade_opened"
+   // to mark the signal active; per-trade DB rows for individual legs are
+   // not created by Python at all for grid mode -- the EA is the sole
+   // source of truth for grid trades, matching "the EA should manage the
+   // trade" for templates.
+   SendJson("{\"type\":\"trade_opened\",\"trade_id\":\"" + JsonEsc(trade_id) +
+            "\",\"ticket\":0,\"fill_price\":0}");
+   Print("[EABridge] grid placed ", placed, "/", legs, " legs group=", groupId,
+         " dir=", direction, " step=", stepPts, "pt");
 }
 
 //+------------------------------------------------------------------+
@@ -999,10 +1181,137 @@ void ManageOrbFixed(ManagedTrade &t, const MqlTick &tick)
 }
 
 //+------------------------------------------------------------------+
+//| EA Templates ("template:<name>" strategy) — see core_ea_templates.py |
+//| and ManagedTrade's tpl* fields for what each setting means.        |
+//+------------------------------------------------------------------+
+
+// Trail-to level for tplTrailMode=="candle" -- lowest low (BUY) / highest
+// high (SELL) of the last N closed M15 candles. Fixed 3-candle lookback
+// (not itself template-configurable -- there is no UI field for it; a
+// future template revision could expose it). Returns 0.0 if the candle
+// data isn't available yet (no trail applied that tick).
+double CandleTrailLevel(const ManagedTrade &t)
+{
+   const int lookback = 3;
+   if(t.direction == "BUY")
+   {
+      int idx = iLowest(_Symbol, PERIOD_M15, MODE_LOW, lookback, 1);
+      if(idx < 0) return 0.0;
+      return iLow(_Symbol, PERIOD_M15, idx);
+   }
+   else
+   {
+      int idx = iHighest(_Symbol, PERIOD_M15, MODE_HIGH, lookback, 1);
+      if(idx < 0) return 0.0;
+      return iHigh(_Symbol, PERIOD_M15, idx);
+   }
+}
+
+// Trail-to level for tplTrailMode=="fractal" -- the most recent confirmed
+// Bill Williams fractal on the opposite side of price (a down-fractal
+// beneath price for a BUY, an up-fractal above price for a SELL), scanned
+// over the last 50 M15 bars. Returns 0.0 if none found yet.
+double FractalTrailLevel(const ManagedTrade &t)
+{
+   int h = iFractals(_Symbol, PERIOD_M15);
+   if(h == INVALID_HANDLE) return 0.0;
+   double buf[];
+   ArraySetAsSeries(buf, true);
+   int lookback = 50;
+   // Buffer 1 = lower fractals (trail target for a BUY, price rises toward
+   // it from below); buffer 0 = upper fractals (trail target for a SELL).
+   if(CopyBuffer(h, (t.direction == "BUY") ? 1 : 0, 0, lookback, buf) <= 0) return 0.0;
+   for(int i = 2; i < lookback; i++) // skip the unconfirmed last 2 bars
+   {
+      double v = buf[i];
+      if(v != 0.0 && v != EMPTY_VALUE) return v;
+   }
+   return 0.0;
+}
+
+void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
+{
+   if(!PositionSelectByTicket(t.ticket)) return; // closed already this tick
+
+   // ── Stealth TP: tracked internally, never on the broker ticket ──────
+   if(t.tplTpslMode == "stealth")
+   {
+      int lastIdx = LastTpIndex(t);
+      if(lastIdx >= 0 && TpCleared(t, lastIdx, tick))
+      {
+         trade.PositionClose(t.ticket);
+         Print("[EABridge] template stealth TP hit, closing ticket=", t.ticket);
+         return; // CheckForClosures reports/removes it on the next pass
+      }
+   }
+
+   // ── Harvest: bank profit once floating P&L reaches the threshold ────
+   if(t.tplHarvestEnabled)
+   {
+      double profit = PositionGetDouble(POSITION_PROFIT);
+      if(profit >= t.tplHarvestThreshold)
+      {
+         trade.PositionClose(t.ticket);
+         Print("[EABridge] template harvest threshold reached ($", profit,
+               " >= $", t.tplHarvestThreshold, "), closing ticket=", t.ticket);
+         return;
+      }
+   }
+
+   // ── Breakeven ────────────────────────────────────────────────────────
+   if(!t.tplBeDone)
+   {
+      int beIdx = t.tplBeTrigger - 1;
+      if(beIdx >= 0 && beIdx < MAX_TPS && TpCleared(t, beIdx, tick))
+      {
+         double beSl = t.entry_price;
+         if(t.tplBeMode == "entry_buffer")
+         {
+            double sign = (t.direction == "BUY") ? 1.0 : -1.0;
+            beSl = t.entry_price + sign * t.tplBeBufferPts;
+         }
+         if(MoveSl(t, beSl, "template_be", beIdx)) t.tplBeDone = true;
+      }
+   }
+
+   // ── Trail ────────────────────────────────────────────────────────────
+   if(t.tplTrailMode == "step")
+   {
+      double dist = InpDefaultTrailStopPts;
+      double newSl = (t.direction == "BUY") ? tick.bid - dist : tick.ask + dist;
+      MoveSl(t, newSl, "template_trail_step");
+   }
+   else if(t.tplTrailMode == "candle")
+   {
+      double newSl = CandleTrailLevel(t);
+      if(newSl != 0.0) MoveSl(t, newSl, "template_trail_candle");
+   }
+   else if(t.tplTrailMode == "fractal")
+   {
+      double newSl = FractalTrailLevel(t);
+      if(newSl != 0.0) MoveSl(t, newSl, "template_trail_fractal");
+   }
+   else if(t.tplTrailMode == "tp")
+   {
+      int bestIdx = -1;
+      for(int i = 0; i < MAX_TPS; i++)
+      {
+         if(!t.hasTp[i]) continue;
+         if(!TpCleared(t, i, tick)) break;
+         bestIdx = i;
+      }
+      if(bestIdx >= 0) MoveSl(t, t.tp[bestIdx], "template_trail_tp", bestIdx);
+   }
+   // trail == "off": nothing further -- SL only ever moved by the
+   // breakeven step above (if/when its trigger clears).
+}
+
+//+------------------------------------------------------------------+
 //| Dispatch                                                           |
 //+------------------------------------------------------------------+
 void ManageTrade(ManagedTrade &t, const MqlTick &tick)
 {
+   if(t.isTemplate) { ManageTemplate(t, tick); return; }
    if(t.strategy == "be_runner") ManageBeRunner(t, tick);
    else if(t.strategy == "trail_stop") ManageTrailStop(t, tick);
    else if(t.strategy == "protected_scale") ManageProtectedScale(t, tick);
@@ -1084,6 +1393,24 @@ void CheckForClosures()
 //| this checks the same way: does the order still exist? If not, did  |
 //| a position with the same ticket appear (filled) or not (gone)?     |
 //+------------------------------------------------------------------+
+// Cancels every other still-resting leg in a filled grid group. Only
+// deletes the broker-side order here -- doesn't touch g_pending[] itself,
+// so it's safe to call from inside CheckPendingOrders()'s own backward
+// loop; the next tick's pass over g_pending[] finds each cancelled ticket
+// already gone and cleans it up via the existing "expired_or_cancelled"
+// path, no double-bookkeeping needed.
+void CancelGridSiblings(const int groupId, const ulong filledTicket)
+{
+   for(int i = 0; i < ArraySize(g_pending); i++)
+   {
+      if(g_pending[i].tplGridGroup != groupId) continue;
+      if(g_pending[i].ticket == filledTicket) continue;
+      if(trade.OrderDelete(g_pending[i].ticket))
+         Print("[EABridge] cancelled grid sibling ticket=", g_pending[i].ticket,
+               " group=", groupId, " (leg filled ticket=", filledTicket, ")");
+   }
+}
+
 void CheckPendingOrders()
 {
    for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
@@ -1121,6 +1448,18 @@ void CheckPendingOrders()
          mt.trailMode = g_pending[i].trailMode;
          mt.closeFullOnLast = g_pending[i].closeFullOnLast;
 
+         mt.isTemplate = g_pending[i].isTemplate;
+         mt.tplTpslMode = g_pending[i].tplTpslMode;
+         mt.tplTrailMode = g_pending[i].tplTrailMode;
+         mt.tplBeMode = g_pending[i].tplBeMode;
+         mt.tplBeBufferPts = g_pending[i].tplBeBufferPts;
+         mt.tplBeTrigger = g_pending[i].tplBeTrigger;
+         mt.tplBeDone = false;
+         mt.tplCancelPending = g_pending[i].tplCancelPending;
+         mt.tplGridGroup = g_pending[i].tplGridGroup;
+         mt.tplHarvestEnabled = g_pending[i].tplHarvestEnabled;
+         mt.tplHarvestThreshold = g_pending[i].tplHarvestThreshold;
+
          int n = ArraySize(g_trades);
          ArrayResize(g_trades, n + 1);
          g_trades[n] = mt;
@@ -1130,6 +1469,12 @@ void CheckPendingOrders()
                   ",\"fill_price\":" + DoubleToString(fillPrice, _Digits) + "}");
          Print("[EABridge] pending order filled -> managed ticket=", ticket,
                " strategy=", mt.strategy, " @ ", fillPrice);
+
+         // EA Template grid, Cancel Pending: this leg filled -- cancel every
+         // other still-resting sibling leg in the same group so the position
+         // doesn't keep averaging in beyond what already filled.
+         if(mt.isTemplate && mt.tplCancelPending && mt.tplGridGroup >= 0)
+            CancelGridSiblings(mt.tplGridGroup, ticket);
       }
       else
       {

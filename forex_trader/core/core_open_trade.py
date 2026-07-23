@@ -24,6 +24,7 @@ import uuid
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_risk_governor import is_trading_paused
 from forex_trader.core.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
@@ -237,6 +238,7 @@ async def open_trade(
     managed_by = "python"
     mt5_ticket = None
     entry_price = None
+    _is_template = ea_templates.is_template_override(strategy)
     ea_rs = await db_module.to_db_thread(db_module.get_risk_settings)
     if bool(ea_rs.get("ea_bridge_enabled", 0)) and mt5_tp_override is None:
         try:
@@ -258,14 +260,20 @@ async def open_trade(
                 _ea_pcts = None
                 _ea_be_at_pos = None
                 _ea_trail_mode = None
+                _ea_template = None
                 if strategy in _EA_LADDER_PCTS and _tps:
                     _ea_table = _EA_LADDER_PCTS[strategy]
                     _ea_pcts = _ea_table.get(len(_tps), _ea_table[max(_ea_table)])
                     _ea_be_at_pos = _EA_LADDER_BE_AT_POS[strategy]
                     _ea_trail_mode = _EA_LADDER_TRAIL_MODE.get(strategy)
+                elif _is_template:
+                    _ea_template = ea_templates.get_ea_template(
+                        ea_templates.template_name_from_override(strategy)
+                    )
                 ea_ack = await _ea.open_trade(
                     trade_id, direction.upper(), lot_size, stop_loss, _tps, strategy,
                     pcts=_ea_pcts, be_at_pos=_ea_be_at_pos, trail_mode=_ea_trail_mode,
+                    template=_ea_template,
                 )
                 if ea_ack.get("type") == "trade_opened":
                     mt5_ticket  = ea_ack.get("ticket")
@@ -273,11 +281,27 @@ async def open_trade(
                     managed_by  = "ea"
                     log.info("[EA] order placed: ticket=%s dir=%s lots=%s @ %s (strategy=%s)",
                              mt5_ticket, direction, lot_size, entry_price, strategy)
+                elif _is_template:
+                    raise RuntimeError(f"EA rejected template order: {ea_ack.get('error')}")
                 else:
                     log.warning("[EA] open_trade rejected: %s — falling back to Python bridge",
                                 ea_ack.get("error"))
+            elif _is_template:
+                raise RuntimeError(
+                    "EA Template strategies require a connected, healthy EA — "
+                    "none is available right now"
+                )
         except Exception as _ea_e:
+            if _is_template:
+                raise
             log.warning("[EA] handoff failed (%s) — falling back to Python bridge", _ea_e)
+
+    if _is_template and managed_by != "ea":
+        # Should be unreachable (every path above either sets managed_by='ea'
+        # or raises for a template strategy) -- fail loudly rather than let a
+        # template trade silently fall through to the Python bridge path,
+        # which has no idea how to run Grid/Stealth/Anchor/Trail management.
+        raise RuntimeError("EA Template strategy resolved with no EA management — refusing to open")
 
     if managed_by != "ea":
         mt5_result  = await bridge.place_order(direction, lot_size, stop_loss, mt5_tp,

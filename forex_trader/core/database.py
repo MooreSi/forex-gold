@@ -439,6 +439,36 @@ CREATE TABLE IF NOT EXISTS strategy_param_templates (
     created_at  REAL NOT NULL
 );
 
+-- EA-native trade-management templates (2026-07-23) -- see
+-- core_ea_templates.py. Unlike strategy_param_templates above (a named
+-- preset of ONE existing Python strategy's numeric knobs), a row here is a
+-- complete, self-contained, EA-managed trade-management definition -- Grid
+-- vs Single entry, TP/SL visibility, trailing method, breakeven rule,
+-- cancel-pending-siblings, and profit harvesting -- selectable per channel
+-- (Trading > Channel Strategy) in place of a built-in strategy, not
+-- alongside one. The EA reads every field fresh off the open_trade/
+-- place_pending_order wire message, so changing a template never needs a
+-- recompile.
+CREATE TABLE IF NOT EXISTS ea_trade_templates (
+    name              TEXT PRIMARY KEY,
+    tg_cmd_enabled    INTEGER NOT NULL DEFAULT 1,
+    harvest_enabled   INTEGER NOT NULL DEFAULT 0,
+    harvest_threshold REAL NOT NULL DEFAULT 50.0,
+    mode              TEXT NOT NULL DEFAULT 'single',
+    grid_step_pts     REAL NOT NULL DEFAULT 10.0,
+    grid_legs         INTEGER NOT NULL DEFAULT 3,
+    tpsl_mode         TEXT NOT NULL DEFAULT 'on',
+    anchor            TEXT NOT NULL DEFAULT 'unified',
+    trail_mode        TEXT NOT NULL DEFAULT 'off',
+    be_mode           TEXT NOT NULL DEFAULT 'entry',
+    be_buffer_pts     REAL NOT NULL DEFAULT 1.0,
+    be_trigger        INTEGER NOT NULL DEFAULT 1,
+    cancel_pending    INTEGER NOT NULL DEFAULT 0,
+    sig_guard         INTEGER NOT NULL DEFAULT 0,
+    created_at        REAL NOT NULL,
+    updated_at        REAL NOT NULL
+);
+
 -- Per-position spread cache — computed once from historical MT5 ticks at
 -- trade-open time, then reused forever (spread at a past moment never
 -- changes). Keyed by position_id since Closed Trades reads directly from

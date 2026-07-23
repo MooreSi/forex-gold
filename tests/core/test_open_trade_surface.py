@@ -86,7 +86,7 @@ class _FakeEA:
         return self._portable
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None, trail_mode=None):
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None):
         self.open_trade_calls.append(
             {"trade_id": trade_id, "direction": direction, "lot_size": lot_size,
              "stop_loss": stop_loss, "tps": tps, "strategy": strategy}
@@ -251,6 +251,54 @@ def test_falls_through_to_python_bridge_when_strategy_not_portable(fresh_db):
     result = asyncio.run(ot.open_trade(bridge, **_open_kwargs()))
 
     assert result["managed_by"] == "python"
+
+
+# ── EA Templates -- no Python-bridge fallback ────────────────────────────────
+
+def test_template_strategy_ea_managed_forwards_template_payload(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    result = asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Grid Stealth"))
+    ))
+
+    assert result["managed_by"] == "ea"
+    assert len(fake_ea.open_trade_calls) == 1
+
+
+def test_template_strategy_raises_when_ea_unhealthy_no_python_fallback(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Grid Stealth", {})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    ea_bridge.set_instance(_FakeEA(healthy=False))
+    bridge = _FakeBridge()
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(ot.open_trade(
+            bridge, **_open_kwargs(strategy=et.override_for_template("Grid Stealth"))
+        ))
+    assert bridge.place_order_calls == []
+
+
+def test_template_strategy_raises_when_ea_bridge_disabled_no_python_fallback(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Grid Stealth", {})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 0})
+    bridge = _FakeBridge()
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(ot.open_trade(
+            bridge, **_open_kwargs(strategy=et.override_for_template("Grid Stealth"))
+        ))
+    assert bridge.place_order_calls == []
 
 
 # ── TP selection for the broker-side order ─────────────────────────────────────

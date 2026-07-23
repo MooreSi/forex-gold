@@ -100,7 +100,7 @@ class _FakeEA:
         return True
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None, trail_mode=None):
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None):
         return self._ack
 
     async def update_trade(self, trade_id, tps):
@@ -285,7 +285,7 @@ def test_adaptive_runner_2_ea_managed_calls_ea_open_trade_with_trail_mode(fresh_
             self.open_trade_calls = []
 
         async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                             pcts=None, be_at_pos=None, trail_mode=None):
+                             pcts=None, be_at_pos=None, trail_mode=None, template=None):
             self.open_trade_calls.append(
                 {"pcts": pcts, "be_at_pos": be_at_pos, "trail_mode": trail_mode}
             )

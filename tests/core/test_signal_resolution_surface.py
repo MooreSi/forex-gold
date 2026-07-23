@@ -203,6 +203,71 @@ def test_strategy_resolution_falls_back_to_global_default(fresh_db):
     assert result["strategy"] == STRATEGY_SCALE_OUT
 
 
+# ── EA Templates ─────────────────────────────────────────────────────────────
+
+def test_template_override_resolves_as_template_unmodified_sl(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
+    _insert_signal(source_name="TplChannel", stop_loss=2390.0)
+    db.set_channel_strategy_override("TplChannel", et.override_for_template("Grid Stealth"))
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["is_template"] is True
+    assert result["strategy"] == "template:Grid Stealth"
+    assert result["template"]["mode"] == "grid"
+    assert result["template"]["tpsl_mode"] == "stealth"
+    # Templates skip every strategy-specific SL override -- the raw signal
+    # SL passes through untouched (the EA computes its own management).
+    assert result["stop_loss_to_use"] == 2390.0
+
+
+def test_template_missing_raises(fresh_db):
+    _insert_signal(source_name="TplChannel")
+    db.set_channel_strategy_override("TplChannel", "template:DoesNotExist")
+    bridge = _FakeBridge()
+    with pytest.raises(ValueError, match="no longer exists"):
+        asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+
+
+def test_template_sig_guard_blocks_when_trade_already_open(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Guarded", {"sig_guard": True})
+    _insert_signal(sig_id="other-sig", source_name="GuardChannel", direction="BUY")
+    _insert_signal(source_name="GuardChannel", direction="BUY")
+    db.set_channel_strategy_override("GuardChannel", et.override_for_template("Guarded"))
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_simulated_trades (trade_id, signal_id, direction, entry_low, "
+            "entry_high, entry_price, lot_size, remaining_lots, stop_loss, status, open_time, "
+            "strategy, tg_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("existing-1", "other-sig", "BUY", 2400.0, 2400.0, 2400.0, 0.10, 0.10, 2390.0,
+             "open", time.time(), "template:Guarded", "GuardChannel"),
+        )
+    bridge = _FakeBridge()
+    with pytest.raises(ValueError, match="Sig Guard"):
+        asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+
+
+def test_template_sig_guard_off_does_not_block(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Unguarded", {"sig_guard": False})
+    _insert_signal(sig_id="other-sig", source_name="GuardChannel", direction="BUY")
+    _insert_signal(source_name="GuardChannel", direction="BUY")
+    db.set_channel_strategy_override("GuardChannel", et.override_for_template("Unguarded"))
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_simulated_trades (trade_id, signal_id, direction, entry_low, "
+            "entry_high, entry_price, lot_size, remaining_lots, stop_loss, status, open_time, "
+            "strategy, tg_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("existing-1", "other-sig", "BUY", 2400.0, 2400.0, 2400.0, 0.10, 0.10, 2390.0,
+             "open", time.time(), "template:Unguarded", "GuardChannel"),
+        )
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["is_template"] is True
+    assert result["strategy"] == "template:Unguarded"
+
+
 # ── lot sizing ─────────────────────────────────────────────────────────────────
 
 def test_lot_size_override_used_verbatim(fresh_db):

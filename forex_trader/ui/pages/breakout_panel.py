@@ -328,7 +328,7 @@ def render() -> None:
                                 for hdr in [
                                     "Ref", "Live Trade", "Date", "Dir", "Type",
                                     "Level", "Entry", "SL", "TP1", "TP3",
-                                    "R:R", "ADX", "H1 Bias", "Strategy", "Outcome",
+                                    "Realized R", "ADX", "H1 Bias", "Strategy", "Outcome",
                                     "Held", "PnL pts", "PnL $",
                                 ]:
                                     with ui.element("th").classes("text-left px-2 py-1 font-medium"):
@@ -342,6 +342,21 @@ def render() -> None:
                                 badge_text, _ = _bo_type_badge(btype)
                                 pnl_pts     = sig.get("pnl_pts")
                                 pnl_dol     = sig.get("pnl_dollars")
+                                # Realized R -- actual outcome relative to the risk this
+                                # signal actually took (sl_dist), not the static TP1-vs-SL
+                                # plan ratio (rr_tp1) computed once at signal time. Every
+                                # row in this table already has a decided outcome (this
+                                # list is pre-filtered to non-pending/triggered signals),
+                                # so realized R is always available and always more
+                                # informative than the fixed planned ratio, which never
+                                # varies from signal to signal since TP1 is itself derived
+                                # as sl_dist x a constant multiplier. rr_tp1 stays
+                                # untouched as the ML pipeline's own R-multiple label.
+                                sl_dist     = sig.get("sl_dist")
+                                realized_rr = (
+                                    float(pnl_pts) / float(sl_dist)
+                                    if pnl_pts is not None and sl_dist else None
+                                )
                                 t_trig      = float(sig.get("trigger_time") or 0)
                                 t_close     = float(sig.get("close_time")   or 0)
                                 held        = _fmt_dur(t_close - t_trig) if (t_trig and t_close) else "—"
@@ -387,7 +402,7 @@ def render() -> None:
                                         (f"${float(sig.get('stop_loss')    or 0):.2f}",  "text-red-300"),
                                         (f"${float(sig.get('tp1') or 0):.2f}" if sig.get("tp1") else "—", "text-green-300"),
                                         (f"${float(sig.get('tp3') or 0):.2f}" if sig.get("tp3") else "—", "text-green-400"),
-                                        (f"{float(sig.get('rr_tp1') or 0):.1f}:1",       "text-blue-300"),
+                                        (f"{realized_rr:+.1f}R" if realized_rr is not None else "—", "text-blue-300"),
                                         (f"{float(adx_v):.1f}" if adx_v else "—",        "text-purple-300 font-mono"),
                                         (sig.get("htf_bias") or "—",                     "text-gray-400"),
                                         (sig_strategy,                                    "text-indigo-300 font-mono text-xs"),

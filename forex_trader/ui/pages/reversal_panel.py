@@ -471,7 +471,7 @@ def render() -> None:
                                 _HDR_TIPS = {
                                     "Live Trade": "MT5 ticket if a real trade was opened. VIRTUAL = learning only.",
                                     "Level Type": "The reference-style price level this signal was based on: round_5/round_10, asia_high/low, swing_high/low",
-                                    "R:R":        "Risk-to-reward ratio for TP1",
+                                    "Realized R": "Actual outcome relative to the risk this signal took (pnl_pts / sl_dist), not the fixed TP1-vs-SL plan ratio",
                                     "Session":    "Market session when the signal fired",
                                     "Bias":       "H1 higher-timeframe trend bias at signal time",
                                     "Outcome":    "WIN = closed in profit, LOSS = hit SL, BE = break-even",
@@ -479,7 +479,7 @@ def render() -> None:
                                 }
                                 for hdr in [
                                     "Ref", "Live Trade", "Opened", "Dir", "Level Type", "Level",
-                                    "Entry", "SL", "TP1", "TP2", "R:R", "Session", "Bias",
+                                    "Entry", "SL", "TP1", "TP2", "Realized R", "Session", "Bias",
                                     "Strategy", "Outcome", "Held", "PnL pts", "PnL $",
                                 ]:
                                     with ui.element("th").classes("text-left px-2 py-1 font-medium"):
@@ -495,6 +495,16 @@ def render() -> None:
                                 outcome   = sig.get("outcome") or "?"
                                 pnl_pts   = sig.get("pnl_pts")
                                 pnl_dol   = sig.get("net_pnl_dollars")
+                                # Realized R -- actual outcome relative to the risk this
+                                # signal actually took (sl_dist), not the static TP1-vs-SL
+                                # plan ratio (rr_tp1). Same fix as breakout_panel.py's
+                                # Signal History table -- this list is already filtered to
+                                # status == 'closed', so realized R is always available.
+                                sl_dist_v   = sig.get("sl_dist")
+                                realized_rr = (
+                                    float(pnl_pts) / float(sl_dist_v)
+                                    if pnl_pts is not None and sl_dist_v else None
+                                )
                                 t_trig    = float(sig.get("trigger_time") or 0)
                                 t_close   = float(sig.get("close_time") or 0)
                                 held_secs = (t_close - t_trig) if (t_trig and t_close) else 0
@@ -531,7 +541,7 @@ def render() -> None:
                                         (f"${float(sig.get('stop_loss') or 0):.2f}",              "text-red-300"),
                                         (f"${float(sig.get('tp1') or 0):.2f}" if sig.get("tp1") else "—", "text-green-300"),
                                         (f"${float(sig.get('tp2') or 0):.2f}" if sig.get("tp2") else "—", "text-green-400"),
-                                        (f"{float(sig.get('rr_tp1') or 0):.2f}:1",                "text-blue-300"),
+                                        (f"{realized_rr:+.2f}R" if realized_rr is not None else "—", "text-blue-300"),
                                         (sig.get("session") or "—",                               "text-gray-400"),
                                         (sig.get("htf_bias") or "—",                              "text-gray-400"),
                                         ((sig.get("strategy") or "—").replace("_", " "),          "text-indigo-300 font-mono text-xs"),

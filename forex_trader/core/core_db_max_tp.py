@@ -68,26 +68,55 @@ def get_max_tp_map_by_ticket() -> dict[str, str]:
 
 
 def get_rr_map_by_ticket() -> dict[str, float]:
-    """Return {mt5_ticket_str: reward:risk ratio} computed from each trade's
-    own entry_price/stop_loss/tp1 — the actual fill and the actual levels
-    that trade was managed under (not the raw Telegram signal's, which a
-    self-managed strategy like Conservative may have overridden entirely).
-    Available immediately at close, unlike max_tp_hit which needs the 30-min
-    post-close window — no async job involved, just excluded here whenever
-    any of the three inputs is missing or entry equals stop (zero risk,
-    ratio undefined)."""
+    """Return {mt5_ticket_str: realized R-multiple} -- the trade's actual
+    net P&L relative to what was actually risked at entry (SL distance on
+    the opening lot size), not a static TP1-vs-SL plan ratio computed once
+    at signal time.
+
+    The previous version used abs(tp1 - entry) / abs(entry - stop) for
+    every closed trade regardless of strategy or outcome. For the several
+    strategies here that ladder through TP2-TP8 (Signal Climber, Reversal
+    Runner, Adaptive Runner/2, Conservative, Limit Runner...) that showed
+    the same understated ratio whether the trade closed at TP1 or ran the
+    full ladder to TP8 -- reported live 2026-07-24 as R:R "not being
+    reported correctly" across Closed Trades. Realized R is the standard
+    trade-journal definition of R:R for an already-closed trade: how many
+    multiples of the initial risk did this trade actually return.
+
+    Risk distance prefers vantage_signals.stop_loss (set once at signal
+    creation, never touched again) over vantage_simulated_trades.stop_loss
+    -- every breakeven/trailing-stop code path (be_runner, scale_out,
+    protected_scale, scalp_runner, conservative_trial, DPM, TP safety net,
+    the EA's own sl_moved reports...) overwrites the latter IN PLACE, so
+    for any trade that had already banked enough to move to breakeven, its
+    stored stop_loss no longer reflects what was actually risked -- often
+    landing exactly on entry_price (zero risk, ratio undefined), silently
+    blanking R:R for a large share of winning trades specifically. Falls
+    back to the trade's own stop_loss when there's no linked signal (manual
+    trades) or the signal's stop_loss is unset.
+
+    Available immediately at close (net_pnl/entry_price/lot_size are all
+    set by record_close()), no async job involved -- excluded whenever any
+    input is missing or the resolved risk distance is zero."""
+    from forex_trader.core.core_fees_sizing import pnl as _pnl
     with db() as conn:
         rows = conn.execute(
-            "SELECT mt5_ticket, entry_price, stop_loss, tp1 FROM vantage_simulated_trades "
-            "WHERE mt5_ticket IS NOT NULL AND entry_price IS NOT NULL "
-            "AND stop_loss IS NOT NULL AND tp1 IS NOT NULL AND stop_loss != entry_price"
+            "SELECT t.mt5_ticket, t.direction, t.entry_price, "
+            "COALESCE(s.stop_loss, t.stop_loss) AS risk_stop, "
+            "t.lot_size, t.net_pnl "
+            "FROM vantage_simulated_trades t "
+            "LEFT JOIN vantage_signals s ON s.signal_id = t.signal_id "
+            "WHERE t.mt5_ticket IS NOT NULL AND t.direction IS NOT NULL "
+            "AND t.entry_price IS NOT NULL "
+            "AND t.lot_size IS NOT NULL AND t.net_pnl IS NOT NULL "
+            "AND COALESCE(s.stop_loss, t.stop_loss) IS NOT NULL"
         ).fetchall()
     result: dict[str, float] = {}
-    for mt5_ticket, entry_price, stop_loss, tp1 in rows:
-        risk = abs(float(entry_price) - float(stop_loss))
-        if risk <= 0:
+    for mt5_ticket, direction, entry_price, risk_stop, lot_size, net_pnl in rows:
+        risk_dollars = abs(_pnl(direction, float(entry_price), float(risk_stop), float(lot_size)))
+        if risk_dollars <= 0:
             continue
-        result[str(mt5_ticket)] = abs(float(tp1) - float(entry_price)) / risk
+        result[str(mt5_ticket)] = float(net_pnl) / risk_dollars
     return result
 
 

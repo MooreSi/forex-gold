@@ -37,11 +37,26 @@ CANDLE_CACHE_TTL = 5.0   # M5 candles only close every 5 min; 5s is more than fr
 _tick_fail_streak = 0
 _TICK_FAIL_WARN_THRESHOLD = 5
 
+# A wedged connection pool (leaked/stuck keep-alive sockets) doesn't
+# self-recover and is invisible from outside this client -- confirmed live
+# 2026-07-23: every tick request through this client failed continuously
+# for 30+ minutes, including across an app restart, while a direct curl to
+# the bridge answered instantly the whole time. Restarting the Wine-side
+# bridge process (self_healer.py's own remedy for "bridge not responding")
+# does nothing for this failure mode since the server was never actually
+# down; only a fresh httpx.AsyncClient clears it. Set well above the WARN
+# threshold so a short blip never triggers a rebuild -- only a sustained
+# streak does. Retried on every multiple (not just once) so a genuine
+# server outage still gets periodic recovery attempts instead of giving up
+# after the first one.
+_CLIENT_RECYCLE_THRESHOLD = 30
+
 
 class MT5BridgeClient:
     def __init__(self, bridge_url: str):
         self._url  = bridge_url.rstrip("/") if bridge_url else ""
         self._http: Optional[httpx.AsyncClient] = None
+        self._recycling = False
 
     @property
     def url(self) -> str:
@@ -58,8 +73,14 @@ class MT5BridgeClient:
             return
         self._http = httpx.AsyncClient(
             limits=httpx.Limits(
-                max_keepalive_connections=2,
-                max_connections=5,
+                # Raised from 2/5 -- too small for multiple concurrent browser
+                # tabs, each running its own full set of per-client polling
+                # loops against this one shared client. Under-provisioning
+                # this pool was the proximate trigger for the 2026-07-23
+                # incident: legitimate concurrent load exhausted it, and nothing
+                # ever released the wedged connections afterward.
+                max_keepalive_connections=10,
+                max_connections=20,
                 keepalive_expiry=30,
             ),
             timeout=httpx.Timeout(10.0),
@@ -75,6 +96,23 @@ class MT5BridgeClient:
                 pass
             self._http = None
         log.info("MT5BridgeClient: HTTP session closed")
+
+    async def _recycle_http_client(self) -> None:
+        """Tear down and rebuild the persistent client to clear a wedged
+        connection pool. Guarded against concurrent callers (many tick
+        fetches can cross the recycle threshold in the same instant)."""
+        if self._recycling:
+            return
+        self._recycling = True
+        try:
+            log.warning(
+                "MT5BridgeClient: %d consecutive tick failures — recycling HTTP client",
+                _tick_fail_streak,
+            )
+            await self.shutdown()
+            await self.startup()
+        finally:
+            self._recycling = False
 
     # ── Internal request helper ───────────────────────────────────────────────
 
@@ -143,6 +181,8 @@ class MT5BridgeClient:
             else:
                 log.debug("bridge tick fetch failed (%d/%d): %s",
                           _tick_fail_streak, _TICK_FAIL_WARN_THRESHOLD, e)
+            if _tick_fail_streak % _CLIENT_RECYCLE_THRESHOLD == 0:
+                await self._recycle_http_client()
             return None
 
     # ── Candles ───────────────────────────────────────────────────────────────

@@ -452,7 +452,7 @@ def _render_main() -> None:
                                     "SL":      "Stop-loss price — where the position closes at a loss",
                                     "TP1":     "Take-profit 1 — first target; SL moves to break-even on hit",
                                     "TP3":     "Take-profit 3 — full winner target",
-                                    "R:R":     "Risk-to-reward ratio for TP1 (1.0 = 1:1, 2.0 = 1:2, etc.)",
+                                    "Realized R": "Actual outcome relative to the risk this signal took (pnl_pts / sl_dist), not the fixed TP1-vs-SL plan ratio",
                                     "Session": "Market session when signal fired: london, overlap, ny, asian",
                                     "Bias":    "H1 Higher Time Frame trend bias at signal time",
                                     "Pattern":   "Entry trigger pattern: bounce, engulfing, pin_bar, rsi_divergence, liquidity_sweep",
@@ -465,7 +465,7 @@ def _render_main() -> None:
                                 }
                                 for hdr in [
                                     "Ref", "Live Trade", "Opened", "Dir", "Entry", "Lot", "SL",
-                                    "TP1", "TP3", "R:R", "Session", "Bias", "Pattern", "Strategy",
+                                    "TP1", "TP3", "Realized R", "Session", "Bias", "Pattern", "Strategy",
                                     "Outcome", "Held", "PnL pts", "PnL $", "Balance",
                                 ]:
                                     with ui.element("th").classes("text-left px-2 py-1 font-medium"):
@@ -481,6 +481,15 @@ def _render_main() -> None:
                                 outcome    = sig.get("outcome") or "?"
                                 pnl_pts    = sig.get("pnl_pts")
                                 pnl_dol    = sig.get("pnl_dollars")
+                                # Realized R -- actual outcome relative to the risk this
+                                # signal actually took (sl_dist), not the static TP1-vs-SL
+                                # plan ratio (rr_tp1). Same fix as breakout_panel.py's and
+                                # reversal_panel.py's Signal History tables.
+                                sl_dist_v   = sig.get("sl_dist")
+                                realized_rr = (
+                                    float(pnl_pts) / float(sl_dist_v)
+                                    if pnl_pts is not None and sl_dist_v else None
+                                )
                                 bal_after  = sig.get("balance_after")
                                 lot_size   = sig.get("lot_size") or 0.01
                                 s_ref      = sig.get("signal_ref") or f"SIG-{sig['id']:04d}"
@@ -527,7 +536,7 @@ def _render_main() -> None:
                                         (f"${float(sig.get('stop_loss') or 0):.2f}", "text-red-300"),
                                         (f"${float(sig.get('tp1') or 0):.2f}" if sig.get("tp1") else "—", "text-green-300"),
                                         (f"${float(sig.get('tp3') or 0):.2f}" if sig.get("tp3") else "—", "text-green-400"),
-                                        (f"{float(sig.get('rr_tp1') or 0):.1f}:1", "text-blue-300"),
+                                        (f"{realized_rr:+.1f}R" if realized_rr is not None else "—", "text-blue-300"),
                                         (sig.get("session") or "—", "text-gray-400"),
                                         (sig.get("htf_bias") or "—", "text-gray-400"),
                                         (pattern, "text-purple-300 font-mono text-xs"),

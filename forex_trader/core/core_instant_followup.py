@@ -142,6 +142,41 @@ async def apply_followup_to_instant_trade(
         ))
     # ────────────────────────────────────────────────────────────────────
 
+    # ── SL distance sanity check ─────────────────────────────────────────
+    # The follow-up's stop_loss is an absolute price the channel computed
+    # relative to ITS OWN suggested entry zone (entry_low/entry_high) --
+    # but IME exists specifically to fill BEFORE that zone is confirmed
+    # (on a bare "BUY NOW"), so the actual fill can sit well outside it.
+    # Applying the follow-up SL verbatim in that case can put the stop far
+    # further from our real fill than the channel ever intended -- update_
+    # signal() only checks it's on the correct SIDE of entry, not how far
+    # away it is. Confirmed live on ticket 1641075009: signal zone
+    # 4098-4102 (SL 4096, ~4pt intended risk from zone mid) but the IME
+    # fill was 4116.24 -- applying 4096 verbatim gave a 20.24pt stop,
+    # well past the original 15pt/$150 provisional cap and the strategy's
+    # own (adaptive_runner) widening math. Re-derive the SAME point-distance
+    # the channel intended and apply it from the actual fill instead,
+    # mirroring the TP reachability fix above.
+    _signal_zone_mid  = (float(parsed["entry_low"]) + float(parsed["entry_high"])) / 2
+    _intended_sl_dist = abs(_signal_zone_mid - float(parsed["stop_loss"]))
+    _actual_sl_dist   = abs(_ime_entry - float(parsed["stop_loss"]))
+    if _intended_sl_dist > 0 and _actual_sl_dist > _intended_sl_dist * 1.5:
+        _old_sl = updates["stop_loss"]
+        updates["stop_loss"] = round(_ime_entry - _ime_sign * _intended_sl_dist, 2)
+        log.info(
+            "[IME] Follow-up SL adjusted — signal SL %.2f implied %.1fpt from actual "
+            "entry %.2f (channel intended ~%.1fpt from its own zone) — using %.2f instead",
+            _old_sl, _actual_sl_dist, _ime_entry, _intended_sl_dist, updates["stop_loss"],
+        )
+        asyncio.create_task(telegram_alerts.send_message(
+            f"*⚠️ IME Follow-up — SL Adjusted*\n"
+            f"Signal SL was ${_old_sl:.2f} ({_actual_sl_dist:.1f}pt from actual entry "
+            f"${_ime_entry:.2f}) — channel's own zone implied ~{_intended_sl_dist:.1f}pt risk.\n"
+            f"Using ${updates['stop_loss']:.2f} instead.",
+            event_type="ime_sl_adjusted",
+        ))
+    # ────────────────────────────────────────────────────────────────────
+
     if signal_id:
         await update_signal(bridge, signal_id, updates)
     else:

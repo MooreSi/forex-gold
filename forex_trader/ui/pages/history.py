@@ -349,7 +349,7 @@ def _render_trade_table(engine):
         "conservative":    "Conservative",
     }
 
-    def _ticket_source_map() -> dict[str, str]:
+    def _ticket_source_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: channel_or_source_label}.
 
         Built primarily from THIS node's own vantage_simulated_trades — but
@@ -359,7 +359,13 @@ def _render_trade_table(engine):
         row here at all, so it fell through to a blank channel. The
         consolidated ledger (populated by both nodes over the sync channel)
         fills exactly that gap — local data always wins where both exist.
+
+        `days` bounds the local queries to the same window the page is
+        showing -- this table only grows over a long-running session, and
+        there is no reason to build a map covering every trade ever opened
+        when the caller only needs the tickets in the selected period.
         """
+        cutoff = time.time() - days * 86400
         result: dict[str, str] = {}
         try:
             ledger_channels, _, _ = db_module.get_consolidated_ticket_maps()
@@ -372,7 +378,8 @@ def _render_trade_table(engine):
             with db_module.db() as conn:
                 rows = conn.execute(
                     "SELECT mt5_ticket, tg_source FROM vantage_simulated_trades "
-                    "WHERE mt5_ticket IS NOT NULL"
+                    "WHERE mt5_ticket IS NOT NULL AND open_time >= ?",
+                    (cutoff,),
                 ).fetchall()
             for mt5_ticket, tg_source in rows:
                 ch = trade_channel_label(tg_source or "")
@@ -391,7 +398,8 @@ def _render_trade_table(engine):
                 rows = conn.execute(
                     "SELECT l.mt5_ticket, t.tg_source FROM vantage_ladder_legs l "
                     "JOIN vantage_simulated_trades t ON t.trade_id = l.trade_id "
-                    "WHERE l.mt5_ticket IS NOT NULL"
+                    "WHERE l.mt5_ticket IS NOT NULL AND t.open_time >= ?",
+                    (cutoff,),
                 ).fetchall()
             for mt5_ticket, tg_source in rows:
                 ch = trade_channel_label(tg_source or "")
@@ -400,12 +408,13 @@ def _render_trade_table(engine):
             pass
         return result
 
-    def _ticket_strategy_map() -> dict[str, str]:
+    def _ticket_strategy_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: strategy_display}.
         Shows 'DPM' when the trade has a dpm_trade_performance record (DPM managed it),
         otherwise falls back to the base strategy stored on the trade row.
-        Same cross-node fallback as _ticket_source_map — see its docstring.
+        Same cross-node fallback and `days` windowing as _ticket_source_map — see its docstring.
         """
+        cutoff = time.time() - days * 86400
         result: dict[str, str] = {}
         try:
             _, ledger_strategies, _ = db_module.get_consolidated_ticket_maps()
@@ -419,7 +428,8 @@ def _render_trade_table(engine):
                     "SELECT t.mt5_ticket, t.strategy, d.trade_id "
                     "FROM vantage_simulated_trades t "
                     "LEFT JOIN dpm_trade_performance d ON t.trade_id = d.trade_id "
-                    "WHERE t.mt5_ticket IS NOT NULL"
+                    "WHERE t.mt5_ticket IS NOT NULL AND t.open_time >= ?",
+                    (cutoff,),
                 ).fetchall()
             for mt5_ticket, strategy, dpm_trade_id in rows:
                 if dpm_trade_id:
@@ -437,7 +447,8 @@ def _render_trade_table(engine):
                 rows = conn.execute(
                     "SELECT l.mt5_ticket, t.strategy FROM vantage_ladder_legs l "
                     "JOIN vantage_simulated_trades t ON t.trade_id = l.trade_id "
-                    "WHERE l.mt5_ticket IS NOT NULL"
+                    "WHERE l.mt5_ticket IS NOT NULL AND t.open_time >= ?",
+                    (cutoff,),
                 ).fetchall()
             for mt5_ticket, strategy in rows:
                 result[str(mt5_ticket)] = _STRAT_LABEL.get(
@@ -516,8 +527,9 @@ def _render_trade_table(engine):
             ui.label("Closed Trades").classes("font-semibold text-yellow-300")
             status_lbl = ui.label("").classes("text-xs text-orange-400 italic")
             days_sel = ui.select(
-                {30: "Last 30 days", 60: "Last 60 days", 90: "Last 90 days", 180: "Last 6 months"},
-                value=90, label="Period",
+                {1: "Last 24 hours", 7: "Last 7 days", 30: "Last 30 days",
+                 60: "Last 60 days", 90: "Last 90 days", 180: "Last 6 months"},
+                value=7, label="Period",
             ).classes("w-36")
             src_badge = ui.badge("MT5", color="green").classes("text-xs")
             refresh_btn = ui.button("Refresh", icon="refresh").classes(
@@ -636,8 +648,9 @@ def _render_trade_table(engine):
             rows_by_ticket: dict[int, dict] = {}
             # Offloaded — these are all synchronous DB reads; running them
             # directly on the event loop blocked the whole app every 15s.
-            src_map    = await db_module.to_db_thread(_ticket_source_map)
-            strat_map  = await db_module.to_db_thread(_ticket_strategy_map)
+            _days_now  = int(days_sel.value)
+            src_map    = await db_module.to_db_thread(_ticket_source_map, _days_now)
+            strat_map  = await db_module.to_db_thread(_ticket_strategy_map, _days_now)
             max_tp_map = await db_module.to_db_thread(_ticket_max_tp_map)
             rr_map     = await db_module.to_db_thread(_ticket_rr_map)
             comm_rate  = await db_module.to_db_thread(_platform_fee_rate)
@@ -653,7 +666,44 @@ def _render_trade_table(engine):
                     # Spread paid at entry is a historical fact — it never changes once
                     # computed, so cache it permanently and only ask MT5 for tickets
                     # this table has never seen before (this loop re-runs every 15s).
-                    spread_cache = db_module.get_cached_spreads(list(by_pos.keys()))
+                    spread_cache = await db_module.to_db_thread(
+                        db_module.get_cached_spreads, list(by_pos.keys())
+                    )
+
+                    # Fetch every still-uncached ticket's entry-time tick concurrently
+                    # instead of one sequential await per ticket inside the row loop
+                    # below — with a wide date range (or a cold cache) that loop was
+                    # awaiting hundreds of individual MT5 bridge round-trips one at a
+                    # time, each blocking the next.
+                    _needs_spread: list[tuple[int, float, float]] = []  # (ticket, open_ts, open_lots)
+                    for ticket, pos_deals in by_pos.items():
+                        if spread_cache.get(ticket) is not None:
+                            continue
+                        _open = next((d for d in pos_deals if d.get("entry") == 0), None)
+                        if not _open:
+                            continue
+                        _open_ts = float(_open.get("time", 0))
+                        if _open_ts:
+                            _needs_spread.append((ticket, _open_ts, float(_open.get("volume", 0))))
+
+                    if _needs_spread:
+                        _ticks = await asyncio.gather(
+                            *(engine._bridge.get_tick_at(ts) for _, ts, _ in _needs_spread),
+                            return_exceptions=True,
+                        )
+                        for (ticket, _ts, open_lots), tick_at in zip(_needs_spread, _ticks):
+                            if not tick_at or isinstance(tick_at, BaseException):
+                                continue
+                            sp_price = round(float(tick_at["ask"]) - float(tick_at["bid"]), 5)
+                            sp_points = round(sp_price / 0.01, 1)
+                            sp_cost = round(sp_price * open_lots * CONTRACT_SIZE, 2)
+                            spread_cache[ticket] = {
+                                "spread_price": sp_price, "spread_points": sp_points,
+                                "spread_cost_usd": sp_cost,
+                            }
+                            await db_module.to_db_thread(
+                                db_module.cache_spread, ticket, sp_price, sp_points, sp_cost
+                            )
 
                     for ticket, pos_deals in by_pos.items():
                         open_deal  = next((d for d in pos_deals if d.get("entry") == 0), None)
@@ -682,19 +732,6 @@ def _render_trade_table(engine):
                         # a further deduction (Vantage Standard STP: 0% commission, spread-only).
                         spread_display = "—"
                         cached_spread = spread_cache.get(ticket)
-                        if cached_spread is None and open_deal:
-                            open_ts = float(open_deal.get("time", 0))
-                            if open_ts:
-                                tick_at = await engine._bridge.get_tick_at(open_ts)
-                                if tick_at:
-                                    sp_price = round(float(tick_at["ask"]) - float(tick_at["bid"]), 5)
-                                    sp_points = round(sp_price / 0.01, 1)
-                                    sp_cost = round(sp_price * open_lots * CONTRACT_SIZE, 2)
-                                    db_module.cache_spread(ticket, sp_price, sp_points, sp_cost)
-                                    cached_spread = {
-                                        "spread_price": sp_price, "spread_points": sp_points,
-                                        "spread_cost_usd": sp_cost,
-                                    }
                         if cached_spread:
                             spread_display = f"{cached_spread['spread_points']:.1f}pt"
                             fees_display = cached_spread["spread_cost_usd"]

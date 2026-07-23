@@ -87,6 +87,34 @@ def _pnl_color(val) -> str:
     return "text-green-400" if float(val) >= 0 else "text-red-400"
 
 
+def _live_exec_badge(exec_st: str) -> Optional[tuple[str, str, str]]:
+    """(badge_text, badge_color, tooltip) for a non-executed live_exec_status,
+    or None if there's nothing worth flagging (empty, or already executed/
+    virtual-by-design). Mirrors the reasons written by _try_live_execute /
+    _try_re_limit_order in reversal_engine_live_execute.py."""
+    if not exec_st or exec_st in ("executed",) or exec_st.startswith("limit_order_placed"):
+        return None
+    if exec_st == "skipped:live_disabled":
+        return None  # live execution off entirely -- not a per-signal problem
+    if exec_st == "ml_skipped":
+        return ("ML BLOCKED", "orange", "ML gate blocked live execution: predicted R-multiple < 0")
+    if exec_st == "bias_skipped":
+        return ("BIAS BLOCKED", "orange", "Fill-time bias re-check disagreed with the signal direction")
+    if "circuit breaker" in exec_st.lower():
+        return ("CIRCUIT BREAKER", "red", exec_st)
+    if exec_st.startswith("limit_order_skip"):
+        return ("LIMIT ORDER SKIPPED", "red", exec_st.split(":", 1)[-1])
+    if exec_st.startswith("limit_order_rejected"):
+        return ("EA REJECTED", "red", exec_st.split(":", 1)[-1])
+    if exec_st.startswith("limit_order_error"):
+        return ("LIMIT ORDER ERROR", "red", exec_st.split(":", 1)[-1])
+    if exec_st.startswith("open_failed"):
+        return ("OPEN FAILED", "red", exec_st)
+    if exec_st.startswith("error"):
+        return ("ERROR", "red", exec_st.split(":", 1)[-1] if ":" in exec_st else exec_st)
+    return ("NOT EXECUTED", "grey", exec_st)
+
+
 def _level_type_badge(ltype: str) -> tuple[str, str]:
     """(badge_text, badge_color)"""
     colors = {
@@ -408,6 +436,10 @@ def render() -> None:
                                 status = sig.get("status", "")
                                 ui.badge(status, color="yellow" if status == "pending" else "blue"
                                          ).classes("text-xs ml-auto")
+                                _exec_badge = _live_exec_badge(sig.get("live_exec_status") or "")
+                                if _exec_badge:
+                                    _bt, _bc, _tip = _exec_badge
+                                    ui.badge(_bt, color=_bc).classes("text-xs").tooltip(_tip)
 
                             with ui.row().classes("text-xs text-gray-400 gap-4 flex-wrap"):
                                 ui.label(f"Entry: {sig.get('entry_low', 0):.2f}–{sig.get('entry_high', 0):.2f}")

@@ -162,6 +162,63 @@ def test_fewer_than_two_valid_tps_auto_spaces_from_fill(fresh_db):
     assert trade_after["tp8"] is None
 
 
+def test_sl_within_tolerance_of_signal_zone_applied_as_parsed(fresh_db):
+    # entry_price=2415.0, signal zone mid=2415.0, SL 2403.0 -> 12pt from zone
+    # AND from actual entry (same point here) -- well within the 1.5x
+    # tolerance, so no adjustment should fire.
+    _insert_trade(strategy="scale_out", entry_price=2415.0)
+    _insert_tg("tg-sl1")
+    bridge = _FakeBridge()
+    trade = _trade_dict("trade-abc")
+    asyncio.run(followup.apply_followup_to_instant_trade(
+        trade, _PARSED_2TP, "tg-sl1", "Chan", "Chan", bridge,
+    ))
+    assert _trade_dict("trade-abc")["stop_loss"] == 2400.0
+
+
+def test_sl_far_from_actual_entry_recomputed_from_zone_distance(fresh_db):
+    # Regression test for ticket 1641075009: IME filled well outside the
+    # signal's own zone -- signal zone 4098-4102 (mid 4100), SL 4096.0
+    # (4pt from zone mid), but actual entry was 4116.24. Applying 4096.0
+    # verbatim would be a 20.24pt stop (5x the intended distance) -- the
+    # fix re-derives the SAME ~4pt distance from the actual fill instead.
+    _insert_trade(strategy="adaptive_runner", entry_price=4116.24, stop_loss=4101.04)
+    _insert_tg("tg-sl2")
+    bridge = _FakeBridge()
+    trade = _trade_dict("trade-abc")
+    parsed = {
+        "stop_loss": 4096.0, "entry_low": 4098.0, "entry_high": 4102.0,
+        "tp1": 4119.24, "tp2": 4121.24,
+    }
+    asyncio.run(followup.apply_followup_to_instant_trade(
+        trade, parsed, "tg-sl2", "Chan", "Chan", bridge,
+    ))
+    trade_after = _trade_dict("trade-abc")
+    # 4116.24 - 4.0 = 4112.24, not the raw 4096.0
+    assert trade_after["stop_loss"] == 4112.24
+
+
+def test_sl_close_to_tolerance_boundary_not_adjusted(fresh_db):
+    # intended_dist=4pt (zone mid 2415.0 to SL 2411.0), actual_dist from
+    # entry 2420.0 is exactly 9pt = 2.25x -- above 1.5x, so this SHOULD
+    # adjust; confirms the threshold is evaluated on distance, not just
+    # presence of a zone/entry mismatch.
+    _insert_trade(strategy="scale_out", entry_price=2420.0, stop_loss=2410.0)
+    _insert_tg("tg-sl3")
+    bridge = _FakeBridge()
+    trade = _trade_dict("trade-abc")
+    parsed = {
+        "stop_loss": 2411.0, "entry_low": 2413.0, "entry_high": 2417.0,
+        "tp1": 2430.0, "tp2": 2435.0,
+    }
+    asyncio.run(followup.apply_followup_to_instant_trade(
+        trade, parsed, "tg-sl3", "Chan", "Chan", bridge,
+    ))
+    trade_after = _trade_dict("trade-abc")
+    # 2420.0 - 4.0 = 2416.0, not the raw 2411.0
+    assert trade_after["stop_loss"] == 2416.0
+
+
 def test_no_signal_id_fallback_direct_db_update_and_modify_order(fresh_db):
     with db.db() as conn:
         conn.execute(

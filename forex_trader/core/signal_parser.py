@@ -66,10 +66,21 @@ _GD2_SL_RE           = re.compile(r'(?:🚫\s*)?SL[\s\xa0]*:?[\s\xa0]+([\d.,]+)'
 # Format A's own gate is literally "buy/sell gold <price> - <price>"
 # (_DIRECTION_RE above) — without requiring "Now" here, "Sell Gold 4520 -
 # 4512" would incorrectly satisfy this gate too for any 'auto'-format channel.
+# "Buy/Sell Zone" alone (no "Now") also matches here via .search() even when
+# preceded by other words -- e.g. "Next Buy Zone" (Gold Diggers Scalping,
+# added 2026-07-24) -- since \b(Buy|Sell) only anchors the start of that
+# word, not the start of the message.
 _GD2_ZONE_DIRECTION_RE = re.compile(r'\b(Buy|Sell)\s+(?:Zone(?:\s+Now)?|Gold\s+Now)\b', re.IGNORECASE)
 _GD2_TARGETS_HEADER_RE = re.compile(r'Targets?\b', re.IGNORECASE)
 _GD2_TARGET_LINE_RE    = re.compile(r'^([\d.,]+)$')
-_GD2_SL_ZONE_RE        = re.compile(r'SL[\s\xa0]*/[\s\xa0]*invalid[\s\xa0]+([\d.,]+)', re.IGNORECASE)
+# SL/ invalid <price>" (original GD2 wording) or plain "SL <price>"/"SL: <price>"
+# (Gold Diggers Scalping's "Next Buy Zone" layout, added 2026-07-24 -- was
+# previously only matched by _GD2_SL_RE, which this is_zone branch never
+# tried, so these messages fell through to parse_gd2_partial forever instead
+# of ever completing as a real signal).
+_GD2_SL_ZONE_RE        = re.compile(
+    r'SL[\s\xa0]*(?:/[\s\xa0]*invalid)?[\s\xa0]*:?[\s\xa0]+([\d.,]+)', re.IGNORECASE
+)
 
 # Format C3: Gold Diggers 2.0's "BUY [LIMITS] GOLD @ xxxx/yyyy AREA" layout
 # (confirmed live 2026-07-09 — multiple signals using this wording).

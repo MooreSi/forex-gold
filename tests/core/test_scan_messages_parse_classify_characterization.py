@@ -94,12 +94,14 @@ _AI_RESULT = {"direction": "BUY", "entry_low": 4529.0, "entry_high": 4534.0, "st
               "tp6": None, "tp7": None, "tp8": None}
 
 
-def _run(msgs, ai_return=None, force_gd2_all_fail=False, learned_rules_return=None):
+def _run(msgs, ai_return=None, force_gd2_all_fail=False, learned_rules_return=None, ai_calls=None):
     e = _make_engine(msgs)
     uq_calls = []
     alerts = []
 
     async def fake_ai(self_, text, channel_name, tg_id):
+        if ai_calls is not None:
+            ai_calls.append(tg_id)
         return ai_return
 
     def fake_queue(self_, tg_id, channel_name, text):
@@ -160,7 +162,7 @@ def test_format_ab_no_match_ai_fails_dropped(fresh_db):
 def test_format_ab_no_match_ai_recovers(fresh_db):
     _setup_channel("format_ab")
     result, uq, alerts = _run(
-        [{"id": "b3", "group_id": "g1", "text": "random chatter AI recovers", "timestamp": _NOW_ISO}],
+        [{"id": "b3", "group_id": "g1", "text": "random gold buy chatter AI recovers", "timestamp": _NOW_ISO}],
         ai_return=_AI_RESULT,
     )
     assert len(result) == 1
@@ -222,7 +224,7 @@ def test_gd2_no_match_ai_fails_dropped(fresh_db):
 def test_gd2_no_match_ai_recovers(fresh_db):
     _setup_channel("gd2")
     result, uq, alerts = _run(
-        [{"id": "b9", "group_id": "g1", "text": "random chatter AI recovers as gd2", "timestamp": _NOW_ISO}],
+        [{"id": "b9", "group_id": "g1", "text": "random gold buy chatter AI recovers as gd2", "timestamp": _NOW_ISO}],
         ai_return=_AI_RESULT,
     )
     assert len(result) == 1
@@ -308,11 +310,28 @@ def test_auto_neither_matches_ai_fails_silently_dropped(fresh_db):
 def test_auto_neither_matches_ai_recovers(fresh_db):
     _setup_channel("auto", prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH")
     result, uq, alerts = _run(
-        [{"id": "b19", "group_id": "g1", "text": "totally unrelated text AI recovers", "timestamp": _NOW_ISO}],
+        [{"id": "b19", "group_id": "g1", "text": "totally unrelated gold buy text AI recovers", "timestamp": _NOW_ISO}],
         ai_return=_AI_RESULT,
     )
     assert len(result) == 1
     assert result[0]["direction"] == "BUY"
+
+
+# ── Logic Keywords: symbol_tokens/buy_orders/limit_orders AI-fallback gate ──
+# 2026-07-24: mirrors the equivalent tests in test_scan_messages_parse_
+# classify_surface.py, driven through the real engine instead of the module
+# function directly -- see should_skip_ai_fallback_for_no_signal_candidate.
+
+def test_ai_fallback_skipped_when_no_candidate_keyword_present(fresh_db):
+    _setup_channel("auto", prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH")
+    ai_calls = []
+    result, uq, alerts = _run(
+        [{"id": "c1", "group_id": "g1",
+          "text": "friday market wrap up nothing exciting happened today", "timestamp": _NOW_ISO}],
+        ai_return=_AI_RESULT, ai_calls=ai_calls,
+    )
+    assert result == []
+    assert ai_calls == []
 
 
 # ── Logic Keywords: Enable TP/SL Parsing toggles ────────────────────────────

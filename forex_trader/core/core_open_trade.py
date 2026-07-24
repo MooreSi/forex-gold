@@ -270,8 +270,37 @@ async def open_trade(
                     _ea_template = ea_templates.get_ea_template(
                         ea_templates.template_name_from_override(strategy)
                     )
+                    if _ea_template is not None:
+                        # Anchor TP (Trading > EA Templates, 2026-07-24):
+                        # tp{n}_pips fills any TP level the raw signal itself
+                        # didn't supply (entry ± N pips from the current
+                        # price) -- never overrides a level the signal DID
+                        # state. tp{n}_pct always wins over the signal for
+                        # the %-close at each level, since a signal states
+                        # TP prices but never how much to close at each one.
+                        _sign = 1 if direction.upper() == "BUY" else -1
+                        _ref_price = tick.ask if direction.upper() == "BUY" else tick.bid
+                        for n in range(1, 9):
+                            if n not in _tps:
+                                _pips = float(_ea_template.get(f"tp{n}_pips", 0.0))
+                                if _pips > 0:
+                                    _tps[n] = _ref_price + _sign * _pips
+                        if _tps:
+                            _tpl_pcts = [float(_ea_template.get(f"tp{n}_pct", 0.0))
+                                         for n in sorted(_tps)]
+                            if any(p > 0 for p in _tpl_pcts):
+                                _ea_pcts = _tpl_pcts
+                _ea_lot = lot_size
+                if _ea_template is not None and _ea_template.get("mode") == "grid":
+                    # Global Parameters > Fixed Lot Size (Grid) -- used for
+                    # EACH leg the EA stages in HandleOpenTemplateGrid, in
+                    # place of whatever lot_size normal (non-grid) sizing
+                    # computed above. 0 (default) leaves lot_size untouched.
+                    _grid_lot = float(ea_rs.get("strategy_lot_size_grid", 0))
+                    if _grid_lot > 0:
+                        _ea_lot = _grid_lot
                 ea_ack = await _ea.open_trade(
-                    trade_id, direction.upper(), lot_size, stop_loss, _tps, strategy,
+                    trade_id, direction.upper(), _ea_lot, stop_loss, _tps, strategy,
                     pcts=_ea_pcts, be_at_pos=_ea_be_at_pos, trail_mode=_ea_trail_mode,
                     template=_ea_template,
                 )
@@ -280,7 +309,7 @@ async def open_trade(
                     entry_price = float(ea_ack.get("fill_price", 0))
                     managed_by  = "ea"
                     log.info("[EA] order placed: ticket=%s dir=%s lots=%s @ %s (strategy=%s)",
-                             mt5_ticket, direction, lot_size, entry_price, strategy)
+                             mt5_ticket, direction, _ea_lot, entry_price, strategy)
                 elif _is_template:
                     raise RuntimeError(f"EA rejected template order: {ea_ack.get('error')}")
                 else:

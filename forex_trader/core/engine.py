@@ -34,6 +34,7 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core import claude_ai
 from forex_trader.core import ai_provider
 from forex_trader.core import dpm_engine
+from forex_trader.core import core_ea_templates as _ea_templates
 from forex_trader.core.core_monitor_loop import (
     check_sl as _check_sl_impl,
     reconcile_sl_hit as _reconcile_sl_hit_impl,
@@ -197,6 +198,9 @@ from forex_trader.core.core_partial_close import partial_close_trade as _partial
 from forex_trader.core.core_open_trade import open_trade as _open_trade_impl
 from forex_trader.core.core_manual_market_order import (
     open_manual_market_order as _open_manual_market_order_impl,
+)
+from forex_trader.core.core_manual_limit_order import (
+    open_manual_limit_order as _open_manual_limit_order_impl,
 )
 from forex_trader.core.core_open_trade_from_signal import (
     open_trade_from_signal as _open_trade_from_signal_impl,
@@ -580,6 +584,28 @@ class SimulationEngine:
             strategy=strategy, take_profit=take_profit, source_name=source_name,
             starting_balance=self._cfg.get("starting_balance", 1000.0),
             background_open_commentary=self._background_open_commentary,
+        )
+
+    async def open_manual_limit_order(
+        self,
+        direction: str,
+        entry_low: float,
+        entry_high: float,
+        stop_loss: float,
+        tp1: Optional[float] = None, tp2: Optional[float] = None,
+        tp3: Optional[float] = None, tp4: Optional[float] = None,
+        tp5: Optional[float] = None, tp6: Optional[float] = None,
+        tp7: Optional[float] = None, tp8: Optional[float] = None,
+        lot_size: Optional[float] = None,
+        notes: str = "",
+    ) -> dict:
+        """Place a genuine resting BuyLimit/SellLimit via the EA from the
+        Trading > Limit Order form — see core_manual_limit_order.py."""
+        return await _open_manual_limit_order_impl(
+            self._bridge, direction, entry_low, entry_high, stop_loss,
+            tp1=tp1, tp2=tp2, tp3=tp3, tp4=tp4, tp5=tp5, tp6=tp6, tp7=tp7, tp8=tp8,
+            lot_size=lot_size, notes=notes,
+            starting_balance=self._cfg.get("starting_balance", 1000.0),
         )
 
     async def _close_all_ladder_legs(self, trade_id: str, row: dict, legs: list[dict],
@@ -2151,6 +2177,7 @@ class SimulationEngine:
                 tg_id, group_id, channel_name, text, msg, parser_fmt, sig_prefix,
                 ai_fallback_fn=self._try_ai_signal_fallback,
                 queue_unrecognised_fn=self._queue_unrecognised,
+                rs=rs,
             )
             if parsed is None:
                 continue
@@ -2218,15 +2245,20 @@ class SimulationEngine:
                 # Limit Runner: a genuine EA pending order, not a market-fill
                 # signal — parse_limit_order_signal's `tp_open` marker (always
                 # present, True or False, only on its own return dicts) means
-                # this signal always uses Limit Runner regardless of whatever
-                # channel-override/active-strategy _resolve_strategy_and_skip_
-                # reason_impl above just computed, since the strategy here is
-                # format-triggered, not channel-configured. Nothing has filled
-                # yet, so there's no exec_lot/exec_price/trade_result — the
-                # shared fmt_signal() alert below reports the placement (or
-                # skip) purely via skip_reason, same wording pattern as the
-                # existing "signal queued" zone-wait case.
-                if parsed.get("tp_open") is not None:
+                # this signal would default to Limit Runner regardless of
+                # whatever channel-override/active-strategy _resolve_strategy_
+                # and_skip_reason_impl above just computed, since the strategy
+                # here is format-triggered, not channel-configured — EXCEPT
+                # when the channel has an EA Template assigned (Trading >
+                # Strategy > Channel Strategy > "Template: <name>"): a
+                # template fully replaces strategy dispatch by design (see
+                # core_ea_templates.py's module docstring), so it must win
+                # over the format-triggered default too, not just over the
+                # built-in strategies. Fixed 2026-07-24 — a template-assigned
+                # channel's "[LIMITS]"-formatted signals were silently always
+                # executing as Limit Runner instead, so a configured Grid
+                # template never actually ran for them.
+                if parsed.get("tp_open") is not None and not _ea_templates.is_template_override(strategy):
                     strategy      = STRATEGY_LIMIT_RUNNER
                     strategy_name = STRATEGY_NAMES[STRATEGY_LIMIT_RUNNER]
                     _exec_result = await _handle_limit_order_signal_impl(

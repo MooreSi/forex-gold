@@ -48,10 +48,19 @@ DEFAULTS: dict = {
     "be_trigger":        1,
     "cancel_pending":    False,
     "sig_guard":         False,
+    **{f"tp{n}_pips": 0.0 for n in range(1, 9)},
+    **{f"tp{n}_pct":  0.0 for n in range(1, 9)},
 }
 
+# Anchor TP (2026-07-24) -- tp{n}_pips is a fallback (entry ± N pips, used
+# only when the signal itself didn't supply that TP level); tp{n}_pct always
+# wins over the signal, which never states a per-level close percentage.
+# See core_open_trade.py's EA-handoff block for how these get resolved into
+# the final tp{n}/pct{n} values sent to the EA.
+_ANCHOR_TP_FIELDS = tuple(f"tp{n}_pips" for n in range(1, 9)) + tuple(f"tp{n}_pct" for n in range(1, 9))
+
 _BOOL_FIELDS  = ("tg_cmd_enabled", "harvest_enabled", "cancel_pending", "sig_guard")
-_FLOAT_FIELDS = ("harvest_threshold", "grid_step_pts", "be_buffer_pts")
+_FLOAT_FIELDS = ("harvest_threshold", "grid_step_pts", "be_buffer_pts") + _ANCHOR_TP_FIELDS
 _INT_FIELDS   = ("grid_legs", "be_trigger")
 _STR_FIELDS   = ("mode", "tpsl_mode", "anchor", "trail_mode", "be_mode")
 

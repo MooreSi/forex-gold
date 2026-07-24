@@ -503,13 +503,12 @@ Log "Python restarted, watchdog re-enabled. Sequence complete."
 def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
     """Self-contained Risk Settings card — importable by other pages.
 
-    Returns a callable ``set_lot_fixed(lot_size: float)`` that greys out the
-    Risk-per-Trade / Max-Risk fields when a fixed lot size is in use, and
-    re-enables them when the lot size is set back to 0.  Wire it to the
-    Fixed Lot Size input's on_value_change in the host page.
+    Risk per trade (%) / Max risk per trade (%) and Fixed Lot Size all moved
+    to Trading > Global Parameters (2026-07-24), so the two no longer need
+    to be greyed in/out against each other from here — this card doesn't
+    return anything for a host page to wire up anymore.
     """
     rs = db_module.get_risk_settings()
-    _lot_is_fixed = float(rs.get("strategy_lot_size", 0.0) or 0.0) > 0
 
     with ui.card().classes(card_classes):
         with ui.row().classes("items-center gap-2 mb-3"):
@@ -550,35 +549,9 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
                     "before. Toggle it to compare performance with and without the governor."
                 ).classes("text-gray-300")
 
-        with ui.row().classes("w-full items-center gap-1"):
-            risk_pct = ui.number(
-                "Risk per trade (%)", value=float(rs.get("risk_per_trade_pct", 0.5)),
-                min=0.01, max=100, step=0.1, format="%.2f",
-            ).classes("flex-1")
-            if _lot_is_fixed:
-                risk_pct.props("disabled=true")
-            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                "Percentage of current balance risked on each trade. "
-                "E.g. 0.5% of $10,000 = $50 risk, which determines lot size automatically. "
-                "Only used when Fixed Lot Size is 0."
-            )
-
-        with ui.row().classes("w-full items-center gap-1"):
-            max_risk = ui.number(
-                "Max risk per trade (%)", value=float(rs.get("max_risk_per_trade_pct", 1.0)),
-                min=0.01, max=100, step=0.1, format="%.2f",
-            ).classes("flex-1")
-            if _lot_is_fixed:
-                max_risk.props("disabled=true")
-            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                "Hard cap — the engine will never exceed this percentage per trade "
-                "regardless of the signal's risk_pct. Only used when Fixed Lot Size is 0."
-            )
-
-        _lot_note = ui.label(
-            "Fixed Lot Size is set — these fields are not used. Set Fixed Lot Size to 0 to enable risk-based sizing."
-        ).classes("text-xs text-amber-400 mt-0 mb-1")
-        _lot_note.set_visibility(_lot_is_fixed)
+        ui.label(
+            "Risk per trade % / Max risk per trade % moved to Trading > Global Parameters."
+        ).classes("text-xs text-gray-500 italic mb-1")
 
         with ui.row().classes("w-full items-center gap-1"):
             max_dd = ui.number(
@@ -721,8 +694,6 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
             try:
                 db_module.update_risk_settings({
                     "risk_governor_enabled":          int(bool(risk_gov.value)),
-                    "risk_per_trade_pct":             float(risk_pct.value    or 0),
-                    "max_risk_per_trade_pct":         float(max_risk.value    or 0),
                     "max_daily_loss_pct":             float(max_dd.value      or 0),
                     "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),
                     "max_open_trades":                int(max_trades.value    or 1),
@@ -739,20 +710,6 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
         ui.button("Save Risk Settings", on_click=save_risk).classes(
             "bg-blue-700 text-white mt-3 px-4 py-2"
         )
-
-    def _set_lot_fixed(lot_size: float) -> None:
-        """Call when Fixed Lot Size changes to grey/ungrey the risk-per-trade fields."""
-        fixed = float(lot_size or 0) > 0
-        if fixed:
-            risk_pct.props("disabled=true")
-            max_risk.props("disabled=true")
-            _lot_note.set_visibility(True)
-        else:
-            risk_pct.props(remove="disabled")
-            max_risk.props(remove="disabled")
-            _lot_note.set_visibility(False)
-
-    return _set_lot_fixed
 
 
 async def _push_ai_config_to_vps(updates: dict) -> None:

@@ -7,6 +7,15 @@ trade/signal row is actually stored under the CANONICAL form ("Gold
 Diggers 2.0") -- so a real rename matched zero existing rows and silently
 created an orphaned second bucket instead of renaming the one already in
 use, and the Channel Strategy tab kept showing the old name forever.
+
+Also covers the SAME-DAY follow-up fix: the Channel Strategy tab's channel
+list used to come from a hardcoded, in-memory CANONICAL_CHANNEL_ORDER array
+that sync_channel_rename() patched in place -- but that patch never
+survived an app restart (confirmed live via ticket 1650272215: a renamed
+channel's trades kept recording correctly, but the tab reverted to showing
+the stale pre-rename name as a dead ghost entry after every restart, while
+the real channel never appeared at all). Fixed by dropping the in-memory
+array entirely -- see _dynamic_channel_bucket_order()'s own docstring.
 """
 import os
 import tempfile
@@ -44,11 +53,16 @@ def fresh_db():
 
 
 @pytest.fixture
-def clean_canonical_state():
-    order_snapshot = list(cdc.CANONICAL_CHANNEL_ORDER)
+def clean_canonical_names():
+    """Seeds a synthetic variant/canonical pair for the mechanism tests below
+    -- isolated from the real GD2.0/Institutional mapping (already fixed in
+    CANONICAL_CHANNELS itself) so these tests don't depend on, or collide
+    with, that specific live rename's current state."""
     names_snapshot = dict(cdc.CANONICAL_CHANNELS)
+    cdc.CANONICAL_CHANNELS["RAW VARIANT TITLE ⚡️"] = "Old Canonical Name"
+    cdc.CANONICAL_CHANNELS["999999999"] = "Old Canonical Name"
+    cdc.CANONICAL_CHANNELS["Old Canonical Name"] = "Old Canonical Name"
     yield
-    cdc.CANONICAL_CHANNEL_ORDER[:] = order_snapshot
     cdc.CANONICAL_CHANNELS.clear()
     cdc.CANONICAL_CHANNELS.update(names_snapshot)
 
@@ -71,68 +85,103 @@ def _insert_trade(trade_id, tg_source):
         )
 
 
-def test_renaming_a_raw_variant_updates_the_canonical_bucket(clean_canonical_state):
-    # "GOLD DIGGERS 2.0 ⚡️" is a known raw variant of the canonical
-    # "Gold Diggers 2.0" bucket -- the rename must land on that bucket, not
+def _insert_channel_parser_config(channel_name, created_at=0.0):
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO channel_parser_config (channel_name, parser_format, signal_prefix, "
+            "instant_entry_enabled, enabled, notes, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (channel_name, "gd2", "", 0, 1, "", created_at, created_at),
+        )
+
+
+def test_renaming_a_raw_variant_updates_the_canonical_bucket(clean_canonical_names):
+    # "RAW VARIANT TITLE ⚡️" is a known raw variant of the canonical
+    # "Old Canonical Name" bucket -- the rename must land on that bucket, not
     # create a disconnected new one keyed by the raw variant string.
-    cdc.sync_channel_rename("GOLD DIGGERS 2.0 ⚡️", "GD Institutional Elite")
-    assert "Gold Diggers 2.0" not in cdc.CANONICAL_CHANNEL_ORDER
-    assert "GD Institutional Elite" in cdc.CANONICAL_CHANNEL_ORDER
-    assert cdc._canonical("GOLD DIGGERS 2.0 ⚡️") == "GD Institutional Elite"
-    assert cdc._canonical("Gold Diggers 2.0") == "GD Institutional Elite"
-    assert cdc._canonical("2616846888") == "GD Institutional Elite"
+    cdc.sync_channel_rename("RAW VARIANT TITLE ⚡️", "New Canonical Name")
+    assert cdc._canonical("RAW VARIANT TITLE ⚡️") == "New Canonical Name"
+    assert cdc._canonical("Old Canonical Name") == "New Canonical Name"
+    assert cdc._canonical("999999999") == "New Canonical Name"
 
 
-def test_renaming_updates_rows_stored_under_the_canonical_form(fresh_db, clean_canonical_state):
-    # Real trade rows are stored under the canonical name ("Gold Diggers
-    # 2.0"), never the raw variant -- this is the regression the bug
+def test_renaming_updates_rows_stored_under_the_canonical_form(fresh_db, clean_canonical_names):
+    # Real trade rows are stored under the canonical name ("Old Canonical
+    # Name"), never the raw variant -- this is the regression the bug
     # caused: matching only on the raw variant updated nothing here.
-    _insert_trade("t1", "Gold Diggers 2.0")
-    cdc.sync_channel_rename("GOLD DIGGERS 2.0 ⚡️", "GD Institutional Elite")
+    _insert_trade("t1", "Old Canonical Name")
+    cdc.sync_channel_rename("RAW VARIANT TITLE ⚡️", "New Canonical Name")
     with db.db() as conn:
         tg_source = conn.execute(
             "SELECT tg_source FROM vantage_simulated_trades WHERE trade_id='t1'"
         ).fetchone()[0]
-    assert tg_source == "GD Institutional Elite"
+    assert tg_source == "New Canonical Name"
 
 
-def test_renaming_also_updates_rows_stored_under_the_raw_variant(fresh_db, clean_canonical_state):
+def test_renaming_also_updates_rows_stored_under_the_raw_variant(fresh_db, clean_canonical_names):
     # Belt-and-braces: any straggler row that happens to still hold the raw
     # (un-canonicalised) title must also be caught.
-    _insert_trade("t2", "GOLD DIGGERS 2.0 ⚡️")
-    cdc.sync_channel_rename("GOLD DIGGERS 2.0 ⚡️", "GD Institutional Elite")
+    _insert_trade("t2", "RAW VARIANT TITLE ⚡️")
+    cdc.sync_channel_rename("RAW VARIANT TITLE ⚡️", "New Canonical Name")
     with db.db() as conn:
         tg_source = conn.execute(
             "SELECT tg_source FROM vantage_simulated_trades WHERE trade_id='t2'"
         ).fetchone()[0]
-    assert tg_source == "GD Institutional Elite"
+    assert tg_source == "New Canonical Name"
 
 
-def test_rename_from_already_canonical_name_still_works(clean_canonical_state):
+def test_rename_from_already_canonical_name_still_works(clean_canonical_names):
     # Backward-compat: internal callers that already pass the canonical
     # form directly (not a raw Telegram variant) must keep working.
     cdc.sync_channel_rename("Gold Diggers VIP", "Gold Diggers VIP Elite")
-    assert "Gold Diggers VIP" not in cdc.CANONICAL_CHANNEL_ORDER
-    assert "Gold Diggers VIP Elite" in cdc.CANONICAL_CHANNEL_ORDER
+    assert cdc._canonical("Gold Diggers VIP") == "Gold Diggers VIP Elite"
 
 
-def test_noop_when_names_equal(clean_canonical_state):
-    before = list(cdc.CANONICAL_CHANNEL_ORDER)
+def test_noop_when_names_equal(clean_canonical_names):
+    before = dict(cdc.CANONICAL_CHANNELS)
     cdc.sync_channel_rename("Gold Diggers VIP", "Gold Diggers VIP")
-    assert cdc.CANONICAL_CHANNEL_ORDER == before
+    assert cdc.CANONICAL_CHANNELS == before
 
 
-def test_noop_when_new_name_matches_existing_canonical_bucket(clean_canonical_state):
-    # old_name resolves to "Gold Diggers 2.0" already -- renaming "to"
+def test_noop_when_new_name_matches_existing_canonical_bucket(clean_canonical_names):
+    # old_name resolves to "Old Canonical Name" already -- renaming "to"
     # that same canonical bucket is a no-op, not a self-referential rename.
-    before = list(cdc.CANONICAL_CHANNEL_ORDER)
-    cdc.sync_channel_rename("GOLD DIGGERS 2.0 ⚡️", "Gold Diggers 2.0")
-    assert cdc.CANONICAL_CHANNEL_ORDER == before
+    before = dict(cdc.CANONICAL_CHANNELS)
+    cdc.sync_channel_rename("RAW VARIANT TITLE ⚡️", "Old Canonical Name")
+    assert cdc.CANONICAL_CHANNELS == before
 
 
-def test_blank_names_are_noop(clean_canonical_state):
-    before = list(cdc.CANONICAL_CHANNEL_ORDER)
+def test_blank_names_are_noop(clean_canonical_names):
+    before = dict(cdc.CANONICAL_CHANNELS)
     cdc.sync_channel_rename("", "New Name")
     cdc.sync_channel_rename("Old Name", "")
     cdc.sync_channel_rename(None, None)
-    assert cdc.CANONICAL_CHANNEL_ORDER == before
+    assert cdc.CANONICAL_CHANNELS == before
+
+
+# ── Dynamic channel listing survives a rename (and a restart) ──────────────
+
+def test_renamed_channel_appears_dynamically_without_registration(fresh_db, clean_canonical_names):
+    # No register_canonical_channel() call anywhere here (removed entirely,
+    # 2026-07-24) -- the channel must show up purely because
+    # channel_parser_config (which sync_channel_rename already cascades
+    # correctly) now has its current name.
+    _insert_channel_parser_config("RAW VARIANT TITLE ⚡️")
+    cdc.sync_channel_rename("RAW VARIANT TITLE ⚡️", "New Canonical Name")
+    settings = cdc.get_all_channel_strategy_settings()
+    sources = [s["source"] for s in settings]
+    assert "New Canonical Name" in sources
+    assert "RAW VARIANT TITLE ⚡️" not in sources
+
+
+def test_channel_list_derives_fresh_from_channel_parser_config_every_call(fresh_db):
+    # No sync_channel_rename() call at all here, no prior in-memory state --
+    # a channel_parser_config row alone (which is how a real Telegram slot
+    # selection/restore populates it) must be enough for the channel to show
+    # up, since the listing is derived from disk on every call rather than
+    # from a module-level array that only a live rename event ever patched
+    # and a process restart would silently reset.
+    _insert_channel_parser_config("A Brand New Channel Never Registered")
+    settings = cdc.get_all_channel_strategy_settings()
+    sources = [s["source"] for s in settings]
+    assert "A Brand New Channel Never Registered" in sources

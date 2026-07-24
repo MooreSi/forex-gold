@@ -97,6 +97,40 @@ def should_skip_for_exclusion(text: str, rs: dict) -> Optional[str]:
     return None
 
 
+def should_skip_ai_fallback_for_no_signal_candidate(text: str, rs: dict) -> Optional[str]:
+    """Gates only the AI-fallback last-resort recovery path (every
+    ai_fallback_fn call site inside core_scan_messages_parse_classify.
+    classify_and_parse) -- never the deterministic per-format parsers, which
+    have their own correct format-specific gates and must keep working even
+    for messages that don't literally name the symbol (see
+    should_skip_for_exclusion's docstring above for a documented example:
+    Gold Diggers 2.0's "Buy/Sell Zone Now" layout never says GOLD/XAU/XAUUSD
+    anywhere -- gating deterministic parsing on symbol_tokens would silently
+    drop that entire live channel format).
+
+    2026-07-24: previously symbol_tokens/buy_orders/limit_orders were pure
+    reference lists, never consulted by anything -- editing them in the
+    Parsing UI had zero effect on live behaviour. This combines all three
+    into one "does this look at all like it could be a trading signal"
+    pre-filter ahead of spending an AI call, so they become a real, active
+    part of parsing instead of cosmetic. Applying it only to the AI-fallback
+    path (rather than blocking parsing outright) means every currently-
+    working deterministic format keeps working exactly as before -- the gate
+    only ever prunes the residual "nothing recognised this at all" case,
+    which previously burned an AI call unconditionally on pure noise too.
+
+    An empty combined lexicon (all three boxes cleared in the UI) disables
+    the gate entirely rather than blocking every AI-fallback call forever --
+    an accidental empty save must never silently kill the app's last-resort
+    signal-recovery path."""
+    phrases = get_lexicon("symbol_tokens") + get_lexicon("buy_orders") + get_lexicon("limit_orders")
+    if not phrases:
+        return None
+    if text_matches_any(text, phrases):
+        return None
+    return "no symbol/buy/limit keyword matched (Logic Keywords) — AI fallback skipped"
+
+
 async def try_handle_close_all_trigger(
     text: str, channel_name: str, tg_id: str, rs: dict,
     close_trade_fn: Callable[[str, str], Awaitable[dict]],

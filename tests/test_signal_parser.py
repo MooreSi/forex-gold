@@ -105,6 +105,64 @@ class TestParseGD2Signal(unittest.TestCase):
         # No entry range after direction — should return None
         self.assertIsNone(r)
 
+    def test_gd2_zone_format_with_slash_invalid_sl(self):
+        # Original Gold Diggers 2.0 "Zone" wording (2026-07-06).
+        text = (
+            "Buy Zone Now\n"
+            "4163.5 - 4158.5\n"
+            "Targets\n"
+            "4165.5\n"
+            "4167.5\n"
+            "4170\n"
+            "SL/ invalid 4155.5"
+        )
+        r = parse_gd2_signal(text)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["direction"], "BUY")
+        self.assertAlmostEqual(r["entry_low"],  4158.5, places=1)
+        self.assertAlmostEqual(r["entry_high"], 4163.5, places=1)
+        self.assertAlmostEqual(r["stop_loss"],  4155.5, places=1)
+        self.assertAlmostEqual(r["tp1"],        4165.5, places=1)
+        self.assertAlmostEqual(r["tp3"],        4170.0, places=1)
+
+    def test_gd2_zone_format_plain_sl_next_buy_zone(self):
+        # Gold Diggers Scalping's "Next Buy Zone" layout (2026-07-24) — SL is
+        # a bare "SL <price>" line, no "/invalid" — previously fell through
+        # to parse_gd2_partial forever since _GD2_SL_ZONE_RE only matched
+        # the "/invalid" wording. Also confirms a "Zone" trigger preceded by
+        # another word ("Next Buy Zone", not just "Buy Zone") still matches,
+        # and a bare "Open" line among the numeric TPs is skipped as noise.
+        text = (
+            "Next Buy Zone\n\n"
+            "4051 - 4047\n\n"
+            "Targets \n\n"
+            "4053.5\n"
+            "4055.5\n"
+            "Open\n\n"
+            "SL 4043"
+        )
+        r = parse_gd2_signal(text)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["direction"], "BUY")
+        self.assertAlmostEqual(r["entry_low"],  4047.0, places=1)
+        self.assertAlmostEqual(r["entry_high"], 4051.0, places=1)
+        self.assertAlmostEqual(r["stop_loss"],  4043.0, places=1)
+        self.assertAlmostEqual(r["tp1"],        4053.5, places=1)
+        self.assertAlmostEqual(r["tp2"],        4055.5, places=1)
+
+    def test_gd2_zone_format_plain_sl_with_colon(self):
+        text = (
+            "Sell Zone Now\n"
+            "4200 - 4205\n"
+            "Targets\n"
+            "4190\n"
+            "SL: 4210"
+        )
+        r = parse_gd2_signal(text)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["direction"], "SELL")
+        self.assertAlmostEqual(r["stop_loss"], 4210.0, places=1)
+
 
 class TestValidateSignal(unittest.TestCase):
     def test_valid_buy(self):

@@ -33,6 +33,20 @@ def make_signal_ref() -> str:
     return "RE-" + hashlib.md5(raw.encode()).hexdigest()[:6].upper()
 
 
+# Stable Telegram group IDs (never change on a channel rename) -- see
+# core_db_channel._TG_GROUP_ID_MAP, the single source of truth these
+# resolve through.
+_REF_GROUP_ID = "1608388054"
+_GD2_GROUP_ID = "2616846888"
+
+
+def _current_channel_name(is_gd2: bool) -> str:
+    """The real channel's CURRENT display name, resolved by stable group_id
+    rather than hardcoded -- see core_db_channel._TG_GROUP_ID_MAP."""
+    from forex_trader.core.core_db_channel import _normalise_tg_source
+    return _normalise_tg_source(_GD2_GROUP_ID if is_gd2 else _REF_GROUP_ID)
+
+
 def entry_zone_from_level(level_price: float, atr: float, direction: str) -> tuple[float, float]:
     """
     Create entry zone around a key level.
@@ -164,10 +178,15 @@ def build_signal(level: dict, direction: str, context: dict) -> dict:
         "status":          "pending",
         "outcome":         "open",
         "strategy":        "gd2_unicorn" if is_gd2 else "signal_climber",
-        # Exact group_name string used by vantage_tg_signals/telegram_messages
-        # for the real channel this signal is modelled on -- engine.py's
-        # correlation check matches against this, not a display-friendly name.
-        "source_channel":  "GOLD DIGGERS 2.0 ⚡️" if is_gd2 else "Gold Diggers VIP",
+        # The real channel this signal is modelled on -- reversal_engine_
+        # correlate.py's correlation check matches against this (canonicalised
+        # on both sides, so it's not sensitive to which exact name is stamped
+        # here). Resolved dynamically via _canonical() rather than a hardcoded
+        # literal -- confirmed live 2026-07-24: GD2's channel was renamed on
+        # Telegram's side ("GOLD DIGGERS 2.0 ⚡️" -> "GOLD DIGGERS
+        # INSTITUTIONAL") and a hardcoded stamp here would keep labelling
+        # every new signal with the dead pre-rename name forever.
+        "source_channel":  _current_channel_name(is_gd2),
         **tps,
     }
 

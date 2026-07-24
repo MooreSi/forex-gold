@@ -59,11 +59,11 @@ _WEDNESDAY = datetime(2026, 7, 22, 10, 30, 0)
 assert _WEDNESDAY.weekday() == 2  # Wednesday
 
 
-def _schedule_with_one_block(start="09:00", end="12:00", target=0.0, enabled=True):
+def _schedule_with_one_block(start="09:00", end="12:00", target=0.0, enabled=True, **sources):
     schedule = sched._default_schedule()
-    schedule["wednesday"][0] = {
-        "enabled": enabled, "start": start, "end": end, "target": target,
-    }
+    block = {"enabled": enabled, "start": start, "end": end, "target": target}
+    block.update({k: sources[k] for k in sched.SOURCE_KEYS if k in sources})
+    schedule["wednesday"][0] = block
     return schedule
 
 
@@ -151,6 +151,50 @@ def test_get_trading_schedule_fills_in_defaults_for_malformed_data(fresh_db):
     assert len(schedule["monday"]) == sched.BLOCKS_PER_DAY
     assert len(schedule["wednesday"]) == sched.BLOCKS_PER_DAY
     assert schedule["monday"][0]["enabled"] is False  # fell back to default, not the malformed value
+
+
+# ── Per-source toggles (2026-07-24) ─────────────────────────────────────────
+
+def test_source_field_missing_defaults_to_allowed(fresh_db):
+    """Backward compat: a schedule saved before this feature existed has no
+    telegram/reversal_engine/breakout_engine keys at all -- must keep
+    allowing every source exactly as before, not suddenly block them."""
+    sched.set_trading_schedule_enabled(True)
+    sched.set_trading_schedule(_schedule_with_one_block())  # no source kwargs at all
+    for src in sched.SOURCE_KEYS:
+        allowed, reason = sched.check_trading_schedule(now=_WEDNESDAY, source=src)
+        assert allowed is True
+        assert reason == ""
+
+
+def test_source_disabled_for_window_blocks_only_that_source(fresh_db):
+    sched.set_trading_schedule_enabled(True)
+    sched.set_trading_schedule(_schedule_with_one_block(reversal_engine=False))
+
+    allowed, reason = sched.check_trading_schedule(now=_WEDNESDAY, source="reversal_engine")
+    assert allowed is False
+    assert "Reversal Engine disabled for this window" in reason
+
+    for src in ("telegram", "breakout_engine"):
+        allowed, reason = sched.check_trading_schedule(now=_WEDNESDAY, source=src)
+        assert allowed is True
+        assert reason == ""
+
+
+def test_source_toggle_checked_before_profit_target(fresh_db):
+    """A disabled source is blocked immediately, even with target=0 (no cap)
+    -- the source toggle and the profit target are independent gates."""
+    sched.set_trading_schedule_enabled(True)
+    sched.set_trading_schedule(_schedule_with_one_block(target=0.0, breakout_engine=False))
+    allowed, reason = sched.check_trading_schedule(now=_WEDNESDAY, source="breakout_engine")
+    assert allowed is False
+    assert "Breakout Engine disabled for this window" in reason
+
+
+def test_default_block_has_all_sources_enabled():
+    block = sched._default_block()
+    for src in sched.SOURCE_KEYS:
+        assert block[src] is True
 
 
 def test_manual_market_order_never_reaches_the_gate():

@@ -148,7 +148,7 @@ async def resolve_open_trade_params(
     # Trading Schedule gate — per-day/per-window profit-target discipline cap.
     # Automated-only by construction: this function is never reached from the
     # manual market order path (see core_manual_market_order.py).
-    _sched_ok, _sched_reason = check_trading_schedule()
+    _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
     if not _sched_ok:
         raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
 

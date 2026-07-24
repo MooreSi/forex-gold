@@ -5,19 +5,21 @@
 ;   1. Install Inno Setup 6 on Windows.
 ;   2. Open this file in Inno Setup Compiler.
 ;   3. Press F9 (or Build → Compile).
-;   4. Installer .exe appears in installer\Output\.
+;   4. Installer .exe appears at the repo root (see OutputDir below).
 ;
 ; BEFORE BUILDING:
-;   a. Download Python 3.11 embeddable zip for Windows (64-bit):
-;      https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
-;      Extract to:  installer\python_embed\
-;   b. Download get-pip.py:
-;      https://bootstrap.pypa.io/get-pip.py
-;      Save to: installer\get-pip.py
-;   c. Adjust AppVersion and VersionInfoVersion below to match the release.
+;   a. Adjust AppVersion and VersionInfoVersion below to match the release --
+;      always bump both, even for a same-day rebuild (see [Code]'s
+;      InitializeSetup: a same-numbered rebuild skips reinstalling on any
+;      machine that already has that version).
+;   That's it -- the embedded Python runtime and get-pip.py are no longer
+;   bundled at compile time; they're downloaded fresh during install (see
+;   [Code]'s CurStepChanged) using PowerShell's Invoke-WebRequest/Expand-
+;   Archive, both built into every Windows 10+ target this installer already
+;   requires. No third-party download plugin, no local prerequisite files.
 
 #define AppName      "FOREX Trader"
-#define AppVersion   "1.0.0"
+#define AppVersion   "1.1.0"
 #define AppPublisher "FOREX Trader"
 #define AppURL       "http://localhost:8888"
 #define AppExeName   "Setup && Start FOREX.bat"
@@ -47,7 +49,7 @@ UninstallDisplayIcon     = {app}\forex_trader\ui\static\gold_bag.ico
 ArchitecturesInstallIn64BitMode = x64compatible
 MinVersion               = 10.0.17763
 ; Windows 10 1809+ required (needed for Python 3.11 + modern TLS)
-VersionInfoVersion       = 1.0.0.0
+VersionInfoVersion       = 1.1.0.0
 VersionInfoCompany       = {#AppPublisher}
 VersionInfoDescription   = {#AppName} Installer
 SetupIconFile            = ..\forex_trader\ui\static\gold_bag.ico
@@ -76,11 +78,9 @@ Source: "..\config.yaml.example";  DestDir: "{app}";                    Flags: i
 Source: "..\Setup & Start FOREX.bat"; DestDir: "{app}";                Flags: ignoreversion
 Source: "..\Stop FOREX.bat";       DestDir: "{app}";                    Flags: ignoreversion
 
-; ── Embedded Python 3.11 (pre-extracted from python-3.11.9-embed-amd64.zip) ──
-; This gives the installer its own Python to bootstrap the venv with, even if
-; the user hasn't installed Python yet.  The app's venv is a full CPython install.
-Source: "python_embed\*"; DestDir: "{app}\python_embed"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "get-pip.py";     DestDir: "{app}\python_embed"; Flags: ignoreversion
+; ── install_deps.py only -- the embedded Python runtime + get-pip.py are no
+; longer bundled here; CurStepChanged (below) downloads both fresh into
+; {app}\python_embed at install time instead.
 Source: "install_deps.py"; DestDir: "{app}\installer";  Flags: ignoreversion
 
 [Icons]
@@ -204,10 +204,81 @@ begin
   end;
 end;
 
+// Runs a PowerShell -Command snippet hidden, waits for it to finish, and
+// returns True on a clean exit. TLS 1.2 is forced explicitly since some
+// Windows 10 builds don't negotiate it by default, which would otherwise
+// fail silently against python.org/bootstrap.pypa.io.
+function RunPowerShell(const Cmd: String): Boolean;
+var
+  ResultCode: Integer;
+  FullCmd: String;
+begin
+  FullCmd := '-NoProfile -ExecutionPolicy Bypass -Command ' +
+    '"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ' + Cmd + '"';
+  Result := Exec('powershell.exe', FullCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+            and (ResultCode = 0);
+end;
+
+// Downloads the Python 3.11.9 embeddable runtime + get-pip.py fresh at
+// install time (2026-07-24 -- previously bundled via [Files], which meant
+// every builder needed to manually pre-stage installer\python_embed\ before
+// compiling; see the file header). Uses only PowerShell's Invoke-WebRequest/
+// Expand-Archive -- both ship with every Windows 10+ target this installer
+// already requires (MinVersion above), so no third-party download plugin is
+// needed. Returns True if both the runtime and get-pip.py end up in place.
+function FetchPythonEmbed(): Boolean;
+var
+  ZipPath, EmbedDir: String;
+begin
+  EmbedDir := ExpandConstant('{app}\python_embed');
+  ZipPath  := ExpandConstant('{app}\python_embed.zip');
+  ForceDirectories(EmbedDir);
+
+  WizardForm.StatusLabel.Caption := 'Downloading Python runtime...';
+  WizardForm.Update;
+  RunPowerShell(
+    'Invoke-WebRequest -Uri ''https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip'' ' +
+    '-OutFile ''' + ZipPath + ''' -UseBasicParsing'
+  );
+
+  if not FileExists(ZipPath) then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  WizardForm.StatusLabel.Caption := 'Extracting Python runtime...';
+  WizardForm.Update;
+  RunPowerShell(
+    'Expand-Archive -Path ''' + ZipPath + ''' -DestinationPath ''' + EmbedDir + ''' -Force'
+  );
+  DeleteFile(ZipPath);
+
+  WizardForm.StatusLabel.Caption := 'Downloading pip bootstrap...';
+  WizardForm.Update;
+  RunPowerShell(
+    'Invoke-WebRequest -Uri ''https://bootstrap.pypa.io/get-pip.py'' ' +
+    '-OutFile ''' + EmbedDir + '\get-pip.py'' -UseBasicParsing'
+  );
+
+  Result := FileExists(EmbedDir + '\python.exe') and FileExists(EmbedDir + '\get-pip.py');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    if not FetchPythonEmbed() then
+    begin
+      MsgBox(
+        'Could not download the Python runtime needed to finish setup.' + #13#10 + #13#10 +
+        'This requires an internet connection to python.org and bootstrap.pypa.io. ' +
+        'Check your connection and re-run this installer.',
+        mbError, MB_OK
+      );
+      Exit;
+    end;
+
     // Patch embedded Python ._pth to allow full site-packages access
     if FileExists(ExpandConstant('{app}\python_embed\python311._pth')) then
       SaveStringToFile(

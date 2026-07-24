@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
+from forex_trader.core.core_logic_keyword_triggers import should_skip_ai_fallback_for_no_signal_candidate
 from forex_trader.core.signal_parser import (
     parse_gold_signal, parse_gd2_signal, parse_gd2_partial,
     is_gd2_message, is_format_ab_signal, parse_with_learned_rules, _CURRENCY_RE,
@@ -46,11 +47,26 @@ async def classify_and_parse(
     sig_prefix: str,
     ai_fallback_fn: AIFallbackFn,
     queue_unrecognised_fn: QueueUnrecognisedFn,
+    rs: dict,
 ) -> Optional[dict]:
     """Returns the parsed signal dict (including AI-recovered) if this
     message classified as a signal, or None if fully handled here (dropped,
     queued as unrecognised, recorded unsupported-currency, or recorded as a
-    pending_followup partial) -- caller should move to the next message."""
+    pending_followup partial) -- caller should move to the next message.
+
+    `rs` gates every ai_fallback_fn call below via Logic Keywords'
+    symbol_tokens/buy_orders/limit_orders lexicons (see
+    core_logic_keyword_triggers.should_skip_ai_fallback_for_no_signal_
+    candidate) -- never the deterministic per-format parsers above, which
+    keep working exactly as before for every currently-recognised format."""
+
+    async def _gated_ai_fallback(t: str, ch: str, tid: str) -> Optional[dict]:
+        _skip = should_skip_ai_fallback_for_no_signal_candidate(t, rs)
+        if _skip:
+            log.debug("[LogicKeywords] tg_id=%s AI fallback skipped — %s", tid, _skip)
+            return None
+        return await ai_fallback_fn(t, ch, tid)
+
     parsed = parse_with_learned_rules(text, channel_name)
 
     if parsed:
@@ -69,7 +85,7 @@ async def classify_and_parse(
     if parser_fmt == "format_ab":
         _ai_recovered = False
         if not is_format_ab_signal(text, sig_prefix):
-            parsed = await ai_fallback_fn(text, channel_name, tg_id)
+            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
             if not parsed:
                 return None
             _ai_recovered = True
@@ -142,7 +158,7 @@ async def classify_and_parse(
         if not _ai_recovered:
             parsed = parse_gold_signal(text)
             if not parsed:
-                parsed = await ai_fallback_fn(text, channel_name, tg_id)
+                parsed = await _gated_ai_fallback(text, channel_name, tg_id)
                 if not parsed:
                     queue_unrecognised_fn(tg_id, channel_name, text)
                     return None
@@ -151,7 +167,7 @@ async def classify_and_parse(
     elif parser_fmt == "gd2":
         _ai_recovered = False
         if not is_gd2_message(text):
-            parsed = await ai_fallback_fn(text, channel_name, tg_id)
+            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
             if not parsed:
                 return None
             _ai_recovered = True
@@ -191,7 +207,7 @@ async def classify_and_parse(
                     channel_name, tg_id, _ime_trigger[0],
                 )
                 return None
-            parsed = await ai_fallback_fn(text, channel_name, tg_id)
+            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
             if not parsed:
                 queue_unrecognised_fn(tg_id, channel_name, text)
                 return None
@@ -231,7 +247,7 @@ async def classify_and_parse(
                     )
                     return None
         if not parsed:
-            parsed = await ai_fallback_fn(text, channel_name, tg_id)
+            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
         if not parsed:
             return None  # auto-format channel — skip silently when nothing matches
         return parsed

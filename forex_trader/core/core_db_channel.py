@@ -27,7 +27,7 @@ from forex_trader.core.core_db_analytics import _session_for_hour, _trade_pts  #
 
 _TG_GROUP_ID_MAP: dict[str, str] = {
     "1608388054": "Gold Diggers VIP",
-    "2616846888": "GOLD DIGGERS 2.0 ⚡️",
+    "2616846888": "GOLD DIGGERS INSTITUTIONAL",  # renamed on Telegram's side, 2026-07-2x; group_id unchanged
 }
 
 
@@ -48,6 +48,12 @@ _CHANNEL_NAME_TABLES = (
     ("vantage_simulated_trades", "tg_source"),
     ("vantage_pending_orders", "channel_name"),
     ("consolidated_trades", "tg_source"),
+    # Added 2026-07-24 -- reversal_engine_correlate.py reads this table's
+    # group_name directly for display and (before that same fix) used it for
+    # matching too; missing from this cascade let GD2/Institutional's rename
+    # silently break correlation-rate tracking since real signals recorded
+    # after the rename never matched the engine's still-hardcoded old name.
+    ("vantage_tg_signals", "group_name"),
 )
 
 
@@ -85,13 +91,6 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
                 )
             except Exception:
                 pass  # table/column doesn't exist on this schema version
-    # If the old canonical name was itself one of the fixed canonical bucket
-    # names (the Channel Strategy tab's rows), swap the bucket to the new
-    # name in place -- otherwise get_all_channel_strategy_settings() would
-    # keep looking for the old, now-nonexistent name and the renamed
-    # channel's freshly-updated rows above would have nowhere to bucket into.
-    if old_canon in CANONICAL_CHANNEL_ORDER:
-        CANONICAL_CHANNEL_ORDER[CANONICAL_CHANNEL_ORDER.index(old_canon)] = new_name
     # Every existing variant that used to resolve to the old canonical name
     # must now resolve to new_name instead, and the new live title itself
     # must map to new_name (self-map) so future messages/trades canonicalise
@@ -327,11 +326,18 @@ def get_channel_trust(source: str) -> bool:
 
 
 CANONICAL_CHANNELS: dict[str, str] = {
-    # Gold Diggers 2.0 variants
-    "GOLD DIGGERS 2.0 ⚡️":           "Gold Diggers 2.0",
-    "Telegram Auto (GOLD DIGGERS 2.0 ⚡️)": "Gold Diggers 2.0",
-    "2616846888":                               "Gold Diggers 2.0",
-    "Gold Diggers 2.0":                         "Gold Diggers 2.0",
+    # GOLD DIGGERS INSTITUTIONAL variants -- this group's Telegram title was
+    # "GOLD DIGGERS 2.0 ⚡️" / canonicalised to "Gold Diggers 2.0" until it was
+    # renamed on Telegram's side (same group_id 2616846888) to "GOLD DIGGERS
+    # INSTITUTIONAL". The legacy strings below are kept so any historical row
+    # still bearing the pre-rename text folds into the same bucket as the
+    # channel's current name, rather than forking into a dead duplicate.
+    "GOLD DIGGERS 2.0 ⚡️":                       "GOLD DIGGERS INSTITUTIONAL",
+    "Telegram Auto (GOLD DIGGERS 2.0 ⚡️)":       "GOLD DIGGERS INSTITUTIONAL",
+    "Gold Diggers 2.0":                          "GOLD DIGGERS INSTITUTIONAL",
+    "2616846888":                                "GOLD DIGGERS INSTITUTIONAL",
+    "GOLD DIGGERS INSTITUTIONAL":                "GOLD DIGGERS INSTITUTIONAL",
+    "Telegram Auto (GOLD DIGGERS INSTITUTIONAL)": "GOLD DIGGERS INSTITUTIONAL",
     # Gold Diggers VIP variants
     "Gold Diggers VIP":                         "Gold Diggers VIP",
     "Telegram Auto (Gold Diggers VIP)":         "Gold Diggers VIP",
@@ -350,9 +356,9 @@ CANONICAL_CHANNELS: dict[str, str] = {
 }
 
 
-CANONICAL_CHANNEL_ORDER = [
-    "Gold Diggers 2.0",
-    "Gold Diggers VIP",
+# Internal signal generators with no live Telegram identity to derive from --
+# genuinely fixed, unlike the Telegram-driven channels below.
+_FIXED_ENGINE_CHANNELS = [
     "Reversal Engine",
     "Bounce Engine",
     "Breakout Engine",
@@ -365,21 +371,39 @@ def _canonical(source: str) -> str:
     return CANONICAL_CHANNELS.get(source, source)
 
 
-def register_canonical_channel(name: str) -> None:
-    """Add a brand-new channel to the Channel Strategy tab's fixed bucket
-    list -- used when a Telegram listener slot beyond the two hardcoded
-    VIP/GD2 channels (_TG_GROUP_ID_MAP) gets a group assigned, since that
-    channel's name isn't known ahead of time the way GD VIP/GD2 are.
-    No-op if the name is blank or already tracked (directly or via an
-    existing CANONICAL_CHANNELS variant mapping)."""
-    name = (name or "").strip()
-    if not name:
-        return
-    canon = _canonical(name)
-    if canon in CANONICAL_CHANNEL_ORDER:
-        return
-    CANONICAL_CHANNEL_ORDER.append(canon)
-    CANONICAL_CHANNELS[canon] = canon
+def _dynamic_channel_bucket_order() -> list[str]:
+    """The Channel Strategy tab's channel list, built fresh every call instead
+    of from a hardcoded, in-memory (restart-resetting) array.
+
+    2026-07-24: the previous approach (a fixed CANONICAL_CHANNEL_ORDER array,
+    patched in place by register_canonical_channel()/sync_channel_rename()
+    whenever a new Telegram slot was assigned or a channel got renamed) broke
+    on every app restart -- the in-memory patch was never persisted, so a
+    renamed channel (e.g. "GOLD DIGGERS 2.0 ⚡️" -> "GOLD DIGGERS
+    INSTITUTIONAL", confirmed live via ticket 1650272215's channel silently
+    missing from the UI) would revert to showing its stale pre-rename name
+    as a dead ghost entry, while the actually-active, correctly-renamed
+    channel (its channel_parser_config/channel_performance rows were already
+    right, per sync_channel_rename's own DB cascade) never appeared at all.
+
+    Fixed by dropping the hardcoded allowlist entirely: every currently
+    configured Telegram channel (channel_parser_config, which itself already
+    stays correctly renamed via sync_channel_rename's DB cascade) is included
+    automatically, in slot order, with no separate registration step needed.
+    Internal engines (no live Telegram identity) stay a small fixed list."""
+    order = list(_FIXED_ENGINE_CHANNELS)
+    try:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT channel_name FROM channel_parser_config ORDER BY created_at ASC"
+            ).fetchall()
+        for (name,) in rows:
+            canon = _canonical(name)
+            if canon not in order:
+                order.append(canon)
+    except Exception:
+        pass
+    return order
 
 
 def get_channel_strategy_override(source: str):
@@ -443,7 +467,7 @@ def get_all_channel_strategy_overrides() -> dict[str, dict]:
     """Lightweight {canonical_source: {strategy, auto}} snapshot for sync —
     just the override fields, not the per-node performance stats that
     get_all_channel_strategy_settings() also returns."""
-    result = {ch: {"strategy": None, "auto": False} for ch in CANONICAL_CHANNEL_ORDER}
+    result = {ch: {"strategy": None, "auto": False} for ch in _dynamic_channel_bucket_order()}
     try:
         with db() as conn:
             rows = conn.execute(
@@ -548,11 +572,12 @@ def get_all_channel_strategy_settings() -> list:
     '1608388054') into the four canonical channels.  The strategy override is
     stored / read under the canonical name only.
     """
+    order = _dynamic_channel_bucket_order()
     # Merge all rows into canonical buckets (returned even when table has no rows)
     buckets: dict[str, dict] = {
         ch: {"source": ch, "strategy_override": None, "auto_strategy": False,
              "lot_mult": 1.0, "win_rate": 0.0, "sample_n": 0, "net_pnl": 0.0}
-        for ch in CANONICAL_CHANNEL_ORDER
+        for ch in order
     }
     try:
         with db() as conn:
@@ -586,7 +611,7 @@ def get_all_channel_strategy_settings() -> list:
             b["sample_n"] += n_new
         b["net_pnl"] = round(b["net_pnl"] + float(r[6] or 0), 2)
 
-    return [buckets[ch] for ch in CANONICAL_CHANNEL_ORDER]
+    return [buckets[ch] for ch in order]
 
     # (unreachable fallback)
     return []

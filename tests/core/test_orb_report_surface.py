@@ -426,8 +426,8 @@ def test_auto_execute_no_override_still_defaults_to_orb_fixed(fresh_db):
 
 
 def test_orb_report_is_a_canonical_channel(fresh_db):
-    from forex_trader.core.core_db_channel import CANONICAL_CHANNEL_ORDER, _canonical
-    assert "ORB/IVB Report" in CANONICAL_CHANNEL_ORDER
+    from forex_trader.core.core_db_channel import _FIXED_ENGINE_CHANNELS, _canonical
+    assert "ORB/IVB Report" in _FIXED_ENGINE_CHANNELS
     assert _canonical("ORB/IVB Report (auto)") == "ORB/IVB Report"
 
 

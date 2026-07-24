@@ -50,6 +50,20 @@ datetime g_lastRecv = 0;
 datetime g_lastDiagHeartbeat = 0;
 int      g_lastDiagCount = -1;
 
+// ── Global Parameters > Harvest (2026-07-24) ─────────────────────────────
+// Trading > Global Parameters, standing config pushed by
+// ea_bridge.EABridge.push_global_config() -- once per connection ("hello")
+// and again whenever the setting is saved. Unlike the old per-template
+// tpl_harvest_enabled/tpl_harvest_threshold (a field on ManagedTrade/
+// PendingOrder, sent once at open_trade time, only ever checked against
+// that one EA-managed trade), this is checked in CheckGlobalHarvest()
+// against EVERY open position on the symbol each tick -- including
+// Python-only-managed trades this EA has no ManagedTrade/PendingOrder
+// entry for at all -- so it applies account-wide regardless of how or
+// when a position was opened.
+bool     g_globalHarvestEnabled = false;
+double   g_globalHarvestThresholdUsd = 50.0;
+
 #define MAX_TPS 8
 
 struct ManagedTrade
@@ -349,6 +363,18 @@ void HandleMessage(const string line)
    if(type == "update_trade") { HandleUpdateTrade(line); return; }
    if(type == "place_pending_order") { HandlePlacePendingOrder(line); return; }
    if(type == "restore_pending_order") { HandleRestorePendingOrder(line); return; }
+   if(type == "set_global_config") { HandleSetGlobalConfig(line); return; }
+}
+
+// Trading > Global Parameters > Harvest -- see push_global_config() in
+// ea_bridge.py and CheckGlobalHarvest() below. No ack sent (fire-and-forget,
+// same as update_trade).
+void HandleSetGlobalConfig(const string json)
+{
+   g_globalHarvestEnabled = JsonGetLong(json, "harvest_enabled", 0) != 0;
+   g_globalHarvestThresholdUsd = JsonGetDouble(json, "harvest_threshold", 50.0);
+   Print("[EABridge] global config updated: harvest_enabled=", g_globalHarvestEnabled,
+         " harvest_threshold=", g_globalHarvestThresholdUsd);
 }
 
 // Corrects an already-tracked trade's TP levels — tp[]/hasTp[] are otherwise
@@ -750,7 +776,12 @@ void HandleOpenTemplateGrid(const string json)
          string key = "tp" + (string)(i + 1);
          p.hasTp[i] = JsonHasKey(json, key);
          p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
-         p.pcts[i] = 0.0;
+         // Anchor TP (2026-07-24): was hardcoded to 0.0, silently discarding
+         // whatever %-close ladder Python resolved (core_open_trade.py's
+         // Anchor TP fallback) -- every grid leg only ever fully closed,
+         // never partial-closed. Read the same generic pct{n} field every
+         // other PendingOrder-building path already uses.
+         p.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
       }
       p.beAtPos = -1;
       p.trailMode = "";
@@ -1350,15 +1381,43 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
 {
    if(!PositionSelectByTicket(t.ticket)) return; // closed already this tick
 
-   // ── Stealth TP: tracked internally, never on the broker ticket ──────
-   if(t.tplTpslMode == "stealth")
+   // ── Anchor TP: partial closes at each cleared level, full close on the
+   // last defined level -- same mechanism ManageLadder() uses for the
+   // built-in ladder strategies (t.pcts[]/t.closeFullOnLast), so a
+   // template's own Anchor TP %-close ladder (core_ea_templates.py's
+   // tp{n}_pct fields) actually takes effect instead of being silently
+   // ignored (2026-07-24 -- ManageTemplate() never read t.pcts[] at all
+   // before this). Runs for "on"/"stealth" only, never "off" -- "off" means
+   // no TP tracking whatsoever (SL/harvest/trail-only), unchanged from
+   // before. For "stealth" this replaces the old last-TP-only check: when
+   // every pct is 0 (a template with no Anchor TP % configured, the case
+   // for every template saved before this feature existed) DoPartialClose's
+   // own 0-lots guard makes every non-last level a safe no-op, so only the
+   // last defined TP ever actually closes anything -- identical outcome to
+   // the old stealth-only block for every existing template.
+   if(t.tplTpslMode != "off")
    {
-      int lastIdx = LastTpIndex(t);
-      if(lastIdx >= 0 && TpCleared(t, lastIdx, tick))
+      int tplN = TpCount(t);
+      if(tplN > 0)
       {
-         trade.PositionClose(t.ticket);
-         Print("[EABridge] template stealth TP hit, closing ticket=", t.ticket);
-         return; // CheckForClosures reports/removes it on the next pass
+         int tplCompactPos = 0;
+         for(int tplIdx = 0; tplIdx < MAX_TPS; tplIdx++)
+         {
+            if(!t.hasTp[tplIdx]) continue;
+            if(t.triggered[tplIdx]) { tplCompactPos++; continue; }
+            if(!TpCleared(t, tplIdx, tick)) break;
+
+            double tplRemaining = RemainingLots(t.ticket);
+            if(tplRemaining <= 0) break;
+            bool tplIsLast = (tplCompactPos == tplN - 1);
+
+            bool tplClosedAll = false;
+            if(tplIsLast && t.closeFullOnLast) tplClosedAll = DoCloseAll(t, tplIdx);
+            else                               DoPartialClose(t, tplIdx, t.pcts[tplCompactPos]);
+
+            if(tplClosedAll) return; // position gone -- CheckForClosures reports it
+            tplCompactPos++;
+         }
       }
    }
 
@@ -1528,6 +1587,37 @@ void CancelGridSiblings(const int groupId, const ulong filledTicket)
    }
 }
 
+// Trading > Global Parameters > Harvest -- sweeps EVERY open position on
+// this symbol, closing any whose own floating profit has reached the
+// configured threshold. Deliberately does NOT go through g_trades[]/
+// PositionSelectByTicket(known ticket) like every other per-trade check in
+// this file (ManageTrade, CheckForClosures) -- those only ever see
+// positions this EA itself is managing. This iterates PositionsTotal()/
+// PositionGetTicket() directly instead, so it also catches positions this
+// EA has no tracking entry for at all (Python-bridge-managed trades,
+// anything opened outside this app entirely) -- "regardless of how it was
+// executed", per the Global Parameters card's own description. Called
+// every OnTick regardless of g_trades/g_pending size (see OnTick below) --
+// a Python-only-managed trade leaves both those arrays empty.
+void CheckGlobalHarvest()
+{
+   if(!g_globalHarvestEnabled) return;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      double profit = PositionGetDouble(POSITION_PROFIT);
+      if(profit >= g_globalHarvestThresholdUsd)
+      {
+         Print("[EABridge] global harvest threshold reached ($", profit,
+               " >= $", g_globalHarvestThresholdUsd, "), closing ticket=", ticket);
+         trade.PositionClose(ticket);
+      }
+   }
+}
+
 void CheckPendingOrders()
 {
    for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
@@ -1653,6 +1743,11 @@ void DiagHeartbeat()
 
 void OnTick()
 {
+   // Global harvest runs even with g_trades/g_pending both empty -- it
+   // sweeps PositionsTotal() directly, so it must not be skipped by the
+   // early-return below (which exists for everything else here, all of
+   // which only ever look at trades/orders this EA itself is tracking).
+   if(g_globalHarvestEnabled) CheckGlobalHarvest();
    if(ArraySize(g_trades) == 0 && ArraySize(g_pending) == 0) return;
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick)) return;

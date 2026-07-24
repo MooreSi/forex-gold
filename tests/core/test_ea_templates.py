@@ -102,6 +102,27 @@ def test_delete(fresh_db):
     assert et.get_ea_template("T1") is None
 
 
+# ── Anchor TP (2026-07-24) ───────────────────────────────────────────────
+
+def test_anchor_tp_defaults_to_all_zero(fresh_db):
+    t = et.save_ea_template("Plain", {})
+    for n in range(1, 9):
+        assert t[f"tp{n}_pips"] == 0.0
+        assert t[f"tp{n}_pct"] == 0.0
+
+
+def test_anchor_tp_saves_and_coerces_types(fresh_db):
+    t = et.save_ea_template("Anchored", {
+        "tp1_pips": "20", "tp1_pct": "25",
+        "tp4_pips": 100.0, "tp4_pct": 100.0,
+    })
+    assert t["tp1_pips"] == 20.0
+    assert t["tp1_pct"] == 25.0
+    assert t["tp4_pips"] == 100.0
+    assert t["tp4_pct"] == 100.0
+    assert t["tp2_pips"] == 0.0  # untouched levels keep the default
+
+
 def test_override_helpers_roundtrip():
     assert et.is_template_override("template:My Grid")
     assert not et.is_template_override("reversal_runner")

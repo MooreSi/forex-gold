@@ -15,7 +15,6 @@ from forex_trader.core.telegram_reader import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,
     AUTH_CONNECTED, AUTH_RECONNECTING, AUTH_FAILED,
 )
-from forex_trader.ui.pages import reader_logic as _reader_logic
 from forex_trader.ui.pages.trading import render_signals_card
 
 def _ts(s) -> str:
@@ -193,8 +192,7 @@ def _render_channels_active_section(reader) -> None:
 
         if not slots:
             ui.label(
-                "No channels loaded yet — select a group in a slot on the "
-                "Reader Logic panel below."
+                "No channels loaded yet — select a group in a slot below."
             ).classes("text-xs text-gray-500 italic")
             return
 
@@ -361,10 +359,6 @@ def _render_connected(reader):
     # Consistent button/badge height — use ui.button style for all three
     _BTN = "text-xs px-3 py-1 min-h-0"
 
-    # Reader Logic dialog — built once, opened on button click
-    _rl_dialog = ui.dialog().props("maximized")
-    _reader_logic.render_dialog(_rl_dialog)
-
     with ui.row().classes("w-full items-center gap-2 mb-3"):
         # Connected indicator — same height/padding as the adjacent buttons
         ui.button("● Connected").classes(
@@ -384,10 +378,6 @@ def _render_connected(reader):
         ui.button("Reset Session", on_click=do_reset).classes(
             f"bg-red-800 text-white {_BTN}"
         )
-
-        ui.button("Reader Logic", on_click=_rl_dialog.open).classes(
-            f"bg-indigo-700 text-white {_BTN}"
-        ).tooltip("View and edit per-channel parser configuration")
 
         # do_dc_check references _dc_lbl by closure; _dc_lbl is defined after
         # the button so it renders immediately to its right in the flex row.

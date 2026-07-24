@@ -41,6 +41,19 @@ class _LiveExecuteMixin:
                 re_db.update_live_exec(sig["id"], status="skipped:live_disabled")
                 return
 
+            # Trading Schedule gate, Reversal Engine source (2026-07-24) --
+            # this engine performs well overnight (Asia) but loses during
+            # London/NY, the opposite of the Telegram channels, so each
+            # window independently allows/blocks it rather than one blanket
+            # automated-order switch. See core_trading_schedule.py.
+            from forex_trader.core.core_trading_schedule import check_trading_schedule
+            _sched_ok, _sched_reason = check_trading_schedule(source="reversal_engine")
+            if not _sched_ok:
+                re_db.update_live_exec(sig["id"], status="skipped:schedule")
+                _log.info("[RE-Engine] schedule blocked live exec %s -- %s",
+                          sig.get("signal_ref"), _sched_reason)
+                return
+
             # Fill-time re-evaluation (2026-07-17) -- a pending zone signal can
             # sit anywhere from a couple of minutes to 4h (Reversal Runner/
             # Adaptive Runner's expiry window) before price actually reaches

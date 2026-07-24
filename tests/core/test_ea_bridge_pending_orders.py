@@ -38,6 +38,13 @@ def fresh_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     db.init(path)
+    # get_risk_settings() caches for 10s (core_db_risk_settings._RS_CACHE_TTL) --
+    # without invalidating here, a value written in a prior test's temp DB
+    # can leak into this one if both run within that window (found
+    # 2026-07-24 adding push_global_config tests: two tests in a row that
+    # both write+read global_harvest_enabled flaked depending on run order).
+    db._rs_cache = None
+    db._rs_cache_ts = 0.0
     yield db
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
@@ -428,6 +435,46 @@ def test_dispatch_hello_schedules_restore():
     async def _run():
         await bridge._dispatch({"type": "hello", "account": 1, "symbol": "XAUUSD"})
         await asyncio.sleep(0)  # let the scheduled task run
+
+    asyncio.run(_run())
+    assert calls == [True]
+
+
+# ── Global Parameters > Harvest (2026-07-24) ───────────────────────────────────
+
+def test_push_global_config_wire_format_enabled(fresh_db):
+    db.update_risk_settings({
+        "global_harvest_enabled": 1, "global_harvest_threshold_usd": 75.0,
+    })
+    bridge = _healthy_bridge()
+    asyncio.run(bridge.push_global_config())
+    msg = _sent_message(bridge)
+    assert msg["type"] == "set_global_config"
+    assert msg["harvest_enabled"] == 1
+    assert msg["harvest_threshold"] == 75.0
+
+
+def test_push_global_config_wire_format_disabled_default(fresh_db):
+    bridge = _healthy_bridge()
+    asyncio.run(bridge.push_global_config())
+    msg = _sent_message(bridge)
+    assert msg["harvest_enabled"] == 0
+    assert msg["harvest_threshold"] == 50.0
+
+
+def test_dispatch_hello_schedules_push_global_config():
+    bridge = _healthy_bridge()
+    calls = []
+
+    async def _fake_push():
+        calls.append(True)
+
+    bridge.push_global_config = _fake_push
+    bridge._restore_pending_orders = lambda: asyncio.sleep(0)
+
+    async def _run():
+        await bridge._dispatch({"type": "hello", "account": 1, "symbol": "XAUUSD"})
+        await asyncio.sleep(0)
 
     asyncio.run(_run())
     assert calls == [True]

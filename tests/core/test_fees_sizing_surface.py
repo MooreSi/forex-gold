@@ -98,3 +98,28 @@ def test_suggest_lot_size_clamped_to_max_lot_size(fresh_db):
 def test_suggest_lot_size_zero_distance_returns_minimum(fresh_db):
     lot = fs.suggest_lot_size(entry=2400.0, stop_loss=2400.0, balance=1000.0, risk_pct=1.0)
     assert lot == 0.01
+
+
+# ── Global Parameters > Max Risk per trade % (2026-07-24) ─────────────────────
+
+def test_suggest_lot_size_capped_by_max_risk_per_trade_pct(fresh_db):
+    db.update_risk_settings({"max_lot_size": 10.0, "max_risk_per_trade_pct": 0.5})
+    # risk_pct=5% would otherwise ask for a much bigger lot than a 0.5% max-risk
+    # ceiling allows at this distance/balance.
+    lot = fs.suggest_lot_size(entry=2400.0, stop_loss=2395.0, balance=100000.0, risk_pct=5.0)
+    # 0.5% of 100000 = 500; distance 5 * CONTRACT_SIZE(100) = 500/pt -> 1.0 lot cap
+    assert lot == 1.0
+
+
+def test_suggest_lot_size_max_risk_never_raises_lot(fresh_db):
+    db.update_risk_settings({"max_risk_per_trade_pct": 50.0})
+    # A generous 50% cap must never push the risk_pct-based lot UP.
+    lot = fs.suggest_lot_size(entry=2400.0, stop_loss=2395.0, balance=1000.0, risk_pct=0.5)
+    assert lot == 0.01
+
+
+def test_suggest_lot_size_max_risk_disabled_at_zero(fresh_db):
+    db.update_risk_settings({"max_lot_size": 10.0, "max_risk_per_trade_pct": 0.0})
+    lot = fs.suggest_lot_size(entry=2400.0, stop_loss=2395.0, balance=100000.0, risk_pct=5.0)
+    # No max-risk ceiling -- only the ordinary max_lot_size (10.0) applies.
+    assert lot == 10.0

@@ -1124,9 +1124,6 @@ def main_page():
             is_paused = pause_raw and float(pause_raw or 0) > _time.time()
             pause_badge.style("" if is_paused else "display:none")
 
-            # Telegram tab dot — an AI-recovered signal is waiting for review
-            telegram_ai_badge.set_visibility(db_module.has_unreviewed_ai_recovered_signals())
-
             # News event badge — check live calendar; send one Telegram alert on entry
             try:
                 from forex_trader.test_signal.news_filter import get_current_event as _get_news_event
@@ -1513,12 +1510,6 @@ def main_page():
             tab_chart    = ui.tab("Chart",       icon="candlestick_chart")
             tab_trading  = ui.tab("Trading",     icon="trending_up")
             tab_telegram = ui.tab("Parsing",     icon="send")
-            with tab_telegram:
-                # Small red dot — shown whenever an AI-recovered signal is
-                # waiting for review/approval in Reader Logic > AI (see
-                # _refresh_header below for the toggle).
-                telegram_ai_badge = ui.badge().props("floating dot color=red")
-                telegram_ai_badge.set_visibility(False)
             tab_test     = ui.tab("Signal Generator", icon="science")
             tab_edge     = ui.tab("Edge",        icon="insights")
             tab_backtest = ui.tab("Backtest",    icon="bar_chart")

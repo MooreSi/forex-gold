@@ -131,6 +131,22 @@ def test_ime_followup_matched_skips_open_trade(fresh_db):
     assert calls == []
 
 
+def test_ime_followup_never_checked_for_limit_format_signal(fresh_db):
+    # Fixed 2026-07-24: a genuine "BUY LIMITS GOLD @ .../... AREA" signal
+    # (parsed["tp_open"] present, matching signal_parser.parse_limit_order_
+    # signal's shape) must never be matched against an open instant-entry
+    # trade as a "follow-up" -- even with IME on and even if the matcher
+    # WOULD say yes (followup_matched=True here) -- it must fall through and
+    # open its own new trade instead of being silently swallowed.
+    limit_parsed = dict(_PARSED)
+    limit_parsed["tp_open"] = False
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, followup_matched=True, parsed=limit_parsed,
+    )
+    assert len(calls) == 1
+    assert result.get("followup_matched") is not True
+
+
 def test_max_open_trades_reached_skips(fresh_db):
     result, calls, bridge = _call(rs={"max_open_trades": 3}, open_trades=[{}] * 3)
     assert result["executed"] is False

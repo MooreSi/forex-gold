@@ -67,13 +67,16 @@ _AI_RESULT = {"direction": "BUY", "entry_low": 4529.0, "entry_high": 4534.0, "st
 
 
 def _call(tg_id, text, parser_fmt, sig_prefix="", channel_name="TestChannel", group_id="g1",
-         ai_return=None, force_gd2_all_fail=False, learned_rules_return=None):
+         ai_return=None, force_gd2_all_fail=False, learned_rules_return=None, rs=None,
+         ai_calls=None):
     msg = {"id": tg_id, "group_id": group_id, "text": text, "timestamp": _NOW_ISO,
           "sender_name": "sender"}
     uq_calls = []
     alerts = []
 
     async def fake_ai(text_, channel_name_, tg_id_):
+        if ai_calls is not None:
+            ai_calls.append(tg_id_)
         return ai_return
 
     def fake_queue(tg_id_, channel_name_, text_):
@@ -97,7 +100,7 @@ def _call(tg_id, text, parser_fmt, sig_prefix="", channel_name="TestChannel", gr
     try:
         result = asyncio.run(pc.classify_and_parse(
             tg_id, group_id, channel_name, text, msg, parser_fmt, sig_prefix,
-            fake_ai, fake_queue,
+            fake_ai, fake_queue, rs if rs is not None else {},
         ))
     finally:
         for p in patches:
@@ -122,7 +125,7 @@ def test_format_ab_no_match_ai_fails_dropped(fresh_db):
 
 
 def test_format_ab_no_match_ai_recovers(fresh_db):
-    result, uq, alerts = _call("b3", "random chatter AI recovers", "format_ab", ai_return=_AI_RESULT)
+    result, uq, alerts = _call("b3", "random gold buy chatter AI recovers", "format_ab", ai_return=_AI_RESULT)
     assert result is not None
     assert result["direction"] == "BUY"
 
@@ -168,7 +171,7 @@ def test_gd2_no_match_ai_fails_dropped(fresh_db):
 
 
 def test_gd2_no_match_ai_recovers(fresh_db):
-    result, uq, alerts = _call("b9", "random chatter AI recovers as gd2", "gd2", ai_return=_AI_RESULT)
+    result, uq, alerts = _call("b9", "random gold buy chatter AI recovers as gd2", "gd2", ai_return=_AI_RESULT)
     assert result is not None
     assert result["direction"] == "BUY"
 
@@ -235,7 +238,46 @@ def test_auto_neither_matches_ai_fails_silently_dropped(fresh_db):
 
 
 def test_auto_neither_matches_ai_recovers(fresh_db):
-    result, uq, alerts = _call("b19", "totally unrelated text AI recovers", "auto",
+    result, uq, alerts = _call("b19", "totally unrelated gold buy text AI recovers", "auto",
                                sig_prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH", ai_return=_AI_RESULT)
     assert result is not None
     assert result["direction"] == "BUY"
+
+
+# ── Logic Keywords: symbol_tokens/buy_orders/limit_orders AI-fallback gate ──
+# 2026-07-24: these three lexicon categories were pure reference lists with
+# zero effect on live parsing until this fix -- see
+# core_logic_keyword_triggers.should_skip_ai_fallback_for_no_signal_candidate.
+
+def test_ai_fallback_skipped_when_no_candidate_keyword_present(fresh_db):
+    calls = []
+    result, uq, alerts = _call(
+        "c1", "friday market wrap up nothing exciting happened today", "auto",
+        sig_prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH", ai_return=_AI_RESULT, ai_calls=calls,
+    )
+    assert result is None
+    assert calls == []  # AI never even invoked -- gate short-circuited it
+
+
+def test_ai_fallback_proceeds_when_symbol_token_present(fresh_db):
+    calls = []
+    result, uq, alerts = _call(
+        "c2", "unusual wording but mentions GOLD somewhere", "auto",
+        sig_prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH", ai_return=_AI_RESULT, ai_calls=calls,
+    )
+    assert result is not None
+    assert calls == ["c2"]
+
+
+def test_ai_fallback_gate_disabled_when_all_three_lexicons_emptied(fresh_db):
+    from forex_trader.core import core_logic_keywords as logic_kw
+    logic_kw.set_lexicon("symbol_tokens", [])
+    logic_kw.set_lexicon("buy_orders", [])
+    logic_kw.set_lexicon("limit_orders", [])
+    calls = []
+    result, uq, alerts = _call(
+        "c3", "no trading vocabulary here at all", "auto",
+        sig_prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH", ai_return=_AI_RESULT, ai_calls=calls,
+    )
+    assert result is not None
+    assert calls == ["c3"]

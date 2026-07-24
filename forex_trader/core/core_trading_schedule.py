@@ -14,6 +14,15 @@ only from the automated open_trade_from_signal() path. core_manual_market_order.
 never calls resolve_open_trade_params(), so manual orders are exempt by
 construction, with no special-casing needed here or in open_trade() itself.
 
+Per-source toggles (2026-07-24): each of the 7x3 windows also independently
+gates Telegram / Reversal Engine / Breakout Engine (SOURCE_KEYS) -- see
+check_trading_schedule()'s `source` parameter. Reversal Engine performs well
+overnight (Asia) but loses during London/NY, the opposite of the Telegram
+channels, so a single blanket automated-order switch isn't enough; each
+engine's own live-execution path (reversal_engine_live_execute.py,
+breakout_signal_live_execute.py) now calls this with its own source key,
+alongside the four pre-existing Telegram call sites.
+
 Storage: app_config keys "trading_schedule_enabled" (plain "1"/"0") and
 "trading_schedule" (JSON), same pattern as trading.py's hidden_strategies.
 
@@ -40,8 +49,21 @@ DAY_NAMES = [
 BLOCKS_PER_DAY = 3
 
 
+SOURCE_KEYS = ("telegram", "reversal_engine", "breakout_engine")
+_SOURCE_LABELS = {
+    "telegram": "Telegram", "reversal_engine": "Reversal Engine", "breakout_engine": "Breakout Engine",
+}
+
+
 def _default_block() -> dict:
-    return {"enabled": False, "start": "00:00", "end": "23:59", "target": 0.0}
+    # Per-source toggles (2026-07-24) default True -- a schedule saved before
+    # this feature existed must keep allowing every source exactly as before,
+    # not suddenly block Reversal Engine/Breakout Engine because a new field
+    # is missing.
+    return {
+        "enabled": False, "start": "00:00", "end": "23:59", "target": 0.0,
+        **{k: True for k in SOURCE_KEYS},
+    }
 
 
 def _default_schedule() -> dict:
@@ -72,6 +94,7 @@ def get_trading_schedule() -> dict:
                     "start":   str(b.get("start", "00:00")),
                     "end":     str(b.get("end", "23:59")),
                     "target":  float(b.get("target", 0) or 0),
+                    **{k: bool(b.get(k, True)) for k in SOURCE_KEYS},
                 })
             merged.append(block)
         schedule[day] = merged
@@ -192,9 +215,19 @@ def _block_realized_pnl(block: dict, now: datetime) -> float:
     return float(row[0] or 0.0)
 
 
-def check_trading_schedule(now: Optional[datetime] = None) -> tuple[bool, str]:
+def check_trading_schedule(
+    now: Optional[datetime] = None, source: str = "telegram",
+) -> tuple[bool, str]:
     """Return (allowed, reason). `now` is injectable for tests; defaults to
-    local wall-clock time, matching the plain HH:MM inputs in the UI."""
+    local wall-clock time, matching the plain HH:MM inputs in the UI.
+
+    `source` (2026-07-24) is one of SOURCE_KEYS -- Reversal Engine performs
+    well overnight (Asia) but loses during London/NY, while Telegram signals
+    are the opposite, so each of the 7x3 windows independently gates each
+    source rather than one blanket automated-order switch. Defaults to
+    "telegram" for the four pre-existing call sites (core_signal_resolution.py,
+    ea_bridge.py x2, core_instant_entry.py), all of which are Telegram-signal
+    paths."""
     if not is_trading_schedule_enabled():
         return True, ""
     now = now or datetime.now()
@@ -202,6 +235,9 @@ def check_trading_schedule(now: Optional[datetime] = None) -> tuple[bool, str]:
     idx, block = _find_active_block(schedule, now)
     if block is None:
         return False, f"outside today's trading schedule ({DAY_NAMES[now.weekday()].title()})"
+    if not block.get(source, True):
+        label = _SOURCE_LABELS.get(source, source)
+        return False, f"{label} disabled for this window (Trading > Schedule)"
     target = float(block.get("target", 0) or 0)
     if target > 0:
         pnl = _block_realized_pnl(block, now)

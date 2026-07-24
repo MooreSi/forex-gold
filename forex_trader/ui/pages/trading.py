@@ -878,52 +878,69 @@ def _render_signal_entry(engine):
             notes = ui.input().classes("w-full")
         status_lbl = ui.label("").classes("text-sm text-red-300 mt-1")
 
-        async def _validate_and_get():
-            errors = validate_signal(
+        def _validate() -> list[str]:
+            return validate_signal(
                 direction.value, entry_low.value or 0, entry_high.value or 0,
                 stop_loss.value or 0,
                 tp1.value or None, tp2.value or None, tp3.value or None,
                 tp4.value or None, tp5.value or None,
                 tp6.value or None, tp7.value or None, tp8.value or None,
             )
-            if errors:
-                status_lbl.text = " | ".join(errors)
-                return None
-            return engine.create_signal(
-                source_name="Manual", direction=direction.value,
-                entry_low=entry_low.value or 0, entry_high=entry_high.value or 0,
-                stop_loss=stop_loss.value or 0,
-                tp1=tp1.value or None, tp2=tp2.value or None, tp3=tp3.value or None,
-                tp4=tp4.value or None, tp5=tp5.value or None,
-                tp6=tp6.value or None, tp7=tp7.value or None, tp8=tp8.value or None,
-                lot_size=lot_size.value if lot_size.value else None,
-                notes=notes.value,
-            )
 
         async def submit():
             status_lbl.text = ""
+            errors = _validate()
+            if errors:
+                status_lbl.text = " | ".join(errors)
+                return
             try:
-                sig = await _validate_and_get()
-                if sig:
-                    ui.notify(
-                        f"Signal saved — see Pending Signals tab to execute it.",
-                        type="positive",
-                    )
-                    asyncio.create_task(_background_commentary(engine, sig["signal_id"]))
+                sig = engine.create_signal(
+                    source_name="Manual", direction=direction.value,
+                    entry_low=entry_low.value or 0, entry_high=entry_high.value or 0,
+                    stop_loss=stop_loss.value or 0,
+                    tp1=tp1.value or None, tp2=tp2.value or None, tp3=tp3.value or None,
+                    tp4=tp4.value or None, tp5=tp5.value or None,
+                    tp6=tp6.value or None, tp7=tp7.value or None, tp8=tp8.value or None,
+                    lot_size=lot_size.value if lot_size.value else None,
+                    notes=notes.value,
+                )
+                ui.notify(
+                    f"Signal saved — see Pending Signals tab to execute it.",
+                    type="positive",
+                )
+                asyncio.create_task(_background_commentary(engine, sig["signal_id"]))
             except Exception as e:
                 status_lbl.text = str(e)
 
         async def submit_and_open():
+            # Places a genuine broker-side resting BuyLimit/SellLimit via the
+            # EA (core_manual_limit_order.py) -- fixed 2026-07-24. Previously
+            # routed through open_trade_from_signal(), the same "wait for
+            # price to re-enter the zone, fill at MARKET" path the automatic
+            # Telegram zone-signal handler uses, which only worked when price
+            # already happened to sit inside Entry Low-High at the moment of
+            # the click and rejected with "price is above/below the entry
+            # zone" otherwise -- backwards for a page whose whole point is to
+            # place an order that rests until price gets there.
             status_lbl.text = ""
+            errors = _validate()
+            if errors:
+                status_lbl.text = " | ".join(errors)
+                return
             try:
-                sig = await _validate_and_get()
-                if not sig:
-                    return
-                result = await engine.open_trade_from_signal(
-                    sig["signal_id"], lot_size.value if lot_size.value else None
+                result = await engine.open_manual_limit_order(
+                    direction=direction.value,
+                    entry_low=entry_low.value or 0, entry_high=entry_high.value or 0,
+                    stop_loss=stop_loss.value or 0,
+                    tp1=tp1.value or None, tp2=tp2.value or None, tp3=tp3.value or None,
+                    tp4=tp4.value or None, tp5=tp5.value or None,
+                    tp6=tp6.value or None, tp7=tp7.value or None, tp8=tp8.value or None,
+                    lot_size=lot_size.value if lot_size.value else None,
+                    notes=notes.value,
                 )
                 ui.notify(
-                    f"Trade opened @ {result['entry_price']}", type="positive"
+                    f"Limit order placed @ {result['price']:.2f} — EA ticket {result['mt5_ticket']}",
+                    type="positive",
                 )
             except Exception as e:
                 status_lbl.text = str(e)
@@ -931,12 +948,14 @@ def _render_signal_entry(engine):
 
         with ui.row().classes("gap-2 mt-4"):
             ui.button("Save Signal", on_click=submit).classes("bg-blue-700 text-white px-4 py-2")
-            ui.button("Save & Open Trade", on_click=submit_and_open).classes(
+            ui.button("Place Limit Order", on_click=submit_and_open).classes(
                 "bg-green-700 text-white px-4 py-2"
             )
 
     ui.label(
-        "Saved signals appear in the Pending Signals tab where you can review them and open a trade."
+        "Save Signal records a zone-watch signal (Pending Signals tab) that fills at market once "
+        "price returns to the zone. Place Limit Order sends a genuine resting BuyLimit/SellLimit "
+        "order to the broker via the EA immediately — requires the EA bridge connected and healthy."
     ).classes("text-xs text-gray-500 mt-2 max-w-2xl")
 
 
@@ -1406,7 +1425,10 @@ def _render_schedule():
     cap on AUTOMATED order execution (manual orders are always exempt).
     Signal generation and Telegram ingestion are never affected -- see
     core_trading_schedule.py / core_signal_resolution.py for the gate this
-    UI configures."""
+    UI configures. Each window also independently toggles Telegram/Reversal
+    Engine/Breakout Engine (2026-07-24) -- e.g. Reversal Engine performs
+    well overnight but loses during London/NY, the opposite of the Telegram
+    channels, so a single blanket switch isn't enough."""
     from forex_trader.core import core_trading_schedule as sched
 
     schedule = sched.get_trading_schedule()
@@ -1562,9 +1584,12 @@ def _render_schedule():
         )
     ui.label(
         "Caps automated order execution per day and per time window, once a window's "
-        "profit target is met trading pauses until the next window. Signal generation "
-        "and Telegram ingestion keep running regardless -- this only blocks the final "
-        "order-placement step, and only for automated (not manual) orders."
+        "profit target is met trading pauses until the next window. Each window also "
+        "independently allows/blocks Telegram, Reversal Engine, and Breakout Engine -- "
+        "unchecking one for a window blocks only that source's live execution there, "
+        "the others are unaffected. Signal generation and Telegram ingestion keep "
+        "running regardless -- this only blocks the final order-placement step, and "
+        "only for automated (not manual) orders."
     ).classes("text-xs text-gray-500 mb-3")
 
     _day_widgets: dict[str, list[dict]] = {}
@@ -1591,9 +1616,26 @@ def _render_schedule():
                         ).props("dense outlined").classes("w-28").tooltip(
                             "0 = no profit cap, only the time window applies"
                         )
-                        _day_widgets[day].append(
-                            {"enabled": en, "start": start, "end": end, "target": target}
+                        ui.label("|").classes("text-gray-600")
+                        tg_chk = ui.checkbox("Telegram", value=block["telegram"]).classes(
+                            "text-xs"
+                        ).props("dense").tooltip(
+                            "Allow automated Telegram-signal trades during this window"
                         )
+                        re_chk = ui.checkbox("Reversal Engine", value=block["reversal_engine"]).classes(
+                            "text-xs"
+                        ).props("dense").tooltip(
+                            "Allow Reversal Engine live execution during this window"
+                        )
+                        bo_chk = ui.checkbox("Breakout Engine", value=block["breakout_engine"]).classes(
+                            "text-xs"
+                        ).props("dense").tooltip(
+                            "Allow Breakout Engine live execution during this window"
+                        )
+                        _day_widgets[day].append({
+                            "enabled": en, "start": start, "end": end, "target": target,
+                            "telegram": tg_chk, "reversal_engine": re_chk, "breakout_engine": bo_chk,
+                        })
 
     def _save():
         try:
@@ -1610,6 +1652,9 @@ def _render_schedule():
                         "start":   start_val,
                         "end":     end_val,
                         "target":  float(w["target"].value or 0),
+                        "telegram":         bool(w["telegram"].value),
+                        "reversal_engine":  bool(w["reversal_engine"].value),
+                        "breakout_engine":  bool(w["breakout_engine"].value),
                     })
                 new_schedule[day] = blocks
         except Exception as e:
@@ -2104,18 +2149,138 @@ def _render_strategy_params_card() -> None:
     _draw_body()
 
 
+def _render_global_parameters_card(rs: dict) -> None:
+    """
+    Global Parameters (2026-07-24): account-wide numbers that used to be
+    scattered across the per-template EA Templates form, Active Strategy,
+    and Risk Settings -- collected into one place since none of them are
+    actually specific to a single template/strategy:
+
+    - Harvest: moved from EA Templates' per-template harvest_enabled/
+      harvest_threshold. Now applies to EVERY open position on the MT5
+      account regardless of which strategy or template opened it (or
+      whether it's EA-managed at all) -- pushed to the EA as a standing
+      global config (ea_bridge.EABridge.push_global_config) rather than a
+      per-trade field on open_trade, and the EA's OnTick sweeps every open
+      position by ticket, not just the ones in its own g_trades[]/
+      g_pending[] tracking. See ForexTraderBridge.mq5's
+      CheckGlobalHarvest().
+    - Fixed Lot Size (Single): moved from Active Strategy, same
+      strategy_lot_size column/semantics (0 = risk-based auto) -- "fixed
+      lot always wins" everywhere it's read (core_open_trade.py,
+      core_fees_sizing.suggest_lot_size, core_manual_limit_order.py).
+    - Fixed Lot Size (Grid): new. Used instead of the computed lot size
+      for each leg of an EA Template in Grid mode -- see
+      core_open_trade.py's template dispatch and
+      ForexTraderBridge.mq5's HandleOpenTemplateGrid.
+    - Risk per trade % / Max Risk per trade %: moved from Risk Settings,
+      same risk_per_trade_pct/max_risk_per_trade_pct columns. Already fed
+      into every strategy and template's lot sizing via
+      core_fees_sizing.suggest_lot_size (risk_per_trade_pct as the base
+      calculation, max_risk_per_trade_pct as an independent ceiling on
+      top) -- moving them here is a pure UI relocation, no resolution
+      logic changed.
+    """
+    with ui.row().classes("items-center gap-2 mb-2"):
+        ui.label("Global Parameters").classes("text-base font-bold text-yellow-300")
+        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+            "Account-wide settings that apply to every strategy and template, "
+            "regardless of which channel or EA Template opened the trade."
+        )
+
+    with ui.grid(columns=2).classes("w-full gap-3"):
+        with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+            harvest_enabled = ui.switch(
+                "Harvest", value=bool(rs.get("global_harvest_enabled", 0)),
+            ).classes("text-sm")
+            harvest_threshold = ui.number(
+                "Profit threshold ($)", value=float(rs.get("global_harvest_threshold_usd", 50.0)),
+                min=0.0, step=5.0,
+            ).classes("w-full mt-1").props("dense outlined")
+            ui.label(
+                "Auto-close ANY open position (regardless of strategy, template, "
+                "or how it was opened) once its own floating P&L reaches this "
+                "amount."
+            ).classes("text-xs text-gray-500 mt-1")
+
+        with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+            fixed_lot_single = ui.number(
+                "Fixed Lot Size (Single)", value=float(rs.get("strategy_lot_size", 0.0)),
+                min=0.0, step=0.01, format="%.2f",
+            ).classes("w-full").props("dense outlined")
+            fixed_lot_single.tooltip(
+                "Overrides risk-based sizing for every strategy and single-mode "
+                "template. 0 = risk-based auto (Risk per trade %, below)."
+            )
+            fixed_lot_grid = ui.number(
+                "Fixed Lot Size (Grid)", value=float(rs.get("strategy_lot_size_grid", 0.0)),
+                min=0.0, step=0.01, format="%.2f",
+            ).classes("w-full mt-2").props("dense outlined")
+            fixed_lot_grid.tooltip(
+                "Lot size used for EACH leg of an EA Template in Grid mode. "
+                "0 = use the same lot as a normal (non-grid) trade."
+            )
+
+        with ui.card().classes("bg-gray-900 p-3 rounded-lg col-span-2"):
+            with ui.row().classes("w-full gap-3"):
+                risk_pct = ui.number(
+                    "Risk per trade (%)", value=float(rs.get("risk_per_trade_pct", 0.5)),
+                    min=0.01, max=100, step=0.1, format="%.2f",
+                ).classes("flex-1").props("dense outlined")
+                risk_pct.tooltip(
+                    "Percentage of balance risked per trade — determines lot size "
+                    "automatically when Fixed Lot Size is 0."
+                )
+                max_risk_pct = ui.number(
+                    "Max Risk per trade (%)", value=float(rs.get("max_risk_per_trade_pct", 1.0)),
+                    min=0.01, max=100, step=0.1, format="%.2f",
+                ).classes("flex-1").props("dense outlined")
+                max_risk_pct.tooltip(
+                    "Hard ceiling — the risk-based lot size (above) is never allowed "
+                    "to exceed this percentage of balance, regardless of Risk per "
+                    "trade %. Does not apply when Fixed Lot Size is set."
+                )
+
+    def _save_global_params():
+        try:
+            db_module.update_risk_settings({
+                "global_harvest_enabled":       int(bool(harvest_enabled.value)),
+                "global_harvest_threshold_usd": float(harvest_threshold.value or 0),
+                "strategy_lot_size":             float(fixed_lot_single.value or 0),
+                "strategy_lot_size_grid":        float(fixed_lot_grid.value or 0),
+                "risk_per_trade_pct":            float(risk_pct.value or 0),
+                "max_risk_per_trade_pct":        float(max_risk_pct.value or 0),
+            })
+            from forex_trader.core import ea_bridge as _ea_mod
+            _ea = _ea_mod.get_instance()
+            if _ea is not None:
+                asyncio.create_task(_ea.push_global_config())
+            ui.notify("Global Parameters saved", type="positive")
+        except Exception as ex:
+            ui.notify(str(ex), type="negative")
+
+    ui.button("Save Global Parameters", on_click=_save_global_params).classes(
+        "bg-blue-700 text-white mt-3 px-4 py-2 text-sm"
+    )
+
+
 def _render_ea_templates_card() -> None:
     """
     EA Templates: complete, self-contained, EA-managed trade-management
     definitions (Grid vs Single, TP/SL visibility, trailing method,
-    breakeven rule, cancel-pending-siblings, profit harvesting) -- a
-    channel can be assigned a saved template in the Channel Strategy card
-    below in place of a built-in strategy. Unlike Strategy Parameters
-    above (which only retunes existing Python-managed strategies), a
-    template fully replaces strategy dispatch and the EA manages the
-    trade end-to-end -- every field here is sent fresh on each open, so
-    changing a template's values never needs an EA recompile. See
-    core_ea_templates.py's module docstring.
+    breakeven rule, cancel-pending-siblings) -- a channel can be assigned a
+    saved template in the Channel Strategy card below in place of a
+    built-in strategy. Unlike Strategy Parameters above (which only
+    retunes existing Python-managed strategies), a template fully
+    replaces strategy dispatch and the EA manages the trade end-to-end --
+    every field here is sent fresh on each open, so changing a template's
+    values never needs an EA recompile. See core_ea_templates.py's module
+    docstring. Harvest moved to Global Parameters (below) 2026-07-24 --
+    it now applies account-wide to every open position regardless of how
+    it was opened, not just this template's own trades. Anchor TP (added
+    2026-07-24): a per-TP pips/pct ladder -- pips fill any level the raw
+    signal didn't supply, pct always wins over the signal (which never
+    states a close percentage) -- see core_open_trade.py's EA-handoff block.
     """
     from forex_trader.core import core_ea_templates as et
 
@@ -2176,19 +2341,6 @@ def _render_ea_templates_card() -> None:
                     ui.label(
                         "Logic Keywords triggers (CLOSE ALL / RISK FREE-BE / TP HIT) "
                         "apply to trades opened under this template."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    fields["harvest_enabled"] = ui.switch(
-                        "Harvest", value=bool(live["harvest_enabled"]),
-                    ).classes("text-sm")
-                    fields["harvest_threshold"] = ui.number(
-                        "Profit threshold ($)", value=float(live["harvest_threshold"]),
-                        step=5.0,
-                    ).classes("w-full mt-1").props("dense outlined")
-                    ui.label(
-                        "Auto-close and bank profit once floating P&L reaches this "
-                        "amount, independent of any TP level."
                     ).classes("text-xs text-gray-500 mt-1")
 
                 with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
@@ -2298,6 +2450,34 @@ def _render_ea_templates_card() -> None:
                         "Block a new template-managed trade for the same channel/"
                         "direction while one is already open."
                     ).classes("text-xs text-gray-500 mt-1")
+
+            with ui.row().classes("items-center gap-2 mb-2 mt-1"):
+                ui.label("Anchor TP").classes(
+                    "text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                )
+                ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                    "Per-TP-level pips + close %. Pips are only used as a fallback "
+                    "for any TP level the raw signal itself didn't supply (entry ± "
+                    "N pips) -- a level the signal DID state always keeps that "
+                    "price. % always comes from here regardless, since a signal "
+                    "states TP prices but never how much to close at each one. "
+                    "0 = level unused."
+                )
+            with ui.card().classes("bg-gray-900 p-3 rounded-lg w-full mb-2"):
+                with ui.grid(columns=9).classes("w-full gap-2 items-center"):
+                    ui.label("")
+                    for n in range(1, 9):
+                        ui.label(f"TP{n}").classes("text-xs font-semibold text-yellow-300 text-center")
+                    ui.label("pips").classes("text-xs text-gray-500")
+                    for n in range(1, 9):
+                        fields[f"tp{n}_pips"] = ui.number(
+                            value=float(live[f"tp{n}_pips"]), step=1.0, min=0,
+                        ).classes("w-full").props("dense outlined")
+                    ui.label("%").classes("text-xs text-gray-500")
+                    for n in range(1, 9):
+                        fields[f"tp{n}_pct"] = ui.number(
+                            value=float(live[f"tp{n}_pct"]), step=1.0, min=0, max=100,
+                        ).classes("w-full").props("dense outlined")
 
             with ui.row().classes("gap-2 mt-1"):
                 ui.button(
@@ -2637,6 +2817,10 @@ def _render_strategy(engine):
           with ui.card().classes("flex-1 min-w-72 bg-gray-800 p-2 rounded-lg"):
             _render_channel_strategy_card(engine, all_names, rs)
 
+        # ── Global Parameters card (full width) ────────────────────────────────
+        with ui.card().classes("w-full bg-gray-800 p-2 rounded-lg"):
+            _render_global_parameters_card(rs)
+
         # ── EA Templates card (full width) ────────────────────────────────────
         with ui.card().classes("w-full bg-gray-800 p-2 rounded-lg"):
             _render_ea_templates_card()
@@ -2678,30 +2862,6 @@ def _render_strategy(engine):
                         min=0.1, step=0.5, format="%.1f",
                     ).classes("w-full")
 
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Fixed Lot Size (0 = risk-based auto)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Override the risk-calculated lot size. Set to 0 to use automatic sizing."
-                        )
-                    lot_override = ui.number(
-                        value=float(rs.get("strategy_lot_size", 0.0)),
-                        min=0.0, step=0.01, format="%.2f",
-                    ).classes("w-full")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Profit Take Target ($ cumulative, 0 = disabled)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Close automatically when cumulative profit (partial closes already "
-                            "taken + unrealised P&L on remaining lots) reaches this USD amount. "
-                            "Applies to all strategies including DPM. Set to 0 to disable."
-                        )
-                    tp_at_usd = ui.number(
-                        value=float(rs.get("profit_close_usd", 0.0) or 0.0),
-                        min=0.0, step=1.0, format="%.2f",
-                    ).classes("w-full")
-
                 ui.separator().classes("my-2")
 
                 with ui.column().classes("gap-0 w-full"):
@@ -2734,8 +2894,6 @@ def _render_strategy(engine):
                         db_module.update_risk_settings({
                             "trail_stop_sl_pts":       float(trail_stop_sl.value or 5.0),
                             "trailing_stop_distance":  float(trail_dist.value or 3.0),
-                            "strategy_lot_size":       lot_override.value,
-                            "profit_close_usd":        float(tp_at_usd.value or 0),
                             "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
                             "kelly_sizing_enabled":    int(kelly_enabled.value),
                         })
@@ -2834,12 +2992,8 @@ def _render_strategy(engine):
 
                 # Immediate Market Buy/Sell moved to Parsing > Logic Keywords tab (2026-07-23).
 
-            # ── Card 1b: Risk Settings (linked to Active Strategy) ────────────
-            _set_risk_lot = render_risk_card("bg-gray-800 p-4 rounded-lg shrink-0 w-72")
-            # Reactively grey/ungrey risk-per-trade fields when lot_override changes.
-            lot_override.on_value_change(
-                lambda e: _set_risk_lot(float(e.value or 0))
-            )
+            # ── Card 1b: Risk Settings ──────────────────────────────────────────
+            render_risk_card("bg-gray-800 p-4 rounded-lg shrink-0 w-72")
 
         # ── Quick comparison table ─────────────────────────────────────────────
         compare_container = ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-2")

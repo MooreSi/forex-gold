@@ -106,10 +106,39 @@ def test_no_exclusion_keyword_proceeds(fresh_db):
 
 
 def test_no_symbol_mention_still_proceeds(fresh_db):
-    """Deliberately NOT gated on symbol_tokens -- see the function's own
-    docstring for the regression this avoids (AI-fallback-eligible messages
-    that never literally say GOLD/XAU)."""
+    """Deliberately NOT gated on symbol_tokens here -- see the function's own
+    docstring for the regression this avoids (deterministic-format signals
+    that never literally say GOLD/XAU). symbol_tokens IS wired elsewhere --
+    see should_skip_ai_fallback_for_no_signal_candidate below."""
     assert trig.should_skip_for_exclusion("random chatter with no symbol at all", {}) is None
+
+
+# ── should_skip_ai_fallback_for_no_signal_candidate ─────────────────────────
+
+def test_ai_fallback_gate_skips_with_no_candidate_keyword(fresh_db):
+    reason = trig.should_skip_ai_fallback_for_no_signal_candidate(
+        "nothing relevant here at all", {},
+    )
+    assert reason is not None
+
+
+def test_ai_fallback_gate_proceeds_on_symbol_token(fresh_db):
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate("mentions GOLD somewhere", {}) is None
+
+
+def test_ai_fallback_gate_proceeds_on_buy_orders_token(fresh_db):
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate("looks like a BUY setup", {}) is None
+
+
+def test_ai_fallback_gate_proceeds_on_limit_orders_token(fresh_db):
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate("check the AREA below", {}) is None
+
+
+def test_ai_fallback_gate_disabled_when_all_lexicons_empty(fresh_db):
+    lk.set_lexicon("symbol_tokens", [])
+    lk.set_lexicon("buy_orders", [])
+    lk.set_lexicon("limit_orders", [])
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate("literally anything", {}) is None
 
 
 # ── try_handle_close_all_trigger ────────────────────────────────────────────

@@ -872,6 +872,29 @@ def _apply_schema() -> None:
             # instead and shift SL/TPs by the breach delta rather than losing
             # the signal outright.
             "ALTER TABLE vantage_risk_settings ADD COLUMN lk_entry_realignment INTEGER NOT NULL DEFAULT 0",
+            # Trading > Global Parameters (2026-07-24) -- moved out of the
+            # per-template EA Templates form and the Risk Settings tab so
+            # they read as one shared set of account-wide numbers instead of
+            # being scattered/duplicated across tabs. See core_ea_templates.py
+            # and core_fees_sizing.suggest_lot_size for how they're consumed.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN strategy_lot_size_grid REAL NOT NULL DEFAULT 0.0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN global_harvest_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN global_harvest_threshold_usd REAL NOT NULL DEFAULT 50.0",
+        ] + [
+            # EA Templates > Anchor TP (2026-07-24) -- a per-template pip/pct
+            # ladder. tp{n}_pips is used only as a FALLBACK when the raw
+            # Telegram signal itself didn't supply that TP level (entry ±
+            # N pips); tp{n}_pct always wins over whatever the signal
+            # implies, since a signal states TP prices but never states how
+            # much to close at each one -- see core_open_trade.py's EA-
+            # handoff block and core_ea_templates.py's DEFAULTS. 0 for
+            # either field means "this level is unused" (matches the
+            # existing tp6-8/pct-table convention everywhere else).
+            f"ALTER TABLE ea_trade_templates ADD COLUMN tp{n}_pips REAL NOT NULL DEFAULT 0.0"
+            for n in range(1, 9)
+        ] + [
+            f"ALTER TABLE ea_trade_templates ADD COLUMN tp{n}_pct REAL NOT NULL DEFAULT 0.0"
+            for n in range(1, 9)
         ]:
             try:
                 conn.execute(stmt)
@@ -1070,9 +1093,7 @@ from forex_trader.core.core_db_channel import (  # noqa: E402,F401
     _CHANNEL_TRUST_MIN_WR,
     get_channel_trust,
     CANONICAL_CHANNELS,
-    CANONICAL_CHANNEL_ORDER,
     _canonical,
-    register_canonical_channel,
     get_channel_strategy_override,
     _applying_sync_channel_strategy,
     set_channel_strategy_override,

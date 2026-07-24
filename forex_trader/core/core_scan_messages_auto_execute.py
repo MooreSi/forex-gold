@@ -98,7 +98,19 @@ async def execute_auto_signal(
     gap_note = ""
 
     # ── Instant trade follow-up ──────────────────────────────────
-    if bool(rs.get("immediate_market_entry", 0)):
+    # Fixed 2026-07-24: IME follow-up matching must only ever apply to a
+    # market-order-shaped follow-up (the normal "XAU USD BUY NOW" -> full
+    # zone-signal pattern this feature exists for) -- never to a message
+    # that is itself a genuine "BUY/SELL [LIMITS] GOLD @ .../... AREA"
+    # Limit Runner/pending-order signal (parsed["tp_open"] is only ever
+    # present, True or False, on that format's own return dict -- see
+    # signal_parser.parse_limit_order_signal). Without this guard, a
+    # template-configured channel sending a bare IME trigger followed by a
+    # genuine Limit signal for a *different* setup had the Limit signal
+    # silently swallowed as a "follow-up" and applied to the already-open
+    # instant-entry market trade instead of ever placing the resting order
+    # it actually described.
+    if bool(rs.get("immediate_market_entry", 0)) and parsed.get("tp_open") is None:
         followup_matched = await find_and_apply_instant_followup_fn(
             channel_name, parsed["direction"], parsed, tg_id,
         )

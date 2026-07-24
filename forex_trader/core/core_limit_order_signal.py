@@ -189,7 +189,7 @@ async def handle_limit_order_signal(
     )
     return {
         "skip_reason": (
-            f"Limit order placed — {direction} {lot:g} lots @ {price:.2f} "
+            f"Limit order placed (Limit Runner) — {direction} {lot:g} lots @ {price:.2f} "
             f"(EA ticket {ticket}), SL {stop_loss:.2f}. Will notify on fill."
         ),
     }
@@ -271,7 +271,7 @@ async def _open_realigned_market_order(
     )
     return {
         "skip_reason": (
-            f"Entry realigned — zone already breached, entered at market "
+            f"Entry realigned (Limit Runner) — zone already breached, entered at market "
             f"{fill_price:.2f} lots {lot:g} (was {original_price:.2f}), "
             f"SL {realigned_sl:.2f} (EA ticket {ticket})."
         ),

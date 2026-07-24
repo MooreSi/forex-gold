@@ -434,6 +434,31 @@ class EABridge:
                 msg[f"tp{n}"] = tps[n]
         return await self._send(msg)
 
+    async def push_global_config(self) -> bool:
+        """Push Trading > Global Parameters' Harvest setting to the EA --
+        called after every save on that card, and once per connection (see
+        _dispatch's "hello" handling) since the EA's own copy is pure
+        in-memory state with no persistence, same gap restore_pending_order
+        closes for pending orders.
+
+        Unlike the old per-template tpl_harvest_enabled/tpl_harvest_threshold
+        (sent once, at open_trade time, and only ever applied to that one
+        EA-managed trade), this is standing config the EA checks against
+        EVERY open position on the symbol each tick — see
+        CheckGlobalHarvest() in ForexTraderBridge.mq5 — so it applies
+        immediately to trades already open when the setting changes, and to
+        Python-managed (non-EA) trades too, not just ones opened after the
+        change. Fire-and-forget: no ack expected, same as update_trade.
+        """
+        from forex_trader.core import database as db_module
+        rs = await db_module.to_db_thread(db_module.get_risk_settings)
+        msg = {
+            "type": "set_global_config",
+            "harvest_enabled": 1 if rs.get("global_harvest_enabled", 0) else 0,
+            "harvest_threshold": float(rs.get("global_harvest_threshold_usd", 50.0)),
+        }
+        return await self._send(msg)
+
     # ── Inbound events from the EA ────────────────────────────────────────────
 
     async def _dispatch(self, msg: dict) -> None:
@@ -441,6 +466,7 @@ class EABridge:
         if t == "hello":
             log.info("[EABridge] EA hello: account=%s symbol=%s",
                      msg.get("account"), msg.get("symbol"))
+            asyncio.create_task(self.push_global_config())
             asyncio.create_task(self._restore_pending_orders())
         elif t == "ping":
             await self._send({"type": "pong"})
@@ -609,7 +635,7 @@ class EABridge:
             # risk once the target is hit. The fill already happened -- an
             # immediate real close is the only protective action left.
             if row["strategy"] != "orb_fixed":
-                _sched_ok, _sched_reason = check_trading_schedule()
+                _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
                 if not _sched_ok and self._engine is not None:
                     try:
                         await self._engine.close_trade(trade_id, "trading_schedule_blocked")
@@ -676,7 +702,7 @@ class EABridge:
         # own check: the leg was accepted by the broker before we could know
         # whether the window's profit target would still allow it by fill
         # time, and the only protective action left is an immediate real close.
-        _sched_ok, _sched_reason = check_trading_schedule()
+        _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
         if not _sched_ok and self._engine is not None:
             try:
                 await self._engine.close_trade(original_id, "trading_schedule_blocked")

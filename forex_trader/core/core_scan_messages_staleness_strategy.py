@@ -21,6 +21,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core import telegram_alerts, ai_provider, channel_strategy_ai
 from forex_trader.core.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
 
@@ -161,6 +162,8 @@ async def resolve_strategy_and_skip_reason(
 
     if bool(rs.get("dpm_enabled", 0)):
         strategy_name = "DPM"
+    elif ea_templates.is_template_override(strategy):
+        strategy_name = f"Template: {ea_templates.template_name_from_override(strategy)}"
     else:
         strategy_name = STRATEGY_NAMES.get(strategy, strategy)
 

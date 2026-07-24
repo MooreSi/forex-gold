@@ -35,6 +35,19 @@ _REF_CORR_LEAD_MAX_S = _SIGNAL_MAX_AGE_S  # we fired first: up to 2h (signal lif
 _REF_CORR_LAG_MAX_S  = 300     # REF fired first: 5 min grace (delivery latency)
 _REF_CORR_PRICE_DELTA = 3.0    # pts between entry-zone midpoints (zones are 3-4pts wide)
 
+# Stable Telegram group IDs -- never change on a channel rename, unlike
+# group_name (see telegram_research.py's identical constants). Matching on
+# these instead of a hardcoded name string is what makes this module
+# immune to the exact bug found 2026-07-24: GD2's channel was renamed on
+# Telegram's side ("GOLD DIGGERS 2.0 ⚡️" -> "GOLD DIGGERS INSTITUTIONAL",
+# same group_id 2616846888) and every hardcoded name-string comparison in
+# this file silently stopped matching any real signal recorded after the
+# rename, since vantage_tg_signals isn't part of core_db_channel.
+# sync_channel_rename's cascade (only channel_parser_config/
+# channel_performance/etc. are).
+_REF_GROUP_ID = "1608388054"
+_GD2_GROUP_ID = "2616846888"
+
 
 class _CorrelationMixin:
     async def _check_correlation(self) -> None:
@@ -50,7 +63,7 @@ class _CorrelationMixin:
           - Same channel: a RE signal only matches real signals from the
             channel it was modelled on (source_channel), never cross-channel.
         """
-        _COVERED_CHANNELS = ("Gold Diggers VIP", "GOLD DIGGERS 2.0 ⚡️")
+        _covered_group_ids = (_REF_GROUP_ID, _GD2_GROUP_ID)
         # Recent real signals from either channel (last 4 hours) -- used
         # for the actual matching window.
         cutoff = time.time() - 14400
@@ -64,16 +77,16 @@ class _CorrelationMixin:
             con = sqlite3.connect(db_path, timeout=5)
             con.row_factory = sqlite3.Row
             try:
-                _ph = ",".join("?" for _ in _COVERED_CHANNELS)
+                _ph = ",".join("?" for _ in _covered_group_ids)
                 ref_rows = con.execute(f"""
                     SELECT id, group_name, direction, entry_low, entry_high, parsed_at, status
                     FROM vantage_tg_signals
-                    WHERE group_name IN ({_ph})
+                    WHERE group_id IN ({_ph})
                     AND direction IN ('BUY','SELL')
                     AND parsed_at > ?
                     ORDER BY parsed_at DESC
                     LIMIT 100
-                """, (*_COVERED_CHANNELS, cutoff)).fetchall()
+                """, (*_covered_group_ids, cutoff)).fetchall()
                 # True count of real signals received so far *today* (UTC), both
                 # channels combined -- distinct from ref_rows above, which is only
                 # a 4h rolling window used for matching.
@@ -82,10 +95,10 @@ class _CorrelationMixin:
                 ).timestamp()
                 ref_today_count = con.execute(f"""
                     SELECT COUNT(*) FROM vantage_tg_signals
-                    WHERE group_name IN ({_ph})
+                    WHERE group_id IN ({_ph})
                     AND direction IN ('BUY','SELL')
                     AND parsed_at >= ?
-                """, (*_COVERED_CHANNELS, day_start)).fetchone()[0]
+                """, (*_covered_group_ids, day_start)).fetchone()[0]
                 return ref_rows, ref_today_count
             finally:
                 con.close()
@@ -102,6 +115,8 @@ class _CorrelationMixin:
         if _fetch_result is None:
             return
         ref_rows, ref_today_count = _fetch_result
+
+        from forex_trader.core import core_db_channel as _cdc
 
         # Build lookup of recent RE signals (pending/triggered, last 4h)
         re_recent = [
@@ -127,7 +142,14 @@ class _CorrelationMixin:
                 # Never cross-correlate a GD2-modelled signal against a real
                 # REF message or vice versa -- each RE signal is only ever
                 # trying to predict the one channel it was built from.
-                if ref["group_name"] != re_channel:
+                # Canonicalised on both sides (not a raw string equality) so
+                # this keeps matching correctly regardless of which literal
+                # name either side happens to hold after a channel rename --
+                # ref["group_name"] is whatever the live channel is called
+                # right now (via the group_id-scoped fetch above), re_channel
+                # may still be an older name if it was stamped before a
+                # rename. See core_db_channel._canonical()/CANONICAL_CHANNELS.
+                if _cdc._canonical(ref["group_name"]) != _cdc._canonical(re_channel):
                     continue
 
                 ref_mid = ((float(ref["entry_low"] or 0) + float(ref["entry_high"] or 0)) / 2)
@@ -228,17 +250,17 @@ class _CorrelationMixin:
             try:
                 last_row = con.execute("""
                     SELECT parsed_at FROM vantage_tg_signals
-                    WHERE group_name='Gold Diggers VIP' AND direction IN ('BUY','SELL')
+                    WHERE group_id=? AND direction IN ('BUY','SELL')
                     ORDER BY parsed_at DESC LIMIT 1
-                """).fetchone()
+                """, (_REF_GROUP_ID,)).fetchone()
                 day_start = datetime.now(timezone.utc).replace(
                     hour=0, minute=0, second=0, microsecond=0
                 ).timestamp()
                 today_count = con.execute("""
                     SELECT COUNT(*) FROM vantage_tg_signals
-                    WHERE group_name='Gold Diggers VIP' AND direction IN ('BUY','SELL')
+                    WHERE group_id=? AND direction IN ('BUY','SELL')
                     AND parsed_at >= ?
-                """, (day_start,)).fetchone()[0]
+                """, (_REF_GROUP_ID, day_start)).fetchone()[0]
                 return (last_row["parsed_at"] if last_row else None), today_count
             finally:
                 con.close()

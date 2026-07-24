@@ -89,7 +89,7 @@ class _FakeEA:
                          pcts=None, be_at_pos=None, trail_mode=None, template=None):
         self.open_trade_calls.append(
             {"trade_id": trade_id, "direction": direction, "lot_size": lot_size,
-             "stop_loss": stop_loss, "tps": tps, "strategy": strategy}
+             "stop_loss": stop_loss, "tps": tps, "strategy": strategy, "pcts": pcts}
         )
         return self._ack
 
@@ -272,6 +272,67 @@ def test_template_strategy_ea_managed_forwards_template_payload(fresh_db):
     assert len(fake_ea.open_trade_calls) == 1
 
 
+def test_template_grid_mode_uses_fixed_lot_size_grid_override(fresh_db):
+    # Trading > Global Parameters > Fixed Lot Size (Grid) -- 2026-07-24.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.25})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Grid Stealth"), lot_size=0.10)
+    ))
+
+    assert fake_ea.open_trade_calls[0]["lot_size"] == 0.25
+
+
+def test_template_single_mode_ignores_fixed_lot_size_grid(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Single Stealth", {"mode": "single", "tpsl_mode": "stealth"})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.25})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Single Stealth"), lot_size=0.10)
+    ))
+
+    assert fake_ea.open_trade_calls[0]["lot_size"] == 0.10
+
+
+def test_template_grid_mode_zero_override_keeps_normal_lot(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.0})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Grid Stealth"), lot_size=0.10)
+    ))
+
+    assert fake_ea.open_trade_calls[0]["lot_size"] == 0.10
+
+
+def test_non_template_strategy_ignores_fixed_lot_size_grid(fresh_db):
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.25})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(bridge, **_open_kwargs(lot_size=0.10)))
+
+    assert fake_ea.open_trade_calls[0]["lot_size"] == 0.10
+
+
 def test_template_strategy_raises_when_ea_unhealthy_no_python_fallback(fresh_db):
     from forex_trader.core import core_ea_templates as et
     et.save_ea_template("Grid Stealth", {})
@@ -299,6 +360,87 @@ def test_template_strategy_raises_when_ea_bridge_disabled_no_python_fallback(fre
             bridge, **_open_kwargs(strategy=et.override_for_template("Grid Stealth"))
         ))
     assert bridge.place_order_calls == []
+
+
+# ── EA Templates -- Anchor TP (2026-07-24) ──────────────────────────────────
+
+def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Anchor Test", {
+        "tp1_pips": 20.0, "tp1_pct": 25.0,
+        "tp2_pips": 50.0, "tp2_pct": 100.0,
+    })
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()  # tick: bid=2399.8, ask=2400.2
+
+    # Signal only states tp1 (2410.0) -- template must fill tp2 from its own
+    # pips ladder (entry ± pips) since the signal didn't supply it.
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(
+            strategy=et.override_for_template("Anchor Test"), tp1=2410.0, tp2=None,
+        )
+    ))
+
+    call = fake_ea.open_trade_calls[0]
+    assert call["tps"][1] == 2410.0                    # signal's own TP1 untouched
+    assert call["tps"][2] == pytest.approx(2400.2 + 50.0)  # BUY: ask + tp2_pips
+    assert call["pcts"] == [25.0, 100.0]                # template's %s, positional by TP number
+
+
+def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Anchor Test", {"tp1_pips": 999.0, "tp1_pct": 50.0})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Anchor Test"), tp1=2410.0)
+    ))
+
+    assert fake_ea.open_trade_calls[0]["tps"][1] == 2410.0  # signal's price wins, not entry+999
+
+
+def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Anchor Test", {"tp1_pips": 30.0, "tp1_pct": 100.0})
+    _insert_signal(direction="SELL")
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()  # tick: bid=2399.8, ask=2400.2
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(
+            strategy=et.override_for_template("Anchor Test"), direction="SELL",
+            tp1=None, entry_low=2390.0, entry_high=2392.0, stop_loss=2400.0,
+        )
+    ))
+
+    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2399.8 - 30.0)  # SELL: bid - pips
+
+
+def test_anchor_tp_all_zero_pct_sends_no_pcts_field(fresh_db):
+    # Every template saved before this feature existed has tp{n}_pct all at
+    # the 0.0 default -- must behave exactly as before (pcts stays None).
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Plain Template", {"mode": "single", "tpsl_mode": "stealth"})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Plain Template"), tp1=2410.0)
+    ))
+
+    assert fake_ea.open_trade_calls[0]["pcts"] is None
 
 
 # ── TP selection for the broker-side order ─────────────────────────────────────

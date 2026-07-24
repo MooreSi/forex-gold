@@ -147,6 +147,11 @@ _SYNCED_SETTINGS_KEYS = (
     # even when the executed trade_strategy itself is correct.
     "trail_stop_sl_pts", "trailing_stop_distance", "strategy_lot_size",
     "atr_collapse_threshold", "display_strategy_id",
+    # Trading > Global Parameters (2026-07-24) -- strategy_lot_size (above)
+    # moved here from Active Strategy; these three are new. Added up front
+    # this time rather than found later as a gap, per the recurring pattern
+    # every entry above this one already documents.
+    "strategy_lot_size_grid", "global_harvest_enabled", "global_harvest_threshold_usd",
     "hour_blocklist_enabled",
     # ORB/IVB Report's auto-execute toggle — whichever node ends up as the
     # active trader is the one whose scheduler actually checks this flag, so

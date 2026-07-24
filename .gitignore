@@ -24,10 +24,11 @@ forex_trader/test_signal/.passwd
 backups/
 
 # Build artifacts / vendored binaries — large, generated, not source
-installer/python_embed/
 installer/Output/
-FOREX_Trader_Setup.exe
 FOREX Trader.app/
+
+# FOREX_Trader_Setup.exe is intentionally committed (see installer/
+# BUILD_INSTALLER.md) — a fresh clone should ship a ready-to-run installer
 
 # Test/tooling caches
 .pytest_cache/

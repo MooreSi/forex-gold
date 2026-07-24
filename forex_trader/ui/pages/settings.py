@@ -58,6 +58,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         t_diag   = ui.tab("Diagnostics")
         t_reg    = ui.tab("Registration")
         t_upd    = ui.tab("Update")
+        t_theme  = ui.tab("Theme")
 
     with ui.tab_panels(stabs, value=t_mt5).classes("bg-gray-900 p-4"):
         with ui.tab_panel(t_mt5):
@@ -78,6 +79,8 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         with ui.tab_panel(t_upd):
             from forex_trader.ui.pages.update_panel import render as _render_update
             _render_update()
+        with ui.tab_panel(t_theme):
+            _render_theme()
 
     _diag_refresh_timer = [None]
 
@@ -3125,6 +3128,63 @@ def _render_diagnostics(engine):
 
 
 # ── Registration tab ───────────────────────────────────────────────────────────
+
+def _render_theme():
+    """Settings → Theme tab — pick a dark-mode color preset for the whole app.
+
+    See core_ui_theme.py's module docstring for why this is dark-only
+    presets (neutral palette swap) rather than a real light mode.
+    """
+    from forex_trader.core import core_ui_theme as theme_mod
+
+    with ui.column().classes("w-full max-w-2xl gap-3"):
+        ui.label("Color Theme").classes("text-base font-bold text-yellow-300")
+        ui.label(
+            "Applies to the whole app immediately — no restart needed. "
+            "All presets stay dark; only the neutral background/border tones "
+            "change. Status colors (profit/loss/warnings) never change."
+        ).classes("text-xs text-gray-400 mb-2")
+
+        current = {"value": theme_mod.get_theme()}
+        cards: dict[str, object] = {}
+
+        def _select(name: str) -> None:
+            theme_mod.set_theme(name)
+            current["value"] = name
+            for key, card in cards.items():
+                card.classes(
+                    remove="border-blue-500" if key != name else "",
+                    add="border-blue-500" if key == name else "border-gray-700",
+                )
+            ui.run_javascript(
+                f'document.documentElement.setAttribute("data-fx-theme","{name}")'
+            )
+            ui.notify(f"Theme set to {theme_mod.THEME_LABELS[name]}", type="positive")
+
+        with ui.row().classes("gap-3 flex-wrap"):
+            for name in theme_mod.THEMES:
+                bg, border, text = theme_mod.THEME_SWATCHES[name]
+                is_active = name == current["value"]
+                card = ui.card().classes(
+                    "cursor-pointer p-3 w-48 border-2 "
+                    + ("border-blue-500" if is_active else "border-gray-700")
+                ).style(f"background:{bg};")
+                cards[name] = card
+                with card:
+                    card.on("click", lambda _e, n=name: _select(n))
+                    ui.label(theme_mod.THEME_LABELS[name]).style(
+                        f"color:{text};font-weight:600;font-size:13px;"
+                    )
+                    ui.label(theme_mod.THEME_DESCRIPTIONS[name]).style(
+                        f"color:{text};font-size:11px;opacity:0.8;"
+                    )
+                    with ui.row().classes("gap-1 mt-2"):
+                        for swatch_color in (bg, border, text):
+                            ui.element("div").style(
+                                f"width:16px;height:16px;border-radius:3px;"
+                                f"background:{swatch_color};border:1px solid #00000040;"
+                            )
+
 
 def _render_registration():
     """Settings → Registration tab — shows stored licence / account details."""

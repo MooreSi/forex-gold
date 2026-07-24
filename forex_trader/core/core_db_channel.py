@@ -63,27 +63,44 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
     new_name = (new_name or "").strip()
     if not old_name or not new_name or old_name == new_name:
         return
+    # `old_name` here is the raw title stored at select_group() time, which
+    # is very often itself just a variant that already canonicalises to a
+    # shorter display bucket (e.g. "GOLD DIGGERS 2.0 ⚡️" -> "Gold Diggers
+    # 2.0") -- every trade/signal row is stored under that canonical form,
+    # never the raw variant, so matching on old_name literally updated
+    # nothing and silently created a second, orphaned bucket instead of
+    # renaming the existing one. Confirmed live 2026-07-24: Channel Strategy
+    # kept showing "Gold Diggers 2.0" long after the channel's real Telegram
+    # title had changed. Resolving through _canonical() first makes this
+    # always target whatever bucket is actually in use.
+    old_canon = _canonical(old_name)
+    if old_canon == new_name:
+        return
     with db() as conn:
         for tbl, col in _CHANNEL_NAME_TABLES:
             try:
-                conn.execute(f"UPDATE {tbl} SET {col}=? WHERE {col}=?", (new_name, old_name))
+                conn.execute(
+                    f"UPDATE {tbl} SET {col}=? WHERE {col} IN (?, ?)",
+                    (new_name, old_canon, old_name),
+                )
             except Exception:
                 pass  # table/column doesn't exist on this schema version
-    # If the old name was itself one of the fixed canonical bucket names (the
-    # Channel Strategy tab's five rows), swap the bucket to the new name in
-    # place -- otherwise get_all_channel_strategy_settings() would keep
-    # looking for the old, now-nonexistent name and the renamed channel's
-    # freshly-updated rows above would have nowhere to bucket into.
-    if old_name in CANONICAL_CHANNEL_ORDER:
-        CANONICAL_CHANNEL_ORDER[CANONICAL_CHANNEL_ORDER.index(old_name)] = new_name
-    # Every existing variant that used to resolve to old_name must now
-    # resolve to new_name instead, and the new live title itself must map
-    # to new_name (self-map) so future messages/trades canonicalise correctly.
+    # If the old canonical name was itself one of the fixed canonical bucket
+    # names (the Channel Strategy tab's rows), swap the bucket to the new
+    # name in place -- otherwise get_all_channel_strategy_settings() would
+    # keep looking for the old, now-nonexistent name and the renamed
+    # channel's freshly-updated rows above would have nowhere to bucket into.
+    if old_canon in CANONICAL_CHANNEL_ORDER:
+        CANONICAL_CHANNEL_ORDER[CANONICAL_CHANNEL_ORDER.index(old_canon)] = new_name
+    # Every existing variant that used to resolve to the old canonical name
+    # must now resolve to new_name instead, and the new live title itself
+    # must map to new_name (self-map) so future messages/trades canonicalise
+    # correctly.
     for variant, canon in list(CANONICAL_CHANNELS.items()):
-        if canon == old_name:
+        if canon == old_canon:
             CANONICAL_CHANNELS[variant] = new_name
     CANONICAL_CHANNELS[new_name] = new_name
-    log.info("[Channel] Renamed channel '%s' -> '%s' across all tracking tables", old_name, new_name)
+    log.info("[Channel] Renamed channel '%s' -> '%s' across all tracking tables", old_canon, new_name)
 
 
 def get_channel_scorecard(days: int = 30) -> list[dict]:

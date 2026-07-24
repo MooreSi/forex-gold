@@ -167,11 +167,71 @@ def _render_logic_keywords_section() -> None:
         )
 
 
+def _render_channels_active_section(reader) -> None:
+    """One toggle per loaded Telegram channel — turns parsing/execution off
+    for that channel entirely (the listener keeps running, messages are
+    just ignored) without touching the other channels or disconnecting.
+    Wired to channel_parser_config.enabled, the same column engine.py's
+    _scan_messages already gates every message on (see the `not bool(ch_cfg.
+    get('enabled', 1))` skip) — this only adds a visible, dedicated place to
+    flip it, no new backend mechanism. Names are read live from the
+    Telegram reader's own resolved group titles every render, never
+    hardcoded, so a channel rename shows up here automatically."""
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
+        with ui.row().classes("items-center gap-2 mb-3"):
+            ui.icon("hub", size="sm").classes("text-yellow-400")
+            ui.label("Channels Active").classes("text-base font-bold text-yellow-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Turn a channel off to stop parsing and executing signals from it "
+                "entirely — the Telegram listener keeps running, messages from "
+                "that channel are just ignored. Names update automatically if a "
+                "channel is renamed on Telegram's side."
+            )
+
+        status = reader.get_status() if reader else {"slots": []}
+        slots = [s for s in status.get("slots", []) if s.get("group_name")]
+
+        if not slots:
+            ui.label(
+                "No channels loaded yet — select a group in a slot on the "
+                "Reader Logic panel below."
+            ).classes("text-xs text-gray-500 italic")
+            return
+
+        with ui.grid(columns=3).classes("w-full gap-3"):
+            for s in slots:
+                channel_name = s["group_name"]
+                cfg = db_module.get_channel_parser_config(channel_name) or {}
+                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+                    sw = ui.switch(
+                        channel_name, value=bool(cfg.get("enabled", 1)),
+                    ).classes("text-sm")
+                    ui.label(f"Slot {s['slot']}").classes("text-xs text-gray-500 mt-1")
+
+                    def _on_toggle(e, ch=channel_name, existing=cfg):
+                        db_module.save_channel_parser_config(
+                            ch,
+                            existing.get("parser_format", "auto"),
+                            existing.get("signal_prefix", ""),
+                            bool(existing.get("instant_entry_enabled", 0)),
+                            bool(e.value),
+                            existing.get("notes", ""),
+                        )
+                        ui.notify(
+                            f"{ch} {'enabled' if e.value else 'disabled'} — "
+                            + ("signals will execute normally" if e.value
+                               else "signals from this channel will be ignored"),
+                            type="positive" if e.value else "warning",
+                        )
+                    sw.on_value_change(_on_toggle)
+
+
 def render(get_tg_reader: Callable):
     reader = get_tg_reader()
 
     render_signals_card()
     _render_logic_keywords_section()
+    _render_channels_active_section(reader)
 
     # ── Status banner ──────────────────────────────────────────────────────────
     status_badge = ui.badge("Disconnected", color="red").classes("text-sm mb-3")

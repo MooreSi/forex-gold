@@ -349,6 +349,68 @@ class EABridge:
             self._pending_orders[trade_id] = {"ticket": ack_box.get("ticket")}
         return ack_box
 
+    async def restore_pending_order(self, row: dict) -> None:
+        """Push one still-'working' vantage_pending_orders row back to the
+        EA right after it reconnects (see _dispatch's "hello" handling).
+
+        g_pending[] is pure in-memory state on the EA side with no
+        persistence of its own -- any EA restart (recompile, terminal
+        restart, a dropped socket that re-triggers OnInit) silently forgets
+        every order that was still resting, and CheckPendingOrders() then
+        has nothing left to check: it can never again notice that order's
+        eventual fill or broker-side expiry. Confirmed live 2026-07-24: 5
+        Limit Runner orders sat "pending" in the UI for 16+ hours after
+        genuinely expiring on MT5 hours earlier, because whichever EA
+        restart happened in between wiped them from tracking with no way
+        for either side to notice afterward. Python is the durable source
+        of truth for every field here, so pushing it back closes that gap
+        regardless of why tracking was lost.
+
+        Fire-and-forget: no ack is awaited. The EA's own reply -- nothing,
+        for an order still genuinely resting; pending_order_filled/
+        pending_order_cancelled for one that resolved while this EA was
+        disconnected -- already routes through the normal _dispatch
+        handlers, identical to a live fill/cancel event."""
+        tps  = json.loads(row["tps_json"])
+        pcts = json.loads(row["pcts_json"])
+        msg = {
+            "type": "restore_pending_order",
+            "trade_id": row["trade_id"],
+            "ticket": row["ea_ticket"],
+            "direction": row["direction"],
+            "lot_size": row["lot_size"],
+            "stop_loss": row["stop_loss"],
+            "strategy": row["strategy"],
+            "be_at_pos": row["be_at_pos"],
+            "close_full_on_last": 0 if row.get("tp_open") else 1,
+        }
+        for n_str, price in tps.items():
+            msg[f"tp{n_str}"] = price
+        for i, p in enumerate(pcts, start=1):
+            msg[f"pct{i}"] = p
+        await self._send(msg)
+
+    async def _restore_pending_orders(self) -> None:
+        """Called once per EA connection (on "hello") -- restores every
+        still-'working' pending order so a prior EA restart can't leave any
+        of them permanently untracked. See restore_pending_order()."""
+        from forex_trader.core import database as db_module
+
+        def _fetch():
+            with db_module.db() as conn:
+                return [
+                    db_module.row_to_dict(r) for r in conn.execute(
+                        "SELECT * FROM vantage_pending_orders WHERE status='working'"
+                    ).fetchall()
+                ]
+        rows = await db_module.to_db_thread(_fetch)
+        for row in rows:
+            try:
+                await self.restore_pending_order(row)
+            except Exception as e:
+                log.warning("[EABridge] restore_pending_order failed for trade_id=%s: %s",
+                            row.get("trade_id"), e)
+
     async def update_trade(self, trade_id: str, tps: dict[int, float]) -> bool:
         """Push corrected TP levels to a trade the EA is already managing.
 
@@ -379,6 +441,7 @@ class EABridge:
         if t == "hello":
             log.info("[EABridge] EA hello: account=%s symbol=%s",
                      msg.get("account"), msg.get("symbol"))
+            asyncio.create_task(self._restore_pending_orders())
         elif t == "ping":
             await self._send({"type": "pong"})
         elif t in ("trade_opened", "trade_open_failed",

@@ -348,6 +348,7 @@ void HandleMessage(const string line)
    if(type == "open_trade") { HandleOpenTrade(line); return; }
    if(type == "update_trade") { HandleUpdateTrade(line); return; }
    if(type == "place_pending_order") { HandlePlacePendingOrder(line); return; }
+   if(type == "restore_pending_order") { HandleRestorePendingOrder(line); return; }
 }
 
 // Corrects an already-tracked trade's TP levels — tp[]/hasTp[] are otherwise
@@ -566,6 +567,122 @@ void HandlePlacePendingOrder(const string json)
             "\",\"ticket\":" + (string)ticket + "}");
    Print("[EABridge] pending order placed ", direction, " ticket=", ticket,
          " strategy=", strategy, " price=", price, " SL=", sl, " expiresMin=", expireMin);
+}
+
+// Re-populates g_pending[] for a resting order this EA already knows about
+// from a PREVIOUS connection -- g_pending[] is pure in-memory state with no
+// persistence of its own, so any EA restart (recompile, terminal restart, a
+// dropped socket that re-triggers OnInit) silently forgets every order that
+// was still resting at the time, and CheckPendingOrders() then has nothing
+// left to check: it can never again notice that order's eventual fill or
+// broker-side expiry. Python is the durable source of truth for every field
+// here (vantage_pending_orders) and now pushes one of these per still-
+// "working" row the moment a fresh "hello" arrives (see ea_bridge.py's
+// _dispatch), so a restart no longer orphans a resting Limit Runner/ORB
+// order from EA-side tracking. Unlike HandlePlacePendingOrder, this never
+// places a NEW broker order -- `ticket` already exists; the three outcomes
+// are: still genuinely resting (re-added to g_pending[], picked up by the
+// next CheckPendingOrders() cycle as normal), already filled while this EA
+// was disconnected (promoted straight into g_trades[] so management resumes
+// immediately instead of orphaning it a second time), or already gone with
+// no resulting position (broker-side expiry or manual cancel while
+// disconnected -- reported immediately instead of leaving Python waiting
+// for a report that would otherwise never arrive).
+void HandleRestorePendingOrder(const string json)
+{
+   ulong  ticket    = (ulong)JsonGetLong(json, "ticket");
+   string trade_id  = JsonGetString(json, "trade_id");
+   string direction = JsonGetString(json, "direction");
+   string strategy  = JsonGetString(json, "strategy");
+   double lots      = JsonGetDouble(json, "lot_size");
+
+   if(OrderSelect(ticket))
+   {
+      // Still genuinely resting on the book -- rebuild the same PendingOrder
+      // CheckPendingOrders() would have if this EA had never restarted.
+      PendingOrder p;
+      p.ticket = ticket;
+      p.trade_id = trade_id;
+      p.strategy = strategy;
+      p.direction = direction;
+      p.lots = lots;
+      for(int i = 0; i < MAX_TPS; i++)
+      {
+         string key = "tp" + (string)(i + 1);
+         p.hasTp[i] = JsonHasKey(json, key);
+         p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+         p.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
+      }
+      p.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
+      p.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
+      p.closeFullOnLast = JsonHasKey(json, "close_full_on_last")
+         ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
+      p.isTemplate = false;
+      p.tplGridGroup = -1;
+
+      int n = ArraySize(g_pending);
+      ArrayResize(g_pending, n + 1);
+      g_pending[n] = p;
+
+      Print("[EABridge] restored resting pending order ticket=", ticket,
+            " trade_id=", trade_id, " strategy=", strategy);
+      return;
+   }
+
+   if(PositionSelectByTicket(ticket))
+   {
+      // Filled while this EA was disconnected -- promote straight into
+      // g_trades[] the same way CheckPendingOrders() does for a fill it
+      // witnessed directly, so management resumes now instead of leaving
+      // this trade permanently unmanaged on the EA side.
+      double fillPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+
+      ManagedTrade mt;
+      mt.ticket = ticket;
+      mt.trade_id = trade_id;
+      mt.strategy = strategy;
+      mt.direction = direction;
+      mt.entry_price = fillPrice;
+      mt.orig_lots = lots;
+      mt.trailing_active = false;
+      mt.last_step = 0;
+      mt.trail_dist = InpConservativeTrailPts;
+      for(int j = 0; j < MAX_TPS; j++)
+      {
+         string key = "tp" + (string)(j + 1);
+         mt.hasTp[j] = JsonHasKey(json, key);
+         mt.tp[j] = mt.hasTp[j] ? JsonGetDouble(json, key) : 0.0;
+         mt.triggered[j] = false;
+         mt.pcts[j] = JsonGetDouble(json, "pct" + (string)(j + 1), 0.0);
+      }
+      mt.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
+      mt.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
+      mt.closeFullOnLast = JsonHasKey(json, "close_full_on_last")
+         ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
+      mt.isTemplate = false;
+      mt.tplGridGroup = -1;
+      mt.tplBeDone = false;
+      mt.tplCancelPending = false;
+      mt.tplHarvestEnabled = false;
+
+      int n = ArraySize(g_trades);
+      ArrayResize(g_trades, n + 1);
+      g_trades[n] = mt;
+
+      SendJson("{\"type\":\"pending_order_filled\",\"trade_id\":\"" + JsonEsc(trade_id) +
+               "\",\"ticket\":" + (string)ticket +
+               ",\"fill_price\":" + DoubleToString(fillPrice, _Digits) + "}");
+      Print("[EABridge] restore found order already filled while disconnected -> managed ticket=",
+            ticket, " strategy=", strategy, " @ ", fillPrice);
+      return;
+   }
+
+   // Neither a resting order nor an open position -- gone (broker-side
+   // expiry or manual cancel) while this EA was disconnected.
+   SendJson("{\"type\":\"pending_order_cancelled\",\"trade_id\":\"" + JsonEsc(trade_id) +
+            "\",\"reason\":\"expired_while_disconnected\"}");
+   Print("[EABridge] restore found order already gone (expired/cancelled while disconnected) ticket=",
+         ticket, " trade_id=", trade_id);
 }
 
 int g_nextGridGroup = 1;

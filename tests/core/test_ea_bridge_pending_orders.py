@@ -358,6 +358,81 @@ def test_on_pending_order_cancelled_marks_rows_cancelled(fresh_db):
         assert row == 0  # no trade was ever opened
 
 
+# ── Restoring resting orders to a freshly (re)connected EA ────────────────────
+# g_pending[] is pure in-memory state on the EA side with no persistence of
+# its own -- any EA restart silently forgets every order still resting,
+# permanently orphaning it from EA-side fill/expiry detection. Confirmed live
+# 2026-07-24: 5 Limit Runner orders sat "pending" in the UI 16+ hours after
+# genuinely expiring on MT5. Python pushes every still-"working" row back to
+# the EA the moment a fresh "hello" arrives.
+
+def test_restore_pending_order_wire_format():
+    bridge = _healthy_bridge()
+    row = {
+        "trade_id": "t1", "ea_ticket": 999, "direction": "BUY",
+        "lot_size": 0.10, "stop_loss": 4141.0, "strategy": "limit_runner",
+        "be_at_pos": 0, "tp_open": 1,
+        "tps_json": json.dumps({1: 4151.0, 2: 4155.0, 3: 4160.0}),
+        "pcts_json": json.dumps([0.25, 0.25, 0.25]),
+    }
+    asyncio.run(bridge.restore_pending_order(row))
+    sent = _sent_message(bridge)
+    assert sent["type"] == "restore_pending_order"
+    assert sent["trade_id"] == "t1"
+    assert sent["ticket"] == 999
+    assert sent["direction"] == "BUY"
+    assert sent["lot_size"] == 0.10
+    assert sent["stop_loss"] == 4141.0
+    assert sent["strategy"] == "limit_runner"
+    assert sent["be_at_pos"] == 0
+    assert sent["close_full_on_last"] == 0  # tp_open=1 -> last TP doesn't close everything
+    assert sent["tp1"] == 4151.0 and sent["tp2"] == 4155.0 and sent["tp3"] == 4160.0
+    assert sent["pct1"] == 0.25 and sent["pct2"] == 0.25 and sent["pct3"] == 0.25
+
+
+def test_restore_pending_order_close_full_on_last_when_no_tp_open():
+    bridge = _healthy_bridge()
+    row = {
+        "trade_id": "t2", "ea_ticket": 1000, "direction": "SELL",
+        "lot_size": 0.10, "stop_loss": 4160.0, "strategy": "orb_fixed",
+        "be_at_pos": 0, "tp_open": 0,
+        "tps_json": json.dumps({1: 4150.0}),
+        "pcts_json": json.dumps([1.0]),
+    }
+    asyncio.run(bridge.restore_pending_order(row))
+    assert _sent_message(bridge)["close_full_on_last"] == 1
+
+
+def test_restore_pending_orders_pushes_every_still_working_row(fresh_db):
+    _insert_pending_order(trade_id="t1", signal_id="s1")
+    _insert_pending_order(trade_id="t2", signal_id="s2")
+    with db.db() as conn:
+        conn.execute("UPDATE vantage_pending_orders SET status='filled' WHERE trade_id='t2'")
+
+    bridge = _healthy_bridge()
+    asyncio.run(bridge._restore_pending_orders())
+
+    sent_trade_ids = [json.loads(w.decode())["trade_id"] for w in bridge._writer.written]
+    assert sent_trade_ids == ["t1"]  # only the still-'working' row
+
+
+def test_dispatch_hello_schedules_restore():
+    bridge = _healthy_bridge()
+    calls = []
+
+    async def _fake_restore():
+        calls.append(True)
+
+    bridge._restore_pending_orders = _fake_restore
+
+    async def _run():
+        await bridge._dispatch({"type": "hello", "account": 1, "symbol": "XAUUSD"})
+        await asyncio.sleep(0)  # let the scheduled task run
+
+    asyncio.run(_run())
+    assert calls == [True]
+
+
 # ── Trading Schedule gate on pending-order fills ──────────────────────────────
 # A resting order is accepted by the broker before we can know whether the
 # window's profit target will still allow it by the time it actually fills.

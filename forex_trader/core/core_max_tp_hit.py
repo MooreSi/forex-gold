@@ -26,29 +26,22 @@ log = logging.getLogger(__name__)
 
 
 def _tp_level_from_extreme(direction: str, extreme: float, tp_source_fn) -> str:
-    """Every TP level (TP1..TP8) crossed by `extreme` in the trade's
-    favourable direction, comma-joined in order (e.g. "TP1,TP2,TP3") -- not
-    just the highest. The loop below already walks every level to find the
-    highest one crossed; discarding everything but the last hit meant Trade
-    Analysis's "Max TP Hit" column could only ever show a single rung, even
-    for laddered strategies that bank partial closes at several TPs on the
-    way to the final one (confirmed live 2026-07-24: the column was reported
-    as effectively "missing the TP levels hit"). "none" if none were
-    reached. `tp_source_fn(i)` returns the TP price for level i (1-indexed)
-    or None. Continues past a None mid-sequence rather than stopping, since
-    a gap (e.g. tp2 NULL but tp3-tp8 populated) must not hide every level
-    beyond it."""
-    hit_levels: list[str] = []
+    """Highest TP level (TP1..TP8) crossed by `extreme` in the trade's
+    favourable direction. `tp_source_fn(i)` returns the TP price for level i
+    (1-indexed) or None. Continues past a None mid-sequence rather than
+    stopping, since a gap (e.g. tp2 NULL but tp3-tp8 populated) must not hide
+    every level beyond it."""
+    hit = "none"
     for i in range(1, 9):
         tp = tp_source_fn(i)
         if tp is None:
             continue
         tp = float(tp)
         if direction == "BUY" and extreme >= tp:
-            hit_levels.append(f"TP{i}")
+            hit = f"TP{i}"
         elif direction == "SELL" and extreme <= tp:
-            hit_levels.append(f"TP{i}")
-    return ",".join(hit_levels) if hit_levels else "none"
+            hit = f"TP{i}"
+    return hit
 
 
 async def max_tp_checker_sweep(bridge: Any) -> None:

@@ -3,8 +3,6 @@
 import asyncio
 import json
 import logging
-import time as _time
-import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -12,11 +10,10 @@ log = logging.getLogger(__name__)
 
 from nicegui import ui
 
-import forex_trader.config as cfg_module
 from forex_trader.core import ai_provider
 from forex_trader.core import database as db_module
 from forex_trader.core.models import (
-    STRATEGY_NAMES, STRATEGY_DESCRIPTIONS, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
+    STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
 from forex_trader.core.signal_parser import validate_signal
 from forex_trader.sync import client as sync_client
@@ -1347,44 +1344,6 @@ from forex_trader.core.models import (
     STRATEGY_ADAPTIVE_RUNNER_2 as _AR2,
 )
 
-# ── Strategy builder (Claude) ─────────────────────────────────────────────────
-
-_STRATEGY_BUILDER_SYSTEM = (
-    "You are a professional XAUUSD (gold) trading strategy designer. "
-    "The user will describe a trading strategy in plain English. "
-    "Interpret their intent and produce a formal strategy definition. "
-    "Respond ONLY with a single minified JSON object — no markdown fences, no extra text — "
-    "matching this exact schema:\n"
-    '{"name":"Short Name (2-5 words)",'
-    '"description":"Full markdown description with ## header, bullet points, '
-    'concrete XAUUSD example with entry/SL/TP prices, and a Best for: section",'
-    '"base_strategy":"scale_out|be_runner|trail_stop|protected_scale|conservative",'
-    '"compare":{'
-    '"partial_closes":"one line",'
-    '"sl_moves_to_be":"one line",'
-    '"max_upside":"one line",'
-    '"risk_after_be":"one line",'
-    '"best_market":"one line"}}\n'
-    "base_strategy — choose the closest built-in execution model:\n"
-    "  scale_out: 20% partial closes at each TP, SL to breakeven after TP1\n"
-    "  be_runner: no partial closes, SL steps to previous TP after each level\n"
-    "  trail_stop: trailing stop activates after TP1, no partial closes\n"
-    "  protected_scale: hold through TP1+TP2 (SL to BE at TP2), 20% closes from TP3\n"
-    "  conservative: 5-pt SL and 3-pt TP1 from fill price; 80% close at TP1 (SL → fill/breakeven); 20% runner with 3-pt trailing stop; ignores signal SL/TP levels entirely\n"
-    "Description: 150-300 words, realistic XAUUSD prices "
-    "(entries ~2500-2600, TPs 10-50 points apart, SL 20-80 points away)."
-)
-
-
-async def _call_strategy_builder(description: str, cfg: dict) -> dict:
-    """Call the configured AI provider to convert natural language into a structured strategy definition."""
-    from forex_trader.core import ai_provider as _aip
-    raw = await _aip.complete(cfg, _STRATEGY_BUILDER_SYSTEM, description, max_tokens=1500, timeout=60)
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw   = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
-    return json.loads(raw)
-
 _STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _RVR, _AR, _AR2]
 _PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _RVR, _AR, _AR2})
 
@@ -2588,12 +2547,6 @@ def _render_strategy(engine):
         }
         all_names.update({cs["id"]: cs["name"] for cs in custom_strats})
 
-        def _get_desc(key: str) -> str:
-            if key in STRATEGY_DESCRIPTIONS:
-                return STRATEGY_DESCRIPTIONS[key]
-            cs = next((c for c in custom_strats if c["id"] == key), None)
-            return (cs or {}).get("description", "")
-
         # ── Top row: Strategy Parameters (half) + Channel Strategy (half) ────
         with ui.row().classes("w-full gap-4 flex-wrap items-stretch"):
 
@@ -2616,13 +2569,9 @@ def _render_strategy(engine):
             with ui.card().classes("bg-gray-800 p-4 rounded-lg shrink-0 w-72"):
                 ui.label("Active Strategy").classes("text-base font-bold text-yellow-300 mb-1")
                 ui.label(
-                    "Global default — overridden per-channel above when a channel has "
-                    "a manual or Auto assignment set."
+                    "Strategy is selected per-channel in Channel Strategy above. "
+                    "The settings below apply regardless of which strategy is running."
                 ).classes("text-xs text-gray-500 italic mb-3")
-
-                with ui.column().classes("gap-0 w-full"):
-                    ui.label("Global Strategy").classes("text-xs text-gray-400 font-medium mb-0.5")
-                    sel = ui.select(all_names, value=_cur_strat[0]).classes("w-full")
 
                 with ui.column().classes("gap-0 w-full"):
                     with ui.row().classes("items-center gap-1"):
@@ -2703,15 +2652,7 @@ def _render_strategy(engine):
 
                 def save_strategy():
                     try:
-                        key = sel.value
-                        if key.startswith("custom_"):
-                            cs_match = next((c for c in custom_strats if c["id"] == key), None)
-                            exec_key = cs_match["base_strategy"] if cs_match else STRATEGY_SCALE_OUT
-                        else:
-                            exec_key = key
                         db_module.update_risk_settings({
-                            "trade_strategy":          exec_key,
-                            "display_strategy_id":     key,
                             "trail_stop_sl_pts":       float(trail_stop_sl.value or 5.0),
                             "trailing_stop_distance":  float(trail_dist.value or 3.0),
                             "strategy_lot_size":       lot_override.value,
@@ -2719,14 +2660,11 @@ def _render_strategy(engine):
                             "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
                             "kelly_sizing_enabled":    int(kelly_enabled.value),
                         })
-                        _cur_strat[0] = key
-                        _refresh_desc(key)
-                        _draw_compare()
-                        ui.notify(f"Strategy saved: {all_names.get(key, key)}", type="positive")
+                        ui.notify("Settings saved", type="positive")
                     except Exception as ex:
                         ui.notify(str(ex), type="negative")
 
-                ui.button("Save Strategy", on_click=save_strategy).classes(
+                ui.button("Save Settings", on_click=save_strategy).classes(
                     "bg-blue-700 text-white mt-3 px-4 py-2 text-sm"
                 )
 
@@ -2823,167 +2761,6 @@ def _render_strategy(engine):
             lot_override.on_value_change(
                 lambda e: _set_risk_lot(float(e.value or 0))
             )
-
-            # ── Card 2: Strategy Builder ──────────────────────────────────────
-            with ui.card().classes("flex-1 bg-gray-800 p-4 rounded-lg min-w-72"):
-                with ui.row().classes("items-center gap-2 mb-1"):
-                    ui.icon("auto_awesome").classes("text-purple-400 text-xl")
-                    ui.label("Strategy Builder").classes(
-                        "text-base font-bold text-purple-300"
-                    )
-                ui.label(
-                    "Describe a strategy in plain English — AI will define it for you."
-                ).classes("text-xs text-gray-400 mb-2")
-
-                desc_input = ui.textarea(
-                    label="Strategy description",
-                    placeholder=(
-                        "e.g. Take 30% at TP1, move SL to breakeven, "
-                        "then hold the rest to TP3 with a trailing stop..."
-                    ),
-                ).classes("w-full").props("rows=3 autogrow")
-
-                build_status  = ui.label("").classes("text-xs text-gray-400 mt-1")
-                builder_output = ui.column().classes("w-full gap-2 mt-2")
-
-                def _show_result(result: dict):
-                    builder_output.clear()
-                    with builder_output:
-                        with ui.card().classes("w-full p-3 rounded").style(
-                            "border:1px solid #6b21a8;background:#1a1128"
-                        ):
-                            name_inp = ui.input(
-                                "Strategy name",
-                                value=result.get("name", ""),
-                            ).classes("w-full text-sm font-semibold")
-
-                            with ui.expansion(
-                                "Description (editable)", icon="description",
-                            ).classes("w-full bg-gray-700 rounded text-xs mt-1"):
-                                desc_ta = ui.textarea(
-                                    value=result.get("description", ""),
-                                ).classes("w-full font-mono text-xs").props("rows=6")
-
-                            ui.label("Quick Comparison Rows").classes(
-                                "text-xs text-gray-400 font-semibold mt-2"
-                            )
-                            cmp = result.get("compare", {})
-                            inp_partial = ui.input(
-                                "Partial closes",
-                                value=cmp.get("partial_closes", ""),
-                            ).classes("w-full text-xs")
-                            inp_sl = ui.input(
-                                "SL moves to BE",
-                                value=cmp.get("sl_moves_to_be", ""),
-                            ).classes("w-full text-xs")
-                            inp_up = ui.input(
-                                "Max upside",
-                                value=cmp.get("max_upside", ""),
-                            ).classes("w-full text-xs")
-                            inp_risk = ui.input(
-                                "Risk after BE",
-                                value=cmp.get("risk_after_be", ""),
-                            ).classes("w-full text-xs")
-                            inp_mkt = ui.input(
-                                "Best market",
-                                value=cmp.get("best_market", ""),
-                            ).classes("w-full text-xs")
-
-                            base_key  = result.get("base_strategy", STRATEGY_SCALE_OUT)
-                            base_name = STRATEGY_NAMES.get(base_key, base_key)
-                            ui.label(f"Executes as: {base_name}").classes(
-                                "text-xs text-gray-500 italic mt-1"
-                            )
-
-                            def _accept():
-                                custom_id = f"custom_{_uuid.uuid4().hex[:8]}"
-                                db_module.save_custom_strategy({
-                                    "id":            custom_id,
-                                    "name":          (name_inp.value or "").strip()
-                                                     or "Custom Strategy",
-                                    "description":   desc_ta.value.strip(),
-                                    "base_strategy": base_key,
-                                    "rules_json":    json.dumps({
-                                        "partial_closes": inp_partial.value,
-                                        "sl_moves_to_be": inp_sl.value,
-                                        "max_upside":     inp_up.value,
-                                        "risk_after_be":  inp_risk.value,
-                                        "best_market":    inp_mkt.value,
-                                    }),
-                                    "created_at": _time.time(),
-                                })
-                                ui.notify(
-                                    f"Strategy '{name_inp.value}' saved", type="positive"
-                                )
-                                _refresh()
-
-                            def _discard():
-                                builder_output.clear()
-                                build_status.text = "Discarded."
-                                build_status.classes(replace="text-xs text-gray-400 mt-1")
-
-                            with ui.row().classes("gap-2 mt-3"):
-                                ui.button(
-                                    "Accept", icon="check_circle", on_click=_accept,
-                                ).classes("bg-green-700 text-white text-sm px-3 py-1")
-                                ui.button(
-                                    "Discard", icon="delete_outline", on_click=_discard,
-                                ).props("flat").classes(
-                                    "text-red-400 text-sm px-3 py-1"
-                                )
-
-                async def _build():
-                    text   = (desc_input.value or "").strip()
-                    config = cfg_module.load()
-
-                    if not text:
-                        build_status.text = "Enter a strategy description first."
-                        build_status.classes(replace="text-xs text-orange-400 mt-1")
-                        return
-                    if not ai_provider.is_configured(config):
-                        build_status.text = (
-                            "AI provider not configured — go to Settings > AI."
-                        )
-                        build_status.classes(replace="text-xs text-orange-400 mt-1")
-                        return
-
-                    build_btn.disable()
-                    builder_output.clear()
-                    build_status.text = "Building with AI..."
-                    build_status.classes(replace="text-xs text-blue-400 mt-1")
-                    try:
-                        result = await _call_strategy_builder(text, config)
-                        _show_result(result)
-                        build_status.text = (
-                            "Strategy generated — review and edit below, then Accept."
-                        )
-                        build_status.classes(replace="text-xs text-green-400 mt-1")
-                    except Exception as ex:
-                        build_status.text = f"Error: {ex}"
-                        build_status.classes(replace="text-xs text-red-400 mt-1")
-                    finally:
-                        build_btn.enable()
-
-                build_btn = ui.button(
-                    "Build with AI", icon="smart_toy", on_click=_build,
-                ).classes("bg-purple-700 text-white mt-3 px-4 py-2 text-sm")
-
-            # ── Card 3: Strategy description ──────────────────────────────────
-            desc_card = ui.card().classes("flex-1 bg-gray-800 p-4 rounded-lg min-w-56")
-
-            def _refresh_desc(key: str):
-                desc_card.clear()
-                with desc_card:
-                    text = _get_desc(key)
-                    if text:
-                        ui.markdown(text).classes("text-sm text-gray-300")
-                    else:
-                        ui.label("No description available.").classes(
-                            "text-xs text-gray-500 italic"
-                        )
-
-            _refresh_desc(display_id)
-            sel.on_value_change(lambda e: _refresh_desc(e.value))
 
         # ── Quick comparison table ─────────────────────────────────────────────
         compare_container = ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-2")

@@ -610,7 +610,7 @@ def _render_trade_table(engine):
             {"name": "pnl",       "label": "Net P&L",     "field": "pnl",       "align": "right",  "sortable": True},
             {"name": "reason",    "label": "Reason",      "field": "reason",    "align": "center"},
             {"name": "rr",        "label": "R:R",         "field": "rr",        "align": "right",  "sortable": True},
-            {"name": "max_tp",    "label": "TPs Hit",     "field": "max_tp",    "align": "center", "sortable": True},
+            {"name": "max_tp",    "label": "Max TP",      "field": "max_tp",    "align": "center", "sortable": True},
             {"name": "duration",  "label": "Held",        "field": "duration",  "align": "right",  "sortable": True},
             {"name": "pending",   "label": "Pending For", "field": "pending",   "align": "right",  "sortable": True},
         ]
@@ -829,13 +829,13 @@ def _render_trade_table(engine):
                         else:
                             lots_display = f"{open_lots:.2f}"
 
-                        # TPs Hit: blank = 30-min window not yet elapsed,
+                        # Max TP: blank = 30-min window not yet elapsed,
                         # "..." = window elapsed but computation pending,
-                        # "none"/comma-joined TP list = computed result.
+                        # "none"/TP label = computed result.
                         _now = time.time()
                         _max_tp_raw = max_tp_map.get(str(ticket))
                         if _max_tp_raw is not None:
-                            max_tp_display = _max_tp_raw   # "none" or "TP1,TP2,TP3" (every level reached)
+                            max_tp_display = _max_tp_raw   # "none" or "TP1".."TP8"
                         elif close_ts and (_now - close_ts) >= 1800:
                             max_tp_display = "..."          # window elapsed, engine pending
                         else:

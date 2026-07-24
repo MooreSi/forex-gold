@@ -91,17 +91,17 @@ def _max_tp_hit(trade_id):
 
 def test_tp_level_buy_highest_reached():
     tps = {1: 2405.0, 2: 2410.0, 3: 2415.0}
-    assert maxtp._tp_level_from_extreme("BUY", 2412.0, lambda i: tps.get(i)) == "TP1,TP2"
+    assert maxtp._tp_level_from_extreme("BUY", 2412.0, lambda i: tps.get(i)) == "TP2"
 
 
 def test_tp_level_sell_highest_reached():
     tps = {1: 2395.0, 2: 2390.0, 3: 2385.0}
-    assert maxtp._tp_level_from_extreme("SELL", 2388.0, lambda i: tps.get(i)) == "TP1,TP2"
+    assert maxtp._tp_level_from_extreme("SELL", 2388.0, lambda i: tps.get(i)) == "TP2"
 
 
 def test_tp_level_none_mid_ladder_not_treated_as_stop():
     tps = {1: 2405.0, 2: None, 3: 2415.0}
-    assert maxtp._tp_level_from_extreme("BUY", 2420.0, lambda i: tps.get(i)) == "TP1,TP3"
+    assert maxtp._tp_level_from_extreme("BUY", 2420.0, lambda i: tps.get(i)) == "TP3"
 
 
 def test_tp_level_none_reached():
@@ -128,9 +128,9 @@ def test_normal_buy_prefers_sig_tp_over_tp_and_pushes_ledger(fresh_db):
     pushed = []
     with mock.patch("forex_trader.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
-    assert _max_tp_hit("t-normal") == "TP1,TP2"
+    assert _max_tp_hit("t-normal") == "TP2"
     assert len(pushed) == 1
-    assert pushed[0]["max_tp_hit"] == "TP1,TP2"
+    assert pushed[0]["max_tp_hit"] == "TP2"
     assert pushed[0]["pnl_dollars"] == 15.0
     assert pushed[0]["outcome"] == "win"
     assert pushed[0]["mt5_ticket"] == 777
@@ -203,9 +203,9 @@ def test_backfill_saves_and_pushes_when_recomputed_differs(fresh_db):
     with mock.patch("asyncio.sleep", new=mock.AsyncMock()), \
          mock.patch("forex_trader.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
         asyncio.run(maxtp.backfill_max_tp_hit_corrected(bridge))
-    assert _max_tp_hit("t-diff") == "TP1,TP2"
+    assert _max_tp_hit("t-diff") == "TP2"
     assert len(pushed) == 1
-    assert pushed[0]["max_tp_hit"] == "TP1,TP2"
+    assert pushed[0]["max_tp_hit"] == "TP2"
 
 
 def test_backfill_fetch_failure_returns_cleanly(fresh_db):
@@ -233,4 +233,4 @@ def test_backfill_per_trade_exception_does_not_stop_loop(fresh_db):
          mock.patch("forex_trader.sync.ledger.push_trade_closed"):
         asyncio.run(maxtp.backfill_max_tp_hit_corrected(bridge))
     assert _max_tp_hit("t-bad") == "TP1"  # untouched, exception before save
-    assert _max_tp_hit("t-good") == "TP1,TP2"
+    assert _max_tp_hit("t-good") == "TP2"

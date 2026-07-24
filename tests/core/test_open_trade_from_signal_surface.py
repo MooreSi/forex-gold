@@ -20,6 +20,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from forex_trader.core import core_open_trade_from_signal as otfs
+from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_REVERSAL_RUNNER,
@@ -49,7 +50,9 @@ def fresh_db():
     db.init(path)
     db._rs_cache = None
     db._rs_cache_ts = 0.0
+    sp._cache.clear()
     yield db
+    sp._cache.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
@@ -238,6 +241,21 @@ def test_conservative_trial_post_fill_override(fresh_db):
     assert trade["tp1"] == 2405.5
     assert trade["tp6"] == 2435.5
     assert trade["tp7"] is None
+
+
+def test_conservative_trial_sl_and_tps_are_live_tunable(fresh_db):
+    _insert_signal(entry_low=2399.0, entry_high=2401.0, lot_size=0.10)
+    db.update_risk_settings({"trade_strategy": STRATEGY_CONSERVATIVE_TRIAL})
+    sp.set_strategy_params(STRATEGY_CONSERVATIVE_TRIAL, {
+        "sl_risk_usd": 50.0, "tp1_pt": 2.0, "tp6_pt": 40.0,
+    })
+    bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
+    asyncio.run(otfs.open_trade_from_signal(bridge, "sig-1"))
+
+    trade = _get_trade_by_signal("sig-1")
+    assert trade["stop_loss"] == 2395.5  # 50 / (0.10*100) = 5pt
+    assert trade["tp1"] == 2402.5
+    assert trade["tp6"] == 2440.5
 
 
 def test_reversal_runner_post_fill_override_leaves_tps_untouched(fresh_db):

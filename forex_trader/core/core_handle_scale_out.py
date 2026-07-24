@@ -30,14 +30,12 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import TPCache, check_tp_hits, get_remaining_lots
-from forex_trader.core.models import MAX_TP, Tick
+from forex_trader.core.models import MAX_TP, STRATEGY_SCALE_OUT, Tick
 
 log = logging.getLogger(__name__)
 
-# Per-TP close percentages: TP1 banks the most, then tapers. TP5+ (index not
-# in dict) closes all remaining lots.
-_SCALE_OUT_PCTS = {1: 0.40, 2: 0.30, 3: 0.20, 4: 0.10}
 _SCALE_OUT_RETRY_COOLDOWN_S = 30  # min seconds between partial-close retries after a failure
 
 
@@ -50,6 +48,8 @@ async def handle_scale_out(
     close_full_after_tps: Optional[Callable[[str, Optional[int], float], Awaitable[None]]] = None,
 ) -> None:
     tp_hits = await check_tp_hits(tp_cache, trade, tick)
+    _so_p = get_strategy_params(STRATEGY_SCALE_OUT)
+    scale_out_pcts = {n: _so_p[f"tp{n}_pct"] / 100.0 for n in range(1, 5)}
     # Determine the last defined TP so it always closes all remaining lots
     last_tp_num = max(
         (n for n in range(1, MAX_TP + 1) if trade.get(f"tp{n}") is not None),
@@ -66,7 +66,7 @@ async def handle_scale_out(
         if tp_num == last_tp_num:
             lots_to_close = remaining
         else:
-            pct = _SCALE_OUT_PCTS.get(tp_num, 0.0)
+            pct = scale_out_pcts.get(tp_num, 0.0)
             if pct <= 0:
                 lots_to_close = remaining  # TP5+ with remaining lots
             else:

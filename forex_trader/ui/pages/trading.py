@@ -1333,6 +1333,7 @@ async def _background_commentary(engine, signal_id: str):
 
 # ── Strategy comparison data ───────────────────────────────────────────────────
 
+from forex_trader.core import core_strategy_params as _sp
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT as _SO, STRATEGY_BE_RUNNER as _BE,
     STRATEGY_TRAIL_STOP as _TS, STRATEGY_PROTECTED_SCALE as _PS,
@@ -1343,6 +1344,58 @@ from forex_trader.core.models import (
     STRATEGY_ADAPTIVE_RUNNER as _AR,
     STRATEGY_ADAPTIVE_RUNNER_2 as _AR2,
 )
+
+
+# Cells below that embed a live-tunable Strategy Parameters value are
+# callables (evaluated fresh on every _draw_compare() render) instead of
+# plain strings, so an edit on Trading > Strategy > Strategy Parameters is
+# reflected here immediately -- see _render_strategy_params_card().
+def _ct_partial_closes_cell() -> str:
+    p = _sp.get_strategy_params(_CT)
+    return (
+        f"{p['tp1_pct']:g}% TP1 · {p['tp2_pct']:g}% TP2 · {p['tp3_pct']:g}% TP3 · "
+        f"{p['tp4_pct']:g}% TP4 · {p['tp5_pct']:g}% TP5 · rest at TP6"
+    )
+
+
+def _ct_be_cell() -> str:
+    p = _sp.get_strategy_params(_CT)
+    return f"At TP2 (+{p['tp2_pt']:g} pts from fill)"
+
+
+def _ct_max_upside_cell() -> str:
+    p = _sp.get_strategy_params(_CT)
+    return f"+{p['tp6_pt']:g} pts from fill price (TP6 fixed target)"
+
+
+def _so_partial_closes_cell() -> str:
+    p = _sp.get_strategy_params(_SO)
+    return (
+        f"{p['tp1_pct']:g}% TP1 · {p['tp2_pct']:g}% TP2 · {p['tp3_pct']:g}% TP3 · "
+        f"{p['tp4_pct']:g}% TP4 · rest at last TP"
+    )
+
+
+def _ps_partial_closes_cell() -> str:
+    p = _sp.get_strategy_params(_PS)
+    return f"Yes — {p['mid_tp_close_pct']:g}% from TP3"
+
+
+def _sc_be_cell() -> str:
+    pos = int(_sp.get_strategy_params(_SC).get("be_at_pos", 1))
+    return (
+        f"After TP{pos} → entry (BE); after TP{pos + 1}+ → trails to previous TP price"
+    )
+
+
+def _be_filter_cell() -> str:
+    thr = _sp.get_strategy_params(_BE)["adx_ranging_threshold"]
+    return f"ADX > {thr:g} required — falls back to Scale Out in ranging markets"
+
+
+def _be_best_market_cell() -> str:
+    thr = _sp.get_strategy_params(_BE)["adx_ranging_threshold"]
+    return f"Strong trend (ADX > {thr:g})"
 
 _STRAT_ORDER = [_SO, _BE, _TS, _PS, _CO, _NSS, _CT, _SR, _SC, _RVR, _AR, _AR2]
 _PROTECTED_STRATS = frozenset({_SO, _BE, _TS, _PS, _CO, _SR, _SC, _RVR, _AR, _AR2})
@@ -1590,13 +1643,13 @@ def _hide_builtin_strategy(sid: str) -> None:
 
 _COMPARE_ROWS = [
     ("Partial closes", {
-        _SO:  "Yes — 20% per TP",
+        _SO:  _so_partial_closes_cell,
         _BE:  "No",
         _TS:  "No",
-        _PS:  "Yes — 20% from TP3",
+        _PS:  _ps_partial_closes_cell,
         _CO:  "80% at TP1 (+3 pts from fill) · remainder trails via 3-pt stop",
         _NSS: "20% TP1 · 20% TP3 · rest at last TP (max TP8)",
-        _CT:  "5% TP1 · 30% TP2 · 20% TP3 · 40% TP4 · 5% TP5 · rest at TP6",
+        _CT:  _ct_partial_closes_cell,
         _SR:  "50% at TP1 (+3 pts from fill), SL untouched · remainder trails via 3-pt stop from TP2 (+4 pts)",
         _SC:  "20% TP1 · 15% TP2/3/4 · 20% TP5 · rest at TP6+ (signal's own TPs used)",
         _RVR: "5% TP1/2 · 10% TP3/4 · 15% TP5/6/7 · 25% TP8 (signal's own TPs used)",
@@ -1612,9 +1665,9 @@ _COMPARE_ROWS = [
         _PS:  "After TP2",
         _CO:  "Immediately at TP1 — SL moves to fill price (entry)",
         _NSS: "SL → TP1 at TP3 · steps TP{n-2} from TP4 onwards",
-        _CT:  "At TP2 (+10 pts from fill)",
+        _CT:  _ct_be_cell,
         _SR:  "At TP2 (+4 pts from fill) — SL moves to fill price (entry)",
-        _SC:  "After TP1 → entry (BE); after TP2+ → trails to previous TP price",
+        _SC:  _sc_be_cell,
         _RVR: "After TP1 → entry (BE); after TP2+ → trails to previous TP price",
         _AR:  "Immediately at TP1 → entry (BE); after TP2+ → trails to previous TP price "
               "(Reversal Runner waits until TP2 — Adaptive Runner doesn't need to, since its "
@@ -1630,7 +1683,7 @@ _COMPARE_ROWS = [
         _PS:  "Capped from TP3",
         _CO:  "Unlimited (3-pt trailing stop after TP1)",
         _NSS: "Last TP of signal (max TP8)",
-        _CT:  "+35 pts from fill price (TP6 fixed target)",
+        _CT:  _ct_max_upside_cell,
         _SR:  "Unlimited (3-pt trailing stop after TP2 — full 50% runner)",
         _SC:  "Signal's final TP (TP6 typically 10-46 pts from entry on GD2 signals)",
         _RVR: "Signal's final TP (TP8 if present) — widened SL keeps the full ladder alive",
@@ -1656,7 +1709,7 @@ _COMPARE_ROWS = [
     }),
     ("Signal quality filter", {
         _SO:  "None",
-        _BE:  "ADX > 25 required — falls back to Scale Out in ranging markets",
+        _BE:  _be_filter_cell,
         _TS:  "None",
         _PS:  "None",
         _CO:  "Direction only — signal SL/TP ignored entirely (5-pt SL / 3-pt TP1 from fill)",
@@ -1672,7 +1725,7 @@ _COMPARE_ROWS = [
     }),
     ("Best market", {
         _SO:  "Any",
-        _BE:  "Strong trend (ADX > 25)",
+        _BE:  _be_best_market_cell,
         _TS:  "Strong trend / breakout",
         _PS:  "Moderate trend / wider TPs",
         _CO:  "Any — tight scalp, quick TP1, small trail",
@@ -1906,16 +1959,15 @@ def _rec_label_text(rec: dict, strat_opts: dict) -> str:
 
 def _render_strategy_params_card() -> None:
     """
-    Strategy Parameters: live-editable SL/TP point values for the
-    fixed-parameter strategies (Conservative, Scalp Runner, Reversal Runner,
-    Adaptive Runner, Adaptive Runner 2), plus a small named-template
-    library to save/reapply a parameter set later. A change here applies
-    to the next trade opened under that strategy -- no restart, no code
-    change. Mirrors a third-party EA's "Settings Templates" panel
-    investigated 2026-07-22; see core_strategy_params.py's module
-    docstring for why this needed no MQL5 changes at all (these five
-    strategies are already fully resolved to concrete SL/TP prices by
-    Python before any EA sees the trade).
+    Strategy Parameters: live-editable SL/TP/close-% values for every
+    fixed-parameter strategy (see core_strategy_params.PARAM_STRATEGIES),
+    plus a small named-template library to save/reapply a parameter set
+    later. A change here applies to the next trade opened under that
+    strategy -- no restart, no code change. Mirrors a third-party EA's
+    "Settings Templates" panel investigated 2026-07-22; see
+    core_strategy_params.py's module docstring for why this needs no
+    MQL5 changes at all (every strategy here is already fully resolved
+    to concrete SL/TP prices by Python before any EA sees the trade).
     """
     from forex_trader.core import core_strategy_params as sp
 
@@ -1941,7 +1993,12 @@ def _render_strategy_params_card() -> None:
 
     ui.select(
         sp.STRATEGY_LABELS, value=state["strategy"], label="Strategy",
-    ).classes("w-56 mb-2").props("dense outlined").on_value_change(_on_strategy_change)
+    ).classes("w-56 mb-2").props("dense outlined").on_value_change(
+        _on_strategy_change
+    ).tooltip(
+        "Which built-in strategy's fixed SL/TP point values to edit below. "
+        "Changes apply to the next trade opened under that strategy."
+    )
 
     body = ui.column().classes("w-full gap-2")
 
@@ -2101,6 +2158,10 @@ def _render_ea_templates_card() -> None:
                     load_opts, value=state["name"] or "", label="Load",
                 ).classes("w-56").props("dense outlined").on_value_change(
                     lambda e: _load(e.value or None)
+                ).tooltip(
+                    "Load a previously saved template's values into the form "
+                    "below for editing, or leave on \"New Template\" to build one "
+                    "from scratch."
                 )
                 name_input = ui.input(
                     "Template name", value=state["name"] or "",
@@ -2134,7 +2195,10 @@ def _render_ea_templates_card() -> None:
                     ui.label("Mode").classes("text-sm")
                     fields["mode"] = ui.select(
                         {c: c.title() for c in et.MODE_CHOICES}, value=live["mode"],
-                    ).classes("w-full").props("dense outlined")
+                    ).classes("w-full").props("dense outlined").tooltip(
+                        "Single: one entry per signal. Grid: stages multiple "
+                        "entries step pts apart to average into the position."
+                    )
                     fields["grid_step_pts"] = ui.number(
                         "Grid step (pt)", value=float(live["grid_step_pts"]), step=1.0,
                     ).classes("w-full mt-1").props("dense outlined")
@@ -2150,7 +2214,11 @@ def _render_ea_templates_card() -> None:
                     ui.label("TP/SL").classes("text-sm")
                     fields["tpsl_mode"] = ui.select(
                         {c: c.title() for c in et.TPSL_MODE_CHOICES}, value=live["tpsl_mode"],
-                    ).classes("w-full").props("dense outlined")
+                    ).classes("w-full").props("dense outlined").tooltip(
+                        "Off: no target, rides with no exit. On: real broker-side "
+                        "SL/TP. Stealth: tracked internally, closes at market when "
+                        "hit -- never written to the order ticket."
+                    )
                     ui.label(
                         "Off: no target, rides with no exit. On: real broker-side "
                         "SL/TP. Stealth: tracked internally, closes at market when "
@@ -2161,7 +2229,11 @@ def _render_ea_templates_card() -> None:
                     ui.label("Anchor").classes("text-sm")
                     fields["anchor"] = ui.select(
                         {c: c.title() for c in et.ANCHOR_CHOICES}, value=live["anchor"],
-                    ).classes("w-full").props("dense outlined")
+                    ).classes("w-full").props("dense outlined").tooltip(
+                        "Unified: every leg trails/BEs off the original entry "
+                        "price. Distributed: each leg manages its own reference "
+                        "independently."
+                    )
                     ui.label(
                         "Unified: every leg trails/BEs off the original entry price. "
                         "Distributed: each leg manages its own reference independently."
@@ -2171,7 +2243,11 @@ def _render_ea_templates_card() -> None:
                     ui.label("Trail").classes("text-sm")
                     fields["trail_mode"] = ui.select(
                         {c: c.title() for c in et.TRAIL_MODE_CHOICES}, value=live["trail_mode"],
-                    ).classes("w-full").props("dense outlined")
+                    ).classes("w-full").props("dense outlined").tooltip(
+                        "Candle: trails to recent candle highs/lows. Step: fixed-"
+                        "point trailing. Fractal: trails to swing-pivot fractals. "
+                        "TP: trails up to each TP price as it's hit."
+                    )
                     ui.label(
                         "Candle: trails to recent candle highs/lows. Step: fixed-"
                         "point trailing. Fractal: trails to swing-pivot fractals. "
@@ -2185,7 +2261,10 @@ def _render_ea_templates_card() -> None:
                     fields["be_mode"] = ui.select(
                         {c: c.replace("_", " ").title() for c in et.BE_MODE_CHOICES},
                         value=live["be_mode"],
-                    ).classes("w-full").props("dense outlined")
+                    ).classes("w-full").props("dense outlined").tooltip(
+                        "Entry: SL moves exactly to entry price. Entry+Buffer: "
+                        "locks in buffer pts of profit instead of dead-even."
+                    )
                     fields["be_buffer_pts"] = ui.number(
                         "BE buffer (pt)", value=float(live["be_buffer_pts"]), step=0.5,
                     ).classes("w-full mt-1").props("dense outlined")
@@ -2888,6 +2967,8 @@ def _render_strategy(engine):
                                     if strat.startswith("custom_")
                                     else row_data.get(strat, "—")
                                 )
+                                if callable(val):
+                                    val = val()
                                 ui.label(val).style(
                                     f"padding:8px 10px;background:{bg};"
                                     "font-size:11px;font-family:monospace;"

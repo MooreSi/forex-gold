@@ -14,6 +14,8 @@ from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE,
+    STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
 )
 
 
@@ -62,6 +64,46 @@ def test_default_params_returns_a_copy_not_shared_state(fresh_db):
 
 def test_unknown_strategy_has_no_defaults(fresh_db):
     assert sp.default_params("not_a_real_strategy") == {}
+
+
+# ── 2026-07-24: Conservative Trial/Signal Climber/Protected Scale/Scale Out/
+# BE Runner added to Strategy Parameters ───────────────────────────────────
+
+@pytest.mark.parametrize("strategy", [
+    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE,
+    STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
+])
+def test_new_strategies_are_fully_wired(fresh_db, strategy):
+    assert strategy in sp.PARAM_STRATEGIES
+    assert strategy in sp.PARAM_SPECS
+    assert strategy in sp.STRATEGY_LABELS
+    assert sp.PARAM_SPECS[strategy]  # at least one tunable param each
+
+
+def test_conservative_trial_defaults_match_original_hardcoded_constants(fresh_db):
+    defaults = sp.default_params(STRATEGY_CONSERVATIVE_TRIAL)
+    assert defaults["sl_risk_usd"] == 100.0
+    assert [defaults[f"tp{i}_pt"] for i in range(1, 7)] == [5.0, 10.0, 14.0, 20.0, 27.0, 35.0]
+    assert [defaults[f"tp{i}_pct"] for i in range(1, 6)] == [5.0, 30.0, 20.0, 40.0, 5.0]
+
+
+def test_scale_out_defaults_match_original_hardcoded_constants(fresh_db):
+    defaults = sp.default_params(STRATEGY_SCALE_OUT)
+    assert [defaults[f"tp{i}_pct"] for i in range(1, 5)] == [40.0, 30.0, 20.0, 10.0]
+
+
+def test_protected_scale_default_matches_original_hardcoded_constant(fresh_db):
+    assert sp.default_params(STRATEGY_PROTECTED_SCALE)["mid_tp_close_pct"] == 20.0
+
+
+def test_be_runner_default_matches_original_hardcoded_constant(fresh_db):
+    assert sp.default_params(STRATEGY_BE_RUNNER)["adx_ranging_threshold"] == 25.0
+
+
+def test_signal_climber_default_be_at_pos_matches_original_hardcoded_value(fresh_db):
+    # Original hardcoded call was be_at_pos=0 (0-indexed) == TP1 in the
+    # 1-based "TP#" convention this param uses.
+    assert sp.default_params(STRATEGY_SIGNAL_CLIMBER)["be_at_pos"] == 1.0
 
 
 # ── get/set/reset live values ────────────────────────────────────────────────

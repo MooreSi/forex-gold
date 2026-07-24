@@ -29,10 +29,11 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import (
     TPCache, get_triggered_tps, get_remaining_lots,
 )
-from forex_trader.core.models import Tick
+from forex_trader.core.models import STRATEGY_CONSERVATIVE_TRIAL, Tick
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ async def handle_conservative_trial(
     trade_id    = trade["trade_id"]
     lot_size    = float(trade["lot_size"])
     triggered   = await get_triggered_tps(tp_cache, trade_id)
+    ct_p        = get_strategy_params(STRATEGY_CONSERVATIVE_TRIAL)
 
     async def _partial(tp_num: int, tp_val: float, pct: float) -> bool:
         """Close pct% of original lot at tp_val. Returns True if trade auto-closed."""
@@ -146,7 +148,7 @@ async def handle_conservative_trial(
         if tp1_f is not None:
             log.info("[conservative_trial] %s TP1 @ %.2f — 5%% insurance close",
                      trade_id[:8], tp1_f)
-            if await _partial(1, tp1_f, 0.05):
+            if await _partial(1, tp1_f, ct_p["tp1_pct"] / 100.0):
                 return
 
     # ── TP2 — 30% close + SL to breakeven ────────────────────────────────
@@ -155,7 +157,7 @@ async def handle_conservative_trial(
         if tp2_f is not None:
             log.info("[conservative_trial] %s TP2 @ %.2f — 30%% close + SL to BE",
                      trade_id[:8], tp2_f)
-            await _partial(2, tp2_f, 0.30)
+            await _partial(2, tp2_f, ct_p["tp2_pct"] / 100.0)
             if current_sl is not None and not trade.get("sl_moved_to_be"):
                 should_move = (direction == "BUY" and entry_price > current_sl) or \
                               (direction == "SELL" and entry_price < current_sl)
@@ -169,7 +171,7 @@ async def handle_conservative_trial(
         if tp3_f is not None:
             log.info("[conservative_trial] %s TP3 @ %.2f — 20%% close",
                      trade_id[:8], tp3_f)
-            if await _partial(3, tp3_f, 0.20):
+            if await _partial(3, tp3_f, ct_p["tp3_pct"] / 100.0):
                 return
 
     # ── TP4 — 40% close + SL steps to TP2 level ─────────────────────────
@@ -178,7 +180,7 @@ async def handle_conservative_trial(
         if tp4_f is not None:
             log.info("[conservative_trial] %s TP4 @ %.2f — 40%% close + SL to TP2",
                      trade_id[:8], tp4_f)
-            await _partial(4, tp4_f, 0.40)
+            await _partial(4, tp4_f, ct_p["tp4_pct"] / 100.0)
             tp2_val = trade.get("tp2")
             if tp2_val is not None:
                 tp2_sl = float(tp2_val)
@@ -195,7 +197,7 @@ async def handle_conservative_trial(
         if tp5_f is not None:
             log.info("[conservative_trial] %s TP5 @ %.2f — 5%% close",
                      trade_id[:8], tp5_f)
-            if await _partial(5, tp5_f, 0.05):
+            if await _partial(5, tp5_f, ct_p["tp5_pct"] / 100.0):
                 return
 
     # ── TP6 — close all remaining ────────────────────────────────────────

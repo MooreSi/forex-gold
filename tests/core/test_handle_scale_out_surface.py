@@ -19,7 +19,9 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_handle_scale_out as hso
+from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
+from forex_trader.core.models import STRATEGY_SCALE_OUT
 
 
 def _reset_thread_local_connection():
@@ -44,7 +46,9 @@ def fresh_db():
     db.init(path)
     db._rs_cache = None
     db._rs_cache_ts = 0.0
+    sp._cache.clear()
     yield db
+    sp._cache.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
@@ -145,6 +149,17 @@ def test_tp1_hit_again_does_not_move_sl_twice(fresh_db):
     bridge = _FakeBridge()
     asyncio.run(hso.handle_scale_out(trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {}))
     assert bridge.modify_order_calls == []
+
+
+def test_tp1_close_pct_is_live_tunable(fresh_db):
+    sp.set_strategy_params(STRATEGY_SCALE_OUT, {"tp1_pct": 60.0})
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0)
+    trade = _trade_dict("t-1")
+    bridge = _FakeBridge()
+    asyncio.run(hso.handle_scale_out(trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {}))
+    assert bridge.partial_close_calls == [{"ticket": 555, "lots": 0.06}]
 
 
 def test_tp2_hit_closes_30pct_of_lot_size(fresh_db):

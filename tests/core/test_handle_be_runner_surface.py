@@ -18,7 +18,9 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_handle_be_runner as hbr
+from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
+from forex_trader.core.models import STRATEGY_BE_RUNNER
 
 
 def _reset_thread_local_connection():
@@ -43,7 +45,9 @@ def fresh_db():
     db.init(path)
     db._rs_cache = None
     db._rs_cache_ts = 0.0
+    sp._cache.clear()
     yield db
+    sp._cache.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
@@ -117,6 +121,23 @@ def test_adx_trending_runs_normal_be_runner_logic(fresh_db):
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
     with patch("forex_trader.core.dpm_engine.compute_adx", return_value=35.0):
+        asyncio.run(hbr.handle_be_runner(
+            trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {},
+            dpm_candles=[{"h": 1, "l": 1, "c": 1}],
+        ))
+    assert bridge.partial_close_calls == []
+    assert bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]
+
+
+def test_adx_ranging_threshold_is_live_tunable(fresh_db):
+    # ADX 20 is below the default 25 threshold (falls back to scale_out),
+    # but above a lowered 15 threshold (runs normal BE Runner logic).
+    sp.set_strategy_params(STRATEGY_BE_RUNNER, {"adx_ranging_threshold": 15.0})
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0)
+    trade = _trade_dict("t-1")
+    bridge = _FakeBridge()
+    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=20.0):
         asyncio.run(hbr.handle_be_runner(
             trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {},
             dpm_candles=[{"h": 1, "l": 1, "c": 1}],

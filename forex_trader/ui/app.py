@@ -238,6 +238,10 @@ def _render_about():
                         ("history",     "Version History",
                          "Release notes and changelog for each version of FOREX Trader.",
                          lambda: _show_section("version")),
+                        ("translate",   "Glossary",
+                         "Plain-English explanations of every trading term and app-specific "
+                         "concept used across the app (R:R, ADX, SL, TP, Anchor, Trail, and more).",
+                         lambda: _show_section("glossary")),
                     ]:
                         with ui.card().classes(
                             "flex-1 min-w-56 bg-gray-800 rounded-lg p-4 cursor-pointer "
@@ -612,6 +616,90 @@ def _render_about():
                                         )
                                         ui.label(change).classes(
                                             "text-sm text-gray-300 leading-relaxed flex-1"
+                                        )
+
+                elif section == "glossary":
+                    _sub_header("Glossary", "translate")
+                    ui.label(
+                        "Every trading term and app-specific concept used across FOREX Trader, "
+                        "in plain English."
+                    ).classes("text-xs text-gray-500 -mt-2 mb-1")
+
+                    GLOSSARY_SECTIONS = [
+                        ("Order & Risk Basics", [
+                            ("SL — Stop Loss", "The price at which a losing trade closes automatically to cap the loss. Every trade has one."),
+                            ("TP — Take Profit", "A target price at which some or all of a trade closes for profit. Trades can have up to 8 TP levels (TP1–TP8), closed in stages."),
+                            ("R:R — Risk:Reward", "How many multiples of the risk taken a trade actually returned. Shown as e.g. \"2.5:1\" or \"+2.5R\" — a trade risking $50 that banked $125 is 2.5R. Negative means it lost money relative to what was risked."),
+                            ("Realized R", "The R:R actually achieved by a closed trade (net P&L ÷ dollar risk taken at entry), as opposed to a plan ratio computed before the trade happened."),
+                            ("BE — Breakeven", "Moving the Stop Loss to the entry price once a trade is in enough profit, so the trade can no longer lose money even if price reverses."),
+                            ("Pip / Point", "A unit of price movement. For XAUUSD (gold) in this app, 1 point = $0.01 of price movement; a $10.00 move is 1,000 points."),
+                            ("Lot", "The trade size. 0.10 lots on XAUUSD means $10 profit or loss per 1-point price move (1 lot = 100 oz)."),
+                            ("Spread", "The gap between the buy (ask) and sell (bid) price at any moment — an implicit cost paid on every trade."),
+                            ("Drawdown", "How far equity has fallen from its most recent peak, shown as a percentage. Max Drawdown is the worst such dip over the period shown."),
+                            ("Win Rate", "The percentage of closed trades that ended in profit."),
+                            ("Profit Factor", "Total profit from winning trades divided by total loss from losing trades. Above 1.0 means profitable overall; below 1.0 means losing overall."),
+                        ]),
+                        ("Order Types", [
+                            ("Market Order", "An order that fills immediately at whatever the current price is."),
+                            ("Limit Order (Pending Order)", "An order that rests unfilled on the broker's book until price reaches a specified level, then fills automatically. Used by the Limit Runner strategy."),
+                            ("GTC — Good Till Cancelled", "A pending order that stays resting until it either fills or is explicitly cancelled/expires — as opposed to expiring at the end of the trading day."),
+                            ("Entry Realignment", "Limit Runner setting: if price has already moved through the signalled zone by the time the order would be placed, enters at market instead and shifts SL/TP by the same distance rather than losing the signal to a broker rejection."),
+                        ]),
+                        ("Technical Indicators", [
+                            ("ADX — Average Directional Index", "Measures how strong a trend is (not its direction). Above ~25 typically indicates a trending market; below suggests a ranging/choppy one. Several strategies require a minimum ADX before entering."),
+                            ("EMA — Exponential Moving Average", "A trend line that weights recent price more heavily than older price. This app shows EMA 9/21/50 on the chart."),
+                            ("RSI — Relative Strength Index", "A 0–100 momentum indicator. Above 70 is typically considered overbought, below 30 oversold."),
+                            ("ATR — Average True Range", "A measure of typical price movement size over recent candles, used to size stops and detect unusually quiet ('collapsed') markets."),
+                            ("HTF Bias — Higher-Timeframe Bias", "The prevailing trend direction on a longer timeframe (e.g. H4/H1) than the one a signal fires on, used as a filter or confidence signal."),
+                        ]),
+                        ("Automation & Risk Controls", [
+                            ("DPM — Dynamic Position Management", "Replaces fixed-TP management with continuous live monitoring: trails the stop as price moves favourably, banks partial profit at key levels, and can close early on a reversal beyond a configured threshold."),
+                            ("IME — Immediate Market Entry", "Reads channels for bare 'Buy Now'/'Sell Now' messages and enters at current market price immediately, updating SL/TP automatically when the full signal follows."),
+                            ("Auto-Execution", "When on, incoming Telegram signals are traded automatically. When off, they're recorded but require manual execution."),
+                            ("Circuit Breaker", "An automatic trading pause triggered after a run of consecutive losses, to stop a losing streak from compounding until manually reset or the cooldown elapses."),
+                            ("Kelly Criterion Sizing", "Adjusts live lot size using a fraction (half-Kelly) of the mathematically optimal bet size, based on rolling win rate and R:R. Clamped to a modest ±25% adjustment."),
+                            ("Trading Schedule", "A per-day, per-time-window profit target — once a window's target is hit, no further automated entries fire in that window for the rest of the day."),
+                            ("Signal", "A parsed trade idea (direction, entry, SL, TPs) from a Telegram channel or generated internally — not yet a trade until it executes."),
+                            ("Channel Strategy", "Which management strategy a given Telegram channel's signals use — set per channel, or left on Auto for Claude to recommend one based on that channel's own track record."),
+                        ]),
+                        ("EA Template Terms", [
+                            ("EA — Expert Advisor", "The native MetaTrader 5 program (ForexTraderBridge.mq5) that can manage a trade directly inside MT5 once handed off from this app, so management continues even if this app briefly disconnects."),
+                            ("EA Template", "A saved, reusable set of entry/management rules (Anchor, Trail, Grid, Stealth, Breakeven, Harvest settings) that fully replaces a channel's normal strategy — the EA runs it natively."),
+                            ("Anchor", "The reference price a template's grid or trail measures from — typically the price at signal time."),
+                            ("Trail", "A stop-loss that follows price at a fixed or rule-based distance as it moves favourably, locking in gains without a fixed target."),
+                            ("Grid", "A template mode that places several resting limit orders staggered at fixed intervals, averaging into a position as price moves through each level."),
+                            ("Stealth", "A template mode that delays or disguises order placement/management to reduce visible footprint."),
+                            ("Cancel Pending", "Grid template setting: once one leg of the grid fills, automatically cancel every other still-resting leg instead of letting them all fill."),
+                            ("Harvest", "A template setting that locks in (closes) profit once it crosses a configured threshold, independent of the normal TP ladder."),
+                        ]),
+                        ("Strategy Names", [
+                            ("Scale Out", "Closes a portion of the position at each TP level and moves SL to breakeven after TP1."),
+                            ("BE Runner", "Keeps the full position open with no partial closes; SL steps forward to each newly-cleared TP price."),
+                            ("Trailing Stop", "SL trails a fixed distance behind price once TP1 is reached, with no fixed final target."),
+                            ("Protected Scale", "Holds through TP1 and TP2 (SL moves to breakeven at TP2), then scales out from TP3 onward."),
+                            ("Conservative", "Ignores the signal's own SL/TP entirely and uses a fixed, tight 5-point SL / 3-point TP1 from the actual fill price."),
+                            ("Conservative Trial", "A variant of Conservative with its own fixed SL/TP/breakeven schedule, used to trial different fixed levels without touching the original Conservative strategy."),
+                            ("Scalp Runner", "A tight two-stage scalp: an initial small target confirms the move, then the remaining position trails on a close stop."),
+                            ("Signal Climber", "Uses the signal's own full TP ladder (up to TP8), closing a share at each level and stepping SL forward as each one clears."),
+                            ("Reversal Runner", "The Reversal Engine's own management style — widens the signal's stop within limits and rides the full TP ladder."),
+                            ("Adaptive Runner / Adaptive Runner 2", "Variants of Reversal Runner with different stop-widening rules (capped proportionate to reward, or a flat fixed distance) — built for signal sources with inconsistent TP-ladder quality."),
+                            ("Limit Runner", "Places a genuine resting limit order at the broker rather than waiting to fill at market, then manages the position with its own TP ladder once filled."),
+                        ]),
+                    ]
+
+                    for section_title, terms in GLOSSARY_SECTIONS:
+                        with ui.card().classes("w-full bg-gray-800 rounded-lg p-5"):
+                            ui.label(section_title).classes(
+                                "text-sm font-semibold text-yellow-300 mb-3"
+                            )
+                            with ui.column().classes("w-full gap-3"):
+                                for term, definition in terms:
+                                    with ui.column().classes("gap-0.5"):
+                                        ui.label(term).classes(
+                                            "text-sm font-semibold text-cyan-300"
+                                        )
+                                        ui.label(definition).classes(
+                                            "text-xs text-gray-300 leading-relaxed"
                                         )
 
 

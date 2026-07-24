@@ -24,8 +24,9 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import TPCache, get_triggered_tps, get_remaining_lots
-from forex_trader.core.models import Tick
+from forex_trader.core.models import STRATEGY_PROTECTED_SCALE, Tick
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ async def handle_protected_scale(
                     trade_id, "sl_moved_be",
                 ))
 
-    close_pct = 0.20
+    close_pct = get_strategy_params(STRATEGY_PROTECTED_SCALE)["mid_tp_close_pct"] / 100.0
     for tp_num in range(3, 6):
         if tp_num in triggered:
             continue

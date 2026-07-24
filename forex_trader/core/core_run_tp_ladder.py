@@ -213,8 +213,13 @@ async def handle_signal_climber(
     Designed for professional multi-TP signals (GD2, GDV) where TP5/6 is
     the intended target and dumping 80% at TP1 destroys the expected value.
     """
+    from forex_trader.core.core_strategy_params import get_strategy_params
+    from forex_trader.core.models import STRATEGY_SIGNAL_CLIMBER
+
+    be_at_pos_1based = int(get_strategy_params(STRATEGY_SIGNAL_CLIMBER).get("be_at_pos", 1))
+    be_at_pos = max(be_at_pos_1based - 1, 0)
     await run_tp_ladder(trade, tick, _CLIMBER_PCTS, "signal_climber", bridge, tp_cache,
-                       be_at_pos=0, close_full_after_tps=close_full_after_tps)
+                       be_at_pos=be_at_pos, close_full_after_tps=close_full_after_tps)
 
 
 async def handle_reversal_runner(

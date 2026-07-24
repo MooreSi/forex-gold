@@ -23,8 +23,9 @@ from forex_trader.core import database as db_module
 from forex_trader.core import dpm_engine
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_handle_scale_out import handle_scale_out
+from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import TPCache
-from forex_trader.core.models import MAX_TP, Tick
+from forex_trader.core.models import MAX_TP, STRATEGY_BE_RUNNER, Tick
 
 log = logging.getLogger(__name__)
 
@@ -40,10 +41,11 @@ async def handle_be_runner(
 ) -> None:
     # ADX gate: BE Runner only in trending markets — fall back to Scale Out when ranging.
     if dpm_candles:
+        _adx_threshold = get_strategy_params(STRATEGY_BE_RUNNER)["adx_ranging_threshold"]
         _adx = dpm_engine.compute_adx(dpm_candles)
-        if _adx < 25:
-            log.debug("[be_runner] trade=%s ADX %.1f < 25 (ranging) — falling back to scale_out",
-                      trade["trade_id"][:8], _adx)
+        if _adx < _adx_threshold:
+            log.debug("[be_runner] trade=%s ADX %.1f < %.1f (ranging) — falling back to scale_out",
+                      trade["trade_id"][:8], _adx, _adx_threshold)
             await handle_scale_out(
                 trade, tick, bridge, tp_cache, scale_out_last_fail,
                 close_full_after_tps=close_full_after_tps,

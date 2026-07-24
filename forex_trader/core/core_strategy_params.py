@@ -1,8 +1,9 @@
 """Live-tunable per-strategy point/multiplier parameters -- lets Conservative,
-Scalp Runner, Reversal Runner, Adaptive Runner, Adaptive Runner 2, and Limit
-Runner's fixed SL/TP constants be edited from Trading > Strategy without a
-code change or restart, plus a small named-template library to save/reapply
-parameter sets.
+Scalp Runner, Reversal Runner, Adaptive Runner, Adaptive Runner 2, Limit
+Runner, Conservative Trial, Signal Climber, Protected Scale, Scale Out, and
+BE Runner's fixed SL/TP/close-% constants be edited from Trading > Strategy
+without a code change or restart, plus a small named-template library to
+save/reapply parameter sets.
 
 Inspired by a third-party EA's "Settings Templates" panel (2026-07-22
 investigation) -- Python-only by design, no MQL5 involved (Limit Runner's own
@@ -36,6 +37,8 @@ from forex_trader.core.database import _schedule_coro
 from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
+    STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE,
+    STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
 )
 
 log = logging.getLogger(__name__)
@@ -80,6 +83,56 @@ PARAM_SPECS: dict[str, list[tuple[str, str, float, str]]] = {
         ("be_at_pos",          "Breakeven at TP#",       1.0,  "tp#"),
         ("runner_reserve_pct", "Runner reserve (TP OPEN)", 25.0, "%"),
     ],
+    # Conservative Trial recomputes SL and all 6 TPs from the actual fill
+    # price at open time (core_open_trade_from_signal.py) -- sl_risk_usd
+    # drives the SL distance formula (pts = sl_risk_usd / (lot_size * 100)),
+    # the six tpN_pt values are the fixed point offsets from fill, and the
+    # tpN_pct values are the fraction of the original lot closed at each
+    # (TP6 always closes whatever remains, so it has no _pct entry).
+    STRATEGY_CONSERVATIVE_TRIAL: [
+        ("sl_risk_usd", "Stop Loss ($ risk target)", 100.0, "usd"),
+        ("tp1_pt",  "TP1",           5.0,  "pt"),
+        ("tp1_pct", "TP1 Close %",   5.0,  "%"),
+        ("tp2_pt",  "TP2",           10.0, "pt"),
+        ("tp2_pct", "TP2 Close %",   30.0, "%"),
+        ("tp3_pt",  "TP3",           14.0, "pt"),
+        ("tp3_pct", "TP3 Close %",   20.0, "%"),
+        ("tp4_pt",  "TP4",           20.0, "pt"),
+        ("tp4_pct", "TP4 Close %",   40.0, "%"),
+        ("tp5_pt",  "TP5",           27.0, "pt"),
+        ("tp5_pct", "TP5 Close %",   5.0,  "%"),
+        ("tp6_pt",  "TP6 (closes all remaining)", 35.0, "pt"),
+    ],
+    # Signal Climber rides the signal's own TP ladder (no fixed point
+    # offsets of its own) -- its exit fractions come from the shared
+    # _CLIMBER_PCTS table (core_open_trade.py), out of scope here for the
+    # same reason Reversal/Adaptive Runner's shared GDVR table is (see
+    # module docstring). be_at_pos is its one strategy-specific scalar,
+    # same 1-based "TP#" convention as Limit Runner.
+    STRATEGY_SIGNAL_CLIMBER: [
+        ("be_at_pos", "Breakeven at TP#", 1.0, "tp#"),
+    ],
+    # Protected Scale skips TP1 (insurance only), moves SL to BE at TP2,
+    # then closes this same percentage at each of TP3/TP4/TP5.
+    STRATEGY_PROTECTED_SCALE: [
+        ("mid_tp_close_pct", "TP3-TP5 Close %", 20.0, "%"),
+    ],
+    # Scale Out: tiered close schedule, taper toward the back; whatever TP
+    # is last-defined on the signal always closes all remaining lots
+    # regardless of these percentages.
+    STRATEGY_SCALE_OUT: [
+        ("tp1_pct", "TP1 Close %", 40.0, "%"),
+        ("tp2_pct", "TP2 Close %", 30.0, "%"),
+        ("tp3_pct", "TP3 Close %", 20.0, "%"),
+        ("tp4_pct", "TP4 Close %", 10.0, "%"),
+    ],
+    # BE Runner has no fixed point/percentage constant of its own -- it
+    # steps SL through the signal's own TP ladder with no partial closes.
+    # Its only tunable number is the ADX threshold gating the ranging-market
+    # fallback to Scale Out.
+    STRATEGY_BE_RUNNER: [
+        ("adx_ranging_threshold", "ADX ranging threshold", 25.0, "adx"),
+    ],
 }
 
 STRATEGY_LABELS: dict[str, str] = {
@@ -89,12 +142,19 @@ STRATEGY_LABELS: dict[str, str] = {
     STRATEGY_ADAPTIVE_RUNNER:   "Adaptive Runner",
     STRATEGY_ADAPTIVE_RUNNER_2: "Adaptive Runner 2",
     STRATEGY_LIMIT_RUNNER:      "Limit Runner",
+    STRATEGY_CONSERVATIVE_TRIAL: "Conservative Trial",
+    STRATEGY_SIGNAL_CLIMBER:     "Signal Climber",
+    STRATEGY_PROTECTED_SCALE:    "Protected Scale",
+    STRATEGY_SCALE_OUT:          "Scale Out",
+    STRATEGY_BE_RUNNER:          "BE Runner",
 }
 
 # Strategies in display order for the UI's strategy picker.
 PARAM_STRATEGIES: list[str] = [
-    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
+    STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
+    STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE, STRATEGY_SCALE_OUT,
+    STRATEGY_BE_RUNNER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
 ]
 
 _DEFAULTS: dict[str, dict[str, float]] = {

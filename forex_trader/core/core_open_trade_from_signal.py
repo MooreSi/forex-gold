@@ -191,11 +191,12 @@ async def open_trade_from_signal(
     # Recalculate exact SL and all 6 TPs from the actual fill price, then
     # update the DB row and sync the MT5 SL via modify_order.
     elif strategy == STRATEGY_CONSERVATIVE_TRIAL and result.get("trade_id"):
+        _ct_p      = get_strategy_params(STRATEGY_CONSERVATIVE_TRIAL)
         _fill      = float(result.get("entry_price", _entry_mid))
-        _ct_sl_pts = round(100.0 / (lot_size * 100.0), 1)
+        _ct_sl_pts = round(_ct_p["sl_risk_usd"] / (lot_size * 100.0), 1)
         exact_sl   = round(_fill - _sign * _ct_sl_pts, 2)
-        # TP offsets (pts from fill): 5, 10, 14, 20, 27, 35
-        ct_tps = [round(_fill + _sign * off, 2) for off in (5.0, 10.0, 14.0, 20.0, 27.0, 35.0)]
+        # TP offsets (pts from fill), live-tunable via Strategy Parameters.
+        ct_tps = [round(_fill + _sign * _ct_p[f"tp{i}_pt"], 2) for i in range(1, 7)]
         with db_module.db() as conn:
             conn.execute(
                 """UPDATE vantage_simulated_trades

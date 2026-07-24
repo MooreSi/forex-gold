@@ -17,7 +17,9 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_handle_protected_scale as hps
+from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
+from forex_trader.core.models import STRATEGY_PROTECTED_SCALE
 
 
 def _reset_thread_local_connection():
@@ -42,7 +44,9 @@ def fresh_db():
     db.init(path)
     db._rs_cache = None
     db._rs_cache_ts = 0.0
+    sp._cache.clear()
     yield db
+    sp._cache.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
@@ -181,6 +185,20 @@ def test_tp3_cleared_closes_flat_20pct(fresh_db):
     bridge = _FakeBridge()
     asyncio.run(hps.handle_protected_scale(trade, _tick(bid=2435.0, ask=2435.5), bridge, TPCache()))
     assert bridge.partial_close_calls == [{"ticket": 555, "lots": 0.02}]
+
+
+def test_mid_tp_close_pct_is_live_tunable(fresh_db):
+    sp.set_strategy_params(STRATEGY_PROTECTED_SCALE, {"mid_tp_close_pct": 50.0})
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10,
+                  entry_price=2400.0, stop_loss=2400.0,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
+    _insert_partial_close("t-1", "TP1_SKIPPED")
+    _insert_partial_close("t-1", "TP2_BE_LOCKED")
+    trade = _trade_dict("t-1")
+    bridge = _FakeBridge()
+    asyncio.run(hps.handle_protected_scale(trade, _tick(bid=2435.0, ask=2435.5), bridge, TPCache()))
+    assert bridge.partial_close_calls == [{"ticket": 555, "lots": 0.05}]
 
 
 def test_break_on_first_miss_stops_before_later_tp(fresh_db):

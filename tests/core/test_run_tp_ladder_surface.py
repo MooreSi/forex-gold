@@ -18,7 +18,9 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_run_tp_ladder as ladder
+from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
+from forex_trader.core.models import STRATEGY_SIGNAL_CLIMBER
 
 
 def _reset_thread_local_connection():
@@ -43,7 +45,9 @@ def fresh_db():
     db.init(path)
     db._rs_cache = None
     db._rs_cache_ts = 0.0
+    sp._cache.clear()
     yield db
+    sp._cache.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
@@ -135,6 +139,22 @@ def test_climber_tp1_hit_closes_30pct_and_moves_sl_to_be(fresh_db):
     trade_after = _trade_dict("t-1")
     assert trade_after["stop_loss"] == 2400.0
     assert trade_after["sl_moved_to_be"] == 1
+
+
+def test_climber_be_at_pos_is_live_tunable(fresh_db):
+    # Default be_at_pos=1 (TP1) moves SL to BE on TP1 -- raising it to 2
+    # (TP2) must withhold that move until TP2, same as Reversal Runner's
+    # hardcoded be_at_pos=1 (0-indexed) behavior.
+    sp.set_strategy_params(STRATEGY_SIGNAL_CLIMBER, {"be_at_pos": 2.0})
+    _insert_signal()
+    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
+                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
+    trade = _trade_dict("t-1")
+    bridge = _FakeBridge()
+    asyncio.run(ladder.handle_signal_climber(trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache()))
+
+    assert bridge.partial_close_calls == [{"ticket": 555, "lots": 0.03}]
+    assert bridge.modify_order_calls == []
 
 
 def test_climber_tp3_last_closes_full_remaining_returns_before_sl_trail(fresh_db):

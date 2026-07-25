@@ -71,7 +71,8 @@ from forex_trader.core.core_max_tp_hit import (
     backfill_max_tp_hit_corrected as _backfill_max_tp_hit_corrected_impl,
 )
 from forex_trader.core.core_fees_sizing import (
-    pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl)
+    pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl,
+    calculate_fees as _calculate_fees_impl)
 from forex_trader.core.core_mt5_performance import (
     compute_mt5_performance as _compute_mt5_performance_impl,
     _platform_fee_rate, _apply_fee,
@@ -431,30 +432,11 @@ class SimulationEngine:
     # ── Fee model ─────────────────────────────────────────────────────────────
 
     def calculate_fees(self, lot_size: float, spread: float, hold_hours: float = 0.0) -> dict:
-        fs = db_module.get_fee_settings()
-        spread_cost = 0.0
-        if fs.get("include_spread_cost", 1):
-            spread_cost = spread * lot_size * CONTRACT_SIZE
-
-        commission = (
-            fs.get("commission_per_lot_per_side", 0.0) * lot_size * 2
-            + fs.get("commission_round_turn_per_lot", 0.0) * lot_size
-        )
-        swap_cost = 0.0
-        if fs.get("include_swap_cost", 1) and hold_hours >= 24:
-            nights = math.floor(hold_hours / 24)
-            swap_cost = fs.get("swap_per_lot_per_night", -6.5) * lot_size * nights
-
-        slippage_pts  = fs.get("estimated_slippage_points", 5.0)
-        slippage_cost = slippage_pts * POINT_SIZE * lot_size * CONTRACT_SIZE
-
-        return {
-            "spread_cost":   round(spread_cost, 4),
-            "commission":    round(commission, 4),
-            "swap_cost":     round(swap_cost, 4),
-            "slippage_cost": round(slippage_cost, 4),
-            "total_cost":    round(spread_cost + commission + abs(swap_cost) + slippage_cost, 4),
-        }
+        # Delegation: this was a verbatim duplicate of core_fees_sizing's copy,
+        # kept alive only because reversal_engine_manage.py:86 reaches it via
+        # self._main_eng. Two copies of a cost calculation is how the sizing
+        # ones drifted apart.
+        return _calculate_fees_impl(lot_size, spread, hold_hours)
 
     # ── P&L ───────────────────────────────────────────────────────────────────
 

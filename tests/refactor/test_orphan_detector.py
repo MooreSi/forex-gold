@@ -111,14 +111,14 @@ def test_public_functions_skips_private_and_reports_loc(tmp_path):
 @pytest.mark.parametrize("ident", [
     "core_mt5_position_sync::sync_closed_mt5_positions",
     "core_profit_sync::close_full_after_tps",
-    "core_fees_sizing::calculate_fees",
-    "core_tp_trigger_tracking::check_sl",
 ])
 def test_known_orphans_are_still_detected(ident):
-    """Regression guard on the four confirmed unwired extractions.
+    """Regression guard on the unwired extractions still outstanding.
 
-    When one is genuinely wired in or deleted, remove it from this list in the
-    same commit -- that edit is the proof the work happened.
+    Two of the original four are gone: core_fees_sizing::calculate_fees is now
+    delegated to from engine.py, and core_tp_trigger_tracking::check_sl was a
+    verbatim duplicate of core_monitor_loop's wired copy and was deleted. Their
+    removal from this list in the same commit is the proof the work happened.
     """
     found = {f"{o['module']}::{o['function']}" for o in od.find_orphans()}
     assert ident in found
@@ -130,5 +130,17 @@ def test_wired_extractions_are_not_reported():
     for ident in ("core_open_trade::open_trade",
                   "core_close_trade::close_trade",
                   "core_monitor_loop::check_sl",
+                  "core_fees_sizing::calculate_fees",
+                  "core_fees_sizing::suggest_lot_size",
                   "core_risk_governor::rg_check_halt"):
         assert ident not in found
+
+
+def test_check_sl_exists_in_exactly_one_module():
+    """It was extracted twice; core_monitor_loop's copy is the wired one."""
+    from tools.refactor_audit.ast_normalise import find_function
+    defining = [
+        p.stem for p in sorted(od.CORE_DIR.glob("core_*.py"))
+        if find_function(ast.parse(p.read_text(encoding="utf-8")), "check_sl")
+    ]
+    assert defining == ["core_monitor_loop"]

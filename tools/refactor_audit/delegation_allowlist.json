@@ -48,14 +48,6 @@
       "twin": "core_bot_commands_trading",
       "reason": "Documented deferral, order-placing surface.",
       "phase": 8
-    },
-    {
-      "method": "calculate_fees",
-      "line": 432,
-      "statements": 13,
-      "twin": "core_fees_sizing",
-      "reason": "Undocumented duplicate, but twin_compare reports the two as behaviourally identical, so no behaviour risk. reversal_engine_manage.py:86 reaches it via self._main_eng.",
-      "phase": 8
     }
   ]
 }

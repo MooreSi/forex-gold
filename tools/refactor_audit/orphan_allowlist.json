@@ -55,24 +55,6 @@
       "action": "Wire with the trading/ phase."
     },
     {
-      "id": "core_fees_sizing::calculate_fees",
-      "loc": 25,
-      "verdict": "identical",
-      "live_twin": "engine.py:432 calculate_fees",
-      "reason": "Undocumented orphan. The extracted copy is behaviourally identical to the live inline one, so this is pure duplication rather than a behaviour risk. reversal_engine_manage.py:86 reaches the logic via self._main_eng.calculate_fees.",
-      "phase": 8,
-      "action": "Safe to delete the orphan now; kept only so the audit lands as one reviewable change."
-    },
-    {
-      "id": "core_tp_trigger_tracking::check_sl",
-      "loc": 10,
-      "verdict": "duplicate extraction",
-      "live_twin": "core_monitor_loop.py:32 check_sl (this is the wired one, via engine.py:39)",
-      "reason": "The same function was extracted twice into two modules. core_monitor_loop's copy is wired; this one never was.",
-      "phase": 7,
-      "action": "Delete this copy."
-    },
-    {
       "id": "core_logic_keywords::default_lexicon",
       "loc": 2,
       "verdict": "no twin",

@@ -178,32 +178,6 @@ def test_log_tp_wait_diagnostic_does_not_raise(fresh_db, cache):
     assert "t-1" in cache.wait_log_ts
 
 
-# ── check_sl ───────────────────────────────────────────────────────────────────
-
-def test_check_sl_buy_hit(fresh_db):
-    trade = {"trade_id": "t-1", "direction": "BUY", "stop_loss": 2390.0}
-    result = tp.check_sl(trade, _tick(bid=2389.0, ask=2389.5))
-    assert result == ("t-1", 2390.0, "SL")
-
-
-def test_check_sl_buy_not_hit(fresh_db):
-    trade = {"trade_id": "t-1", "direction": "BUY", "stop_loss": 2390.0}
-    result = tp.check_sl(trade, _tick(bid=2395.0, ask=2395.5))
-    assert result is None
-
-
-def test_check_sl_sell_hit(fresh_db):
-    trade = {"trade_id": "t-1", "direction": "SELL", "stop_loss": 2410.0}
-    result = tp.check_sl(trade, _tick(bid=2410.5, ask=2411.0))
-    assert result == ("t-1", 2410.0, "SL")
-
-
-def test_check_sl_no_stop_set(fresh_db):
-    trade = {"trade_id": "t-1", "direction": "BUY", "stop_loss": None}
-    result = tp.check_sl(trade, _tick(bid=2300.0, ask=2300.5))
-    assert result is None
-
-
 # ── check_tp_hits ──────────────────────────────────────────────────────────────
 
 def test_check_tp_hits_buy_single_hit(fresh_db, cache):

@@ -93,18 +93,6 @@ def log_tp_wait_diagnostic(
     )
 
 
-def check_sl(trade: dict, tick: Tick) -> Optional[tuple]:
-    direction = trade["direction"].upper()
-    sl = float(trade["stop_loss"]) if trade["stop_loss"] else None
-    if direction == "BUY":
-        if sl and tick.bid <= sl:
-            return (trade["trade_id"], sl, "SL")
-    else:
-        if sl and tick.ask >= sl:
-            return (trade["trade_id"], sl, "SL")
-    return None
-
-
 async def check_tp_hits(cache: TPCache, trade: dict, tick: Tick) -> list[tuple]:
     direction   = trade["direction"].upper()
     entry_price = float(trade["entry_price"])

@@ -22,3 +22,15 @@ forex-trader = "run:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["forex_trader*"]
+
+[tool.pytest.ini_options]
+# The suite reads the real clock: dpm_engine.detect_session() branches on the
+# current UTC hour and is_weekly_market_closed() returns True all weekend, so
+# every session-gated test passes on a Tuesday afternoon and fails on a Saturday
+# night with no code change in between. That made "did my change break this?"
+# unanswerable depending on the day.
+#
+# This plugin pins both readers to a fixed market-open instant so a run means
+# the same thing whenever it happens. Override the instant with
+# --market-clock=..., or drop the flag to reproduce real-clock behaviour.
+addopts = "-p tools.testing.fixed_clock"

@@ -102,22 +102,11 @@
       "forex_trader/ui/pages/trading.py": 3
     },
     "transaction": {
-      "forex_trader/breakout_signal/breakout_signal_repo.py": 1,
-      "forex_trader/breakout_signal/database.py": 2,
       "forex_trader/core/core_db_ai_recovered.py": 3,
-      "forex_trader/core/core_db_analytics.py": 2,
-      "forex_trader/core/core_db_channel.py": 2,
-      "forex_trader/core/core_db_learned_rules.py": 2,
-      "forex_trader/core/core_db_signal_bus.py": 1,
-      "forex_trader/core/core_db_sync.py": 1,
-      "forex_trader/core/core_db_telegram.py": 2,
-      "forex_trader/core/core_db_unrecognised.py": 1,
       "forex_trader/core/core_orb_report.py": 1,
-      "forex_trader/core/core_trade_reporting.py": 2,
       "forex_trader/core/database.py": 1,
-      "forex_trader/reversal_engine/database.py": 6,
-      "forex_trader/test_signal/database.py": 6,
-      "forex_trader/test_signal/test_signal_repo.py": 2
+      "forex_trader/reversal_engine/database.py": 3,
+      "forex_trader/test_signal/database.py": 1
     },
     "ui_db": {
       "forex_trader/ui/app.py": 1,

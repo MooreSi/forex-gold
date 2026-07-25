@@ -258,35 +258,40 @@ def get_signal_by_id(signal_id: int) -> dict:
 
 
 def insert_signal(sig: dict) -> tuple[int, str]:
-    result = get_db().run(
-        """INSERT INTO test_signals
-           (created_at, direction, entry_low, entry_high, entry_mid, stop_loss,
-            tp1, tp2, tp3, sl_dist, rr_tp1, rr_tp3,
-            session, htf_bias, atr_m15, key_level, key_level_type,
-            rationale, quality_score, claude_approved,
-            lot_size, risk_amount, claude_fallback, trigger_pattern, strategy,
-            ml_prob, regime, adx)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        sig.get("created_at", time.time()),
-        sig["direction"], sig["entry_low"], sig["entry_high"], sig["entry_mid"],
-        sig["stop_loss"], sig.get("tp1"), sig.get("tp2"), sig.get("tp3"),
-        sig.get("sl_dist"), sig.get("rr_tp1"), sig.get("rr_tp3"),
-        sig.get("session"), sig.get("htf_bias"), sig.get("atr_m15"),
-        sig.get("key_level"), sig.get("key_level_type"),
-        sig.get("rationale", ""), sig.get("quality_score", 0.0),
-        1 if sig.get("claude_approved") else 0,
-        sig.get("lot_size", 0.01), sig.get("risk_amount", 0.0),
-        1 if sig.get("claude_fallback") else 0,
-        sig.get("trigger_pattern", ""),
-        sig.get("strategy", "be_runner"),
-        sig.get("ml_prob"),
-        sig.get("regime"),
-        sig.get("adx"),
-    )
-    signal_id = result.lastrowid
-    signal_ref = f"SIG-{signal_id:04d}"
-    get_db().run("UPDATE test_signals SET signal_ref=? WHERE id=?", signal_ref, signal_id)
-    return signal_id, signal_ref
+    # One transaction, because signal_ref is derived from the rowid and so can
+    # only be stamped after the INSERT. Left unwrapped, a crash between the two
+    # statements commits a signal with a NULL signal_ref -- a row every caller
+    # assumes has a reference.
+    with get_db().transaction():
+        result = get_db().run(
+            """INSERT INTO test_signals
+               (created_at, direction, entry_low, entry_high, entry_mid, stop_loss,
+                tp1, tp2, tp3, sl_dist, rr_tp1, rr_tp3,
+                session, htf_bias, atr_m15, key_level, key_level_type,
+                rationale, quality_score, claude_approved,
+                lot_size, risk_amount, claude_fallback, trigger_pattern, strategy,
+                ml_prob, regime, adx)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            sig.get("created_at", time.time()),
+            sig["direction"], sig["entry_low"], sig["entry_high"], sig["entry_mid"],
+            sig["stop_loss"], sig.get("tp1"), sig.get("tp2"), sig.get("tp3"),
+            sig.get("sl_dist"), sig.get("rr_tp1"), sig.get("rr_tp3"),
+            sig.get("session"), sig.get("htf_bias"), sig.get("atr_m15"),
+            sig.get("key_level"), sig.get("key_level_type"),
+            sig.get("rationale", ""), sig.get("quality_score", 0.0),
+            1 if sig.get("claude_approved") else 0,
+            sig.get("lot_size", 0.01), sig.get("risk_amount", 0.0),
+            1 if sig.get("claude_fallback") else 0,
+            sig.get("trigger_pattern", ""),
+            sig.get("strategy", "be_runner"),
+            sig.get("ml_prob"),
+            sig.get("regime"),
+            sig.get("adx"),
+        )
+        signal_id = result.lastrowid
+        signal_ref = f"SIG-{signal_id:04d}"
+        get_db().run("UPDATE test_signals SET signal_ref=? WHERE id=?", signal_ref, signal_id)
+        return signal_id, signal_ref
 
 
 def get_open_signals() -> list[dict]:

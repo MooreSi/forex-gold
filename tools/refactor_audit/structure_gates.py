@@ -79,15 +79,51 @@ def sql_report() -> dict[str, int]:
     return out
 
 
+# Statements that change rows. DDL is excluded on purpose: schema creation and
+# migrate-on-write columns are not part of a business write, SQLite commits DDL
+# implicitly anyway, and the ALTERs are routinely wrapped in try/except because
+# they are expected to fail once the column exists.
+#
+# The first version of this gate counted every run()/execute() and so reported
+# `test_signal_repo.log_analysis` and `breakout_signal_repo.init` alongside the
+# one real defect. A gate with two false positives out of three findings gets
+# ignored, which would have cost more than it caught.
+ROW_MODIFYING = ("INSERT", "UPDATE", "DELETE", "REPLACE")
+
+
+def _leading_sql(call: ast.Call) -> str | None:
+    """The SQL verb of a run()/execute() call, when it can be read statically."""
+    if not call.args:
+        return None
+    arg = call.args[0]
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        text = arg.value
+    elif isinstance(arg, ast.JoinedStr) and arg.values and \
+            isinstance(arg.values[0], ast.Constant) and \
+            isinstance(arg.values[0].value, str):
+        # f"ALTER TABLE {t} ADD COLUMN {c}" -- the verb is in the literal prefix.
+        text = arg.values[0].value
+    else:
+        return None
+    return text.strip().split(None, 1)[0].upper() if text.strip() else None
+
+
 def _writes_in(node: ast.AST) -> int:
-    """Calls that look like a data-layer write."""
-    return sum(
-        1 for n in ast.walk(node)
-        if isinstance(n, ast.Call) and (
+    """Calls that modify rows. An unreadable statement counts, conservatively."""
+    total = 0
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Call):
+            continue
+        is_db_call = (
             (isinstance(n.func, ast.Attribute) and n.func.attr in ("run", "execute"))
             or (isinstance(n.func, ast.Name) and n.func.id in ("run", "execute"))
         )
-    )
+        if not is_db_call:
+            continue
+        verb = _leading_sql(n)
+        if verb is None or verb in ROW_MODIFYING:
+            total += 1
+    return total
 
 
 def _has_transaction(node: ast.AST) -> bool:

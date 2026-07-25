@@ -57,27 +57,47 @@ def test_repo_files_are_exempt_from_the_sql_gate():
     assert not sg.is_repo_file(sg.Path("forex_trader/ui/pages/history.py"))
 
 
-def test_the_reference_repos_are_only_partly_clean():
-    """The three migrated engines are held up as the pattern for the other 16
-    domains. They are not uniformly transactional, and that matters because
-    whatever is wrong here gets copied fifteen more times.
+def test_the_reference_repos_are_transactionally_clean():
+    """The three migrated engines are the pattern for the other 16 domains, so
+    anything wrong here gets copied fifteen more times.
 
-    Verified rather than assumed:
-      reversal_engine_repo.py  clean
-      breakout_signal_repo.py  init
-      test_signal_repo.py      insert_signal, log_analysis
-
-    test_signal_repo.insert_signal is the substantive one: it INSERTs a signal
-    and then issues a separate `UPDATE test_signals SET signal_ref=?` to stamp
-    the reference derived from the new rowid. Two unwrapped writes -- a crash
-    between them leaves a signal row with a NULL signal_ref.
-
-    Tighten this test as those are fixed; it is a to-do list, not a licence.
+    They are clean now. `test_signal_repo.insert_signal` was not: it INSERTed a
+    signal and then issued a separate `UPDATE test_signals SET signal_ref=?` to
+    stamp the reference derived from the new rowid, so a crash between the two
+    committed a row with a NULL signal_ref. Now one transaction.
     """
     offenders = sg.transaction_report()
-    assert "forex_trader/reversal_engine/reversal_engine_repo.py" not in offenders
-    assert offenders.get("forex_trader/test_signal/test_signal_repo.py") == [
-        "insert_signal", "log_analysis"]
+    for repo in ("forex_trader/reversal_engine/reversal_engine_repo.py",
+                 "forex_trader/breakout_signal/breakout_signal_repo.py",
+                 "forex_trader/test_signal/test_signal_repo.py"):
+        assert repo not in offenders, f"{repo} is the pattern others copy"
+
+
+def test_ddl_is_not_counted_as_a_write():
+    """Schema and migrate-on-write statements are not business writes.
+
+    Counting them reported two false positives against one real defect, and a
+    gate that is wrong two thirds of the time gets switched off.
+    """
+    import ast
+    fn = ast.parse(
+        "def f():\n"
+        "    get_db().run('CREATE TABLE t (id INT)')\n"
+        "    get_db().run(f'ALTER TABLE t ADD COLUMN {c} {d}')\n"
+        "    get_db().run('INSERT INTO t VALUES (?)', 1)\n"
+    ).body[0]
+    assert sg._writes_in(fn) == 1
+
+
+def test_an_unreadable_statement_still_counts():
+    """A run(sql_var) we cannot inspect must not be assumed harmless."""
+    import ast
+    fn = ast.parse(
+        "def f():\n"
+        "    get_db().run(some_sql, 1)\n"
+        "    get_db().run(other_sql, 2)\n"
+    ).body[0]
+    assert sg._writes_in(fn) == 2
 
 
 def test_ui_db_gate_sees_the_aliased_import_form():

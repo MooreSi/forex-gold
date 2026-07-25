@@ -38,47 +38,73 @@ def test_wired_delegators_are_not_flagged():
         assert method_named(name) is None, f"{name} delegates and must not be flagged"
 
 
-def test_suggest_lot_size_duplication_is_still_present():
-    """A live risk-control divergence, not scheduled debt.
+def test_lot_sizing_has_exactly_one_implementation():
+    """Regression guard on a fixed live defect.
 
-    engine.py:466 and core_fees_sizing.suggest_lot_size are BOTH reachable and
-    they do not agree: only the extracted one applies the
-    max_risk_per_trade_pct ceiling (schema default 1.0, i.e. on). Signals
-    auto-executed through _scan_messages take the engine copy via
-    engine.py:2268/2284 and are sized without that ceiling; manual orders and
-    bot commands take the extracted copy and are capped.
+    engine.py used to carry its own copy of the sizing maths. When Global
+    Parameters > Max Risk per trade % was added to core_fees_sizing and not to
+    that copy, the two silently disagreed -- and because _scan_messages injects
+    the engine method as suggest_lot_size_fn (engine.py:2268/2284), Telegram
+    auto-executed signals were sized without a ceiling that manual orders and
+    bot commands applied. Same UI field, honoured on two entry paths of three.
 
-    Delete this test when the duplication is resolved -- that deletion is the
-    record that a decision was made.
+    The engine method must stay a pure delegation. Reintroducing arithmetic
+    here is how the divergence happened the first time.
     """
-    f = method_named("suggest_lot_size")
-    assert f is not None, "the duplicate implementation appears to be resolved"
-    assert "core_fees_sizing" in f["twins"]
+    assert method_named("suggest_lot_size") is None, (
+        "engine.py's suggest_lot_size no longer delegates to core_fees_sizing"
+    )
 
 
-def test_the_two_lot_sizing_implementations_still_disagree():
-    """Pins the specific divergence, so a silent partial fix is visible."""
-    engine_src = (dc.ENGINE_PATH).read_text(encoding="utf-8")
+def test_only_the_extracted_copy_owns_the_risk_ceiling():
     engine_fn = next(
-        n for n in ast.walk(ast.parse(engine_src))
+        n for n in ast.walk(ast.parse(dc.ENGINE_PATH.read_text(encoding="utf-8")))
         if isinstance(n, ast.FunctionDef) and n.name == "suggest_lot_size"
     )
-    extracted_src = (dc.od.CORE_DIR / "core_fees_sizing.py").read_text(encoding="utf-8")
     extracted_fn = next(
-        n for n in ast.walk(ast.parse(extracted_src))
+        n for n in ast.walk(ast.parse(
+            (dc.od.CORE_DIR / "core_fees_sizing.py").read_text(encoding="utf-8")))
         if isinstance(n, ast.FunctionDef) and n.name == "suggest_lot_size"
     )
     assert "max_risk_per_trade_pct" in ast.unparse(extracted_fn)
-    assert "max_risk_per_trade_pct" not in ast.unparse(engine_fn), (
-        "engine.py's copy now applies the cap -- if this was fixed deliberately, "
-        "remove this test and the finding from the Phase 0 docs"
-    )
+    assert dc.is_wrapper(engine_fn), "the engine method must remain a plain delegation"
 
 
-def test_ci_check_fails_while_suggest_lot_size_is_unresolved():
-    """The allowlist covers scheduled debt only; a live defect must fail CI."""
-    allowed = dc.load_allowlist()
-    assert "suggest_lot_size" not in allowed
+def test_the_scan_path_and_the_manual_path_now_size_identically():
+    """The actual behavioural claim, checked end to end rather than by shape.
+
+    engine.py:2268/2284 hand `self.suggest_lot_size` to the scan path; manual
+    orders call core_fees_sizing.suggest_lot_size directly. Those two must
+    produce the same number for the same inputs, or the fork is back.
+    """
+    import types
+    from forex_trader.core import core_fees_sizing
+
+    captured = {}
+
+    def fake_get_risk_settings():
+        captured["called"] = True
+        return {"max_lot_size": 0.10, "max_risk_per_trade_pct": 1.0}
+
+    original = core_fees_sizing.db_module.get_risk_settings
+    core_fees_sizing.db_module.get_risk_settings = fake_get_risk_settings
+    try:
+        engine_like = types.SimpleNamespace()
+        from forex_trader.core.engine import SimulationEngine
+        scan_path = SimulationEngine.suggest_lot_size(
+            engine_like, 2000.0, 1990.0, 10_000.0, 5.0)
+        manual_path = core_fees_sizing.suggest_lot_size(
+            2000.0, 1990.0, 10_000.0, 5.0)
+    finally:
+        core_fees_sizing.db_module.get_risk_settings = original
+
+    assert scan_path == manual_path
+    assert captured.get("called"), "the engine path never consulted risk settings"
+
+
+def test_suggest_lot_size_is_not_in_the_allowlist():
+    """It was a live defect, never scheduled debt. It must not reappear here."""
+    assert "suggest_lot_size" not in dc.load_allowlist()
 
 
 def parse_fn(src: str) -> ast.FunctionDef:

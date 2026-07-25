@@ -70,7 +70,8 @@ from forex_trader.core.core_max_tp_hit import (
     max_tp_checker_sweep as _max_tp_checker_sweep_impl,
     backfill_max_tp_hit_corrected as _backfill_max_tp_hit_corrected_impl,
 )
-from forex_trader.core.core_fees_sizing import pnl as _pnl_impl
+from forex_trader.core.core_fees_sizing import (
+    pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl)
 from forex_trader.core.core_mt5_performance import (
     compute_mt5_performance as _compute_mt5_performance_impl,
     _platform_fee_rate, _apply_fee,
@@ -464,15 +465,11 @@ class SimulationEngine:
     # ── Lot sizing ────────────────────────────────────────────────────────────
 
     def suggest_lot_size(self, entry: float, stop_loss: float, balance: float, risk_pct: float) -> float:
-        distance = abs(entry - stop_loss)
-        if distance <= 0:
-            return 0.01
-        rs         = db_module.get_risk_settings()
-        risk_amt   = balance * (risk_pct / 100)
-        lot        = risk_amt / (distance * CONTRACT_SIZE)
-        min_lot    = 0.01
-        max_lot    = float(rs.get("max_lot_size", 0.10))
-        return max(min_lot, min(max_lot, round(lot, 2)))
+        # Delegation, deliberately: this once held its own copy of the maths,
+        # and when Max Risk per trade % was added to core_fees_sizing but not
+        # here, _scan_messages (which injects this as suggest_lot_size_fn)
+        # sized Telegram signals without a ceiling manual orders applied.
+        return _suggest_lot_size_impl(entry, stop_loss, balance, risk_pct)
 
     # ── Account ───────────────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@
       "forex_trader/core/database.py": 1199,
       "forex_trader/core/ea_bridge.py": 816,
       "forex_trader/core/email_service.py": 946,
-      "forex_trader/core/engine.py": 3165,
+      "forex_trader/core/engine.py": 3162,
       "forex_trader/core/telegram_reader.py": 1037,
       "forex_trader/remote/client.py": 920,
       "forex_trader/remote/server.py": 1196,

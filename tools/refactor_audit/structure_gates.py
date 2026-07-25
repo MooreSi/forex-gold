@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Ratchets that stop the codebase drifting back while the refactor runs.
+
+The last refactor was declared complete and then 32 feature commits landed on
+top; `engine.py` regrew from 2,994 to 3,165 lines. Documentation did not
+prevent that and will not prevent it next time. These gates do, by allowing
+every current violation and refusing to let the count grow.
+
+Four ratchets, each with a checked-in baseline:
+
+  loc          no file over 800 lines; existing offenders may only shrink
+  sql          no SQL outside a *repo*.py; the count may only fall
+  transaction  a repo function with 2+ writes must wrap them in transaction()
+  ui_db        the UI may not reach the database directly
+
+Every gate is shrink-only by design. A hard failure on all 22 oversized files
+today would just get switched off; a ratchet that can never tighten backwards
+survives contact with real work.
+
+Usage:
+    python -m tools.refactor_audit.structure_gates             # report
+    python -m tools.refactor_audit.structure_gates --check     # CI
+    python -m tools.refactor_audit.structure_gates --update-baseline
+"""
+from __future__ import annotations
+
+import argparse
+import ast
+import json
+import re
+import sys
+from pathlib import Path
+
+from tools.refactor_audit import orphan_detector as od
+
+BASELINE_PATH = od.REPO_ROOT / "tools" / "refactor_audit" / "structure_baseline.json"
+
+LOC_CEILING = 800
+
+# Deliberately crude. This catches SQL embedded in application code, which is
+# the thing being driven out; it is not a SQL parser and does not need to be.
+SQL_PATTERN = re.compile(
+    r"\b(SELECT\s+.+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|"
+    r"CREATE\s+TABLE|ALTER\s+TABLE)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def is_repo_file(path: Path) -> bool:
+    name = path.name
+    return "repo" in name or name == "database.py" or name.startswith("core_db_")
+
+
+def loc_report() -> dict[str, int]:
+    return {
+        str(p.relative_to(od.REPO_ROOT)): len(p.read_text(encoding="utf-8").splitlines())
+        for p in od.production_files()
+        if len(p.read_text(encoding="utf-8").splitlines()) > LOC_CEILING
+    }
+
+
+def sql_report() -> dict[str, int]:
+    """Files outside the data layer that contain SQL, and how many statements."""
+    out: dict[str, int] = {}
+    for path in od.production_files():
+        if is_repo_file(path):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        count = sum(
+            1 for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and SQL_PATTERN.search(node.value)
+        )
+        if count:
+            out[str(path.relative_to(od.REPO_ROOT))] = count
+    return out
+
+
+def _writes_in(node: ast.AST) -> int:
+    """Calls that look like a data-layer write."""
+    return sum(
+        1 for n in ast.walk(node)
+        if isinstance(n, ast.Call) and (
+            (isinstance(n.func, ast.Attribute) and n.func.attr in ("run", "execute"))
+            or (isinstance(n.func, ast.Name) and n.func.id in ("run", "execute"))
+        )
+    )
+
+
+def _has_transaction(node: ast.AST) -> bool:
+    for n in ast.walk(node):
+        if isinstance(n, (ast.With, ast.AsyncWith)):
+            for item in n.items:
+                if "transaction" in ast.unparse(item.context_expr):
+                    return True
+    return False
+
+
+def transaction_report() -> dict[str, list[str]]:
+    """Repo functions doing multiple writes without wrapping them."""
+    out: dict[str, list[str]] = {}
+    for path in od.production_files():
+        if not is_repo_file(path):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        offenders = [
+            node.name for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and _writes_in(node) >= 2 and not _has_transaction(node)
+        ]
+        if offenders:
+            out[str(path.relative_to(od.REPO_ROOT))] = sorted(offenders)
+    return out
+
+
+def ui_db_report() -> dict[str, int]:
+    """UI files reaching the database directly.
+
+    This is the backend/frontend boundary expressed in today's layout: once
+    `ui/` becomes `frontend/`, the contract is that it may import controllers
+    and nothing else. Ratcheting the count down now means the boundary is
+    already true by the time the directory move happens, rather than the move
+    being blocked on 13 pages' worth of untangling.
+    """
+    out: dict[str, int] = {}
+    for path in od.production_files():
+        if "ui" not in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        hits = 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                # Both shapes count, and the second is the common one here:
+                #   from forex_trader.core.database import db   -> in node.module
+                #   from forex_trader.core import database      -> in node.names
+                if "database" in node.module or node.module == "sqlite3":
+                    hits += 1
+                else:
+                    hits += sum(1 for a in node.names
+                                if a.name in ("database", "sqlite3")
+                                or a.name.startswith("core_db_"))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "sqlite3" or alias.name.endswith(".database"):
+                        hits += 1
+        if hits:
+            out[str(path.relative_to(od.REPO_ROOT))] = hits
+    return out
+
+
+def current() -> dict:
+    return {
+        "loc": loc_report(),
+        "sql": sql_report(),
+        "transaction": {k: len(v) for k, v in transaction_report().items()},
+        "ui_db": ui_db_report(),
+    }
+
+
+def load_baseline() -> dict:
+    if not BASELINE_PATH.exists():
+        return {"loc": {}, "sql": {}, "transaction": {}, "ui_db": {}}
+    return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))["baseline"]
+
+
+def check(now: dict, baseline: dict) -> list[str]:
+    """Every way the code got worse than the recorded baseline."""
+    failures = []
+    for gate, label in (("loc", "lines"), ("sql", "SQL statements"),
+                        ("transaction", "unwrapped multi-write functions"),
+                        ("ui_db", "direct DB imports")):
+        for path, value in sorted(now[gate].items()):
+            was = baseline.get(gate, {}).get(path)
+            if was is None:
+                failures.append(
+                    f"[{gate}] {path}: new violation ({value} {label})")
+            elif value > was:
+                failures.append(
+                    f"[{gate}] {path}: {label} rose {was} -> {value}")
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="CI: exit 1 on regression")
+    parser.add_argument("--update-baseline", action="store_true",
+                        help="record the current state as the new ceiling")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    now = current()
+
+    if args.update_baseline:
+        BASELINE_PATH.write_text(json.dumps({
+            "_comment": [
+                "Shrink-only ratchet. Every number here may fall and may not rise;",
+                "a file absent from a section may not appear in it.",
+                "Regenerate with: python -m tools.refactor_audit.structure_gates",
+                "--update-baseline, and only when the totals have gone DOWN."
+            ],
+            "baseline": now,
+        }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"Baseline written to {BASELINE_PATH.relative_to(od.REPO_ROOT)}")
+        return 0
+
+    if args.json:
+        print(json.dumps(now, indent=2, sort_keys=True))
+        return 0
+
+    print(f"Files over {LOC_CEILING} LOC: {len(now['loc'])}"
+          f"  (largest: {max(now['loc'].values(), default=0)})")
+    print(f"Files with SQL outside the data layer: {len(now['sql'])}"
+          f"  ({sum(now['sql'].values())} statements)")
+    print(f"Repo files with unwrapped multi-write functions: {len(now['transaction'])}"
+          f"  ({sum(now['transaction'].values())} functions)")
+    print(f"UI files importing the database directly: {len(now['ui_db'])}"
+          f"  ({sum(now['ui_db'].values())} imports)")
+
+    if args.check:
+        failures = check(now, load_baseline())
+        if failures:
+            print(f"\nFAIL: {len(failures)} structural regression(s):", file=sys.stderr)
+            for f in failures:
+                print(f"  {f}", file=sys.stderr)
+            print("\nThese gates are shrink-only. If a number legitimately had to "
+                  "rise, say why in the commit and rerun with --update-baseline.",
+                  file=sys.stderr)
+            return 1
+        print("\nOK: no structural regressions against the baseline.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "SimulationEngine methods that carry their own implementation despite an",
+    "extracted twin existing. Each entry is a known unwired duplicate awaiting",
+    "the phase that resolves it. An entry is a debt record, not an approval.",
+    "",
+    "`suggest_lot_size` is deliberately NOT listed: it is a live behaviour",
+    "defect, not scheduled debt, and CI should fail on it until someone decides",
+    "what to do. See docs/todo/refactor/phase-0-audit/README.md."
+  ],
+  "allowed": [
+    {
+      "method": "_sync_closed_mt5_positions",
+      "line": 1346,
+      "statements": 119,
+      "twin": "core_mt5_position_sync",
+      "reason": "Tracker row marked Done on the reasoning it was 'resolved for free' when _record_close was wired. The extracted module builds a partial CloseTradeContext and nothing imports it.",
+      "phase": 6
+    },
+    {
+      "method": "_cmd_close",
+      "line": 2856,
+      "statements": 33,
+      "twin": "core_bot_commands_trading",
+      "reason": "Documented deferral, blocked on _make_close_trade_ctx (engine.py:534).",
+      "phase": 8
+    },
+    {
+      "method": "_close_full_after_tps",
+      "line": 1629,
+      "statements": 23,
+      "twin": "core_profit_sync",
+      "reason": "Documented deferral, same CloseTradeContext dependency. All 13 handler call sites pass this inline copy.",
+      "phase": 8
+    },
+    {
+      "method": "_cmd_market_price_buy",
+      "line": 3127,
+      "statements": 8,
+      "twin": "core_bot_commands_trading",
+      "reason": "Documented deferral, order-placing surface.",
+      "phase": 8
+    },
+    {
+      "method": "_cmd_market_price_sell",
+      "line": 3141,
+      "statements": 8,
+      "twin": "core_bot_commands_trading",
+      "reason": "Documented deferral, order-placing surface.",
+      "phase": 8
+    },
+    {
+      "method": "calculate_fees",
+      "line": 432,
+      "statements": 13,
+      "twin": "core_fees_sizing",
+      "reason": "Undocumented duplicate, but twin_compare reports the two as behaviourally identical, so no behaviour risk. reversal_engine_manage.py:86 reaches it via self._main_eng.",
+      "phase": 8
+    }
+  ]
+}

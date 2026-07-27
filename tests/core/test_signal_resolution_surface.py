@@ -541,3 +541,38 @@ def test_risk_governor_yields_to_strategy_fixed_lot(fresh_db):
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
     assert result["lot_size"] == 0.15
+
+
+# ── Grid templates are exempt from the entry-zone check (2026-07-28) ─────
+# A grid template is a pending-order strategy by construction -- its resting
+# legs span the zone (core_open_trade.py's zone_low/zone_high handoff), so
+# unlike every market-fill strategy above, price is NOT required to already
+# be inside it. Without this, a grid template signal could never be manually
+# fired (e.g. the "Open Trade Now" button) until price happened to already
+# be back in its zone.
+
+def test_grid_template_bypasses_entry_zone_check(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("GridTpl", {"mode": "grid"})
+    _insert_signal(source_name="GridChannel", direction="BUY",
+                    entry_low=2399.0, entry_high=2401.0)
+    db.set_channel_strategy_override("GridChannel", et.override_for_template("GridTpl"))
+    # Price well outside the zone -- would raise for any other strategy
+    # (see test_raises_when_price_outside_entry_zone above).
+    bridge = _FakeBridge(tick=SimpleNamespace(bid=2450.0, ask=2450.4, spread_points=4.0))
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["is_template"] is True
+    assert result["template"]["mode"] == "grid"
+
+
+def test_single_mode_template_still_enforces_entry_zone(fresh_db):
+    # Only grid mode is exempt -- single mode is a market-fill strategy like
+    # any other and must still wait for price to be in the zone.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("SingleTpl", {"mode": "single"})
+    _insert_signal(source_name="SingleChannel", direction="BUY",
+                    entry_low=2399.0, entry_high=2401.0)
+    db.set_channel_strategy_override("SingleChannel", et.override_for_template("SingleTpl"))
+    bridge = _FakeBridge(tick=SimpleNamespace(bid=2450.0, ask=2450.4, spread_points=4.0))
+    with pytest.raises(ValueError, match="entry zone"):
+        asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))

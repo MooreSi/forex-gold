@@ -215,7 +215,18 @@ async def resolve_open_trade_params(
         tick = await bridge.get_tick()
         if not tick:
             raise RuntimeError("No live price available")
-        if not price_in_entry_range(_dir, _el, _eh, tick):
+        # Grid templates are a pending-order strategy by construction (they
+        # stage resting legs spanning the zone -- core_open_trade.py's
+        # zone_low/zone_high handoff), so unlike every market-fill strategy
+        # here, price is NOT required to already be in the zone: the resting
+        # legs themselves are what waits for it. Without this exemption, the
+        # "Open Trade Now" button (and anything else routing a template
+        # signal through this function) could never fire a grid template
+        # signal until price happened to already be back in its zone --
+        # exactly the gap that left grid signals unable to be manually
+        # actioned at all (2026-07-28).
+        _is_grid_template = _is_template and _template is not None and _template.get("mode") == "grid"
+        if not _is_grid_template and not price_in_entry_range(_dir, _el, _eh, tick):
             cur = tick.ask if _dir == "BUY" else tick.bid
             raise ValueError(
                 f"Price ${cur:.2f} is {'above' if _dir == 'BUY' else 'below'} the entry zone "

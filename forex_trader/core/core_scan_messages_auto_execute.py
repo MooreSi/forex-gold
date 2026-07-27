@@ -37,6 +37,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import ea_bridge
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_open_trade import open_trade as _real_open_trade
 from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.models import (
@@ -196,6 +197,81 @@ async def execute_auto_signal(
                         eh = float(parsed["entry_high"])
                         in_range = price_in_entry_range(direction, el, eh, tick)
                         cur_px = tick.ask if direction == "BUY" else tick.bid
+
+                        # ── EA Template, grid mode (2026-07-28) ──────────────────
+                        # A grid template IS a pending-order strategy by
+                        # construction -- it stages resting BuyLimit/SellLimit
+                        # legs, exactly like Limit Runner's own genuine pending
+                        # order -- so it must place immediately, spanning the
+                        # signal's own stated zone, rather than defer to the
+                        # "insert a pending row, wait for price to re-enter the
+                        # zone, then market-fill" path every other strategy
+                        # (including single-mode templates, which really are
+                        # market-fill strategies) uses below. Without this, a
+                        # grid template's signal sat queued waiting for price to
+                        # already be back in the zone before ever placing a
+                        # broker order at all -- confirmed live 2026-07-27: three
+                        # GOLD DIGGERS INSTITUTIONAL signals expired unfilled in
+                        # a row this way. The resting grid legs
+                        # (core_open_trade.py's zone_low/zone_high handoff, EA's
+                        # ApplyGroupTpAction/HandleOpenTemplateGrid) ARE the
+                        # "wait for price" mechanism now -- MT5 itself watches
+                        # for the fill, not this Python poll. No gap adjustment,
+                        # no queue-and-wait: the zone IS the resting order.
+                        _tpl_grid = False
+                        if ea_templates.is_template_override(strategy):
+                            _tpl = ea_templates.get_ea_template(
+                                ea_templates.template_name_from_override(strategy))
+                            _tpl_grid = bool(_tpl) and _tpl.get("mode") == "grid"
+
+                        if _tpl_grid:
+                            with db_module.db() as conn:
+                                conn.execute(
+                                    """INSERT INTO vantage_signals
+                                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
+                                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
+                                        lot_size,notes,status,created_at,activated_at)
+                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                    (signal_id, f"Telegram Auto ({source_label})",
+                                     direction, el, eh, float(parsed["stop_loss"]),
+                                     parsed["tp1"], parsed["tp2"], parsed["tp3"],
+                                     parsed["tp4"], parsed["tp5"],
+                                     parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
+                                     lot,
+                                     f"Grid template pending order from Telegram {tg_id} ({source_label})",
+                                     "active", time.time(), time.time()),
+                                )
+                                conn.execute(
+                                    "UPDATE vantage_tg_signals SET status='activated',signal_id=?"
+                                    " WHERE tg_message_id=?",
+                                    (signal_id, tg_id),
+                                )
+                            try:
+                                trade_result = await open_trade_fn(
+                                    signal_id=signal_id, direction=direction,
+                                    entry_low=el, entry_high=eh,
+                                    stop_loss=float(parsed["stop_loss"]),
+                                    tp1=parsed["tp1"], tp2=parsed["tp2"], tp3=parsed["tp3"],
+                                    tp4=parsed["tp4"], tp5=parsed["tp5"],
+                                    tp6=parsed.get("tp6"), tp7=parsed.get("tp7"),
+                                    tp8=parsed.get("tp8"),
+                                    lot_size=lot, tick=tick, strategy=strategy,
+                                    tg_source=channel_name,
+                                )
+                                executed = True
+                                exec_lot = lot
+                                exec_price = trade_result.get("entry_price")
+                            except Exception as _tpl_exc:
+                                skip_reason = f"Grid template order failed: {_tpl_exc}"
+                                log.warning(
+                                    "[%s] grid template immediate placement failed: %s",
+                                    source_label, _tpl_exc,
+                                )
+                            return {
+                                "executed": executed, "exec_lot": exec_lot,
+                                "exec_price": exec_price, "trade_result": trade_result,
+                                "skip_reason": skip_reason, "gap_note": gap_note,
+                            }
 
                         # ── Gap-adjusted market entry (GD2 / Gold Diggers VIP) ──
                         src_lower = source_label.lower()

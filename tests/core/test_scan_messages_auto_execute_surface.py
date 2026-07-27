@@ -254,3 +254,92 @@ def test_ea_managed_conservative_post_fill_sync(fresh_db):
     assert result["executed"] is True
     assert bridge.modify_calls == [(999, 4524.0, None)]
     assert ea_calls == [("trade-xyz", {1: 4532.0})]
+
+
+# ── EA Template, grid mode: place immediately regardless of zone ─────────
+# (2026-07-28) -- a grid template is a pending-order strategy by
+# construction; it must never fall into the "queue and wait for price to
+# re-enter the zone" path every other strategy (including single-mode
+# templates) uses, or it silently places nothing until the zone happens to
+# already contain price again. See core_ea_templates.py's DEFAULTS.
+
+_OUT_OF_ZONE_TICK = SimpleNamespace(bid=4600.0, ask=4601.0)  # well above _PARSED's 4529-4534 zone
+
+
+def _make_grid_template(name="Grid Tpl"):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template(name, {"mode": "grid", "grid_legs": 3})
+    return et.override_for_template(name)
+
+
+def _make_single_template(name="Single Tpl"):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template(name, {"mode": "single"})
+    return et.override_for_template(name)
+
+
+def test_grid_template_places_immediately_when_out_of_zone(fresh_db):
+    strategy = _make_grid_template()
+    result, calls, bridge = _call(tick=_OUT_OF_ZONE_TICK, strategy=strategy)
+    assert result["executed"] is True
+    assert len(calls) == 1
+    # The FULL stated zone is used, unmodified -- no gap adjustment, no
+    # waiting for price to already be inside it.
+    assert calls[0]["entry_low"] == 4529.0
+    assert calls[0]["entry_high"] == 4534.0
+    assert calls[0]["strategy"] == strategy
+    sig = _get_last_signal()
+    assert sig["status"] == "active"
+    assert "Grid template pending order" in sig["notes"]
+
+
+def test_grid_template_places_immediately_when_already_in_zone(fresh_db):
+    # Behaviourally similar outcome to the plain in-zone path, but must be
+    # the SAME (grid-aware) code path, not the ordinary market-fill branch --
+    # distinguished here via the signal's own notes text.
+    strategy = _make_grid_template()
+    result, calls, bridge = _call(tick=_IN_ZONE_TICK, strategy=strategy)
+    assert result["executed"] is True
+    assert len(calls) == 1
+    sig = _get_last_signal()
+    assert "Grid template pending order" in sig["notes"]
+
+
+def test_grid_template_failure_is_reported_not_swallowed(fresh_db):
+    strategy = _make_grid_template()
+
+    async def failing_open_trade(**kwargs):
+        raise RuntimeError("EA rejected template order: invalid stops")
+
+    result, calls, bridge = _call(
+        tick=_OUT_OF_ZONE_TICK, strategy=strategy, open_trade_fn=failing_open_trade,
+    )
+    assert result["executed"] is False
+    assert "Grid template order failed" in result["skip_reason"]
+
+
+def test_single_mode_template_still_queues_when_out_of_zone(fresh_db):
+    # Only grid mode places immediately -- single mode is a market-fill
+    # strategy like any other and keeps the existing wait-then-fill path.
+    strategy = _make_single_template()
+    result, calls, bridge = _call(tick=_OUT_OF_ZONE_TICK, strategy=strategy)
+    assert result["executed"] is False
+    assert calls == []
+    assert _get_last_signal()["status"] == "pending"
+
+
+def test_non_template_strategy_unaffected_when_out_of_zone(fresh_db):
+    result, calls, bridge = _call(tick=_OUT_OF_ZONE_TICK, strategy="scale_out")
+    assert result["executed"] is False
+    assert calls == []
+    assert _get_last_signal()["status"] == "pending"
+
+
+def test_unknown_template_name_falls_back_to_queueing(fresh_db):
+    # Channel points at a template that's since been deleted/renamed --
+    # must not crash, just behave like any other non-grid strategy.
+    from forex_trader.core import core_ea_templates as et
+    strategy = et.override_for_template("Does Not Exist")
+    result, calls, bridge = _call(tick=_OUT_OF_ZONE_TICK, strategy=strategy)
+    assert result["executed"] is False
+    assert calls == []

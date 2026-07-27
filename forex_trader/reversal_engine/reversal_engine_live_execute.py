@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from forex_trader.core import database as db_module
+from forex_trader.core.momentum_exhaustion import check_momentum_exhaustion
 from forex_trader.reversal_engine import reversal_engine_repo as re_db
 from forex_trader.reversal_engine import level_detector as ld
 
@@ -88,6 +89,24 @@ class _LiveExecuteMixin:
                             "[RE-Engine] bias gate blocked live exec %s -- htf now %s vs "
                             "direction=%s, level_score=%.2f < 0.75",
                             sig.get("signal_ref"), fresh_htf, direction, level_score,
+                        )
+                        return
+
+                    # Momentum-exhaustion / rejection re-check (2026-07-28) --
+                    # the bias re-check above only asks "does the wider H1/H4
+                    # trend still agree", which says nothing about whether the
+                    # market has already made (or reversed) its move on the
+                    # timeframe this signal actually trades. Deliberately a
+                    # fast local check, not an ML/AI call -- see
+                    # core/momentum_exhaustion.py's own docstring for why.
+                    _mx_ok, _mx_reason = check_momentum_exhaustion(
+                        direction, m15_candles or h1_candles, fresh_atr)
+                    if not _mx_ok:
+                        re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
+                        re_db.update_live_exec(sig["id"], status="momentum_skipped")
+                        _log.info(
+                            "[RE-Engine] momentum re-check blocked live exec %s -- %s",
+                            sig.get("signal_ref"), _mx_reason,
                         )
                         return
 

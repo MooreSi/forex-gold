@@ -10,8 +10,10 @@ an actual MT5 order.
 from __future__ import annotations
 
 import logging
+import time
 
 from forex_trader.breakout_signal import breakout_signal_repo as bdb
+from forex_trader.core.momentum_exhaustion import check_momentum_exhaustion
 
 _log = logging.getLogger("breakout_signal")
 
@@ -58,12 +60,91 @@ class _LiveExecuteMixin:
                     bdb.update_live_exec_result(sig_id, None, None, f"skipped:{reason}")
                 return
 
+        # Fill-time re-evaluation (2026-07-28) -- a pending breakout signal
+        # can sit anywhere from a few seconds (the common case) to hours
+        # (held by a closed Trading Markets session) before this fires, but
+        # until now nothing re-checked current price action or re-scored the
+        # ML prediction before firing -- both were trusted exactly as they
+        # were at signal creation, however stale. Mirrors Reversal Engine's
+        # own fill-time re-evaluation (reversal_engine_live_execute.py).
+        # Falls back to the creation-time ml_prob if the refresh itself
+        # fails (bridge offline, etc.) rather than skipping the gates.
+        ml_prob = sig.get("ml_prob")
+        try:
+            m5_fresh = await self._bridge.get_candles("M5", 80)
+            h1_fresh = await self._bridge.get_candles("H1", 120)
+            h4_fresh = await self._bridge.get_candles("H4", 40)
+            if m5_fresh and h1_fresh:
+                from forex_trader.core.dpm_engine import compute_atr
+                from forex_trader.breakout_signal.signal_generator import (
+                    compute_htf_bias, compute_h4_bias, compute_adx,
+                    compute_macd_hist, get_session,
+                )
+                fresh_atr  = compute_atr(m5_fresh[-20:], period=14)
+                fresh_adx  = compute_adx(m5_fresh[-30:] if len(m5_fresh) >= 30 else m5_fresh)
+                fresh_htf  = compute_htf_bias(h1_fresh)
+                fresh_h4   = compute_h4_bias(h4_fresh) if h4_fresh else "neutral"
+                fresh_closes = [float(c.get("close", 0) or 0) for c in m5_fresh]
+                _, fresh_macd = compute_macd_hist(fresh_closes)
+                fresh_session = get_session()
+
+                # Momentum-exhaustion / rejection re-check -- catches the
+                # exact failure mode a stale signal risks: the market already
+                # made (or reversed) its move while this signal was waiting.
+                # Deliberately a fast local check, not an ML/AI call -- see
+                # core/momentum_exhaustion.py's own docstring for why.
+                _mx_ok, _mx_reason = check_momentum_exhaustion(direction, m5_fresh, fresh_atr)
+                if not _mx_ok:
+                    age_s = time.time() - float(sig.get("created_at", 0) or 0)
+                    reason = f"momentum re-check: {_mx_reason} (signal was {age_s:.0f}s old)"
+                    _log.info("[BO-LiveExec] %s %s skipped — %s", signal_ref, direction, reason)
+                    if sig_id:
+                        bdb.update_live_exec_result(sig_id, None, None, f"skipped:{reason}")
+                    return
+
+                # Fresh ML re-score -- same feature set ml_engine.extract_features
+                # used at creation, with every dynamic input recomputed against
+                # now instead of signal-creation time. Static fields (rr_tp1,
+                # sl_dist, quality_score, breakout_type, created_at) are left as
+                # originally captured -- those describe the signal itself, not
+                # current conditions.
+                from forex_trader.breakout_signal import ml_engine as bo_ml
+                fresh_sig = dict(sig)
+                fresh_sig["atr_m15"]       = fresh_atr
+                fresh_sig["adx_at_signal"] = fresh_adx
+                fresh_sig["htf_bias"]      = fresh_htf
+                fresh_sig["h4_bias"]       = fresh_h4
+                fresh_sig["macd_hist"]     = fresh_macd
+                fresh_sig["session"]       = fresh_session
+                try:
+                    from forex_trader.core.news_calendar import get_news_proximity_norm as _get_news
+                    fresh_sig["news_proximity_norm"] = _get_news()
+                except Exception:
+                    pass
+                try:
+                    from forex_trader.core import database as _cdb_fresh
+                    fresh_sig["regime_score"]         = _cdb_fresh.get_regime_score(fresh_adx, fresh_atr)
+                    fresh_sig["equity_drawdown_pct"]  = _cdb_fresh.get_equity_drawdown_pct()
+                    fresh_sig["concurrent_agreement"] = _cdb_fresh.get_concurrent_agreement(
+                        "breakout", direction)
+                except Exception:
+                    pass
+                fresh_feats = bo_ml.extract_features(fresh_sig)
+                if fresh_feats:
+                    _fp = bo_ml.predict(fresh_feats)
+                    if _fp is not None:
+                        ml_prob = _fp
+        except Exception as _refresh_exc:
+            _log.warning(
+                "[BO-LiveExec] %s fill-time re-evaluation failed, falling back to "
+                "creation-time ml_prob: %s", signal_ref, _refresh_exc,
+            )
+
         vantage_sig_id = None
         try:
             from forex_trader.breakout_signal import ml_engine as bo_ml
 
             base_lot = float(sig.get("lot_size") or 0)
-            ml_prob  = sig.get("ml_prob")
 
             _BO_ML_R_FLOOR = 0.0
             if ml_prob is not None and bo_ml.has_batch() and float(ml_prob) < _BO_ML_R_FLOOR:

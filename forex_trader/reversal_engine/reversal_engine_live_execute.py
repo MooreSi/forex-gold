@@ -55,6 +55,21 @@ class _LiveExecuteMixin:
                           sig.get("signal_ref"), _sched_reason)
                 return
 
+            # Internal Engine Exposure guard (Trading > Strategy) -- OFF by
+            # default, in which case this is a no-op. See
+            # core_internal_exposure_guard.py for the modes and for the
+            # measured reason the default is off.
+            from forex_trader.core.core_internal_exposure_guard import check_internal_exposure
+            _exp_lot = float(rs.get("strategy_lot_size", 0) or 0) or 0.01
+            _exp_ok, _exp_reason = check_internal_exposure(
+                sig.get("direction", ""), _exp_lot, rs,
+            )
+            if not _exp_ok:
+                re_db.update_live_exec(sig["id"], status="skipped:exposure_guard")
+                _log.info("[RE-Engine] exposure guard blocked live exec %s -- %s",
+                          sig.get("signal_ref"), _exp_reason)
+                return
+
             # Fill-time re-evaluation (2026-07-17) -- a pending zone signal can
             # sit anywhere from a couple of minutes to 4h (Reversal Runner/
             # Adaptive Runner's expiry window) before price actually reaches

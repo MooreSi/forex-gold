@@ -49,6 +49,20 @@ class _LiveExecuteMixin:
                 bdb.update_live_exec_result(sig_id, None, None, f"skipped:schedule:{_sched_reason}")
             return
 
+        # Internal Engine Exposure guard (Trading > Strategy) -- OFF by
+        # default, in which case this is a no-op. See
+        # core_internal_exposure_guard.py for the modes and for the measured
+        # reason the default is off.
+        from forex_trader.core.core_internal_exposure_guard import check_internal_exposure
+        _exp_ok, _exp_reason = check_internal_exposure(
+            direction, float(sig.get("lot_size") or 0) or 0.01, rs,
+        )
+        if not _exp_ok:
+            _log.info("[BO-LiveExec] %s skipped -- %s", signal_ref, _exp_reason)
+            if sig_id:
+                bdb.update_live_exec_result(sig_id, None, None, f"skipped:{_exp_reason}")
+            return
+
         if bool(rs.get("hour_blocklist_enabled", 0)):
             from datetime import datetime as _dt, timezone as _tz
             from forex_trader.core.regime import BREAKOUT_BLOCKED_HOURS_UTC

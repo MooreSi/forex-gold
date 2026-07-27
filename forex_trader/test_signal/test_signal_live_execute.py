@@ -41,7 +41,23 @@ class _LiveExecuteMixin:
         # normally. Trading > Strategy > Risk Settings toggle, shared with
         # the Breakout generator, off by default.
         from forex_trader.core import database as _cdb_hour
-        if bool(_cdb_hour.get_risk_settings().get("hour_blocklist_enabled", 0)):
+        _rs_bounce = _cdb_hour.get_risk_settings()
+
+        # Internal Engine Exposure guard (Trading > Strategy) -- OFF by
+        # default, in which case this is a no-op. See
+        # core_internal_exposure_guard.py for the modes and for the measured
+        # reason the default is off.
+        from forex_trader.core.core_internal_exposure_guard import check_internal_exposure
+        _exp_ok, _exp_reason = check_internal_exposure(
+            direction, float(sig.get("lot_size") or 0) or 0.01, _rs_bounce,
+        )
+        if not _exp_ok:
+            _log.info("[LiveExec] %s skipped — %s", signal_ref, _exp_reason)
+            if sig_id:
+                tdb.update_live_exec_result(sig_id, None, None, f"skipped:{_exp_reason}")
+            return
+
+        if bool(_rs_bounce.get("hour_blocklist_enabled", 0)):
             from forex_trader.core.regime import BOUNCE_BLOCKED_HOURS_UTC
             _hour_now = datetime.now(timezone.utc).hour
             if _hour_now in BOUNCE_BLOCKED_HOURS_UTC:

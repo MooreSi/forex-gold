@@ -2913,13 +2913,102 @@ def _render_strategy(engine):
                     "Requires ≥20 closed trades to activate."
                 )
 
+                # ── Internal Engine Exposure ──────────────────────────────
+                from forex_trader.core import core_internal_exposure_guard as _ieg
+                ui.separator().classes("my-3")
+                with ui.row().classes("items-center gap-2 mb-1"):
+                    ui.icon("compare_arrows").classes("text-blue-400 text-base")
+                    ui.label("Internal Engine Exposure").classes(
+                        "text-sm font-semibold text-blue-300"
+                    )
+                    ui.icon("info_outline", size="xs").classes(
+                        "text-blue-400 cursor-help"
+                    ).tooltip(
+                        "Applies ONLY to the internal signal generators "
+                        "(Reversal, Breakout, Bounce). Telegram-channel trades "
+                        "are never affected by this setting."
+                    )
+                ui.label(
+                    "The internal engines have no hedge guard of their own — each engine only "
+                    "blocks a duplicate in the SAME direction at the same level, and the "
+                    "cross-engine check ignores an engine's own signals. So a BUY and a SELL "
+                    "can sit open together. This controls whether that's allowed."
+                ).classes("text-xs text-gray-500 mb-2")
+
+                hedge_mode_sel = ui.select(
+                    {
+                        _ieg.MODE_OFF:          "Off — no restriction (default)",
+                        _ieg.MODE_SELF_HEDGE:   "Self-Hedge Guard — block opposing positions",
+                        _ieg.MODE_NET_EXPOSURE: "Net Exposure Cap — limit net directional lots",
+                    },
+                    value=(rs.get("internal_hedge_mode") or _ieg.MODE_OFF),
+                    label="Mode",
+                ).classes("w-full").props("dense outlined")
+
+                net_cap_num = ui.number(
+                    "Net exposure cap (lots)",
+                    value=float(rs.get("internal_net_exposure_max_lots", 0.30) or 0.30),
+                    min=0.0, step=0.01, format="%.2f",
+                ).classes("w-full mt-1").props("dense outlined").tooltip(
+                    "Only used by Net Exposure Cap mode. Net = total BUY lots minus "
+                    "total SELL lots across all open internal-engine trades. "
+                    "0 = no cap (mode effectively disabled)."
+                )
+
+                with ui.column().classes("gap-0 mt-2"):
+                    ui.label("Off — no restriction (default)").classes(
+                        "text-xs font-semibold text-gray-300")
+                    ui.label(
+                        "Long-standing behaviour, nothing is blocked. Opposing positions are "
+                        "allowed to open freely. Worth knowing before changing this: on 86 "
+                        "closed Reversal Engine trades (21–27 Jul), overlapping opposing pairs "
+                        "were 19% of trades but produced ~80% of total profit — 7 of 8 pairs "
+                        "had both legs win, and only one pair ever cancelled out (−$15.21). "
+                        "For a mean-reversion engine, buying support while selling resistance "
+                        "in a range is the strategy working, not a fault."
+                    ).classes("text-xs text-gray-500 mb-2")
+
+                    ui.label("Self-Hedge Guard").classes(
+                        "text-xs font-semibold text-gray-300")
+                    ui.label(
+                        "Blocks a new internal-engine trade whenever ANY opposing-direction "
+                        "internal trade is already open. Strictest option: one direction at a "
+                        "time across all three engines combined. Best suited to trending "
+                        "conditions, where holding both sides tends to mean one leg is simply "
+                        "wrong. Costs you the range-play behaviour described above."
+                    ).classes("text-xs text-gray-500 mb-2")
+
+                    ui.label("Net Exposure Cap").classes(
+                        "text-xs font-semibold text-gray-300")
+                    ui.label(
+                        "Allows opposing positions but caps how far the book can lean one way. "
+                        "A hedge is always permitted because it REDUCES net exposure; what "
+                        "gets blocked is stacking further in whichever direction already "
+                        "dominates. Example at a 0.30 cap: net +0.20 long, a new 0.10 BUY "
+                        "takes it to +0.30 and is allowed; a further 0.10 BUY would reach "
+                        "+0.40 and is blocked — but a 0.10 SELL is allowed at any time, since "
+                        "it brings net back toward flat. The middle-ground option: keeps the "
+                        "range play, limits one-way pile-ups. A cap of 0 disables the check."
+                    ).classes("text-xs text-gray-500 mb-1")
+
+                ui.label(
+                    "Blocked trades are skipped for live execution only — the signal is still "
+                    "generated, tracked, and used for learning, exactly like the other "
+                    "execution gates."
+                ).classes("text-xs text-gray-600 italic mb-1")
+
                 def save_strategy():
                     try:
+                        _hm = hedge_mode_sel.value
+                        if isinstance(_hm, dict):
+                            _hm = _hm.get("value")
                         db_module.update_risk_settings({
                             "trail_stop_sl_pts":       float(trail_stop_sl.value or 5.0),
                             "trailing_stop_distance":  float(trail_dist.value or 3.0),
                             "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
                             "kelly_sizing_enabled":    int(kelly_enabled.value),
+                            "internal_hedge_mode":     _hm or _ieg.MODE_OFF,
+                            "internal_net_exposure_max_lots": float(net_cap_num.value or 0.30),
                         })
                         ui.notify("Settings saved", type="positive")
                     except Exception as ex:

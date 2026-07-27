@@ -896,6 +896,15 @@ def _apply_schema() -> None:
             f"ALTER TABLE ea_trade_templates ADD COLUMN tp{n}_pct REAL NOT NULL DEFAULT 0.0"
             for n in range(1, 9)
         ] + [
+            # Trading > Strategy > Internal Engine Exposure (2026-07-28) --
+            # applies ONLY to the internal signal generators (Reversal,
+            # Breakout, Bounce), never to Telegram-channel trades. 'off'
+            # (default) is the long-standing behaviour: no restriction on
+            # opposing positions. See core_internal_exposure_guard.py for
+            # the modes and for why the default is deliberately off.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN internal_hedge_mode TEXT NOT NULL DEFAULT 'off'",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN internal_net_exposure_max_lots REAL NOT NULL DEFAULT 0.30",
+        ] + [
             # EA Templates > Group TP Action (2026-07-28) -- grid mode only:
             # the first TP any leg of the group clears cancels every other
             # still-resting sibling and moves every other already-live

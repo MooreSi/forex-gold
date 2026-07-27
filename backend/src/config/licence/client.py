@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 _AUTH_SERVER = "https://217.155.25.160"
 _TIMEOUT     = 10   # seconds
 
-# Bundled server certificate for pinning (place at forex_trader/licence/server.crt).
+# Bundled server certificate for pinning (place at backend/src/config/licence/server.crt).
 # If the file is absent, falls back to system CA bundle (less secure but still HTTPS).
 _CERT_PATH = Path(__file__).parent / "server.crt"
 

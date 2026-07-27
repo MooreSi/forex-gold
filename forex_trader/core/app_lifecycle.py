@@ -1,7 +1,7 @@
 """
 App lifecycle — engine/bridge/Telegram/sync startup and shutdown.
 
-Extracted out of forex_trader/ui/app.py so this logic can be called from two
+Extracted out of frontend/app.py so this logic can be called from two
 different entry points: the normal NiceGUI-hosted app (ui/app.py's
 @app.on_startup/@app.on_shutdown wrap the functions below) and the headless
 entry point (run_headless.py), which never imports NiceGUI at all. Keeping

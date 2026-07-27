@@ -19,7 +19,7 @@ from nicegui import ui
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 from forex_trader.core import database as db_module
 from forex_trader.sync import client as sync_client
-from forex_trader.ui.pages.trading import trade_source_label, trade_channel_label
+from frontend.pages.trading import trade_source_label, trade_channel_label
 
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
 TF_MAP     = {"1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",

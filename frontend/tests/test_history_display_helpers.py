@@ -1,7 +1,7 @@
 """Pure display-formatting helpers on the Trade Analysis (history.py) page:
 _strategy_display_label (Strategy column) and _fmt_duration (Held / Pending
 For columns). No DB, no NiceGUI rendering -- these never touch either."""
-from forex_trader.ui.pages import history
+from frontend.pages import history
 
 
 def test_strategy_display_label_known_strategy():

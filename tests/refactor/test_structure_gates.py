@@ -41,7 +41,7 @@ def test_a_new_ui_database_import_fails():
     """The frontend/backend boundary, enforced in today's layout."""
     baseline = {"loc": {}, "sql": {}, "transaction": {}, "ui_db": {}}
     now = {"loc": {}, "sql": {}, "transaction": {},
-           "ui_db": {"forex_trader/ui/pages/new_page.py": 1}}
+           "ui_db": {"frontend/pages/new_page.py": 1}}
     assert len(sg.check(now, baseline)) == 1
 
 
@@ -54,7 +54,7 @@ def test_repo_files_are_exempt_from_the_sql_gate():
     """SQL belongs in a repo; that is the whole point."""
     assert sg.is_repo_file(sg.Path("forex_trader/reversal_engine/reversal_engine_repo.py"))
     assert sg.is_repo_file(sg.Path("forex_trader/core/core_db_channel.py"))
-    assert not sg.is_repo_file(sg.Path("forex_trader/ui/pages/history.py"))
+    assert not sg.is_repo_file(sg.Path("frontend/pages/history.py"))
 
 
 def test_the_reference_repos_are_transactionally_clean():
@@ -103,6 +103,6 @@ def test_an_unreadable_statement_still_counts():
 def test_ui_db_gate_sees_the_aliased_import_form():
     """`from forex_trader.core import database as db_module` is how the pages
     actually do it -- the module path contains no "database" component, so a
-    naive check reports 5 files instead of 14."""
+    naive check reports 5 files instead of 14. Scoped to frontend/ since Phase 1."""
     report = sg.ui_db_report()
     assert len(report) > 10, f"only found {len(report)}; the alias form is being missed"

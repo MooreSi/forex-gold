@@ -70,14 +70,14 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         with ui.tab_panel(t_email):
             _render_email()
         with ui.tab_panel(t_remote):
-            from forex_trader.ui.pages.remote_node import render as _render_remote_node
+            from frontend.pages.remote_node import render as _render_remote_node
             _render_remote_node(get_engine)
         with ui.tab_panel(t_diag):
             _run_diag = _render_diagnostics(engine)
         with ui.tab_panel(t_reg):
             _render_registration()
         with ui.tab_panel(t_upd):
-            from forex_trader.ui.pages.update_panel import render as _render_update
+            from frontend.pages.update_panel import render as _render_update
             _render_update()
         with ui.tab_panel(t_theme):
             _render_theme()

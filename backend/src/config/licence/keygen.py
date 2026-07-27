@@ -6,7 +6,7 @@ Algorithm:
   formatted as XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX
 
 This module is imported by:
-  - forex_trader/licence/guard.py   (client — verifies on startup)
+  - backend/src/config/licence/guard.py   (client — verifies on startup)
   - forex_trader/remote/server.py   (admin server — generates on approval)
 
 The secret MUST also match /Users/simon/Documents/KeyGen/keygen.py.

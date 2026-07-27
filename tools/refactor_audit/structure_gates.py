@@ -158,15 +158,15 @@ def transaction_report() -> dict[str, list[str]]:
 def ui_db_report() -> dict[str, int]:
     """UI files reaching the database directly.
 
-    This is the backend/frontend boundary expressed in today's layout: once
-    `ui/` becomes `frontend/`, the contract is that it may import controllers
-    and nothing else. Ratcheting the count down now means the boundary is
-    already true by the time the directory move happens, rather than the move
-    being blocked on 13 pages' worth of untangling.
+    This is the backend/frontend boundary. The contract is that `frontend/` may
+    import controllers and nothing else; until the controllers exist, the count
+    only has to fall. Ratcheting it down as each page is drained means the
+    boundary becomes true incrementally, rather than the whole thing blocking on
+    14 files' worth of untangling at once.
     """
     out: dict[str, int] = {}
     for path in od.production_files():
-        if "ui" not in path.parts:
+        if "frontend" not in path.parts:
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))

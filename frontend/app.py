@@ -62,7 +62,7 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 import backend.src.config as cfg_module
 from forex_trader import __version__ as _APP_VERSION
 from forex_trader.core import database as db_module
-from forex_trader.ui.pages import backtest as backtest_page
+from frontend.pages import backtest as backtest_page
 
 log = logging.getLogger(__name__)
 
@@ -712,11 +712,11 @@ def main_page():
     import subprocess
     import sys
     import time as _time
-    from forex_trader.ui.pages import trading, telegram, history, settings as settings_page
-    import forex_trader.ui.pages.chart as chart_page
-    import forex_trader.ui.pages.ai_summary as ai_summary_page
-    import forex_trader.ui.pages.test_panel as test_panel
-    import forex_trader.ui.pages.edge_dashboard as edge_dashboard
+    from frontend.pages import trading, telegram, history, settings as settings_page
+    import frontend.pages.chart as chart_page
+    import frontend.pages.ai_summary as ai_summary_page
+    import frontend.pages.test_panel as test_panel
+    import frontend.pages.edge_dashboard as edge_dashboard
 
     ui.query("body").style(
         "background: #0f1117; color: #e0e0e0; font-family: 'Inter', sans-serif; margin:0;"

@@ -257,13 +257,13 @@ def main():
             log.warning("Could not check Remote-node role for browser auto-launch: %s", exc)
 
         from nicegui import ui
-        import forex_trader.ui.app  # registers startup hooks and page routes  # noqa: F401
+        import frontend.app  # registers startup hooks and page routes  # noqa: F401
 
         ui.run(
             host="0.0.0.0",
             port=port,
             title="FOREX Trader",
-            favicon="forex_trader/ui/static/favicon.png",
+            favicon="frontend/static/favicon.png",
             dark=True,
             reload=False,
             show=show_browser,

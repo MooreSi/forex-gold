@@ -18,8 +18,8 @@ from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
-from forex_trader.ui.pages import ai_trade_analysis as _ai_analysis
-from forex_trader.ui.pages.trading import trade_source_label, trade_channel_label
+from frontend.pages import ai_trade_analysis as _ai_analysis
+from frontend.pages.trading import trade_source_label, trade_channel_label
 
 
 def _parse_reason(comment: str, pnl: float = 0.0) -> str:
@@ -219,7 +219,7 @@ def render(get_engine: Callable):
             _ai_analysis.render(get_engine)
 
         with ui.tab_panel(t_dpm).style("padding:16px"):
-            from forex_trader.ui.pages import dpm_analysis as _dpm_analysis
+            from frontend.pages import dpm_analysis as _dpm_analysis
             _dpm_analysis.render()
 
 

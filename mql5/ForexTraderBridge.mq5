@@ -32,7 +32,7 @@
 #include <Trade\Trade.mqh>
 
 input string InpHost      = "127.0.0.1";
-input int    InpPort      = 9111;  // this checkout's isolated EA-bridge port -- see forex_trader/config.py's ea_bridge_port
+input int    InpPort      = 9111;  // this checkout's isolated EA-bridge port -- see backend/src/config/__init__.py's ea_bridge_port
 input ulong  InpMagic     = 20260706;
 input double InpDefaultTrailStopPts = 5.0;   // used by trail_stop if the open_trade message omits trail_dist
 input double InpConservativeTrailPts = 3.0;  // used by conservative/scalp_runner if omitted

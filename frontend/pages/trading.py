@@ -18,7 +18,7 @@ from backend.src.utils.models import (
 from forex_trader.core.signal_parser import validate_signal
 from forex_trader.sync import client as sync_client
 from forex_trader.sync.remote_stats_facade import _is_remote_active
-from forex_trader.ui.pages.settings import render_risk_card
+from frontend.pages.settings import render_risk_card
 
 def _uk(ts) -> str:
     """Format an MT5 broker timestamp for display.

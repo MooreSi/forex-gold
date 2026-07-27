@@ -99,8 +99,8 @@ def _pnl_str(val: Optional[float], prefix: str = "") -> str:
 
 def render(get_engine: Callable) -> None:
     """Entry point — renders Bounce, Breakout, and Reversal Engine tabs."""
-    from forex_trader.ui.pages import breakout_panel
-    from forex_trader.ui.pages import reversal_panel
+    from frontend.pages import breakout_panel
+    from frontend.pages import reversal_panel
 
     with ui.tabs().classes("bg-gray-900 border-b border-gray-700") as sg_tabs:
         t_bounce   = ui.tab("Bounce",   icon="water")

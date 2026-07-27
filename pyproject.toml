@@ -34,3 +34,5 @@ include = ["forex_trader*", "backend*", "frontend*"]
 # the same thing whenever it happens. Override the instant with
 # --market-clock=..., or drop the flag to reproduce real-clock behaviour.
 addopts = "-p tools.testing.fixed_clock"
+# frontend/ has its own suite since Phase 1; both must run by default.
+testpaths = ["tests", "frontend/tests"]

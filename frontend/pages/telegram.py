@@ -15,7 +15,7 @@ from forex_trader.core.telegram_reader import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,
     AUTH_CONNECTED, AUTH_RECONNECTING, AUTH_FAILED,
 )
-from forex_trader.ui.pages.trading import render_signals_card
+from frontend.pages.trading import render_signals_card
 
 def _ts(s) -> str:
     if not s:

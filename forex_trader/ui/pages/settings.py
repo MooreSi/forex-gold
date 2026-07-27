@@ -9,7 +9,7 @@ from typing import Callable
 from nicegui import app, ui
 
 from forex_trader.core import database as db_module
-from forex_trader.core import platform_utils as _pu
+from backend.src.utils import os_utils as _pu
 from forex_trader.sync import client as sync_client
 import backend.src.config as cfg_module
 
@@ -399,7 +399,7 @@ def _render_ea_update_button():
         script_path = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "ea_update_restart.ps1"
         script_path.write_text(script, encoding="utf-8")
 
-        from forex_trader.core.platform_utils import open_restart_log
+        from backend.src.utils.os_utils import open_restart_log
         from backend.src.config import USER_DATA_DIR
         log_path = USER_DATA_DIR / "data" / "ea_update_restart.log"
         with open_restart_log(log_path) as _restart_log:

@@ -28,7 +28,7 @@ from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_open_trade import open_trade
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.core_trading_schedule import check_trading_schedule
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, Tick,
 )
@@ -247,7 +247,7 @@ async def process_instant_entry(
         )
 
     try:
-        from forex_trader.core import latency_trace as _lt_ime
+        from backend.src.utils import latency_trace as _lt_ime
         _lt_ime.mark(tg_id, "t7_decided")
         trade_result = await open_trade(
             bridge, signal_id=signal_id, direction=direction,

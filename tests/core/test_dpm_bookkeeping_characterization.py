@@ -17,7 +17,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
 from forex_trader.core.core_dpm_bookkeeping import DPMCache
-from forex_trader.core.models import CONTRACT_SIZE
+from backend.src.utils.models import CONTRACT_SIZE
 
 
 def _reset_thread_local_connection():

@@ -14,7 +14,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import core_limit_order_signal as los
 from forex_trader.core import core_strategy_params as sp
-from forex_trader.core.models import STRATEGY_LIMIT_RUNNER, Tick
+from backend.src.utils.models import STRATEGY_LIMIT_RUNNER, Tick
 
 
 def _reset_thread_local_connection():

@@ -24,7 +24,7 @@ from forex_trader.core.core_fees_sizing import pnl
 from forex_trader.core.core_sim_account import get_sim_account
 from forex_trader.core.core_tp_trigger_tracking import last_closed_tp
 from forex_trader.core.core_trade_reporting import get_open_trades
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP,
     STRATEGY_PROTECTED_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
@@ -299,7 +299,7 @@ async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -
     # MT5 bridge status — LISTEN filter ensures we detect the bridge server,
     # not our own keep-alive client connection to port 9000
     try:
-        from forex_trader.core.platform_utils import is_port_listening as _ipl
+        from backend.src.utils.os_utils import is_port_listening as _ipl
         _bridge_up = _ipl(9000)
     except Exception:
         _bridge_up = False

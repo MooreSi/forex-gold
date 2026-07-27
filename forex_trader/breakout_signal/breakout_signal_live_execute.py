@@ -49,7 +49,7 @@ class _LiveExecuteMixin:
 
         if bool(rs.get("hour_blocklist_enabled", 0)):
             from datetime import datetime as _dt, timezone as _tz
-            from forex_trader.core.regime import BREAKOUT_BLOCKED_HOURS_UTC
+            from backend.src.utils.regime import BREAKOUT_BLOCKED_HOURS_UTC
             _hour_now = _dt.now(_tz.utc).hour
             if _hour_now in BREAKOUT_BLOCKED_HOURS_UTC:
                 reason = f"hour_blocklist: {_hour_now:02d} UTC (measured -$1,079 in 12-14 window)"

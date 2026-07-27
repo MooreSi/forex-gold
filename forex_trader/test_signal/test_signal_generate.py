@@ -259,7 +259,7 @@ class _GenerateMixin:
         _, _macd_3 = compute_macd_hist(m15_closes_all[:-3]) if len(m15_closes_all) > 40 else (0.0, macd_hist)
         _, _macd_6 = compute_macd_hist(m15_closes_all[:-6]) if len(m15_closes_all) > 43 else (0.0, _macd_3)
         macd_hist_trend = [round(_macd_6, 4), round(_macd_3, 4), round(macd_hist, 4)]
-        from forex_trader.core.regime import classify_day, efficiency_ratio
+        from backend.src.utils.regime import classify_day, efficiency_ratio
         h1_closes = [float(c.get("close", 0) or 0) for c in h1_candles]
         h1_eff    = efficiency_ratio(h1_closes, n=24)
         regime    = classify_day(adx, h1_eff)
@@ -408,7 +408,7 @@ class _GenerateMixin:
         # ── 9b. ML feature extraction ─────────────────────────────────────────
         try:
             from forex_trader.core import database as _cdb_ctx
-            from forex_trader.core.news_calendar import get_news_proximity_norm
+            from backend.src.utils.news_calendar import get_news_proximity_norm
             candidate["news_proximity_norm"]  = get_news_proximity_norm()
             candidate["equity_drawdown_pct"]  = _cdb_ctx.get_equity_drawdown_pct()
             candidate["concurrent_agreement"] = _cdb_ctx.get_concurrent_agreement("bounce", direction)

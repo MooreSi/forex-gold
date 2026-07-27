@@ -651,7 +651,7 @@ class TelegramReader:
         # Handler returns as fast as possible — only enqueue, no awaits.
         # All network calls (get_sender) and DB writes happen in _event_processor.
         async def _handle_new_message(event):
-            from forex_trader.core import latency_trace as _lt
+            from backend.src.utils import latency_trace as _lt
             _lt.mark(getattr(event.message, "id", None), "t1_arrived")
             try:
                 self._event_queue.put_nowait(("new", slot, event))
@@ -675,7 +675,7 @@ class TelegramReader:
         to a background task so the message is buffered and the scan-loop event
         is set before any network round-trips occur.
         """
-        from forex_trader.core import latency_trace as _lt
+        from backend.src.utils import latency_trace as _lt
         while True:
             try:
                 kind, slot, event = await self._event_queue.get()

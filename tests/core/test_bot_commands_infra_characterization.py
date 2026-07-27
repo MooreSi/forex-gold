@@ -89,7 +89,7 @@ def test_restart_bridge_launch_fails(fresh_db, engine):
 
 def test_restart_bridge_port_never_binds(fresh_db, engine):
     with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("forex_trader.core.platform_utils.is_port_listening", return_value=False), \
+         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=False), \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()):
         result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
     assert "port 9000 not bound" in result
@@ -98,7 +98,7 @@ def test_restart_bridge_port_never_binds(fresh_db, engine):
 def test_restart_bridge_mt5_not_connected(fresh_db, engine):
     engine._bridge = _FakeBridge(health={"connected": False})
     with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("forex_trader.core.platform_utils.is_port_listening", return_value=True), \
+         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()):
         result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
     assert "MT5 is not connected yet" in result
@@ -107,7 +107,7 @@ def test_restart_bridge_mt5_not_connected(fresh_db, engine):
 def test_restart_bridge_already_active(fresh_db, engine):
     engine._bridge = _FakeBridge(health={"connected": True, "trade_allowed": True})
     with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("forex_trader.core.platform_utils.is_port_listening", return_value=True), \
+         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()):
         result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
     assert result == "Bridge restarted and connected. Algo Trading: active."
@@ -117,7 +117,7 @@ def test_restart_bridge_auto_enable_already_enabled(fresh_db, engine):
     engine._bridge = _FakeBridge(health={"connected": True, "trade_allowed": False},
                                  autotrading={"enabled": True, "method": "already_enabled"})
     with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("forex_trader.core.platform_utils.is_port_listening", return_value=True), \
+         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()):
         result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
     assert result == "Bridge restarted and connected. Algo Trading: active."
@@ -127,7 +127,7 @@ def test_restart_bridge_auto_enable_fails(fresh_db, engine):
     engine._bridge = _FakeBridge(health={"connected": True, "trade_allowed": False},
                                  autotrading={"enabled": False, "error": "denied"})
     with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("forex_trader.core.platform_utils.is_port_listening", return_value=True), \
+         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
          mock.patch("asyncio.sleep", new=mock.AsyncMock()):
         result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
     assert "Algo Trading: DISABLED" in result
@@ -183,8 +183,8 @@ def test_switch_env_live_uses_live_credentials(fresh_db, engine):
 def test_restart_app_success(fresh_db, engine):
     engine._bot_offset = 12345
     with mock.patch("subprocess.Popen") as popen_mock, \
-         mock.patch("forex_trader.core.platform_utils.open_restart_log") as log_mock, \
-         mock.patch("forex_trader.core.platform_utils.delayed_relaunch_cmd", return_value=["fakecmd"]):
+         mock.patch("backend.src.utils.os_utils.open_restart_log") as log_mock, \
+         mock.patch("backend.src.utils.os_utils.delayed_relaunch_cmd", return_value=["fakecmd"]):
         log_mock.return_value.__enter__ = mock.Mock(return_value=mock.Mock())
         log_mock.return_value.__exit__ = mock.Mock(return_value=False)
         result = asyncio.run(SimulationEngine._cmd_restart_app(engine, []))
@@ -195,7 +195,7 @@ def test_restart_app_success(fresh_db, engine):
 
 def test_restart_app_popen_failure_caught(fresh_db, engine):
     with mock.patch("subprocess.Popen", side_effect=OSError("spawn failed")), \
-         mock.patch("forex_trader.core.platform_utils.open_restart_log") as log_mock:
+         mock.patch("backend.src.utils.os_utils.open_restart_log") as log_mock:
         log_mock.return_value.__enter__ = mock.Mock(return_value=mock.Mock())
         log_mock.return_value.__exit__ = mock.Mock(return_value=False)
         result = asyncio.run(SimulationEngine._cmd_restart_app(engine, []))

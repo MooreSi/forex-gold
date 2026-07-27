@@ -223,8 +223,8 @@ def render(get_engine=None) -> None:  # get_engine unused; matches page signatur
         latency_box.clear()
         with latency_box:
             try:
-                from forex_trader.core import latency_trace as _lt
-                from forex_trader.core import loop_monitor as _lm
+                from backend.src.utils import latency_trace as _lt
+                from backend.src.utils import loop_monitor as _lm
             except Exception:
                 ui.label("Latency tracing unavailable").classes("text-xs text-gray-500")
                 return

@@ -30,7 +30,7 @@ from forex_trader.core.core_open_trade import _CLIMBER_PCTS, _GDVR_PCTS
 from forex_trader.core.core_tp_trigger_tracking import (
     TPCache, get_triggered_tps, log_tp_wait_diagnostic, get_remaining_lots,
 )
-from forex_trader.core.models import MAX_TP, Tick
+from backend.src.utils.models import MAX_TP, Tick
 
 log = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ async def handle_signal_climber(
     the intended target and dumping 80% at TP1 destroys the expected value.
     """
     from forex_trader.core.core_strategy_params import get_strategy_params
-    from forex_trader.core.models import STRATEGY_SIGNAL_CLIMBER
+    from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
 
     be_at_pos_1based = int(get_strategy_params(STRATEGY_SIGNAL_CLIMBER).get("be_at_pos", 1))
     be_at_pos = max(be_at_pos_1based - 1, 0)
@@ -302,7 +302,7 @@ def _limit_runner_pcts_table(trade: dict) -> tuple[dict[int, list[float]], bool]
     already fixed for this trade -- run_tp_ladder's own n-keyed lookup
     resolves straight to it."""
     from forex_trader.core.core_strategy_params import get_strategy_params
-    from forex_trader.core.models import STRATEGY_LIMIT_RUNNER
+    from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
     n = sum(1 for i in range(1, MAX_TP + 1) if trade.get(f"tp{i}") is not None)
     if n == 0:
         return {1: [1.0]}, True
@@ -336,7 +336,7 @@ async def handle_limit_runner(
     the trailing SL with no further target.
     """
     from forex_trader.core.core_strategy_params import get_strategy_params
-    from forex_trader.core.models import STRATEGY_LIMIT_RUNNER
+    from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
     pcts_table, close_full_on_last = _limit_runner_pcts_table(trade)
     be_at_pos_1based = int(get_strategy_params(STRATEGY_LIMIT_RUNNER).get("be_at_pos", 1))
     be_at_pos = max(be_at_pos_1based - 1, 0)

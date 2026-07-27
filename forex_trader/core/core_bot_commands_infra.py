@@ -59,7 +59,7 @@ async def cmd_restart_bridge(
 
     # Poll for port 9000.  Wine/CrossOver startup takes 15-30 s on macOS;
     # native Windows bridge is up in 2-3 s.
-    from forex_trader.core.platform_utils import is_port_listening as _ipl
+    from backend.src.utils.os_utils import is_port_listening as _ipl
     bridge_up = False
     for _ in range(12):
         await asyncio.sleep(3)
@@ -115,7 +115,7 @@ async def cmd_restart_app(args: list, bot_offset: int) -> str:
             venv_python = root / ".venv" / "bin" / "python3"
         python = str(venv_python) if venv_python.exists() else sys.executable
         from backend.src.config import USER_DATA_DIR
-        from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
+        from backend.src.utils.os_utils import delayed_relaunch_cmd, open_restart_log
         log_path = USER_DATA_DIR / "data" / "restart.log"
         # Persist the current offset NOW so the restarted process skips
         # this /restartapp update and doesn't trigger another restart.

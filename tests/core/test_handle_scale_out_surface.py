@@ -21,7 +21,7 @@ from forex_trader.core import database as db
 from forex_trader.core import core_handle_scale_out as hso
 from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
-from forex_trader.core.models import STRATEGY_SCALE_OUT
+from backend.src.utils.models import STRATEGY_SCALE_OUT
 
 
 def _reset_thread_local_connection():

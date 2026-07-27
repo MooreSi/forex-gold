@@ -16,7 +16,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_instant_followup as followup
-from forex_trader.core.models import STRATEGY_BE_RUNNER
+from backend.src.utils.models import STRATEGY_BE_RUNNER
 
 
 def _reset_thread_local_connection():

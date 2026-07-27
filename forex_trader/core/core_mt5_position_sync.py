@@ -27,7 +27,7 @@ from forex_trader.core.core_close_trade import CloseTradeContext, record_close
 from forex_trader.core.core_partial_close import partial_close_trade
 from forex_trader.core.core_profit_sync import schedule_profit_sync, sync_profit
 from forex_trader.core.core_tp_trigger_tracking import last_closed_tp
-from forex_trader.core.models import STRATEGY_SCALE_OUT
+from backend.src.utils.models import STRATEGY_SCALE_OUT
 
 log = logging.getLogger(__name__)
 

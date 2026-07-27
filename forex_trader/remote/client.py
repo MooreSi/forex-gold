@@ -464,7 +464,7 @@ def _do_restart() -> None:
     overlap, not a conflict, since the new process binds the port either way.
     """
     app_root = Path(__file__).parent.parent.parent
-    from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
+    from backend.src.utils.os_utils import delayed_relaunch_cmd, open_restart_log
     from backend.src.config import USER_DATA_DIR as _udata
     log_path = Path(_udata) / "data" / "restart.log"
 

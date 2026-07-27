@@ -21,7 +21,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from forex_trader.core.engine import SimulationEngine
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER,

@@ -30,7 +30,7 @@ from forex_trader.core.core_partial_close import partial_close_trade
 from forex_trader.core.core_tp_trigger_tracking import (
     TPCache, get_triggered_tps, log_tp_wait_diagnostic, get_remaining_lots,
 )
-from forex_trader.core.models import Tick
+from backend.src.utils.models import Tick
 
 log = logging.getLogger(__name__)
 

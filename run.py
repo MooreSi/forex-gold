@@ -54,7 +54,7 @@ def _ensure_data_dirs():
 def _free_port(port: int) -> None:
     """Kill any process already listening on the given port."""
     try:
-        from forex_trader.core.platform_utils import free_port as _fp, pids_listening_on
+        from backend.src.utils.os_utils import free_port as _fp, pids_listening_on
         pids = pids_listening_on(port)
         _fp(port)
         if pids:

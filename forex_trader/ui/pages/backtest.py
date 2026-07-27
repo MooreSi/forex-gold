@@ -16,7 +16,7 @@ from typing import Optional
 from nicegui import ui
 
 from forex_trader.core import backtest_engine as bt
-from forex_trader.core.models import STRATEGY_NAMES
+from backend.src.utils.models import STRATEGY_NAMES
 
 _STRATEGY_LABELS = dict(STRATEGY_NAMES)
 

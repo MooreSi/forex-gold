@@ -31,7 +31,7 @@ from typing import Any, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
-from forex_trader.core.models import STRATEGY_ORB_FIXED
+from backend.src.utils.models import STRATEGY_ORB_FIXED
 
 log = logging.getLogger(__name__)
 

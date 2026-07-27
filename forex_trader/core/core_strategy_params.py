@@ -34,7 +34,7 @@ import time
 
 from forex_trader.core import database as db_module
 from forex_trader.core.database import _schedule_coro
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE,

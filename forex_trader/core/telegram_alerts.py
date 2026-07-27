@@ -11,7 +11,7 @@ import httpx
 
 from forex_trader.core import database as db_module
 from forex_trader.core.core_ea_templates import TEMPLATE_OVERRIDE_PREFIX as _TEMPLATE_OVERRIDE_PREFIX
-from forex_trader.core.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
+from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 
 log = logging.getLogger(__name__)
 

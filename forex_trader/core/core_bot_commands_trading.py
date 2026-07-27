@@ -32,7 +32,7 @@ from forex_trader.core.core_mt5_performance import compute_mt5_performance
 from forex_trader.core.core_open_trade import open_trade
 from forex_trader.core.core_risk_governor import price_in_entry_range
 from forex_trader.core.core_trade_reporting import get_open_trades
-from forex_trader.core.models import STRATEGY_SCALE_OUT
+from backend.src.utils.models import STRATEGY_SCALE_OUT
 from forex_trader.core.signal_parser import validate_signal
 
 log = logging.getLogger(__name__)

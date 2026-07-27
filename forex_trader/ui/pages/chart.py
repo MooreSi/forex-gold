@@ -16,7 +16,7 @@ from typing import Optional, Callable
 
 from nicegui import ui
 
-from forex_trader.core.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
+from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 from forex_trader.core import database as db_module
 from forex_trader.sync import client as sync_client
 from forex_trader.ui.pages.trading import trade_source_label, trade_channel_label

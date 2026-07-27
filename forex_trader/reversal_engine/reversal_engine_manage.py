@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 
-from forex_trader.core.models import STRATEGY_CONSERVATIVE
+from backend.src.utils.models import STRATEGY_CONSERVATIVE
 from forex_trader.reversal_engine import reversal_engine_repo as re_db
 
 _log = logging.getLogger("reversal_engine")

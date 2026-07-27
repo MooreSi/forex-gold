@@ -534,7 +534,7 @@ def check_entry_trigger(
     if len(m15_candles) < 4 or atr < 1.0:
         return None
 
-    from forex_trader.core.regime import (
+    from backend.src.utils.regime import (
         BOUNCE_BLOCKED_ENTRY_LEVELS,
         bounce_pattern_allowed,
     )

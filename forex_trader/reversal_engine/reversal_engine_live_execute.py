@@ -106,7 +106,7 @@ class _LiveExecuteMixin:
                     fresh_sig["atr"]      = fresh_atr
                     fresh_sig["session"]  = fresh_session
                     try:
-                        from forex_trader.core.news_calendar import get_news_proximity_norm as _get_news
+                        from backend.src.utils.news_calendar import get_news_proximity_norm as _get_news
                         fresh_sig["news_proximity_norm"] = _get_news()
                     except Exception:
                         pass

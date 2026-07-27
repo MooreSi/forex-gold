@@ -324,7 +324,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         # chosen -- computed once per cycle rather than repeated (or, as
         # before, computed only after a candidate had already been picked).
         try:
-            from forex_trader.core.news_calendar import get_news_proximity_norm as _get_news
+            from backend.src.utils.news_calendar import get_news_proximity_norm as _get_news
             news_proximity_norm = _get_news()
         except Exception:
             news_proximity_norm = 1.0
@@ -589,7 +589,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         same SL/TP management rules, not an unrelated leftover default."""
         try:
             from forex_trader.core import database as core_db
-            from forex_trader.core.models import STRATEGY_SCALE_OUT
+            from backend.src.utils.models import STRATEGY_SCALE_OUT
             override = core_db.get_channel_strategy_override("Reversal Engine")
             if override and override != "auto":
                 return override

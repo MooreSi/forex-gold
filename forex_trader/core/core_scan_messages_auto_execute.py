@@ -39,7 +39,7 @@ from forex_trader.core import database as db_module
 from forex_trader.core import ea_bridge
 from forex_trader.core.core_open_trade import open_trade as _real_open_trade
 from forex_trader.core.core_strategy_params import get_strategy_params
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,

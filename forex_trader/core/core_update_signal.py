@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from forex_trader.core import database as db_module
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SCALP_RUNNER,
     STRATEGY_BE_RUNNER,
 )

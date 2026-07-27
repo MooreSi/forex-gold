@@ -12,7 +12,7 @@ from nicegui import ui
 
 import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
-from forex_trader.core.models import STRATEGY_NAMES
+from backend.src.utils.models import STRATEGY_NAMES
 
 def _uk_time() -> str:
     return datetime.now().strftime("%H:%M:%S")

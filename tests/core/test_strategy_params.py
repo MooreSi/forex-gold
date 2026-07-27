@@ -11,7 +11,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_strategy_params as sp
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE,

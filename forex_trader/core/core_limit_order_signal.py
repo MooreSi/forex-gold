@@ -35,7 +35,7 @@ from typing import Any, Awaitable, Callable
 
 from forex_trader.core import database as db_module
 from forex_trader.core.core_strategy_params import get_strategy_params
-from forex_trader.core.models import MAX_TP, STRATEGY_LIMIT_RUNNER
+from backend.src.utils.models import MAX_TP, STRATEGY_LIMIT_RUNNER
 
 log = logging.getLogger(__name__)
 

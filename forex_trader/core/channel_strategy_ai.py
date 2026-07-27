@@ -135,7 +135,7 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
     """
     from forex_trader.core import ai_provider
     from forex_trader.core import database as _db
-    from forex_trader.core.models import STRATEGY_NAMES
+    from backend.src.utils.models import STRATEGY_NAMES
 
     results: dict[str, dict] = {}
 
@@ -318,7 +318,7 @@ If a channel has no performance data, recommend "conservative" with confidence 0
             old_strat = prev_recs.get(src, "")
             conf      = results[src]["confidence"]
             if new_strat != old_strat and old_strat and conf >= _NOTIFY_CONF_MIN:
-                from forex_trader.core.models import STRATEGY_NAMES as _SN
+                from backend.src.utils.models import STRATEGY_NAMES as _SN
                 old_label = _SN.get(old_strat, old_strat)
                 new_label = _SN.get(new_strat, new_strat)
                 _changed.append(
@@ -363,7 +363,7 @@ async def evaluate_signal_strategy(
     """
     from forex_trader.core import ai_provider
     from forex_trader.core import database as _db
-    from forex_trader.core.models import STRATEGY_NAMES
+    from backend.src.utils.models import STRATEGY_NAMES
 
     valid_strategies = list(STRATEGY_NAMES.keys())
     current_rec      = _db.get_channel_strategy_rec(channel)

@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_manual_market_order as mmo
-from forex_trader.core.models import STRATEGY_TRAIL_STOP
+from backend.src.utils.models import STRATEGY_TRAIL_STOP
 
 
 def _reset_thread_local_connection():

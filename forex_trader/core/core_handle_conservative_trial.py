@@ -33,7 +33,7 @@ from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import (
     TPCache, get_triggered_tps, get_remaining_lots,
 )
-from forex_trader.core.models import STRATEGY_CONSERVATIVE_TRIAL, Tick
+from backend.src.utils.models import STRATEGY_CONSERVATIVE_TRIAL, Tick
 
 log = logging.getLogger(__name__)
 

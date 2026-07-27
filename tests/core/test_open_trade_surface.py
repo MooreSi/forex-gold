@@ -19,7 +19,7 @@ import pytest
 from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from forex_trader.core import core_open_trade as ot
-from forex_trader.core.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER
+from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER
 
 
 def _reset_thread_local_connection():

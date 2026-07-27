@@ -20,7 +20,7 @@ from forex_trader.core import database as db
 from forex_trader.core import core_handle_be_runner as hbr
 from forex_trader.core import core_strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
-from forex_trader.core.models import STRATEGY_BE_RUNNER
+from backend.src.utils.models import STRATEGY_BE_RUNNER
 
 
 def _reset_thread_local_connection():

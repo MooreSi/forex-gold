@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 
 from forex_trader.core import database as db_module
-from forex_trader.core.models import CONTRACT_SIZE
+from backend.src.utils.models import CONTRACT_SIZE
 
 
 class DPMCache:

@@ -21,7 +21,7 @@ from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from forex_trader.core import core_open_trade_from_signal as otfs
 from forex_trader.core import core_strategy_params as sp
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,

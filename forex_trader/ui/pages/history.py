@@ -17,7 +17,7 @@ import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
-from forex_trader.core.models import STRATEGY_NAMES, CONTRACT_SIZE
+from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
 from forex_trader.ui.pages import ai_trade_analysis as _ai_analysis
 from forex_trader.ui.pages.trading import trade_source_label, trade_channel_label
 

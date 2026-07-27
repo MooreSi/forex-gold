@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, TYPE_CHECKING
 
 from forex_trader.core import database as db_module
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     Tick, CONTRACT_SIZE, POINT_SIZE,
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP, STRATEGY_PROTECTED_SCALE,
     STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE_TRIAL,
@@ -375,7 +375,7 @@ class SimulationEngine:
         self._ai_model_refresh_task = asyncio.create_task(self._ai_model_refresh_loop())
         self._data_retention_task = asyncio.create_task(self._data_retention_loop())
         self._reversal_engine_research_task = asyncio.create_task(self._reversal_engine_research_loop())
-        from forex_trader.core.self_healer import SelfHealer
+        from backend.src.utils.self_healer import SelfHealer
         self._self_healer = SelfHealer(self)
         self._self_healer.start()
         # EA bridge — local TCP listener a companion MQL5 EA connects to.
@@ -2020,7 +2020,7 @@ class SimulationEngine:
             text     = (msg.get("text") or "").strip()
             if not tg_id or not text:
                 continue
-            from forex_trader.core import latency_trace as _lt_scan
+            from backend.src.utils import latency_trace as _lt_scan
             _lt_scan.mark(tg_id, "t6_scanning")
             if slot_groups and group_id and group_id not in slot_groups:
                 continue
@@ -2186,7 +2186,7 @@ class SimulationEngine:
             if not _is_fresh:
                 continue
 
-            from forex_trader.core import latency_trace as _lt_dec
+            from backend.src.utils import latency_trace as _lt_dec
             _lt_dec.mark(tg_id, "t7_decided")
 
             if parsed.get("_ai_extracted"):
@@ -2916,7 +2916,7 @@ class SimulationEngine:
             return ok
 
         import subprocess, os as _os, sys as _sys
-        from forex_trader.core import platform_utils as _pu
+        from backend.src.utils import os_utils as _pu
 
         _bridge_py = _os.path.normpath(
             _os.path.join(_os.path.dirname(__file__), "..", "..", "mt5_bridge.py")

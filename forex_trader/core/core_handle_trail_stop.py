@@ -21,7 +21,7 @@ from typing import Any
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_tp_trigger_tracking import TPCache, get_triggered_tps
-from forex_trader.core.models import MAX_TP, Tick
+from backend.src.utils.models import MAX_TP, Tick
 
 log = logging.getLogger(__name__)
 

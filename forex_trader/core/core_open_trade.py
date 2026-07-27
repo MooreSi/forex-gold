@@ -26,7 +26,7 @@ from typing import Any, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_risk_governor import is_trading_paused
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,

@@ -23,7 +23,7 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core import telegram_alerts, ai_provider, channel_strategy_ai
-from forex_trader.core.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
+from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
 
 log = logging.getLogger(__name__)
 

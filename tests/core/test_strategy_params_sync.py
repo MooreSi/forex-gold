@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_strategy_params as sp
-from forex_trader.core.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER
+from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER
 from forex_trader.sync.server import SyncServer
 from forex_trader.sync.client import SyncClient
 

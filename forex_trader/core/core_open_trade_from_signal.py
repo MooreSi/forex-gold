@@ -35,7 +35,7 @@ from forex_trader.core.core_signal_resolution import (
     _rr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,
 )
 from forex_trader.core.core_strategy_params import get_strategy_params
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,

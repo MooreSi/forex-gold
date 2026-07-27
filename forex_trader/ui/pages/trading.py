@@ -12,7 +12,7 @@ from nicegui import ui
 
 from forex_trader.core import ai_provider
 from forex_trader.core import database as db_module
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
 from forex_trader.core.signal_parser import validate_signal
@@ -1353,7 +1353,7 @@ async def _background_commentary(engine, signal_id: str):
 # ── Strategy comparison data ───────────────────────────────────────────────────
 
 from forex_trader.core import core_strategy_params as _sp
-from forex_trader.core.models import (
+from backend.src.utils.models import (
     STRATEGY_SCALE_OUT as _SO, STRATEGY_BE_RUNNER as _BE,
     STRATEGY_TRAIL_STOP as _TS, STRATEGY_PROTECTED_SCALE as _PS,
     STRATEGY_CONSERVATIVE as _CO, STRATEGY_NO_SL_SCALE as _NSS,
@@ -1809,7 +1809,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     from forex_trader.core import database as _csdb
     from forex_trader.core import channel_strategy_ai as _csai
     from forex_trader.core import core_ea_templates as _et
-    from forex_trader.core.models import STRATEGY_NAMES
+    from backend.src.utils.models import STRATEGY_NAMES
 
     with ui.row().classes("items-center gap-2 mb-1"):
         ui.label("Channel Strategy").classes("text-base font-bold text-yellow-300")

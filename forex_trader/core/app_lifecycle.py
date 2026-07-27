@@ -198,7 +198,7 @@ async def startup() -> None:
     # Protect each startup step independently so a failure in one does not
     # prevent the signal engine from starting.
     try:
-        from forex_trader.core import loop_monitor as _loop_mon
+        from backend.src.utils import loop_monitor as _loop_mon
         _loop_mon.start()
     except Exception as _e:
         log.error("[startup] Loop monitor failed to start: %s", _e)

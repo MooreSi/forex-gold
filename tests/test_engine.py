@@ -40,13 +40,13 @@ sys.path.insert(0, str(ROOT))
 
 from forex_trader.core import database as db_module
 from forex_trader.core.engine import SimulationEngine
-from forex_trader.core.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
+from backend.src.utils.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
 
 db_module.init(_TEST_DB)
 
 
 def _make_tick(bid=2350.00, ask=2350.30) -> Tick:
-    from forex_trader.core.models import POINT_SIZE, DIGITS
+    from backend.src.utils.models import POINT_SIZE, DIGITS
     spread = round(ask - bid, 5)
     return Tick(bid=round(bid, DIGITS), ask=round(ask, DIGITS),
                 mid=round((bid + ask) / 2, DIGITS),

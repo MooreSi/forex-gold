@@ -27,7 +27,7 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_open_trade import open_trade
-from forex_trader.core.models import STRATEGY_SCALE_OUT, STRATEGY_NAMES
+from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_NAMES
 
 
 async def open_manual_market_order(

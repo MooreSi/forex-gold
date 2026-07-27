@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
-from forex_trader.core.models import STRATEGY_SCALE_OUT, STRATEGY_TRAIL_STOP
+from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_TRAIL_STOP
 
 
 def _reset_thread_local_connection():

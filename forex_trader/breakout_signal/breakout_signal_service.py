@@ -411,7 +411,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         trigger_tag   = "velocity" if velocity else "M5_candle"
 
         if ap.get("level_filter_enabled") >= 0.5:
-            from forex_trader.core.regime import BREAKOUT_BLOCKED_LEVELS
+            from backend.src.utils.regime import BREAKOUT_BLOCKED_LEVELS
             _blt = candidate.get("broken_level_type", "")
             if _blt in BREAKOUT_BLOCKED_LEVELS:
                 _lv_reason = f"Level type '{_blt}' blocked (measured 36-37% WR)"
@@ -589,7 +589,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             _market_ctx = {}
 
         try:
-            from forex_trader.core.news_calendar import get_news_proximity_norm as _get_news
+            from backend.src.utils.news_calendar import get_news_proximity_norm as _get_news
             sig_data["news_proximity_norm"] = _get_news()
         except Exception:
             sig_data["news_proximity_norm"] = 1.0

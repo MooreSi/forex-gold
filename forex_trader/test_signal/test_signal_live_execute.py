@@ -42,7 +42,7 @@ class _LiveExecuteMixin:
         # the Breakout generator, off by default.
         from forex_trader.core import database as _cdb_hour
         if bool(_cdb_hour.get_risk_settings().get("hour_blocklist_enabled", 0)):
-            from forex_trader.core.regime import BOUNCE_BLOCKED_HOURS_UTC
+            from backend.src.utils.regime import BOUNCE_BLOCKED_HOURS_UTC
             _hour_now = datetime.now(timezone.utc).hour
             if _hour_now in BOUNCE_BLOCKED_HOURS_UTC:
                 reason = f"hour_blocklist: {_hour_now:02d} UTC (measured negative expectancy)"

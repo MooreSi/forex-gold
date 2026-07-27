@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 
 from forex_trader.core import database as db_module
-from forex_trader.core.models import CONTRACT_SIZE, POINT_SIZE
+from backend.src.utils.models import CONTRACT_SIZE, POINT_SIZE
 
 
 def calculate_fees(lot_size: float, spread: float, hold_hours: float = 0.0) -> dict:

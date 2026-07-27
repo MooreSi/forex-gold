@@ -25,7 +25,7 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core.core_handle_scale_out import handle_scale_out
 from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import TPCache
-from forex_trader.core.models import MAX_TP, STRATEGY_BE_RUNNER, Tick
+from backend.src.utils.models import MAX_TP, STRATEGY_BE_RUNNER, Tick
 
 log = logging.getLogger(__name__)
 

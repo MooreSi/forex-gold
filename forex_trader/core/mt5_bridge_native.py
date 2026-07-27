@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from forex_trader.core.models import Tick, SYMBOL, POINT_SIZE, DIGITS
+from backend.src.utils.models import Tick, SYMBOL, POINT_SIZE, DIGITS
 
 log = logging.getLogger(__name__)
 

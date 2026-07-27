@@ -759,7 +759,7 @@ def main_page():
             else:
                 venv_python = root / ".venv" / "bin" / "python3"
             python = str(venv_python) if venv_python.exists() else sys.executable
-            from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
+            from backend.src.utils.os_utils import delayed_relaunch_cmd, open_restart_log
             from backend.src.config import USER_DATA_DIR
             log_path = USER_DATA_DIR / "data" / "restart.log"
             with open_restart_log(log_path) as _restart_log:

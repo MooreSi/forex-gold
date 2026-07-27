@@ -147,7 +147,11 @@ async def process_instant_entry(
         strategy = _ch_ov_ime
         log.info("[IME] Channel %s strategy override → %s", channel_name, strategy)
     # Per-signal "High Risk" override — same rule as the full-signal path.
-    if "high risk" in text.lower():
+    # Must not override a template-assigned channel (see
+    # core_scan_messages_staleness_strategy.py's identical fix/reasoning) --
+    # a template fully replaces strategy dispatch by design, and clobbering
+    # it here would also defeat the Sig Guard template-detection right below.
+    if "high risk" in text.lower() and not ea_templates.is_template_override(strategy):
         log.info("[IME] 'High Risk' flagged in message — using Conservative "
                   "strategy for this trade only")
         strategy = STRATEGY_CONSERVATIVE

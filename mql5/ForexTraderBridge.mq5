@@ -114,6 +114,8 @@ struct ManagedTrade
    // zero-value defaults and ManageTrade() never reads them.
    bool     isTemplate;
    string   tplTpslMode;     // "off" / "on" / "stealth"
+   string   tplAnchor;       // "unified" / "distributed" -- see BE block in ManageTemplate
+   double   tplAnchorPrice;  // grid mode: basePrice shared by every leg; single mode: own fill price
    string   tplTrailMode;    // "off" / "candle" / "step" / "fractal" / "tp"
    string   tplBeMode;       // "entry" / "entry_buffer"
    double   tplBeBufferPts;
@@ -156,6 +158,8 @@ struct PendingOrder
    // complete ManagedTrade the moment a leg fills.
    bool     isTemplate;
    string   tplTpslMode;
+   string   tplAnchor;
+   double   tplAnchorPrice;
    string   tplTrailMode;
    string   tplBeMode;
    double   tplBeBufferPts;
@@ -549,6 +553,10 @@ void HandleOpenTrade(const string json)
 
    mt.isTemplate = isTemplate;
    mt.tplTpslMode = isTemplate ? JsonGetString(json, "tpl_tpsl_mode", "on") : "";
+   // Single mode has no siblings to share a reference with, so unified vs
+   // distributed can't differ here -- this leg's own fill price either way.
+   mt.tplAnchor = isTemplate ? JsonGetString(json, "tpl_anchor", "unified") : "unified";
+   mt.tplAnchorPrice = fillPrice;
    mt.tplTrailMode = isTemplate ? JsonGetString(json, "tpl_trail_mode", "off") : "off";
    mt.tplBeMode = isTemplate ? JsonGetString(json, "tpl_be_mode", "entry") : "entry";
    mt.tplBeBufferPts = isTemplate ? JsonGetDouble(json, "tpl_be_buffer_pts", 1.0) : 0.0;
@@ -736,6 +744,8 @@ void HandleRestorePendingOrder(const string json)
       mt.closeFullOnLast = JsonHasKey(json, "close_full_on_last")
          ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
       mt.isTemplate = false;
+      mt.tplAnchor = "unified";
+      mt.tplAnchorPrice = fillPrice;
       mt.tplGridGroup = -1;
       mt.tplBeDone = false;
       mt.tplCancelPending = false;
@@ -847,6 +857,16 @@ void HandleOpenTemplateGrid(const string json)
       p.closeFullOnLast = true;
       p.isTemplate = true;
       p.tplTpslMode = JsonGetString(json, "tpl_tpsl_mode", "on");
+      // Anchor (2026-07-28) -- "unified": every leg's breakeven target is
+      // THIS SAME basePrice (the price the whole grid was staged from),
+      // not each leg's own fill price, so a group of legs filled at
+      // different levels still converges on one shared breakeven when
+      // triggered. "distributed" (the only behaviour before this): each
+      // leg's own entry_price, exactly as ManageTemplate/ApplyGroupTpAction
+      // already did. See core_ea_templates.py's DEFAULTS and the EA
+      // Templates UI's own tooltip for this field's stated meaning.
+      p.tplAnchor = JsonGetString(json, "tpl_anchor", "unified");
+      p.tplAnchorPrice = basePrice;
       p.tplTrailMode = JsonGetString(json, "tpl_trail_mode", "off");
       p.tplBeMode = JsonGetString(json, "tpl_be_mode", "entry");
       p.tplBeBufferPts = JsonGetDouble(json, "tpl_be_buffer_pts", 1.0);
@@ -1463,11 +1483,13 @@ void CancelGridSiblings(const int groupId, const ulong filledTicket)
 // below) treats it as validation of the whole basket: every other
 // still-resting sibling gets pulled (same mechanism Cancel Pending already
 // uses on a fill, just triggered by a TP hit here instead) and every other
-// already-live sibling's SL moves to ITS OWN breakeven (each leg has a
-// different entry price, staggered by grid_step_pts, so this can't just
-// copy the triggering leg's SL) -- caps risk on the rest of the basket
-// instead of leaving unfilled legs to fill blind or open siblings sitting
-// at their original, wider stop.
+// already-live sibling's SL moves to breakeven -- caps risk on the rest of
+// the basket instead of leaving unfilled legs to fill blind or open
+// siblings sitting at their original, wider stop. Each sibling's own
+// Anchor setting decides the breakeven reference: "distributed" is ITS OWN
+// entry price (legs are staggered by grid_step_pts, so this differs per
+// leg); "unified" is tplAnchorPrice, the single basePrice the whole group
+// was staged from, so every leg converges on the same breakeven price.
 void ApplyGroupTpAction(ManagedTrade &t)
 {
    CancelGridSiblings(t.tplGridGroup, t.ticket);
@@ -1475,11 +1497,13 @@ void ApplyGroupTpAction(ManagedTrade &t)
    {
       if(g_trades[i].tplGridGroup != t.tplGridGroup) continue;
       if(g_trades[i].ticket == t.ticket) continue;
-      double beSl = g_trades[i].entry_price;
+      double refPrice = (g_trades[i].tplAnchor == "unified")
+         ? g_trades[i].tplAnchorPrice : g_trades[i].entry_price;
+      double beSl = refPrice;
       if(g_trades[i].tplBeMode == "entry_buffer")
       {
          double sign = (g_trades[i].direction == "BUY") ? 1.0 : -1.0;
-         beSl = g_trades[i].entry_price + sign * g_trades[i].tplBeBufferPts;
+         beSl = refPrice + sign * g_trades[i].tplBeBufferPts;
       }
       if(MoveSl(g_trades[i], beSl, "group_tp_action"))
          g_trades[i].tplBeDone = true;
@@ -1553,16 +1577,22 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
    }
 
    // ── Breakeven ────────────────────────────────────────────────────────
+   // Anchor: "unified" uses tplAnchorPrice (the single price the whole grid
+   // group was staged from, shared by every leg) so a multi-leg fill still
+   // converges on one common breakeven; "distributed" (the default, and
+   // the only behaviour before this field was wired in) uses this leg's
+   // own entry_price, same as every other strategy's breakeven already did.
    if(!t.tplBeDone)
    {
       int beIdx = t.tplBeTrigger - 1;
       if(beIdx >= 0 && beIdx < MAX_TPS && TpCleared(t, beIdx, tick))
       {
-         double beSl = t.entry_price;
+         double refPrice = (t.tplAnchor == "unified") ? t.tplAnchorPrice : t.entry_price;
+         double beSl = refPrice;
          if(t.tplBeMode == "entry_buffer")
          {
             double sign = (t.direction == "BUY") ? 1.0 : -1.0;
-            beSl = t.entry_price + sign * t.tplBeBufferPts;
+            beSl = refPrice + sign * t.tplBeBufferPts;
          }
          if(MoveSl(t, beSl, "template_be", beIdx)) t.tplBeDone = true;
       }
@@ -1774,6 +1804,8 @@ void CheckPendingOrders()
 
          mt.isTemplate = g_pending[i].isTemplate;
          mt.tplTpslMode = g_pending[i].tplTpslMode;
+         mt.tplAnchor = g_pending[i].tplAnchor;
+         mt.tplAnchorPrice = g_pending[i].tplAnchorPrice;
          mt.tplTrailMode = g_pending[i].tplTrailMode;
          mt.tplBeMode = g_pending[i].tplBeMode;
          mt.tplBeBufferPts = g_pending[i].tplBeBufferPts;

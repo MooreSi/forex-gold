@@ -155,7 +155,20 @@ async def resolve_strategy_and_skip_reason(
     elif _ch_ov_tg:
         strategy = _ch_ov_tg
 
-    if "high risk" in text.lower():
+    # "High Risk" must not override a template-assigned channel -- a
+    # template fully replaces strategy dispatch by design (see
+    # core_ea_templates.py's module docstring), and this override doesn't
+    # just lose that intent locally: engine.py's own Limit-format dispatch
+    # (the tp_open check right after this function returns) tests
+    # is_template_override(strategy) on the ALREADY-mutated value, so
+    # clobbering it here also defeated that check's template-wins
+    # protection -- confirmed live 2026-07-27: GOLD DIGGERS INSTITUTIONAL's
+    # "HIGH RISK TRADE" disclaimer appears on effectively every signal
+    # (channel-wide boilerplate, not a per-signal risk flag), so every one
+    # of that channel's Limit-format signals silently executed as Limit
+    # Runner instead of its assigned Test Template, no grid, no fractal
+    # trail, none of the template's own management.
+    if "high risk" in text.lower() and not ea_templates.is_template_override(strategy):
         log.info("[%s] 'High Risk' flagged in message — using Conservative "
                  "strategy for this trade only", channel_name)
         strategy = STRATEGY_CONSERVATIVE

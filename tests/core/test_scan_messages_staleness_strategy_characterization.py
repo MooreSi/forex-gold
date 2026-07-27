@@ -216,6 +216,23 @@ def test_high_risk_text_forces_conservative(fresh_db):
     assert calls[0]["strategy_name"] == "Conservative"
 
 
+def test_high_risk_does_not_override_an_assigned_ea_template(fresh_db):
+    # Regression (2026-07-27): GOLD DIGGERS INSTITUTIONAL puts "HIGH RISK
+    # TRADE" on effectively every signal as channel-wide boilerplate, so
+    # this override silently replaced that channel's assigned template on
+    # every trade -- and because engine.py's Limit-format dispatch tests
+    # is_template_override() on the already-mutated value, it also defeated
+    # that check's template-wins protection, executing as Limit Runner.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Test Template", {"mode": "grid"})
+    db.set_channel_strategy_override(
+        "TestChannel", et.override_for_template("Test Template"), auto=False,
+    )
+    text_hr = _GD2_FULL + "\nHIGH RISK TRADE"
+    result, calls, alerts = _run([{"id": "c11b", "group_id": "g1", "text": text_hr, "timestamp": _NOW_ISO}])
+    assert calls[0]["strategy_name"] == "Template: Test Template"
+
+
 def test_dpm_enabled_overrides_displayed_name_only(fresh_db):
     db.update_risk_settings({"dpm_enabled": 1})
     result, calls, alerts = _run([{"id": "c12", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])

@@ -167,6 +167,8 @@ class EABridge:
                          be_at_pos: Optional[int] = None,
                          trail_mode: Optional[str] = None,
                          template: Optional[dict] = None,
+                         zone_low: Optional[float] = None,
+                         zone_high: Optional[float] = None,
                          timeout: float = 5.0) -> dict:
         """Ask the EA to place the order and take over its management.
         Returns the trade_opened/trade_open_failed payload. Raises
@@ -239,6 +241,19 @@ class EABridge:
             msg["tpl_group_tp_action"] = 1 if template["group_tp_action"] else 0
             msg["tpl_harvest_enabled"]   = 1 if template["harvest_enabled"] else 0
             msg["tpl_harvest_threshold"] = template["harvest_threshold"]
+            # Grid mode, zone-spanned staging (2026-07-28) -- the signal's own
+            # stated entry zone. When present, HandleOpenTemplateGrid stages
+            # the legs ACROSS this zone rather than stepping grid_step_pts
+            # away from current price: a "BUY LIMITS 4063/4068 AREA" message
+            # is itself already a grid instruction, and its SL sits just
+            # beyond the zone, so fixed stepping walks the legs straight
+            # through the stop and every one gets broker-rejected as invalid
+            # stops. Omitted (and the EA falls back to step-based staging)
+            # for any signal with no meaningful zone.
+            if (zone_low is not None and zone_high is not None
+                    and float(zone_high) > float(zone_low) > 0):
+                msg["zone_low"]  = float(zone_low)
+                msg["zone_high"] = float(zone_high)
         ack_event = asyncio.Event()
         ack_box: dict = {}
 

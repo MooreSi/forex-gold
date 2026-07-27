@@ -303,6 +303,11 @@ async def open_trade(
                     trade_id, direction.upper(), _ea_lot, stop_loss, _tps, strategy,
                     pcts=_ea_pcts, be_at_pos=_ea_be_at_pos, trail_mode=_ea_trail_mode,
                     template=_ea_template,
+                    # The signal's own entry zone -- grid-mode templates stage
+                    # their legs across it instead of stepping away from
+                    # current price. See EABridge.open_trade's zone_low/
+                    # zone_high handling for why.
+                    zone_low=entry_low, zone_high=entry_high,
                 )
                 if ea_ack.get("type") == "trade_opened":
                     mt5_ticket  = ea_ack.get("ticket")

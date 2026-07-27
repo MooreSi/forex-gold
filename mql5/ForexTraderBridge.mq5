@@ -801,6 +801,24 @@ void HandleOpenTemplateGrid(const string json)
    SymbolInfoTick(_Symbol, tick);
    double basePrice = (direction == "BUY") ? tick.bid : tick.ask;
 
+   // Zone-spanned staging (2026-07-28). When the signal states its own entry
+   // zone (zone_low/zone_high, sent by ea_bridge.py), stage the legs ACROSS
+   // that zone instead of stepping grid_step_pts away from the current price.
+   // A "BUY LIMITS 4063/4068 AREA" message is itself already a grid
+   // instruction, and its SL sits just beyond the zone (4062 here) -- fixed
+   // stepping walks the legs straight through that stop (4057/4047/4037) and
+   // the broker rejects every one as invalid stops, so the signal silently
+   // places nothing at all. Spanning the zone keeps every leg inside the
+   // signal's own structure, which is above its SL by construction. Falls
+   // back to the original step-based staging whenever no usable zone is sent.
+   double zoneLow  = JsonGetDouble(json, "zone_low", 0.0);
+   double zoneHigh = JsonGetDouble(json, "zone_high", 0.0);
+   bool   useZone  = (zoneLow > 0.0 && zoneHigh > zoneLow);
+
+   // A pending limit must rest on the correct side of the market by at least
+   // the broker's stops level, or it is rejected outright.
+   double minDist = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+
    trade.SetExpertMagicNumber(InpMagic);
    int groupId = g_nextGridGroup++;
    int placed = 0;
@@ -817,10 +835,43 @@ void HandleOpenTemplateGrid(const string json)
 
    for(int leg = 1; leg <= legs; leg++)
    {
-      double legPrice = (direction == "BUY")
-         ? basePrice - stepPrice * leg
-         : basePrice + stepPrice * leg;
+      double legPrice;
+      if(useZone)
+      {
+         // Leg 1 sits at the edge of the zone price reaches FIRST (the top
+         // for a BUY, the bottom for a SELL); the last leg sits at the far
+         // edge, with the rest spread evenly between. A single-leg grid just
+         // takes that near edge.
+         double span = zoneHigh - zoneLow;
+         double frac = (legs > 1) ? ((double)(leg - 1) / (double)(legs - 1)) : 0.0;
+         legPrice = (direction == "BUY") ? (zoneHigh - span * frac)
+                                         : (zoneLow  + span * frac);
+      }
+      else
+      {
+         legPrice = (direction == "BUY")
+            ? basePrice - stepPrice * leg
+            : basePrice + stepPrice * leg;
+      }
       legPrice = NormalizeDouble(legPrice, _Digits);
+
+      // Skip rather than let the broker reject: price may already be partway
+      // through the zone by the time this runs (the zone-wait path fires the
+      // moment price ENTERS the zone), which leaves the near legs on the
+      // wrong side of the market. Any leg beyond the signal's own stop is
+      // skipped too -- that ordering can only be a mistake, never an entry.
+      bool wrongSide = (direction == "BUY") ? (legPrice > basePrice - minDist)
+                                            : (legPrice < basePrice + minDist);
+      bool beyondSl  = (sl > 0.0) && ((direction == "BUY") ? (legPrice <= sl)
+                                                           : (legPrice >= sl));
+      if(wrongSide || beyondSl)
+      {
+         Print("[EABridge] grid leg ", leg, "/", legs, " skipped @ ", legPrice,
+               (wrongSide ? " (wrong side of market, base=" + DoubleToString(basePrice, _Digits) + ")"
+                          : " (beyond SL " + DoubleToString(sl, _Digits) + ")"));
+         continue;
+      }
+
       string legTradeId = trade_id + "-g" + (string)leg;
       string comment = "ea:" + StringSubstr(trade_id, 0, 10) + "g" + (string)leg;
 

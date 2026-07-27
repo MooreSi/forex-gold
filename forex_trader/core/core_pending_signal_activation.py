@@ -32,6 +32,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_open_trade_from_signal import open_trade_from_signal
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range
 from forex_trader.core.core_trade_reporting import get_open_trades
@@ -47,6 +48,33 @@ log = logging.getLogger(__name__)
 _EXPIRY = 120  # 2 minutes — cancel if zone not filled in time
 _GDVR_PENDING_EXPIRY_SEC = 4 * 3600  # signals often take >1h to fill the entry zone
 _PENDING_ACTIVATION_BACKOFF_S = 20.0
+# EA Templates (2026-07-28) -- matches the 60min TTL a resting Limit Runner
+# order gets (core_limit_order_signal._DEFAULT_EXPIRE_MINUTES). Until the
+# "High Risk" dispatch fix landed the same day, a template-assigned channel's
+# Limit-format signals were being diverted to Limit Runner and so never
+# reached this expiry path at all; once they did, the 120s default expired
+# every one of them before price could pull back into the zone (confirmed
+# live: three GOLD DIGGERS INSTITUTIONAL signals expired unfilled in a row).
+_TEMPLATE_PENDING_EXPIRY_SEC = 60 * 60
+
+
+def _channel_parser_format(source_name: str | None) -> str:
+    """The configured parser_format for whichever channel `source_name`
+    belongs to, or "" if unknown. source_name on a stored signal is the
+    decorated form ("Telegram Auto (<channel>)"), and channel_parser_config
+    is keyed by the bare channel name, so the wrapper has to come off before
+    the lookup -- and the result is resolved through the canonical-channel
+    map so a renamed channel still finds its own row."""
+    src = (source_name or "").strip()
+    if not src:
+        return ""
+    if src.lower().startswith("telegram auto (") and src.endswith(")"):
+        src = src[len("Telegram Auto ("):-1]
+    try:
+        cfg = db_module.get_channel_parser_config(db_module._canonical(src))
+        return (cfg or {}).get("parser_format", "") or ""
+    except Exception:
+        return ""
 
 
 async def try_activate_pending_signals(
@@ -119,9 +147,21 @@ async def try_activate_pending_signals(
         # window is harmless for faster-filling signals (they still fire the moment
         # price re-enters the zone; this only raises how long they're allowed to wait).
         _src = (sig.get("source_name") or "").lower()
-        _is_gd2_src = "gold diggers 2.0" in _src
+        # Was `"gold diggers 2.0" in _src` -- a hardcoded PRE-RENAME channel
+        # name. That group's Telegram title changed to "GOLD DIGGERS
+        # INSTITUTIONAL" (same group_id), so the test silently became dead
+        # code and every one of its zone signals dropped to the 120s default
+        # instead of the 15 minutes this branch exists to give them. Same
+        # class of bug as the orphaned channel_performance row fixed the same
+        # day. Resolved through the channel's configured parser_format
+        # instead of its display name, so no future rename can break it again
+        # -- "gd2" IS the format these pullback-style zone signals arrive in,
+        # which is what the window was actually about.
+        _is_gd2_src = _channel_parser_format(sig.get("source_name")) == "gd2"
         _is_orb_src = "orb/ivb report" in _src
-        if effective_strategy in (STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+        if ea_templates.is_template_override(effective_strategy):
+            _expiry = _TEMPLATE_PENDING_EXPIRY_SEC
+        elif effective_strategy in (STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
                                    STRATEGY_ADAPTIVE_RUNNER_2):
             _expiry = _GDVR_PENDING_EXPIRY_SEC
         elif _is_gd2_src:

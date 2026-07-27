@@ -86,10 +86,12 @@ class _FakeEA:
         return self._portable
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None, trail_mode=None, template=None):
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None,
+                         zone_low=None, zone_high=None):
         self.open_trade_calls.append(
             {"trade_id": trade_id, "direction": direction, "lot_size": lot_size,
-             "stop_loss": stop_loss, "tps": tps, "strategy": strategy, "pcts": pcts}
+             "stop_loss": stop_loss, "tps": tps, "strategy": strategy, "pcts": pcts,
+             "zone_low": zone_low, "zone_high": zone_high}
         )
         return self._ack
 

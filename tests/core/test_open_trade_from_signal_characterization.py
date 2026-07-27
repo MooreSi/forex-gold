@@ -101,7 +101,8 @@ class _FakeEA:
         return True
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None, trail_mode=None, template=None):
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None,
+                         zone_low=None, zone_high=None):
         return self._ack
 
     async def update_trade(self, trade_id, tps):

@@ -123,6 +123,13 @@ def test_anchor_tp_saves_and_coerces_types(fresh_db):
     assert t["tp2_pips"] == 0.0  # untouched levels keep the default
 
 
+def test_group_tp_action_defaults_off_and_saves(fresh_db):
+    t = et.save_ea_template("Plain", {})
+    assert t["group_tp_action"] is False
+    t2 = et.save_ea_template("Basket", {"mode": "grid", "group_tp_action": 1})
+    assert t2["group_tp_action"] is True
+
+
 def test_override_helpers_roundtrip():
     assert et.is_template_override("template:My Grid")
     assert not et.is_template_override("reversal_runner")

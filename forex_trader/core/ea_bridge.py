@@ -236,6 +236,7 @@ class EABridge:
             # so harvest and grid cancel-pending never fired regardless of
             # the template's actual setting.
             msg["tpl_cancel_pending"] = 1 if template["cancel_pending"] else 0
+            msg["tpl_group_tp_action"] = 1 if template["group_tp_action"] else 0
             msg["tpl_harvest_enabled"]   = 1 if template["harvest_enabled"] else 0
             msg["tpl_harvest_threshold"] = template["harvest_threshold"]
         ack_event = asyncio.Event()

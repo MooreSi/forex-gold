@@ -895,6 +895,13 @@ def _apply_schema() -> None:
         ] + [
             f"ALTER TABLE ea_trade_templates ADD COLUMN tp{n}_pct REAL NOT NULL DEFAULT 0.0"
             for n in range(1, 9)
+        ] + [
+            # EA Templates > Group TP Action (2026-07-28) -- grid mode only:
+            # the first TP any leg of the group clears cancels every other
+            # still-resting sibling and moves every other already-live
+            # sibling's SL to its own breakeven. See core_ea_templates.py's
+            # DEFAULTS and ForexTraderBridge.mq5's ApplyGroupTpAction.
+            "ALTER TABLE ea_trade_templates ADD COLUMN group_tp_action INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)

@@ -121,6 +121,8 @@ struct ManagedTrade
    bool     tplBeDone;       // breakeven already applied once
    bool     tplCancelPending;
    int      tplGridGroup;    // shared id for sibling grid legs, -1 if none
+   bool     tplGroupTpAction;  // see ApplyGroupTpAction
+   bool     tplGroupActionDone;
    bool     tplHarvestEnabled;
    double   tplHarvestThreshold;
 };
@@ -160,6 +162,7 @@ struct PendingOrder
    int      tplBeTrigger;
    bool     tplCancelPending;
    int      tplGridGroup;    // shared id across this grid's sibling legs
+   bool     tplGroupTpAction;  // see ApplyGroupTpAction
    bool     tplHarvestEnabled;
    double   tplHarvestThreshold;
 };
@@ -553,6 +556,8 @@ void HandleOpenTrade(const string json)
    mt.tplBeDone = false;
    mt.tplCancelPending = isTemplate && JsonGetLong(json, "tpl_cancel_pending", 0) != 0;
    mt.tplGridGroup = -1; // single-mode template trades are never part of a grid group
+   mt.tplGroupTpAction = isTemplate && JsonGetLong(json, "tpl_group_tp_action", 0) != 0;
+   mt.tplGroupActionDone = false;
    mt.tplHarvestEnabled = isTemplate && JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
    mt.tplHarvestThreshold = isTemplate ? JsonGetDouble(json, "tpl_harvest_threshold", 50.0) : 0.0;
 
@@ -734,6 +739,8 @@ void HandleRestorePendingOrder(const string json)
       mt.tplGridGroup = -1;
       mt.tplBeDone = false;
       mt.tplCancelPending = false;
+      mt.tplGroupTpAction = false;
+      mt.tplGroupActionDone = false;
       mt.tplHarvestEnabled = false;
 
       int n = ArraySize(g_trades);
@@ -846,6 +853,7 @@ void HandleOpenTemplateGrid(const string json)
       p.tplBeTrigger = (int)JsonGetLong(json, "tpl_be_trigger", 1);
       p.tplCancelPending = JsonGetLong(json, "tpl_cancel_pending", 0) != 0;
       p.tplGridGroup = groupId;
+      p.tplGroupTpAction = JsonGetLong(json, "tpl_group_tp_action", 0) != 0;
       p.tplHarvestEnabled = JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
       p.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
 
@@ -1429,6 +1437,55 @@ double FractalTrailLevel(const ManagedTrade &t)
    return 0.0;
 }
 
+// Cancels every other still-resting leg in a filled/TP'd grid group. Only
+// deletes the broker-side order here -- doesn't touch g_pending[] itself,
+// so it's safe to call from inside CheckPendingOrders()'s own backward
+// loop (a filled sibling) or ManageTemplate's TP-clear check (a TP'd
+// sibling, see ApplyGroupTpAction below); the next tick's pass over
+// g_pending[] finds each cancelled ticket already gone and cleans it up
+// via the existing "expired_or_cancelled" path, no double-bookkeeping
+// needed. Moved above ManageTemplate (2026-07-28) so ApplyGroupTpAction
+// can call it -- unchanged otherwise.
+void CancelGridSiblings(const int groupId, const ulong filledTicket)
+{
+   for(int i = 0; i < ArraySize(g_pending); i++)
+   {
+      if(g_pending[i].tplGridGroup != groupId) continue;
+      if(g_pending[i].ticket == filledTicket) continue;
+      if(trade.OrderDelete(g_pending[i].ticket))
+         Print("[EABridge] cancelled grid sibling ticket=", g_pending[i].ticket,
+               " group=", groupId, " (leg filled ticket=", filledTicket, ")");
+   }
+}
+
+// EA Template, Group TP Action (2026-07-28) -- when a grid template has
+// this enabled, the FIRST TP any leg of the group clears (ManageTemplate
+// below) treats it as validation of the whole basket: every other
+// still-resting sibling gets pulled (same mechanism Cancel Pending already
+// uses on a fill, just triggered by a TP hit here instead) and every other
+// already-live sibling's SL moves to ITS OWN breakeven (each leg has a
+// different entry price, staggered by grid_step_pts, so this can't just
+// copy the triggering leg's SL) -- caps risk on the rest of the basket
+// instead of leaving unfilled legs to fill blind or open siblings sitting
+// at their original, wider stop.
+void ApplyGroupTpAction(ManagedTrade &t)
+{
+   CancelGridSiblings(t.tplGridGroup, t.ticket);
+   for(int i = 0; i < ArraySize(g_trades); i++)
+   {
+      if(g_trades[i].tplGridGroup != t.tplGridGroup) continue;
+      if(g_trades[i].ticket == t.ticket) continue;
+      double beSl = g_trades[i].entry_price;
+      if(g_trades[i].tplBeMode == "entry_buffer")
+      {
+         double sign = (g_trades[i].direction == "BUY") ? 1.0 : -1.0;
+         beSl = g_trades[i].entry_price + sign * g_trades[i].tplBeBufferPts;
+      }
+      if(MoveSl(g_trades[i], beSl, "group_tp_action"))
+         g_trades[i].tplBeDone = true;
+   }
+}
+
 void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
 {
    if(!PositionSelectByTicket(t.ticket)) return; // closed already this tick
@@ -1458,6 +1515,15 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
             if(!t.hasTp[tplIdx]) continue;
             if(t.triggered[tplIdx]) { tplCompactPos++; continue; }
             if(!TpCleared(t, tplIdx, tick)) break;
+
+            // Group TP Action -- fires once, on the FIRST TP this leg clears
+            // (see ApplyGroupTpAction above). Independent of whether this
+            // same level goes on to partial/full-close below.
+            if(t.tplGroupTpAction && !t.tplGroupActionDone && t.tplGridGroup >= 0)
+            {
+               ApplyGroupTpAction(t);
+               t.tplGroupActionDone = true;
+            }
 
             double tplRemaining = RemainingLots(t.ticket);
             if(tplRemaining <= 0) break;
@@ -1621,24 +1687,6 @@ void CheckForClosures()
 //| this checks the same way: does the order still exist? If not, did  |
 //| a position with the same ticket appear (filled) or not (gone)?     |
 //+------------------------------------------------------------------+
-// Cancels every other still-resting leg in a filled grid group. Only
-// deletes the broker-side order here -- doesn't touch g_pending[] itself,
-// so it's safe to call from inside CheckPendingOrders()'s own backward
-// loop; the next tick's pass over g_pending[] finds each cancelled ticket
-// already gone and cleans it up via the existing "expired_or_cancelled"
-// path, no double-bookkeeping needed.
-void CancelGridSiblings(const int groupId, const ulong filledTicket)
-{
-   for(int i = 0; i < ArraySize(g_pending); i++)
-   {
-      if(g_pending[i].tplGridGroup != groupId) continue;
-      if(g_pending[i].ticket == filledTicket) continue;
-      if(trade.OrderDelete(g_pending[i].ticket))
-         Print("[EABridge] cancelled grid sibling ticket=", g_pending[i].ticket,
-               " group=", groupId, " (leg filled ticket=", filledTicket, ")");
-   }
-}
-
 // Trading > Global Parameters > Harvest -- sweeps EVERY open position on
 // this symbol, closing any whose own floating profit has reached the
 // configured threshold. Deliberately does NOT go through g_trades[]/
@@ -1733,6 +1781,8 @@ void CheckPendingOrders()
          mt.tplBeDone = false;
          mt.tplCancelPending = g_pending[i].tplCancelPending;
          mt.tplGridGroup = g_pending[i].tplGridGroup;
+         mt.tplGroupTpAction = g_pending[i].tplGroupTpAction;
+         mt.tplGroupActionDone = false;
          mt.tplHarvestEnabled = g_pending[i].tplHarvestEnabled;
          mt.tplHarvestThreshold = g_pending[i].tplHarvestThreshold;
 

@@ -42,7 +42,8 @@ _TEMPLATE = {
     "mode": "grid", "grid_step_pts": 5.0, "grid_legs": 2,
     "tpsl_mode": "on", "anchor": "unified", "trail_mode": "off",
     "be_mode": "entry", "be_buffer_pts": 1.0, "be_trigger": 1,
-    "cancel_pending": True, "harvest_enabled": True, "harvest_threshold": 25.0,
+    "cancel_pending": True, "group_tp_action": True,
+    "harvest_enabled": True, "harvest_threshold": 25.0,
 }
 
 
@@ -56,13 +57,15 @@ def test_template_bool_flags_sent_as_int_not_native_bool():
     msg = _sent_message(bridge)
     assert msg["tpl_cancel_pending"] == 1
     assert type(msg["tpl_cancel_pending"]) is int
+    assert msg["tpl_group_tp_action"] == 1
+    assert type(msg["tpl_group_tp_action"]) is int
     assert msg["tpl_harvest_enabled"] == 1
     assert type(msg["tpl_harvest_enabled"]) is int
 
 
 def test_template_bool_flags_false_sent_as_zero():
     bridge = _healthy_bridge()
-    template = dict(_TEMPLATE, cancel_pending=False, harvest_enabled=False)
+    template = dict(_TEMPLATE, cancel_pending=False, group_tp_action=False, harvest_enabled=False)
     with pytest.raises(asyncio.TimeoutError):
         asyncio.run(bridge.open_trade(
             "trade-2", "BUY", 0.10, 2390.0, {}, "template:T1",
@@ -71,5 +74,7 @@ def test_template_bool_flags_false_sent_as_zero():
     msg = _sent_message(bridge)
     assert msg["tpl_cancel_pending"] == 0
     assert type(msg["tpl_cancel_pending"]) is int
+    assert msg["tpl_group_tp_action"] == 0
+    assert type(msg["tpl_group_tp_action"]) is int
     assert msg["tpl_harvest_enabled"] == 0
     assert type(msg["tpl_harvest_enabled"]) is int

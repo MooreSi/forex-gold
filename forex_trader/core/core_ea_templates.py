@@ -47,6 +47,7 @@ DEFAULTS: dict = {
     "be_buffer_pts":     1.0,
     "be_trigger":        1,
     "cancel_pending":    False,
+    "group_tp_action":   False,
     "sig_guard":         False,
     **{f"tp{n}_pips": 0.0 for n in range(1, 9)},
     **{f"tp{n}_pct":  0.0 for n in range(1, 9)},
@@ -59,7 +60,15 @@ DEFAULTS: dict = {
 # the final tp{n}/pct{n} values sent to the EA.
 _ANCHOR_TP_FIELDS = tuple(f"tp{n}_pips" for n in range(1, 9)) + tuple(f"tp{n}_pct" for n in range(1, 9))
 
-_BOOL_FIELDS  = ("tg_cmd_enabled", "harvest_enabled", "cancel_pending", "sig_guard")
+# Group TP Action (2026-07-28) -- grid mode only: the FIRST TP any leg of
+# the group clears cancels every other still-resting sibling (same
+# mechanism cancel_pending already uses on a fill, just triggered by a TP
+# hit instead) and moves every other already-live sibling's SL to its own
+# breakeven. Treats one leg's TP as validation of the whole basket rather
+# than leaving unfilled legs to fill blind or open siblings sitting at
+# their original, wider stop. See ForexTraderBridge.mq5's
+# ApplyGroupTpAction. No effect in single mode (no siblings to act on).
+_BOOL_FIELDS  = ("tg_cmd_enabled", "harvest_enabled", "cancel_pending", "group_tp_action", "sig_guard")
 _FLOAT_FIELDS = ("harvest_threshold", "grid_step_pts", "be_buffer_pts") + _ANCHOR_TP_FIELDS
 _INT_FIELDS   = ("grid_legs", "be_trigger")
 _STR_FIELDS   = ("mode", "tpsl_mode", "anchor", "trail_mode", "be_mode")

@@ -2456,6 +2456,17 @@ def _render_ea_templates_card() -> None:
                     ).classes("text-xs text-gray-500 mt-1")
 
                 with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+                    fields["group_tp_action"] = ui.switch(
+                        "Group TP Action", value=bool(live["group_tp_action"]),
+                    ).classes("text-sm")
+                    ui.label(
+                        "Grid mode only: the first TP any leg hits cancels every "
+                        "other still-resting leg and moves every other open leg's "
+                        "SL to its own breakeven -- treats one leg's TP as "
+                        "validation of the whole basket."
+                    ).classes("text-xs text-gray-500 mt-1")
+
+                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
                     fields["sig_guard"] = ui.switch(
                         "Sig Guard", value=bool(live["sig_guard"]),
                     ).classes("text-sm")

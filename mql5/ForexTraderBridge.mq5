@@ -1636,7 +1636,24 @@ void CheckPendingOrders()
 
          ManagedTrade mt;
          mt.ticket = ticket;
-         mt.trade_id = g_pending[i].trade_id;
+         // EA Template grid legs are tracked in g_pending under a per-leg id
+         // ("<original trade_id>-g<N>", set by HandleOpenTemplateGrid) so
+         // CancelGridSiblings can tell them apart while resting. Python's
+         // vantage_simulated_trades row, though, only ever exists under the
+         // un-suffixed original id (_promote_grid_leg_fill's UPDATE targets
+         // that, not the leg id) -- every later lifecycle message for this
+         // now-live position (tp_hit/sl_moved/trade_closed) must therefore
+         // report the stripped id, or ea_bridge.py's _fetch_trade() finds no
+         // row, logs "unknown trade_id", and silently drops the event. This
+         // left a filled/closed grid leg's trade permanently stuck showing
+         // "open" in the app (confirmed live: Test Template, grid mode) --
+         // manual closes were simply the easiest way to notice it, since
+         // ManageTemplate()'s own partial-close ladder can mask the same
+         // gap for TP/SL-triggered closes.
+         int _gridSuffixPos = StringFind(g_pending[i].trade_id, "-g");
+         mt.trade_id = (_gridSuffixPos >= 0)
+            ? StringSubstr(g_pending[i].trade_id, 0, _gridSuffixPos)
+            : g_pending[i].trade_id;
          mt.strategy = g_pending[i].strategy;
          mt.direction = g_pending[i].direction;
          mt.entry_price = fillPrice;
@@ -1671,7 +1688,34 @@ void CheckPendingOrders()
          ArrayResize(g_trades, n + 1);
          g_trades[n] = mt;
 
-         SendJson("{\"type\":\"pending_order_filled\",\"trade_id\":\"" + JsonEsc(mt.trade_id) +
+         // EA Template grid, tpsl_mode "on" -- give the position a real
+         // broker-side TP now that it's live, matching what HandleOpenTrade
+         // already does for be_runner/single-mode template trades at open
+         // time. BuyLimit/SellLimit above always place the resting order
+         // with tp=0.0 (a grid leg has no single TP to quote until we know
+         // which leg actually fills), so "on" mode has to be applied here,
+         // retroactively, once fill_price/ticket are known -- without this,
+         // "on" silently behaved exactly like "stealth" (internal-only, no
+         // visible broker target) for every grid-mode template.
+         if(mt.isTemplate && mt.tplTpslMode == "on")
+         {
+            double gridBrokerTp = 0.0;
+            for(int k = MAX_TPS - 1; k >= 0; k--)
+            {
+               if(mt.hasTp[k]) { gridBrokerTp = mt.tp[k]; break; }
+            }
+            if(gridBrokerTp > 0.0 && PositionSelectByTicket(ticket))
+               trade.PositionModify(ticket, PositionGetDouble(POSITION_SL), gridBrokerTp);
+         }
+
+         // Deliberately the raw (possibly "-g<N>"-suffixed) pending id, NOT
+         // mt.trade_id above -- ea_bridge.py's _on_pending_order_filled uses
+         // the suffix itself to detect a grid-leg fill and route it to
+         // _promote_grid_leg_fill (core_ea_templates.py's grid-leg-fill
+         // promotion path). mt.trade_id is already stripped for every
+         // message from here on, once this trade is a normal tracked
+         // position.
+         SendJson("{\"type\":\"pending_order_filled\",\"trade_id\":\"" + JsonEsc(g_pending[i].trade_id) +
                   "\",\"ticket\":" + (string)ticket +
                   ",\"fill_price\":" + DoubleToString(fillPrice, _Digits) + "}");
          Print("[EABridge] pending order filled -> managed ticket=", ticket,

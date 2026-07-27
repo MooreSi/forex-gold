@@ -716,7 +716,6 @@ def main_page():
     import forex_trader.ui.pages.chart as chart_page
     import forex_trader.ui.pages.ai_summary as ai_summary_page
     import forex_trader.ui.pages.test_panel as test_panel
-    import forex_trader.ui.pages.edge_dashboard as edge_dashboard
 
     ui.query("body").style(
         "background: #0f1117; color: #e0e0e0; font-family: 'Inter', sans-serif; margin:0;"
@@ -1511,7 +1510,6 @@ def main_page():
             tab_trading  = ui.tab("Trading",     icon="trending_up")
             tab_telegram = ui.tab("Parsing",     icon="send")
             tab_test     = ui.tab("Signal Generator", icon="science")
-            tab_edge     = ui.tab("Edge",        icon="insights")
             tab_backtest = ui.tab("Backtest",    icon="bar_chart")
             tab_history  = ui.tab("Analysis",    icon="history")
             tab_settings = ui.tab("Settings",    icon="settings")
@@ -1638,5 +1636,3 @@ def main_page():
             _render_about()
         with ui.tab_panel(tab_test):
             test_panel.render(get_engine)
-        with ui.tab_panel(tab_edge):
-            edge_dashboard.render(get_engine)

@@ -1592,6 +1592,18 @@ def _render_schedule():
         "only for automated (not manual) orders."
     ).classes("text-xs text-gray-500 mb-3")
 
+    with ui.row().classes("items-center gap-2 mb-3"):
+        daily_target_input = ui.number(
+            "Daily Profit Target $", value=sched.get_daily_profit_target(), min=0, step=1.0,
+        ).props("dense outlined").classes("w-48")
+        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+            "Cumulative profit across the WHOLE day, all windows combined. Once "
+            "reached, automated trading stops for the rest of the day regardless "
+            "of which window/hours would otherwise still be open.\n\n"
+            "0 = disabled -- reverts to each window's own Target $ above (and if "
+            "every window's target is also 0, there is no profit cap at all)."
+        )
+
     _day_widgets: dict[str, list[dict]] = {}
 
     with ui.column().classes("w-full gap-2"):
@@ -1662,6 +1674,7 @@ def _render_schedule():
             return
         sched.set_trading_schedule(new_schedule)
         sched.set_trading_schedule_enabled(bool(master_chk.value))
+        sched.set_daily_profit_target(float(daily_target_input.value or 0))
         ui.notify(
             "Trading Schedule saved and enabled" if master_chk.value
             else "Trading Schedule saved (currently disabled — automated orders are not restricted)",

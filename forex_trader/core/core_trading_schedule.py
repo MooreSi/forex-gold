@@ -115,6 +115,24 @@ def set_trading_schedule_enabled(enabled: bool, _from_sync: bool = False) -> Non
     _maybe_forward_trading_schedule(_from_sync)
 
 
+def get_daily_profit_target() -> float:
+    """Cumulative profit target across the WHOLE day (every window combined),
+    checked ahead of and independent of whichever per-window target is also
+    configured. 0 (default) disables this gate entirely -- trading discipline
+    then falls back to each window's own target exactly as before this
+    feature existed."""
+    raw = db_module.get_app_config("trading_schedule_daily_target")
+    try:
+        return float(raw) if raw else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def set_daily_profit_target(value: float, _from_sync: bool = False) -> None:
+    db_module.set_app_config("trading_schedule_daily_target", str(float(value or 0)))
+    _maybe_forward_trading_schedule(_from_sync)
+
+
 _applying_sync_trading_schedule = False  # re-entrancy guard — see set_trading_schedule/set_trading_schedule_enabled
 
 
@@ -136,10 +154,14 @@ def _maybe_forward_trading_schedule(_from_sync: bool) -> None:
 
 
 def trading_schedule_snapshot() -> dict:
-    """Combined {enabled, schedule} snapshot -- the unit sent/received over
-    the Local/Remote sync channel, since the UI edits and saves both pieces
-    as one atomic action."""
-    return {"enabled": is_trading_schedule_enabled(), "schedule": get_trading_schedule()}
+    """Combined {enabled, schedule, daily_target} snapshot -- the unit sent/
+    received over the Local/Remote sync channel, since the UI edits and
+    saves all three pieces as one atomic action."""
+    return {
+        "enabled": is_trading_schedule_enabled(),
+        "schedule": get_trading_schedule(),
+        "daily_target": get_daily_profit_target(),
+    }
 
 
 def apply_trading_schedule_snapshot(snapshot: dict) -> None:
@@ -150,6 +172,8 @@ def apply_trading_schedule_snapshot(snapshot: dict) -> None:
         set_trading_schedule(snapshot["schedule"], _from_sync=True)
     if "enabled" in snapshot:
         set_trading_schedule_enabled(bool(snapshot["enabled"]), _from_sync=True)
+    if "daily_target" in snapshot:
+        set_daily_profit_target(float(snapshot["daily_target"] or 0), _from_sync=True)
 
 
 def _forward_trading_schedule_over_sync() -> None:
@@ -200,6 +224,20 @@ def _find_active_block(schedule: dict, now: datetime) -> tuple[Optional[int], Op
     return None, None
 
 
+def _day_realized_pnl(now: datetime) -> float:
+    """Sum net_pnl of closed trades opened any time today (00:00-24:00 local),
+    across every window -- the daily cumulative target's denominator, as
+    opposed to _block_realized_pnl's single-window one."""
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "
+            "WHERE status='closed' AND open_time >= ?",
+            (day_start.timestamp(),),
+        ).fetchone()
+    return float(row[0] or 0.0)
+
+
 def _block_realized_pnl(block: dict, now: datetime) -> float:
     """Sum net_pnl of closed trades opened within today's occurrence of this
     block's [start, end) window."""
@@ -231,6 +269,22 @@ def check_trading_schedule(
     if not is_trading_schedule_enabled():
         return True, ""
     now = now or datetime.now()
+
+    # Cumulative daily target (2026-07-27) -- checked ahead of, and
+    # independent of, the per-window schedule below: once the day's running
+    # total clears this, trading stops for the rest of the day regardless of
+    # which window/hours would otherwise still be open. 0 (default) disables
+    # this gate and falls straight through to the per-window target(s) below,
+    # exactly as before this feature existed.
+    daily_target = get_daily_profit_target()
+    if daily_target > 0:
+        day_pnl = _day_realized_pnl(now)
+        if day_pnl >= daily_target:
+            return False, (
+                f"daily profit target reached (${day_pnl:.2f} of ${daily_target:.2f}) "
+                "-- resumes tomorrow (Trading > Schedule)"
+            )
+
     schedule = get_trading_schedule()
     idx, block = _find_active_block(schedule, now)
     if block is None:

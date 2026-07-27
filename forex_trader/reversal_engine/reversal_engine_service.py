@@ -70,7 +70,7 @@ _OUTCOME_INTERVAL_S   = 5       # outcome/trigger loop
 _CORR_INTERVAL_S      = 30      # correlation check loop
 _SIGNAL_MAX_AGE_S     = 7200    # 2-hour pending expiry
 _LEVEL_COOLDOWN_S     = 1800    # 30 min before same level re-signals
-_MAX_OPEN_SIGNALS     = 3       # cap concurrent open positions
+_MAX_OPEN_SIGNALS     = 6       # cap concurrent open positions
 _CONSEC_LOSS_LIMIT    = 3       # consecutive same-direction losses -> cooldown
 _CONSEC_LOSS_WINDOW   = 7200    # 2-hour window for consecutive-loss check
 

@@ -955,6 +955,33 @@ def _apply_schema() -> None:
                 )
             except Exception:
                 pass  # table/column doesn't exist on this schema version
+        # One-off heal (2026-07-27): "Gold Diggers 2.0"'s channel_performance /
+        # channel_strategy_rec rows predate both the GOLD DIGGERS INSTITUTIONAL
+        # rename cascade and the PK-collision fix in core_db_channel's
+        # sync_channel_rename -- the plain UPDATE above has the exact same bug
+        # (silently no-ops via the bare except when the canonical row already
+        # exists), so these two rows were never folded in and every lookup by
+        # the live channel name missed whatever was set on the old one --
+        # confirmed live: a user-set EA Template override sat here invisibly,
+        # so the channel silently traded under the global default strategy
+        # instead. sync_channel_rename won't re-fire for this pair on its own
+        # (the Telegram-side title mismatch that triggers it is long gone),
+        # so heal it directly here, once, with the same merge-safe helper.
+        try:
+            from forex_trader.core.core_db_channel import (
+                _fold_renamed_row, _CHANNEL_UNIQUE_TABLES,
+            )
+            for _tbl, _col in (
+                ("channel_parser_config", "channel_name"),
+                ("channel_performance", "source"),
+                ("channel_strategy_rec", "source"),
+            ):
+                _fold_renamed_row(
+                    conn, _tbl, _col, "Gold Diggers 2.0", "GOLD DIGGERS INSTITUTIONAL",
+                    _CHANNEL_UNIQUE_TABLES.get(_tbl, ()),
+                )
+        except Exception:
+            pass  # table/column doesn't exist on this schema version
         # Enable instant_entry for any GD2 channel configs that were bootstrapped
         # before the GD2 IME support was added (they defaulted to 0).
         conn.execute(

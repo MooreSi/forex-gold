@@ -24,8 +24,10 @@ from typing import Any, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import dpm_engine
 from forex_trader.core import telegram_alerts
+from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_open_trade import open_trade
+from forex_trader.core.core_signal_resolution import _sig_guard_blocks
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.core_trading_schedule import check_trading_schedule
 from forex_trader.core.models import (
@@ -149,6 +151,24 @@ async def process_instant_entry(
         log.info("[IME] 'High Risk' flagged in message — using Conservative "
                   "strategy for this trade only")
         strategy = STRATEGY_CONSERVATIVE
+
+    # EA Template Sig Guard — mirrors core_signal_resolution.py's
+    # resolve_open_trade_params() check (that function is never reached from
+    # this path; IME resolves and opens independently). Without this, IME
+    # could open a second template-managed trade for a channel/direction
+    # that already has one live, exactly the pile-up Sig Guard exists to
+    # prevent on the full-signal path.
+    if ea_templates.is_template_override(strategy):
+        _tpl_name_ime = ea_templates.template_name_from_override(strategy)
+        _template_ime = ea_templates.get_ea_template(_tpl_name_ime)
+        if _template_ime is None:
+            log.warning("[IME] Template '%s' no longer exists for channel %s — "
+                        "skipping instant entry", _tpl_name_ime, channel_name)
+            return
+        if _template_ime["sig_guard"] and _sig_guard_blocks(channel_name, direction):
+            log.info("[IME] Sig Guard: a template-managed trade is already open "
+                      "for %s %s — skipping instant entry", channel_name, direction)
+            return
 
     open_trades  = get_open_trades()
     open_count   = len(open_trades)

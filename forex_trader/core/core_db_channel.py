@@ -57,6 +57,49 @@ _CHANNEL_NAME_TABLES = (
 )
 
 
+# Tables from _CHANNEL_NAME_TABLES whose name column is PRIMARY KEY (at most
+# one row per channel). A blind "UPDATE ... SET col=new WHERE col=old" hits
+# new's existing PK row and raises, which sync_channel_rename's bare except
+# swallows -- permanently orphaning the old row instead of folding it in.
+# Confirmed live: "Gold Diggers 2.0"'s channel_performance row (holding a
+# user-set EA Template override, set before this fix existed) was never
+# folded into "GOLD DIGGERS INSTITUTIONAL" because that canonical row
+# already existed by the time sync_channel_rename ran for this pair --
+# every lookup by the live channel name silently missed the override from
+# then on, for the Test Template channel and any other renamed channel with
+# a pre-existing canonical row alike. Maps table -> columns worth carrying
+# from the old row onto the canonical one (gated on the first column being
+# non-NULL) before the old row is dropped; empty means the canonical row's
+# own data always wins.
+_CHANNEL_UNIQUE_TABLES: dict[str, tuple[str, ...]] = {
+    "channel_parser_config": (),
+    "channel_performance":   ("strategy_override", "auto_strategy"),
+    "channel_strategy_rec":  (),
+}
+
+
+def _fold_renamed_row(conn, table: str, col: str, old_val: str, new_val: str,
+                       carry_cols: tuple[str, ...] = ()) -> None:
+    """Merge a PK-unique table's row keyed by old_val into new_val's row --
+    renaming in place if new_val has no row yet, otherwise carrying the
+    given columns over (only when the old row actually set them) and
+    dropping the old row. See _CHANNEL_UNIQUE_TABLES for why plain UPDATE
+    isn't safe here."""
+    old_row = conn.execute(f"SELECT * FROM {table} WHERE {col}=?", (old_val,)).fetchone()
+    if old_row is None:
+        return
+    exists = conn.execute(f"SELECT 1 FROM {table} WHERE {col}=?", (new_val,)).fetchone()
+    if exists is None:
+        conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new_val, old_val))
+        return
+    old = dict(old_row)
+    if carry_cols and old.get(carry_cols[0]) is not None:
+        assign = ", ".join(f"{c}=?" for c in carry_cols)
+        conn.execute(f"UPDATE {table} SET {assign} WHERE {col}=?",
+                     (*(old[c] for c in carry_cols), new_val))
+    conn.execute(f"DELETE FROM {table} WHERE {col}=?", (old_val,))
+
+
 def sync_channel_rename(old_name: str, new_name: str) -> None:
     """Cascade a channel display-name change (e.g. the Telegram group's real
     title was edited, or a signal generator's own name changed) across every
@@ -85,10 +128,16 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
     with db() as conn:
         for tbl, col in _CHANNEL_NAME_TABLES:
             try:
-                conn.execute(
-                    f"UPDATE {tbl} SET {col}=? WHERE {col} IN (?, ?)",
-                    (new_name, old_canon, old_name),
-                )
+                if tbl in _CHANNEL_UNIQUE_TABLES:
+                    carry = _CHANNEL_UNIQUE_TABLES[tbl]
+                    _fold_renamed_row(conn, tbl, col, old_name, new_name, carry)
+                    if old_canon != old_name:
+                        _fold_renamed_row(conn, tbl, col, old_canon, new_name, carry)
+                else:
+                    conn.execute(
+                        f"UPDATE {tbl} SET {col}=? WHERE {col} IN (?, ?)",
+                        (new_name, old_canon, old_name),
+                    )
             except Exception:
                 pass  # table/column doesn't exist on this schema version
     # Every existing variant that used to resolve to the old canonical name

@@ -78,3 +78,38 @@ def test_init_redirects_the_db_worker_threads_cached_connection():
         for p in (path_a, path_b):
             if os.path.exists(p):
                 os.remove(p)
+
+
+def test_init_invalidates_the_risk_settings_cache():
+    """The same 2026-07-21 bug, one layer up, found 2026-07-25.
+
+    get_risk_settings() memoises for _RS_CACHE_TTL (10s) keyed on nothing but
+    time. init() closed the stale *connections* but left that cache populated,
+    so for ten seconds after a demo/live switch the app kept answering with the
+    other environment's risk settings -- the session gates and the Max Risk per
+    trade % ceiling among them.
+
+    It was also what made the test suite flaky: every fresh_db builds a new temp
+    database, so any test that only read settings within ten seconds of another
+    silently got the previous test's values from a deleted file.
+    """
+    fd1, path_a = tempfile.mkstemp(suffix=".db")
+    os.close(fd1); os.remove(path_a)
+    fd2, path_b = tempfile.mkstemp(suffix=".db")
+    os.close(fd2); os.remove(path_b)
+    try:
+        db.init(path_a)
+        db.update_risk_settings({"max_risk_per_trade_pct": 5.0})
+        assert db.get_risk_settings()["max_risk_per_trade_pct"] == 5.0
+        assert db._rs_cache is not None, "precondition: the read populated the cache"
+
+        # Switching environments immediately, well inside the 10s TTL.
+        db.init(path_b)
+        assert db._rs_cache is None, "init() must invalidate the settings cache"
+
+        # The fresh database must answer with its own default, not 5.0.
+        assert db.get_risk_settings()["max_risk_per_trade_pct"] == 1.0
+    finally:
+        for p in (path_a, path_b):
+            if os.path.exists(p):
+                os.remove(p)

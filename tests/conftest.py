@@ -52,6 +52,34 @@ def reset_db_worker_thread_connection() -> None:
     db._db_executor.submit(reset_thread_local_connection).result()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_risk_settings_cache():
+    """Clear the risk-settings cache around every test.
+
+    `core_db_risk_settings.get_risk_settings()` caches its result for
+    `_RS_CACHE_TTL = 10.0` seconds, keyed on nothing but time. Each test builds
+    its own temp database, so a test that only *reads* settings within ten
+    seconds of a previous one silently receives the previous test's values --
+    from a database file that has already been deleted. `update_risk_settings`
+    invalidates the cache, so tests that write are safe; tests that read are not.
+
+    That made the suite timing-dependent rather than order-dependent, which is
+    why the failure count wandered between 20 and 58 across runs of identical
+    code, and why the failures clustered in the slower `test_scan_messages_*`
+    files. Bisecting for a single polluting file found nothing, because there
+    isn't one.
+
+    Autouse so it covers all 119 test modules regardless of which of the 17
+    `fresh_db` variants they define locally. It only clears a cache, so it
+    cannot change what any test asserts -- only which database answers it.
+    """
+    db._rs_cache = None
+    db._rs_cache_ts = 0.0
+    yield
+    db._rs_cache = None
+    db._rs_cache_ts = 0.0
+
+
 @pytest.fixture
 def fresh_db():
     """A private, empty database for one test, torn down afterwards.

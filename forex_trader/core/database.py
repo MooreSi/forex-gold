@@ -117,6 +117,15 @@ def init(db_path: str) -> None:
     # broke immediately with "no such table".
     _close_thread_local_conn()
     _db_executor.submit(_close_thread_local_conn).result(timeout=5)
+    # Same failure as the connection caches above, one layer up:
+    # get_risk_settings() memoises its result for _RS_CACHE_TTL (10s) keyed on
+    # nothing but time, so for ten seconds after a demo/live switch it would
+    # keep answering with the OTHER environment's risk settings -- including
+    # the session gates and the Max Risk per trade % ceiling. Pointing at a new
+    # database has to invalidate it, exactly as it closes stale connections.
+    global _rs_cache, _rs_cache_ts
+    _rs_cache = None
+    _rs_cache_ts = 0.0
     _DB_PATH = db_path
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     _apply_schema()

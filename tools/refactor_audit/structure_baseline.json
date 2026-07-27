@@ -8,7 +8,7 @@
   "baseline": {
     "loc": {
       "forex_trader/core/backtest_engine.py": 1125,
-      "forex_trader/core/database.py": 1199,
+      "forex_trader/core/database.py": 1208,
       "forex_trader/core/ea_bridge.py": 816,
       "forex_trader/core/email_service.py": 946,
       "forex_trader/core/engine.py": 3144,

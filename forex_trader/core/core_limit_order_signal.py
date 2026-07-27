@@ -39,9 +39,19 @@ from forex_trader.core.models import MAX_TP, STRATEGY_LIMIT_RUNNER
 
 log = logging.getLogger(__name__)
 
-# MT5 GTC-with-expiration -- matches the existing Python-simulated zone-wait
-# signals' own 4h pending-expiry convention (core_pending_signal_activation.py).
-_DEFAULT_EXPIRE_MINUTES = 240
+# MT5 GTC-with-expiration. Was 240 (4h), copied from the Python-simulated
+# zone-wait signals' own pending-expiry convention (core_pending_signal_
+# activation.py) -- but that comparison doesn't hold: those signals get
+# re-validated (ML gate + momentum/exhaustion check) at the moment they'd
+# fire, while a genuine broker-side pending order has no such moment at all
+# -- MT5 fills it directly the instant price touches, with no round-trip
+# back to Python (see core_pending_order_revalidation.py, which now
+# periodically re-checks resting orders against current conditions and
+# cancels on invalidation -- the TTL is a backstop for that, not the only
+# safety net, but shouldn't be the same 4h a re-validated signal gets away
+# with). Matches Reversal Engine's own limit-order toggle and ORB/IVB's
+# existing (already-shorter) convention.
+_DEFAULT_EXPIRE_MINUTES = 60
 
 
 def _limit_runner_pcts(n: int, tp_open: bool, params: dict) -> list[float]:

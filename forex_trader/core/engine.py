@@ -221,6 +221,9 @@ from forex_trader.core.core_orb_report import (
 from forex_trader.core.core_pending_signal_activation import (
     try_activate_pending_signals as _try_activate_pending_signals_impl,
 )
+from forex_trader.core.core_pending_order_revalidation import (
+    revalidate_pending_orders as _revalidate_pending_orders_impl,
+)
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
@@ -278,6 +281,7 @@ class SimulationEngine:
         self._sync_cycle     = 0
         self._profit_cycle   = 0
         self._cal_cycle      = 0
+        self._pending_revalidate_cycle = 0
         self._bot_offset     = 0
         self._email_task:    Optional[asyncio.Task] = None
         # Incremented when a trade closes with gross profit > 0; UI polls to trigger sound
@@ -1224,6 +1228,18 @@ class SimulationEngine:
                 except Exception as e:
                     log.debug("Profit sweep error: %s", e)
 
+            # Resting pending-order re-validation -- every ~60 cycles (roughly
+            # 1-5min depending on the fast/slow poll rate below), since a
+            # resting broker-side limit order has no other re-check at all
+            # before it fills (see core_pending_order_revalidation.py).
+            self._pending_revalidate_cycle += 1
+            if self._pending_revalidate_cycle >= 60:
+                self._pending_revalidate_cycle = 0
+                try:
+                    await self._revalidate_pending_orders()
+                except Exception as e:
+                    log.debug("Pending-order revalidation error: %s", e)
+
             # DPM self-calibration: attempt once per hour.
             # Cal_cycle threshold adapts to the current sleep interval:
             # 720 × 5s = 3600s idle, 3600 × 1s = 3600s active.
@@ -1622,6 +1638,9 @@ class SimulationEngine:
 
     async def _schedule_profit_sync(self, trade_id: str, mt5_ticket: int) -> None:
         return await _schedule_profit_sync_impl(trade_id, mt5_ticket, self._bridge)
+
+    async def _revalidate_pending_orders(self) -> None:
+        return await _revalidate_pending_orders_impl(self._bridge)
 
     async def _profit_sweep(self) -> None:
         return await _profit_sweep_impl(self._bridge)

@@ -74,6 +74,7 @@ def _make_engine(bridge):
     e._sync_cycle = 0
     e._profit_cycle = 0
     e._cal_cycle = 0
+    e._pending_revalidate_cycle = 0
     e._dxy_cycle = 0
     e._dpm_candles = None
     e._dpm_dxy_candles = None

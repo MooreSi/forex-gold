@@ -295,9 +295,14 @@ class _LiveExecuteMixin:
 
         trade_id = str(uuid.uuid4())[:16]
         try:
+            # 60min, not the old 240 -- this resting order has no fill-time
+            # re-check at all (MT5 fills it directly, no round-trip back to
+            # Python), so it shouldn't get the same TTL as a signal that DOES
+            # get re-validated at fire time. See core_limit_order_signal.py's
+            # _DEFAULT_EXPIRE_MINUTES for the full reasoning (matched here).
             ack = await _ea.place_pending_order(
                 trade_id, direction, price, lot_size, stop_loss, tps, pcts, be_at_pos, strategy,
-                expire_minutes=240.0, close_full_on_last=True, trail_mode=trail_mode,
+                expire_minutes=60.0, close_full_on_last=True, trail_mode=trail_mode,
             )
         except Exception as exc:
             with db_module.db() as conn:

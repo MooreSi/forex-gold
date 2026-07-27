@@ -434,6 +434,21 @@ class EABridge:
                 msg[f"tp{n}"] = tps[n]
         return await self._send(msg)
 
+    async def cancel_pending_order(self, trade_id: str, ticket: int, reason: str) -> bool:
+        """Pull a still-resting broker-side pending order before it can fill
+        blind (core_pending_order_revalidation.py). Fire-and-forget, same as
+        update_trade -- the EA deletes the order and reports its own
+        pending_order_cancelled event back (_on_pending_order_cancelled),
+        carrying `reason` through unchanged, exactly like any other
+        cancellation (expiry, manual). That existing handler already does
+        the vantage_pending_orders/vantage_signals update and Telegram
+        alert, so this call itself does neither.
+        """
+        return await self._send({
+            "type": "cancel_pending_order", "trade_id": trade_id,
+            "ticket": ticket, "reason": reason,
+        })
+
     async def push_global_config(self) -> bool:
         """Push Trading > Global Parameters' Harvest setting to the EA --
         called after every save on that card, and once per connection (see

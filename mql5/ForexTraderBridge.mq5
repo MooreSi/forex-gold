@@ -363,7 +363,52 @@ void HandleMessage(const string line)
    if(type == "update_trade") { HandleUpdateTrade(line); return; }
    if(type == "place_pending_order") { HandlePlacePendingOrder(line); return; }
    if(type == "restore_pending_order") { HandleRestorePendingOrder(line); return; }
+   if(type == "cancel_pending_order") { HandleCancelPendingOrder(line); return; }
    if(type == "set_global_config") { HandleSetGlobalConfig(line); return; }
+}
+
+// Python-initiated cancel of a still-resting pending order (2026-07-28) --
+// core_pending_order_revalidation.py periodically re-checks each resting
+// order against current price action and pulls it here the moment the
+// setup that justified it no longer holds, rather than leaving it to fill
+// blind or wait out its full expire_minutes. Removes the ticket from
+// g_pending[] directly and reports back immediately with the specific
+// reason Python sent, instead of relying on CheckPendingOrders()'s own
+// next cycle to notice it's gone and report a generic "expired_or_cancelled".
+void HandleCancelPendingOrder(const string json)
+{
+   string trade_id = JsonGetString(json, "trade_id");
+   string reason    = JsonGetString(json, "reason", "revalidation_failed");
+   ulong ticket = (ulong)JsonGetLong(json, "ticket", 0);
+   if(ticket == 0)
+   {
+      for(int i = 0; i < ArraySize(g_pending); i++)
+         if(g_pending[i].trade_id == trade_id) { ticket = g_pending[i].ticket; break; }
+   }
+   if(ticket == 0)
+   {
+      Print("[EABridge] cancel_pending_order: no ticket found for trade_id=", trade_id);
+      return;
+   }
+   if(!trade.OrderDelete(ticket))
+   {
+      Print("[EABridge] cancel_pending_order failed ticket=", ticket,
+            " err=", trade.ResultRetcodeDescription());
+      return;
+   }
+   for(int i = ArraySize(g_pending) - 1; i >= 0; i--)
+   {
+      if(g_pending[i].ticket == ticket)
+      {
+         int total = ArraySize(g_pending);
+         for(int k = i; k < total - 1; k++) g_pending[k] = g_pending[k + 1];
+         ArrayResize(g_pending, total - 1);
+         break;
+      }
+   }
+   SendJson("{\"type\":\"pending_order_cancelled\",\"trade_id\":\"" + JsonEsc(trade_id) +
+            "\",\"reason\":\"" + JsonEsc(reason) + "\"}");
+   Print("[EABridge] cancel_pending_order: cancelled ticket=", ticket, " reason=", reason);
 }
 
 // Trading > Global Parameters > Harvest -- see push_global_config() in
@@ -742,8 +787,15 @@ void HandleOpenTemplateGrid(const string json)
    trade.SetExpertMagicNumber(InpMagic);
    int groupId = g_nextGridGroup++;
    int placed = 0;
+   // 60min, not the old 240 -- these resting legs have no fill-time
+   // re-check at all (this EA doesn't use OnTradeTransaction; every
+   // lifecycle event here is polled), so they shouldn't sit on the book
+   // any longer than core_limit_order_signal.py's own resting orders do
+   // (see that file's _DEFAULT_EXPIRE_MINUTES for the full reasoning).
+   // Python never actually sends tpl_grid_expire_minutes today, so this
+   // default is the only value in effect.
    string expireMinKey = "tpl_grid_expire_minutes";
-   double expireMin = JsonGetDouble(json, expireMinKey, 240.0);
+   double expireMin = JsonGetDouble(json, expireMinKey, 60.0);
    datetime expiration = TimeCurrent() + (datetime)(expireMin * 60);
 
    for(int leg = 1; leg <= legs; leg++)

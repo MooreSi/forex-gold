@@ -189,14 +189,14 @@ class SyncClient:
         the MT5 password — so the Mac can auto-reconnect on app restart
         without the user re-pasting the token every session."""
         self._host, self._port, self._token = host, port, token
-        from forex_trader.core import secrets as _sec
+        from backend.src.config import secrets as _sec
         db_module.set_app_config("sync_remote_host", host)
         db_module.set_app_config("sync_remote_port", str(port))
         db_module.set_app_config("sync_remote_token_enc", _sec.encrypt(token))
 
     @staticmethod
     def load_config() -> tuple[str, int, str]:
-        from forex_trader.core import secrets as _sec
+        from backend.src.config import secrets as _sec
         host = db_module.get_app_config("sync_remote_host") or ""
         port = int(db_module.get_app_config("sync_remote_port") or tls_util.DEFAULT_SYNC_PORT)
         enc  = db_module.get_app_config("sync_remote_token_enc") or ""

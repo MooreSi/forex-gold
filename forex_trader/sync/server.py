@@ -784,7 +784,7 @@ class SyncServer:
         missed delivery is caught by the periodic full-queue pull instead."""
         await self._broadcast(make(MSG_AI_RECOVERED_SIGNAL_SYNC, action=action, **fields))
 
-    # AI provider config lives in config.yaml (forex_trader.config), a
+    # AI provider config lives in config.yaml (backend.src.config), a
     # completely separate store from vantage_risk_settings — allowlisted
     # here rather than added to _SYNCED_SETTINGS_KEYS above, and includes the
     # DeepSeek key (an explicit user opt-in 2026-07-08) unlike that
@@ -798,7 +798,7 @@ class SyncServer:
                    if k in self._AI_CONFIG_SYNC_KEYS}
         if not updates:
             return
-        import forex_trader.config as cfg_module
+        import backend.src.config as cfg_module
         cfg_module.save_to_yaml(updates)  # also reloads config.py's own module-level cache
         # Mirrors what Settings > AI's save handlers do locally (engine._cfg[...] = ...)
         # — most AI call sites read config.py fresh each call (already covered by the

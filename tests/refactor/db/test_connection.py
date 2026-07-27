@@ -1,11 +1,11 @@
-"""Characterizes forex_trader.src.db.connection's module-level adapter
+"""Characterizes backend.src.db.connection's module-level adapter
 singleton — see docs/todo/refactor/backend-foundation/010-*.md."""
 import os
 import tempfile
 
 import pytest
 
-from forex_trader.src.db import connection
+from backend.src.db import connection
 
 
 @pytest.fixture(autouse=True)

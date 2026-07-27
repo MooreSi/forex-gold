@@ -70,7 +70,7 @@ class _CorrelationMixin:
 
         def _fetch_ref_data():
             import sqlite3
-            from forex_trader.config import get as cfg_get
+            from backend.src.config import get as cfg_get
             db_path = cfg_get("db_path", "")
             if not db_path:
                 return None
@@ -241,7 +241,7 @@ class _CorrelationMixin:
         relying purely on static level geometry."""
         def _fetch():
             import sqlite3
-            from forex_trader.config import get as cfg_get
+            from backend.src.config import get as cfg_get
             db_path = cfg_get("db_path", "")
             if not db_path:
                 return None

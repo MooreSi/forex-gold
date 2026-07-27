@@ -490,7 +490,7 @@ class _GenerateMixin:
             pass
 
         if _sg_claude_on:
-            import forex_trader.config as cfg_module
+            import backend.src.config as cfg_module
             cfg        = cfg_module.load()
             m15_closes = [float(c.get("close", 0) or 0) for c in m15_candles[-10:]]
             tg_context = _fetch_recent_tg_signals()

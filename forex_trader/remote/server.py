@@ -22,7 +22,7 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from forex_trader.config import USER_DATA_DIR
+from backend.src.config import USER_DATA_DIR
 from forex_trader.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
@@ -416,7 +416,7 @@ async def _admin_handler(websocket, uuid: str) -> None:
 def approve_registration(token: str, display_name: str, subscription_type: str = "Perpetual") -> bool:
     """Approve a pending client registration.  Returns True on success."""
     from datetime import datetime, timedelta
-    from forex_trader.licence.keygen import generate_licence_key
+    from backend.src.config.licence.keygen import generate_licence_key
     if token not in _pending:
         return False
     sub_days = {"6 Months": 183, "1 Year": 365, "2 Years": 730, "3 Years": 1095}

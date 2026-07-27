@@ -1,5 +1,5 @@
 """Isolated data store for the TEST signal (Bounce) module, rebuilt on the
-shared DbAdapter (forex_trader.src.db) instead of raw sqlite3 -- see
+shared DbAdapter (backend.src.db) instead of raw sqlite3 -- see
 docs/todo/refactor/test-signal-migration/020-*.md.
 
 Structural port of test_signal/database.py: same tables, same function
@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from forex_trader.src.db import connection as _conn_mod
+from backend.src.db import connection as _conn_mod
 
 _NAMESPACE = "test_signal"
 

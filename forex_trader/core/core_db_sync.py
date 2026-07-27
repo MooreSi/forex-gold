@@ -262,7 +262,7 @@ def generate_sync_token() -> str:
     so the operator can copy it into the other node's settings. Overwrites
     any previous token — do this once per node pairing, not per restart."""
     import secrets as _secrets
-    from forex_trader.core import secrets as _sec
+    from backend.src.config import secrets as _sec
     token = _secrets.token_urlsafe(32)
     set_app_config("sync_token_enc", _sec.encrypt(token))
     return token
@@ -271,6 +271,6 @@ def generate_sync_token() -> str:
 def get_sync_token() -> str:
     """Decrypt and return this node's persisted sync token, or '' if none
     has been generated yet."""
-    from forex_trader.core import secrets as _sec
+    from backend.src.config import secrets as _sec
     enc = get_app_config("sync_token_enc") or ""
     return _sec.decrypt(enc) if enc else ""

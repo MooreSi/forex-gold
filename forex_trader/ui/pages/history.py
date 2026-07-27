@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
@@ -53,7 +53,7 @@ def _parse_reason(comment: str, pnl: float = 0.0) -> str:
 
 def _get_env_db_path(env: str) -> str:
     """Return the absolute DB path for the given environment."""
-    from forex_trader.config import DATA_DIR
+    from backend.src.config import DATA_DIR
     return str(DATA_DIR / f"forex_trader_{env}.db")
 
 
@@ -971,7 +971,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
     """
     result: dict[date, tuple[str, str]] = {}
     try:
-        from forex_trader.config import DATA_DIR
+        from backend.src.config import DATA_DIR
         sig_db = DATA_DIR / "test_signal.db"
         if not sig_db.exists():
             return result
@@ -1523,7 +1523,7 @@ def _render_heatmap(engine):
         import asyncio as _asyncio
         import json as _json
         from datetime import datetime as _dt
-        from forex_trader.config import load as _cfg_load
+        from backend.src.config import load as _cfg_load
         _analysis_body = _refs["analysis_body"]
 
         stored = db_module.get_app_config("heatmap_analysis_cache")

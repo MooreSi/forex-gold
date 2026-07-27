@@ -12,7 +12,7 @@ import ssl
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from forex_trader.config import USER_DATA_DIR
+from backend.src.config import USER_DATA_DIR
 
 log = logging.getLogger(__name__)
 

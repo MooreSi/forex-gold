@@ -1,7 +1,7 @@
 """
 FOREX Trader — launcher.
 Run: python run.py
-Opens the dashboard in your default browser (see forex_trader.config's
+Opens the dashboard in your default browser (see backend.src.config's
 default port for this checkout).
 """
 
@@ -28,10 +28,10 @@ logging.basicConfig(
 # Rotates at midnight; keeps 30 daily files before the oldest is removed.
 # Backup filenames:  forex_trader.log.YYYY-MM-DD
 #
-# Must match forex_trader.config.USER_DATA_DIR exactly -- this checkout
+# Must match backend.src.config.USER_DATA_DIR exactly -- this checkout
 # (forex-refactor2) is a fork of the live app and must never default to its
 # "ForexTrader" folder (see the long comment in config.py for why).
-from forex_trader.config import USER_DATA_DIR as _USER_DATA
+from backend.src.config import USER_DATA_DIR as _USER_DATA
 _log_dir   = _USER_DATA / "data"
 _log_dir.mkdir(parents=True, exist_ok=True)
 _fh = TimedRotatingFileHandler(
@@ -71,7 +71,7 @@ def _start_mt5_bridge() -> subprocess.Popen | None:
     Returns the Popen object or None if not started.
     """
     try:
-        import forex_trader.config as cfg_module
+        import backend.src.config as cfg_module
         cfg = cfg_module.load()
         if not cfg.get("mt5_bridge_enabled", True):
             log.info("MT5 bridge disabled in config — skipping")
@@ -107,7 +107,7 @@ def _start_mt5_bridge() -> subprocess.Popen | None:
         # no credentials at all — silently "self-healed" only because the
         # bridge watchdog's own restart path (engine.py's _start_bridge_process)
         # sets this env var correctly, masking the bug as a normal startup delay.
-        from forex_trader.config import USER_DATA_DIR
+        from backend.src.config import USER_DATA_DIR
         from urllib.parse import urlparse
         bridge_port = urlparse(bridge_url).port or 9000
         bridge_env = {
@@ -139,7 +139,7 @@ def _migrate_config_yaml() -> None:
     before config.py, settings.py or any UI code is imported, so old copies of
     those files on remote machines cannot cause a crash.
     """
-    from forex_trader.config import CONFIG_FILE as cfg_path
+    from backend.src.config import CONFIG_FILE as cfg_path
 
     if not cfg_path.exists():
         return
@@ -216,13 +216,13 @@ def main():
     _migrate_config_yaml()
 
     # ── Licence check — must pass before any engine or UI starts ──────────────
-    from forex_trader.licence.guard import enforce as _licence_enforce
+    from backend.src.config.licence.guard import enforce as _licence_enforce
     _licence_enforce()
 
     bridge_proc = _start_mt5_bridge()
 
     try:
-        import forex_trader.config as cfg_module
+        import backend.src.config as cfg_module
         cfg  = cfg_module.load()
         port = int(cfg.get("port", 8888))
         _free_port(port)

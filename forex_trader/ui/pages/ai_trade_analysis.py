@@ -16,7 +16,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 from forex_trader.core import claude_ai as ai_module
 from forex_trader.core import ai_provider
 from forex_trader.core import database as db_module
@@ -1140,7 +1140,7 @@ def render(get_engine: Callable):  # noqa: C901
 
         cfg = cfg_module.load()
         env = cfg.get("account_env", "demo")
-        from forex_trader.config import DATA_DIR
+        from backend.src.config import DATA_DIR
         db_path   = str(DATA_DIR / f"forex_trader_{env}.db")
         days      = int(days_sel.value)
 

@@ -991,7 +991,7 @@ def _apply_schema() -> None:
             ") WHERE tg_source IS NULL OR tg_source LIKE 'instant:%'"
         )
         # singleton rows
-        from forex_trader.config import get as cfg_get
+        from backend.src.config import get as cfg_get
         starting_balance = cfg_get("starting_balance", 1000.0)
         mt5_login = cfg_get("mt5_login", 0)
         mt5_server = cfg_get("mt5_server", "")

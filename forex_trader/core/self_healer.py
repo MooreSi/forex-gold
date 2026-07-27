@@ -80,7 +80,7 @@ def _read_recent_log_lines(window_seconds: int) -> list[tuple[float, str]]:
     async task. A tail read comfortably covers _WINDOW_SECONDS regardless of
     total file size.
     """
-    from forex_trader.config import DATA_DIR
+    from backend.src.config import DATA_DIR
     from datetime import datetime
     log_base = Path(DATA_DIR) / "forex_trader.log"
     if not log_base.exists():

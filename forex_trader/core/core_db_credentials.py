@@ -27,7 +27,7 @@ from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_
 # ── MT5 credentials — always stored in the demo DB (env-independent) ─────────
 
 def _master_creds_path() -> str:
-    from forex_trader.config import DATA_DIR
+    from backend.src.config import DATA_DIR
     return str(DATA_DIR / "forex_trader_demo.db")
 
 
@@ -49,7 +49,7 @@ def get_mt5_credentials() -> dict:
         return {}
 
     try:
-        from forex_trader.core import secrets as _sec
+        from backend.src.config import secrets as _sec
         legacy = {}
         for col in _CRED_SECRET_COLS:
             val = creds.get(col) or ""
@@ -68,7 +68,7 @@ def save_mt5_credentials(updates: dict) -> None:
     Secret columns are encrypted before hitting disk."""
     import sqlite3 as _sq
     try:
-        from forex_trader.core import secrets as _sec
+        from backend.src.config import secrets as _sec
         updates = {
             k: (_sec.encrypt(v) if k in _CRED_SECRET_COLS and v else v)
             for k, v in updates.items()
@@ -94,7 +94,7 @@ def _bridge_creds_path() -> str:
     The Wine bridge reads the same file via the Z: drive mount; the launcher
     script converts this path and passes it as BRIDGE_CREDS_PATH.
     """
-    from forex_trader.config import USER_DATA_DIR
+    from backend.src.config import USER_DATA_DIR
     return str(USER_DATA_DIR / "bridge_credentials.json")
 
 

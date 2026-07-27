@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 
 from forex_trader.breakout_signal import breakout_signal_repo as bdb
 from forex_trader.breakout_signal import adaptive_params as ap
@@ -74,7 +74,7 @@ def get_instance() -> Optional["BreakoutEngine"]:
 def init(bridge: "MT5BridgeClient") -> "BreakoutEngine":
     global _instance
     if _instance is None:
-        from forex_trader.config import USER_DATA_DIR
+        from backend.src.config import USER_DATA_DIR
         data_dir = USER_DATA_DIR / "data"
         bdb.init(str(data_dir / "breakout_signal.db"))
         bo_ml.init(data_dir)

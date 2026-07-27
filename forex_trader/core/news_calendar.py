@@ -124,7 +124,7 @@ def _from_mt5() -> Optional[float]:
 def _from_finnhub() -> Optional[float]:
     """Query Finnhub economic calendar. Requires FINNHUB_API_KEY in config."""
     try:
-        from forex_trader.config import get as cfg_get
+        from backend.src.config import get as cfg_get
         api_key = cfg_get("finnhub_api_key", "")
         if not api_key:
             return None

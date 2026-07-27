@@ -14,7 +14,7 @@ from unittest import mock
 
 import pytest
 
-import forex_trader.config as cfg_mod
+import backend.src.config as cfg_mod
 from forex_trader.core import database as db
 from forex_trader.core import core_bot_commands_infra as cmds
 

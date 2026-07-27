@@ -1328,7 +1328,7 @@ def _render_orb_report(engine):
 
 async def _background_commentary(engine, signal_id: str):
     try:
-        import forex_trader.config as cfg_module
+        import backend.src.config as cfg_module
         import forex_trader.core.claude_ai as claude_ai
         config = cfg_module.load()
         with db_module.db() as conn:

@@ -59,7 +59,7 @@ from nicegui import core as _nicegui_core
 _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 # ── end patch ──────────────────────────────────────────────────────────────────
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 from forex_trader import __version__ as _APP_VERSION
 from forex_trader.core import database as db_module
 from forex_trader.ui.pages import backtest as backtest_page
@@ -760,7 +760,7 @@ def main_page():
                 venv_python = root / ".venv" / "bin" / "python3"
             python = str(venv_python) if venv_python.exists() else sys.executable
             from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
-            from forex_trader.config import USER_DATA_DIR
+            from backend.src.config import USER_DATA_DIR
             log_path = USER_DATA_DIR / "data" / "restart.log"
             with open_restart_log(log_path) as _restart_log:
                 subprocess.Popen(
@@ -1382,7 +1382,7 @@ def main_page():
             return
 
         # 1. Swap DB and persist new env immediately
-        from forex_trader.config import DATA_DIR as _DATA_DIR
+        from backend.src.config import DATA_DIR as _DATA_DIR
         db_module.init(str(_DATA_DIR / f"forex_trader_{new_env}.db"))
         cfg_module.save_to_yaml({"account_env": new_env})
         _is_live[0] = (new_env == "live")

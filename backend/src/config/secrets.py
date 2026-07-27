@@ -30,7 +30,7 @@ _fernet: Optional[Fernet] = None
 
 
 def _key_file_path() -> Path:
-    from forex_trader.config import USER_DATA_DIR
+    from backend.src.config import USER_DATA_DIR
     return Path(USER_DATA_DIR) / ".credentials.key"
 
 

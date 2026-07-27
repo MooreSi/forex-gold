@@ -28,8 +28,8 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from forex_trader.config import USER_DATA_DIR
-from forex_trader.licence import store as _licence_store
+from backend.src.config import USER_DATA_DIR
+from backend.src.config.licence import store as _licence_store
 from forex_trader.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
@@ -255,7 +255,7 @@ def _build_hello() -> dict:
 
 def _build_register() -> dict:
     import platform
-    from forex_trader.licence.fingerprint import get_fingerprint
+    from backend.src.config.licence.fingerprint import get_fingerprint
     return make(
         MSG_REGISTER,
         token=get_or_create_token(),
@@ -316,7 +316,7 @@ def _build_status() -> dict:
             bridge_ok = False
     else:
         try:
-            from forex_trader.config import get as _cfg_get
+            from backend.src.config import get as _cfg_get
             import urllib.request as _ureq
             if _cfg_get("mt5_bridge_enabled", True):
                 _url = _cfg_get("mt5_bridge_url", "http://localhost:9000").rstrip("/")
@@ -367,7 +367,7 @@ def _build_diagnostics() -> dict:
         "log_raw":   "",
     }
     try:
-        from forex_trader.config import DATA_DIR
+        from backend.src.config import DATA_DIR
         log_file = Path(DATA_DIR) / "forex_trader.log"
         if log_file.exists():
             cutoff = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
@@ -465,7 +465,7 @@ def _do_restart() -> None:
     """
     app_root = Path(__file__).parent.parent.parent
     from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
-    from forex_trader.config import USER_DATA_DIR as _udata
+    from backend.src.config import USER_DATA_DIR as _udata
     log_path = Path(_udata) / "data" / "restart.log"
 
     if sys.platform == "win32":
@@ -835,7 +835,7 @@ async def _connect_loop() -> None:
                         if lic_key and expiry:
                             existing = _licence_store.load()
                             if not existing or existing.get("licence_key") != lic_key:
-                                from forex_trader.licence.fingerprint import get_fingerprint
+                                from backend.src.config.licence.fingerprint import get_fingerprint
                                 _licence_store.save({
                                     "machine_id":   mid or get_fingerprint(),
                                     "email":        email,

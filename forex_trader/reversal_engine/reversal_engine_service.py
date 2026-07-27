@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-import forex_trader.config as _cfg_module
+import backend.src.config as _cfg_module
 from forex_trader.reversal_engine import reversal_engine_repo as re_db
 from forex_trader.reversal_engine import level_detector as ld
 from forex_trader.reversal_engine import ml_engine as re_ml

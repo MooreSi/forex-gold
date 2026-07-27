@@ -2437,7 +2437,7 @@ class SimulationEngine:
                 if updates:
                     updates["ai_models_last_refreshed"] = time.time()
                     self._cfg["ai_models_last_refreshed"] = updates["ai_models_last_refreshed"]
-                    import forex_trader.config as _cfg_mod
+                    import backend.src.config as _cfg_mod
                     await db_module.to_db_thread(lambda: _cfg_mod.save_to_yaml(updates))
                     log.info("[AI] model catalogue refreshed: %s", list(updates.keys()))
             except asyncio.CancelledError:
@@ -2933,7 +2933,7 @@ class SimulationEngine:
             _pu.kill_matching("mt5_bridge.py", force=True)
             await asyncio.sleep(1)
 
-            from forex_trader.config import USER_DATA_DIR, get as _cfg_get
+            from backend.src.config import USER_DATA_DIR, get as _cfg_get
             from urllib.parse import urlparse as _urlparse
             _creds = str(USER_DATA_DIR / "bridge_credentials.json")
             _bridge_port = _urlparse(_cfg_get("mt5_bridge_url", "")).port or 9010
@@ -2992,7 +2992,7 @@ class SimulationEngine:
             log.info("Bridge restart: clean slate — no terminal64.exe or wineserver running")
 
         try:
-            from forex_trader.config import load as _cfg_load, USER_DATA_DIR
+            from backend.src.config import load as _cfg_load, USER_DATA_DIR
             _cfg = _cfg_load()
             _wine = (
                 _cfg.get("wine_bin")

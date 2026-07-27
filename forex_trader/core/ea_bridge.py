@@ -51,7 +51,7 @@ _HOST = "127.0.0.1"
 
 def _resolve_port() -> int:
     try:
-        import forex_trader.config as _cfg_module
+        import backend.src.config as _cfg_module
         return int(_cfg_module.get("ea_bridge_port", 9101))
     except Exception:
         return 9101

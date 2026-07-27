@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from forex_trader.src.db.sqlite_adapter import SqliteAdapter
+from backend.src.db.sqlite_adapter import SqliteAdapter
 
 
 @pytest.fixture

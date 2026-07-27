@@ -114,7 +114,7 @@ async def cmd_restart_app(args: list, bot_offset: int) -> str:
         else:
             venv_python = root / ".venv" / "bin" / "python3"
         python = str(venv_python) if venv_python.exists() else sys.executable
-        from forex_trader.config import USER_DATA_DIR
+        from backend.src.config import USER_DATA_DIR
         from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
         log_path = USER_DATA_DIR / "data" / "restart.log"
         # Persist the current offset NOW so the restarted process skips
@@ -172,7 +172,7 @@ async def cmd_switch_demo(args: list, bridge: Any) -> str:
 
 async def cmd_switch_env(new_env: str, bridge: Any) -> str:
     """Switch the active MT5 account environment (live/demo)."""
-    import forex_trader.config as _cfg
+    import backend.src.config as _cfg
     env_label = "Live" if new_env == "live" else "Demo"
     try:
         creds = db_module.get_mt5_credentials()
@@ -192,7 +192,7 @@ async def cmd_switch_env(new_env: str, bridge: Any) -> str:
                 f"{env_label} account login, password and server first."
             )
 
-        from forex_trader.config import DATA_DIR as _DATA_DIR
+        from backend.src.config import DATA_DIR as _DATA_DIR
         db_module.init(str(_DATA_DIR / f"forex_trader_{new_env}.db"))
         _cfg.save_to_yaml({"account_env": new_env})
         db_module.sync_bridge_credentials_file(new_env)

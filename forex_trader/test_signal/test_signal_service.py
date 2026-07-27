@@ -397,7 +397,7 @@ _instance: Optional[TestSignalEngine] = None
 
 def init(bridge: "MT5BridgeClient") -> TestSignalEngine:
     global _instance
-    from forex_trader.config import USER_DATA_DIR
+    from backend.src.config import USER_DATA_DIR
     _setup_log(USER_DATA_DIR / "data")
 
     db_path = str(USER_DATA_DIR / "data" / "test_signal.db")

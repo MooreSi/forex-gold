@@ -16,7 +16,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-from forex_trader.licence.keygen import verify_licence_key as _verify_licence_hmac
+from backend.src.config.licence.keygen import verify_licence_key as _verify_licence_hmac
 
 
 def _parse_activation_code(code: str):
@@ -120,8 +120,8 @@ def _show_registration_page() -> None:
     import sys
     from nicegui import ui, app as _ng_app
     from fastapi.responses import HTMLResponse
-    from forex_trader.licence import store as _store_mod
-    from forex_trader.licence.fingerprint import get_fingerprint
+    from backend.src.config.licence import store as _store_mod
+    from backend.src.config.licence.fingerprint import get_fingerprint
 
     machine_id = get_fingerprint()
 
@@ -313,8 +313,8 @@ def enforce() -> None:
       2. Stored machine_id matches current machine — if not, block (wrong machine)
       3. HMAC-SHA256 valid for machine_id + expiry_date — if not, clear store and block
     """
-    from forex_trader.licence import store as _store
-    from forex_trader.licence.fingerprint import get_fingerprint
+    from backend.src.config.licence import store as _store
+    from backend.src.config.licence.fingerprint import get_fingerprint
 
     data = _store.load()
     if (

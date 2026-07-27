@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from forex_trader.core.engine import SimulationEngine
 from forex_trader.core.telegram_reader import TelegramReader
@@ -73,7 +73,7 @@ def _find_remote_admin_open_fn():
 
     admin_panel.py lives in KeyGen/ (never shipped with the FOREX app) alongside
     forex_admin.py and admin_client.py."""
-    from forex_trader.config import USER_DATA_DIR
+    from backend.src.config import USER_DATA_DIR
     flag = Path(USER_DATA_DIR) / "remote" / "is_remote_admin"
     if not flag.exists():
         return None
@@ -177,7 +177,7 @@ async def startup() -> None:
 
     # Initialise breakout signal DB (completely isolated from bounce engine).
     # breakout_signal_service.init() initializes its own repo DB internally.
-    from forex_trader.config import DATA_DIR as _DATA_DIR
+    from backend.src.config import DATA_DIR as _DATA_DIR
     _breakout_engine_module.init(_engine._bridge)
 
     # Initialise Reversal Engine DB (completely isolated from other engines).

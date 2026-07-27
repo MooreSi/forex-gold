@@ -109,7 +109,7 @@ async def review_signal(
     Returns {"approved": bool, "score": float, "rationale": str, "fallback": bool}
     """
     try:
-        import forex_trader.config as _cfg_mod
+        import backend.src.config as _cfg_mod
         cfg = {
             "ai_provider":       _cfg_mod.get("ai_provider", "claude"),
             "anthropic_api_key": _cfg_mod.get("anthropic_api_key", ""),

@@ -23,7 +23,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 from forex_trader.core import ai_provider
 
 from forex_trader.test_signal import test_signal_repo as tdb

@@ -285,7 +285,7 @@ def render(get_tg_reader: Callable):
 
 
 def _render_send_code_step(reader, on_done: Callable):
-    import forex_trader.config as cfg_module
+    import backend.src.config as cfg_module
     cfg = cfg_module.load()
 
     ui.label("Step 1: Send login code").classes("text-sm font-semibold text-gray-300 mb-2")
@@ -594,11 +594,11 @@ def _ts_uk(s) -> str:
 
 def _render_stored_messages():
     """Collapsible section showing the last 100 messages stored in telegram_messages."""
-    import forex_trader.config as _cfg
+    import backend.src.config as _cfg
 
     def _query_messages(limit: int = 100) -> tuple[list[dict], int]:
         try:
-            from forex_trader.config import DATA_DIR
+            from backend.src.config import DATA_DIR
             env = _cfg.get("account_env", "demo")
             db_path = str(DATA_DIR / f"forex_trader_{env}.db")
             conn = sqlite3.connect(db_path, check_same_thread=False)

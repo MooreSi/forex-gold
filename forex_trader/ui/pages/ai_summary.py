@@ -10,7 +10,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from forex_trader.core.models import STRATEGY_NAMES
 

@@ -11,7 +11,7 @@ import os
 import secrets
 from pathlib import Path
 
-from forex_trader.config import USER_DATA_DIR
+from backend.src.config import USER_DATA_DIR
 
 _HASH_FILE = Path(USER_DATA_DIR) / "remote" / "admin_password.hash"
 

@@ -11,7 +11,7 @@ from nicegui import app, ui
 from forex_trader.core import database as db_module
 from forex_trader.core import platform_utils as _pu
 from forex_trader.sync import client as sync_client
-import forex_trader.config as cfg_module
+import backend.src.config as cfg_module
 
 # ── Prevent-sleep state (module-level so it survives page re-renders) ──────────
 # On macOS uses `caffeinate -i -w <app-pid>`.
@@ -311,7 +311,7 @@ def _render_ea_update_button():
     # show what happened is reading back the detached script's own log on
     # the NEXT page load — there's no live handler left to report through.
     try:
-        from forex_trader.config import USER_DATA_DIR
+        from backend.src.config import USER_DATA_DIR
         _result_log = USER_DATA_DIR / "data" / "ea_update_result.log"
         if _result_log.exists():
             _lines = _result_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
@@ -392,7 +392,7 @@ def _render_ea_update_button():
         # that survives that, mirroring the existing Restart button's own
         # self-relaunch pattern (ui/app.py's _do_restart) but with the MT5
         # terminal restart sandwiched in between stop and relaunch.
-        from forex_trader.config import USER_DATA_DIR as _ea_user_data_dir
+        from backend.src.config import USER_DATA_DIR as _ea_user_data_dir
         script = _EA_RESTART_PS1_TEMPLATE.format(
             terminal_id=terminal_id, data_folder=_ea_user_data_dir.name,
         )
@@ -400,7 +400,7 @@ def _render_ea_update_button():
         script_path.write_text(script, encoding="utf-8")
 
         from forex_trader.core.platform_utils import open_restart_log
-        from forex_trader.config import USER_DATA_DIR
+        from backend.src.config import USER_DATA_DIR
         log_path = USER_DATA_DIR / "data" / "ea_update_restart.log"
         with open_restart_log(log_path) as _restart_log:
             subprocess.Popen(
@@ -1760,7 +1760,7 @@ def _wine_bin() -> str:
     """Wine binary — reads from config (wine_bin key).
     Defaults to CrossOver's binary which ships on this machine; update config.yaml
     to /opt/homebrew/bin/wine after installing a system Wine via Homebrew."""
-    import forex_trader.config as _cfg
+    import backend.src.config as _cfg
     return (_cfg.get("wine_bin") or "").strip() or \
         "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
 
@@ -1770,7 +1770,7 @@ def _mt5_bottle_path() -> str:
     After running setup_wine_bridge.sh this is ~/.wine_mt5 — an independent
     prefix that does not require CrossOver to be installed."""
     import os as _os
-    import forex_trader.config as _cfg
+    import backend.src.config as _cfg
     return (_cfg.get("mt5_bottle_path") or "").strip() or \
         _os.path.expanduser("~/.wine_mt5")
 
@@ -1909,7 +1909,7 @@ def _render_bridge_control(engine):
             try:
                 # ── Windows: run bridge natively without Wine ─────────────────
                 if sys.platform == "win32":
-                    from forex_trader.config import USER_DATA_DIR
+                    from backend.src.config import USER_DATA_DIR
                     from urllib.parse import urlparse as _urlparse
                     _creds_path  = str(USER_DATA_DIR / "bridge_credentials.json")
                     _bridge_port = _urlparse(cfg_module.get("mt5_bridge_url", "")).port or 9010
@@ -2315,7 +2315,7 @@ def _render_diagnostics(engine):
         Return [(level, line), ...] for meaningful events since app startup.
         Only ERRORs, WARNINGs, and recognised app-event INFO lines are included.
         """
-        from forex_trader.config import DATA_DIR
+        from backend.src.config import DATA_DIR
         log_base = _Path(DATA_DIR) / "forex_trader.log"
         if not log_base.exists():
             return []
@@ -2455,7 +2455,7 @@ def _render_diagnostics(engine):
         # ── Telegram → execution latency from DB ───────────────────────────
         tg_latency: dict = {}
         try:
-            from forex_trader.config import DATA_DIR as _ddir, load as _cfg_load
+            from backend.src.config import DATA_DIR as _ddir, load as _cfg_load
             _env = _cfg_load().get("account_env", "demo")
             _db_path = str(_ddir / f"forex_trader_{_env}.db")
             _conn = _sqlite3.connect(_db_path, check_same_thread=False)
@@ -2731,7 +2731,7 @@ def _render_diagnostics(engine):
 
         try:
             # ── Collect log files (current + rotated backups) ─────────────────
-            from forex_trader.config import DATA_DIR as _log_data_dir
+            from backend.src.config import DATA_DIR as _log_data_dir
             log_base = _Path(_log_data_dir) / "forex_trader.log"
             if not log_base.exists():
                 export_lbl.text = "No log file found — restart the app first to begin writing logs."
@@ -2801,8 +2801,8 @@ def _render_diagnostics(engine):
 
             # ── Gather user and system info ────────────────────────────────────
             try:
-                from forex_trader.licence import store as _lic_store
-                from forex_trader.licence.fingerprint import get_fingerprint as _fp
+                from backend.src.config.licence import store as _lic_store
+                from backend.src.config.licence.fingerprint import get_fingerprint as _fp
                 _lic_data    = _lic_store.load() or {}
                 _lic_email   = _lic_data.get("email", "—")
                 _lic_type    = _lic_data.get("licence_type", "—")
@@ -3145,8 +3145,8 @@ def _render_theme():
 
 def _render_registration():
     """Settings → Registration tab — shows stored licence / account details."""
-    from forex_trader.licence import store as _store
-    from forex_trader.licence.fingerprint import get_fingerprint
+    from backend.src.config.licence import store as _store
+    from backend.src.config.licence.fingerprint import get_fingerprint
 
     data       = _store.load()
     email      = data.get("email", "") if data else ""

@@ -70,5 +70,5 @@ def unpack_models(zip_bytes: bytes, data_dir: Path) -> list[str]:
 
 
 def data_dir() -> Path:
-    from forex_trader.config import DATA_DIR
+    from backend.src.config import DATA_DIR
     return Path(DATA_DIR)

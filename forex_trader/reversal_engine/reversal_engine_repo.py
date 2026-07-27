@@ -1,5 +1,5 @@
 """Isolated data store for the Reversal Engine signal engine, rebuilt on the shared
-DbAdapter (forex_trader.src.db) instead of raw sqlite3 -- see
+DbAdapter (backend.src.db) instead of raw sqlite3 -- see
 docs/todo/refactor/backend-foundation/030-migrate-reversal-engine-repo-layer.md.
 
 Structural port of reversal_engine/database.py: same tables (re_ prefix),
@@ -19,7 +19,7 @@ from typing import Optional
 
 import sqlite3
 
-from forex_trader.src.db import connection as _conn_mod
+from backend.src.db import connection as _conn_mod
 
 _NAMESPACE = "reversal_engine"
 

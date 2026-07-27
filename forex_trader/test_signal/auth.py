@@ -16,7 +16,7 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 
-from forex_trader.licence.fingerprint import get_sha256
+from backend.src.config.licence.fingerprint import get_sha256
 
 _ITERATIONS = 260_000
 _PEPPER = b"FOREX_TEST_V1_"

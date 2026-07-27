@@ -19,7 +19,7 @@ from pathlib import Path
 _FOREX_DIR = Path(__file__).parent
 sys.path.insert(0, str(_FOREX_DIR))
 
-from forex_trader.config import DATA_DIR
+from backend.src.config import DATA_DIR
 
 _DB_PATH = DATA_DIR / "test_signal.db"
 

@@ -37,7 +37,7 @@ _ENGINES: dict[str, dict] = {
 
 
 def _data_dir() -> Path:
-    from forex_trader.config import DATA_DIR
+    from backend.src.config import DATA_DIR
     return Path(DATA_DIR)
 
 

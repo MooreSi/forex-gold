@@ -81,7 +81,7 @@ class NativeMT5Bridge:
         # wrong (empty) credentials file location instead of the one the
         # app actually writes to via db_module.sync_bridge_credentials_file().
         import os as _os
-        from forex_trader.config import USER_DATA_DIR
+        from backend.src.config import USER_DATA_DIR
         _os.environ.setdefault("BRIDGE_CREDS_PATH", str(USER_DATA_DIR / "bridge_credentials.json"))
 
         spec = importlib.util.spec_from_file_location("mt5_bridge_native_mod", bridge_path)

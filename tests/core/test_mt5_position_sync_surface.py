@@ -173,7 +173,12 @@ def test_full_close_infers_sl_reason_from_comment(fresh_db):
     assert rc.call_args.args[2] == "SL"
 
 
-def test_partial_close_detected_no_full_close_double_prefixed_reason(fresh_db):
+def test_partial_close_detected_no_full_close_reason_not_double_prefixed(fresh_db):
+    # Regression (2026-07-27): `reason` is already "MT5_close"/"MT5_sync_TP"
+    # in two of its three possible values (only "SL" isn't), so blindly
+    # prefixing with f"MT5_{reason}" produced "MT5_MT5_close"/
+    # "MT5_MT5_sync_TP" -- found investigating a live incident where this
+    # same value ended up in vantage_partial_closes.reason.
     _insert_trade(mt5_ticket=555, remaining_lots=0.10)
     partial_deals = [{"entry": 1, "position_id": 555, "price": 2405.0, "time": 100,
                       "comment": "tp", "volume": 0.05, "profit": 5.0, "swap": 0, "fee": 0}]
@@ -185,9 +190,24 @@ def test_partial_close_detected_no_full_close_double_prefixed_reason(fresh_db):
          mock.patch.object(sync, "record_close", new=mock.AsyncMock()) as rc, \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
         asyncio.run(sync.sync_closed_mt5_positions(bridge, streak))
-    pc.assert_called_once_with("t-1", 0.05, 2405.0, "MT5_MT5_sync_TP")
+    pc.assert_called_once_with("t-1", 0.05, 2405.0, "MT5_sync_TP")
     assert not rc.called
     assert "t-1" not in streak
+
+
+def test_partial_close_sl_reason_still_gets_prefixed(fresh_db):
+    # "SL" (unlike "MT5_close"/"MT5_sync_TP") does NOT already start with
+    # "MT5_", so it must still be prefixed to "MT5_SL".
+    _insert_trade(mt5_ticket=555, remaining_lots=0.10)
+    partial_deals = [{"entry": 1, "position_id": 555, "price": 2390.0, "time": 100,
+                      "comment": "sl hit", "volume": 0.05, "profit": -5.0, "swap": 0, "fee": 0}]
+    bridge = _FakeBridge(positions=[{"ticket": 999, "volume": 0.05}],
+                         deal_history=[], position_history=partial_deals)
+    with mock.patch.object(sync, "partial_close_trade",
+                           new=mock.AsyncMock(return_value={"partial_pnl": -5.0})) as pc, \
+         mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
+        asyncio.run(sync.sync_closed_mt5_positions(bridge, {"t-1": 1}))
+    pc.assert_called_once_with("t-1", 0.05, 2390.0, "MT5_SL")
 
 
 def test_partial_close_reassigns_ticket_when_continuing_position_found(fresh_db):

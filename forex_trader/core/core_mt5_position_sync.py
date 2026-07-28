@@ -167,9 +167,12 @@ async def sync_closed_mt5_positions(
                         trade["trade_id"], ticket, closed_volume,
                         remaining_lots - closed_volume, partial_profit,
                     )
+                    # `reason` is already "MT5_close"/"MT5_sync_TP" in two of
+                    # its three possible values (only "SL" isn't) -- blindly
+                    # prefixing produced "MT5_MT5_close"/"MT5_MT5_sync_TP".
                     await partial_close_trade(
-                        trade["trade_id"], closed_volume,
-                        float(close_price), f"MT5_{reason}",
+                        trade["trade_id"], closed_volume, float(close_price),
+                        reason if reason.startswith("MT5_") else f"MT5_{reason}",
                     )
                     # Update ticket if the continuing position has a new ticket
                     new_remaining = round(remaining_lots - closed_volume, 4)

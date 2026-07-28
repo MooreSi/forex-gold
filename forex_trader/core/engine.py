@@ -1188,6 +1188,18 @@ class SimulationEngine:
                                 await self._handle_no_sl_scale(trade, tick)
                             elif strategy == STRATEGY_CONSERVATIVE_TRIAL:
                                 await self._handle_conservative_trial(trade, tick)
+                            elif _ea_templates.is_template_override(strategy):
+                                # Defence in depth alongside reclaim_ea_managed_
+                                # trade's own guard (core_monitor_loop.py) --
+                                # a template has no Python handler at all and
+                                # must never fall through to scale_out below,
+                                # which fabricates PnL from a live tick crossing
+                                # tp1/tp2/tp3 against whatever entry_price this
+                                # row happens to hold (0 for an unfilled grid
+                                # placeholder) with no real broker order ever
+                                # touched. See that function's own comment for
+                                # the live incident this is fixing.
+                                pass
                             else:
                                 await self._handle_scale_out(trade, tick)
                         except Exception as exc:
@@ -1490,9 +1502,15 @@ class SimulationEngine:
                             trade["trade_id"], ticket, closed_volume,
                             remaining_lots - closed_volume, partial_profit,
                         )
+                        # `reason` is already "MT5_close"/"MT5_sync_TP" in two
+                        # of its three possible values (only "SL" isn't), so
+                        # blindly prefixing produced "MT5_MT5_close"/
+                        # "MT5_MT5_sync_TP" -- found investigating a live
+                        # incident where this exact value ended up in
+                        # vantage_partial_closes.reason (2026-07-27).
                         await self.partial_close_trade(
-                            trade["trade_id"], closed_volume,
-                            float(close_price), f"MT5_{reason}",
+                            trade["trade_id"], closed_volume, float(close_price),
+                            reason if reason.startswith("MT5_") else f"MT5_{reason}",
                         )
                         # Update ticket if the continuing position has a new ticket
                         new_remaining = round(remaining_lots - closed_volume, 4)

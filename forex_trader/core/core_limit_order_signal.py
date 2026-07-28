@@ -8,6 +8,29 @@ classify_and_parse() checks for ahead of every channel's own configured
 parser_format -- so this fires for any channel, format-matched only, per
 the explicit design decision behind this feature (2026-07-22).
 
+Split entry/management (2026-07-28): the *entry* mechanic above is what's
+format-triggered -- a genuine resting BuyLimit/SellLimit at the near zone
+edge, which no other strategy can express (every other strategy waits for
+price to re-enter the zone and then fills at market). The *management* of
+the resulting position is a separate question, and a channel that has an
+explicit strategy override configured (Trading > Strategy > Channel
+Strategy) now keeps that override's TP ladder / BE / trail rules once the
+order fills, instead of being silently forced onto Limit Runner's own
+ladder. Raised live: GOLD DIGGERS INSTITUTIONAL is set to Signal Climber,
+but every "[LIMITS]"-formatted message on it was executing and managing as
+Limit Runner, whose payoff profile on that channel is upside-down (avg
+loss ~2x avg win over 34 closed trades). Channels with no override are
+unchanged -- still pure Limit Runner, since there is no configured intent
+to honour and the global Active Strategy is not a per-channel decision.
+
+This mirrors what Reversal Engine's own LIMIT ORDER toggle already does
+(reversal_engine_live_execute.py) -- place_pending_order() has always
+taken an explicit `strategy` and stored it on vantage_pending_orders, and
+_on_pending_order_filled reads it back to stamp the filled trade row, so
+the EA manages the fill under that strategy's branch with no extra
+protocol work. EA Templates are handled earlier still (engine.py's
+dispatch) and never reach here.
+
 Requires the EA bridge to be connected and healthy: unlike every other
 strategy's open_trade() handoff, there is no Python-bridge fallback for a
 genuine pending order -- if the EA is unavailable, this signal is skipped
@@ -69,6 +92,74 @@ def _limit_runner_pcts(n: int, tp_open: bool, params: dict) -> list[float]:
     return [each] * n
 
 
+def _resolve_management(
+    channel_name: str, n: int, tp_open: bool,
+) -> tuple[str, list[float], int, str | None]:
+    """Decide which strategy manages this position once the resting order
+    fills, and with what ladder shape.
+
+    Returns (strategy, pcts, be_at_pos, trail_mode).
+
+    Default is Limit Runner's own even split -- unchanged for any channel
+    with no configured override. When the channel HAS an explicit override
+    (not 'auto', not an EA Template -- templates never reach this module,
+    engine.py dispatches them first), that strategy manages the fill:
+      * ladder-shaped strategies (Signal Climber, Reversal Runner, Adaptive
+        Runner 1/2) contribute their own pcts/be_at_pos/trail_mode from the
+        shared tables in core_open_trade.py, so a tuning change there
+        applies here automatically with no MQL5 rebuild;
+      * any other strategy gets inert placeholders, exactly as
+        reversal_engine_live_execute.py's limit path already does -- its EA
+        management branch (ManageConservativeLike etc.) never reads
+        t.pcts/t.beAtPos at all.
+
+    A literal "TP OPEN" line still reserves runner_reserve_pct regardless of
+    which strategy manages the fill: the reserve is a property of the
+    *signal*, not of the ladder, so an override strategy's table is scaled
+    down to leave the same permanently-open share Limit Runner would have.
+    """
+    params = get_strategy_params(STRATEGY_LIMIT_RUNNER)
+    default = (
+        STRATEGY_LIMIT_RUNNER,
+        _limit_runner_pcts(n, tp_open, params),
+        max(int(params.get("be_at_pos", 1)) - 1, 0),
+        None,
+    )
+
+    from forex_trader.core.core_db_channel import get_channel_strategy_override
+    try:
+        override = get_channel_strategy_override(channel_name)
+    except Exception:
+        return default
+    if not override or override == "auto" or override == STRATEGY_LIMIT_RUNNER:
+        return default
+
+    from forex_trader.core.core_ea_templates import is_template_override
+    if is_template_override(override):
+        # Should be unreachable -- engine.py routes template channels away
+        # from this module entirely -- but a template's settings live in a
+        # different shape altogether, so never try to ladder one here.
+        return default
+
+    from forex_trader.core.core_open_trade import (
+        _EA_LADDER_PCTS, _EA_LADDER_BE_AT_POS, _EA_LADDER_TRAIL_MODE,
+    )
+    if override not in _EA_LADDER_PCTS:
+        return override, [1.0], 0, None
+
+    table = _EA_LADDER_PCTS[override]
+    pcts = list(table.get(n, table[max(table)]))
+    if tp_open:
+        reserve = min(max(float(params.get("runner_reserve_pct", 25.0)) / 100.0, 0.0), 0.95)
+        pcts = [p * (1.0 - reserve) for p in pcts]
+    return (
+        override,
+        pcts,
+        _EA_LADDER_BE_AT_POS[override],
+        _EA_LADDER_TRAIL_MODE.get(override),
+    )
+
+
 async def handle_limit_order_signal(
     parsed: dict,
     tg_id: str,
@@ -122,9 +213,9 @@ async def handle_limit_order_signal(
 
     n = len(tps)
     tp_open = bool(parsed.get("tp_open"))
-    params = get_strategy_params(STRATEGY_LIMIT_RUNNER)
-    be_at_pos = max(int(params.get("be_at_pos", 1)) - 1, 0)
-    pcts = _limit_runner_pcts(n, tp_open, params)
+    manage_strategy, pcts, be_at_pos, trail_mode = _resolve_management(
+        channel_name, n, tp_open,
+    )
 
     # Near edge of the quoted AREA -- the price side reached first as the
     # market approaches the zone from outside it (BUY: top of the zone,
@@ -147,16 +238,17 @@ async def handle_limit_order_signal(
             return await _open_realigned_market_order(
                 _ea, tg_id, channel_name, source_label, direction, lot,
                 tick, price, stop_loss, tps, pcts, be_at_pos, tp_open,
-                entry_low, entry_high,
+                entry_low, entry_high, manage_strategy, trail_mode,
             )
 
     trade_id = str(uuid.uuid4())[:16]
     try:
         ack = await _ea.place_pending_order(
             trade_id, direction, price, lot, stop_loss, tps, pcts, be_at_pos,
-            strategy=STRATEGY_LIMIT_RUNNER,
+            strategy=manage_strategy,
             expire_minutes=_DEFAULT_EXPIRE_MINUTES,
             close_full_on_last=not tp_open,
+            trail_mode=trail_mode,
         )
     except Exception as exc:
         log.warning("[LimitRunner] place_pending_order failed for tg_id=%s: %s", tg_id, exc)
@@ -168,6 +260,7 @@ async def handle_limit_order_signal(
     ticket = ack.get("ticket")
     now = time.time()
     signal_id = str(uuid.uuid4())[:16]
+    manage_name = _strategy_label(manage_strategy)
     with db_module.db() as conn:
         conn.execute(
             """INSERT INTO vantage_signals
@@ -177,7 +270,8 @@ async def handle_limit_order_signal(
             (signal_id, f"Telegram Auto ({source_label})", direction, entry_low, entry_high,
              stop_loss, tps.get(1), tps.get(2), tps.get(3), tps.get(4), tps.get(5),
              tps.get(6), tps.get(7), tps.get(8), lot,
-             f"Limit Runner pending order @ {price:.2f} (EA ticket {ticket})",
+             f"Limit order pending @ {price:.2f}, managed as {manage_name} "
+             f"(EA ticket {ticket})",
              "pending", now),
         )
         conn.execute(
@@ -191,18 +285,25 @@ async def handle_limit_order_signal(
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, tg_id, channel_name, direction, price, stop_loss,
              json.dumps(tps), json.dumps(pcts), be_at_pos, int(tp_open), lot, ticket,
-             "working", now, STRATEGY_LIMIT_RUNNER),
+             "working", now, manage_strategy),
         )
     log.info(
-        "[LimitRunner] pending order placed tg_id=%s ticket=%s %s %.2f lots @ %.2f SL=%.2f tps=%s tp_open=%s",
-        tg_id, ticket, direction, lot, price, stop_loss, tps, tp_open,
+        "[LimitRunner] pending order placed tg_id=%s ticket=%s %s %.2f lots @ %.2f "
+        "SL=%.2f tps=%s tp_open=%s manage=%s",
+        tg_id, ticket, direction, lot, price, stop_loss, tps, tp_open, manage_strategy,
     )
     return {
         "skip_reason": (
-            f"Limit order placed (Limit Runner) — {direction} {lot:g} lots @ {price:.2f} "
-            f"(EA ticket {ticket}), SL {stop_loss:.2f}. Will notify on fill."
+            f"Limit order placed (managed as {manage_name}) — {direction} {lot:g} lots "
+            f"@ {price:.2f} (EA ticket {ticket}), SL {stop_loss:.2f}. Will notify on fill."
         ),
+        "manage_strategy": manage_strategy,
     }
+
+
+def _strategy_label(strategy: str) -> str:
+    from forex_trader.core.models import STRATEGY_NAMES
+    return STRATEGY_NAMES.get(strategy, strategy)
 
 
 async def _open_realigned_market_order(
@@ -210,6 +311,7 @@ async def _open_realigned_market_order(
     lot: float, tick: Any, original_price: float, stop_loss: float,
     tps: dict[int, float], pcts: list[float], be_at_pos: int, tp_open: bool,
     entry_low: float, entry_high: float,
+    manage_strategy: str = STRATEGY_LIMIT_RUNNER, trail_mode: str | None = None,
 ) -> dict:
     """Entry Realignment fallback -- opens a genuine immediate market order
     via the EA (the same low-level call every ladder-shaped strategy's EA
@@ -228,7 +330,8 @@ async def _open_realigned_market_order(
     try:
         ack = await ea.open_trade(
             trade_id, direction, lot, realigned_sl, realigned_tps,
-            strategy=STRATEGY_LIMIT_RUNNER, pcts=pcts, be_at_pos=be_at_pos,
+            strategy=manage_strategy, pcts=pcts, be_at_pos=be_at_pos,
+            trail_mode=trail_mode,
         )
     except Exception as exc:
         log.warning("[LimitRunner] realigned open_trade failed for tg_id=%s: %s", tg_id, exc)
@@ -251,8 +354,9 @@ async def _open_realigned_market_order(
              realigned_sl, realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
              realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
              realigned_tps.get(7), realigned_tps.get(8), lot,
-             f"Limit Runner entry realigned — zone already breached, entered at "
-             f"market {fill_price:.2f} (was {original_price:.2f}), EA ticket {ticket}",
+             f"Limit order entry realigned — zone already breached, entered at "
+             f"market {fill_price:.2f} (was {original_price:.2f}), managed as "
+             f"{_strategy_label(manage_strategy)}, EA ticket {ticket}",
              "active", now),
         )
         conn.execute(
@@ -271,18 +375,20 @@ async def _open_realigned_market_order(
              realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
              realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
              realigned_tps.get(7), realigned_tps.get(8),
-             "open", now, 0.0, 0.0, 0.0, 0.0, STRATEGY_LIMIT_RUNNER,
+             "open", now, 0.0, 0.0, 0.0, 0.0, manage_strategy,
              channel_name, "ea", int(tp_open), "market", None),
         )
     log.info(
         "[LimitRunner] entry realigned tg_id=%s ticket=%s %s %.2f lots @ %.2f "
-        "(was %.2f, delta %+.2f) SL=%.2f tps=%s",
-        tg_id, ticket, direction, lot, fill_price, original_price, delta, realigned_sl, realigned_tps,
+        "(was %.2f, delta %+.2f) SL=%.2f tps=%s manage=%s",
+        tg_id, ticket, direction, lot, fill_price, original_price, delta,
+        realigned_sl, realigned_tps, manage_strategy,
     )
     return {
         "skip_reason": (
-            f"Entry realigned (Limit Runner) — zone already breached, entered at market "
-            f"{fill_price:.2f} lots {lot:g} (was {original_price:.2f}), "
-            f"SL {realigned_sl:.2f} (EA ticket {ticket})."
+            f"Entry realigned (managed as {_strategy_label(manage_strategy)}) — zone "
+            f"already breached, entered at market {fill_price:.2f} lots {lot:g} "
+            f"(was {original_price:.2f}), SL {realigned_sl:.2f} (EA ticket {ticket})."
         ),
+        "manage_strategy": manage_strategy,
     }

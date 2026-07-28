@@ -2310,6 +2310,18 @@ class SimulationEngine:
                     exec_price   = None
                     trade_result = None
                     skip_reason  = _exec_result["skip_reason"]
+                    # The resting order itself is always Limit Runner's entry
+                    # mechanic, but a channel with an explicit strategy
+                    # override manages the resulting position under that
+                    # override instead (see core_limit_order_signal.py's
+                    # _resolve_management). Report what will actually manage
+                    # the trade, so the Telegram alert and the recorded
+                    # signal don't keep claiming "Limit Runner" for a
+                    # position the EA will run as e.g. Signal Climber.
+                    _manage = _exec_result.get("manage_strategy")
+                    if _manage and _manage != STRATEGY_LIMIT_RUNNER:
+                        strategy      = _manage
+                        strategy_name = STRATEGY_NAMES.get(_manage, _manage)
                 else:
                     _exec_result = await _execute_auto_signal_impl(
                         parsed, tg_id, channel_name, source_label, strategy, rs,

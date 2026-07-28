@@ -21,7 +21,7 @@ from forex_trader.core.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ORB_FIXED, STRATEGY_ADAPTIVE_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER, STRATEGY_FIXED_RR,
     STRATEGY_NAMES, MAX_TP,
 )
 from forex_trader.core.mt5_bridge import MT5BridgeClient
@@ -1188,6 +1188,16 @@ class SimulationEngine:
                                 await self._handle_no_sl_scale(trade, tick)
                             elif strategy == STRATEGY_CONSERVATIVE_TRIAL:
                                 await self._handle_conservative_trial(trade, tick)
+                            elif strategy == STRATEGY_FIXED_RR:
+                                # Nothing to do -- both the stop and the
+                                # target are real broker orders, so MT5
+                                # closes this trade itself and the
+                                # reconciliation poller picks it up. An
+                                # explicit branch is required: the else
+                                # below is _handle_scale_out, which would
+                                # otherwise partial-close against tp1 and
+                                # fabricate PnL (see the template comment).
+                                pass
                             elif _ea_templates.is_template_override(strategy):
                                 # Defence in depth alongside reclaim_ea_managed_
                                 # trade's own guard (core_monitor_loop.py) --

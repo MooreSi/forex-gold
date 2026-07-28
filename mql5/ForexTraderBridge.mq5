@@ -489,7 +489,12 @@ void HandleOpenTrade(const string json)
    // written to the broker order — see ManageTemplate()).
    double brokerTp = 0.0;
    string tplTpslModeEarly = isTemplate ? JsonGetString(json, "tpl_tpsl_mode", "on") : "";
-   if(strategy == "be_runner" || (isTemplate && tplTpslModeEarly == "on"))
+   // fixed_rr joins be_runner in getting a genuine broker TP -- it is the
+   // one strategy that is deliberately NOT managed after open at all, so
+   // MT5 must hold both the stop and the target itself. Python sends the
+   // computed target as tp1 (core_open_trade.py).
+   if(strategy == "be_runner" || strategy == "fixed_rr" ||
+      (isTemplate && tplTpslModeEarly == "on"))
    {
       for(int i = MAX_TPS - 1; i >= 0; i--)
       {
@@ -1699,6 +1704,11 @@ void ManageTrade(ManagedTrade &t, const MqlTick &tick)
    else if(t.strategy == "no_sl_scale") ManageNoSlScale(t, tick);
    else if(t.strategy == "unattended") ManageUnattended(t, tick);
    else if(t.strategy == "orb_fixed") ManageOrbFixed(t, tick);
+   // fixed_rr is intentionally unmanaged: its stop AND target are both
+   // real broker orders, so there is nothing to poll. This branch must
+   // exist -- without it the default below (ManageScaleOut) would
+   // partial-close it against tp[] levels it does not use.
+   else if(t.strategy == "fixed_rr") { return; }
    else ManageScaleOut(t, tick); // default / scale_out
 }
 

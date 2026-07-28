@@ -42,7 +42,7 @@ EA_PORTABLE_STRATEGIES = frozenset({
     "conservative", "scalp_runner", "conservative_trial",
     "signal_climber", "reversal_runner", "no_sl_scale",
     "adaptive_runner", "adaptive_runner_2", "orb_fixed",
-    "limit_runner",
+    "limit_runner", "fixed_rr",
 })
 
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy

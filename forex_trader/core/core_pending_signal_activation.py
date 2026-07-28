@@ -38,6 +38,7 @@ from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
+    STRATEGY_FIXED_RR,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
     Tick,
@@ -230,7 +231,7 @@ async def try_activate_pending_signals(
         else:
             _pw_strategy = current_strategy
         _self_mgd = {STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
-                     STRATEGY_SIGNAL_CLIMBER,
+                     STRATEGY_SIGNAL_CLIMBER, STRATEGY_FIXED_RR,
                      STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
                      STRATEGY_ADAPTIVE_RUNNER_2}
         _act_px = tick.ask if sig["direction"].upper() == "BUY" else tick.bid

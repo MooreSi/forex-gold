@@ -29,6 +29,7 @@ from forex_trader.core.core_risk_governor import is_trading_paused
 from forex_trader.core.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_FIXED_RR,
     STRATEGY_ADAPTIVE_RUNNER_2,
 )
 
@@ -223,6 +224,13 @@ async def open_trade(
         mt5_tp = mt5_tp_override
     elif strategy == STRATEGY_BE_RUNNER:
         mt5_tp = tp8 or tp7 or tp6 or tp5 or tp4 or tp3 or tp2 or tp1
+    elif strategy == STRATEGY_FIXED_RR:
+        # Fixed R:R's whole design is one broker stop and one broker
+        # target -- nothing polls it, so MT5 still closes the trade
+        # correctly if the app or the EA is down. tp1 carries the
+        # computed target (see core_open_trade_from_signal, which
+        # rewrites both levels to be exact from the real fill).
+        mt5_tp = tp1
     else:
         mt5_tp = None
 

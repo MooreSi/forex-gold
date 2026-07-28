@@ -32,6 +32,7 @@ from forex_trader.core.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
+    STRATEGY_FIXED_RR,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, MAX_TP,
 )
 
@@ -192,9 +193,12 @@ async def resolve_open_trade_params(
     # so the TP1 R:R check would be measuring against a stop that isn't
     # actually going to be used. EA Templates join them too — the EA computes
     # its own management independent of the raw TP1 distance.
+    # Fixed R:R joins them: it replaces both the stop AND the target with
+    # its own fixed distances from fill, so a check against the signal's
+    # TP1 measures levels this strategy will never use.
     _self_level_strategies = (
         STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
-        STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
+        STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER, STRATEGY_FIXED_RR,
         STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     )
     if strategy not in _self_level_strategies and not _is_template:
@@ -296,6 +300,27 @@ async def resolve_open_trade_params(
             stop_loss_to_use = round(entry_mid - sl_dist * 1.5, 2)
         else:
             stop_loss_to_use = round(entry_mid + sl_dist * 1.5, 2)
+    elif strategy == STRATEGY_FIXED_RR:
+        # Fixed R:R -- stop and target are both fixed distances from the
+        # fill, and both go to the broker, so the signal's own SL/TP are
+        # used for nothing but the entry zone.
+        #
+        # Recomputing the lot from that fixed stop is the point, not a
+        # side effect: it makes risk per trade constant instead of a
+        # function of whatever stop distance the signal happened to carry.
+        # Measured 2026-07-28, realised risk across one day ranged $4.87
+        # to $300 (0.5%-32.6% of balance) against a configured 0.5%,
+        # because a fixed lot decouples size from stop distance entirely.
+        _fr_sl_pt     = get_strategy_params(strategy)["sl_pt"]
+        _fr_sign      = 1.0 if sig["direction"].upper() == "BUY" else -1.0
+        _fr_entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+        stop_loss_to_use = round(_fr_entry_mid - _fr_sign * _fr_sl_pt, 2)
+        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
+            _fr_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+            _fr_balance  = await get_trading_balance(bridge, starting_balance)
+            lot_size = max(0.01, round(
+                suggest_lot_size(_fr_entry_mid, stop_loss_to_use, _fr_balance, _fr_risk_pct), 2
+            ))
     elif strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
         # Fixed-point SL/TP from fill; signal levels ignored after fill.
         # Live-tunable via core_strategy_params (Trading > Strategy).

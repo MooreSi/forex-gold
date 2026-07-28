@@ -22,12 +22,13 @@ from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_update_signal import update_signal
 from forex_trader.core.models import (
-    STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_BE_RUNNER, Tick,
+    STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_BE_RUNNER,
+    STRATEGY_FIXED_RR, Tick,
 )
 
 log = logging.getLogger(__name__)
 
-_IME_SELF_MANAGED = {STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL}
+_IME_SELF_MANAGED = {STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_FIXED_RR}
 
 
 async def apply_followup_to_instant_trade(

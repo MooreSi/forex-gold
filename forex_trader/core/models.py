@@ -120,6 +120,25 @@ STRATEGY_ADAPTIVE_RUNNER_2    = "adaptive_runner_2"
 STRATEGY_LIMIT_RUNNER         = "limit_runner"
 STRATEGY_FIXED_RR             = "fixed_rr"
 
+# Strategies that compute their own SL (and, for Fixed R:R, TP) from the
+# actual fill price and deliberately ignore the signal's own levels.
+#
+# These must not accept a mid-trade SL override pushed by a channel
+# ("SL IS SET TO BE AT 4021", "risk free at ...", "set SL to ..."), because
+# the override replaces the very level the strategy exists to control.
+# Fixed R:R is the sharpest case: its 4pt stop is the measured output of
+# tools/exit_policy_lab.py, and SL-tightening/breakeven moves reduced
+# expectancy in 14 of 14 configurations tested (2026-07-28). Obeying the
+# channel would hand back the edge the strategy was built to capture, and
+# would do it silently, mid-trade.
+#
+# Signal-following strategies are deliberately NOT in this set -- they use
+# the channel's levels by design, so a channel updating those levels is
+# information, not interference.
+STRATEGIES_OWN_SL = frozenset({
+    "conservative", "conservative_trial", "scalp_runner", "fixed_rr",
+})
+
 STRATEGY_NAMES = {
     STRATEGY_FIXED_RR:           "Fixed R:R",
     STRATEGY_SCALE_OUT:          "Scale Out + Breakeven",

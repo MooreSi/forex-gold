@@ -29,6 +29,7 @@ from forex_trader.core import ai_signal_extractor
 from forex_trader.core import claude_ai
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
+from forex_trader.core.models import STRATEGIES_OWN_SL
 from forex_trader.core.signal_parser import _CURRENCY_RE
 
 log = logging.getLogger(__name__)
@@ -220,6 +221,23 @@ async def apply_sl_adjustment(
     mt5_ticket = trade.get("mt5_ticket")
     trade_id   = trade["trade_id"]
     old_sl     = trade.get("stop_loss")
+
+    # Strategies that set their own SL from the fill price do not accept a
+    # channel-pushed override -- it would replace the exact level the
+    # strategy exists to control, silently and mid-trade. See
+    # models.STRATEGIES_OWN_SL for the full reasoning and the measurements
+    # behind it. Signal-following strategies are unaffected.
+    _strategy = (trade.get("strategy") or "")
+    if _strategy in STRATEGIES_OWN_SL:
+        log.info(
+            "[%s] SL adjustment (tg_id=%s, via=%s) target %.2f SKIPPED for "
+            "trade=%s -- strategy=%s manages its own SL (currently %.2f) from "
+            "the fill price and ignores channel-pushed levels by design",
+            channel_name, tg_id, via, new_sl, trade_id[:8], _strategy,
+            float(old_sl) if old_sl is not None else 0.0,
+        )
+        return
+
     if old_sl is not None and abs(float(old_sl) - new_sl) < 0.011:
         log.info(
             "[%s] SL adjustment (tg_id=%s, via=%s) target %.2f already matches "

@@ -372,3 +372,47 @@ def test_apply_sl_adjustment_success_still_updates_db_and_alerts(fresh_db):
         ).fetchone()
     assert row[0] == 2395.0
     assert sent and "REJECTED" not in sent[0]
+
+
+# ── Self-managed strategies reject channel-pushed SL overrides ─────────────
+
+def _set_strategy(trade_id, strategy):
+    with db.db() as conn:
+        conn.execute("UPDATE vantage_simulated_trades SET strategy=? WHERE trade_id=?",
+                     (strategy, trade_id))
+
+
+@pytest.mark.parametrize("strategy", sorted(
+    __import__("forex_trader.core.models", fromlist=["x"]).STRATEGIES_OWN_SL))
+def test_own_sl_strategies_ignore_channel_pushed_sl(fresh_db, strategy):
+    """Fixed R:R's 4pt stop is the measured output of the exit-policy lab,
+    and SL-tightening reduced expectancy in 14/14 configurations tested.
+    A channel message ("SL IS SET TO BE AT 4021") must not silently replace
+    it mid-trade. Same reasoning for the other fill-relative strategies."""
+    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
+    _set_strategy("t-1", strategy)
+    bridge = _FakeBridge()
+    asyncio.run(fb.apply_sl_adjustment(2395.0, "Chan", "tg-1", "logic_keyword", bridge))
+
+    assert bridge.modify_order_calls == [], "must not touch the broker"
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",),
+        ).fetchone()
+    assert row[0] == 2390.0, "strategy's own stop must survive"
+
+
+def test_signal_following_strategies_still_accept_channel_sl(fresh_db):
+    """The exclusion must be narrow -- strategies that trade the channel's
+    own levels should keep following the channel's updates."""
+    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
+    _set_strategy("t-1", "signal_climber")
+    bridge = _FakeBridge()
+    asyncio.run(fb.apply_sl_adjustment(2395.0, "Chan", "tg-1", "logic_keyword", bridge))
+
+    assert bridge.modify_order_calls == [{"ticket": 555, "sl": 2395.0, "tp": None}]
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",),
+        ).fetchone()
+    assert row[0] == 2395.0

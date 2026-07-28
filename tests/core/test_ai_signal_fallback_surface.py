@@ -63,6 +63,20 @@ class _RaisingBridge:
         raise RuntimeError("mt5 unavailable")
 
 
+class _RejectingBridge:
+    """The broker refuses the modify. Critically this is reported as a
+    RETURNED {"error": ...} dict, not a raised exception -- the shape that
+    made rejected SL moves look successful (see apply_sl_adjustment)."""
+
+    def __init__(self, error="Modify failed: 10016"):
+        self.modify_order_calls = []
+        self._error = error
+
+    async def modify_order(self, ticket, sl=None, tp=None):
+        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
+        return {"error": self._error}
+
+
 def _insert_open_trade(trade_id="t-1", tg_source="GD VIP", mt5_ticket=555, stop_loss=2390.0):
     with db.db() as conn:
         conn.execute(
@@ -284,3 +298,77 @@ def test_analyse_unrecognised_message_exception_still_updates_row(fresh_db):
             "SELECT claude_analysis FROM channel_unrecognised_messages WHERE id=?", (unrec_id,)
         ).fetchone()
     assert "ai down" in row[0]
+
+
+def test_apply_sl_adjustment_broker_rejection_does_not_touch_db(fresh_db):
+    """Regression -- live 2026-07-28, ticket 1663956102. A RISK FREE/BE
+    instruction arrived after price had run past breakeven, so the stop was
+    on the wrong side of the market and MT5 rejected it with "Invalid
+    stops". modify_order reports that by RETURNING {"error": ...}, so the
+    surrounding try/except never fired: the DB was updated and an "SL
+    adjusted" alert sent for a stop the broker never accepted, leaving the
+    position on its original, much wider risk with nobody aware."""
+    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
+    bridge = _RejectingBridge(error="Modify failed: 10016")
+    asyncio.run(fb.apply_sl_adjustment(2395.0, "Chan", "tg-1", "logic_keyword", bridge))
+
+    # The attempt is still made -- it is the bookkeeping that must not lie.
+    assert bridge.modify_order_calls == [{"ticket": 555, "sl": 2395.0, "tp": None}]
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",),
+        ).fetchone()
+    assert row[0] == 2390.0, "DB must keep the real, unmoved SL on rejection"
+
+
+def _run_and_drain(coro_fn):
+    """apply_sl_adjustment fires its Telegram alert via asyncio.create_task,
+    so the task needs the loop to tick once more before it has actually
+    run -- asyncio.run() only awaits the main coroutine."""
+    async def _outer():
+        await coro_fn()
+        for _ in range(3):
+            await asyncio.sleep(0)
+    asyncio.run(_outer())
+
+
+def test_apply_sl_adjustment_rejection_alerts_that_sl_did_not_move(fresh_db):
+    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
+    sent = []
+
+    async def _capture(msg, *a, **k):
+        sent.append(msg)
+
+    bridge = _RejectingBridge()
+    with mock.patch.object(fb.telegram_alerts, "send_message", side_effect=_capture):
+        _run_and_drain(lambda: fb.apply_sl_adjustment(
+            2395.0, "Chan", "tg-1", "logic_keyword", bridge,
+        ))
+
+    assert sent, "a rejection must still be reported, not swallowed"
+    body = sent[0]
+    assert "REJECTED" in body
+    assert "NOT moved" in body
+    assert "10016" in body
+
+
+def test_apply_sl_adjustment_success_still_updates_db_and_alerts(fresh_db):
+    """The happy path must be unchanged by the rejection guard."""
+    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
+    sent = []
+
+    async def _capture(msg, *a, **k):
+        sent.append(msg)
+
+    bridge = _FakeBridge()
+    with mock.patch.object(fb.telegram_alerts, "send_message", side_effect=_capture):
+        _run_and_drain(lambda: fb.apply_sl_adjustment(
+            2395.0, "Chan", "tg-1", "logic_keyword", bridge,
+        ))
+
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",),
+        ).fetchone()
+    assert row[0] == 2395.0
+    assert sent and "REJECTED" not in sent[0]

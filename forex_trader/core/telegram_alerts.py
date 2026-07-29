@@ -190,6 +190,7 @@ def fmt_signal(
     strategy_name: str = "",
     ai_confidence: Optional[float] = None,
     ai_reasoning: str = "",
+    mt5_ticket=None,
 ) -> str:
     direction = parsed.get("direction", "?")
     header    = "🤖 AUTO-EXECUTED" if executed else "📩 Signal Detected"
@@ -208,6 +209,15 @@ def fmt_signal(
     if executed and exec_lot is not None:
         price_str = f"~{exec_price}" if exec_price else "market"
         lines.append(f"✅ AUTO-EXECUTED {direction} {exec_lot} lots @ {price_str}  (MT5 order placed)")
+        # mt5_ticket=0 is a genuine value, not "missing" -- an EA Template
+        # grid parent row is a deliberate placeholder (real fills land as
+        # separate per-leg tickets, see fmt_grid_leg_fill below), so it's
+        # shown as such rather than silently omitted.
+        if mt5_ticket is not None:
+            lines.append(
+                f"MT5 Ticket: {mt5_ticket}" if mt5_ticket else
+                "MT5 Ticket: pending (grid parent — legs report their own ticket on fill)"
+            )
         if strategy_name:
             lines.append(f"Strategy: {_md_esc(strategy_name)}")
             lines.append(f"Node: {_node_label()}")

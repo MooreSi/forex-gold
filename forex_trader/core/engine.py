@@ -2372,6 +2372,7 @@ class SimulationEngine:
                     exec_lot, exec_price, skip_reason, _alert_strategy,
                     ai_confidence=parsed.get("_ai_confidence") if parsed.get("_ai_extracted") else None,
                     ai_reasoning=parsed.get("_ai_reasoning", "") if parsed.get("_ai_extracted") else "",
+                    mt5_ticket=(trade_result or {}).get("mt5_ticket"),
                 )
                 asyncio.create_task(telegram_alerts.send_message(alert, event_type="tg_signal_detected"))
             new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,

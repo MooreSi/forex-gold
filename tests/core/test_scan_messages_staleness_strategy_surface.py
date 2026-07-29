@@ -53,7 +53,13 @@ def _get_tg_row(tg_id):
         return db.row_to_dict(r) if r else None
 
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+# Evaluated per call, not at import. As a module-level constant this was
+# fixed at collection time, so by the time these tests ran near the end of
+# a ~6 minute suite the "fresh" timestamp was older than the production
+# staleness threshold (_MAX_SIGNAL_AGE_SECS = 4 minutes) and the signal was
+# correctly rejected as stale. Passed in isolation, failed in the full run.
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 _STALE_ISO = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
 
 _PARSED = {"direction": "BUY", "entry_low": 4529.0, "entry_high": 4534.0, "stop_loss": 4527.0,
@@ -94,7 +100,7 @@ def test_no_timestamp_treated_as_stale(fresh_db):
 
 def test_fresh_message_recorded_new(fresh_db):
     proceed = asyncio.run(ss.record_staleness_or_new(
-        "c2", "g1", "TestChannel", _msg("c2", _NOW_ISO), _PARSED, "TestChannel"))
+        "c2", "g1", "TestChannel", _msg("c2", _now_iso()), _PARSED, "TestChannel"))
     assert proceed is True
     row = _get_tg_row("c2")
     assert row["status"] == "new"

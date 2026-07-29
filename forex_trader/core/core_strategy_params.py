@@ -165,6 +165,11 @@ _DEFAULTS: dict[str, dict[str, float]] = {
 _CACHE_TTL = 10.0  # seconds -- these change only on user edit
 _cache: dict[str, tuple[dict, float]] = {}
 
+# Keyed on strategy and time, not on which database is open, so without this a
+# demo/live switch would keep serving the other environment's parameters for up
+# to _CACHE_TTL. Same defect as get_risk_settings() had; see database.init().
+db_module.register_cache_invalidator(_cache.clear)
+
 
 def default_params(strategy: str) -> dict[str, float]:
     return dict(_DEFAULTS.get(strategy, {}))

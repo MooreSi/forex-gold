@@ -92,7 +92,13 @@ def _get_last_signal():
         )
 
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+# Evaluated per call, not at import. As a module-level constant this was
+# fixed at collection time, so by the time these tests ran near the end of
+# a ~6 minute suite the "fresh" timestamp was older than the production
+# staleness threshold (_MAX_SIGNAL_AGE_SECS = 4 minutes) and the signal was
+# correctly rejected as stale. Passed in isolation, failed in the full run.
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 _GD2_FULL = "XAU USD BUY NOW\n\n4534 - 4529\n\nTP1 4537\nTP2 4539\nTP3 4541\nTP4 4543\nTP5 4545\n\nSL 4527"
 _IN_ZONE_TICK = SimpleNamespace(bid=4530.0, ask=4531.0)
 
@@ -127,7 +133,7 @@ def _run(msgs, tick, open_trade_fn=None, open_trades=None, filter_err=None,
 
 def test_in_zone_execute_happy_path(fresh_db):
     result, calls, alerts, bridge = _run(
-        [{"id": "d1", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK)
+        [{"id": "d1", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK)
     assert result[0]["auto_executed"] is True
     assert len(calls) == 1
     assert calls[0]["strategy"] == "scale_out"
@@ -138,7 +144,7 @@ def test_in_zone_execute_happy_path(fresh_db):
 def test_ime_followup_matched_skips_open_trade(fresh_db):
     db.update_risk_settings({"immediate_market_entry": 1})
     result, calls, alerts, bridge = _run(
-        [{"id": "d13", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d13", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         followup_matched=True,
     )
     assert result[0]["auto_executed"] is True
@@ -148,7 +154,7 @@ def test_ime_followup_matched_skips_open_trade(fresh_db):
 def test_max_open_trades_reached_skips(fresh_db):
     db.update_risk_settings({"max_open_trades": 3})
     result, calls, alerts, bridge = _run(
-        [{"id": "d2", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d2", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         open_trades=[{}] * 3,
     )
     assert result[0]["auto_executed"] is False
@@ -157,7 +163,7 @@ def test_max_open_trades_reached_skips(fresh_db):
 
 def test_no_tick_skips(fresh_db):
     result, calls, alerts, bridge = _run(
-        [{"id": "d3", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], None)
+        [{"id": "d3", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], None)
     assert result[0]["auto_executed"] is False
     assert calls == []
 
@@ -165,7 +171,7 @@ def test_no_tick_skips(fresh_db):
 def test_self_managed_conservative_uses_fixed_pre_execution_sl(fresh_db):
     db.set_channel_strategy_override("TestChannel", "conservative", auto=False)
     result, calls, alerts, bridge = _run(
-        [{"id": "d4", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK)
+        [{"id": "d4", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK)
     assert result[0]["auto_executed"] is True
     # entry_mid = 4531.5, CONSERVATIVE_SL_PT = 5.0, BUY -> entry_mid - 5
     assert calls[0]["stop_loss"] == 4526.5
@@ -174,7 +180,7 @@ def test_self_managed_conservative_uses_fixed_pre_execution_sl(fresh_db):
 def test_zone_breached_skips_outright(fresh_db):
     breached_tick = SimpleNamespace(bid=4520.0, ask=4520.5)  # below BUY zone 4529-4534
     result, calls, alerts, bridge = _run(
-        [{"id": "d5", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], breached_tick)
+        [{"id": "d5", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], breached_tick)
     assert result[0]["auto_executed"] is False
     assert calls == []
 
@@ -182,7 +188,7 @@ def test_zone_breached_skips_outright(fresh_db):
 def test_out_of_zone_not_breached_queues_pending(fresh_db):
     outside_tick = SimpleNamespace(bid=4538.0, ask=4538.5)  # above BUY zone, not gap-adjustable
     result, calls, alerts, bridge = _run(
-        [{"id": "d6", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], outside_tick)
+        [{"id": "d6", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], outside_tick)
     assert result[0]["auto_executed"] is False
     assert calls == []
     assert _get_last_signal()["status"] == "pending"
@@ -190,7 +196,7 @@ def test_out_of_zone_not_breached_queues_pending(fresh_db):
 
 def test_pre_trade_filter_fails_skips(fresh_db):
     result, calls, alerts, bridge = _run(
-        [{"id": "d14", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d14", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         filter_err="R:R too low",
     )
     assert result[0]["auto_executed"] is False
@@ -201,7 +207,7 @@ def test_validate_signal_fails_skips(fresh_db):
     db.set_channel_strategy_override("TestChannel", "scale_out", auto=False)
     bad_text = "XAU USD BUY NOW\n\n4534 - 4529\n\nTP1 4520\n\nSL 4527"  # TP1 wrong side of entry
     result, calls, alerts, bridge = _run(
-        [{"id": "d15", "group_id": "g1", "text": bad_text, "timestamp": _NOW_ISO}], _IN_ZONE_TICK)
+        [{"id": "d15", "group_id": "g1", "text": bad_text, "timestamp": _now_iso()}], _IN_ZONE_TICK)
     if result:
         assert result[0]["auto_executed"] is False
     assert calls == []
@@ -212,7 +218,7 @@ def test_open_trade_stood_down_silently_reverts_to_pending(fresh_db):
         raise ValueError("Trading stood down — the paired node has taken control")
 
     result, calls, alerts, bridge = _run(
-        [{"id": "d7", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d7", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         open_trade_fn=raise_stood_down, capture_alerts=True,
     )
     assert result[0]["auto_executed"] is False
@@ -225,7 +231,7 @@ def test_open_trade_circuit_breaker_surfaces_message_as_skip_reason(fresh_db):
         raise RuntimeError("circuit breaker active, cooldown 45 min")
 
     result, calls, alerts, bridge = _run(
-        [{"id": "d8", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d8", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         open_trade_fn=raise_cb, capture_alerts=True,
     )
     assert result[0]["auto_executed"] is False
@@ -237,7 +243,7 @@ def test_open_trade_other_error_generic_skip_reason(fresh_db):
         raise RuntimeError("something unexpected broke")
 
     result, calls, alerts, bridge = _run(
-        [{"id": "d9", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d9", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         open_trade_fn=raise_other, capture_alerts=True,
     )
     assert result[0]["auto_executed"] is False
@@ -249,7 +255,7 @@ def test_executed_remotely_suppresses_final_alert(fresh_db):
         return {"trade_id": "trade-remote", "entry_price": 4530.0, "executed_remotely": True}
 
     result, calls, alerts, bridge = _run(
-        [{"id": "d10", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+        [{"id": "d10", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
         open_trade_fn=remote_open, capture_alerts=True,
     )
     assert result[0]["auto_executed"] is True
@@ -261,7 +267,7 @@ def test_gap_adjusted_market_entry_gd2_source(fresh_db):
     db.save_channel_parser_config("Gold Diggers 2.0", "gd2", "", True, True, "test")
     gap_tick = SimpleNamespace(bid=4535.0, ask=4536.0)  # 2pt above BUY zone, within 10pt GD2 cap
     result, calls, alerts, bridge = _run(
-        [{"id": "d11", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], gap_tick,
+        [{"id": "d11", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], gap_tick,
         group_name="Gold Diggers 2.0",
     )
     assert result[0]["auto_executed"] is True
@@ -281,7 +287,7 @@ def test_ea_managed_conservative_post_fill_sync(fresh_db):
     fake_ea = SimpleNamespace(update_trade=mock.AsyncMock(side_effect=lambda tid, tps: ea_calls.append((tid, tps))))
     with mock.patch.object(ea_bridge, "get_instance", return_value=fake_ea):
         result, calls, alerts, bridge = _run(
-            [{"id": "d12", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], _IN_ZONE_TICK,
+            [{"id": "d12", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], _IN_ZONE_TICK,
             open_trade_fn=ea_open_trade,
         )
     assert result[0]["auto_executed"] is True

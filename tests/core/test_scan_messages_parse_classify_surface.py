@@ -53,7 +53,13 @@ def _get_tg_row(tg_id):
         return db.row_to_dict(r) if r else None
 
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+# Evaluated per call, not at import. As a module-level constant this was
+# fixed at collection time, so by the time these tests ran near the end of
+# a ~6 minute suite the "fresh" timestamp was older than the production
+# staleness threshold (_MAX_SIGNAL_AGE_SECS = 4 minutes) and the signal was
+# correctly rejected as stale. Passed in isolation, failed in the full run.
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 _GD2_FULL = "XAU USD BUY NOW\n\n4534 - 4529\n\nTP1 4537\nTP2 4539\nTP3 4541\nTP4 4543\nTP5 4545\n\nSL 4527"
 _GD2_PARTIAL = "XAU USD BUY NOW\n4534 - 4529"
@@ -69,7 +75,7 @@ _AI_RESULT = {"direction": "BUY", "entry_low": 4529.0, "entry_high": 4534.0, "st
 def _call(tg_id, text, parser_fmt, sig_prefix="", channel_name="TestChannel", group_id="g1",
          ai_return=None, force_gd2_all_fail=False, learned_rules_return=None, rs=None,
          ai_calls=None):
-    msg = {"id": tg_id, "group_id": group_id, "text": text, "timestamp": _NOW_ISO,
+    msg = {"id": tg_id, "group_id": group_id, "text": text, "timestamp": _now_iso(),
           "sender_name": "sender"}
     uq_calls = []
     alerts = []

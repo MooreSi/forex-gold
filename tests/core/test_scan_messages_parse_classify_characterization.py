@@ -81,7 +81,13 @@ def _get_tg_row(tg_id):
         return db.row_to_dict(r) if r else None
 
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+# Evaluated per call, not at import. As a module-level constant this was
+# fixed at collection time, so by the time these tests ran near the end of
+# a ~6 minute suite the "fresh" timestamp was older than the production
+# staleness threshold (_MAX_SIGNAL_AGE_SECS = 4 minutes) and the signal was
+# correctly rejected as stale. Passed in isolation, failed in the full run.
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 _GD2_FULL = "XAU USD BUY NOW\n\n4534 - 4529\n\nTP1 4537\nTP2 4539\nTP3 4541\nTP4 4543\nTP5 4545\n\nSL 4527"
 _GD2_PARTIAL = "XAU USD BUY NOW\n4534 - 4529"
@@ -141,7 +147,7 @@ def test_learned_rules_short_circuit(fresh_db):
                "tp1": 99.0, "tp2": None, "tp3": None, "tp4": None, "tp5": None,
                "tp6": None, "tp7": None, "tp8": None}
     result, uq, alerts = _run(
-        [{"id": "b1", "group_id": "g1", "text": "anything at all", "timestamp": _NOW_ISO}],
+        [{"id": "b1", "group_id": "g1", "text": "anything at all", "timestamp": _now_iso()}],
         learned_rules_return=learned,
     )
     assert len(result) == 1
@@ -152,7 +158,7 @@ def test_learned_rules_short_circuit(fresh_db):
 def test_format_ab_no_match_ai_fails_dropped(fresh_db):
     _setup_channel("format_ab")
     result, uq, alerts = _run(
-        [{"id": "b2", "group_id": "g1", "text": "totally unrelated chatter", "timestamp": _NOW_ISO}],
+        [{"id": "b2", "group_id": "g1", "text": "totally unrelated chatter", "timestamp": _now_iso()}],
         ai_return=None,
     )
     assert result == []
@@ -162,7 +168,7 @@ def test_format_ab_no_match_ai_fails_dropped(fresh_db):
 def test_format_ab_no_match_ai_recovers(fresh_db):
     _setup_channel("format_ab")
     result, uq, alerts = _run(
-        [{"id": "b3", "group_id": "g1", "text": "random gold buy chatter AI recovers", "timestamp": _NOW_ISO}],
+        [{"id": "b3", "group_id": "g1", "text": "random gold buy chatter AI recovers", "timestamp": _now_iso()}],
         ai_return=_AI_RESULT,
     )
     assert len(result) == 1
@@ -173,7 +179,7 @@ def test_format_ab_currency_mismatch_recorded_and_alerted(fresh_db):
     _setup_channel("format_ab")
     text = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
             "Currency: EURUSD\nBuy Gold 1.1200 - 1.1180\nStop Loss 1.1150\nTP1 1.1250")
-    result, uq, alerts = _run([{"id": "b4", "group_id": "g1", "text": text, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b4", "group_id": "g1", "text": text, "timestamp": _now_iso()}])
     assert result == []
     row = _get_tg_row("b4")
     assert row["status"] == "unsupported_currency"
@@ -187,15 +193,15 @@ def test_format_ab_currency_mismatch_dedup_window_suppresses_second_alert(fresh_
     text2 = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
              "Direction  BUY\nCurrency: EURUSD\nENTRY : 1.1190-1.1210\nTP1: 1.1260\nSL: 1.1160")
     result, uq, alerts = _run([
-        {"id": "dup1", "group_id": "g1", "text": text1, "timestamp": _NOW_ISO},
-        {"id": "dup2", "group_id": "g1", "text": text2, "timestamp": _NOW_ISO},
+        {"id": "dup1", "group_id": "g1", "text": text1, "timestamp": _now_iso()},
+        {"id": "dup2", "group_id": "g1", "text": text2, "timestamp": _now_iso()},
     ])
     assert len(alerts) == 1
 
 
 def test_format_ab_matches_parses_cleanly(fresh_db):
     _setup_channel("format_ab")
-    result, uq, alerts = _run([{"id": "b5", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b5", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert result[0]["direction"] == "SELL"
 
@@ -205,7 +211,7 @@ def test_format_ab_matches_parse_fails_ai_fails_queues_unrecognised(fresh_db):
     bad_text = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
                 "Direction BUY\nENTRY: 4510-4508\n")
     result, uq, alerts = _run(
-        [{"id": "b6", "group_id": "g1", "text": bad_text, "timestamp": _NOW_ISO}], ai_return=None,
+        [{"id": "b6", "group_id": "g1", "text": bad_text, "timestamp": _now_iso()}], ai_return=None,
     )
     assert result == []
     assert uq == [("b6", "TestChannel")]
@@ -214,7 +220,7 @@ def test_format_ab_matches_parse_fails_ai_fails_queues_unrecognised(fresh_db):
 def test_gd2_no_match_ai_fails_dropped(fresh_db):
     _setup_channel("gd2")
     result, uq, alerts = _run(
-        [{"id": "b8", "group_id": "g1", "text": "not a gold signal at all", "timestamp": _NOW_ISO}],
+        [{"id": "b8", "group_id": "g1", "text": "not a gold signal at all", "timestamp": _now_iso()}],
         ai_return=None,
     )
     assert result == []
@@ -224,7 +230,7 @@ def test_gd2_no_match_ai_fails_dropped(fresh_db):
 def test_gd2_no_match_ai_recovers(fresh_db):
     _setup_channel("gd2")
     result, uq, alerts = _run(
-        [{"id": "b9", "group_id": "g1", "text": "random gold buy chatter AI recovers as gd2", "timestamp": _NOW_ISO}],
+        [{"id": "b9", "group_id": "g1", "text": "random gold buy chatter AI recovers as gd2", "timestamp": _now_iso()}],
         ai_return=_AI_RESULT,
     )
     assert len(result) == 1
@@ -233,14 +239,14 @@ def test_gd2_no_match_ai_recovers(fresh_db):
 
 def test_gd2_full_parse_succeeds(fresh_db):
     _setup_channel("gd2")
-    result, uq, alerts = _run([{"id": "b10", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b10", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert result[0]["direction"] == "BUY"
 
 
 def test_gd2_partial_records_pending_followup(fresh_db):
     _setup_channel("gd2")
-    result, uq, alerts = _run([{"id": "b11", "group_id": "g1", "text": _GD2_PARTIAL, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b11", "group_id": "g1", "text": _GD2_PARTIAL, "timestamp": _now_iso()}])
     assert result == []
     row = _get_tg_row("b11")
     assert row["status"] == "pending_followup"
@@ -248,7 +254,7 @@ def test_gd2_partial_records_pending_followup(fresh_db):
 
 def test_gd2_bare_instant_trigger_silently_skipped(fresh_db):
     _setup_channel("gd2")
-    result, uq, alerts = _run([{"id": "b12", "group_id": "g1", "text": _GD2_BARE, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b12", "group_id": "g1", "text": _GD2_BARE, "timestamp": _now_iso()}])
     assert result == []
     assert uq == []
 
@@ -257,7 +263,7 @@ def test_gd2_all_parsers_fail_ai_fails_queues_unrecognised(fresh_db):
     _setup_channel("gd2")
     text = "XAU USD BUY NOW garbled unrecognisable content"
     result, uq, alerts = _run(
-        [{"id": "b13", "group_id": "g1", "text": text, "timestamp": _NOW_ISO}],
+        [{"id": "b13", "group_id": "g1", "text": text, "timestamp": _now_iso()}],
         ai_return=None, force_gd2_all_fail=True,
     )
     assert result == []
@@ -268,7 +274,7 @@ def test_gd2_all_parsers_fail_ai_recovers(fresh_db):
     _setup_channel("gd2")
     text = "XAU USD BUY NOW garbled unrecognisable content"
     result, uq, alerts = _run(
-        [{"id": "b14", "group_id": "g1", "text": text, "timestamp": _NOW_ISO}],
+        [{"id": "b14", "group_id": "g1", "text": text, "timestamp": _now_iso()}],
         ai_return=_AI_RESULT, force_gd2_all_fail=True,
     )
     assert len(result) == 1
@@ -277,21 +283,21 @@ def test_gd2_all_parsers_fail_ai_recovers(fresh_db):
 
 def test_auto_format_ab_matches_first(fresh_db):
     _setup_channel("auto", prefix="")
-    result, uq, alerts = _run([{"id": "b15", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b15", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert result[0]["direction"] == "SELL"
 
 
 def test_auto_falls_to_gd2_full_parse(fresh_db):
     _setup_channel("auto", prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH")
-    result, uq, alerts = _run([{"id": "b16", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b16", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert result[0]["direction"] == "BUY"
 
 
 def test_auto_gd2_partial_records_pending_followup(fresh_db):
     _setup_channel("auto", prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH")
-    result, uq, alerts = _run([{"id": "b17", "group_id": "g1", "text": _GD2_PARTIAL, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b17", "group_id": "g1", "text": _GD2_PARTIAL, "timestamp": _now_iso()}])
     assert result == []
     row = _get_tg_row("b17")
     assert row["status"] == "pending_followup"
@@ -300,7 +306,7 @@ def test_auto_gd2_partial_records_pending_followup(fresh_db):
 def test_auto_neither_matches_ai_fails_silently_dropped(fresh_db):
     _setup_channel("auto", prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH")
     result, uq, alerts = _run(
-        [{"id": "b18", "group_id": "g1", "text": "totally unrelated text", "timestamp": _NOW_ISO}],
+        [{"id": "b18", "group_id": "g1", "text": "totally unrelated text", "timestamp": _now_iso()}],
         ai_return=None,
     )
     assert result == []
@@ -310,7 +316,7 @@ def test_auto_neither_matches_ai_fails_silently_dropped(fresh_db):
 def test_auto_neither_matches_ai_recovers(fresh_db):
     _setup_channel("auto", prefix="SPECIFIC_PREFIX_THAT_WONT_MATCH")
     result, uq, alerts = _run(
-        [{"id": "b19", "group_id": "g1", "text": "totally unrelated gold buy text AI recovers", "timestamp": _NOW_ISO}],
+        [{"id": "b19", "group_id": "g1", "text": "totally unrelated gold buy text AI recovers", "timestamp": _now_iso()}],
         ai_return=_AI_RESULT,
     )
     assert len(result) == 1
@@ -327,7 +333,7 @@ def test_ai_fallback_skipped_when_no_candidate_keyword_present(fresh_db):
     ai_calls = []
     result, uq, alerts = _run(
         [{"id": "c1", "group_id": "g1",
-          "text": "friday market wrap up nothing exciting happened today", "timestamp": _NOW_ISO}],
+          "text": "friday market wrap up nothing exciting happened today", "timestamp": _now_iso()}],
         ai_return=_AI_RESULT, ai_calls=ai_calls,
     )
     assert result == []
@@ -342,7 +348,7 @@ def test_ai_fallback_skipped_when_no_candidate_keyword_present(fresh_db):
 def test_tp_parsing_disabled_strips_all_tp_fields(fresh_db):
     _setup_channel("format_ab")
     db.update_risk_settings({"lk_enable_tp_parsing": 0})
-    result, uq, alerts = _run([{"id": "b20", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b20", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert all(result[0].get(f"tp{i}") is None for i in range(1, 9))
     assert result[0]["stop_loss"] is not None  # SL untouched by this toggle
@@ -351,7 +357,7 @@ def test_tp_parsing_disabled_strips_all_tp_fields(fresh_db):
 def test_sl_parsing_disabled_strips_stop_loss(fresh_db):
     _setup_channel("format_ab")
     db.update_risk_settings({"lk_enable_sl_parsing": 0})
-    result, uq, alerts = _run([{"id": "b21", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b21", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert result[0]["stop_loss"] is None
     assert result[0]["tp1"] is not None  # TP untouched by this toggle
@@ -359,7 +365,7 @@ def test_sl_parsing_disabled_strips_stop_loss(fresh_db):
 
 def test_tp_and_sl_parsing_enabled_by_default_unchanged(fresh_db):
     _setup_channel("format_ab")
-    result, uq, alerts = _run([{"id": "b22", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b22", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert len(result) == 1
     assert result[0]["tp1"] is not None
     assert result[0]["stop_loss"] is not None

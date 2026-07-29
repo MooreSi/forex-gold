@@ -98,6 +98,37 @@ def _close_thread_local_conn() -> None:
         del _thread_local.depth
 
 
+# Caches derived from the database's contents, which must be dropped whenever
+# the active database changes. Modules register their own clear function at
+# import time, so this file does not need to import them back and create a
+# cycle -- core_strategy_params already imports this module.
+#
+# This exists because the same defect was found twice. get_risk_settings()
+# memoised for 10s keyed on nothing but time, so a demo/live switch kept
+# answering with the other environment's risk settings; core_strategy_params
+# has a module-level dict with an identical 10s TTL and the same problem. A
+# registry makes the next one a one-line registration instead of a third bug.
+_cache_invalidators: list = []
+
+
+def register_cache_invalidator(fn):
+    """Register a callable to be run whenever init() re-points the database.
+
+    Usable as a decorator or a plain call. Any cache whose contents come from
+    the database belongs here.
+    """
+    _cache_invalidators.append(fn)
+    return fn
+
+
+def _invalidate_registered_caches() -> None:
+    for fn in _cache_invalidators:
+        try:
+            fn()
+        except Exception:  # a broken invalidator must not block the switch
+            log.exception("[db] cache invalidator failed")
+
+
 def init(db_path: str) -> None:
     global _DB_PATH
     # db() caches one connection per thread for the life of that thread, so
@@ -126,6 +157,7 @@ def init(db_path: str) -> None:
     global _rs_cache, _rs_cache_ts
     _rs_cache = None
     _rs_cache_ts = 0.0
+    _invalidate_registered_caches()
     _DB_PATH = db_path
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     _apply_schema()

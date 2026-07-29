@@ -83,7 +83,13 @@ def _get_tg_row(tg_id):
         return db.row_to_dict(r) if r else None
 
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+# Evaluated per call, not at import. As a module-level constant this was
+# fixed at collection time, so by the time these tests ran near the end of
+# a ~6 minute suite the "fresh" timestamp was older than the production
+# staleness threshold (_MAX_SIGNAL_AGE_SECS = 4 minutes) and the signal was
+# correctly rejected as stale. Passed in isolation, failed in the full run.
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 _STALE_ISO = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
 _GD2_FULL = "XAU USD BUY NOW\n\n4534 - 4529\n\nTP1 4537\nTP2 4539\nTP3 4541\nTP4 4543\nTP5 4545\n\nSL 4527"
 
@@ -143,7 +149,7 @@ def test_no_timestamp_treated_as_stale(fresh_db):
 
 
 def test_fresh_message_recorded_new(fresh_db):
-    result, calls, alerts = _run([{"id": "c2", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c2", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert len(result) == 1
     row = _get_tg_row("c2")
     assert row["status"] == "new"
@@ -151,14 +157,14 @@ def test_fresh_message_recorded_new(fresh_db):
 
 def test_no_override_uses_global_trade_strategy(fresh_db):
     db.update_risk_settings({"trade_strategy": "be_runner"})
-    result, calls, alerts = _run([{"id": "c4", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c4", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert calls[0]["strategy_name"] == "Breakeven Runner"
 
 
 def test_auto_override_auto_execute_off_uses_channel_rec(fresh_db):
     db.set_channel_strategy_override("TestChannel", None, auto=True)
     db.set_channel_strategy_rec("TestChannel", "trail_stop", "reasoning", 0.9)
-    result, calls, alerts = _run([{"id": "c5", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c5", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert calls[0]["strategy_name"] == "Trailing Stop"
 
 
@@ -167,7 +173,7 @@ def test_auto_override_ai_not_configured_uses_channel_rec(fresh_db):
     db.set_channel_strategy_override("TestChannel", None, auto=True)
     db.set_channel_strategy_rec("TestChannel", "protected_scale", "reasoning", 0.9)
     result, calls, alerts = _run(
-        [{"id": "c6", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], ai_configured=False,
+        [{"id": "c6", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], ai_configured=False,
     )
     assert calls[0]["strategy_name"] == "Protected Scale"
 
@@ -176,7 +182,7 @@ def test_auto_override_ai_eval_skip(fresh_db):
     db.update_risk_settings({"auto_execute_signals": 1})
     db.set_channel_strategy_override("TestChannel", None, auto=True)
     result, calls, alerts = _run(
-        [{"id": "c7", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}],
+        [{"id": "c7", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}],
         ai_configured=True, eval_return={"skip": True, "reasoning": "too risky"},
     )
     assert calls[0]["skip_reason"] == "Auto-eval declined signal: too risky"
@@ -186,7 +192,7 @@ def test_auto_override_ai_eval_strategy(fresh_db):
     db.update_risk_settings({"auto_execute_signals": 1})
     db.set_channel_strategy_override("TestChannel", None, auto=True)
     result, calls, alerts = _run(
-        [{"id": "c8", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}],
+        [{"id": "c8", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}],
         ai_configured=True, eval_return={"skip": False, "strategy": "no_sl_scale", "confidence": 0.8},
     )
     assert calls[0]["strategy_name"] == "Trend Ratchet"
@@ -197,7 +203,7 @@ def test_auto_override_ai_eval_raises_falls_back_to_channel_rec(fresh_db):
     db.set_channel_strategy_override("TestChannel", None, auto=True)
     db.set_channel_strategy_rec("TestChannel", "conservative_trial", "reasoning", 0.9)
     result, calls, alerts = _run(
-        [{"id": "c9", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}],
+        [{"id": "c9", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}],
         ai_configured=True, eval_raises=True,
     )
     assert calls[0]["strategy_name"] == "Conservative Trial"
@@ -205,26 +211,26 @@ def test_auto_override_ai_eval_raises_falls_back_to_channel_rec(fresh_db):
 
 def test_specific_channel_override_used_directly(fresh_db):
     db.set_channel_strategy_override("TestChannel", "trail_stop", auto=False)
-    result, calls, alerts = _run([{"id": "c10", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c10", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert calls[0]["strategy_name"] == "Trailing Stop"
 
 
 def test_high_risk_text_forces_conservative(fresh_db):
     db.set_channel_strategy_override("TestChannel", "trail_stop", auto=False)
     text_hr = _GD2_FULL + "\nHigh Risk Trade"
-    result, calls, alerts = _run([{"id": "c11", "group_id": "g1", "text": text_hr, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c11", "group_id": "g1", "text": text_hr, "timestamp": _now_iso()}])
     assert calls[0]["strategy_name"] == "Conservative"
 
 
 def test_dpm_enabled_overrides_displayed_name_only(fresh_db):
     db.update_risk_settings({"dpm_enabled": 1})
-    result, calls, alerts = _run([{"id": "c12", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c12", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert calls[0]["strategy_name"] == "DPM"
 
 
 def test_session_not_allowed_skip_reason(fresh_db):
     result, calls, alerts = _run(
-        [{"id": "c13", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}],
+        [{"id": "c13", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}],
         session_allowed=(False, "asian"),
     )
     assert "Asian Market Turned Off" in calls[0]["skip_reason"]
@@ -234,11 +240,11 @@ def test_trading_paused_skip_reason(fresh_db):
     db.set_app_config("risk_halt_reason", "daily loss limit hit")
     db.set_app_config("trade_pause_until", str(time.time() + 3600))
     result, calls, alerts = _run(
-        [{"id": "c14", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}], trading_paused=True,
+        [{"id": "c14", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}], trading_paused=True,
     )
     assert "daily loss limit hit" in calls[0]["skip_reason"]
 
 
 def test_default_skip_reason(fresh_db):
-    result, calls, alerts = _run([{"id": "c15", "group_id": "g1", "text": _GD2_FULL, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c15", "group_id": "g1", "text": _GD2_FULL, "timestamp": _now_iso()}])
     assert calls[0]["skip_reason"] == "Auto-execution is OFF — activate manually in the dashboard."

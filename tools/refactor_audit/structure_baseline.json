@@ -8,7 +8,7 @@
   "baseline": {
     "loc": {
       "forex_trader/core/backtest_engine.py": 1125,
-      "forex_trader/core/database.py": 1208,
+      "forex_trader/core/database.py": 1240,
       "forex_trader/core/ea_bridge.py": 816,
       "forex_trader/core/email_service.py": 946,
       "forex_trader/core/engine.py": 3144,
@@ -60,12 +60,11 @@
       "forex_trader/core/core_manual_market_order.py": 1,
       "forex_trader/core/core_monitor_loop.py": 1,
       "forex_trader/core/core_mt5_import.py": 2,
-      "forex_trader/core/core_mt5_position_sync.py": 6,
       "forex_trader/core/core_open_trade.py": 3,
       "forex_trader/core/core_open_trade_from_signal.py": 9,
       "forex_trader/core/core_partial_close.py": 7,
       "forex_trader/core/core_pending_signal_activation.py": 5,
-      "forex_trader/core/core_profit_sync.py": 8,
+      "forex_trader/core/core_profit_sync.py": 6,
       "forex_trader/core/core_risk_governor.py": 3,
       "forex_trader/core/core_run_tp_ladder.py": 1,
       "forex_trader/core/core_scan_messages_auto_execute.py": 8,

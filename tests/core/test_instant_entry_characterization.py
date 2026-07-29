@@ -69,7 +69,13 @@ def engine(fresh_db):
     return e
 
 
-_FRESH_TS = datetime.now(timezone.utc).isoformat()
+# Evaluated per call, not at import. As a module-level constant this was
+# fixed at collection time, so by the time these tests ran near the end of
+# a ~6 minute suite the "fresh" timestamp was older than the production
+# staleness threshold (_MAX_SIGNAL_AGE_SECS = 4 minutes) and the signal was
+# correctly rejected as stale. Passed in isolation, failed in the full run.
+def _fresh_ts() -> str:
+    return datetime.now(timezone.utc).isoformat()
 _STALE_TS = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 _TICK = SimpleNamespace(bid=2414.5, ask=2415.0, spread_points=10.0)
 _TRADE_RESULT = {"entry_price": 2415.0, "mt5_ticket": 777, "trade_id": "trade-abc", "managed_by": "app"}
@@ -110,33 +116,33 @@ def test_no_timestamp_treated_as_stale(fresh_db, engine):
 
 
 def test_auto_execute_off_recorded_pending_no_signal(fresh_db, engine):
-    _run(engine, {"timestamp": _FRESH_TS}, "tg-3", "BUY", None, _rs(), False)
+    _run(engine, {"timestamp": _fresh_ts()}, "tg-3", "BUY", None, _rs(), False)
     assert _tg_status("tg-3") == "instant_pending"
     assert _signals_count() == 0
 
 
 def test_session_blocked_no_signal(fresh_db, engine):
     with mock.patch.object(db, "is_session_allowed", return_value=(False, "Asian")):
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-4", "BUY", None, _rs(), True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-4", "BUY", None, _rs(), True)
     assert _signals_count() == 0
 
 
 def test_no_tick_no_signal(fresh_db, engine):
-    _run(engine, {"timestamp": _FRESH_TS}, "tg-5", "BUY", None, _rs(), True)
+    _run(engine, {"timestamp": _fresh_ts()}, "tg-5", "BUY", None, _rs(), True)
     assert _signals_count() == 0
 
 
 def test_wide_spread_no_signal(fresh_db, engine):
     wide_tick = SimpleNamespace(bid=2414.5, ask=2415.0, spread_points=100.0)
     engine._bridge.get_tick = mock.AsyncMock(return_value=wide_tick)
-    _run(engine, {"timestamp": _FRESH_TS}, "tg-6", "BUY", None, _rs(), True)
+    _run(engine, {"timestamp": _fresh_ts()}, "tg-6", "BUY", None, _rs(), True)
     assert _signals_count() == 0
 
 
 def test_max_open_trades_reached_no_signal(fresh_db, engine):
     engine._bridge.get_tick = mock.AsyncMock(return_value=_TICK)
     with mock.patch.object(core_instant_entry, "get_open_trades", return_value=[{"trade_id": "x"}]):
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-7", "BUY", None, _rs(), True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-7", "BUY", None, _rs(), True)
     assert _signals_count() == 0
 
 
@@ -145,7 +151,7 @@ def _run_open_trade_path(engine, rs, tg_id="tg-8"):
     with mock.patch.object(core_instant_entry, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade", new=mock.AsyncMock(return_value=_TRADE_RESULT)) as ot:
-        _run(engine, {"timestamp": _FRESH_TS}, tg_id, "BUY", None, rs, True)
+        _run(engine, {"timestamp": _fresh_ts()}, tg_id, "BUY", None, rs, True)
     return ot
 
 
@@ -162,7 +168,7 @@ def test_governor_on_default_settings_skips_entirely(fresh_db, engine):
     with mock.patch.object(core_instant_entry, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade", new=mock.AsyncMock(return_value=_TRADE_RESULT)) as ot:
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-9", "BUY", None, rs, True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-9", "BUY", None, rs, True)
     assert not ot.called
 
 
@@ -207,7 +213,7 @@ def test_high_risk_text_forces_conservative(fresh_db, engine):
     with mock.patch.object(core_instant_entry, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade", new=mock.AsyncMock(return_value=_TRADE_RESULT)) as ot:
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-15", "BUY", None, _rs(), True,
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-15", "BUY", None, _rs(), True,
              text="XAU Buy Now — High Risk")
     assert ot.call_args.kwargs["strategy"] == "conservative"
 
@@ -235,7 +241,7 @@ def test_conservative_post_fill_overrides_sl_tp1_from_fill(fresh_db, engine):
     with mock.patch.object(core_instant_entry, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade", new=mock.AsyncMock(return_value=_TRADE_RESULT)):
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-16", "BUY", None, rs, True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-16", "BUY", None, rs, True)
 
     with db.db() as conn:
         row = db.row_to_dict(
@@ -266,7 +272,7 @@ def test_conservative_trial_post_fill_sets_six_tp_ladder(fresh_db, engine):
     with mock.patch.object(core_instant_entry, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade", new=mock.AsyncMock(return_value=_TRADE_RESULT)):
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-17", "BUY", None, rs, True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-17", "BUY", None, rs, True)
 
     with db.db() as conn:
         row = db.row_to_dict(
@@ -282,7 +288,7 @@ def test_open_trade_exception_rolls_back_signal_and_marks_failed(fresh_db, engin
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade",
                            new=mock.AsyncMock(side_effect=RuntimeError("mt5 fail"))):
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-18", "BUY", None, _rs(), True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-18", "BUY", None, _rs(), True)
 
     assert _signals_count() == 0
     assert _tg_status("tg-18") == "instant_failed"
@@ -294,7 +300,7 @@ def test_circuit_breaker_exception_same_cleanup_as_generic(fresh_db, engine):
          mock.patch.object(core_instant_entry, "get_open_trades", return_value=[]), \
          mock.patch.object(core_instant_entry, "open_trade",
                            new=mock.AsyncMock(side_effect=ValueError("circuit breaker tripped"))):
-        _run(engine, {"timestamp": _FRESH_TS}, "tg-19", "BUY", None, _rs(), True)
+        _run(engine, {"timestamp": _fresh_ts()}, "tg-19", "BUY", None, _rs(), True)
 
     assert _signals_count() == 0
     assert _tg_status("tg-19") == "instant_failed"

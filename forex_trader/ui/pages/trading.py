@@ -2963,7 +2963,9 @@ def _render_strategy(engine):
 
         all_names = {
             k: v for k, v in STRATEGY_NAMES.items()
-            if k not in _hidden
+            # ORB/IVB is a time-of-day breakout engine, not a per-channel
+            # strategy -- it has no signal/channel to attach to.
+            if k not in _hidden and k != STRATEGY_ORB_FIXED
         }
         all_names.update({cs["id"]: cs["name"] for cs in custom_strats})
 
@@ -2996,59 +2998,6 @@ def _render_strategy(engine):
                     "Strategy is selected per-channel in Channel Strategy above. "
                     "The settings below apply regardless of which strategy is running."
                 ).classes("text-xs text-gray-500 italic mb-3")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Trailing Stop SL (pts)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Trailing Stop strategy only. "
-                            "Initial stop-loss distance from entry price — gives the trade breathing room "
-                            "before the trail activates at TP1."
-                        )
-                    trail_stop_sl = ui.number(
-                        value=float(rs.get("trail_stop_sl_pts", 5.0)),
-                        min=0.5, step=0.5, format="%.1f",
-                    ).classes("w-full")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Trailing Stop Distance (pts)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Trailing Stop strategy only. "
-                            "TP1–TP8 are set at 1×–8× this distance from entry. "
-                            "After TP1 is reached, the SL trails at this distance behind price."
-                        )
-                    trail_dist = ui.number(
-                        value=float(rs.get("trailing_stop_distance", 5.0)),
-                        min=0.1, step=0.5, format="%.1f",
-                    ).classes("w-full")
-
-                ui.separator().classes("my-2")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("ATR Collapse Threshold (0.0–1.0)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Suppresses signals when current ATR falls below this fraction of the recent "
-                            "ATR baseline. 0.65 = block when volatility drops to 65% or below of normal. "
-                            "Set to 0 to disable. Prevents trading in dead-market chop (Asian gaps, "
-                            "pre-news consolidation) where spread costs eliminate edge."
-                        )
-                    atr_collapse_thresh = ui.number(
-                        value=float(rs.get("atr_collapse_threshold", 0.65) or 0.65),
-                        min=0.0, max=1.0, step=0.05, format="%.2f",
-                    ).classes("w-full")
-
-                kelly_enabled = ui.checkbox(
-                    "Kelly Criterion Sizing",
-                    value=bool(rs.get("kelly_sizing_enabled", 0)),
-                ).classes("text-sm text-gray-300 mt-1")
-                kelly_enabled.tooltip(
-                    "Adjusts live-execution lot size using half-Kelly Criterion "
-                    "based on rolling 50-trade win rate and R:R. "
-                    "Multiplier is clamped to [0.75x, 1.25x] — modest adjustment only. "
-                    "Requires ≥20 closed trades to activate."
-                )
 
                 # ── Internal Engine Exposure ──────────────────────────────
                 from forex_trader.core import core_internal_exposure_guard as _ieg
@@ -3140,10 +3089,6 @@ def _render_strategy(engine):
                         if isinstance(_hm, dict):
                             _hm = _hm.get("value")
                         db_module.update_risk_settings({
-                            "trail_stop_sl_pts":       float(trail_stop_sl.value or 5.0),
-                            "trailing_stop_distance":  float(trail_dist.value or 3.0),
-                            "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
-                            "kelly_sizing_enabled":    int(kelly_enabled.value),
                             "internal_hedge_mode":     _hm or _ieg.MODE_OFF,
                             "internal_net_exposure_max_lots": float(net_cap_num.value or 0.30),
                         })

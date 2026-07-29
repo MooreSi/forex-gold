@@ -59,12 +59,11 @@ def test_save_coerces_types(fresh_db):
 
 
 def test_be_trigger_clamped_to_ladder_depth(fresh_db):
-    """Upper bound follows MAX_TP_LEVELS, raised 8 -> 10 (2026-07-29) to
-    match the copier EA's own TP1..TP10 depth."""
+    """Upper bound follows MAX_TP_LEVELS (8)."""
     t = et.save_ea_template("T1", {"be_trigger": 0})
     assert t["be_trigger"] == 1
     t = et.save_ea_template("T2", {"be_trigger": 99})
-    assert t["be_trigger"] == et.MAX_TP_LEVELS == 10
+    assert t["be_trigger"] == et.MAX_TP_LEVELS == 8
 
 
 def test_cancel_pending_level_allows_zero_meaning_never(fresh_db):
@@ -73,7 +72,7 @@ def test_cancel_pending_level_allows_zero_meaning_never(fresh_db):
     t = et.save_ea_template("T3", {"cancel_pending_level": 0})
     assert t["cancel_pending_level"] == 0
     t = et.save_ea_template("T4", {"cancel_pending_level": 99})
-    assert t["cancel_pending_level"] == 10
+    assert t["cancel_pending_level"] == 8
 
 
 def test_anchor_and_pending_ladders_are_independent(fresh_db):

@@ -33,10 +33,12 @@ ANCHOR_CHOICES      = ("unified", "distributed")
 TRAIL_MODE_CHOICES  = ("off", "candle", "step", "fractal", "tp")
 BE_MODE_CHOICES     = ("entry", "entry_buffer")
 
-# TP ladder depth. Was 8; raised to 10 (2026-07-29) to match the copier
-# EA's own InpC{n}_TP1..TP10 / Pct1..Pct10 inputs, so a template can
-# express the same ladder without truncation.
-MAX_TP_LEVELS = 10
+# TP ladder depth. Briefly raised to 10 (2026-07-29) to match the copier
+# EA's own InpC{n}_TP1..TP10 / Pct1..Pct10 inputs, then reverted back to 8
+# the same day (explicit user directive) -- core_open_trade.py's EA-handoff
+# block already only ever resolved levels 1-8 regardless, so this restores
+# consistency between the schema/UI and what actually reaches the EA.
+MAX_TP_LEVELS = 8
 
 DEFAULTS: dict = {
     "tg_cmd_enabled":    True,

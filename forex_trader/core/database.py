@@ -964,6 +964,22 @@ def _apply_schema() -> None:
         ] + [
             f"ALTER TABLE ea_trade_templates ADD COLUMN tp_pen{n}_pct REAL NOT NULL DEFAULT 0.0"
             for n in range(1, 11)
+        ] + [
+            # Remaining goldbotea.set behaviour parity. The copier holds
+            # these as EA globals; kept per-template here so two channels
+            # can differ, which the copier itself cannot express.
+            "ALTER TABLE ea_trade_templates ADD COLUMN use_dynamic_atr INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN atr_period INTEGER NOT NULL DEFAULT 14",
+            "ALTER TABLE ea_trade_templates ADD COLUMN atr_sl_mult REAL NOT NULL DEFAULT 1.5",
+            "ALTER TABLE ea_trade_templates ADD COLUMN atr_tp1_mult REAL NOT NULL DEFAULT 1.5",
+            "ALTER TABLE ea_trade_templates ADD COLUMN guard_pips REAL NOT NULL DEFAULT 10.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN safety_cap_pips REAL NOT NULL DEFAULT 10.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN use_emergency_sl INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN emergency_sl_mult REAL NOT NULL DEFAULT 2.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN signal_rr_ratio REAL NOT NULL DEFAULT 0.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN tp1_trigger_level INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE ea_trade_templates ADD COLUMN manual_sl_push_pips REAL NOT NULL DEFAULT 10.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN gold_half_pip_anchor INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)

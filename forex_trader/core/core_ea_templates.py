@@ -104,6 +104,44 @@ DEFAULTS: dict = {
     # Ignore a Telegram signal older than this at fill time.
     "signal_max_age_sec": 10,
 
+    # ── Remaining goldbotea.set behaviour parity (2026-07-29) ────────
+    # The copier keeps these as EA globals rather than per-channel, but
+    # they change how a trade is placed and managed, so they belong on
+    # the template -- that way two channels can differ, which the copier
+    # itself cannot express.
+    #
+    # Dynamic ATR sizing of SL/TP1 (InpUseDynamicATR/InpATRPeriod/
+    # InpATR_SL_Mult/InpATR_TP1_Mult). When on, sl_pips is ignored in
+    # favour of ATR x atr_sl_mult.
+    "use_dynamic_atr":   False,
+    "atr_period":        14,
+    "atr_sl_mult":       1.5,
+    "atr_tp1_mult":      1.5,
+    # Minimum distance to keep from price when placing/adjusting a stop
+    # (InpDefaultGuardPips), and the hard floor the EA will never tighten
+    # inside (InpSafetyCapPips). These are what stop a breakeven move
+    # being rejected as an invalid stop -- the failure that cost a full
+    # -$100 on ticket 1663956102.
+    "guard_pips":        10.0,
+    "safety_cap_pips":   10.0,
+    # Backstop stop at emergency_sl_mult x the normal distance, in case
+    # the primary stop is rejected or removed (InpUseEmergencySL).
+    "use_emergency_sl":  False,
+    "emergency_sl_mult": 2.0,
+    # Reject a signal whose own TP1:SL ratio is below this
+    # (InpSignalRRRatio). 0 = no filter.
+    "signal_rr_ratio":   0.0,
+    # Which TP level arms the automatic SL move (InpTP1_TriggerLevel).
+    # Distinct from be_trigger: this one drives the trailing/step logic,
+    # be_trigger drives the move to breakeven specifically.
+    "tp1_trigger_level": 1,
+    # How far a manual "push SL" command moves the stop
+    # (InpManualSLPushPips).
+    "manual_sl_push_pips": 10.0,
+    # Gold quotes at half-pip granularity on some feeds; anchor entries
+    # to the half pip when set (InpGoldHalfPipAnchor).
+    "gold_half_pip_anchor": False,
+
     # ── Anchor TP ladder ─────────────────────────────────────────────
     **{f"tp{n}_pips": 0.0 for n in range(1, MAX_TP_LEVELS + 1)},
     **{f"tp{n}_pct":  0.0 for n in range(1, MAX_TP_LEVELS + 1)},
@@ -145,16 +183,20 @@ _PENDING_TP_FIELDS = (
 _BOOL_FIELDS  = (
     "tg_cmd_enabled", "harvest_enabled", "cancel_pending", "group_tp_action",
     "sig_guard", "anc_shave", "auto_sl", "partials",
+    "use_dynamic_atr", "use_emergency_sl", "gold_half_pip_anchor",
 )
 _FLOAT_FIELDS = (
     "harvest_threshold", "grid_step_pts", "be_buffer_pts",
     "lot_anchor", "lot_pending", "sl_pips", "risk_pct", "equity_protect",
     "late_guard_pips", "trail_distance", "trail_step", "trail_activation",
     "trail_padding", "max_spread_pips", "harvest_pips",
+    "atr_sl_mult", "atr_tp1_mult", "guard_pips", "safety_cap_pips",
+    "emergency_sl_mult", "signal_rr_ratio", "manual_sl_push_pips",
 ) + _ANCHOR_TP_FIELDS + _PENDING_TP_FIELDS
 _INT_FIELDS   = (
     "grid_legs", "be_trigger", "anchors", "pendings",
     "cancel_pending_level", "slippage", "signal_max_age_sec",
+    "atr_period", "tp1_trigger_level",
 )
 _STR_FIELDS   = ("mode", "tpsl_mode", "anchor", "trail_mode", "be_mode")
 
@@ -233,10 +275,15 @@ def _clean_fields(fields: dict) -> dict:
         merged[f] = max(0.0, merged[f])
     for f in ("sl_pips", "risk_pct", "equity_protect", "late_guard_pips",
               "trail_distance", "trail_step", "trail_activation",
-              "trail_padding", "max_spread_pips", "harvest_pips"):
+              "trail_padding", "max_spread_pips", "harvest_pips",
+              "atr_sl_mult", "atr_tp1_mult", "guard_pips",
+              "safety_cap_pips", "emergency_sl_mult", "signal_rr_ratio",
+              "manual_sl_push_pips"):
         merged[f] = max(0.0, merged[f])
     merged["slippage"] = max(0, merged["slippage"])
     merged["signal_max_age_sec"] = max(0, merged["signal_max_age_sec"])
+    merged["atr_period"] = max(1, merged["atr_period"])
+    merged["tp1_trigger_level"] = max(1, min(MAX_TP_LEVELS, merged["tp1_trigger_level"]))
     return merged
 
 

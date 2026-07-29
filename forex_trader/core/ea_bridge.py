@@ -221,26 +221,28 @@ class EABridge:
             if trail_mode is not None:
                 msg["trail_mode"] = trail_mode
         if template is not None:
-            msg["tpl_mode"]           = template["mode"]
-            msg["tpl_grid_step_pts"]  = template["grid_step_pts"]
-            msg["tpl_grid_legs"]      = template["grid_legs"]
-            msg["tpl_tpsl_mode"]      = template["tpsl_mode"]
-            msg["tpl_anchor"]         = template["anchor"]
-            msg["tpl_trail_mode"]     = template["trail_mode"]
-            msg["tpl_be_mode"]        = template["be_mode"]
-            msg["tpl_be_buffer_pts"]  = template["be_buffer_pts"]
-            msg["tpl_be_trigger"]     = template["be_trigger"]
-            # Sent as 1/0, not a native JSON bool -- the EA's minimal JSON
-            # parser only understands numbers/strings for flag fields (same
-            # convention as close_full_on_last above). Confirmed live
-            # 2026-07-23: sending a native Python bool here silently
-            # evaluates false on the EA side (StringToInteger("true") == 0),
-            # so harvest and grid cancel-pending never fired regardless of
-            # the template's actual setting.
-            msg["tpl_cancel_pending"] = 1 if template["cancel_pending"] else 0
-            msg["tpl_group_tp_action"] = 1 if template["group_tp_action"] else 0
-            msg["tpl_harvest_enabled"]   = 1 if template["harvest_enabled"] else 0
-            msg["tpl_harvest_threshold"] = template["harvest_threshold"]
+            # Every template field is forwarded generically as tpl_<key>.
+            #
+            # This used to be a hand-written line per field, which meant a
+            # new template setting needed edits in three places (the
+            # template schema, here, and the EA's own parser) and an EA
+            # recompile before it could do anything. The EA now keeps the
+            # raw payload and reads keys on demand with a default (see
+            # TplS/TplD/TplI/TplB in ForexTraderBridge.mq5), so a field
+            # added to core_ea_templates.DEFAULTS reaches the EA with no
+            # change here and no recompile. Keys the EA doesn't understand
+            # are carried harmlessly.
+            #
+            # Bools are coerced to 1/0 rather than sent as native JSON
+            # booleans: the EA's minimal parser only understands numbers
+            # and strings for flag fields. Confirmed live 2026-07-23 --
+            # sending a Python bool silently evaluated false on the EA
+            # side (StringToInteger("true") == 0), so harvest and grid
+            # cancel-pending never fired regardless of the setting.
+            for _k, _v in template.items():
+                if _k in ("name", "created_at", "updated_at"):
+                    continue          # bookkeeping, not behaviour
+                msg[f"tpl_{_k}"] = (1 if _v else 0) if isinstance(_v, bool) else _v
             # Grid mode, zone-spanned staging (2026-07-28) -- the signal's own
             # stated entry zone. When present, HandleOpenTemplateGrid stages
             # the legs ACROSS this zone rather than stepping grid_step_pts

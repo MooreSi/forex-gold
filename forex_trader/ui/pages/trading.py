@@ -2452,9 +2452,11 @@ def _render_ea_templates_card() -> None:
 
             _ladder("Anchor TP", "tp",
                     "Targets for the anchor (market) legs, in pips from entry. "
-                    "These are a FALLBACK: when the signal states its own TP "
-                    "levels those win. The % row is always used, since a signal "
-                    "never states how much to close at each level.")
+                    "These are AUTHORITATIVE -- they replace whatever TP levels "
+                    "the triggering signal itself stated, so this channel behaves "
+                    "identically regardless of message shape. A level left at 0 "
+                    "is simply not used. The % row is always template-driven, "
+                    "since a signal never states how much to close at each level.")
 
             with ui.row().classes("gap-2 mt-1 mb-1"):
                 ui.button("Copy to Pending ↓",

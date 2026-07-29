@@ -279,20 +279,33 @@ async def open_trade(
                         ea_templates.template_name_from_override(strategy)
                     )
                     if _ea_template is not None:
-                        # Anchor TP (Trading > EA Templates, 2026-07-24):
-                        # tp{n}_pips fills any TP level the raw signal itself
-                        # didn't supply (entry ± N pips from the current
-                        # price) -- never overrides a level the signal DID
-                        # state. tp{n}_pct always wins over the signal for
-                        # the %-close at each level, since a signal states
-                        # TP prices but never how much to close at each one.
+                        # Anchor TP (2026-07-29): the template's tp{n}_pips
+                        # is now AUTHORITATIVE for every level -- entry ±
+                        # N pips from the actual fill reference price,
+                        # replacing the signal's own TP prices entirely
+                        # rather than only filling gaps it left. Explicit
+                        # user directive: an EA Template channel's targets
+                        # come from the template, full stop, so the same
+                        # channel behaves identically regardless of which
+                        # provider's message shape triggered the trade.
+                        # tp{n}_pct is unchanged -- it was always template-
+                        # only, since a signal states TP prices but never
+                        # how much to close at each one.
+                        #
+                        # A template with no pips configured at any level
+                        # sends NO take-profit at all (an empty _tps),
+                        # rather than silently reviving the discarded
+                        # signal levels as an implicit fallback -- that
+                        # would defeat the point of this being explicit and
+                        # authoritative. tpsl_mode/mode still govern
+                        # whether/how this ladder is used by the EA.
                         _sign = 1 if direction.upper() == "BUY" else -1
                         _ref_price = tick.ask if direction.upper() == "BUY" else tick.bid
+                        _tps = {}
                         for n in range(1, 9):
-                            if n not in _tps:
-                                _pips = float(_ea_template.get(f"tp{n}_pips", 0.0))
-                                if _pips > 0:
-                                    _tps[n] = _ref_price + _sign * _pips
+                            _pips = float(_ea_template.get(f"tp{n}_pips", 0.0))
+                            if _pips > 0:
+                                _tps[n] = _ref_price + _sign * _pips
                         if _tps:
                             _tpl_pcts = [float(_ea_template.get(f"tp{n}_pct", 0.0))
                                          for n in sorted(_tps)]

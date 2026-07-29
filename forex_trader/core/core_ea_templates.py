@@ -158,11 +158,16 @@ DEFAULTS: dict = {
     **{f"tp_pen{n}_pct":  0.0 for n in range(1, MAX_TP_LEVELS + 1)},
 }
 
-# Anchor TP (2026-07-24) -- tp{n}_pips is a fallback (entry ± N pips, used
-# only when the signal itself didn't supply that TP level); tp{n}_pct always
-# wins over the signal, which never states a per-level close percentage.
-# See core_open_trade.py's EA-handoff block for how these get resolved into
-# the final tp{n}/pct{n} values sent to the EA.
+# Anchor TP -- tp{n}_pips is AUTHORITATIVE (entry ± N pips from the actual
+# fill), replacing the signal's own TP prices entirely rather than only
+# filling gaps it left (changed 2026-07-29 -- was a signal-wins-with-
+# template-fallback rule from 2026-07-24; an EA Template channel's targets
+# now come from the template regardless of the triggering message's own
+# levels, so the same channel behaves identically across message shapes).
+# tp{n}_pct was always template-only, since a signal states TP prices but
+# never how much to close at each one. See core_open_trade.py's EA-handoff
+# block for how these get resolved into the final tp{n}/pct{n} values sent
+# to the EA.
 _ANCHOR_TP_FIELDS = (
     tuple(f"tp{n}_pips" for n in range(1, MAX_TP_LEVELS + 1))
     + tuple(f"tp{n}_pct" for n in range(1, MAX_TP_LEVELS + 1))

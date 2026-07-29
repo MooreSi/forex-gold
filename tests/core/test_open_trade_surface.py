@@ -366,7 +366,11 @@ def test_template_strategy_raises_when_ea_bridge_disabled_no_python_fallback(fre
 
 # ── EA Templates -- Anchor TP (2026-07-24) ──────────────────────────────────
 
-def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
+def test_anchor_tp_computed_from_template_ignoring_signal_gap(fresh_db):
+    """Regression for the 2026-07-29 precedence change: the template's own
+    tp{n}_pips computes EVERY level (entry ± pips from the fill reference
+    price), even one the signal happened to leave blank -- there is no
+    "signal fills what the template doesn't" merging any more."""
     from forex_trader.core import core_ea_templates as et
     et.save_ea_template("Anchor Test", {
         "tp1_pips": 20.0, "tp1_pct": 25.0,
@@ -378,8 +382,6 @@ def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
     ea_bridge.set_instance(fake_ea)
     bridge = _FakeBridge()  # tick: bid=2399.8, ask=2400.2
 
-    # Signal only states tp1 (2410.0) -- template must fill tp2 from its own
-    # pips ladder (entry ± pips) since the signal didn't supply it.
     asyncio.run(ot.open_trade(
         bridge, **_open_kwargs(
             strategy=et.override_for_template("Anchor Test"), tp1=2410.0, tp2=None,
@@ -387,14 +389,39 @@ def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
     ))
 
     call = fake_ea.open_trade_calls[0]
-    assert call["tps"][1] == 2410.0                    # signal's own TP1 untouched
+    assert call["tps"][1] == pytest.approx(2400.2 + 20.0)  # BUY: ask + tp1_pips
     assert call["tps"][2] == pytest.approx(2400.2 + 50.0)  # BUY: ask + tp2_pips
     assert call["pcts"] == [25.0, 100.0]                # template's %s, positional by TP number
 
 
-def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
+def test_anchor_tp_overrides_a_tp_the_signal_did_supply(fresh_db):
+    """The template's price is authoritative even when the signal states
+    its own TP1 -- an EA Template channel's targets come from the
+    template, full stop, so the same channel behaves identically
+    regardless of which provider's message shape triggered the trade."""
     from forex_trader.core import core_ea_templates as et
     et.save_ea_template("Anchor Test", {"tp1_pips": 999.0, "tp1_pct": 50.0})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()  # tick: bid=2399.8, ask=2400.2
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Anchor Test"), tp1=2410.0)
+    ))
+
+    # entry (ask 2400.2) + 999 pips, NOT the signal's 2410.0
+    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2400.2 + 999.0)
+
+
+def test_anchor_tp_level_left_at_zero_is_simply_unused(fresh_db):
+    """A template level with no pips configured contributes nothing --
+    NOT a revival of whatever the signal stated for that level. Discarding
+    the signal's TPs is the whole point of "authoritative"; a partial
+    fallback would quietly undo it for under-configured templates."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Sparse Anchor", {"tp1_pips": 20.0, "tp1_pct": 100.0})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1})
     fake_ea = _FakeEA(healthy=True, portable=True)
@@ -402,10 +429,15 @@ def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
     bridge = _FakeBridge()
 
     asyncio.run(ot.open_trade(
-        bridge, **_open_kwargs(strategy=et.override_for_template("Anchor Test"), tp1=2410.0)
+        bridge, **_open_kwargs(
+            strategy=et.override_for_template("Sparse Anchor"),
+            tp1=2410.0, tp2=2420.0, tp3=2430.0,
+        )
     ))
 
-    assert fake_ea.open_trade_calls[0]["tps"][1] == 2410.0  # signal's price wins, not entry+999
+    call = fake_ea.open_trade_calls[0]
+    assert list(call["tps"].keys()) == [1]  # tp2/tp3 never appear at all
+    assert call["tps"][1] == pytest.approx(2400.2 + 20.0)
 
 
 def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):

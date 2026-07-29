@@ -15,6 +15,7 @@ from nicegui import ui
 
 import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
+from backend.src.services.analytics import trade_history_repo
 from forex_trader.core import telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
@@ -411,12 +412,7 @@ def _render_trade_table(engine):
         except Exception:
             pass
         try:
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT mt5_ticket, tg_source FROM vantage_simulated_trades "
-                    "WHERE mt5_ticket IS NOT NULL AND open_time >= ?",
-                    (cutoff,),
-                ).fetchall()
+            rows = trade_history_repo.ticket_sources(cutoff)
             for mt5_ticket, tg_source in rows:
                 ch = trade_channel_label(tg_source or "")
                 result[str(mt5_ticket)] = ch if ch else trade_source_label(tg_source or "")
@@ -430,13 +426,7 @@ def _render_trade_table(engine):
             # never finds them and they fell back to whatever stale/generic
             # label the consolidated ledger happened to have (or none at
             # all). Inherit the real channel from the parent trade instead.
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT l.mt5_ticket, t.tg_source FROM vantage_ladder_legs l "
-                    "JOIN vantage_simulated_trades t ON t.trade_id = l.trade_id "
-                    "WHERE l.mt5_ticket IS NOT NULL AND t.open_time >= ?",
-                    (cutoff,),
-                ).fetchall()
+            rows = trade_history_repo.ticket_sources_for_legs(cutoff)
             for mt5_ticket, tg_source in rows:
                 ch = trade_channel_label(tg_source or "")
                 result[str(mt5_ticket)] = ch if ch else trade_source_label(tg_source or "")
@@ -459,14 +449,7 @@ def _render_trade_table(engine):
         except Exception:
             pass
         try:
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT t.mt5_ticket, t.strategy, d.trade_id "
-                    "FROM vantage_simulated_trades t "
-                    "LEFT JOIN dpm_trade_performance d ON t.trade_id = d.trade_id "
-                    "WHERE t.mt5_ticket IS NOT NULL AND t.open_time >= ?",
-                    (cutoff,),
-                ).fetchall()
+            rows = trade_history_repo.ticket_strategies(cutoff)
             for mt5_ticket, strategy, dpm_trade_id in rows:
                 if dpm_trade_id:
                     label = "DPM"
@@ -479,13 +462,7 @@ def _render_trade_table(engine):
             # Same ladder-leg gap as _ticket_source_map — legs 2+ have no
             # vantage_simulated_trades row of their own, only a
             # vantage_ladder_legs row; inherit the parent's strategy.
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT l.mt5_ticket, t.strategy FROM vantage_ladder_legs l "
-                    "JOIN vantage_simulated_trades t ON t.trade_id = l.trade_id "
-                    "WHERE l.mt5_ticket IS NOT NULL AND t.open_time >= ?",
-                    (cutoff,),
-                ).fetchall()
+            rows = trade_history_repo.ticket_strategies_for_legs(cutoff)
             for mt5_ticket, strategy in rows:
                 result[str(mt5_ticket)] = _strategy_display_label(strategy or "")
         except Exception:
@@ -534,12 +511,7 @@ def _render_trade_table(engine):
         cutoff = time.time() - days * 86400
         result: dict[str, tuple[str, Optional[float]]] = {}
         try:
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT mt5_ticket, order_type, pending_placed_at FROM vantage_simulated_trades "
-                    "WHERE mt5_ticket IS NOT NULL AND open_time >= ?",
-                    (cutoff,),
-                ).fetchall()
+            rows = trade_history_repo.ticket_order_types(cutoff)
             for mt5_ticket, order_type, pending_placed_at in rows:
                 result[str(mt5_ticket)] = (order_type or "market", pending_placed_at)
         except Exception:
@@ -563,16 +535,7 @@ def _render_trade_table(engine):
         """
         result: dict[str, tuple[str, int]] = {}
         try:
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT t.trade_id, t.mt5_ticket AS ticket, 1 AS tier "
-                    "FROM vantage_simulated_trades t "
-                    "WHERE t.trade_id IN (SELECT DISTINCT trade_id FROM vantage_ladder_legs) "
-                    "AND t.mt5_ticket IS NOT NULL "
-                    "UNION ALL "
-                    "SELECT l.trade_id, l.mt5_ticket AS ticket, l.tier "
-                    "FROM vantage_ladder_legs l WHERE l.mt5_ticket IS NOT NULL"
-                ).fetchall()
+            rows = trade_history_repo.ticket_groups()
             for trade_id, ticket, tier in rows:
                 result[str(ticket)] = (trade_id, int(tier))
         except Exception:
@@ -1072,11 +1035,7 @@ def _render_calendar(engine):
         except Exception:
             pass
         try:
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT mt5_ticket, tg_source, strategy, direction "
-                    "FROM vantage_simulated_trades WHERE mt5_ticket IS NOT NULL"
-                ).fetchall()
+            rows = trade_history_repo.all_ticket_info()
             for tk, src, strat, dir_ in rows:
                 ch = trade_channel_label(src or "")
                 label = ch if ch else trade_source_label(src or "")
@@ -1087,13 +1046,7 @@ def _render_calendar(engine):
         try:
             # Same ladder-leg gap as _ticket_source_map/_ticket_strategy_map
             # — legs 2+ have no vantage_simulated_trades row of their own.
-            with db_module.db() as conn:
-                rows = conn.execute(
-                    "SELECT l.mt5_ticket, t.tg_source, t.strategy, t.direction "
-                    "FROM vantage_ladder_legs l "
-                    "JOIN vantage_simulated_trades t ON t.trade_id = l.trade_id "
-                    "WHERE l.mt5_ticket IS NOT NULL"
-                ).fetchall()
+            rows = trade_history_repo.all_ticket_info_for_legs()
             for tk, src, strat, dir_ in rows:
                 ch = trade_channel_label(src or "")
                 label = ch if ch else trade_source_label(src or "")

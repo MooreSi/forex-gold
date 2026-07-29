@@ -367,6 +367,45 @@ class EABridge:
             self._pending_orders[trade_id] = {"ticket": ack_box.get("ticket")}
         return ack_box
 
+    async def _push_panel_context(self) -> None:
+        """Give the on-chart panel a template to act on as soon as the EA
+        connects.
+
+        Without this the panel starts blank and every click is refused with
+        "no template in context" -- it only gained context once a template
+        TRADE happened to open, which on a quiet channel could be hours.
+        Observed immediately after the first panel deploy (2026-07-29):
+        three button presses all rejected.
+
+        Picks whichever template is actually assigned to a channel, since
+        that is the one whose behaviour is live; falls back to the most
+        recently edited template when no channel has one assigned, so the
+        panel is still usable while a template is being set up.
+        """
+        from forex_trader.core import core_ea_templates as _et
+        from forex_trader.core import database as db_module
+        try:
+            def _pick() -> Optional[dict]:
+                assigned = db_module.get_all_channel_strategy_overrides() or {}
+                names = {
+                    _et.template_name_from_override(v.get("strategy_override") or "")
+                    for v in assigned.values()
+                    if _et.is_template_override(v.get("strategy_override") or "")
+                }
+                rows = _et.list_ea_templates()
+                if not rows:
+                    return None
+                for r in rows:
+                    if r["name"] in names:
+                        return r
+                return max(rows, key=lambda r: r.get("updated_at") or 0)
+
+            tpl = await db_module.to_db_thread(_pick)
+            if tpl:
+                await self.push_template(tpl["name"], tpl)
+        except Exception as e:
+            log.debug("[EABridge] panel context push skipped: %s", e)
+
     async def _on_panel_action(self, msg: dict) -> None:
         """A button was pressed on the EA's on-chart panel.
 
@@ -579,6 +618,7 @@ class EABridge:
                      msg.get("account"), msg.get("symbol"))
             asyncio.create_task(self.push_global_config())
             asyncio.create_task(self._restore_pending_orders())
+            asyncio.create_task(self._push_panel_context())
         elif t == "ping":
             await self._send({"type": "pong"})
         elif t == "panel_action":

@@ -127,9 +127,88 @@ struct ManagedTrade
    bool     tplGroupActionDone;
    bool     tplHarvestEnabled;
    double   tplHarvestThreshold;
+
+   // Raw open_trade payload, kept verbatim so ANY tpl_* key can be read
+   // later without a struct member or a parse line of its own.
+   //
+   // Every named tplXxx field above still exists and is still populated at
+   // open -- the hot paths read them directly, and rewriting 126 live
+   // call sites at once on code that manages real positions is not worth
+   // the risk. What this adds is a second, generic route: a template
+   // field newly added on the Python side (core_ea_templates.DEFAULTS,
+   // forwarded generically by ea_bridge) arrives here automatically and
+   // can be consumed with a single TplD/TplI/TplB/TplS call at the point
+   // of use -- no new member, no new parse line, and crucially no
+   // recompile just to carry the value. Only genuinely NEW behaviour
+   // needs MQL5 code; new parameters for existing behaviour are free.
+   string   tplCfg;
 };
 
 ManagedTrade g_trades[];
+
+//+------------------------------------------------------------------+
+//| Generic EA Template config accessors                              |
+//|                                                                   |
+//| Read a tpl_<key> straight out of the stored payload, falling back  |
+//| to `def` when the key is absent -- which is what makes an older EA |
+//| build safe against a newer app sending fields it has never heard   |
+//| of, and a newer EA safe against an older app that omits them.      |
+//+------------------------------------------------------------------+
+string TplS(const string cfg, const string key, const string def)
+{
+   if(cfg == "") return def;
+   return JsonGetString(cfg, "tpl_" + key, def);
+}
+
+double TplD(const string cfg, const string key, const double def)
+{
+   if(cfg == "") return def;
+   return JsonGetDouble(cfg, "tpl_" + key, def);
+}
+
+int TplI(const string cfg, const string key, const int def)
+{
+   if(cfg == "") return def;
+   return (int)JsonGetLong(cfg, "tpl_" + key, (long)def);
+}
+
+// Flags cross the wire as 1/0, never as native JSON booleans -- the
+// minimal parser here cannot read `true`/`false`, and Python sending a
+// bare bool silently evaluated false (confirmed live 2026-07-23, when
+// harvest and cancel-pending never fired). ea_bridge coerces on the way
+// out; this mirrors that on the way in.
+bool TplB(const string cfg, const string key, const bool def)
+{
+   if(cfg == "") return def;
+   return TplI(cfg, key, def ? 1 : 0) != 0;
+}
+
+//+------------------------------------------------------------------+
+//| Pip -> raw price delta.                                           |
+//|                                                                   |
+//| MIND THE UNITS. Two conventions coexist here deliberately:        |
+//|                                                                   |
+//|   *_pts fields (grid_step_pts, be_buffer_pts, trail_dist,         |
+//|   InpDefaultTrailStopPts) are RAW PRICE DELTAS -- grid_step_pts    |
+//|   = 10.0 means a $10 move. That is this EA's long-standing         |
+//|   convention and is unchanged.                                     |
+//|                                                                   |
+//|   *_pips fields (sl_pips, guard_pips, trail_distance, ...) mirror  |
+//|   the copier panel's labels, where 50 means $5.00 -- so they MUST  |
+//|   be converted before use. Confirmed two ways: the panel's own     |
+//|   arithmetic (SL 50.0 at 0.01 lot = 1oz displays $5.00 risk) and   |
+//|   the channel's wording ("TP1 HIT +20 PIPS (4022 TO 4024)" = 2.00  |
+//|   of price). Both give 1 pip = 0.10 = 10 * _Point on this XAUUSD   |
+//|   feed, where _Point is 0.01.                                      |
+//|                                                                   |
+//| Getting this wrong scales every stop and target by 10x, so the two |
+//| conventions are kept visually distinct by the field NAME suffix    |
+//| rather than by memory.                                             |
+//+------------------------------------------------------------------+
+double PipsToPrice(const double pips)
+{
+   return pips * 10.0 * _Point;
+}
 
 // A resting BuyLimit/SellLimit order placed for the Limit Runner strategy
 // (STRATEGY_LIMIT_RUNNER / "limit_runner") — the only strategy that places
@@ -169,6 +248,7 @@ struct PendingOrder
    bool     tplGroupTpAction;  // see ApplyGroupTpAction
    bool     tplHarvestEnabled;
    double   tplHarvestThreshold;
+   string   tplCfg;          // raw payload -- see ManagedTrade.tplCfg
 };
 
 PendingOrder g_pending[];
@@ -573,6 +653,9 @@ void HandleOpenTrade(const string json)
    mt.tplGroupActionDone = false;
    mt.tplHarvestEnabled = isTemplate && JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
    mt.tplHarvestThreshold = isTemplate ? JsonGetDouble(json, "tpl_harvest_threshold", 50.0) : 0.0;
+   // Keep the whole payload so any tpl_* key the named fields above don't
+   // cover can still be read later via TplS/TplD/TplI/TplB.
+   mt.tplCfg = isTemplate ? json : "";
 
    int n = ArraySize(g_trades);
    ArrayResize(g_trades, n + 1);
@@ -694,13 +777,34 @@ void HandleRestorePendingOrder(const string json)
       p.trade_id = trade_id;
       p.strategy = strategy;
       p.direction = direction;
-      p.lots = lots;
+      p.lots = lotPending;
       for(int i = 0; i < MAX_TPS; i++)
       {
+         // Pending legs get their OWN ladder when the template supplies
+         // one (tpl_tp_pen<n>_pips), falling back to the anchor ladder.
+         // The copier ships wider pending targets than anchor ones
+         // (40/70/110/150/250 vs 30/50/80/100/130) because a leg filled
+         // deeper in the zone has more room to the same structural
+         // level -- borne out live on signal 25204, where its pending leg
+         // entered 1pt better and carried 14pt of reward against the
+         // anchor's 13pt.
+         string penKey = "tpl_tp_pen" + (string)(i + 1) + "_pips";
+         double penPips = JsonGetDouble(json, penKey, 0.0);
          string key = "tp" + (string)(i + 1);
-         p.hasTp[i] = JsonHasKey(json, key);
-         p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
-         p.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
+         if(penPips > 0.0)
+         {
+            double off = PipsToPrice(penPips);
+            p.hasTp[i] = true;
+            p.tp[i] = (direction == "BUY") ? legPrice + off : legPrice - off;
+         }
+         else
+         {
+            p.hasTp[i] = JsonHasKey(json, key);
+            p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+         }
+         double penPct = JsonGetDouble(json, "tpl_tp_pen" + (string)(i + 1) + "_pct", 0.0);
+         p.pcts[i] = (penPct > 0.0) ? penPct / 100.0
+                                    : JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
       }
       p.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
       p.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
@@ -795,8 +899,26 @@ void HandleOpenTemplateGrid(const string json)
    double sl        = JsonGetDouble(json, "stop_loss");
    string strategy  = JsonGetString(json, "strategy");
    double stepPts   = JsonGetDouble(json, "tpl_grid_step_pts", 10.0);
-   int    legs       = (int)JsonGetLong(json, "tpl_grid_legs", 3);
-   if(legs < 1) legs = 1;
+   // Anchor/pending split (2026-07-29) -- the copier's actual structure,
+   // observed live: on signal 25202 it opened "C2_LDBD_25202_ANC" at 4026
+   // (a MARKET fill, a point outside the zone) alongside
+   // "C2_LDBD_25202_PEN" at 4025 (a LIMIT resting at the zone edge). The
+   // anchor takes part of the position immediately so a signal that never
+   // retraces is not missed entirely; the pending legs wait for a better
+   // fill inside the zone.
+   //
+   // tpl_grid_legs is the pre-split field and still drives the pending
+   // count when the newer tpl_pendings is absent, so existing templates
+   // behave exactly as before.
+   int    legs       = (int)JsonGetLong(json, "tpl_pendings",
+                              JsonGetLong(json, "tpl_grid_legs", 3));
+   int    anchors    = (int)JsonGetLong(json, "tpl_anchors", 0);
+   if(legs < 0) legs = 0;
+   if(anchors < 0) anchors = 0;
+   double lotAnchor  = JsonGetDouble(json, "tpl_lot_anchor", 0.0);
+   double lotPending = JsonGetDouble(json, "tpl_lot_pending", 0.0);
+   if(lotAnchor  <= 0.0) lotAnchor  = lots;
+   if(lotPending <= 0.0) lotPending = lots;
    // Same convention as every other *_pts field in this EA (trail_dist,
    // InpDefaultTrailStopPts, trail_stop_sl_pts) -- a raw price delta, not a
    // broker _Point-scaled value. See core_ea_templates.py's DEFAULTS.
@@ -838,6 +960,76 @@ void HandleOpenTemplateGrid(const string json)
    double expireMin = JsonGetDouble(json, expireMinKey, 60.0);
    datetime expiration = TimeCurrent() + (datetime)(expireMin * 60);
 
+   // ── Anchor leg(s): immediate market fill ──────────────────────────
+   for(int a = 1; a <= anchors; a++)
+   {
+      MqlTick atick;
+      if(!SymbolInfoTick(_Symbol, atick)) break;
+      string aTradeId = trade_id + "-a" + (string)a;
+      string aComment = "ea:" + StringSubstr(trade_id, 0, 10) + "a" + (string)a;
+      bool aok = (direction == "BUY")
+         ? trade.Buy(lotAnchor, _Symbol, 0.0, sl, 0.0, aComment)
+         : trade.Sell(lotAnchor, _Symbol, 0.0, sl, 0.0, aComment);
+      if(!aok)
+      {
+         Print("[EABridge] anchor leg ", a, "/", anchors, " failed: ",
+               trade.ResultRetcodeDescription());
+         continue;
+      }
+      double aFill = trade.ResultPrice();
+      if(aFill <= 0.0) aFill = (direction == "BUY") ? atick.ask : atick.bid;
+
+      ManagedTrade am;
+      am.ticket = trade.ResultOrder();
+      am.trade_id = aTradeId;
+      am.strategy = strategy;
+      am.direction = direction;
+      am.entry_price = aFill;
+      am.orig_lots = lotAnchor;
+      am.trailing_active = false;
+      am.last_step = 0;
+      am.trail_dist = InpDefaultTrailStopPts;
+      for(int i = 0; i < MAX_TPS; i++)
+      {
+         string k = "tp" + (string)(i + 1);
+         am.hasTp[i] = JsonHasKey(json, k);
+         am.tp[i] = am.hasTp[i] ? JsonGetDouble(json, k) : 0.0;
+         am.triggered[i] = false;
+         am.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
+      }
+      am.beAtPos = -1;
+      am.trailMode = "";
+      am.closeFullOnLast = true;
+      am.isTemplate = true;
+      am.tplTpslMode = JsonGetString(json, "tpl_tpsl_mode", "on");
+      am.tplAnchor = JsonGetString(json, "tpl_anchor", "unified");
+      am.tplAnchorPrice = basePrice;
+      am.tplTrailMode = JsonGetString(json, "tpl_trail_mode", "off");
+      am.tplBeMode = JsonGetString(json, "tpl_be_mode", "entry");
+      am.tplBeBufferPts = JsonGetDouble(json, "tpl_be_buffer_pts", 1.0);
+      am.tplBeTrigger = (int)JsonGetLong(json, "tpl_be_trigger", 1);
+      am.tplBeDone = false;
+      am.tplCancelPending = (JsonGetLong(json, "tpl_cancel_pending", 0) != 0);
+      am.tplGridGroup = groupId;
+      am.tplGroupTpAction = (JsonGetLong(json, "tpl_group_tp_action", 0) != 0);
+      am.tplGroupActionDone = false;
+      am.tplHarvestEnabled = (JsonGetLong(json, "tpl_harvest_enabled", 0) != 0);
+      am.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
+      am.tplCfg = json;
+
+      int sz = ArraySize(g_trades);
+      ArrayResize(g_trades, sz + 1);
+      g_trades[sz] = am;
+      placed++;
+
+      SendJson("{\"type\":\"trade_opened\",\"trade_id\":\"" + JsonEsc(aTradeId) +
+               "\",\"ticket\":" + (string)am.ticket +
+               ",\"fill_price\":" + DoubleToString(aFill, _Digits) + "}");
+      Print("[EABridge] anchor leg ", a, "/", anchors, " filled @ ",
+            DoubleToString(aFill, _Digits), " lots=", lotAnchor);
+   }
+
+   // ── Pending leg(s): resting limits inside the zone ────────────────
    for(int leg = 1; leg <= legs; leg++)
    {
       double legPrice;
@@ -881,8 +1073,8 @@ void HandleOpenTemplateGrid(const string json)
       string comment = "ea:" + StringSubstr(trade_id, 0, 10) + "g" + (string)leg;
 
       bool ok = (direction == "BUY")
-         ? trade.BuyLimit(lots, legPrice, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment)
-         : trade.SellLimit(lots, legPrice, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment);
+         ? trade.BuyLimit(lotPending, legPrice, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment)
+         : trade.SellLimit(lotPending, legPrice, _Symbol, sl, 0.0, ORDER_TIME_SPECIFIED, expiration, comment);
 
       if(!ok)
       {
@@ -932,6 +1124,7 @@ void HandleOpenTemplateGrid(const string json)
       p.tplGroupTpAction = JsonGetLong(json, "tpl_group_tp_action", 0) != 0;
       p.tplHarvestEnabled = JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
       p.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
+      p.tplCfg = json;
 
       int n = ArraySize(g_pending);
       ArrayResize(g_pending, n + 1);
@@ -1655,23 +1848,44 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
    }
 
    // ── Trail ────────────────────────────────────────────────────────────
-   if(t.tplTrailMode == "step")
+   // Geometry comes from the template when supplied, falling back to the
+   // EA input for older payloads that predate these fields. This is the
+   // generic-config path in use: trail_distance/activation/padding were
+   // added on the Python side and are consumed here with no struct member
+   // and no parse line of their own.
+   double trailAct  = PipsToPrice(TplD(t.tplCfg, "trail_activation", 0.0));
+   double trailPad  = PipsToPrice(TplD(t.tplCfg, "trail_padding", 0.0));
+   double trailDist = TplD(t.tplCfg, "trail_distance", 0.0) > 0.0
+                      ? PipsToPrice(TplD(t.tplCfg, "trail_distance", 0.0))
+                      : InpDefaultTrailStopPts;
+
+   // trail_activation: leave the stop alone until the trade is this far in
+   // profit. 0 keeps the previous always-on behaviour.
+   bool trailArmed = true;
+   if(trailAct > 0.0)
    {
-      double dist = InpDefaultTrailStopPts;
+      double inProfit = (t.direction == "BUY") ? (tick.bid - t.entry_price)
+                                               : (t.entry_price - tick.ask);
+      trailArmed = (inProfit >= trailAct);
+   }
+
+   if(t.tplTrailMode == "step" && trailArmed)
+   {
+      double dist = trailDist + trailPad;
       double newSl = (t.direction == "BUY") ? tick.bid - dist : tick.ask + dist;
       MoveSl(t, newSl, "template_trail_step");
    }
-   else if(t.tplTrailMode == "candle")
+   else if(t.tplTrailMode == "candle" && trailArmed)
    {
       double newSl = CandleTrailLevel(t);
       if(newSl != 0.0) MoveSl(t, newSl, "template_trail_candle");
    }
-   else if(t.tplTrailMode == "fractal")
+   else if(t.tplTrailMode == "fractal" && trailArmed)
    {
       double newSl = FractalTrailLevel(t);
       if(newSl != 0.0) MoveSl(t, newSl, "template_trail_fractal");
    }
-   else if(t.tplTrailMode == "tp")
+   else if(t.tplTrailMode == "tp" && trailArmed)
    {
       int bestIdx = -1;
       for(int i = 0; i < MAX_TPS; i++)
@@ -1865,6 +2079,7 @@ void CheckPendingOrders()
 
          mt.isTemplate = g_pending[i].isTemplate;
          mt.tplTpslMode = g_pending[i].tplTpslMode;
+         mt.tplCfg      = g_pending[i].tplCfg;
          mt.tplAnchor = g_pending[i].tplAnchor;
          mt.tplAnchorPrice = g_pending[i].tplAnchorPrice;
          mt.tplTrailMode = g_pending[i].tplTrailMode;

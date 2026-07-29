@@ -753,6 +753,36 @@ class EABridge:
             original_id, "template_grid_leg_filled",
         ))
 
+    async def _on_grid_leg_cancelled(self, leg_trade_id: str, reason: str) -> None:
+        """Counterpart to _promote_grid_leg_fill for a leg that never fills.
+        Python has no record of how many legs a grid opened with or how many
+        are still resting (only the EA's own g_pending[] knows that), so this
+        can't safely decide "the whole grid is dead" from a single leg's
+        cancellation -- another leg may still fill later and promote the row
+        exactly as today. What it CAN do is stop the event dead-ending
+        silently: surface it so a leg that never fills doesn't sit invisible
+        in Active Trades until someone stumbles on it by hand."""
+        from forex_trader.core import telegram_alerts
+        original_id = leg_trade_id.rsplit("-g", 1)[0]
+        row = await self._fetch_trade(original_id)
+        if not row:
+            log.debug("[EABridge] grid leg %s cancelled (%s) — no placeholder row (already "
+                      "closed?)", leg_trade_id, reason)
+            return
+        if row["status"] != "open" or int(row["mt5_ticket"] or 0) != 0:
+            # Another leg already filled and promoted this row, or it's
+            # since been closed -- a losing sibling leg cancelling now is
+            # expected and harmless.
+            return
+        log.warning("[EABridge] grid leg %s cancelled (%s) — trade=%s still has no filled "
+                    "leg (mt5_ticket=0)", leg_trade_id, reason, original_id[:8])
+        asyncio.create_task(telegram_alerts.send_message(
+            f"EA Template grid leg not filled — {row['direction']} {row.get('tg_source', '')} "
+            f"({reason}). Other legs may still be resting; this trade stays open at $0 until "
+            f"one fills or you close it manually.",
+            original_id, "template_grid_leg_cancelled",
+        ))
+
     async def _on_pending_order_cancelled(self, msg: dict) -> None:
         """A resting Limit Runner order was removed from the broker's book
         without filling — either it expired (expire_minutes elapsed, same
@@ -767,7 +797,17 @@ class EABridge:
         try:
             row = await self._fetch_pending_order(trade_id)
             if not row:
-                log.warning("[EABridge] pending_order_cancelled for unknown trade_id=%s", trade_id)
+                # EA Template grid legs never get a vantage_pending_orders row
+                # (see _on_pending_order_filled's identical fallback) -- without
+                # this, a leg that never fills leaves the open_trade() placeholder
+                # (mt5_ticket=0) permanently invisible: nothing ever updates it,
+                # nothing ever alerts, and it sits in Active Trades at $0 until
+                # someone notices and cleans it up by hand (confirmed live,
+                # trade eb8ca404, sat orphaned 2026-07-28 to 2026-07-29).
+                if "-g" in trade_id:
+                    await self._on_grid_leg_cancelled(trade_id, reason)
+                else:
+                    log.warning("[EABridge] pending_order_cancelled for unknown trade_id=%s", trade_id)
                 return
             now = time.time()
 

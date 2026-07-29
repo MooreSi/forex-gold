@@ -109,16 +109,17 @@ def test_public_functions_skips_private_and_reports_loc(tmp_path):
 
 
 @pytest.mark.parametrize("ident", [
-    "core_mt5_position_sync::sync_closed_mt5_positions",
-    "core_profit_sync::close_full_after_tps",
+    "core_logic_keywords::default_lexicon",
+    "core_strategy_params::default_params",
 ])
 def test_known_orphans_are_still_detected(ident):
-    """Regression guard on the unwired extractions still outstanding.
+    """What the detector should still see: two-line in-module defaults.
 
-    Two of the original four are gone: core_fees_sizing::calculate_fees is now
-    delegated to from engine.py, and core_tp_trigger_tracking::check_sl was a
-    verbatim duplicate of core_monitor_loop's wired copy and was deleted. Their
-    removal from this list in the same commit is the proof the work happened.
+    Every substantive orphan is gone. The four order-path ones and
+    core_mt5_position_sync were deleted 2026-07-27 rather than wired;
+    core_fees_sizing::calculate_fees is now delegated to; the duplicated
+    core_tp_trigger_tracking::check_sl was removed. Dead code fell from 456 LOC
+    to 8. Each removal from this list, in the commit that did it, is the proof.
     """
     found = {f"{o['module']}::{o['function']}" for o in od.find_orphans()}
     assert ident in found

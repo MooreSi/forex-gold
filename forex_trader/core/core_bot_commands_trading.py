@@ -38,55 +38,6 @@ from forex_trader.core.signal_parser import validate_signal
 log = logging.getLogger(__name__)
 
 
-async def cmd_close(args: list, bridge: Any, starting_balance: float = 1000.0) -> str:
-    open_trades = get_open_trades()
-    if not open_trades:
-        return "No open trades to close."
-
-    if not args:
-        return "Usage: /close all  or  /close `<ticket>`"
-
-    ctx = CloseTradeContext(bridge, starting_balance=starting_balance)
-
-    if args[0].lower() == "all":
-        n     = len(open_trades)
-        lines = [f"Closing {n} open trade{'s' if n != 1 else ''}..."]
-        total = 0.0
-        for t in open_trades:
-            try:
-                result = await close_trade(t["trade_id"], "manual_close", ctx)
-                pnl    = float(result.get("net_pnl", 0))
-                cp     = float(result.get("close_price", 0))
-                total += pnl
-                sign   = "+" if pnl >= 0 else ""
-                lines.append(
-                    f"Closed {t['direction']} {t['lot_size']} lots @ ${cp:.2f}  P&L: {sign}${pnl:.2f}"
-                )
-            except Exception as e:
-                lines.append(f"Failed {t.get('mt5_ticket', t['trade_id'][:8])}: {e}")
-        sign = "+" if total >= 0 else ""
-        lines.append(f"Done. Total P&L: {sign}${total:.2f}")
-        return "\n".join(lines)
-
-    # Close by MT5 ticket number
-    try:
-        ticket = int(args[0])
-    except ValueError:
-        return f"Invalid ticket '{args[0]}'. Use /close all  or  /close `<ticket number>`"
-
-    trade = next((t for t in open_trades if t.get("mt5_ticket") == ticket), None)
-    if not trade:
-        return f"No open trade with ticket {ticket}."
-    result = await close_trade(trade["trade_id"], "manual_close", ctx)
-    pnl    = float(result.get("net_pnl", 0))
-    cp     = float(result.get("close_price", 0))
-    sign   = "+" if pnl >= 0 else ""
-    return (
-        f"Closed: {trade['direction']} {trade['lot_size']} lots @ ${cp:.2f}\n"
-        f"P&L: {sign}${pnl:.2f}"
-    )
-
-
 async def cmd_activate(args: list, bridge: Any, starting_balance: float = 1000.0) -> str:
     with db_module.db() as conn:
         tg_sig = db_module.row_to_dict(conn.execute(
@@ -168,38 +119,6 @@ async def cmd_activate(args: list, bridge: Any, starting_balance: float = 1000.0
         f"{tg_sig['direction']} {lot} lots @ ~${result['entry_price']:.2f}\n"
         f"Trade ID: {result['trade_id']}"
     )
-
-
-async def cmd_market_price_buy(args: list, bridge: Any, starting_balance: float = 1000.0) -> str:
-    try:
-        result = await open_manual_market_order(bridge, "BUY", starting_balance=starting_balance)
-        ticket = result.get("mt5_ticket", "—")
-        entry  = float(result.get("entry_price", 0))
-        lot    = result.get("lot_size") or result.get("remaining_lots", "?")
-        return (
-            f"*BUY order placed*\n"
-            f"Entry: ${entry:.2f}  |  Lots: {lot}\n"
-            f"MT5 Ticket: {ticket}"
-        )
-    except Exception as e:
-        from forex_trader.core import telegram_alerts
-        return f"Order failed: {telegram_alerts._md_esc(str(e))}"
-
-
-async def cmd_market_price_sell(args: list, bridge: Any, starting_balance: float = 1000.0) -> str:
-    try:
-        result = await open_manual_market_order(bridge, "SELL", starting_balance=starting_balance)
-        ticket = result.get("mt5_ticket", "—")
-        entry  = float(result.get("entry_price", 0))
-        lot    = result.get("lot_size") or result.get("remaining_lots", "?")
-        return (
-            f"*SELL order placed*\n"
-            f"Entry: ${entry:.2f}  |  Lots: {lot}\n"
-            f"MT5 Ticket: {ticket}"
-        )
-    except Exception as e:
-        from forex_trader.core import telegram_alerts
-        return f"Order failed: {telegram_alerts._md_esc(str(e))}"
 
 
 async def cmd_report(args: list, bridge: Any, cfg: dict) -> str:

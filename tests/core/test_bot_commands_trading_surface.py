@@ -81,58 +81,6 @@ def _insert_tg_signal(tg_id="tg-1", direction="BUY", entry_low=2399.0, entry_hig
         )
 
 
-# ── cmd_close ─────────────────────────────────────────────────────────────
-
-def test_close_no_open_trades(fresh_db):
-    result = asyncio.run(cmds.cmd_close([], _FakeBridge()))
-    assert result == "No open trades to close."
-
-
-def test_close_no_args_usage(fresh_db):
-    _insert_trade("t-1")
-    result = asyncio.run(cmds.cmd_close([], _FakeBridge()))
-    assert "Usage: /close all" in result
-
-
-def test_close_all_aggregates_total_pnl(fresh_db):
-    _insert_trade("t-1", mt5_ticket=555)
-    _insert_trade("t-2", mt5_ticket=556)
-    with mock.patch.object(cmds, "close_trade",
-                           new=mock.AsyncMock(return_value={"net_pnl": 20.0, "close_price": 2410.0})) as ct:
-        result = asyncio.run(cmds.cmd_close(["all"], _FakeBridge()))
-    assert "Closing 2 open trades..." in result
-    assert "Done. Total P&L: +$40.00" in result
-    assert ct.call_count == 2
-
-
-def test_close_all_reports_per_trade_failure(fresh_db):
-    _insert_trade("t-1", mt5_ticket=555)
-    with mock.patch.object(cmds, "close_trade", new=mock.AsyncMock(side_effect=RuntimeError("mt5 error"))):
-        result = asyncio.run(cmds.cmd_close(["all"], _FakeBridge()))
-    assert "Failed 555: mt5 error" in result
-
-
-def test_close_by_valid_ticket(fresh_db):
-    _insert_trade("t-1", mt5_ticket=555)
-    with mock.patch.object(cmds, "close_trade",
-                           new=mock.AsyncMock(return_value={"net_pnl": -5.0, "close_price": 2395.0})):
-        result = asyncio.run(cmds.cmd_close(["555"], _FakeBridge()))
-    assert "Closed: BUY 0.1 lots @ $2395.00" in result
-    assert "P&L: $-5.00" in result
-
-
-def test_close_by_unknown_ticket(fresh_db):
-    _insert_trade("t-1", mt5_ticket=555)
-    result = asyncio.run(cmds.cmd_close(["999"], _FakeBridge()))
-    assert result == "No open trade with ticket 999."
-
-
-def test_close_by_invalid_ticket(fresh_db):
-    _insert_trade("t-1", mt5_ticket=555)
-    result = asyncio.run(cmds.cmd_close(["bogus"], _FakeBridge()))
-    assert "Invalid ticket 'bogus'" in result
-
-
 # ── cmd_activate ──────────────────────────────────────────────────────────
 
 def test_activate_no_pending_signal(fresh_db):
@@ -186,34 +134,6 @@ def test_activate_no_tick_leaves_for_manual(fresh_db):
         result = asyncio.run(cmds.cmd_activate([], _FakeBridge()))
     assert "no live price available" in result
     assert not ot.called
-
-
-# ── cmd_market_price_buy / cmd_market_price_sell ────────────────────────
-
-def test_market_price_buy_delegates_with_direction(fresh_db):
-    result_dict = {"mt5_ticket": 777, "entry_price": 2415.0, "lot_size": 0.05}
-    with mock.patch.object(cmds, "open_manual_market_order",
-                           new=mock.AsyncMock(return_value=result_dict)) as om:
-        result = asyncio.run(cmds.cmd_market_price_buy([], _FakeBridge()))
-    assert om.call_args.args[1] == "BUY"
-    assert "BUY order placed" in result
-    assert "Ticket: 777" in result
-
-
-def test_market_price_sell_delegates_with_direction(fresh_db):
-    result_dict = {"mt5_ticket": 778, "entry_price": 2415.0, "lot_size": 0.05}
-    with mock.patch.object(cmds, "open_manual_market_order",
-                           new=mock.AsyncMock(return_value=result_dict)) as om:
-        result = asyncio.run(cmds.cmd_market_price_sell([], _FakeBridge()))
-    assert om.call_args.args[1] == "SELL"
-    assert "SELL order placed" in result
-
-
-def test_market_price_buy_exception_caught_not_raised(fresh_db):
-    with mock.patch.object(cmds, "open_manual_market_order",
-                           new=mock.AsyncMock(side_effect=ValueError("no SL configured"))):
-        result = asyncio.run(cmds.cmd_market_price_buy([], _FakeBridge()))
-    assert "Order failed" in result
 
 
 # ── cmd_report ────────────────────────────────────────────────────────────

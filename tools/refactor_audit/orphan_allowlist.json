@@ -2,58 +2,16 @@
   "_comment": [
     "Extracted functions that nothing calls. Every entry here is dead code that",
     "we have decided not to remove YET -- an allowlist entry is a debt record,",
-    "not an approval. `verdict` is the twin_compare.py classification against the",
-    "inline copy still running in engine.py.",
+    "not an approval.",
     "",
-    "Adding an entry requires a reason and a phase. Removing one is how the work",
-    "gets proved: when a function is wired in or deleted, its line disappears."
+    "The five order-path entries are gone as of 2026-07-27: they were deleted",
+    "rather than wired, because each built a partial CloseTradeContext and the",
+    "live inline copies in engine.py are the correct ones. They get re-extracted",
+    "against the real context in phases 6 and 8.",
+    "",
+    "What remains are three trivial in-module defaults, permanently allowed."
   ],
   "allowed": [
-    {
-      "id": "core_mt5_position_sync::sync_closed_mt5_positions",
-      "loc": 276,
-      "verdict": "diverged",
-      "live_twin": "engine.py:1346 _sync_closed_mt5_positions",
-      "reason": "Extracted, tested, and marked Done in core-engine-wiring/README.md:65 on the reasoning that it was 'resolved for free' when a callee was wired. Wiring a callee does not wire the caller: nothing imports this module and the full 273-line inline copy still runs. The copy builds CloseTradeContext(bridge, starting_balance=...) where the live path uses engine.py:534 _make_close_trade_ctx(), which also carries tp_cache, scale_out_last_fail, tp_safety_net_last_alert, on_profit, schedule_profit_sync and background_close_commentary. Wiring it as-is would silently drop six collaborators.",
-      "phase": 6,
-      "action": "Delete the orphan and its _surface.py; re-extract against the real context in the broker/ phase."
-    },
-    {
-      "id": "core_profit_sync::close_full_after_tps",
-      "loc": 62,
-      "verdict": "diverged",
-      "live_twin": "engine.py:1629 _close_full_after_tps",
-      "reason": "Same root cause: builds a bare CloseTradeContext(bridge). All 13 handler call sites (engine.py:688-922) pass self._close_full_after_tps, the inline copy. PROGRESS.md:540 calls this 'the STILL-ORIGINAL, correct, deliberately-unwired implementation' -- but the tracker still records the row as Done, which is exactly how core_mt5_position_sync slipped through.",
-      "phase": 8,
-      "action": "Wire once _make_close_trade_ctx is resolved; mark the tracker row Deferred, not Done."
-    },
-    {
-      "id": "core_bot_commands_trading::cmd_close",
-      "loc": 47,
-      "verdict": "diverged",
-      "live_twin": "engine.py:2856 _cmd_close",
-      "reason": "Documented deferral, blocked on the same CloseTradeContext problem.",
-      "phase": 8,
-      "action": "Wire with the trading/ phase."
-    },
-    {
-      "id": "core_bot_commands_trading::cmd_market_price_buy",
-      "loc": 14,
-      "verdict": "diverged",
-      "live_twin": "engine.py:3127 _cmd_market_price_buy",
-      "reason": "Documented deferral, order-placing surface.",
-      "phase": 8,
-      "action": "Wire with the trading/ phase."
-    },
-    {
-      "id": "core_bot_commands_trading::cmd_market_price_sell",
-      "loc": 14,
-      "verdict": "diverged",
-      "live_twin": "engine.py:3141 _cmd_market_price_sell",
-      "reason": "Documented deferral, order-placing surface.",
-      "phase": 8,
-      "action": "Wire with the trading/ phase."
-    },
     {
       "id": "core_logic_keywords::default_lexicon",
       "loc": 2,

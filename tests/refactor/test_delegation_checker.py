@@ -19,12 +19,16 @@ def method_named(name: str) -> dict | None:
     return None
 
 
-def test_detects_the_known_unwired_duplicate():
-    """_sync_closed_mt5_positions: 273 live lines, extracted module unused."""
-    f = method_named("_sync_closed_mt5_positions")
-    assert f is not None
-    assert f["severity"] == "unwired duplicate"
-    assert "core_mt5_position_sync" in f["twins"]
+def test_no_unwired_duplicates_remain():
+    """Every engine method with an extracted twin now calls it.
+
+    Five did not, all blocked on the same partial CloseTradeContext. They were
+    resolved by deleting the extracted copies (2026-07-27) rather than wiring
+    them, so those methods no longer have a twin to disagree with. If this
+    starts failing, an extraction has been merged dead again -- which is the
+    exact failure this checker exists to catch.
+    """
+    assert [f for f in dc.audit() if f["severity"] == "unwired duplicate"] == []
 
 
 def test_wired_delegators_are_not_flagged():

@@ -777,34 +777,13 @@ void HandleRestorePendingOrder(const string json)
       p.trade_id = trade_id;
       p.strategy = strategy;
       p.direction = direction;
-      p.lots = lotPending;
+      p.lots = lots;
       for(int i = 0; i < MAX_TPS; i++)
       {
-         // Pending legs get their OWN ladder when the template supplies
-         // one (tpl_tp_pen<n>_pips), falling back to the anchor ladder.
-         // The copier ships wider pending targets than anchor ones
-         // (40/70/110/150/250 vs 30/50/80/100/130) because a leg filled
-         // deeper in the zone has more room to the same structural
-         // level -- borne out live on signal 25204, where its pending leg
-         // entered 1pt better and carried 14pt of reward against the
-         // anchor's 13pt.
-         string penKey = "tpl_tp_pen" + (string)(i + 1) + "_pips";
-         double penPips = JsonGetDouble(json, penKey, 0.0);
          string key = "tp" + (string)(i + 1);
-         if(penPips > 0.0)
-         {
-            double off = PipsToPrice(penPips);
-            p.hasTp[i] = true;
-            p.tp[i] = (direction == "BUY") ? legPrice + off : legPrice - off;
-         }
-         else
-         {
-            p.hasTp[i] = JsonHasKey(json, key);
-            p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
-         }
-         double penPct = JsonGetDouble(json, "tpl_tp_pen" + (string)(i + 1) + "_pct", 0.0);
-         p.pcts[i] = (penPct > 0.0) ? penPct / 100.0
-                                    : JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
+         p.hasTp[i] = JsonHasKey(json, key);
+         p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+         p.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
       }
       p.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
       p.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
@@ -960,6 +939,8 @@ void HandleOpenTemplateGrid(const string json)
    double expireMin = JsonGetDouble(json, expireMinKey, 60.0);
    datetime expiration = TimeCurrent() + (datetime)(expireMin * 60);
 
+   string tplAnchorMode = JsonGetString(json, "tpl_anchor", "unified");
+
    // ── Anchor leg(s): immediate market fill ──────────────────────────
    for(int a = 1; a <= anchors; a++)
    {
@@ -1087,18 +1068,39 @@ void HandleOpenTemplateGrid(const string json)
       p.trade_id = legTradeId;
       p.strategy = strategy;
       p.direction = direction;
-      p.lots = lots;
+      p.lots = lotPending;
       for(int i = 0; i < MAX_TPS; i++)
       {
+         // Pending legs may carry their OWN ladder (tpl_tp_pen<n>_pips),
+         // falling back to the anchor ladder when absent.
+         //
+         // Which price the offset measures FROM is decided by tpl_anchor,
+         // the same flag that already governs breakeven:
+         //   "unified"     -> basePrice, so every leg shares one TP PRICE
+         //                    and a leg filled deeper in the zone earns
+         //                    MORE points reaching it. This is what the
+         //                    copier actually does -- signal 25246 put
+         //                    both its legs on TP 4051 (13pt for the
+         //                    anchor at 4038, 14pt for the pending at
+         //                    4037); 25204 likewise shared TP 4019.
+         //   "distributed" -> each leg's own price, i.e. equal DISTANCE.
          string key = "tp" + (string)(i + 1);
-         p.hasTp[i] = JsonHasKey(json, key);
-         p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
-         // Anchor TP (2026-07-24): was hardcoded to 0.0, silently discarding
-         // whatever %-close ladder Python resolved (core_open_trade.py's
-         // Anchor TP fallback) -- every grid leg only ever fully closed,
-         // never partial-closed. Read the same generic pct{n} field every
-         // other PendingOrder-building path already uses.
-         p.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
+         double penPips = JsonGetDouble(json, "tpl_tp_pen" + (string)(i + 1) + "_pips", 0.0);
+         if(penPips > 0.0)
+         {
+            double tpBase = (tplAnchorMode == "distributed") ? legPrice : basePrice;
+            double off = PipsToPrice(penPips);
+            p.hasTp[i] = true;
+            p.tp[i] = (direction == "BUY") ? tpBase + off : tpBase - off;
+         }
+         else
+         {
+            p.hasTp[i] = JsonHasKey(json, key);
+            p.tp[i] = p.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+         }
+         double penPct = JsonGetDouble(json, "tpl_tp_pen" + (string)(i + 1) + "_pct", 0.0);
+         p.pcts[i] = (penPct > 0.0) ? penPct / 100.0
+                                    : JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
       }
       p.beAtPos = -1;
       p.trailMode = "";

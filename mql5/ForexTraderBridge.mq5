@@ -448,6 +448,7 @@ void HandleMessage(const string line)
    if(type == "ping") { SendJson("{\"type\":\"pong\"}"); return; }
    if(type == "open_trade") { HandleOpenTrade(line); return; }
    if(type == "update_trade") { HandleUpdateTrade(line); return; }
+   if(type == "set_template") { HandleSetTemplate(line); return; }
    if(type == "place_pending_order") { HandlePlacePendingOrder(line); return; }
    if(type == "restore_pending_order") { HandleRestorePendingOrder(line); return; }
    if(type == "cancel_pending_order") { HandleCancelPendingOrder(line); return; }
@@ -516,6 +517,51 @@ void HandleSetGlobalConfig(const string json)
 // the corrected value; this EA's on-tick TpCleared() never saw it). Only
 // updates untriggered levels are meaningful — leaves ticket/strategy/entry
 // alone, and doesn't touch triggered[] so an already-hit TP can't refire.
+//+------------------------------------------------------------------+
+//| set_template -- apply a template's values to every OPEN trade      |
+//| already running under it, without waiting for the next signal.     |
+//|                                                                    |
+//| Templates normally travel with each open_trade, so an edit made in  |
+//| the app reaches the EA only on the NEXT trade. This is the app's    |
+//| "Send to EA" button: it re-points the stored config of every live   |
+//| trade at the new values, so a mid-session adjustment takes effect   |
+//| on positions that are already open.                                 |
+//|                                                                    |
+//| Deliberately replaces tplCfg wholesale rather than merging fields:  |
+//| the payload is a complete template, and a partial merge would let   |
+//| a removed field keep its old value invisibly. The named tplXxx      |
+//| members are refreshed alongside it so the hot paths that still read |
+//| them stay consistent with the generic store.                        |
+//+------------------------------------------------------------------+
+void HandleSetTemplate(const string json)
+{
+   string name = JsonGetString(json, "template_name", "");
+   int updated = 0;
+   for(int i = 0; i < ArraySize(g_trades); i++)
+   {
+      if(!g_trades[i].isTemplate) continue;
+      g_trades[i].tplCfg            = json;
+      g_trades[i].tplTpslMode       = JsonGetString(json, "tpl_tpsl_mode", g_trades[i].tplTpslMode);
+      g_trades[i].tplAnchor         = JsonGetString(json, "tpl_anchor", g_trades[i].tplAnchor);
+      g_trades[i].tplTrailMode      = JsonGetString(json, "tpl_trail_mode", g_trades[i].tplTrailMode);
+      g_trades[i].tplBeMode         = JsonGetString(json, "tpl_be_mode", g_trades[i].tplBeMode);
+      g_trades[i].tplBeBufferPts    = JsonGetDouble(json, "tpl_be_buffer_pts", g_trades[i].tplBeBufferPts);
+      g_trades[i].tplBeTrigger      = (int)JsonGetLong(json, "tpl_be_trigger", g_trades[i].tplBeTrigger);
+      g_trades[i].tplCancelPending  = (JsonGetLong(json, "tpl_cancel_pending", g_trades[i].tplCancelPending ? 1 : 0) != 0);
+      g_trades[i].tplGroupTpAction  = (JsonGetLong(json, "tpl_group_tp_action", g_trades[i].tplGroupTpAction ? 1 : 0) != 0);
+      g_trades[i].tplHarvestEnabled = (JsonGetLong(json, "tpl_harvest_enabled", g_trades[i].tplHarvestEnabled ? 1 : 0) != 0);
+      g_trades[i].tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", g_trades[i].tplHarvestThreshold);
+      updated++;
+   }
+   for(int i = 0; i < ArraySize(g_pending); i++)
+   {
+      if(!g_pending[i].isTemplate) continue;
+      g_pending[i].tplCfg = json;
+      updated++;
+   }
+   Print("[EABridge] set_template '", name, "' applied to ", updated, " live item(s)");
+}
+
 void HandleUpdateTrade(const string json)
 {
    string trade_id = JsonGetString(json, "trade_id");

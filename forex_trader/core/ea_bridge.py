@@ -367,6 +367,35 @@ class EABridge:
             self._pending_orders[trade_id] = {"ticket": ack_box.get("ticket")}
         return ack_box
 
+    async def push_template(self, name: str, template: dict) -> bool:
+        """Push a template's values to the EA immediately, outside of any
+        trade open.
+
+        A template is normally sent with each open_trade/place_pending_order
+        call, so an edit only reaches the EA on the NEXT signal. That is
+        fine for a change made between sessions, but not for adjusting a
+        live setup -- hence the panel's Send button, which calls this.
+
+        Sent as set_template with the same generic tpl_<key> encoding
+        open_trade uses, so the EA parses it through exactly the same path
+        (and, like open_trade, simply ignores keys it doesn't recognise).
+        Best-effort: returns False when the EA isn't connected rather than
+        raising, since the values are already saved and will apply on the
+        next signal regardless.
+        """
+        if not self.is_ea_healthy():
+            return False
+        msg = {"type": "set_template", "template_name": name}
+        for k, v in template.items():
+            if k in ("name", "created_at", "updated_at"):
+                continue
+            msg[f"tpl_{k}"] = (1 if v else 0) if isinstance(v, bool) else v
+        ok = await self._send(msg)
+        if ok:
+            log.info("[EABridge] pushed template '%s' to EA (%d fields)",
+                     name, len(msg) - 2)
+        return ok
+
     async def restore_pending_order(self, row: dict) -> None:
         """Push one still-'working' vantage_pending_orders row back to the
         EA right after it reconnects (see _dispatch's "hello" handling).

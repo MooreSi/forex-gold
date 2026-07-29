@@ -2323,10 +2323,48 @@ def _render_ea_templates_card() -> None:
             out[k] = v
         return out
 
+    def _copy_ladder(src_prefix: str, dst_prefix: str) -> None:
+        """Copy one TP ladder onto the other (the panel's Copy to Pending /
+        Copy to Anchor buttons). Anchor and pending ladders are separate by
+        design -- the copier ships wider pending targets -- but starting one
+        from the other and then tweaking is the common case."""
+        for n in range(1, et.MAX_TP_LEVELS + 1):
+            for suffix in ("pips", "pct"):
+                src = fields.get(f"{src_prefix}{n}_{suffix}")
+                dst = fields.get(f"{dst_prefix}{n}_{suffix}")
+                if src is not None and dst is not None:
+                    dst.value = src.value
+
+    def _send_to_ea() -> None:
+        """Push the form's current values to the live EA immediately.
+
+        Templates are normally sent with each open_trade, so a saved change
+        reaches the EA on the NEXT signal. This is the panel's green Send
+        button: it pushes now, so an adjustment can be made mid-session
+        without waiting for a new trade. No-ops harmlessly when the EA is
+        not connected."""
+        from forex_trader.core import ea_bridge as _eab
+        ea = _eab.get_instance()
+        if ea is None or not ea.is_ea_healthy():
+            ui.notify("EA not connected — values saved, will apply on next signal",
+                      type="warning")
+            return
+        name = (state["name"] or "").strip()
+        if not name:
+            ui.notify("Save the template first, then Send", type="warning")
+            return
+        try:
+            from forex_trader.core.database import _schedule_coro
+            _schedule_coro(ea.push_template(name, _current_values()))
+            ui.notify(f"Sent '{name}' to the EA", type="positive")
+        except Exception as exc:
+            ui.notify(f"Send failed: {exc}", type="negative")
+
     def _draw_body() -> None:
         body.clear()
         live = (et.get_ea_template(state["name"]) if state["name"] else None) or dict(et.DEFAULTS)
         fields.clear()
+        N = et.MAX_TP_LEVELS
         with body:
             with ui.row().classes("items-center gap-2 mb-2"):
                 existing = et.list_ea_templates()
@@ -2337,173 +2375,250 @@ def _render_ea_templates_card() -> None:
                 ).classes("w-56").props("dense outlined").on_value_change(
                     lambda e: _load(e.value or None)
                 ).tooltip(
-                    "Load a previously saved template's values into the form "
-                    "below for editing, or leave on \"New Template\" to build one "
-                    "from scratch."
+                    "Load a saved template's values into the form for editing, "
+                    "or leave on \"New Template\" to build one from scratch."
                 )
                 name_input = ui.input(
                     "Template name", value=state["name"] or "",
                 ).classes("w-56").props("dense outlined")
+                ui.button("Send to EA", on_click=lambda: _send_to_ea()) \
+                    .classes("text-xs bg-green-800 text-white").props("dense") \
+                    .tooltip(
+                        "Push these values to the running EA right now. Without "
+                        "this they still apply, but only from the next signal "
+                        "onward (a template is sent with every trade open)."
+                    )
 
-            ui.label("Strategy").classes("text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1")
-            with ui.grid(columns=2).classes("w-full gap-3 mb-2"):
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+            # ── Entries & lots ────────────────────────────────────────────
+            ui.label("Entries & Lots").classes(
+                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1")
+            with ui.row().classes("w-full gap-2 mb-1"):
+                def _num(key, label, step, tip, width="w-28", mn=0):
+                    with ui.column().classes("gap-0"):
+                        with ui.row().classes("items-center gap-1"):
+                            ui.label(label).classes("text-xs text-gray-400")
+                            if tip:
+                                ui.icon("info_outline", size="14px").classes(
+                                    "text-blue-400 cursor-help").tooltip(tip)
+                        fields[key] = ui.number(
+                            value=live[key], step=step, min=mn,
+                        ).classes(width).props("dense outlined")
+
+                _num("anchors", "Anchors", 1,
+                     "How many legs enter immediately at market when the signal "
+                     "arrives. The anchor takes part of the position straight "
+                     "away so a signal that never retraces isn't missed entirely. "
+                     "0 = pending legs only.")
+                _num("pendings", "Pendings", 1,
+                     "How many resting limit legs are staged inside the signal's "
+                     "entry zone, waiting for a better fill than the anchor got.")
+                _num("lot_anchor", "Anchor Lot", 0.01,
+                     "Lot size for each anchor (market) leg.")
+                _num("lot_pending", "Pending Lot", 0.01,
+                     "Lot size for each pending (limit) leg.")
+                _num("sl_pips", "SL (pips)", 1.0,
+                     "Stop distance in pips, used when the signal doesn't supply "
+                     "its own SL. 10 pips = 1.00 of gold price, so 50 = $5.00 per "
+                     "0.01 lot. The signal's own SL always wins when present.")
+                _num("grid_step_pts", "Ladder Step", 1.0,
+                     "Spacing between pending legs when the signal states no "
+                     "entry zone. When it does state one, legs span that zone "
+                     "instead and this is ignored.")
+                _num("risk_pct", "Risk % (0=OFF)", 0.1,
+                     "Size legs from account risk instead of the fixed lots "
+                     "above. 0 = use the fixed lots.")
+
+            # ── TP ladders ────────────────────────────────────────────────
+            def _ladder(title: str, prefix: str, tip: str) -> None:
+                with ui.row().classes("items-center gap-2 mt-2"):
+                    ui.label(title).classes(
+                        "text-xs font-semibold text-gray-400 uppercase tracking-wider")
+                    ui.icon("info_outline", size="14px").classes(
+                        "text-blue-400 cursor-help").tooltip(tip)
+                with ui.grid(columns=N + 1).classes("w-full gap-1"):
+                    ui.label("").classes("text-xs")
+                    for n in range(1, N + 1):
+                        ui.label(f"TP{n}").classes("text-xs text-center text-gray-400")
+                    ui.label("pips").classes("text-xs text-gray-500 self-center")
+                    for n in range(1, N + 1):
+                        fields[f"{prefix}{n}_pips"] = ui.number(
+                            value=float(live[f"{prefix}{n}_pips"]), step=1.0, min=0,
+                        ).classes("w-full").props("dense outlined")
+                    ui.label("%").classes("text-xs text-gray-500 self-center")
+                    for n in range(1, N + 1):
+                        fields[f"{prefix}{n}_pct"] = ui.number(
+                            value=float(live[f"{prefix}{n}_pct"]), step=1.0, min=0, max=100,
+                        ).classes("w-full").props("dense outlined")
+
+            _ladder("Anchor TP", "tp",
+                    "Targets for the anchor (market) legs, in pips from entry. "
+                    "These are a FALLBACK: when the signal states its own TP "
+                    "levels those win. The % row is always used, since a signal "
+                    "never states how much to close at each level.")
+
+            with ui.row().classes("gap-2 mt-1 mb-1"):
+                ui.button("Copy to Pending ↓",
+                          on_click=lambda: _copy_ladder("tp", "tp_pen")) \
+                    .classes("text-xs bg-blue-900 text-white").props("dense")
+                ui.button("↑ Copy to Anchor",
+                          on_click=lambda: _copy_ladder("tp_pen", "tp")) \
+                    .classes("text-xs bg-amber-800 text-white").props("dense")
+
+            _ladder("Pending TP", "tp_pen",
+                    "Separate targets for the resting (limit) legs. Usually set "
+                    "WIDER than the anchor ladder: a leg filled deeper in the "
+                    "zone has more room to the same structural level. With "
+                    "Anchor = Unified every leg shares one target PRICE, so a "
+                    "deeper leg automatically earns more points reaching it. "
+                    "Leave at 0 to reuse the anchor ladder.")
+
+            # ── Strategy toggles ──────────────────────────────────────────
+            ui.label("Strategy").classes(
+                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-3")
+            with ui.grid(columns=3).classes("w-full gap-2 mb-1"):
+                def _toggle(key, label, opts, tip):
+                    with ui.card().classes("bg-gray-900 p-2 rounded-lg"):
+                        with ui.row().classes("items-center gap-1"):
+                            ui.label(label).classes("text-xs text-gray-300")
+                            ui.icon("info_outline", size="14px").classes(
+                                "text-blue-400 cursor-help").tooltip(tip)
+                        fields[key] = ui.toggle(
+                            opts, value=live[key],
+                        ).props("dense no-caps").classes("text-xs")
+
+                with ui.card().classes("bg-gray-900 p-2 rounded-lg"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("TG CMD").classes("text-xs text-gray-300")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Let Logic Keywords (CLOSE ALL / RISK FREE / TP HIT) "
+                            "from the channel act on trades opened under this "
+                            "template.")
                     fields["tg_cmd_enabled"] = ui.switch(
-                        "TG CMD", value=bool(live["tg_cmd_enabled"]),
-                    ).classes("text-sm")
-                    ui.label(
-                        "Logic Keywords triggers (CLOSE ALL / RISK FREE-BE / TP HIT) "
-                        "apply to trades opened under this template."
-                    ).classes("text-xs text-gray-500 mt-1")
+                        "", value=bool(live["tg_cmd_enabled"])).classes("text-xs")
+                with ui.card().classes("bg-gray-900 p-2 rounded-lg"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Harvest").classes("text-xs text-gray-300")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Close the whole basket once its combined floating "
+                            "profit clears the harvest threshold, regardless of "
+                            "individual TP levels.")
+                    fields["harvest_enabled"] = ui.switch(
+                        "", value=bool(live["harvest_enabled"])).classes("text-xs")
+                _toggle("mode", "Mode", {"grid": "GRID", "single": "SINGLE"},
+                        "GRID stages anchor + pending legs across the signal's "
+                        "zone. SINGLE opens one position.")
+                _toggle("tpsl_mode", "TP/SL",
+                        {"off": "OFF", "on": "ON", "stealth": "STEALTH"},
+                        "ON puts real SL/TP on the broker order. STEALTH keeps "
+                        "targets internal to the EA so they're not visible to "
+                        "the broker. OFF sets neither.")
+                _toggle("anchor", "Anchor",
+                        {"unified": "UNIFIED", "distributed": "DISTRIBUTED"},
+                        "UNIFIED: every leg shares one breakeven and one target "
+                        "PRICE measured from the group's base, so a deeper leg "
+                        "earns more points. DISTRIBUTED: each leg uses its own "
+                        "fill price, giving every leg equal distance.")
+                _toggle("trail_mode", "Trail",
+                        {"off": "OFF", "candle": "CANDLE", "step": "STEP",
+                         "fractal": "FRACTAL", "tp": "TP"},
+                        "How the stop follows price. TP trails to the last "
+                        "cleared TP level; CANDLE/FRACTAL follow structure; "
+                        "STEP uses the fixed trail distance below.")
 
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    ui.label("Mode").classes("text-sm")
-                    fields["mode"] = ui.select(
-                        {c: c.title() for c in et.MODE_CHOICES}, value=live["mode"],
-                    ).classes("w-full").props("dense outlined").tooltip(
-                        "Single: one entry per signal. Grid: stages multiple "
-                        "entries step pts apart to average into the position."
-                    )
-                    fields["grid_step_pts"] = ui.number(
-                        "Grid step (pt)", value=float(live["grid_step_pts"]), step=1.0,
-                    ).classes("w-full mt-1").props("dense outlined")
-                    fields["grid_legs"] = ui.number(
-                        "Grid legs", value=int(live["grid_legs"]), step=1, min=2, max=10,
-                    ).classes("w-full mt-1").props("dense outlined")
-                    ui.label(
-                        "Single: one entry per signal. Grid: stages multiple entries "
-                        "step pts apart to average into the position."
-                    ).classes("text-xs text-gray-500 mt-1")
+            with ui.row().classes("w-full gap-2 mb-1"):
+                _num("trail_distance", "Trail Dist", 1.0,
+                     "Stop distance behind price for STEP trailing, in pips.")
+                _num("trail_activation", "Trail Activate", 1.0,
+                     "Hold the stop still until the trade is this many pips in "
+                     "profit. 0 = trail from the start.")
+                _num("trail_step", "Trail Step", 1.0,
+                     "Minimum move before the stop is adjusted again.")
+                _num("harvest_threshold", "Harvest $", 1.0,
+                     "Basket floating profit (account currency) that triggers a "
+                     "harvest close.")
 
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    ui.label("TP/SL").classes("text-sm")
-                    fields["tpsl_mode"] = ui.select(
-                        {c: c.title() for c in et.TPSL_MODE_CHOICES}, value=live["tpsl_mode"],
-                    ).classes("w-full").props("dense outlined").tooltip(
-                        "Off: no target, rides with no exit. On: real broker-side "
-                        "SL/TP. Stealth: tracked internally, closes at market when "
-                        "hit -- never written to the order ticket."
-                    )
-                    ui.label(
-                        "Off: no target, rides with no exit. On: real broker-side "
-                        "SL/TP. Stealth: tracked internally, closes at market when "
-                        "hit -- never written to the order ticket."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    ui.label("Anchor").classes("text-sm")
-                    fields["anchor"] = ui.select(
-                        {c: c.title() for c in et.ANCHOR_CHOICES}, value=live["anchor"],
-                    ).classes("w-full").props("dense outlined").tooltip(
-                        "Unified: every leg trails/BEs off the original entry "
-                        "price. Distributed: each leg manages its own reference "
-                        "independently."
-                    )
-                    ui.label(
-                        "Unified: every leg trails/BEs off the original entry price. "
-                        "Distributed: each leg manages its own reference independently."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    ui.label("Trail").classes("text-sm")
-                    fields["trail_mode"] = ui.select(
-                        {c: c.title() for c in et.TRAIL_MODE_CHOICES}, value=live["trail_mode"],
-                    ).classes("w-full").props("dense outlined").tooltip(
-                        "Candle: trails to recent candle highs/lows. Step: fixed-"
-                        "point trailing. Fractal: trails to swing-pivot fractals. "
-                        "TP: trails up to each TP price as it's hit."
-                    )
-                    ui.label(
-                        "Candle: trails to recent candle highs/lows. Step: fixed-"
-                        "point trailing. Fractal: trails to swing-pivot fractals. "
-                        "TP: trails up to each TP price as it's hit."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-            ui.label("Triggers").classes("text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1")
-            with ui.grid(columns=2).classes("w-full gap-3 mb-2"):
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    ui.label("BE Mode").classes("text-sm")
+            # ── Triggers ──────────────────────────────────────────────────
+            ui.label("Triggers").classes(
+                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-3")
+            with ui.row().classes("w-full gap-2 mb-1"):
+                with ui.column().classes("gap-0"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("BE Mode").classes("text-xs text-gray-400")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Where breakeven puts the stop: exactly at entry, or "
+                            "entry plus a small buffer to cover costs.")
                     fields["be_mode"] = ui.select(
-                        {c: c.replace("_", " ").title() for c in et.BE_MODE_CHOICES},
+                        {"entry": "ENTRY", "entry_buffer": "ENTRY + BUFFER"},
                         value=live["be_mode"],
-                    ).classes("w-full").props("dense outlined").tooltip(
-                        "Entry: SL moves exactly to entry price. Entry+Buffer: "
-                        "locks in buffer pts of profit instead of dead-even."
-                    )
-                    fields["be_buffer_pts"] = ui.number(
-                        "BE buffer (pt)", value=float(live["be_buffer_pts"]), step=0.5,
-                    ).classes("w-full mt-1").props("dense outlined")
-                    ui.label(
-                        "Entry: SL moves exactly to entry price. Entry+Buffer: locks "
-                        "in buffer pts of profit instead of dead-even."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    fields["be_trigger"] = ui.number(
-                        "BE Trigger (TP#)", value=int(live["be_trigger"]), step=1, min=1, max=8,
-                    ).classes("w-full").props("dense outlined")
-                    ui.label(
-                        "Which TP level arms the breakeven move."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    fields["cancel_pending"] = ui.switch(
-                        "Cancel Pending", value=bool(live["cancel_pending"]),
-                    ).classes("text-sm")
-                    ui.label(
-                        "When one leg of a multi-order signal fills, cancel the "
-                        "other still-resting pending legs."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    fields["group_tp_action"] = ui.switch(
-                        "Group TP Action", value=bool(live["group_tp_action"]),
-                    ).classes("text-sm")
-                    ui.label(
-                        "Grid mode only: the first TP any leg hits cancels every "
-                        "other still-resting leg and moves every other open leg's "
-                        "SL to its own breakeven -- treats one leg's TP as "
-                        "validation of the whole basket."
-                    ).classes("text-xs text-gray-500 mt-1")
-
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
+                    ).classes("w-44").props("dense outlined")
+                with ui.column().classes("gap-0"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("BE Trigger").classes("text-xs text-gray-400")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Which TP level moves the stop to breakeven. Worth "
+                            "knowing: measured on this account's own trade "
+                            "paths, breakeven moves REDUCED expectancy in every "
+                            "configuration tested — see tools/exit_policy_lab.py.")
+                    fields["be_trigger"] = ui.select(
+                        {n: f"TP{n}" for n in range(1, N + 1)},
+                        value=int(live["be_trigger"]),
+                    ).classes("w-32").props("dense outlined")
+                with ui.column().classes("gap-0"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Cancel Pending").classes("text-xs text-gray-400")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Which TP level cancels any still-resting sibling "
+                            "legs. OFF leaves them on the book to fill later.")
+                    fields["cancel_pending_level"] = ui.select(
+                        {0: "OFF", **{n: f"TP{n}" for n in range(1, N + 1)}},
+                        value=int(live["cancel_pending_level"]),
+                    ).classes("w-32").props("dense outlined")
+                with ui.column().classes("gap-0"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Sig Guard").classes("text-xs text-gray-400")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Block a new trade on this channel while one is "
+                            "already open in the same direction.")
                     fields["sig_guard"] = ui.switch(
-                        "Sig Guard", value=bool(live["sig_guard"]),
-                    ).classes("text-sm")
-                    ui.label(
-                        "Block a new template-managed trade for the same channel/"
-                        "direction while one is already open."
-                    ).classes("text-xs text-gray-500 mt-1")
+                        "", value=bool(live["sig_guard"])).classes("text-xs")
+                with ui.column().classes("gap-0"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Group TP Action").classes("text-xs text-gray-400")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Grid only: the first TP any leg clears cancels the "
+                            "resting siblings and moves the live ones to their "
+                            "own breakeven.")
+                    fields["group_tp_action"] = ui.switch(
+                        "", value=bool(live["group_tp_action"])).classes("text-xs")
 
-            with ui.row().classes("items-center gap-2 mb-2 mt-1"):
-                ui.label("Anchor TP").classes(
-                    "text-xs font-semibold text-gray-400 uppercase tracking-wider"
-                )
-                ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                    "Per-TP-level pips + close %. Pips are only used as a fallback "
-                    "for any TP level the raw signal itself didn't supply (entry ± "
-                    "N pips) -- a level the signal DID state always keeps that "
-                    "price. % always comes from here regardless, since a signal "
-                    "states TP prices but never how much to close at each one. "
-                    "0 = level unused."
-                )
-            with ui.card().classes("bg-gray-900 p-3 rounded-lg w-full mb-2"):
-                with ui.grid(columns=9).classes("w-full gap-2 items-center"):
-                    ui.label("")
-                    for n in range(1, 9):
-                        ui.label(f"TP{n}").classes("text-xs font-semibold text-yellow-300 text-center")
-                    ui.label("pips").classes("text-xs text-gray-500")
-                    for n in range(1, 9):
-                        fields[f"tp{n}_pips"] = ui.number(
-                            value=float(live[f"tp{n}_pips"]), step=1.0, min=0,
-                        ).classes("w-full").props("dense outlined")
-                    ui.label("%").classes("text-xs text-gray-500")
-                    for n in range(1, 9):
-                        fields[f"tp{n}_pct"] = ui.number(
-                            value=float(live[f"tp{n}_pct"]), step=1.0, min=0, max=100,
-                        ).classes("w-full").props("dense outlined")
+            # ── Guards & execution ────────────────────────────────────────
+            ui.label("Guards & Execution").classes(
+                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-3")
+            with ui.row().classes("w-full gap-2 mb-1"):
+                _num("equity_protect", "Equity Protect $", 1.0,
+                     "Close everything on this template if floating loss exceeds "
+                     "this many account-currency units. 0 = off.")
+                _num("guard_pips", "Guard pips", 1.0,
+                     "Minimum distance to keep between a stop and current price. "
+                     "This is what prevents a breakeven move being rejected as "
+                     "an invalid stop when price has already run past entry.")
+                _num("max_spread_pips", "Max Spread", 0.5,
+                     "Skip the trade if the spread is wider than this at fill "
+                     "time.")
+                _num("late_guard_pips", "Late Guard", 1.0,
+                     "Reject a signal that arrives this many pips beyond its own "
+                     "zone. 0 = no guard.")
+                _num("signal_max_age_sec", "Max Age (s)", 1,
+                     "Ignore a signal older than this many seconds at fill time.")
 
-            with ui.row().classes("gap-2 mt-1"):
+            with ui.row().classes("gap-2 mt-2"):
                 ui.button(
                     "Save Template", on_click=lambda: _save(name_input),
                 ).classes("text-xs bg-green-800 text-white").props("dense")

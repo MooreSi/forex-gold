@@ -34,7 +34,7 @@ from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_open_trade_from_signal import open_trade_from_signal
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range
-from forex_trader.core.core_trade_reporting import get_open_trades
+from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,

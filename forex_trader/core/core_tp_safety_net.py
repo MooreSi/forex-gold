@@ -22,7 +22,7 @@ from typing import Any
 
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
-from forex_trader.core.core_trade_reporting import get_open_trades
+from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import STRATEGY_BE_RUNNER, STRATEGY_REVERSAL_RUNNER, STRATEGY_SCALP_RUNNER
 
 log = logging.getLogger(__name__)

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from forex_trader.core import core_trade_reporting
+from backend.src.services.analytics import reporting as core_trade_reporting
 
 
 async def get_untracked_mt5_positions(bridge: Any) -> list[dict]:

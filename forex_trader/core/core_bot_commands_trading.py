@@ -31,7 +31,7 @@ from forex_trader.core.core_manual_market_order import open_manual_market_order
 from forex_trader.core.core_mt5_performance import compute_mt5_performance
 from forex_trader.core.core_open_trade import open_trade
 from forex_trader.core.core_risk_governor import price_in_entry_range
-from forex_trader.core.core_trade_reporting import get_open_trades
+from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import STRATEGY_SCALE_OUT
 from forex_trader.core.signal_parser import validate_signal
 

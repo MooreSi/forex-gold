@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_trade_reporting's extracted functions behave
+"""Proves backend.src.services.analytics.reporting's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_trade_reporting_characterization.py -- see
 docs/todo/refactor/core-trade-reporting-migration/020-*.md.
@@ -15,7 +15,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_trade_reporting as rep
+from backend.src.services.analytics import reporting as rep
 
 
 def _reset_thread_local_connection():

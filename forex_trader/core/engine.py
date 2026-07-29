@@ -83,7 +83,7 @@ from forex_trader.core.core_sim_account import (
     update_sim_balance as _update_sim_balance_impl,
     reset_simulation as _reset_simulation_impl,
 )
-from forex_trader.core.core_trade_reporting import (
+from backend.src.services.analytics.reporting import (
     get_open_trades as _get_open_trades_impl,
     get_all_trades as _get_all_trades_impl,
     compute_performance as _compute_performance_impl,

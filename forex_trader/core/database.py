@@ -1112,7 +1112,7 @@ from forex_trader.core.core_db_sync import (  # noqa: E402,F401
     generate_sync_token,
     get_sync_token,
 )
-from forex_trader.core.core_db_analytics import (  # noqa: E402,F401
+from backend.src.services.analytics.read_repo import (  # noqa: E402,F401
     _session_for_hour,
     _trade_pts,
     get_hourly_pnl_grid,

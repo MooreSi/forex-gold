@@ -188,11 +188,31 @@ async def execute_auto_signal(
                         signal_id = str(uuid.uuid4())[:16]
                         balance = await get_trading_balance_fn()
                         entry_mid = (float(parsed["entry_low"]) + float(parsed["entry_high"])) / 2
-                        lot = suggest_lot_size_fn(entry_mid, float(parsed["stop_loss"]),
-                                                  balance, float(rs.get("risk_per_trade_pct", 0.5)))
-                        strategy_lot = float(rs.get("strategy_lot_size", 0))
-                        if strategy_lot > 0:
-                            lot = strategy_lot
+
+                        # EA Templates size from their own Entries & Lots fields, not
+                        # the generic risk-based path below -- see the matching fix
+                        # in core_signal_resolution.py for the full reasoning. This
+                        # is a SEPARATE code path (the immediate-placement branch for
+                        # a freshly-arrived Telegram signal), so it needs its own
+                        # copy of the same logic rather than falling through to it.
+                        _tpl_for_sizing = None
+                        if ea_templates.is_template_override(strategy):
+                            _tpl_for_sizing = ea_templates.get_ea_template(
+                                ea_templates.template_name_from_override(strategy))
+                        if _tpl_for_sizing is not None:
+                            _tpl_risk_pct = float(_tpl_for_sizing.get("risk_pct") or 0)
+                            if _tpl_risk_pct > 0:
+                                lot = suggest_lot_size_fn(
+                                    entry_mid, float(parsed["stop_loss"]), balance, _tpl_risk_pct)
+                            else:
+                                _max_lot = float(rs.get("max_lot_size", 0.10))
+                                lot = min(float(_tpl_for_sizing.get("lot_anchor") or 0.01), _max_lot)
+                        else:
+                            lot = suggest_lot_size_fn(entry_mid, float(parsed["stop_loss"]),
+                                                      balance, float(rs.get("risk_per_trade_pct", 0.5)))
+                            strategy_lot = float(rs.get("strategy_lot_size", 0))
+                            if strategy_lot > 0:
+                                lot = strategy_lot
 
                         direction = parsed["direction"]
                         el = float(parsed["entry_low"])

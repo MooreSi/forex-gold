@@ -162,6 +162,7 @@ async def process_instant_entry(
     # could open a second template-managed trade for a channel/direction
     # that already has one live, exactly the pile-up Sig Guard exists to
     # prevent on the full-signal path.
+    _template_ime = None
     if ea_templates.is_template_override(strategy):
         _tpl_name_ime = ea_templates.template_name_from_override(strategy)
         _template_ime = ea_templates.get_ea_template(_tpl_name_ime)
@@ -181,7 +182,20 @@ async def process_instant_entry(
         log.info("[IME] Instant %s — max_trades (%d) reached, skipped", direction, max_trades)
         return
     strategy_lot = float(rs.get("strategy_lot_size", 0))
-    lot          = strategy_lot if strategy_lot > 0 else 0.01
+    if _template_ime is not None:
+        # Templates size from their own Entries & Lots fields even on the
+        # IME path -- this used to hardcode 0.01 (or the global fixed lot)
+        # regardless of the template's configured Anchor Lot, same gap as
+        # the full-signal and immediate-grid-placement paths. See
+        # core_signal_resolution.py's matching fix for the full reasoning.
+        _tpl_risk_ime = float(_template_ime.get("risk_pct") or 0)
+        if _tpl_risk_ime <= 0:
+            lot = min(float(_template_ime.get("lot_anchor") or 0.01),
+                     float(rs.get("max_lot_size", 0.10)))
+        else:
+            lot = 0.01  # placeholder -- the risk_pct>0 branches below recompute it
+    else:
+        lot = strategy_lot if strategy_lot > 0 else 0.01
     # Use the signalled price as the entry reference if one was provided.
     # Execution is always at market; the price is used for entry_low/high only.
     market_px = tick.ask if direction == "BUY" else tick.bid
@@ -191,7 +205,29 @@ async def process_instant_entry(
     # 1 lot XAUUSD = 100 oz; P&L per point = lot × 100.
     # Target max loss $150, but clamp between 8 pts (survive spread/noise) and
     # 25 pts (limit damage if the follow-up never arrives).
-    if bool(rs.get("risk_governor_enabled", 0)):
+    if _template_ime is not None:
+        # Lot is already resolved from the template's own Entries & Lots
+        # fields above -- none of the Risk Governor / fixed-lot / risk_pct
+        # branches below may touch it, since each unconditionally
+        # recomputes `lot` regardless of strategy. That was the actual bug:
+        # a template's Anchor Lot was overwritten by whichever of those
+        # three happened to be active, not just by the Risk Governor one.
+        # The provisional SL distance still needs computing (replaced once
+        # the real follow-up signal arrives) -- same ATR-based default the
+        # risk_pct branch below uses, since a template's own sl_pips isn't
+        # in comparable point-from-fill terms for this placeholder.
+        _ime_atr_tpl = 0.0
+        if dpm_candles:
+            try:
+                _ime_atr_tpl = dpm_engine.compute_atr(dpm_candles) or 0.0
+            except Exception:
+                _ime_atr_tpl = 0.0
+        _IME_SL_DIST = max(8.0, min(round(_ime_atr_tpl * 1.2 if _ime_atr_tpl > 0 else 12.0, 2), 25.0))
+        provisional_sl = round(
+            entry_px - _IME_SL_DIST if direction == "BUY" else entry_px + _IME_SL_DIST, 2
+        )
+        _ime_max_loss = round(_IME_SL_DIST * lot * 100.0, 2)
+    elif bool(rs.get("risk_governor_enabled", 0)):
         # Tier 1 Risk Governor: compute ATR-based provisional SL distance.
         # Lot sizing uses the fixed lot when set; otherwise falls back to risk_pct.
         _rg_atr_ime = 0.0

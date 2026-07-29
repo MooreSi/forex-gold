@@ -315,6 +315,81 @@ def test_strategy_fixed_lot_wins_over_everything(fresh_db):
     assert result["lot_size"] == 0.77
 
 
+def test_template_uses_lot_anchor_for_sizing(fresh_db):
+    """A template's own Entries & Lots field is authoritative, not the
+    generic risk-based path every other strategy uses. Regression for the
+    gap where single-mode templates (and the DB/Telegram record of any
+    template trade) got the generic size instead of the configured Anchor
+    Lot -- grid mode's resting legs happened to be correct already since
+    the EA itself overrides with tpl_lot_anchor/tpl_lot_pending, but the
+    Python-side value fed to open_trade() was never actually derived from
+    the template."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("SizedTpl", {"lot_anchor": 0.05, "risk_pct": 0})
+    _insert_signal(source_name="TplChannel")
+    db.set_channel_strategy_override("TplChannel", et.override_for_template("SizedTpl"))
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["lot_size"] == 0.05
+
+
+def test_template_lot_anchor_capped_by_max_lot_size(fresh_db):
+    """Global parameters still apply as a ceiling even though the
+    template's fixed lot is the primary sizing source."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("BigTpl", {"lot_anchor": 5.0, "risk_pct": 0})
+    _insert_signal(source_name="TplChannel")
+    db.set_channel_strategy_override("TplChannel", et.override_for_template("BigTpl"))
+    db.update_risk_settings({"max_lot_size": 0.10})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["lot_size"] == 0.10
+
+
+def test_template_risk_pct_sizes_from_risk_instead_of_lot_anchor(fresh_db):
+    """risk_pct (0 = OFF) lets a template size from account risk instead
+    of a flat lot -- the same convention every other strategy's own
+    risk_pct field already follows."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("RiskTpl", {"lot_anchor": 0.05, "risk_pct": 1.0})
+    _insert_signal(source_name="TplChannel", stop_loss=2390.0)
+    db.set_channel_strategy_override("TplChannel", et.override_for_template("RiskTpl"))
+    bridge = _FakeBridge(account={"balance": 10000.0})
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    # entry ~2400, SL 2390 -> 10pt distance; 1% of 10000 = $100 risk -> 0.10 lot
+    assert result["lot_size"] != 0.05
+    assert result["lot_size"] > 0.05
+
+
+def test_template_global_fixed_lot_does_not_override_lot_anchor(fresh_db):
+    """The global fixed-lot toggle must not silently overwrite a
+    template's own Anchor Lot -- that would defeat the entire point of
+    the field existing on the template. Every other (non-template)
+    strategy keeps "fixed lot always wins" (see
+    test_strategy_fixed_lot_wins_over_everything)."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("FixedLotTpl", {"lot_anchor": 0.03, "risk_pct": 0})
+    _insert_signal(source_name="TplChannel")
+    db.set_channel_strategy_override("TplChannel", et.override_for_template("FixedLotTpl"))
+    db.update_risk_settings({"strategy_lot_size": 0.77})
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["lot_size"] == 0.03
+
+
+def test_template_manual_lot_override_still_wins(fresh_db):
+    """An explicit manual override (e.g. the "Open Trade Now" UI lot
+    field) still wins over the template's Anchor Lot -- the user set it
+    deliberately for this one trade."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("OverrideTpl", {"lot_anchor": 0.03, "risk_pct": 0})
+    _insert_signal(source_name="TplChannel")
+    db.set_channel_strategy_override("TplChannel", et.override_for_template("OverrideTpl"))
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1", lot_size_override=0.42))
+    assert result["lot_size"] == 0.42
+
+
 def test_age_lot_mult_decay_applied(fresh_db):
     _insert_signal(lot_size=0.10)
     bridge = _FakeBridge()

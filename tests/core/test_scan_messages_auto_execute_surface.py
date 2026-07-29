@@ -318,6 +318,45 @@ def test_grid_template_failure_is_reported_not_swallowed(fresh_db):
     assert "Grid template order failed" in result["skip_reason"]
 
 
+def test_grid_template_sizes_from_lot_anchor_not_generic_risk(fresh_db):
+    """Regression: this immediate-placement branch computed `lot` generically
+    (risk-based, then global fixed-lot) BEFORE checking whether the
+    strategy was a template at all, so a grid template's own Anchor Lot
+    was never consulted here even though the EA-side grid legs already
+    read tpl_lot_anchor/tpl_lot_pending directly. The value stored on the
+    DB placeholder row and reported via Telegram was wrong regardless."""
+    from forex_trader.core import core_ea_templates as et
+    strategy = _make_grid_template("SizedGrid")
+    et.save_ea_template("SizedGrid", {"mode": "grid", "grid_legs": 3,
+                                      "lot_anchor": 0.05, "risk_pct": 0})
+    result, calls, bridge = _call(tick=_OUT_OF_ZONE_TICK, strategy=strategy)
+    assert result["executed"] is True
+    assert calls[0]["lot_size"] == 0.05
+    assert result["exec_lot"] == 0.05
+
+
+def test_grid_template_lot_anchor_capped_by_max_lot_size(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    strategy = _make_grid_template("BigGrid")
+    et.save_ea_template("BigGrid", {"mode": "grid", "grid_legs": 3,
+                                    "lot_anchor": 5.0, "risk_pct": 0})
+    result, calls, bridge = _call(
+        tick=_OUT_OF_ZONE_TICK, strategy=strategy, rs={"max_lot_size": 0.10},
+    )
+    assert calls[0]["lot_size"] == 0.10
+
+
+def test_grid_template_global_fixed_lot_does_not_override_lot_anchor(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    strategy = _make_grid_template("FixedLotGrid")
+    et.save_ea_template("FixedLotGrid", {"mode": "grid", "grid_legs": 3,
+                                         "lot_anchor": 0.03, "risk_pct": 0})
+    result, calls, bridge = _call(
+        tick=_OUT_OF_ZONE_TICK, strategy=strategy, rs={"strategy_lot_size": 0.77},
+    )
+    assert calls[0]["lot_size"] == 0.03
+
+
 def test_single_mode_template_still_queues_when_out_of_zone(fresh_db):
     # Only grid mode places immediately -- single mode is a market-fill
     # strategy like any other and keeps the existing wait-then-fill path.

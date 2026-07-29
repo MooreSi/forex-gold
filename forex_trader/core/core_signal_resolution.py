@@ -259,6 +259,34 @@ async def resolve_open_trade_params(
         raise ValueError(f"Channel '{_ch_src}' is paused by the scorecard — trade skipped")
 
     lot_size = lot_size_override or sig.get("lot_size")
+    if not lot_size and _is_template and _template is not None:
+        # A template's own Entries & Lots fields are authoritative for
+        # sizing, not the generic per-strategy path below. Grid mode's
+        # resting legs already read tpl_lot_anchor/tpl_lot_pending directly
+        # on the EA side (HandleOpenTemplateGrid) and only fall back to
+        # whatever this function computes if those are zero -- but single
+        # mode reuses the plain market-order path with no such override, so
+        # it silently used the generic risk-based/global-fixed-lot size
+        # instead of the template's own Anchor Lot. This also fixes the
+        # value recorded in the DB placeholder row and reported via
+        # Telegram, which was never the true anchor size for grid trades
+        # either.
+        #
+        # risk_pct (0 = OFF) lets a template size itself from account risk
+        # instead of a flat lot, same convention as every other strategy's
+        # own risk_pct field.
+        _tpl_risk_pct = float(_template.get("risk_pct") or 0)
+        if _tpl_risk_pct > 0:
+            balance   = await get_trading_balance(bridge, starting_balance)
+            entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+            lot_size  = suggest_lot_size(entry_mid, float(sig["stop_loss"]), balance, _tpl_risk_pct)
+        else:
+            # Global parameters still apply as a ceiling even though the
+            # template's fixed lot is the primary source -- suggest_lot_size
+            # would clamp to this too, but the raw-anchor-lot path bypasses
+            # that function entirely so it needs its own cap.
+            _max_lot = float(rs.get("max_lot_size", 0.10))
+            lot_size = min(float(_template.get("lot_anchor") or 0.01), _max_lot)
     if not lot_size:
         risk_pct  = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
         balance   = await get_trading_balance(bridge, starting_balance)
@@ -271,8 +299,14 @@ async def resolve_open_trade_params(
     lot_size = max(0.01, round(lot_size, 2))
 
     # strategy already resolved above the filter check
+    #
+    # The global fixed-lot override does NOT apply to templates: a template
+    # is a self-contained, per-channel sizing definition (Anchor Lot/Pending
+    # Lot), and letting one global toggle silently overwrite that would
+    # defeat the entire point of those fields being on the template at all.
+    # Every other strategy keeps "fixed lot always wins".
     strategy_lot = float(rs.get("strategy_lot_size", 0))
-    if strategy_lot > 0:
+    if strategy_lot > 0 and not _is_template:
         lot_size = strategy_lot
 
     # Signal age decay: stale signals trade smaller to reflect reduced confidence

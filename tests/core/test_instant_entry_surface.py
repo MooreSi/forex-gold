@@ -161,6 +161,56 @@ def test_default_risk_pct_sizing_floors_to_min_lot(fresh_db):
     assert ot.call_args.kwargs["stop_loss"] == 2403.0
 
 
+def test_template_uses_lot_anchor_not_hardcoded_001(fresh_db):
+    """Regression: IME's template path hardcoded lot=0.01 (or the global
+    fixed lot) regardless of the template's configured Anchor Lot -- the
+    same gap as the full-signal and immediate-grid-placement paths, just
+    on the "bare Buy Now" code path instead."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("ImeTpl", {"lot_anchor": 0.06, "risk_pct": 0})
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("ImeTpl")):
+        ot = _run_open_trade_path(_rs(), tg_id="tg-tpl-1")
+    assert ot.called
+    assert ot.call_args.kwargs["lot_size"] == 0.06
+
+
+def test_template_lot_anchor_capped_by_max_lot_size(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("BigImeTpl", {"lot_anchor": 5.0, "risk_pct": 0})
+    rs = dict(_rs(), max_lot_size=0.10)
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("BigImeTpl")):
+        ot = _run_open_trade_path(rs, tg_id="tg-tpl-2")
+    assert ot.called
+    assert ot.call_args.kwargs["lot_size"] == 0.10
+
+
+def test_template_global_fixed_lot_does_not_override_lot_anchor(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("FixedImeTpl", {"lot_anchor": 0.04, "risk_pct": 0})
+    rs = dict(_rs(), strategy_lot_size=0.77)
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("FixedImeTpl")):
+        ot = _run_open_trade_path(rs, tg_id="tg-tpl-3")
+    assert ot.called
+    assert ot.call_args.kwargs["lot_size"] == 0.04
+
+
+def test_template_risk_governor_does_not_override_lot_anchor(fresh_db):
+    """Risk Governor's ATR-based sizing must not clobber a template's own
+    Anchor Lot either -- its provisional-SL model doesn't apply to a
+    template's self-managed SL/TP."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("RgImeTpl", {"lot_anchor": 0.02, "risk_pct": 0})
+    rs = dict(_rs(), risk_governor_enabled=1, strategy_lot_size=0.0)
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("RgImeTpl")):
+        ot = _run_open_trade_path(rs, tg_id="tg-tpl-4")
+    assert ot.called
+    assert ot.call_args.kwargs["lot_size"] == 0.02
+
+
 def test_governor_on_default_settings_skips_entirely(fresh_db):
     rs = dict(_rs(), risk_governor_enabled=1, strategy_lot_size=0.0)
     with mock.patch.object(ime, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \

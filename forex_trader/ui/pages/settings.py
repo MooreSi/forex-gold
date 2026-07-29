@@ -3087,10 +3087,10 @@ def _render_diagnostics(engine):
 # ── Registration tab ───────────────────────────────────────────────────────────
 
 def _render_theme():
-    """Settings → Theme tab — pick a dark-mode color preset for the whole app.
+    """Settings → Theme tab — pick Light or Dark for the whole app.
 
-    See core_ui_theme.py's module docstring for why this is dark-only
-    presets (neutral palette swap) rather than a real light mode.
+    See core_ui_theme.py's module docstring for how the neutral-class CSS
+    override mechanism works (and why text-white is excluded on buttons).
     """
     from forex_trader.core import core_ui_theme as theme_mod
 
@@ -3098,8 +3098,7 @@ def _render_theme():
         ui.label("Color Theme").classes("text-base font-bold text-yellow-300")
         ui.label(
             "Applies to the whole app immediately — no restart needed. "
-            "All presets stay dark; only the neutral background/border tones "
-            "change. Status colors (profit/loss/warnings) never change."
+            "Status colors (profit/loss/warnings) never change."
         ).classes("text-xs text-gray-400 mb-2")
 
         current = {"value": theme_mod.get_theme()}

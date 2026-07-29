@@ -23,7 +23,7 @@
       "frontend/pages/ai_trade_analysis.py": 1721,
       "frontend/pages/breakout_panel.py": 930,
       "frontend/pages/chart.py": 842,
-      "frontend/pages/history.py": 1747,
+      "frontend/pages/history.py": 1644,
       "frontend/pages/reversal_panel.py": 813,
       "frontend/pages/settings.py": 3204,
       "frontend/pages/test_panel.py": 1264,

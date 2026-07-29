@@ -16,40 +16,12 @@ from nicegui import ui
 import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from backend.src.services.analytics import trade_history_repo
+from backend.src.controllers.history import controller as history_ctl
 from forex_trader.core import telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
 from frontend.pages import ai_trade_analysis as _ai_analysis
 from frontend.pages.trading import trade_source_label, trade_channel_label
-
-
-def _parse_reason(comment: str, pnl: float = 0.0) -> str:
-    """
-    Translate a raw MT5 close-deal comment into a clean human-readable label.
-
-    MT5 close comment patterns (from Vantage / standard MT5):
-      "[sl 4482.00]"       → SL
-      "[tp 4460.00]"       → TP
-      "so: 1:100"          → Stop-out (margin call)
-      "closePosition"      → Manual close (via bridge)
-      "close"              → Manual close
-      "ForexTrader"        → App-initiated close
-      ""                   → fallback on PnL sign
-    """
-    c = comment.strip().lower()
-    if c.startswith("[sl") or "stop loss" in c or c == "sl":
-        return "SL"
-    if c.startswith("[tp") or "take profit" in c or c == "tp":
-        return "TP"
-    if c.startswith("so:") or "stop out" in c or "margin call" in c:
-        return "Stop-out"
-    if c in ("closeposition", "close", "forextrader", "manual", ""):
-        return "Manual"
-    # Partial-close comments from the app
-    if "partial" in c or "scale" in c:
-        return "Partial TP"
-    # Anything left — return cleaned-up original
-    return comment.strip() or ("Win" if pnl > 0 else "Loss")
 
 
 def _get_env_db_path(env: str) -> str:
@@ -71,57 +43,6 @@ def _query_env_db(env: str, sql: str, params: tuple = ()) -> list[dict]:
         return [dict(r) for r in rows]
     except Exception:
         return []
-
-
-def _uk(ts) -> str:
-    """Format an MT5 broker timestamp for display.
-    MT5 timestamps are UTC+3 encoded as Unix epoch; treating as UTC gives broker time."""
-    if not ts:
-        return "—"
-    try:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%m-%d %H:%M")
-    except Exception:
-        return str(ts)[:16]
-
-
-def _fmt_duration(seconds: Optional[float]) -> str:
-    """Compact human-readable duration -- "45s", "12m", "2h 15m", "3d 4h".
-    Used for both how long a closed trade was held (open->close) and how
-    long a Limit Runner/EA Template grid order sat pending before it filled
-    (pending_placed_at->open)."""
-    if seconds is None or seconds < 0:
-        return "—"
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes, seconds = divmod(seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m {seconds}s" if seconds else f"{minutes}m"
-    hours, minutes = divmod(minutes, 60)
-    if hours < 24:
-        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
-    days, hours = divmod(hours, 24)
-    return f"{days}d {hours}h" if hours else f"{days}d"
-
-
-def _to_date(ts) -> Optional[date]:
-    try:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).date()
-    except Exception:
-        return None
-
-
-_UK_TZ = _ZoneInfo("Europe/London")
-_BROKER_OFFSET = 10800  # broker stores UTC+3 timestamps as-if-UTC
-
-
-def _broker_ts_to_uk_date(ts) -> Optional[date]:
-    """Convert a broker timestamp (UTC+3-stored-as-UTC) to UK local calendar date."""
-    try:
-        real_utc_epoch = float(ts) - _BROKER_OFFSET
-        return datetime.fromtimestamp(real_utc_epoch, tz=_UK_TZ).date()
-    except Exception:
-        return None
 
 
 def render(get_engine: Callable):
@@ -337,7 +258,7 @@ def _render_equity_curve(engine):
                 x_data, y_data = [], []
                 for ts, pnl in rows:
                     equity += pnl
-                    x_data.append(_uk(ts))
+                    x_data.append(history_ctl.format_broker_ts(ts))
                     y_data.append(round(equity, 2))
 
                 chart.options["series"][0]["markLine"]["data"] = [{
@@ -361,30 +282,6 @@ def _render_equity_curve(engine):
 # ── Trade history table (live from MT5) ───────────────────────────────────────
 
 # Short display names for the strategy column
-_STRAT_LABEL = {
-    "scale_out":       "Scale Out",
-    "be_runner":       "BE Runner",
-    "trail_stop":      "Trail Stop",
-    "protected_scale": "Protected Scale",
-    "conservative":    "Conservative",
-}
-
-
-def _strategy_display_label(strategy: str) -> str:
-    """Human-readable label for a trade's strategy, including EA Templates
-    ("template:<name>") -- these are user-defined, not one of the fixed
-    built-in strategies, so they were never in STRATEGY_NAMES/_STRAT_LABEL
-    and fell through to the "—" placeholder instead of a readable name.
-    Confirmed live 2026-07-23 that every EA Template trade showed a blank
-    Strategy column in Trade Analysis."""
-    if not strategy:
-        return "—"
-    from forex_trader.core import core_ea_templates as _et
-    if _et.is_template_override(strategy):
-        return f"Template: {_et.template_name_from_override(strategy)}"
-    return _STRAT_LABEL.get(strategy, STRATEGY_NAMES.get(strategy, "—"))
-
-
 def _render_trade_table(engine):
     def _ticket_source_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: channel_or_source_label}.
@@ -445,7 +342,7 @@ def _render_trade_table(engine):
         try:
             _, ledger_strategies, _ = db_module.get_consolidated_ticket_maps()
             for ticket, strategy in ledger_strategies.items():
-                result[ticket] = _strategy_display_label(strategy or "")
+                result[ticket] = history_ctl.strategy_display_label(strategy or "")
         except Exception:
             pass
         try:
@@ -454,7 +351,7 @@ def _render_trade_table(engine):
                 if dpm_trade_id:
                     label = "DPM"
                 else:
-                    label = _strategy_display_label(strategy or "")
+                    label = history_ctl.strategy_display_label(strategy or "")
                 result[str(mt5_ticket)] = label
         except Exception:
             pass
@@ -464,7 +361,7 @@ def _render_trade_table(engine):
             # vantage_ladder_legs row; inherit the parent's strategy.
             rows = trade_history_repo.ticket_strategies_for_legs(cutoff)
             for mt5_ticket, strategy in rows:
-                result[str(mt5_ticket)] = _strategy_display_label(strategy or "")
+                result[str(mt5_ticket)] = history_ctl.strategy_display_label(strategy or "")
         except Exception:
             pass
         return result
@@ -750,7 +647,7 @@ def _render_trade_table(engine):
                         pnl, fees_display = _apply_fee(pos_deals, open_lots, comm_rate)
                         close_ts = float(close_deal.get("time", 0))
                         open_ts  = float(open_deal.get("time", 0)) if open_deal else 0.0
-                        reason   = _parse_reason(close_deal.get("comment") or "", pnl)
+                        reason   = history_ctl.parse_reason(close_deal.get("comment") or "", pnl)
 
                         # Order Type / Pending For: distinguishes a genuine
                         # resting Limit Runner/EA Template grid fill from an
@@ -761,10 +658,10 @@ def _render_trade_table(engine):
                         _otype, _pending_at = order_type_map.get(str(ticket), ("market", None))
                         order_type_display = "Limit" if _otype == "limit" else "Market"
                         pending_display = (
-                            _fmt_duration(open_ts - _pending_at)
+                            history_ctl.format_duration(open_ts - _pending_at)
                             if _pending_at and open_ts else "—"
                         )
-                        duration_display = _fmt_duration(close_ts - open_ts) if open_ts and close_ts else "—"
+                        duration_display = history_ctl.format_duration(close_ts - open_ts) if open_ts and close_ts else "—"
 
                         # Spread paid at entry — already embedded in pnl via MT5's real
                         # fill prices; shown here as an informational cost breakdown, not
@@ -815,7 +712,7 @@ def _render_trade_table(engine):
                             "_fees":     fees_display,
                             "_entry":    entry,
                             "_id":       str(ticket),
-                            "time":      _uk(close_ts),
+                            "time":      history_ctl.format_broker_ts(close_ts),
                             "ticket":    str(ticket),
                             "channel":   src_map.get(str(ticket), "—"),
                             "order_type": order_type_display,
@@ -960,7 +857,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
         day_adx:  dict[date, list[float]] = {}
         day_bias: dict[date, list[str]]   = {}
         for r in rows:
-            d = _to_date(r["ts"])
+            d = history_ctl.to_date(r["ts"])
             if not d:
                 continue
             day_adx.setdefault(d, []).append(float(r["adx"]))
@@ -1029,7 +926,7 @@ def _render_calendar(engine):
                 strat = ledger_strategies.get(ticket, "")
                 info[ticket] = (
                     label,
-                    _strategy_display_label(strat or ""),
+                    history_ctl.strategy_display_label(strat or ""),
                     ledger_directions.get(ticket, ""),
                 )
         except Exception:
@@ -1040,7 +937,7 @@ def _render_calendar(engine):
                 ch = trade_channel_label(src or "")
                 label = ch if ch else trade_source_label(src or "")
                 # Local data always wins where both exist.
-                info[str(tk)] = (label, _strategy_display_label(strat or ""), dir_ or "")
+                info[str(tk)] = (label, history_ctl.strategy_display_label(strat or ""), dir_ or "")
         except Exception:
             pass
         try:
@@ -1050,7 +947,7 @@ def _render_calendar(engine):
             for tk, src, strat, dir_ in rows:
                 ch = trade_channel_label(src or "")
                 label = ch if ch else trade_source_label(src or "")
-                info[str(tk)] = (label, _strategy_display_label(strat or ""), dir_ or "")
+                info[str(tk)] = (label, history_ctl.strategy_display_label(strat or ""), dir_ or "")
         except Exception:
             pass
         return info
@@ -1084,7 +981,7 @@ def _render_calendar(engine):
                     close_ts = close_deal.get("time")
                     if not close_ts:
                         continue
-                    d_date = _broker_ts_to_uk_date(close_ts)
+                    d_date = history_ctl.broker_ts_to_uk_date(close_ts)
                     if not d_date or d_date.year != year or d_date.month != month:
                         continue
                     # Net P&L including estimated fees (_apply_fee), matching the

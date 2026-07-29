@@ -816,60 +816,87 @@ class EABridge:
         of what happens here; this only updates Python's own record so the
         trade shows up as a real, trackable row instead of the permanent
         mt5_ticket=0 placeholder open_trade() wrote at grid-open time.
-        Only the first leg to fill promotes the row -- with cancel_pending
-        on (the common case) that's the only leg that ever will; with it
-        off, later legs' fills are still managed live by the EA but aren't
-        separately reflected here (same single-row shape every other
-        strategy uses)."""
+
+        Only the first leg to fill can promote the row this way -- there is
+        one vantage_simulated_trades row per template trade, and the SELECT
+        below finds it via mt5_ticket=0, which only the not-yet-promoted
+        placeholder has. With cancel_pending on (the common case) that's
+        the only leg that ever fills anyway. With it off, a later leg's
+        fill is a genuine second broker position with no DB row of its own
+        -- previously this was silently dropped (a warning log line, no
+        Telegram alert at all, even though the broker really did fill it).
+        Now reported via the same formatter, explicitly marked as an
+        additional leg rather than pretending it's the trade's row."""
         from forex_trader.core import database as db_module
         from forex_trader.core import telegram_alerts
         original_id = leg_trade_id.rsplit("-g", 1)[0]
+        leg_num = leg_trade_id.rsplit("-g", 1)[-1] if "-g" in leg_trade_id else "?"
         now = time.time()
 
         def _apply():
             with db_module.db() as conn:
+                # row_to_dict(None) returns {} (falsy), not None -- must
+                # check truthiness here, not `is not None` (that was the
+                # actual bug in an earlier draft of this fix: {} is not
+                # None, so the not-yet-promoted branch never ran for a
+                # second leg and this raised KeyError on row["open_time"]
+                # via the wrong branch).
                 row = db_module.row_to_dict(conn.execute(
                     "SELECT * FROM vantage_simulated_trades WHERE trade_id=? AND mt5_ticket=0",
                     (original_id,),
                 ).fetchone())
-                if not row:
-                    return None
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=?,"
-                    "order_type='limit',pending_placed_at=? WHERE trade_id=?",
-                    # row["open_time"] (read above, before this UPDATE overwrites
-                    # it) is when open_trade() placed the grid legs -- the only
-                    # placement timestamp that exists for a leg, since grid legs
-                    # never get their own vantage_pending_orders row.
-                    (ticket, fill_price, now, row["open_time"], original_id),
-                )
-                return row
-        row = await db_module.to_db_thread(_apply)
-        if row is None:
-            log.warning("[EABridge] grid leg filled (trade_id=%s) but no open placeholder "
-                        "row found for original trade_id=%s", leg_trade_id, original_id)
+                if row:
+                    conn.execute(
+                        "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=?,"
+                        "order_type='limit',pending_placed_at=? WHERE trade_id=?",
+                        # row["open_time"] (read above, before this UPDATE
+                        # overwrites it) is when open_trade() placed the grid
+                        # legs -- the only placement timestamp that exists for
+                        # a leg, since grid legs never get their own
+                        # vantage_pending_orders row.
+                        (ticket, fill_price, now, row["open_time"], original_id),
+                    )
+                    return row, True
+                # Already promoted by an earlier leg. Fetch the row as-is
+                # (no mt5_ticket=0 filter) purely to report THIS leg's fill
+                # with the right channel/strategy/TP context -- nothing is
+                # written for it, since there is nowhere in the current
+                # schema to record a second concurrent position.
+                already = db_module.row_to_dict(conn.execute(
+                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=?",
+                    (original_id,),
+                ).fetchone())
+                return already, False
+        result = await db_module.to_db_thread(_apply)
+        row, is_first = result if result else ({}, False)
+        if not row:
+            log.warning("[EABridge] grid leg filled (trade_id=%s) but no trade row "
+                        "found at all for original trade_id=%s", leg_trade_id, original_id)
             return
-        self._active[original_id] = {"ticket": ticket, "strategy": row["strategy"]}
 
-        # Trading Schedule gate -- same reasoning as _on_pending_order_filled's
-        # own check: the leg was accepted by the broker before we could know
-        # whether the window's profit target would still allow it by fill
-        # time, and the only protective action left is an immediate real close.
-        _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
-        if not _sched_ok and self._engine is not None:
-            try:
-                await self._engine.close_trade(original_id, "trading_schedule_blocked")
-                asyncio.create_task(telegram_alerts.send_message(
-                    f"EA Template grid leg filled then immediately closed — {_sched_reason}",
-                    original_id, "template_grid_leg_filled_schedule_blocked",
-                ))
-            except Exception as e:
-                log.warning("[EABridge] schedule-blocked close failed for %s: %s", original_id, e)
-            return
+        if is_first:
+            self._active[original_id] = {"ticket": ticket, "strategy": row["strategy"]}
+
+            # Trading Schedule gate -- same reasoning as _on_pending_order_
+            # filled's own check: the leg was accepted by the broker before
+            # we could know whether the window's profit target would still
+            # allow it by fill time, and the only protective action left is
+            # an immediate real close. Only meaningful for the promoted row
+            # -- a later leg has no DB-tracked ticket this app could close.
+            _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
+            if not _sched_ok and self._engine is not None:
+                try:
+                    await self._engine.close_trade(original_id, "trading_schedule_blocked")
+                    asyncio.create_task(telegram_alerts.send_message(
+                        f"EA Template grid leg filled then immediately closed — {_sched_reason}",
+                        original_id, "template_grid_leg_filled_schedule_blocked",
+                    ))
+                except Exception as e:
+                    log.warning("[EABridge] schedule-blocked close failed for %s: %s", original_id, e)
+                return
 
         asyncio.create_task(telegram_alerts.send_message(
-            f"EA Template grid leg FILLED — {row['direction']} {row['lot_size']:g} lots @ "
-            f"{fill_price:.2f} (ticket {ticket})",
+            telegram_alerts.fmt_grid_leg_fill(row, leg_num, ticket, fill_price, is_first),
             original_id, "template_grid_leg_filled",
         ))
 

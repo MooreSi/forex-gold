@@ -269,6 +269,52 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
     return "\n".join(lines)
 
 
+def fmt_grid_leg_fill(row: dict, leg_num, ticket, fill_price: float, is_first: bool) -> str:
+    """A single leg of an EA Template grid filled at the broker.
+
+    Same shape and detail as fmt_trade_open() (ticket, entry, lot, SL, TP
+    ladder, strategy, channel, node) rather than the bare one-line message
+    this used to be -- the previous "EA Template grid leg FILLED —
+    {direction} {lot} lots @ {price} (ticket {ticket})" gave no way to
+    tell which channel or strategy a grid fill belonged to without cross-
+    referencing the DB.
+
+    `is_first` distinguishes the leg that promoted the DB placeholder row
+    (mt5_ticket=0 -> this ticket) from a later leg filling on the same
+    original trade_id when cancel_pending is off. Only one DB row exists
+    per template trade, so a later leg's fill is real (a genuine second
+    broker position) but cannot be separately tracked here -- reported
+    for visibility, with that limitation stated rather than hidden."""
+    direction     = row.get("direction", "?")
+    strategy_name = _strategy_label(row)
+    tg_source     = row.get("tg_source", "")
+    tp_block      = _tp_lines_single(row)
+
+    lines = [
+        "*XAUUSD — Grid Leg Fill*" if is_first else "*XAUUSD — Grid Leg Fill (additional leg)*",
+        f"Direction: {direction}",
+        f"Leg: {leg_num}",
+        f"MT5 Ticket: {ticket}",
+        f"Entry: {fill_price}",
+        f"Lot: {row.get('lot_size')}",
+        f"SL: {row.get('stop_loss')}",
+    ]
+    if tp_block:
+        lines.append(tp_block)
+    lines.append(f"Strategy: {_md_esc(strategy_name)}")
+    if tg_source:
+        lines.append(f"Channel: {_md_esc(tg_source)}")
+    lines.append("Executed via: EA")  # grid legs are only ever EA-managed
+    lines.append(f"Node: {_node_label()}")
+    if not is_first:
+        lines.append(
+            "_Note: a second concurrent broker position -- only the first "
+            "grid leg to fill is tracked as this trade's DB row, so this "
+            "leg is reported for visibility only._"
+        )
+    return "\n".join(lines)
+
+
 def fmt_instant_followup(instant_trade: dict, parsed: dict, channel_name: str) -> str:
     """Format a 'Trade Updated' notification for an instant entry that received full SL/TP."""
     direction     = instant_trade.get("direction", "?")

@@ -58,11 +58,46 @@ def test_save_coerces_types(fresh_db):
     assert t["harvest_threshold"] == 75.5
 
 
-def test_be_trigger_clamped_to_1_8(fresh_db):
+def test_be_trigger_clamped_to_ladder_depth(fresh_db):
+    """Upper bound follows MAX_TP_LEVELS, raised 8 -> 10 (2026-07-29) to
+    match the copier EA's own TP1..TP10 depth."""
     t = et.save_ea_template("T1", {"be_trigger": 0})
     assert t["be_trigger"] == 1
     t = et.save_ea_template("T2", {"be_trigger": 99})
-    assert t["be_trigger"] == 8
+    assert t["be_trigger"] == et.MAX_TP_LEVELS == 10
+
+
+def test_cancel_pending_level_allows_zero_meaning_never(fresh_db):
+    """Unlike be_trigger, 0 is meaningful here -- it means "never cancel
+    siblings" -- so the floor is 0, not 1."""
+    t = et.save_ea_template("T3", {"cancel_pending_level": 0})
+    assert t["cancel_pending_level"] == 0
+    t = et.save_ea_template("T4", {"cancel_pending_level": 99})
+    assert t["cancel_pending_level"] == 10
+
+
+def test_anchor_and_pending_ladders_are_independent(fresh_db):
+    """The copier ships WIDER pending defaults (40/70/110/150/250) than
+    anchor (30/50/80/100/130) because a leg filled deeper in the zone has
+    more room to the same target. The two tables must not alias."""
+    t = et.save_ea_template("Two", {
+        "tp1_pips": 30.0, "tp2_pips": 50.0,
+        "tp_pen1_pips": 40.0, "tp_pen2_pips": 70.0,
+    })
+    assert (t["tp1_pips"], t["tp2_pips"]) == (30.0, 50.0)
+    assert (t["tp_pen1_pips"], t["tp_pen2_pips"]) == (40.0, 70.0)
+
+
+def test_leg_counts_and_lots_are_sanitised(fresh_db):
+    """A hand-edited template must not be able to send a negative count or
+    lot to the broker."""
+    t = et.save_ea_template("Legs", {
+        "anchors": 99, "pendings": -5, "lot_anchor": -1.0, "lot_pending": 0.02,
+    })
+    assert t["anchors"] == 20
+    assert t["pendings"] == 0
+    assert t["lot_anchor"] == 0.0
+    assert t["lot_pending"] == 0.02
 
 
 def test_invalid_enum_raises(fresh_db):

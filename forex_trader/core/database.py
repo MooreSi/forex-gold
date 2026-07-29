@@ -911,6 +911,59 @@ def _apply_schema() -> None:
             # sibling's SL to its own breakeven. See core_ea_templates.py's
             # DEFAULTS and ForexTraderBridge.mq5's ApplyGroupTpAction.
             "ALTER TABLE ea_trade_templates ADD COLUMN group_tp_action INTEGER NOT NULL DEFAULT 0",
+        ] + [
+            # EA Templates: full copier parity (2026-07-29). Mirrors the
+            # per-channel input block of the GoldSnipers copier EA
+            # (goldbotea.set's InpC{n}_* group) so a template can express
+            # the same behaviour. The big structural change is splitting
+            # the old single `grid_legs` into an ANCHOR leg (enters at
+            # market, near the zone) and PENDING legs (rest inside it),
+            # each with their own count and lot -- observed live on signal
+            # 25202, where the copier opened "_ANC" at 4026 and "_PEN" at
+            # 4025. grid_legs is left in place so existing rows keep
+            # working unchanged.
+            "ALTER TABLE ea_trade_templates ADD COLUMN anchors INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE ea_trade_templates ADD COLUMN pendings INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE ea_trade_templates ADD COLUMN lot_anchor REAL NOT NULL DEFAULT 0.01",
+            "ALTER TABLE ea_trade_templates ADD COLUMN lot_pending REAL NOT NULL DEFAULT 0.01",
+            "ALTER TABLE ea_trade_templates ADD COLUMN sl_pips REAL NOT NULL DEFAULT 50.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN risk_pct REAL NOT NULL DEFAULT 0.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN equity_protect REAL NOT NULL DEFAULT 0.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN late_guard_pips REAL NOT NULL DEFAULT 0.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN anc_shave INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE ea_trade_templates ADD COLUMN auto_sl INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE ea_trade_templates ADD COLUMN partials INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE ea_trade_templates ADD COLUMN cancel_pending_level INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN trail_distance REAL NOT NULL DEFAULT 50.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN trail_step REAL NOT NULL DEFAULT 10.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN trail_activation REAL NOT NULL DEFAULT 100.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN trail_padding REAL NOT NULL DEFAULT 0.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN max_spread_pips REAL NOT NULL DEFAULT 6.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN slippage INTEGER NOT NULL DEFAULT 20",
+            "ALTER TABLE ea_trade_templates ADD COLUMN harvest_pips REAL NOT NULL DEFAULT 1.0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN signal_max_age_sec INTEGER NOT NULL DEFAULT 10",
+        ] + [
+            # TP ladder widened 8 -> 10 to match the copier's own depth.
+            f"ALTER TABLE ea_trade_templates ADD COLUMN tp{n}_pips REAL NOT NULL DEFAULT 0.0"
+            for n in (9, 10)
+        ] + [
+            f"ALTER TABLE ea_trade_templates ADD COLUMN tp{n}_pct REAL NOT NULL DEFAULT 0.0"
+            for n in (9, 10)
+        ] + [
+            # Separate PENDING-leg ladder. The copier ships WIDER defaults
+            # here than for the anchor (40/70/110/150/250 vs
+            # 30/50/80/100/130): a leg filled deeper in the zone has more
+            # room to the same structural target. Confirmed live on signal
+            # 25204, where its pending leg entered 1pt better and so
+            # carried 14pt of reward against the anchor's 13pt. Columns
+            # default to 0 ("level unused") like every other TP column;
+            # the copier's own defaults are offered in the UI instead of
+            # being forced on existing templates.
+            f"ALTER TABLE ea_trade_templates ADD COLUMN tp_pen{n}_pips REAL NOT NULL DEFAULT 0.0"
+            for n in range(1, 11)
+        ] + [
+            f"ALTER TABLE ea_trade_templates ADD COLUMN tp_pen{n}_pct REAL NOT NULL DEFAULT 0.0"
+            for n in range(1, 11)
         ]:
             try:
                 conn.execute(stmt)

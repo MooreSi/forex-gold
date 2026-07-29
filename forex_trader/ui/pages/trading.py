@@ -2389,52 +2389,68 @@ def _render_ea_templates_card() -> None:
                         "onward (a template is sent with every trade open)."
                     )
 
-            # ── Entries & lots ────────────────────────────────────────────
-            ui.label("Entries & Lots").classes(
-                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1")
-            with ui.row().classes("w-full gap-2 mb-1"):
-                def _num(key, label, step, tip, width="w-28", mn=0):
-                    with ui.column().classes("gap-0"):
-                        with ui.row().classes("items-center gap-1"):
-                            ui.label(label).classes("text-xs text-gray-400")
-                            if tip:
-                                ui.icon("info_outline", size="14px").classes(
-                                    "text-blue-400 cursor-help").tooltip(tip)
-                        fields[key] = ui.number(
-                            value=live[key], step=step, min=mn,
-                        ).classes(width).props("dense outlined")
+            # ── Section header helper ────────────────────────────────────
+            # Every major block below is its own bordered card with a
+            # colour-coded header -- previously these floated directly on
+            # the page background with identical flat-gray labels, which
+            # is what made the whole editor read as one undifferentiated
+            # wall of fields. Anchor TP and Pending TP get their own
+            # accent colours specifically so the two ladders are
+            # distinguishable at a glance without reading every label.
+            def _section(title: str, color: str, tip: str = ""):
+                card = ui.card().classes(
+                    "w-full bg-gray-900 border border-gray-700 rounded-lg p-3 mb-2"
+                )
+                with card:
+                    with ui.row().classes("items-center gap-1 mb-1"):
+                        ui.label(title).classes(
+                            f"text-xs font-bold uppercase tracking-wider {color}"
+                        )
+                        if tip:
+                            ui.icon("info_outline", size="14px").classes(
+                                "text-blue-400 cursor-help").tooltip(tip)
+                return card
 
-                _num("anchors", "Anchors", 1,
-                     "How many legs enter immediately at market when the signal "
-                     "arrives. The anchor takes part of the position straight "
-                     "away so a signal that never retraces isn't missed entirely. "
-                     "0 = pending legs only.")
-                _num("pendings", "Pendings", 1,
-                     "How many resting limit legs are staged inside the signal's "
-                     "entry zone, waiting for a better fill than the anchor got.")
-                _num("lot_anchor", "Anchor Lot", 0.01,
-                     "Lot size for each anchor (market) leg.")
-                _num("lot_pending", "Pending Lot", 0.01,
-                     "Lot size for each pending (limit) leg.")
-                _num("sl_pips", "SL (pips)", 1.0,
-                     "Stop distance in pips, used when the signal doesn't supply "
-                     "its own SL. 10 pips = 1.00 of gold price, so 50 = $5.00 per "
-                     "0.01 lot. The signal's own SL always wins when present.")
-                _num("grid_step_pts", "Ladder Step", 1.0,
-                     "Spacing between pending legs when the signal states no "
-                     "entry zone. When it does state one, legs span that zone "
-                     "instead and this is ignored.")
-                _num("risk_pct", "Risk % (0=OFF)", 0.1,
-                     "Size legs from account risk instead of the fixed lots "
-                     "above. 0 = use the fixed lots.")
+            # ── Entries & lots ────────────────────────────────────────────
+            with _section("Entries & Lots", "text-gray-200"):
+                with ui.row().classes("w-full gap-2 mb-1"):
+                    def _num(key, label, step, tip, width="w-28", mn=0):
+                        with ui.column().classes("gap-0"):
+                            with ui.row().classes("items-center gap-1"):
+                                ui.label(label).classes("text-xs text-gray-400")
+                                if tip:
+                                    ui.icon("info_outline", size="14px").classes(
+                                        "text-blue-400 cursor-help").tooltip(tip)
+                            fields[key] = ui.number(
+                                value=live[key], step=step, min=mn,
+                            ).classes(width).props("dense outlined")
+
+                    _num("anchors", "Anchors", 1,
+                         "How many legs enter immediately at market when the signal "
+                         "arrives. The anchor takes part of the position straight "
+                         "away so a signal that never retraces isn't missed entirely. "
+                         "0 = pending legs only.")
+                    _num("pendings", "Pendings", 1,
+                         "How many resting limit legs are staged inside the signal's "
+                         "entry zone, waiting for a better fill than the anchor got.")
+                    _num("lot_anchor", "Anchor Lot", 0.01,
+                         "Lot size for each anchor (market) leg.")
+                    _num("lot_pending", "Pending Lot", 0.01,
+                         "Lot size for each pending (limit) leg.")
+                    _num("sl_pips", "SL (pips)", 1.0,
+                         "Stop distance in pips, used when the signal doesn't supply "
+                         "its own SL. 10 pips = 1.00 of gold price, so 50 = $5.00 per "
+                         "0.01 lot. The signal's own SL always wins when present.")
+                    _num("grid_step_pts", "Ladder Step", 1.0,
+                         "Spacing between pending legs when the signal states no "
+                         "entry zone. When it does state one, legs span that zone "
+                         "instead and this is ignored.")
+                    _num("risk_pct", "Risk % (0=OFF)", 0.1,
+                         "Size legs from account risk instead of the fixed lots "
+                         "above. 0 = use the fixed lots.")
 
             # ── TP ladders ────────────────────────────────────────────────
-            def _ladder(title: str, prefix: str, tip: str) -> None:
-                with ui.row().classes("items-center gap-2 mt-2"):
-                    ui.label(title).classes(
-                        "text-xs font-semibold text-gray-400 uppercase tracking-wider")
-                    ui.icon("info_outline", size="14px").classes(
-                        "text-blue-400 cursor-help").tooltip(tip)
+            def _ladder_grid(prefix: str) -> None:
                 with ui.grid(columns=N + 1).classes("w-full gap-1"):
                     ui.label("").classes("text-xs")
                     for n in range(1, N + 1):
@@ -2450,34 +2466,38 @@ def _render_ea_templates_card() -> None:
                             value=float(live[f"{prefix}{n}_pct"]), step=1.0, min=0, max=100,
                         ).classes("w-full").props("dense outlined")
 
-            _ladder("Anchor TP", "tp",
-                    "Targets for the anchor (market) legs, in pips from entry. "
-                    "These are AUTHORITATIVE -- they replace whatever TP levels "
-                    "the triggering signal itself stated, so this channel behaves "
-                    "identically regardless of message shape. A level left at 0 "
-                    "is simply not used. The % row is always template-driven, "
-                    "since a signal never states how much to close at each level.")
+            with _section(
+                "Anchor TP", "text-amber-400",
+                "Targets for the anchor (market) legs, in pips from entry. "
+                "These are AUTHORITATIVE -- they replace whatever TP levels "
+                "the triggering signal itself stated, so this channel behaves "
+                "identically regardless of message shape. A level left at 0 "
+                "is simply not used. The % row is always template-driven, "
+                "since a signal never states how much to close at each level.",
+            ):
+                _ladder_grid("tp")
+                with ui.row().classes("gap-2 mt-2"):
+                    ui.button("Copy to Pending ↓",
+                              on_click=lambda: _copy_ladder("tp", "tp_pen")) \
+                        .classes("text-xs bg-sky-700 text-white").props("dense unelevated")
+                    ui.button("↑ Copy to Anchor",
+                              on_click=lambda: _copy_ladder("tp_pen", "tp")) \
+                        .classes("text-xs bg-amber-600 text-white").props("dense unelevated")
 
-            with ui.row().classes("gap-2 mt-1 mb-1"):
-                ui.button("Copy to Pending ↓",
-                          on_click=lambda: _copy_ladder("tp", "tp_pen")) \
-                    .classes("text-xs bg-blue-900 text-white").props("dense")
-                ui.button("↑ Copy to Anchor",
-                          on_click=lambda: _copy_ladder("tp_pen", "tp")) \
-                    .classes("text-xs bg-amber-800 text-white").props("dense")
-
-            _ladder("Pending TP", "tp_pen",
-                    "Separate targets for the resting (limit) legs. Usually set "
-                    "WIDER than the anchor ladder: a leg filled deeper in the "
-                    "zone has more room to the same structural level. With "
-                    "Anchor = Unified every leg shares one target PRICE, so a "
-                    "deeper leg automatically earns more points reaching it. "
-                    "Leave at 0 to reuse the anchor ladder.")
+            with _section(
+                "Pending TP", "text-sky-400",
+                "Separate targets for the resting (limit) legs. Usually set "
+                "WIDER than the anchor ladder: a leg filled deeper in the "
+                "zone has more room to the same structural level. With "
+                "Anchor = Unified every leg shares one target PRICE, so a "
+                "deeper leg automatically earns more points reaching it. "
+                "Leave at 0 to reuse the anchor ladder.",
+            ):
+                _ladder_grid("tp_pen")
 
             # ── Strategy toggles ──────────────────────────────────────────
-            ui.label("Strategy").classes(
-                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-3")
-            with ui.grid(columns=3).classes("w-full gap-2 mb-1"):
+            strategy_section = _section("Strategy", "text-emerald-400")
+            with strategy_section, ui.grid(columns=3).classes("w-full gap-2 mb-1"):
                 def _toggle(key, label, opts, tip):
                     with ui.card().classes("bg-gray-900 p-2 rounded-lg"):
                         with ui.row().classes("items-center gap-1"):
@@ -2529,7 +2549,7 @@ def _render_ea_templates_card() -> None:
                         "cleared TP level; CANDLE/FRACTAL follow structure; "
                         "STEP uses the fixed trail distance below.")
 
-            with ui.row().classes("w-full gap-2 mb-1"):
+            with strategy_section, ui.row().classes("w-full gap-2 mb-1"):
                 _num("trail_distance", "Trail Dist", 1.0,
                      "Stop distance behind price for STEP trailing, in pips.")
                 _num("trail_activation", "Trail Activate", 1.0,
@@ -2542,9 +2562,8 @@ def _render_ea_templates_card() -> None:
                      "harvest close.")
 
             # ── Triggers ──────────────────────────────────────────────────
-            ui.label("Triggers").classes(
-                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-3")
-            with ui.row().classes("w-full gap-2 mb-1"):
+            triggers_section = _section("Triggers", "text-violet-400")
+            with triggers_section, ui.row().classes("w-full gap-2 mb-1"):
                 with ui.column().classes("gap-0"):
                     with ui.row().classes("items-center gap-1"):
                         ui.label("BE Mode").classes("text-xs text-gray-400")
@@ -2601,9 +2620,8 @@ def _render_ea_templates_card() -> None:
                         "", value=bool(live["group_tp_action"])).classes("text-xs")
 
             # ── Guards & execution ────────────────────────────────────────
-            ui.label("Guards & Execution").classes(
-                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-3")
-            with ui.row().classes("w-full gap-2 mb-1"):
+            with _section("Guards & Execution", "text-rose-400"), \
+                 ui.row().classes("w-full gap-2 mb-1"):
                 _num("equity_protect", "Equity Protect $", 1.0,
                      "Close everything on this template if floating loss exceeds "
                      "this many account-currency units. 0 = off.")
@@ -2620,17 +2638,19 @@ def _render_ea_templates_card() -> None:
                 _num("signal_max_age_sec", "Max Age (s)", 1,
                      "Ignore a signal older than this many seconds at fill time.")
 
-            with ui.row().classes("gap-2 mt-2"):
+            with ui.row().classes("gap-2 mt-3"):
                 ui.button(
                     "Save Template", on_click=lambda: _save(name_input),
-                ).classes("text-xs bg-green-800 text-white").props("dense")
+                ).classes("text-xs font-semibold bg-green-700 text-white px-4") \
+                    .props("dense unelevated")
                 if state["name"]:
                     ui.button(
                         "Delete", on_click=lambda: _delete(state["name"]),
-                    ).classes("text-xs bg-red-900 text-white").props("dense")
+                    ).classes("text-xs font-semibold bg-red-800 text-white px-4") \
+                        .props("dense unelevated")
                 ui.button(
                     "New", on_click=lambda: _load(None),
-                ).classes("text-xs").props("dense outline")
+                ).classes("text-xs px-4").props("dense outline")
 
     def _save(name_input) -> None:
         name = (name_input.value or "").strip()

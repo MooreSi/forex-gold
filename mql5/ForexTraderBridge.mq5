@@ -36,6 +36,7 @@ input int    InpPort      = 9111;  // this checkout's isolated EA-bridge port --
 input ulong  InpMagic     = 20260706;
 input double InpDefaultTrailStopPts = 5.0;   // used by trail_stop if the open_trade message omits trail_dist
 input double InpConservativeTrailPts = 3.0;  // used by conservative/scalp_runner if omitted
+input bool   InpShowPanel = true;            // draw the on-chart control panel
 
 CTrade trade;
 int    g_socket = INVALID_HANDLE;
@@ -252,6 +253,29 @@ struct PendingOrder
 };
 
 PendingOrder g_pending[];
+
+// ── On-chart panel state ────────────────────────────────────────────
+// Declared here, with the other module globals, because MQL5 requires a
+// global to be declared before it is referenced -- HandleOpenTrade and
+// HandleSetTemplate both update these, and both appear long before the
+// panel's own code further down.
+datetime g_panelLastPaint = 0;
+
+#define PNL_PREFIX  "FTB_PNL_"
+#define PNL_X       12
+#define PNL_Y       22
+#define PNL_W       232
+#define PNL_ROW     20
+
+string g_panelTemplate = "";       // template name last seen from the app
+string g_panelMode     = "single";
+string g_panelTpsl     = "on";
+string g_panelAnchor   = "unified";
+string g_panelTrail    = "off";
+int    g_panelBeTrig   = 1;
+string g_panelLastSig  = "";       // most recent signal line, for context
+bool   g_panelBuilt    = false;
+
 
 //+------------------------------------------------------------------+
 //| Minimal JSON helpers — the wire protocol is a fixed, flat set of  |
@@ -559,6 +583,18 @@ void HandleSetTemplate(const string json)
       g_pending[i].tplCfg = json;
       updated++;
    }
+   // Mirror into the panel's display state. The panel deliberately holds
+   // no authoritative state of its own -- a click asks the app to change
+   // something, and this is the reply that actually moves the display, so
+   // chart and app can never silently disagree.
+   g_panelTemplate = name;
+   g_panelMode     = JsonGetString(json, "tpl_mode", g_panelMode);
+   g_panelTpsl     = JsonGetString(json, "tpl_tpsl_mode", g_panelTpsl);
+   g_panelAnchor   = JsonGetString(json, "tpl_anchor", g_panelAnchor);
+   g_panelTrail    = JsonGetString(json, "tpl_trail_mode", g_panelTrail);
+   g_panelBeTrig   = (int)JsonGetLong(json, "tpl_be_trigger", g_panelBeTrig);
+   if(InpShowPanel) PanelUpdate();
+
    Print("[EABridge] set_template '", name, "' applied to ", updated, " live item(s)");
 }
 
@@ -702,6 +738,18 @@ void HandleOpenTrade(const string json)
    // Keep the whole payload so any tpl_* key the named fields above don't
    // cover can still be read later via TplS/TplD/TplI/TplB.
    mt.tplCfg = isTemplate ? json : "";
+   if(isTemplate)
+   {
+      // Keep the panel current from ordinary trade opens too, not only
+      // from an explicit set_template push.
+      g_panelTemplate = StringSubstr(strategy, 9);   // strip "template:"
+      g_panelMode     = JsonGetString(json, "tpl_mode", g_panelMode);
+      g_panelTpsl     = mt.tplTpslMode;
+      g_panelAnchor   = mt.tplAnchor;
+      g_panelTrail    = mt.tplTrailMode;
+      g_panelBeTrig   = mt.tplBeTrigger;
+      g_panelLastSig  = direction + " " + DoubleToString(fillPrice, _Digits);
+   }
 
    int n = ArraySize(g_trades);
    ArrayResize(g_trades, n + 1);
@@ -2206,10 +2254,231 @@ void CheckPendingOrders()
 //+------------------------------------------------------------------+
 //| MT5 event handlers                                                 |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| ON-CHART CONTROL PANEL                                            |
+//|                                                                   |
+//| A compact status/control surface on the chart, so the live         |
+//| template can be read and the high-frequency switches flipped at    |
+//| the terminal instead of only from the app.                         |
+//|                                                                   |
+//| SCOPE, deliberately. This shows state and carries the toggles and  |
+//| emergency actions -- not the full 60-field editor. The TP grids    |
+//| (10 levels x pips/% x anchor/pending = 40 numeric cells) belong in |
+//| the app, where they are a real form; reproducing them as MQL5      |
+//| chart objects would be large, fragile, and worse to use. What      |
+//| genuinely benefits from being on the chart is what you reach for   |
+//| WHILE watching price: mode, trail, breakeven, and close/cancel.    |
+//|                                                                   |
+//| TWO-WAY SYNC. A click sends panel_action to the app, which mutates |
+//| the saved template and pushes it back via set_template -- so the   |
+//| chart never holds authoritative state of its own. The app remains  |
+//| the single source of truth; the panel is a view plus a remote      |
+//| control. That ordering matters: if the panel owned state, an app   |
+//| edit and a chart edit could silently diverge.                      |
+//+------------------------------------------------------------------+
+
+void PnlLabel(const string name, const int x, const int y, const string text,
+              const color clr, const int size = 8, const string font = "Arial")
+{
+   string obj = PNL_PREFIX + name;
+   if(ObjectFind(0, obj) < 0)
+   {
+      ObjectCreate(0, obj, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, obj, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, obj, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, obj, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, obj, OBJPROP_BACK, false);
+   }
+   ObjectSetInteger(0, obj, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, obj, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, obj, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, size);
+   ObjectSetString(0, obj, OBJPROP_FONT, font);
+   ObjectSetString(0, obj, OBJPROP_TEXT, text);
+}
+
+void PnlButton(const string name, const int x, const int y, const int w,
+               const string text, const color bg, const color fg = clrWhite)
+{
+   string obj = PNL_PREFIX + name;
+   if(ObjectFind(0, obj) < 0)
+   {
+      ObjectCreate(0, obj, OBJ_BUTTON, 0, 0, 0);
+      ObjectSetInteger(0, obj, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, obj, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, obj, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, 7);
+   }
+   ObjectSetInteger(0, obj, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, obj, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, obj, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, obj, OBJPROP_YSIZE, 16);
+   ObjectSetInteger(0, obj, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, obj, OBJPROP_COLOR, fg);
+   ObjectSetInteger(0, obj, OBJPROP_BORDER_COLOR, clrDimGray);
+   ObjectSetInteger(0, obj, OBJPROP_STATE, false);
+   ObjectSetString(0, obj, OBJPROP_TEXT, text);
+}
+
+void PanelDestroy()
+{
+   ObjectsDeleteAll(0, PNL_PREFIX);
+   g_panelBuilt = false;
+   ChartRedraw(0);
+}
+
+void PanelBuild()
+{
+   string bg = PNL_PREFIX + "BG";
+   if(ObjectFind(0, bg) < 0)
+   {
+      ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, bg, OBJPROP_BACK, false);
+   }
+   ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, PNL_X - 6);
+   ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, PNL_Y - 6);
+   ObjectSetInteger(0, bg, OBJPROP_XSIZE, PNL_W);
+   ObjectSetInteger(0, bg, OBJPROP_YSIZE, PNL_ROW * 9 + 18);
+   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'22,26,34');
+   ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, bg, OBJPROP_COLOR, clrDimGray);
+   g_panelBuilt = true;
+}
+
+void PanelUpdate()
+{
+   if(!g_panelBuilt) PanelBuild();
+
+   int y = PNL_Y;
+   PnlLabel("title", PNL_X, y, "FOREX TRADER  ·  BRIDGE", C'255,209,71', 9, "Arial Bold");
+   y += PNL_ROW;
+
+   bool linked = (g_socket != INVALID_HANDLE);
+   PnlLabel("link", PNL_X, y,
+            (linked ? "● LINKED" : "○ NO LINK") + "   " + _Symbol,
+            linked ? clrLimeGreen : clrTomato, 8);
+   y += PNL_ROW;
+
+   PnlLabel("tpl", PNL_X, y,
+            "Template: " + (g_panelTemplate == "" ? "(none)" : g_panelTemplate),
+            clrGainsboro, 8);
+   y += PNL_ROW;
+
+   int openTrades = ArraySize(g_trades);
+   int openPend   = ArraySize(g_pending);
+   double flt = 0.0;
+   for(int i = 0; i < PositionsTotal(); i++)
+      if(PositionGetTicket(i) > 0) flt += PositionGetDouble(POSITION_PROFIT);
+   PnlLabel("stat", PNL_X, y,
+            StringFormat("Open %d   Pending %d   P/L %.2f", openTrades, openPend, flt),
+            flt >= 0 ? clrLimeGreen : clrTomato, 8);
+   y += PNL_ROW;
+
+   PnlLabel("sig", PNL_X, y,
+            "Sig: " + (g_panelLastSig == "" ? "-" : g_panelLastSig), clrSilver, 7);
+   y += PNL_ROW;
+
+   // Toggle rows -- each click round-trips through the app.
+   PnlButton("mode", PNL_X, y, 70,
+             g_panelMode == "grid" ? "GRID" : "SINGLE",
+             g_panelMode == "grid" ? C'196,160,0' : C'55,62,74');
+   PnlButton("tpsl", PNL_X + 74, y, 70,
+             "TP/SL " + (g_panelTpsl == "off" ? "OFF" : (g_panelTpsl == "stealth" ? "STL" : "ON")),
+             g_panelTpsl == "off" ? C'85,45,45' : C'0,110,110');
+   PnlButton("anchor", PNL_X + 148, y, 70,
+             g_panelAnchor == "unified" ? "UNIFIED" : "DISTRIB",
+             C'190,110,20');
+   y += PNL_ROW;
+
+   PnlButton("trail", PNL_X, y, 70,
+             "TR " + (g_panelTrail == "off" ? "OFF" : g_panelTrail),
+             g_panelTrail == "off" ? C'55,62,74' : C'110,40,150');
+   PnlButton("be", PNL_X + 74, y, 70,
+             "BE TP" + (string)g_panelBeTrig, C'30,70,160');
+   PnlButton("refresh", PNL_X + 148, y, 70, "REFRESH", C'55,62,74');
+   y += PNL_ROW + 2;
+
+   PnlButton("cancel", PNL_X, y, 106, "CANCEL LIMITS", C'150,110,0');
+   PnlButton("closeall", PNL_X + 110, y, 108, "CLOSE ALL", C'150,30,30');
+
+   ChartRedraw(0);
+}
+
+// A click never mutates local state directly -- it asks the app to, and the
+// app's set_template reply is what actually moves the panel. One authority,
+// so a chart click and an app edit cannot silently disagree.
+void PanelSendAction(const string action, const string value)
+{
+   SendJson("{\"type\":\"panel_action\",\"action\":\"" + JsonEsc(action) +
+            "\",\"value\":\"" + JsonEsc(value) +
+            "\",\"template\":\"" + JsonEsc(g_panelTemplate) + "\"}");
+}
+
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+{
+   if(id != CHARTEVENT_OBJECT_CLICK) return;
+   if(StringFind(sparam, PNL_PREFIX) != 0) return;
+   string what = StringSubstr(sparam, StringLen(PNL_PREFIX));
+   ObjectSetInteger(0, sparam, OBJPROP_STATE, false);   // buttons are momentary
+
+   if(what == "mode")
+      PanelSendAction("mode", g_panelMode == "grid" ? "single" : "grid");
+   else if(what == "tpsl")
+      PanelSendAction("tpsl_mode",
+         g_panelTpsl == "on" ? "stealth" : (g_panelTpsl == "stealth" ? "off" : "on"));
+   else if(what == "anchor")
+      PanelSendAction("anchor", g_panelAnchor == "unified" ? "distributed" : "unified");
+   else if(what == "trail")
+   {
+      string nxt = "off";
+      if(g_panelTrail == "off")          nxt = "tp";
+      else if(g_panelTrail == "tp")      nxt = "step";
+      else if(g_panelTrail == "step")    nxt = "candle";
+      else if(g_panelTrail == "candle")  nxt = "fractal";
+      PanelSendAction("trail_mode", nxt);
+   }
+   else if(what == "be")
+      PanelSendAction("be_trigger", (string)((g_panelBeTrig % 10) + 1));
+   else if(what == "refresh")
+      PanelSendAction("refresh", "");
+   else if(what == "cancel")
+   {
+      // Cancels only orders this EA placed (magic-filtered) -- it must not
+      // touch anything the user or another EA left on the book.
+      int n = 0;
+      for(int i = OrdersTotal() - 1; i >= 0; i--)
+      {
+         ulong tk = OrderGetTicket(i);
+         if(tk == 0) continue;
+         if(OrderGetInteger(ORDER_MAGIC) != (long)InpMagic) continue;
+         if(trade.OrderDelete(tk)) n++;
+      }
+      Print("[EABridge][Panel] cancelled ", n, " pending order(s)");
+      PanelUpdate();
+   }
+   else if(what == "closeall")
+   {
+      int n = 0;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+      {
+         ulong tk = PositionGetTicket(i);
+         if(tk == 0) continue;
+         if(PositionGetInteger(POSITION_MAGIC) != (long)InpMagic) continue;
+         if(trade.PositionClose(tk)) n++;
+      }
+      Print("[EABridge][Panel] closed ", n, " position(s)");
+      PanelUpdate();
+   }
+}
+
 int OnInit()
 {
    EventSetMillisecondTimer(200);
    EnsureConnected();
+   if(InpShowPanel) PanelUpdate();
    return(INIT_SUCCEEDED);
 }
 
@@ -2217,12 +2486,20 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    if(g_socket != INVALID_HANDLE) SocketClose(g_socket);
+   PanelDestroy();
 }
 
 void OnTimer()
 {
    PollSocket();
    DiagHeartbeat();
+   // Panel repaint is throttled to ~1s: OnTimer runs at 200ms, and redrawing
+   // the chart five times a second to move a P/L figure is wasted work.
+   if(InpShowPanel && TimeCurrent() != g_panelLastPaint)
+   {
+      g_panelLastPaint = TimeCurrent();
+      PanelUpdate();
+   }
 }
 
 // TEMPORARY DIAGNOSTIC (remove once the scalp_runner "silently orphaned

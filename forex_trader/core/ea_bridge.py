@@ -367,6 +367,55 @@ class EABridge:
             self._pending_orders[trade_id] = {"ticket": ack_box.get("ticket")}
         return ack_box
 
+    async def _on_panel_action(self, msg: dict) -> None:
+        """A button was pressed on the EA's on-chart panel.
+
+        The panel holds no authoritative state: it asks for a change, this
+        applies it to the SAVED template, and the resulting set_template
+        push is what actually moves the panel's display. That ordering is
+        the point -- if the chart mutated its own copy, a chart click and
+        an app edit could silently diverge, and the EA's copy would quietly
+        win until the next restart.
+
+        A "refresh" action carries no change and simply re-pushes, which is
+        also how the panel repopulates after an EA reload.
+        """
+        # Local imports: this module is pulled in early by the engine, and
+        # importing database/templates at module scope reintroduces the
+        # circular import the rest of this file already avoids the same way.
+        from forex_trader.core import core_ea_templates as _et
+        from forex_trader.core import database as db_module
+        action = (msg.get("action") or "").strip()
+        value  = (msg.get("value") or "").strip()
+        name   = (msg.get("template") or "").strip()
+        if not name:
+            log.info("[EABridge] panel_action %r ignored -- no template in context", action)
+            return
+        try:
+            tpl = await db_module.to_db_thread(_et.get_ea_template, name)
+            if not tpl:
+                log.warning("[EABridge] panel_action for unknown template %r", name)
+                return
+            if action and action != "refresh":
+                if action not in _et.DEFAULTS:
+                    log.warning("[EABridge] panel_action unknown field %r", action)
+                    return
+                # The wire is all strings; coerce to whatever the field is.
+                cur = _et.DEFAULTS[action]
+                if isinstance(cur, bool):
+                    tpl[action] = value not in ("0", "false", "False", "")
+                elif isinstance(cur, int):
+                    tpl[action] = int(float(value))
+                elif isinstance(cur, float):
+                    tpl[action] = float(value)
+                else:
+                    tpl[action] = value
+                tpl = await db_module.to_db_thread(_et.save_ea_template, name, tpl)
+                log.info("[EABridge] panel set %s=%s on template '%s'", action, value, name)
+            await self.push_template(name, tpl)
+        except Exception as e:
+            log.warning("[EABridge] panel_action %r failed: %s", action, e)
+
     async def push_template(self, name: str, template: dict) -> bool:
         """Push a template's values to the EA immediately, outside of any
         trade open.
@@ -532,6 +581,8 @@ class EABridge:
             asyncio.create_task(self._restore_pending_orders())
         elif t == "ping":
             await self._send({"type": "pong"})
+        elif t == "panel_action":
+            await self._on_panel_action(msg)
         elif t in ("trade_opened", "trade_open_failed",
                    "pending_order_placed", "pending_order_open_failed"):
             cb = getattr(self, "_pending_open_acks", {}).get(msg.get("trade_id"))

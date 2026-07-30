@@ -49,6 +49,14 @@ EA_PORTABLE_STRATEGIES = frozenset({
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy
 _HOST = "127.0.0.1"
 
+# How long a leg fill waits for open_trade()'s INSERT to appear before giving
+# up and leaving the row to core_template_placeholder_repair. The row only
+# lands once the EA's parent ack returns, which core_open_trade allows up to
+# 60s for on a multi-leg template -- so this must exceed that cap, not the 5s
+# the ack used to be capped at. Waited OFF the reader loop, so a generous
+# budget costs nothing (see _promote_leg_when_row_exists).
+_LEG_ROW_WAIT_S = 75.0
+
 # EA Template legs. HandleOpenTemplateGrid opens each leg of a template trade
 # as its own broker position and reports it under its own suffixed trade_id:
 #   "<trade_id>-a<N>"  Anchor leg   -- immediate market fill at open time
@@ -996,9 +1004,9 @@ class EABridge:
         via the same formatter, explicitly marked as an additional leg rather
         than pretending it's the trade's row."""
         from forex_trader.core import database as db_module
-        from forex_trader.core import telegram_alerts
         original_id, kind, num = split_leg_trade_id(leg_trade_id)
         label = leg_label(kind, num)
+        now = time.time()
         # The EA reports no volume with a leg fill, and the row's lot_size is
         # Python's own pre-trade sizing -- for a template trade the EA sizes
         # each leg from the template's own Anchor/Pending Lot instead, so the
@@ -1006,7 +1014,6 @@ class EABridge:
         # Take the broker's real volume for the promoted leg when we can read
         # it; keep the existing value if the bridge can't answer.
         lots = await self._leg_position_volume(ticket)
-        now = time.time()
 
         def _apply():
             with db_module.db() as conn:
@@ -1055,26 +1062,62 @@ class EABridge:
                     (original_id,),
                 ).fetchone())
                 return already, False
-        # An anchor leg is a market order: the EA fills it and reports back in
-        # milliseconds, which can beat open_trade()'s own INSERT of the trade
-        # row (observed repeatedly on 2026-07-30). Bailing out on the first
-        # miss lost the promotion AND this leg's fill alert, left the row a
-        # mt5_ticket=0 placeholder until TemplateRepair adopted it seconds
-        # later, and made the trade-open alert report ticket 0 / entry 0.0.
-        # The INSERT is imminent, so retry briefly before giving up.
+        # An anchor leg is a market order: the EA fills it and reports back
+        # before open_trade() has INSERTed the row, because that INSERT only
+        # happens once the EA's own parent ack returns -- and for a multi-leg
+        # template that ack legitimately takes tens of seconds (10.5s observed
+        # live on 2026-07-30). So a miss here is expected and temporary.
+        #
+        # The wait is deliberately NOT done inline: _handle_conn awaits
+        # _dispatch directly, so blocking here stalls every subsequent EA
+        # message AND _last_seen with it -- an inline 10s wait pushed
+        # is_ea_healthy() past its 8s timeout and made three template
+        # activations fail with "no healthy EA" on 2026-07-30. Hand the retry
+        # to its own task and let the reader loop carry on.
         result = await db_module.to_db_thread(_apply)
         row, is_first = result if result else ({}, False)
-        _row_wait_deadline = time.time() + 10.0
-        while not row and time.time() < _row_wait_deadline:
-            await asyncio.sleep(0.25)
+        if not row:
+            asyncio.create_task(self._promote_leg_when_row_exists(
+                _apply, label, leg_trade_id, original_id, ticket, fill_price, lots))
+            return
+        await self._finish_leg_promotion(
+            row, is_first, label, original_id, ticket, fill_price, lots)
+
+    async def _promote_leg_when_row_exists(self, _apply, label: str, leg_trade_id: str,
+                                           original_id: str, ticket, fill_price: float,
+                                           lots) -> None:
+        """Wait for open_trade()'s INSERT, then promote the leg.
+
+        Runs as its own task so the EA reader loop keeps draining messages and
+        keeps the heartbeat fresh while this waits -- see the call site.
+
+        The budget covers core_open_trade's own ack timeout (capped at 60s)
+        plus room for the INSERT that follows it, since the row cannot appear
+        until that ack returns. Overshooting costs nothing here; giving up too
+        early leaves the row for core_template_placeholder_repair to adopt on
+        its next poll, which works but is slower and noisier.
+        """
+        from forex_trader.core import database as db_module
+        deadline = time.time() + _LEG_ROW_WAIT_S
+        while time.time() < deadline:
+            await asyncio.sleep(0.5)
             result = await db_module.to_db_thread(_apply)
             row, is_first = result if result else ({}, False)
-        if not row:
-            log.warning("[EABridge] %s filled (trade_id=%s) but no trade row "
-                        "found at all for original trade_id=%s (waited 10s for "
-                        "the open_trade() INSERT)",
-                        label, leg_trade_id, original_id)
-            return
+            if row:
+                await self._finish_leg_promotion(
+                    row, is_first, label, original_id, ticket, fill_price, lots)
+                return
+        log.warning("[EABridge] %s filled (trade_id=%s) but no trade row appeared "
+                    "for original trade_id=%s within %.0fs — leaving it to "
+                    "TemplateRepair",
+                    label, leg_trade_id, original_id, _LEG_ROW_WAIT_S)
+
+    async def _finish_leg_promotion(self, row: dict, is_first: bool, label: str,
+                                    original_id: str, ticket, fill_price: float,
+                                    lots) -> None:
+        """Everything that happens once a leg fill has been matched to its row,
+        shared by the immediate and the deferred paths."""
+        from forex_trader.core import telegram_alerts
         log.info("[EABridge] %s live: trade=%s ticket=%s @ %.2f lots=%s (%s)",
                  label, original_id[:8], ticket, fill_price, lots or row.get("lot_size"),
                  "promoted this trade's row" if is_first else "sibling leg, row already promoted")

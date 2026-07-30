@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import core_ea_templates as ea_templates
-from forex_trader.core.core_risk_governor import is_trading_paused
+from forex_trader.core.core_risk_governor import is_trading_paused, price_in_entry_range
 from forex_trader.core.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
@@ -446,6 +446,47 @@ async def open_trade(
                     _grid_lot = float(ea_rs.get("strategy_lot_size_grid", 0))
                     if _grid_lot > 0:
                         _ea_lot = _grid_lot
+
+                    # ── Anchor legs require price to BE at the zone ──────
+                    # A grid's anchor is a MARKET order (HandleOpenTemplateGrid
+                    # calls trade.Buy/trade.Sell for it). That is only an entry
+                    # the signal asked for while price is at or better than its
+                    # zone -- which used to be guaranteed, because a grid was
+                    # only ever dispatched once price had reached the zone.
+                    # Placing on arrival removed that guarantee, and on
+                    # 2026-07-30 six queued Reversal Engine signals with zones
+                    # from 4084 to 4121 each took a market anchor at ~4095:
+                    # four BUYs and two SELLs filled within seconds of each
+                    # other, none at a price its own signal named.
+                    #
+                    # Outside the zone, only the resting legs are placed --
+                    # those sit AT the zone by construction and are the whole
+                    # reason for staging early. The anchor's own purpose
+                    # ("take part of the position now so a signal that never
+                    # retraces is not missed entirely") is exactly what must
+                    # not happen when price is already past the level.
+                    if not price_in_entry_range(direction, entry_low, entry_high, tick):
+                        _pendings = int(_ea_template.get("pendings", 0) or 0) or \
+                                    int(_ea_template.get("grid_legs", 0) or 0)
+                        if _pendings <= 0:
+                            # Nothing left to place: anchors-only template with
+                            # price away from the zone. Refuse rather than fall
+                            # through to a market fill -- the signal stays
+                            # pending and is retried while its window lasts.
+                            raise RuntimeError(
+                                f"Grid template '{_ea_template.get('name', '?')}' has no pending "
+                                f"legs and price is outside the {direction} zone "
+                                f"{entry_low:.2f}-{entry_high:.2f} — refusing a market anchor "
+                                f"at a price this signal never named"
+                            )
+                        _px = tick.ask if direction.upper() == "BUY" else tick.bid
+                        log.info(
+                            "[EA] grid staged without anchors: price %.2f is outside the %s "
+                            "zone %.2f-%.2f — %d resting leg(s) only",
+                            _px, direction, entry_low, entry_high, _pendings,
+                        )
+                        _ea_template = dict(_ea_template)
+                        _ea_template["anchors"] = 0
                 # A template's ack is only sent once the EA has staged EVERY
                 # leg (HandleOpenTemplateGrid's closing SendJson), and each
                 # leg is its own synchronous broker round trip -- so the flat

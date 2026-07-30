@@ -444,6 +444,56 @@ def _render_trade_table(engine):
             pass
         return result
 
+    def _template_leg_maps(leg_comments: dict) -> tuple:
+        """Return ({ticket: channel}, {ticket: strategy}) for EA Template legs.
+
+        A template trade opens one broker position per Anchor/Grid leg, but
+        Python keeps a SINGLE vantage_simulated_trades row per trade -- so
+        every leg except the one that promoted that row has no local row, and
+        _ticket_source_map's ticket lookup finds nothing for it. Those legs
+        rendered with a blank channel and strategy even though they are the
+        bulk of a grid trade: over two days of live history only 59 of 294
+        broker positions had a local row, and 160 of the remaining 235 were
+        template legs.
+
+        The EA's own order comment is the link back (see ea_bridge.
+        trade_id_prefix_from_comment) -- the same mechanism
+        core_template_placeholder_repair uses to adopt an orphaned row.
+        `leg_comments` is {ticket: entry_deal_comment}, taken from the
+        broker's deal history by the caller.
+        """
+        from forex_trader.core.ea_bridge import trade_id_prefix_from_comment
+
+        by_prefix: dict[str, list] = {}
+        for ticket, comment in (leg_comments or {}).items():
+            prefix = trade_id_prefix_from_comment(comment)
+            if prefix:
+                by_prefix.setdefault(prefix, []).append(str(ticket))
+        if not by_prefix:
+            return {}, {}
+
+        src: dict[str, str] = {}
+        strat: dict[str, str] = {}
+        try:
+            with db_module.db() as conn:
+                for prefix, tickets in by_prefix.items():
+                    row = conn.execute(
+                        "SELECT tg_source, strategy FROM vantage_simulated_trades "
+                        "WHERE trade_id LIKE ? LIMIT 1",
+                        (prefix + "%",),
+                    ).fetchone()
+                    if not row:
+                        continue
+                    tg_source, strategy = row[0], row[1]
+                    ch = trade_channel_label(tg_source or "")
+                    label = ch if ch else trade_source_label(tg_source or "")
+                    for ticket in tickets:
+                        src[ticket] = label
+                        strat[ticket] = _strategy_display_label(strategy or "")
+        except Exception:
+            pass
+        return src, strat
+
     def _ticket_strategy_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: strategy_display}.
         Shows 'DPM' when the trade has a dpm_trade_performance record (DPM managed it),
@@ -723,6 +773,24 @@ def _render_trade_table(engine):
                         pid = d.get("position_id")
                         if pid:  # excludes None and 0 (balance/deposit ops)
                             by_pos.setdefault(int(pid), []).append(d)
+
+                    # EA Template legs: attribute the sibling legs that have no
+                    # local trade row of their own back to their trade, via the
+                    # comment the EA stamped on the opening deal. setdefault, so
+                    # a real local row always wins over a comment inference.
+                    _leg_comments = {}
+                    for _pid, _ds in by_pos.items():
+                        for _d in _ds:
+                            if _d.get("entry") == 0 and (_d.get("comment") or ""):
+                                _leg_comments[str(_pid)] = _d.get("comment")
+                                break
+                    if _leg_comments:
+                        _leg_src, _leg_strat = await db_module.to_db_thread(
+                            _template_leg_maps, _leg_comments)
+                        for _t, _v in _leg_src.items():
+                            src_map.setdefault(_t, _v)
+                        for _t, _v in _leg_strat.items():
+                            strat_map.setdefault(_t, _v)
 
                     # Spread paid at entry is a historical fact — it never changes once
                     # computed, so cache it permanently and only ask MT5 for tickets

@@ -41,11 +41,12 @@ from forex_trader.core import database as db_module
 log = logging.getLogger(__name__)
 
 # Matches the EA's own comment construction: "ea:" + StringSubstr(trade_id, 0, 10)
-_COMMENT_ID_LEN = 10
-
-
 def _comment_prefix(trade_id: str) -> str:
-    return f"ea:{trade_id[:_COMMENT_ID_LEN]}"
+    # Single source of truth for the EA's comment format (ea_bridge), so the
+    # id length cannot drift between this module, the history channel lookup
+    # and the Reversal Engine's leg reconciliation, which all depend on it.
+    from forex_trader.core.ea_bridge import comment_for_trade
+    return comment_for_trade(trade_id)
 
 
 def _fetch_placeholders() -> list:

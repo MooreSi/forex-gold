@@ -394,6 +394,59 @@ class _ManagementMixin:
         if hit_trail:
             _close_remaining("win")
 
+    async def _template_leg_tickets(self, sig: dict, ticket: int) -> set:
+        """Every broker position belonging to this signal's trade, not just
+        the one ticket the signal recorded.
+
+        Returns {ticket} unchanged for a normal single-position trade, and for
+        anything this cannot resolve -- so a template lookup that fails
+        degrades to exactly the previous behaviour rather than dropping the
+        signal's own ticket.
+
+        Only EA Template trades have siblings: the EA opens one position per
+        Anchor/Grid leg while Python keeps a single trade row, and the legs
+        are linked solely by the order comment the EA stamps on them.
+        """
+        legs = {int(ticket)}
+        vsig = sig.get("vantage_signal_id")
+        if not vsig:
+            return legs
+        try:
+            from forex_trader.core import database as _cdb
+            from forex_trader.core.ea_bridge import (
+                comment_for_trade, trade_id_prefix_from_comment,
+            )
+
+            def _trade_id():
+                with _cdb.db() as conn:
+                    row = conn.execute(
+                        "SELECT trade_id, strategy FROM vantage_simulated_trades "
+                        "WHERE signal_id=?", (vsig,),
+                    ).fetchone()
+                    return (row[0], row[1]) if row else (None, None)
+
+            trade_id, strategy = await _cdb.to_db_thread(_trade_id)
+            if not trade_id or not (strategy or "").startswith("template:"):
+                return legs
+
+            prefix = trade_id_prefix_from_comment(comment_for_trade(trade_id))
+            if not prefix:
+                return legs
+            for d in (await self._bridge.get_deal_history(7) or []):
+                if d.get("entry") != 0:
+                    continue          # opening deals carry the EA's comment
+                if trade_id_prefix_from_comment(d.get("comment") or "") == prefix:
+                    pid = d.get("position_id")
+                    if pid:
+                        legs.add(int(pid))
+        except Exception as exc:
+            _log.debug("[RE-Engine] leg lookup failed for ticket=%s: %s", ticket, exc)
+            return {int(ticket)}
+        if len(legs) > 1:
+            _log.info("[RE-Engine] signal %s spans %d template legs: %s",
+                      sig.get("signal_ref", sig.get("id")), len(legs), sorted(legs))
+        return legs
+
     async def _reconcile_live_signal(self, sig: dict) -> None:
         """Mirror a live-executed signal's outcome/P&L from the real MT5
         trade rather than the tick-based simulation used for virtual
@@ -412,7 +465,16 @@ class _ManagementMixin:
         except Exception as exc:
             _log.debug("[RE-Engine] live reconcile: get_positions failed ticket=%s: %s", ticket, exc)
             return
-        if any(int(p.get("ticket", 0)) == ticket for p in live_positions):
+        # EA Template legs: the signal's mt5_ticket is only the ONE leg that
+        # promoted the trade row. A grid trade opens an anchor plus N pending
+        # legs as separate broker positions, so reconciling that single ticket
+        # counted roughly a quarter of the real result into the virtual
+        # balance and closed the signal while sibling legs were still running.
+        # The EA's order comment is the only link to them (see ea_bridge.
+        # comment_for_trade), the same link the History channel lookup uses.
+        leg_tickets = await self._template_leg_tickets(sig, ticket)
+
+        if any(int(p.get("ticket", 0)) in leg_tickets for p in live_positions):
             self._live_missing_streak.pop(ticket, None)
             return  # still open on the real account -- nothing to reconcile yet
 
@@ -421,11 +483,15 @@ class _ManagementMixin:
         if streak < _LIVE_MISSING_THRESHOLD:
             return
 
-        try:
-            deals = await self._bridge.get_position_history(ticket)
-        except Exception as exc:
-            _log.debug("[RE-Engine] live reconcile: get_position_history failed ticket=%s: %s", ticket, exc)
-            return
+        deals: list = []
+        for _t in sorted(leg_tickets):
+            try:
+                deals.extend(await self._bridge.get_position_history(_t) or [])
+            except Exception as exc:
+                _log.debug("[RE-Engine] live reconcile: get_position_history failed "
+                           "ticket=%s: %s", _t, exc)
+                if _t == ticket:
+                    return
         if not deals:
             return  # nothing to reconcile yet -- try again next cycle
 

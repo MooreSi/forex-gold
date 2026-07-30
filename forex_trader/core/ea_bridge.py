@@ -82,6 +82,40 @@ def leg_label(kind: Optional[str], num: str) -> str:
     return f"{_LEG_KIND_LABELS.get(kind or '', 'Leg')} {num}".strip()
 
 
+# The order comment the EA stamps on every template leg:
+#   "ea:" + StringSubstr(trade_id, 0, 10) + <a|g> + <N>
+# It is the ONLY link from a broker position back to the app's trade_id that
+# survives into MT5's own position and deal records, and for every leg except
+# the one that promoted the row it is the only link that exists at all --
+# Python keeps one vantage_simulated_trades row per template trade, so sibling
+# legs have no row and no ticket of their own on this side.
+COMMENT_PREFIX = "ea:"
+COMMENT_ID_LEN = 10
+
+
+def comment_for_trade(trade_id: str) -> str:
+    """The comment prefix every leg of `trade_id` will carry."""
+    return f"{COMMENT_PREFIX}{(trade_id or '')[:COMMENT_ID_LEN]}"
+
+
+def trade_id_prefix_from_comment(comment: str) -> Optional[str]:
+    """Recover a trade_id's leading characters from a leg's order comment.
+
+    "ea:5b88a61e-6g3" -> "5b88a61e-6". Returns None for any comment the EA
+    did not write (broker-generated "[sl 4046.50]", "batchClose", blanks).
+    Match the result with a prefix comparison, not equality -- it is only the
+    first COMMENT_ID_LEN characters of the full trade_id.
+    """
+    if not comment or not comment.startswith(COMMENT_PREFIX):
+        return None
+    # The EA always writes exactly COMMENT_ID_LEN id characters before the leg
+    # marker, so a slice is unambiguous where pattern-matching the marker off
+    # the end is not: "ea:f4ef1085-aa1" is the id "f4ef1085-a" plus leg "a1",
+    # and no regex can tell that from a shorter id without knowing the length.
+    ident = comment[len(COMMENT_PREFIX):][:COMMENT_ID_LEN].strip()
+    return ident or None
+
+
 def _resolve_port() -> int:
     try:
         import forex_trader.config as _cfg_module

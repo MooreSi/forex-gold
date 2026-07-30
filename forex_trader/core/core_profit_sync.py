@@ -29,28 +29,97 @@ log = logging.getLogger(__name__)
 
 
 async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[float]:
-    deals = await bridge.get_position_history(mt5_ticket)
-    if not deals:
-        all_deals = await bridge.get_deal_history(90)
-        deals = [d for d in all_deals if str(d.get("position_id", "")) == str(mt5_ticket)]
-    if not deals:
+    """Sync `trade_id`'s real MT5 profit into net_pnl/mt5_profit, correcting
+    the simulated balance by the difference from whatever estimate the
+    strategy handler had recorded.
+
+    An EA Template trade opens one broker position per Anchor/Grid leg, but
+    `mt5_ticket` is only the ONE leg that promoted the row -- summing that
+    ticket alone silently dropped every sibling leg's real money from
+    net_pnl (confirmed live 2026-07-30: a 3-leg grid's anchor alone showed
+    $30.63 while its two grid legs, each its own broker position, were
+    never counted anywhere in this figure). Siblings are discovered via the
+    EA's own order comment (ea_bridge.find_template_leg_tickets, the same
+    link History's leg attribution and Reversal Engine's live reconciliation
+    already use independently).
+
+    A sibling can close well after the anchor -- one did, four minutes past
+    the row's own close_time, in the same incident -- so this sums whatever
+    discovered legs have closed SO FAR rather than waiting for all of them,
+    and only marks the trade's mt5_profit as final (stopping
+    schedule_profit_sync's retries) once none of the discovered legs are
+    still open. Until then it keeps applying the INCREMENTAL correction
+    each call, so the total converges as later legs settle instead of
+    freezing at whichever leg happened to close first. profit_sweep's
+    periodic catch-all (mt5_profit IS NULL, no age limit on that branch)
+    is what eventually catches a leg that fills and closes long after the
+    anchor -- nothing here watches for that in real time.
+
+    A resting pending leg that has never filled produces no opening deal,
+    so it is invisible to find_template_leg_tickets and cannot block
+    "settled" -- there is nothing yet to wait for.
+    """
+    def _fetch_strategy():
+        with db_module.db() as conn:
+            row = conn.execute(
+                "SELECT strategy FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
+            ).fetchone()
+            return row[0] if row else None
+    strategy = await db_module.to_db_thread(_fetch_strategy)
+
+    ticket_set = {int(mt5_ticket)}
+    if strategy and strategy.startswith("template:"):
+        try:
+            from forex_trader.core.ea_bridge import find_template_leg_tickets
+            ticket_set |= await find_template_leg_tickets(trade_id, bridge)
+        except Exception as exc:
+            log.debug("[ProfitSync] leg lookup failed for %s: %s", trade_id, exc)
+
+    live_tickets: set[int] = set()
+    if len(ticket_set) > 1:
+        try:
+            live_tickets = {int(p.get("ticket", 0)) for p in (await bridge.get_positions() or [])}
+        except Exception:
+            pass
+
+    all_deals_cache: Optional[list] = None
+    total = 0.0
+    any_closed = False
+    all_settled = True
+    for t in sorted(ticket_set):
+        deals = await bridge.get_position_history(t)
+        if not deals:
+            if all_deals_cache is None:
+                all_deals_cache = await bridge.get_deal_history(90)
+            deals = [d for d in all_deals_cache if str(d.get("position_id", "")) == str(t)]
+        if not deals:
+            if t == int(mt5_ticket) or t in live_tickets:
+                all_settled = False
+            continue
+        closing = [d for d in deals if d.get("entry") in (1, 2)]
+        if not closing:
+            all_settled = False
+            continue
+        any_closed = True
+        total += sum(float(d.get("profit", 0)) + float(d.get("swap", 0)) + float(d.get("fee", 0))
+                     for d in deals)
+
+    if not any_closed:
         return None
-    closing = [d for d in deals if d.get("entry") in (1, 2)]
-    if not closing:
-        return None
-    mt5_profit = round(
-        sum(float(d.get("profit", 0)) + float(d.get("swap", 0)) + float(d.get("fee", 0))
-            for d in deals), 2,
-    )
+    mt5_profit = round(total, 2)
+
     def _apply_profit_sync():
         with db_module.db() as conn:
             existing = db_module.row_to_dict(conn.execute(
                 "SELECT mt5_profit, net_pnl FROM vantage_simulated_trades WHERE trade_id=?",
                 (trade_id,),
             ).fetchone())
-            # First-time sync only: if our estimated net_pnl differs from the real MT5
-            # figure (e.g. due to SL slippage, swap, commission), correct the simulated
-            # account balance so it stays in sync with the broker.
+            # mt5_profit stays NULL until all_settled (see below), so this
+            # branch runs on every retry while sibling legs are still
+            # closing -- our_estimate is always what the LAST call wrote,
+            # so the correction applied is exactly the incremental amount
+            # a newly-closed leg added, never a re-application of the same
+            # money twice.
             if existing and existing.get("mt5_profit") is None:
                 our_estimate = float(existing.get("net_pnl") or 0)
                 correction = round(mt5_profit - our_estimate, 4)
@@ -67,12 +136,13 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
                         "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
                         trade_id, our_estimate, mt5_profit, correction,
                     )
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",
-                (mt5_profit, trade_id),
-            )
+            if all_settled:
+                conn.execute(
+                    "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",
+                    (mt5_profit, trade_id),
+                )
     await db_module.to_db_thread(_apply_profit_sync)
-    return mt5_profit
+    return mt5_profit if all_settled else None
 
 
 async def schedule_profit_sync(trade_id: str, mt5_ticket: int, bridge: Any) -> None:

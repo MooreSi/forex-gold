@@ -25,7 +25,7 @@ import json
 import logging
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from forex_trader.core.core_trading_schedule import check_trading_schedule
 
@@ -122,6 +122,40 @@ def trade_id_prefix_from_comment(comment: str) -> Optional[str]:
     # and no regex can tell that from a shorter id without knowing the length.
     ident = comment[len(COMMENT_PREFIX):][:COMMENT_ID_LEN].strip()
     return ident or None
+
+
+async def find_template_leg_tickets(trade_id: str, bridge: Any, days: int = 7) -> set[int]:
+    """Every broker position opened for an EA Template trade's legs (the
+    anchor plus any grid legs), discovered from the EA's own order comment
+    -- the only link between a template trade's single Python row and its
+    N broker positions, since sibling legs never get a row of their own.
+
+    Returns an empty set if nothing can be resolved (deal history
+    unavailable, or `trade_id` never actually opened as a template). Only
+    tickets that have actually filled show up here -- a resting pending leg
+    that hasn't filled yet produces no opening deal, so it is invisible to
+    this lookup until it does.
+
+    Same mechanism reversal_engine_manage.py's own _template_leg_tickets
+    and history.py's _template_leg_maps already use independently; this is
+    the shared version core_profit_sync.sync_profit uses so a grid's
+    sibling legs' profit stops being silently dropped from net_pnl.
+    """
+    prefix = trade_id_prefix_from_comment(comment_for_trade(trade_id))
+    if not prefix:
+        return set()
+    legs: set[int] = set()
+    try:
+        for d in (await bridge.get_deal_history(days) or []):
+            if d.get("entry") != 0:
+                continue  # opening deals carry the EA's comment
+            if trade_id_prefix_from_comment(d.get("comment") or "") == prefix:
+                pid = d.get("position_id")
+                if pid:
+                    legs.add(int(pid))
+    except Exception:
+        return set()
+    return legs
 
 
 def _resolve_port() -> int:

@@ -384,6 +384,58 @@ def _strategy_display_label(strategy: str) -> str:
     return _STRAT_LABEL.get(strategy, STRATEGY_NAMES.get(strategy, "—"))
 
 
+def _template_group_map(leg_comments: dict) -> dict[str, tuple[str, int]]:
+    """Return {ticket_str: (trade_id, tier)} for every ticket belonging to an
+    EA Template group of 2+ legs, in the exact shape _ticket_group_map
+    already produces for Adaptive Runner ladder legs -- merged into the same
+    group_map in _render_trade_table so the row-collapsing logic that
+    already exists for ladder legs applies to template siblings too, with no
+    changes needed to that logic itself.
+
+    Before this, a grid trade's anchor and its 2-3 sibling legs each
+    rendered as their own unrelated row -- _template_leg_maps only
+    backfilled their blank Channel/Strategy columns, nothing summed what the
+    signal actually made. tier 1 is always the leg that promoted the local
+    trade row (matches _ticket_group_map's own "tier 1 = anchor"
+    convention); the rest sort by ticket number, which the broker issues in
+    fill order. A prefix with only one resolved ticket is left out entirely
+    -- a group of one is nothing to collapse, same rule _ticket_group_map's
+    own caller applies.
+
+    Module-level (unlike _template_leg_maps) since it has no dependency on
+    _render_trade_table's own closure -- only leg_comments and the DB.
+    """
+    from forex_trader.core.ea_bridge import trade_id_prefix_from_comment
+
+    by_prefix: dict[str, list[str]] = {}
+    for ticket, comment in (leg_comments or {}).items():
+        prefix = trade_id_prefix_from_comment(comment)
+        if prefix:
+            by_prefix.setdefault(prefix, []).append(str(ticket))
+
+    result: dict[str, tuple[str, int]] = {}
+    try:
+        with db_module.db() as conn:
+            for prefix, tickets in by_prefix.items():
+                if len(tickets) < 2:
+                    continue
+                row = conn.execute(
+                    "SELECT trade_id, mt5_ticket FROM vantage_simulated_trades "
+                    "WHERE trade_id LIKE ? LIMIT 1",
+                    (prefix + "%",),
+                ).fetchone()
+                if not row:
+                    continue
+                trade_id = row[0]
+                anchor_ticket = str(row[1]) if row[1] else None
+                ordered = sorted(tickets, key=lambda t: (t != anchor_ticket, int(t)))
+                for tier, ticket in enumerate(ordered, start=1):
+                    result[ticket] = (trade_id, tier)
+    except Exception:
+        pass
+    return result
+
+
 def _render_trade_table(engine):
     def _ticket_source_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: channel_or_source_label}.
@@ -756,6 +808,7 @@ def _render_trade_table(engine):
             """Fetch closed trades exclusively from MT5 deal history."""
             mt5_error: Optional[str] = None
             rows_by_ticket: dict[int, dict] = {}
+            _leg_comments: dict = {}
             # Offloaded — these are all synchronous DB reads; running them
             # directly on the event loop blocked the whole app every 15s.
             _days_now  = int(days_sel.value)
@@ -943,6 +996,11 @@ def _render_trade_table(engine):
                 mt5_error = str(exc)
 
             group_map = await db_module.to_db_thread(_ticket_group_map)
+            if _leg_comments:
+                tpl_group_map = await db_module.to_db_thread(
+                    _template_group_map, _leg_comments)
+                for _t, _v in tpl_group_map.items():
+                    group_map.setdefault(_t, _v)
             groups: dict[str, list[dict]] = {}
             flat_rows: list[dict] = []
             for ticket, row in rows_by_ticket.items():

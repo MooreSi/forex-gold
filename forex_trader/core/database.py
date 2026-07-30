@@ -980,6 +980,16 @@ def _apply_schema() -> None:
             "ALTER TABLE ea_trade_templates ADD COLUMN tp1_trigger_level INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE ea_trade_templates ADD COLUMN manual_sl_push_pips REAL NOT NULL DEFAULT 10.0",
             "ALTER TABLE ea_trade_templates ADD COLUMN gold_half_pip_anchor INTEGER NOT NULL DEFAULT 0",
+        ] + [
+            # "Use TP Levels from Telegram" (2026-07-30), one flag per
+            # ladder. When set, that ladder ignores its tp{n}_pips column and
+            # takes its TP levels from the triggering Telegram message's own
+            # stated prices. Defaults to 0 so every existing template keeps
+            # its current, pips-driven behaviour untouched. See
+            # core_ea_templates.DEFAULTS and core_open_trade's
+            # _resolve_template_tps for the resolution order.
+            "ALTER TABLE ea_trade_templates ADD COLUMN tp_from_telegram INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ea_trade_templates ADD COLUMN tp_pen_from_telegram INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)

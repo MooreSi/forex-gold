@@ -1021,11 +1021,24 @@ class EABridge:
                     (original_id,),
                 ).fetchone())
                 return already, False
+        # An anchor leg is a market order: the EA fills it and reports back in
+        # milliseconds, which can beat open_trade()'s own INSERT of the trade
+        # row (observed repeatedly on 2026-07-30). Bailing out on the first
+        # miss lost the promotion AND this leg's fill alert, left the row a
+        # mt5_ticket=0 placeholder until TemplateRepair adopted it seconds
+        # later, and made the trade-open alert report ticket 0 / entry 0.0.
+        # The INSERT is imminent, so retry briefly before giving up.
         result = await db_module.to_db_thread(_apply)
         row, is_first = result if result else ({}, False)
+        _row_wait_deadline = time.time() + 10.0
+        while not row and time.time() < _row_wait_deadline:
+            await asyncio.sleep(0.25)
+            result = await db_module.to_db_thread(_apply)
+            row, is_first = result if result else ({}, False)
         if not row:
             log.warning("[EABridge] %s filled (trade_id=%s) but no trade row "
-                        "found at all for original trade_id=%s",
+                        "found at all for original trade_id=%s (waited 10s for "
+                        "the open_trade() INSERT)",
                         label, leg_trade_id, original_id)
             return
         log.info("[EABridge] %s live: trade=%s ticket=%s @ %.2f lots=%s (%s)",

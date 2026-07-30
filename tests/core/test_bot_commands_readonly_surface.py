@@ -83,9 +83,13 @@ def _insert_signal_and_trade(trade_id, direction="BUY", entry_price=2400.0,
 
 # ── cmd_help ──────────────────────────────────────────────────────────────
 
-def test_help_lists_commands(fresh_db):
+def test_help_describes_the_control_panel(fresh_db):
+    """The bot is button-driven now (core_bot_panel) -- help is a map of the
+    panel rather than the old list of typed commands. /status and /help are
+    the only commands that stayed typed."""
     result = asyncio.run(cmds.cmd_help([]))
-    assert "/balance" in result and "/status" in result and "/help" in result
+    assert "/panel" in result and "/status" in result and "/help" in result
+    assert "Channel Strategy" in result and "Channel Trades" in result
 
 
 # ── cmd_balance ───────────────────────────────────────────────────────────

@@ -1831,7 +1831,16 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
             "conditions and update the recommendation every 30 min."
         )
 
-    channels = _csdb.get_all_channel_strategy_settings()
+    channels = [
+        ch for ch in _csdb.get_all_channel_strategy_settings()
+        # ORB/IVB isn't a channel -- it's a time-of-day breakout engine with
+        # its own page and its own orb_fixed management, so a per-channel
+        # strategy row for it doesn't belong in this list. It stays a
+        # canonical source everywhere else (trade attribution, scorecards,
+        # rename cascades) and any override already stored for it is still
+        # honoured by orb_auto_execute.
+        if ch["source"] != "ORB/IVB Report"
+    ]
 
     strat_opts = {"": "— Inherit Global —", "auto": "Auto (Claude)"}
     strat_opts.update(STRATEGY_NAMES)
@@ -2450,16 +2459,50 @@ def _render_ea_templates_card() -> None:
                          "above. 0 = use the fixed lots.")
 
             # ── TP ladders ────────────────────────────────────────────────
-            def _ladder_grid(prefix: str) -> None:
+            def _tg_tp_switch(key: str, which: str):
+                """"Use TP Levels from Telegram" for one ladder.
+
+                On, the pips row below is ignored and the levels come from the
+                triggering Telegram message's own TP prices. The pips values
+                are kept (and stay visible, just disabled) because they are
+                still what the internal signal generators use -- those have no
+                message to read, so this switch never applies to them."""
+                with ui.row().classes("items-center gap-2 mb-2"):
+                    sw = ui.switch(
+                        "Use TP Levels from Telegram",
+                        value=bool(live[key]),
+                    ).classes("text-xs")
+                    fields[key] = sw
+                    ui.icon("info_outline", size="14px").classes(
+                        "text-blue-400 cursor-help").tooltip(
+                        f"ON: the {which} legs take their TP levels from the "
+                        f"Telegram message's own TP prices, and the pips row "
+                        f"below is ignored. The message sets how many levels "
+                        f"there are; the % row still decides how much closes "
+                        f"at each, and the last level closes the remainder.\n\n"
+                        f"Internal signals (Reversal, Breakout, Bounce, ORB) "
+                        f"have no message, so they keep using the pips row "
+                        f"regardless. A Telegram signal that states no TPs "
+                        f"also falls back to it.")
+                return sw
+
+            def _ladder_grid(prefix: str, tg_switch=None) -> None:
                 with ui.grid(columns=N + 1).classes("w-full gap-1"):
                     ui.label("").classes("text-xs")
                     for n in range(1, N + 1):
                         ui.label(f"TP{n}").classes("text-xs text-center text-gray-400")
                     ui.label("pips").classes("text-xs text-gray-500 self-center")
                     for n in range(1, N + 1):
-                        fields[f"{prefix}{n}_pips"] = ui.number(
+                        num = ui.number(
                             value=float(live[f"{prefix}{n}_pips"]), step=1.0, min=0,
                         ).classes("w-full").props("dense outlined")
+                        if tg_switch is not None:
+                            # Disabled, not hidden or cleared: these values
+                            # still drive internal-generator trades, so they
+                            # must keep their values and keep saving.
+                            num.bind_enabled_from(
+                                tg_switch, "value", backward=lambda v: not v)
+                        fields[f"{prefix}{n}_pips"] = num
                     ui.label("%").classes("text-xs text-gray-500 self-center")
                     for n in range(1, N + 1):
                         fields[f"{prefix}{n}_pct"] = ui.number(
@@ -2475,7 +2518,7 @@ def _render_ea_templates_card() -> None:
                 "is simply not used. The % row is always template-driven, "
                 "since a signal never states how much to close at each level.",
             ):
-                _ladder_grid("tp")
+                _ladder_grid("tp", _tg_tp_switch("tp_from_telegram", "anchor"))
                 with ui.row().classes("gap-2 mt-2"):
                     ui.button("Copy to Pending ↓",
                               on_click=lambda: _copy_ladder("tp", "tp_pen")) \
@@ -2493,7 +2536,8 @@ def _render_ea_templates_card() -> None:
                 "deeper leg automatically earns more points reaching it. "
                 "Leave at 0 to reuse the anchor ladder.",
             ):
-                _ladder_grid("tp_pen")
+                _ladder_grid("tp_pen",
+                             _tg_tp_switch("tp_pen_from_telegram", "pending"))
 
             # ── Strategy toggles ──────────────────────────────────────────
             strategy_section = _section("Strategy", "text-emerald-400")

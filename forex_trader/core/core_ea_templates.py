@@ -144,6 +144,22 @@ DEFAULTS: dict = {
     # to the half pip when set (InpGoldHalfPipAnchor).
     "gold_half_pip_anchor": False,
 
+    # ── TP source (2026-07-30) ───────────────────────────────────────
+    # "Use TP Levels from Telegram", one per ladder. When set, that
+    # ladder's tp{n}_pips column is ignored and the TP levels come from
+    # the triggering Telegram message's own stated TP prices instead;
+    # tp{n}_pct still governs how much closes at each level, since a
+    # message states prices but never sizes.
+    #
+    # Telegram-only by design: the internal generators (Reversal, Breakout,
+    # Bounce, ORB) have no message to read, so they always use the pips
+    # columns regardless of this flag -- which is the whole point of
+    # keeping the manual ladder editable while this is on. A Telegram
+    # signal that arrives with no usable TP levels also falls back to the
+    # pips columns rather than opening with no targets at all.
+    "tp_from_telegram":     False,
+    "tp_pen_from_telegram": False,
+
     # ── Anchor TP ladder ─────────────────────────────────────────────
     **{f"tp{n}_pips": 0.0 for n in range(1, MAX_TP_LEVELS + 1)},
     **{f"tp{n}_pct":  0.0 for n in range(1, MAX_TP_LEVELS + 1)},
@@ -191,6 +207,7 @@ _BOOL_FIELDS  = (
     "tg_cmd_enabled", "harvest_enabled", "cancel_pending", "group_tp_action",
     "sig_guard", "anc_shave", "auto_sl", "partials",
     "use_dynamic_atr", "use_emergency_sl", "gold_half_pip_anchor",
+    "tp_from_telegram", "tp_pen_from_telegram",
 )
 _FLOAT_FIELDS = (
     "harvest_threshold", "grid_step_pts", "be_buffer_pts",

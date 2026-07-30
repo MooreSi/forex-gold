@@ -91,6 +91,119 @@ _EA_LADDER_TRAIL_MODE = {
 }
 
 
+def is_telegram_source(tg_source: Optional[str]) -> bool:
+    """Did this signal come from a Telegram message, as opposed to one of the
+    app's own internal generators or a manual order?
+
+    Decided against the registry of configured Telegram channels
+    (channel_parser_config, the same table the Channel Strategy tab builds
+    its list from) rather than against a hardcoded list of engine names, so
+    adding a channel or renaming one needs no change here. The
+    'Telegram Auto (<name>)' spelling the auto-execution path writes is
+    unwrapped first, since that is the form most executed rows carry.
+    """
+    if not tg_source:
+        return False
+    name = tg_source.strip()
+    if name.startswith("Telegram Auto (") and name.endswith(")"):
+        name = name[len("Telegram Auto ("):-1]
+    try:
+        canon = db_module._canonical(name)
+    except Exception:
+        canon = name
+    try:
+        configured = {c.get("channel_name") for c in db_module.get_all_channel_parser_configs()}
+    except Exception:
+        return False
+    return canon in configured or name in configured
+
+
+def resolve_template_tps(template: dict, direction: str, tick: Any,
+                          signal_tps: list, tg_source: Optional[str]) -> tuple:
+    """Work out the TP levels an EA Template trade actually opens with.
+
+    Returns (tps, pcts, pending_pips):
+      tps          {n: absolute price} -- the anchor ladder, and what goes
+                   on the wire as tp1..tp8.
+      pcts         close-% list aligned to sorted(tps), or None to leave the
+                   EA on its own defaults.
+      pending_pips None  -> send the template's own tp_pen{n}_pips unchanged
+                   {}    -> zero them, so the EA falls back to the absolute
+                            tp{n} values (see HandleOpenTemplateGrid)
+                   {n: pips} -> replace them with these
+
+    Resolution order per ladder: the message's own TP prices when
+    "Use TP Levels from Telegram" is set AND this is a Telegram signal AND
+    that message actually stated levels; otherwise the template's pips
+    column. Internal generators never take the Telegram branch -- they have
+    no message -- which is exactly why the pips columns stay editable while
+    the flag is on.
+    """
+    sign  = 1 if direction.upper() == "BUY" else -1
+    ref   = tick.ask if direction.upper() == "BUY" else tick.bid
+    # The EA stages a grid from the OPPOSITE side of the book than Python's
+    # own reference price (basePrice = bid for a BUY, ask for a SELL, see
+    # HandleOpenTemplateGrid) -- so a pips value handed to the EA must be
+    # measured from that side, or every pending level lands one spread out.
+    ea_base = tick.bid if direction.upper() == "BUY" else tick.ask
+
+    msg_tps = [float(t) for t in signal_tps if t]
+    from_tg = bool(msg_tps) and is_telegram_source(tg_source)
+    use_tg_anchor  = bool(template.get("tp_from_telegram")) and from_tg
+    use_tg_pending = bool(template.get("tp_pen_from_telegram")) and from_tg
+
+    def _pips_ladder(prefix: str) -> dict:
+        out = {}
+        for n in range(1, ea_templates.MAX_TP_LEVELS + 1):
+            pips = float(template.get(f"{prefix}{n}_pips", 0.0) or 0.0)
+            if pips > 0:
+                out[n] = ref + sign * pips
+        return out
+
+    if use_tg_anchor:
+        # The message sets the level COUNT: 3 stated TPs is a 3-level ladder,
+        # not 3 levels padded out to whatever the pct column happens to
+        # define. Levels are taken in the message's own order.
+        tps = {n: price for n, price in
+               enumerate(msg_tps[:ea_templates.MAX_TP_LEVELS], start=1)}
+    else:
+        tps = _pips_ladder("tp")
+
+    pcts = None
+    if tps:
+        table = [float(template.get(f"tp{n}_pct", 0.0) or 0.0) for n in sorted(tps)]
+        if use_tg_anchor and table:
+            # Whatever ends up being the last level closes the remainder, so
+            # a message with more TPs than the pct column defines can never
+            # leave the position with an unclosable tail. Only applied on
+            # the Telegram branch -- a template-driven ladder deliberately
+            # allows a trailing 0% (Sig Gen Grid runs TP5/TP6 at 0 and lets
+            # the trailing stop take them).
+            table[-1] = 100.0
+        if any(p > 0 for p in table):
+            pcts = table
+
+    pending_pips = None
+    if use_tg_pending:
+        if use_tg_anchor:
+            # Anchor and pending both on the message: the absolute tp{n}
+            # already carry exactly the levels wanted, and the EA uses them
+            # verbatim for a pending leg whose pips entry is 0.
+            pending_pips = {}
+        else:
+            # Anchor stayed on the template while pending follows the
+            # message. The absolute tp{n} on the wire are the anchor's
+            # template levels, so the fallback would hand the pending legs
+            # the wrong ladder -- convert the message's prices into pips
+            # from the EA's own staging base instead, which reproduces them
+            # under the default "unified" anchor mode.
+            pending_pips = {
+                n: abs(price - ea_base)
+                for n, price in enumerate(msg_tps[:ea_templates.MAX_TP_LEVELS], start=1)
+            }
+    return tps, pcts, pending_pips
+
+
 async def open_trade(
     bridge: Any,
     signal_id: str, direction: str, entry_low: float, entry_high: float,
@@ -246,6 +359,11 @@ async def open_trade(
     managed_by = "python"
     mt5_ticket = None
     entry_price = None
+    # The TP levels an EA Template resolved to, so the row below can record
+    # what the trade is ACTUALLY running instead of the signal's own levels.
+    # Stays None for every non-template strategy, which keeps writing the
+    # signal levels exactly as before.
+    _resolved_tps: Optional[dict] = None
     _is_template = ea_templates.is_template_override(strategy)
     ea_rs = await db_module.to_db_thread(db_module.get_risk_settings)
     if bool(ea_rs.get("ea_bridge_enabled", 0)) and mt5_tp_override is None:
@@ -299,18 +417,25 @@ async def open_trade(
                         # would defeat the point of this being explicit and
                         # authoritative. tpsl_mode/mode still govern
                         # whether/how this ladder is used by the EA.
-                        _sign = 1 if direction.upper() == "BUY" else -1
-                        _ref_price = tick.ask if direction.upper() == "BUY" else tick.bid
-                        _tps = {}
-                        for n in range(1, 9):
-                            _pips = float(_ea_template.get(f"tp{n}_pips", 0.0))
-                            if _pips > 0:
-                                _tps[n] = _ref_price + _sign * _pips
-                        if _tps:
-                            _tpl_pcts = [float(_ea_template.get(f"tp{n}_pct", 0.0))
-                                         for n in sorted(_tps)]
-                            if any(p > 0 for p in _tpl_pcts):
-                                _ea_pcts = _tpl_pcts
+                        #
+                        # "Use TP Levels from Telegram" (2026-07-30) can
+                        # override the pips column per ladder -- see
+                        # resolve_template_tps, which owns the whole
+                        # resolution and is what the DB row is written from
+                        # below so the record matches what the EA runs.
+                        _tps, _ea_pcts, _pen_pips = resolve_template_tps(
+                            _ea_template, direction, tick,
+                            [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8], tg_source,
+                        )
+                        _resolved_tps = dict(_tps)
+                        if _pen_pips is not None:
+                            # Rewrite the pending ladder on the COPY sent to
+                            # the EA only -- the stored template keeps the
+                            # user's own pips for when the flag is off or the
+                            # signal came from an internal generator.
+                            _ea_template = dict(_ea_template)
+                            for n in range(1, ea_templates.MAX_TP_LEVELS + 1):
+                                _ea_template[f"tp_pen{n}_pips"] = float(_pen_pips.get(n, 0.0))
                 _ea_lot = lot_size
                 if _ea_template is not None and _ea_template.get("mode") == "grid":
                     # Global Parameters > Fixed Lot Size (Grid) -- used for
@@ -374,6 +499,20 @@ async def open_trade(
         log.info("MT5 order placed: ticket=%s dir=%s lots=%s @ %s",
                  mt5_ticket, direction, lot_size, entry_price)
 
+    # Record the levels the trade is actually running. For an EA Template
+    # these are the template's (or, with "Use TP Levels from Telegram" on,
+    # the message's) resolved prices -- NOT the signal's own tp1..tp8, which
+    # is what this row used to store while the EA ran something else
+    # entirely. That divergence is what made the trade-open alert, the UI and
+    # TP Safety Net all report levels no one was trading (found 2026-07-30:
+    # a Sig Gen Grid trade alerted 8 Reversal Engine levels while the EA ran
+    # the template's 6). A level the resolved ladder doesn't define is NULL,
+    # so a 6-level template stops claiming 8.
+    if _resolved_tps is not None:
+        _row_tps = [_resolved_tps.get(n) for n in range(1, 9)]
+    else:
+        _row_tps = [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8]
+
     with db_module.db() as conn:
         conn.execute(
             """INSERT INTO vantage_simulated_trades
@@ -383,7 +522,7 @@ async def open_trade(
                 managed_by)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, mt5_ticket, direction.upper(), entry_low, entry_high, entry_price,
-             lot_size, lot_size, stop_loss, tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
+             lot_size, lot_size, stop_loss, *_row_tps,
              "open", now,
              0.0, 0.0, 0.0, 0.0,
              strategy, tg_source, managed_by),

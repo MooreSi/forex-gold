@@ -31,6 +31,7 @@ from forex_trader.core.signal_parser import (
     SIGNAL_PREFIX, check_sl_adjustment_rules,
 )
 from forex_trader.core import telegram_alerts
+from forex_trader.core import core_bot_panel as bot_panel
 from forex_trader.core import claude_ai
 from forex_trader.core import ai_provider
 from forex_trader.core import dpm_engine
@@ -211,6 +212,9 @@ from forex_trader.core.core_close_trade import (
     close_trade as _close_trade_impl,
     record_close as _record_close_impl,
     close_all_ladder_legs as _close_all_ladder_legs_impl,
+)
+from forex_trader.core.core_template_placeholder_repair import (
+    repair_template_placeholders as _repair_template_placeholders,
 )
 from forex_trader.core.core_orb_report import (
     build_orb_report as _build_orb_report_impl,
@@ -1241,6 +1245,16 @@ class SimulationEngine:
                     await self._sync_closed_mt5_positions()
                 except Exception as e:
                     log.debug("MT5 sync error: %s", e)
+                # EA Template placeholder rows are excluded from the sync above
+                # (managed_by='ea', and they have no ticket to look up anyway),
+                # so they need their own reconciliation: a leg fill event that
+                # never reached this node otherwise leaves the row a permanent
+                # $0-entry ghost in Active Trades. See
+                # core_template_placeholder_repair.py.
+                try:
+                    await _repair_template_placeholders(self._bridge)
+                except Exception as e:
+                    log.debug("Template placeholder repair error: %s", e)
 
             self._profit_cycle += 1
             if self._profit_cycle >= 24:
@@ -1737,6 +1751,36 @@ class SimulationEngine:
 
     # ── Background commentary ─────────────────────────────────────────────────
 
+    async def _await_trade_promotion(self, trade_id: str,
+                                      timeout: float = 15.0) -> Optional[dict]:
+        """The trade's current DB row, waiting out an EA Template placeholder.
+
+        A template trade's row is INSERTed with mt5_ticket=0/entry_price=0.0 --
+        at that moment the EA has only staged the legs, so no broker ticket or
+        fill price exists yet. The first leg to fill promotes the row (see
+        EABridge._on_template_leg_filled), normally within seconds. Poll for
+        that promotion so the trade-open alert can carry the real ticket and
+        entry instead of the placeholder zeros.
+
+        Never blocks the alert indefinitely: a grid whose legs all sit unfilled
+        is a legitimate state, and fmt_trade_open() reports that case
+        explicitly. Non-placeholder rows (every Python-managed trade, and any
+        template row already promoted) return on the first read with no wait.
+        """
+        deadline = time.monotonic() + timeout
+
+        def _read():
+            with db_module.db() as conn:
+                return db_module.row_to_dict(conn.execute(
+                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
+                ).fetchone())
+
+        row = await db_module.to_db_thread(_read)
+        while row and not row.get("mt5_ticket") and time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            row = await db_module.to_db_thread(_read)
+        return row
+
     async def _background_open_commentary(self, trade_id: str, sig: dict, tick: Tick) -> None:
         try:
             candles = await self.get_candles("M5", 20)
@@ -1753,8 +1797,15 @@ class SimulationEngine:
                     "UPDATE vantage_simulated_trades SET claude_open=? WHERE trade_id=?",
                     (json.dumps(commentary), trade_id),
                 )
+            # Re-read the row instead of reusing the copy fetched above: an EA
+            # Template row is INSERTed as a placeholder (mt5_ticket=0,
+            # entry_price=0.0) and only gains its real ticket and fill price
+            # when the first leg fills, which normally happens while the
+            # commentary request above is still in flight. The stale copy is
+            # what produced "MT5 Ticket: 0 / Entry: 0.0" alerts.
+            fresh_row = await self._await_trade_promotion(trade_id) or trade_row
             await telegram_alerts.send_message(
-                telegram_alerts.fmt_trade_open(trade_row, tick, commentary), trade_id, "trade_open",
+                telegram_alerts.fmt_trade_open(fresh_row, tick, commentary), trade_id, "trade_open",
             )
         except Exception as e:
             log.warning("Background open commentary failed %s: %s", trade_id, e)
@@ -2792,6 +2843,16 @@ class SimulationEngine:
                                 if uid >= self._bot_offset:
                                     self._bot_offset = uid + 1
 
+                                # An inline-keyboard tap arrives as a
+                                # callback_query, not a message — the panel's
+                                # entire navigation and every settings edit
+                                # comes through here.
+                                cbq = update.get("callback_query")
+                                if cbq:
+                                    await self._handle_panel_callback(
+                                        _client, token, cbq, allowed_chat)
+                                    continue
+
                                 msg     = update.get("message") or {}
                                 chat_id = str(msg.get("chat", {}).get("id", ""))
                                 text    = (msg.get("text") or "").strip()
@@ -2800,7 +2861,22 @@ class SimulationEngine:
                                 if not text or not chat_id or chat_id != allowed_chat:
                                     continue
 
+                                # A reply to a panel "Set exact value" prompt.
+                                # Checked before the slash-command dispatch
+                                # because a typed value is not a command and
+                                # would otherwise be dropped.
+                                prompt = ((msg.get("reply_to_message") or {}).get("text") or "")
+                                if bot_panel.parse_prompt(prompt):
+                                    screen = await bot_panel.handle_value_reply(prompt, text)
+                                    await self._send_panel_screen(
+                                        _client, token, chat_id, screen)
+                                    continue
+
                                 reply = await self._handle_bot_command(text)
+                                if isinstance(reply, bot_panel.Screen):
+                                    await self._send_panel_screen(
+                                        _client, token, chat_id, reply)
+                                    continue
                                 if not reply:
                                     continue
 
@@ -2846,7 +2922,78 @@ class SimulationEngine:
         finally:
             await _client.aclose()
 
-    async def _handle_bot_command(self, text: str) -> str:
+    # ── Telegram control panel transport ──────────────────────────────────────
+    #
+    # core_bot_panel builds screens but performs no HTTP; these three methods
+    # are the only place that turns a Screen into Telegram API calls, so the
+    # panel itself stays testable without a network or a bot token.
+
+    async def _handle_panel_callback(self, client, token: str, cbq: dict,
+                                      allowed_chat: str) -> None:
+        """One inline-button tap."""
+        msg        = cbq.get("message") or {}
+        chat_id    = str(msg.get("chat", {}).get("id", ""))
+        message_id = msg.get("message_id")
+        # Same allowlist the message path enforces — a callback carries its
+        # own chat, so it must be checked independently, not inherited.
+        if not chat_id or chat_id != allowed_chat:
+            return
+        screen = await bot_panel.handle_callback(cbq.get("data", ""), self)
+        # Always answer, even with no toast: Telegram shows a loading spinner
+        # on the button until the callback is acknowledged.
+        try:
+            await client.post(
+                f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+                json={"callback_query_id": cbq.get("id"),
+                      "text": (screen.toast or "")[:200]},
+                timeout=8,
+            )
+        except Exception as e:
+            log.debug("answerCallbackQuery failed: %s", e)
+        await self._send_panel_screen(client, token, chat_id, screen, message_id)
+
+    async def _send_panel_screen(self, client, token: str, chat_id: str,
+                                  screen, message_id=None) -> None:
+        base = f"https://api.telegram.org/bot{token}"
+        try:
+            if screen.mode == "noop":
+                return
+            if screen.mode == "delete" and message_id:
+                await client.post(f"{base}/deleteMessage",
+                                  json={"chat_id": chat_id, "message_id": message_id},
+                                  timeout=8)
+                return
+            if screen.mode == "edit" and message_id:
+                r = await client.post(f"{base}/editMessageText", json={
+                    "chat_id":      chat_id,
+                    "message_id":   message_id,
+                    "text":         screen.text,
+                    "parse_mode":   "Markdown",
+                    "reply_markup": {"inline_keyboard": screen.keyboard or []},
+                }, timeout=8)
+                # "message is not modified" is the expected response to a tap
+                # that changed nothing visible (e.g. a stepper already at its
+                # floor) — not an error worth surfacing.
+                if r.status_code != 200 and "not modified" not in r.text:
+                    log.warning("Panel edit failed: %s", r.text[:200])
+                return
+            payload = {"chat_id": chat_id, "text": screen.text, "parse_mode": "Markdown"}
+            if screen.mode == "force_reply":
+                payload["reply_markup"] = {"force_reply": True, "selective": True}
+            elif screen.keyboard:
+                payload["reply_markup"] = {"inline_keyboard": screen.keyboard}
+            r = await client.post(f"{base}/sendMessage", json=payload, timeout=8)
+            if r.status_code != 200:
+                # Markdown in a DB-sourced value (an underscore in a template
+                # name, say) can 400 the whole send; retry as plain text so
+                # the user still gets the answer.
+                log.warning("Panel send failed (%s), retrying unformatted", r.text[:200])
+                payload.pop("parse_mode", None)
+                await client.post(f"{base}/sendMessage", json=payload, timeout=8)
+        except Exception as e:
+            log.warning("Panel transport error: %s", e)
+
+    async def _handle_bot_command(self, text: str):
         """Route an incoming message to the correct command handler."""
         if not text.startswith("/"):
             return ""
@@ -2855,30 +3002,17 @@ class SimulationEngine:
         cmd  = parts[0].lstrip("/").split("@")[0].lower()
         args = parts[1:]
 
+        # The control panel is now the interface: everything that used to be
+        # its own slash command is a button (see core_bot_panel), and only
+        # these three stay typed. The _cmd_* implementations below are all
+        # still live — the panel calls them directly — so nothing was
+        # deleted, just unrouted from the command dispatcher.
+        if cmd in ("panel", "menu", "start"):
+            return bot_panel.root_screen()
+
         handlers = {
             "help":              self._cmd_help,
-            "balance":           self._cmd_balance,
-            "daily":             self._cmd_daily,
             "status":            self._cmd_status,
-            "trades":            self._cmd_trades,
-            "pause":             self._cmd_pause,
-            "resume":            self._cmd_resume,
-            "close":             self._cmd_close,
-            "strategy":          self._cmd_strategy,
-            "risk":              self._cmd_risk,
-            "marketbuy":         self._cmd_market_price_buy,
-            "marketsell":        self._cmd_market_price_sell,
-            "dpmon":             self._cmd_dpm_on,
-            "dpmoff":            self._cmd_dpm_off,
-            "imeon":             self._cmd_ime_on,
-            "imeoff":            self._cmd_ime_off,
-            "activate":          self._cmd_activate,
-            "report":            self._cmd_report,
-            "restartbridge":      self._cmd_restart_bridge,
-            "restartapp":         self._cmd_restart_app,
-            "switchlive":         self._cmd_switch_live,
-            "switchdemo":         self._cmd_switch_demo,
-            "headless":           self._cmd_headless,
         }
         handler = handlers.get(cmd)
         if handler:
@@ -2887,7 +3021,8 @@ class SimulationEngine:
             except Exception as e:
                 log.warning("Bot command /%s error: %s", cmd, e)
                 return f"Error running /{cmd}: {e}"
-        return f"Unknown command `/{cmd}`. Send /help to see all available commands."
+        return (f"`/{cmd}` is no longer a command — everything moved to the "
+                f"control panel. Send /panel to open it.")
 
     # ── Command handlers ──────────────────────────────────────────────────────
 

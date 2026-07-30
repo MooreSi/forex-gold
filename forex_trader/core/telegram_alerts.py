@@ -112,26 +112,13 @@ def _close_label(reason: str) -> str:
     return labels.get(reason, _md_esc(reason.replace("_", " ").title()))
 
 
+# The bot is button-driven now (core_bot_panel): the previous 19-command
+# list is all still reachable, but as panel buttons rather than typed
+# commands, so only these three are registered in Telegram's slash menu.
 BOT_COMMANDS = [
-    ("balance",           "Account balance, equity & open P&L"),
-    ("daily",             "Daily summary: P&L, trades & account"),
+    ("panel",             "Open the control panel"),
     ("status",            "System status, strategy & settings"),
-    ("trades",            "List all open trades with P&L"),
-    ("pause",             "Pause auto-trading — e.g. /pause 30m"),
-    ("resume",            "Resume auto-trading"),
-    ("close",             "Close trade — /close all  or  /close <ticket>"),
-    ("strategy",          "Change strategy — e.g. /strategy trail_stop"),
-    ("risk",              "Set risk per trade — e.g. /risk 1.5"),
-    ("marketbuy",         "Buy XAUUSD at current market price"),
-    ("marketsell",        "Sell XAUUSD at current market price"),
-    ("dpmon",             "Enable Dynamic Position Management"),
-    ("dpmoff",            "Disable Dynamic Position Management"),
-    ("imeon",             "Enable Immediate Signal Entry"),
-    ("imeoff",            "Disable Immediate Signal Entry"),
-    ("activate",          "Activate latest pending signal"),
-    ("report",            "Send a performance report email now"),
-    ("restartbridge",     "Restart the MT5 bridge connection"),
-    ("help",              "Show all available commands"),
+    ("help",              "How to use the bot"),
 ]
 
 
@@ -245,11 +232,22 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
     tp_block      = _tp_lines_single(trade)
     spread_line   = f"Spread: {tick.spread_points:.0f} pts" if tick else ""
 
+    # An EA Template trade's row is INSERTed as a placeholder (mt5_ticket=0,
+    # entry_price=0.0) because the EA only stages the legs at open time -- the
+    # real ticket and fill price arrive later, when a leg actually fills and
+    # promotes the row. Printing those raw read as "MT5 Ticket: 0 / Entry: 0.0",
+    # which looks like a broken trade rather than a staged one, so say what is
+    # actually true and where the real numbers will come from. Same convention
+    # as fmt_signal()'s grid-parent ticket line.
+    ticket = trade.get("mt5_ticket")
     lines = [
         "XAUUSD — Trade Opened",
         f"Direction: {direction}",
-        f"MT5 Ticket: {trade.get('mt5_ticket', '—')}",
-        f"Entry: {entry}  (range {trade.get('entry_low')}–{trade.get('entry_high')})",
+        f"MT5 Ticket: {ticket}" if ticket else
+        "MT5 Ticket: pending (template legs report their own ticket on fill)",
+        f"Entry: {entry}  (range {trade.get('entry_low')}–{trade.get('entry_high')})"
+        if entry else
+        f"Entry: pending — legs staged across {trade.get('entry_low')}–{trade.get('entry_high')}",
         f"Lot: {trade.get('lot_size')}",
         f"SL: {trade.get('stop_loss')}",
     ]

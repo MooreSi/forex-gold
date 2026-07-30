@@ -269,15 +269,16 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
     return "\n".join(lines)
 
 
-def fmt_grid_leg_fill(row: dict, leg_num, ticket, fill_price: float, is_first: bool) -> str:
-    """A single leg of an EA Template grid filled at the broker.
+def fmt_leg_fill(row: dict, leg_label: str, ticket, fill_price: float,
+                 lots, is_first: bool) -> str:
+    """A single leg of an EA Template trade went live at the broker — either
+    an Anchor leg (immediate market fill, "-a<N>") or a Grid leg (a resting
+    limit that has now filled, "-g<N>").
 
-    Same shape and detail as fmt_trade_open() (ticket, entry, lot, SL, TP
-    ladder, strategy, channel, node) rather than the bare one-line message
-    this used to be -- the previous "EA Template grid leg FILLED —
-    {direction} {lot} lots @ {price} (ticket {ticket})" gave no way to
-    tell which channel or strategy a grid fill belonged to without cross-
-    referencing the DB.
+    Deliberately the same shape and detail as fmt_trade_open() (ticket,
+    entry, lot, SL, TP ladder, strategy, channel, node) — a leg going live
+    IS a trade execution and gets a full execution message, with
+    `leg_label` ("Grid Leg 2" / "Anchor Leg 1") naming which leg it was.
 
     `is_first` distinguishes the leg that promoted the DB placeholder row
     (mt5_ticket=0 -> this ticket) from a later leg filling on the same
@@ -291,12 +292,12 @@ def fmt_grid_leg_fill(row: dict, leg_num, ticket, fill_price: float, is_first: b
     tp_block      = _tp_lines_single(row)
 
     lines = [
-        "*XAUUSD — Grid Leg Fill*" if is_first else "*XAUUSD — Grid Leg Fill (additional leg)*",
+        f"*XAUUSD — Trade Opened ({leg_label})*" if is_first
+        else f"*XAUUSD — Trade Opened ({leg_label}, additional leg)*",
         f"Direction: {direction}",
-        f"Leg: {leg_num}",
         f"MT5 Ticket: {ticket}",
         f"Entry: {fill_price}",
-        f"Lot: {row.get('lot_size')}",
+        f"Lot: {lots if lots is not None else row.get('lot_size')}",
         f"SL: {row.get('stop_loss')}",
     ]
     if tp_block:
@@ -304,14 +305,40 @@ def fmt_grid_leg_fill(row: dict, leg_num, ticket, fill_price: float, is_first: b
     lines.append(f"Strategy: {_md_esc(strategy_name)}")
     if tg_source:
         lines.append(f"Channel: {_md_esc(tg_source)}")
-    lines.append("Executed via: EA")  # grid legs are only ever EA-managed
+    lines.append("Executed via: EA")  # template legs are only ever EA-managed
     lines.append(f"Node: {_node_label()}")
     if not is_first:
         lines.append(
             "_Note: a second concurrent broker position -- only the first "
-            "grid leg to fill is tracked as this trade's DB row, so this "
+            "leg to fill is tracked as this trade's DB row, so this "
             "leg is reported for visibility only._"
         )
+    return "\n".join(lines)
+
+
+def fmt_template_leg_note(row: dict, leg_label: str, title: str,
+                          detail_lines: list) -> str:
+    """A lifecycle event (TP hit / SL move / close) reported by the EA for a
+    template leg that is NOT the broker position this trade's DB row tracks.
+
+    Only one vantage_simulated_trades row exists per template trade, so
+    nothing about such a leg can be written to it without corrupting the
+    tracked position's lots or close state. The event is still real money
+    at the broker, so it is reported rather than dropped -- clearly marked
+    as an untracked sibling leg."""
+    strategy_name = _strategy_label(row)
+    tg_source     = row.get("tg_source", "")
+    lines = [f"*XAUUSD — {leg_label} {title}*"]
+    lines += [str(l) for l in detail_lines if l]
+    lines.append(f"Strategy: {_md_esc(strategy_name)}")
+    if tg_source:
+        lines.append(f"Channel: {_md_esc(tg_source)}")
+    lines.append(f"Node: {_node_label()}")
+    lines.append(
+        "_Note: a sibling template leg, not the position tracked by this "
+        "trade's row -- reported for visibility, nothing recorded against "
+        "the trade._"
+    )
     return "\n".join(lines)
 
 
@@ -450,29 +477,40 @@ def fmt_trade_close(
     direction     = trade.get("direction", "?")
     strategy_name = _strategy_label(trade)
     tg_source     = trade.get("tg_source", "")
-    ticket        = trade.get("mt5_ticket", "—")
+    ticket        = trade.get("mt5_ticket") or None
     lot_size      = trade.get("lot_size", "?")
-    entry_price   = float(trade.get("entry_price", 0))
+    entry_price   = float(trade.get("entry_price") or 0)
     close_price   = float(result.get("close_price") or trade.get("close_price") or 0)
     _mt5_p = trade.get("mt5_profit")
     profit = float(_mt5_p if _mt5_p is not None else (trade.get("net_pnl") or result.get("net_pnl") or 0))
+    # entry_price == 0 means this row never got a real fill recorded against
+    # it (an EA Template placeholder whose leg fill was never promoted, see
+    # ea_bridge._promote_leg_fill). Reporting "Entry: $0.00" plus a P&L
+    # derived from it produced wildly wrong figures in the close message
+    # (confirmed live 2026-07-29: "Entry $0.00 -> Exit $4021.50, Profit
+    # $-16086.00" on a 0.03-lot trade whose real loss was $15.63). Say the
+    # entry is unknown and don't quote a P&L we can't stand behind.
+    entry_known   = entry_price > 0
+    profit_known  = entry_known or _mt5_p is not None
     reason        = result.get("reason", trade.get("exit_reason", "?"))
     reason_label  = _close_label(reason)
     if reason == "SL" and last_tp is not None:
         reason_label = f"🛑 Stop Loss Hit (after TP{last_tp})"
     pnl_sign      = "+" if profit >= 0 else ""
     held_str      = _held(trade.get("activated_at"), trade.get("close_time") or time.time())
-    pnl_emoji     = "✅" if profit >= 0 else "❌"
+    pnl_emoji     = ("✅" if profit >= 0 else "❌") if profit_known else "⚠️"
 
     lines = [
         f"*XAUUSD Trade Closed {pnl_emoji}*",
         reason_label,
         "",
         f"Direction: {direction}  |  Lots: {lot_size}  |  Held: {held_str}",
-        f"MT5 Ticket: {ticket}",
-        f"Entry: ${entry_price:.2f}  →  Exit: ${close_price:.2f}",
+        f"MT5 Ticket: {ticket if ticket else 'unknown'}",
+        (f"Entry: ${entry_price:.2f}  →  Exit: ${close_price:.2f}" if entry_known
+         else f"Entry: unknown  →  Exit: ${close_price:.2f}"),
         "",
-        f"Profit: ${pnl_sign}{profit:.2f}",
+        (f"Profit: ${pnl_sign}{profit:.2f}" if profit_known
+         else "Profit: unknown (no entry price recorded for this trade)"),
     ]
 
     if account:

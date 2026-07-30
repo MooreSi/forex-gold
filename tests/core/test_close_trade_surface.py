@@ -338,3 +338,46 @@ def test_close_all_ladder_legs_sums_pnl_and_skips_rejected(fresh_db):
 
     trade = _get_trade("t-1")
     assert trade["status"] == "closed"
+
+
+def test_record_close_with_zero_entry_price_does_not_invent_a_pnl(fresh_db, ctx):
+    """An EA Template placeholder row whose leg fill never got promoted has
+    entry_price=0. _pnl() against a zero entry is contract-value-sized: a
+    real -$15.63 loss was recorded and reported as -$16,086, and credited
+    into vantage_simulation_account (live, trade 76687f1a, 2026-07-29).
+    Record nothing rather than a fabricated figure."""
+    _insert_signal("sig-z")
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_simulated_trades (trade_id, signal_id, mt5_ticket, direction, "
+            "entry_low, entry_high, entry_price, lot_size, remaining_lots, stop_loss, status, "
+            "open_time, net_pnl, realised_pnl) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("t-zero", "sig-z", 0, "SELL", 0.0, 0.0, 0.0, 0.04, 0.04, 4021.5,
+             "open", time.time(), 0.0, 0.0),
+        )
+    result = asyncio.run(ct.record_close("t-zero", 4021.5, "SL", ctx))
+
+    assert result["net_pnl"] == 0.0
+    row = _get_trade("t-zero")
+    assert row["status"] == "closed"
+    assert row["net_pnl"] == 0.0
+    with db.db() as conn:
+        balance = conn.execute(
+            "SELECT balance FROM vantage_simulation_account WHERE id=1").fetchone()[0]
+    assert balance == 1000.0
+
+
+def test_record_close_with_zero_entry_uses_broker_realised_profit_when_known(fresh_db, ctx):
+    """Once sync_profit has written the broker's own realised figure, that is
+    the only trustworthy P&L for a zero-entry row -- use it."""
+    _insert_signal("sig-z2")
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_simulated_trades (trade_id, signal_id, mt5_ticket, direction, "
+            "entry_low, entry_high, entry_price, lot_size, remaining_lots, stop_loss, status, "
+            "open_time, net_pnl, realised_pnl, mt5_profit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("t-zero2", "sig-z2", 0, "SELL", 0.0, 0.0, 0.0, 0.03, 0.03, 4021.5,
+             "open", time.time(), 0.0, 0.0, -15.63),
+        )
+    result = asyncio.run(ct.record_close("t-zero2", 4021.5, "SL", ctx))
+    assert result["net_pnl"] == -15.63

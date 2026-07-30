@@ -31,6 +31,14 @@ log = logging.getLogger(__name__)
 
 def check_sl(trade: dict, tick: Any) -> Optional[tuple]:
     direction = trade["direction"].upper()
+    # A row with no entry price has no fill behind it yet -- an EA Template
+    # placeholder waiting for a leg to go live (mt5_ticket=0, entry_price=0,
+    # see ea_bridge._promote_leg_fill). Closing one here recorded a DB-only
+    # "Stop Loss Hit" with a P&L computed off a zero entry while the EA's real
+    # position was still running (live, trade 76687f1a, 2026-07-29). Nothing
+    # about an unfilled placeholder can hit a stop.
+    if not float(trade.get("entry_price") or 0):
+        return None
     sl = float(trade["stop_loss"]) if trade["stop_loss"] else None
     if direction == "BUY":
         if sl and tick.bid <= sl:
@@ -98,6 +106,10 @@ async def check_profit_close_target(trade: dict, tick: Any, profit_close_usd: fl
     """Cumulative-P&L (realised partials + unrealised open) threshold check
     against `profit_close_usd`. Returns True if the trade was closed."""
     if profit_close_usd <= 0:
+        return False
+    # Same placeholder guard as check_sl() -- unrealised P&L measured from a
+    # zero entry price is contract-value-sized and would trip any target.
+    if not float(trade.get("entry_price") or 0):
         return False
     cur = tick.bid if trade["direction"].upper() == "BUY" else tick.ask
     unrealized = _pnl(

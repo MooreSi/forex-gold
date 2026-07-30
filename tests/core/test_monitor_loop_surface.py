@@ -114,19 +114,19 @@ def _make_ctx(bridge):
 # ── check_sl (pure) ──────────────────────────────────────────────────────
 
 def test_check_sl_buy_crosses():
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0}
+    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2389.0, ask=2389.5)
     assert ml.check_sl(trade, tick) == ("t1", 2390.0, "SL")
 
 
 def test_check_sl_sell_crosses():
-    trade = {"trade_id": "t1", "direction": "SELL", "stop_loss": 2410.0}
+    trade = {"trade_id": "t1", "direction": "SELL", "stop_loss": 2410.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2409.5, ask=2410.0)
     assert ml.check_sl(trade, tick) == ("t1", 2410.0, "SL")
 
 
 def test_check_sl_no_cross():
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0}
+    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2395.0, ask=2395.5)
     assert ml.check_sl(trade, tick) is None
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Optional
 
@@ -47,6 +48,38 @@ EA_PORTABLE_STRATEGIES = frozenset({
 
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy
 _HOST = "127.0.0.1"
+
+# EA Template legs. HandleOpenTemplateGrid opens each leg of a template trade
+# as its own broker position and reports it under its own suffixed trade_id:
+#   "<trade_id>-a<N>"  Anchor leg   -- immediate market fill at open time
+#   "<trade_id>-g<N>"  Grid leg     -- a resting limit that later fills
+# Python keeps ONE vantage_simulated_trades row per template trade, so every
+# inbound leg event has to be mapped back onto that row (see
+# EABridge._resolve_leg_event). Anchor-leg events used to have no mapping at
+# all: their unsolicited "trade_opened" matched no open_trade() ack callback
+# and was dropped, so the placeholder row kept mt5_ticket=0/entry_price=0
+# forever and every later tp_hit/sl_moved/trade_closed for the leg was logged
+# as "unknown trade_id" and discarded (confirmed live 2026-07-29 on
+# 76687f1a/e93f3fe7/c2ebb432).
+_LEG_ID_RE = re.compile(r"^(?P<base>.+)-(?P<kind>[ag])(?P<num>\d+)$")
+
+_LEG_KIND_LABELS = {"a": "Anchor Leg", "g": "Grid Leg"}
+
+
+def split_leg_trade_id(trade_id: str) -> tuple[str, Optional[str], str]:
+    """Split an EA leg trade_id into (base_trade_id, kind, leg_num).
+
+    kind is "a" (anchor), "g" (grid), or None when the id carries no leg
+    suffix at all -- in which case base_trade_id is the id unchanged."""
+    m = _LEG_ID_RE.match(trade_id or "")
+    if not m:
+        return (trade_id, None, "")
+    return (m.group("base"), m.group("kind"), m.group("num"))
+
+
+def leg_label(kind: Optional[str], num: str) -> str:
+    """Human label for a leg suffix, e.g. ("g", "2") -> "Grid Leg 2"."""
+    return f"{_LEG_KIND_LABELS.get(kind or '', 'Leg')} {num}".strip()
 
 
 def _resolve_port() -> int:
@@ -628,6 +661,23 @@ class EABridge:
             cb = getattr(self, "_pending_open_acks", {}).get(msg.get("trade_id"))
             if cb:
                 cb(msg)
+            elif t == "trade_opened":
+                # No waiting ack for this id. An EA Template Anchor leg reports
+                # its immediate market fill as an unsolicited "trade_opened"
+                # under "<trade_id>-a<N>" (HandleOpenTemplateGrid), while the
+                # open_trade() call that started it all is waiting on the
+                # un-suffixed parent id -- so this never matched a callback and
+                # was silently dropped, leaving the parent row a permanent
+                # mt5_ticket=0/entry_price=0 placeholder.
+                _base, _kind, _num = split_leg_trade_id(msg.get("trade_id") or "")
+                if _kind:
+                    await self._promote_leg_fill(
+                        msg.get("trade_id"), msg.get("ticket"),
+                        float(msg.get("fill_price", 0) or 0),
+                    )
+                else:
+                    log.debug("[EABridge] trade_opened with no waiting ack: %s",
+                              msg.get("trade_id"))
         elif t == "tp_hit":
             await self._on_tp_hit(msg)
         elif t == "sl_moved":
@@ -641,16 +691,60 @@ class EABridge:
         else:
             log.debug("[EABridge] unhandled message type: %s", t)
 
+    async def _resolve_leg_event(self, msg: dict, event: str) -> tuple:
+        """Map an inbound EA event onto the vantage_simulated_trades row it
+        belongs to, following EA Template leg suffixes.
+
+        Returns (row, row_trade_id, label, owns_row):
+          row           the DB row, or None if there is nothing to map onto
+          row_trade_id  the id to write against (the un-suffixed parent for
+                        a leg event)
+          label         "" for a normal trade, else "Anchor Leg 1"/"Grid Leg 2"
+          owns_row      True when the reporting leg IS the broker position
+                        this row tracks (its mt5_ticket), so trade state may
+                        be written. False for a sibling leg -- one row per
+                        template trade means there is nowhere to record a
+                        second concurrent position, and writing anyway
+                        corrupts the tracked leg's lots/close state.
+        """
+        trade_id = msg.get("trade_id") or ""
+        row = await self._fetch_trade(trade_id)
+        if row:
+            return (row, trade_id, "", True)
+        base, kind, num = split_leg_trade_id(trade_id)
+        if not kind:
+            log.warning("[EABridge] %s for unknown trade_id=%s", event, trade_id)
+            return (None, trade_id, "", False)
+        row = await self._fetch_trade(base)
+        if not row:
+            log.warning("[EABridge] %s for unknown template leg trade_id=%s "
+                        "(no parent row %s)", event, trade_id, base)
+            return (None, base, leg_label(kind, num), False)
+        ev_ticket  = int(msg.get("ticket") or 0)
+        row_ticket = int(row.get("mt5_ticket") or 0)
+        owns = (row_ticket == 0) or (ev_ticket == 0) or (ev_ticket == row_ticket)
+        return (row, base, leg_label(kind, num), owns)
+
     async def _on_tp_hit(self, msg: dict) -> None:
         from forex_trader.core import telegram_alerts
-        trade_id = msg.get("trade_id")
         tp_num   = int(msg.get("tp_num", 0))
         price    = float(msg.get("price", 0))
         lots     = float(msg.get("lots_closed", 0))
         try:
-            trade = await self._fetch_trade(trade_id)
+            trade, trade_id, label, owns = await self._resolve_leg_event(msg, "tp_hit")
             if not trade:
-                log.warning("[EABridge] tp_hit for unknown trade_id=%s", trade_id)
+                return
+            if not owns:
+                asyncio.create_task(telegram_alerts.send_message(
+                    telegram_alerts.fmt_template_leg_note(
+                        trade, label, f"TP{tp_num} Hit", [
+                            f"MT5 Ticket: {msg.get('ticket')}",
+                            f"TP{tp_num} price: ${price:.2f}",
+                            f"Lots closed: {lots:.2f}",
+                        ],
+                    ),
+                    trade_id, f"tp{tp_num}_hit_sibling_leg",
+                ))
                 return
             res = await self._engine.partial_close_trade(trade_id, lots, price, f"TP{tp_num}")
             asyncio.create_task(telegram_alerts.send_message(
@@ -658,7 +752,7 @@ class EABridge:
                 trade_id, f"tp{tp_num}_hit",
             ))
         except Exception as e:
-            log.warning("[EABridge] tp_hit handling failed for %s: %s", trade_id, e)
+            log.warning("[EABridge] tp_hit handling failed for %s: %s", msg.get("trade_id"), e)
 
     async def _on_sl_moved(self, msg: dict) -> None:
         from forex_trader.core import database as db_module
@@ -672,9 +766,19 @@ class EABridge:
         # EA-reported breakeven lock (confirmed live on ticket 1556988985).
         tp_cleared_num = int(msg.get("tp_cleared_num", 0) or 0)
         try:
-            trade = await self._fetch_trade(trade_id)
+            trade, trade_id, label, owns = await self._resolve_leg_event(msg, "sl_moved")
             if not trade:
-                log.warning("[EABridge] sl_moved for unknown trade_id=%s", trade_id)
+                return
+            if not owns:
+                asyncio.create_task(telegram_alerts.send_message(
+                    telegram_alerts.fmt_template_leg_note(
+                        trade, label, "SL Moved", [
+                            f"MT5 Ticket: {msg.get('ticket')}",
+                            f"New SL: ${new_sl:.2f}",
+                        ],
+                    ),
+                    trade_id, "sl_moved_ea_sibling_leg",
+                ))
                 return
             def _apply():
                 with db_module.db() as conn:
@@ -694,19 +798,39 @@ class EABridge:
         trade_id    = msg.get("trade_id")
         close_price = float(msg.get("close_price", 0))
         reason      = msg.get("reason", "EA_close")
+        from forex_trader.core import telegram_alerts
         try:
-            trade = await self._fetch_trade(trade_id)
+            trade, trade_id, label, owns = await self._resolve_leg_event(msg, "trade_closed")
             if not trade:
-                log.warning("[EABridge] trade_closed for unknown trade_id=%s", trade_id)
                 return
+            if not owns:
+                asyncio.create_task(telegram_alerts.send_message(
+                    telegram_alerts.fmt_template_leg_note(
+                        trade, label, f"Closed ({reason})", [
+                            f"MT5 Ticket: {msg.get('ticket')}",
+                            f"Close price: ${close_price:.2f}",
+                        ],
+                    ),
+                    trade_id, "ea_close_sibling_leg",
+                ))
+                return
+            # A leg's close IS this trade's close when the leg owns the row's
+            # ticket -- record it against the parent id, never the suffixed
+            # one (which has no row of its own and previously made the whole
+            # event a no-op, leaving the trade permanently "open" in the UI).
             result = await self._engine._record_close(trade_id, close_price, reason)
             account = await self._engine.get_mt5_account()
-            from forex_trader.core import telegram_alerts
             closed_row = await self._fetch_trade(trade_id)
             asyncio.create_task(telegram_alerts.send_message(
                 telegram_alerts.fmt_trade_close(closed_row, result, {}, account),
                 trade_id, "ea_close",
             ))
+            if int(closed_row.get("mt5_ticket") or 0):
+                # Replace the entry-vs-exit estimate with the broker's own
+                # realised figure once the deal history settles.
+                asyncio.create_task(self._engine._schedule_profit_sync(
+                    trade_id, int(closed_row["mt5_ticket"]),
+                ))
         except Exception as e:
             log.warning("[EABridge] trade_closed handling failed for %s: %s", trade_id, e)
         finally:
@@ -735,8 +859,8 @@ class EABridge:
                 # trade_id>-g<N>". Fall back to promoting the original open_trade()
                 # placeholder row (mt5_ticket=0, entry_price=0.0) instead of
                 # dropping the fill silently.
-                if "-g" in trade_id:
-                    await self._promote_grid_leg_fill(trade_id, ticket, fill_price)
+                if split_leg_trade_id(trade_id)[1]:
+                    await self._promote_leg_fill(trade_id, ticket, fill_price)
                 else:
                     log.warning("[EABridge] pending_order_filled for unknown trade_id=%s", trade_id)
                 return
@@ -808,29 +932,46 @@ class EABridge:
         except Exception as e:
             log.warning("[EABridge] pending_order_filled handling failed for %s: %s", trade_id, e)
 
-    async def _promote_grid_leg_fill(self, leg_trade_id: str, ticket, fill_price: float) -> None:
-        """A leg of an EA Template grid (HandleOpenTemplateGrid in the EA)
-        filled -- leg_trade_id is "<original trade_id>-g<N>". The EA already
-        has this trade fully in its own g_trades[] (isTemplate + tpl* fields
-        copied over at promotion time) and manages it correctly regardless
-        of what happens here; this only updates Python's own record so the
-        trade shows up as a real, trackable row instead of the permanent
-        mt5_ticket=0 placeholder open_trade() wrote at grid-open time.
+    async def _promote_leg_fill(self, leg_trade_id: str, ticket, fill_price: float) -> None:
+        """A leg of an EA Template trade (HandleOpenTemplateGrid in the EA)
+        went live at the broker -- leg_trade_id is "<original trade_id>-g<N>"
+        for a filled grid limit, or "<original trade_id>-a<N>" for an anchor
+        leg's immediate market fill. The EA already has this trade fully in
+        its own g_trades[] (isTemplate + tpl* fields copied over) and manages
+        it correctly regardless of what happens here; this only updates
+        Python's own record so the trade shows up as a real, trackable row
+        instead of the permanent mt5_ticket=0 placeholder open_trade() wrote
+        at template-open time.
 
-        Only the first leg to fill can promote the row this way -- there is
-        one vantage_simulated_trades row per template trade, and the SELECT
-        below finds it via mt5_ticket=0, which only the not-yet-promoted
-        placeholder has. With cancel_pending on (the common case) that's
-        the only leg that ever fills anyway. With it off, a later leg's
-        fill is a genuine second broker position with no DB row of its own
-        -- previously this was silently dropped (a warning log line, no
-        Telegram alert at all, even though the broker really did fill it).
-        Now reported via the same formatter, explicitly marked as an
-        additional leg rather than pretending it's the trade's row."""
+        Anchor legs used to reach nothing at all: their fill arrives as an
+        unsolicited "trade_opened" (not "pending_order_filled" -- an anchor
+        is a market order, never a resting one) under the suffixed id, which
+        matched no open_trade() ack callback and was dropped. The row then
+        kept mt5_ticket=0/entry_price=0 for life, so the trade showed a $0
+        entry in Active Trades, its EA-reported TP/SL/close events were all
+        logged as "unknown trade_id" and discarded, and the Telegram close
+        message quoted ticket 0, a $0 entry and a P&L computed from it
+        (confirmed live 2026-07-29: -$16086 reported on a real -$15.63 loss).
+
+        Only the first leg to go live can promote the row -- there is one
+        vantage_simulated_trades row per template trade, and the SELECT below
+        finds it via mt5_ticket=0, which only the not-yet-promoted
+        placeholder has. With cancel_pending on (the common case) that's the
+        only leg that ever fills anyway. With it off, a later leg's fill is a
+        genuine second broker position with no DB row of its own -- reported
+        via the same formatter, explicitly marked as an additional leg rather
+        than pretending it's the trade's row."""
         from forex_trader.core import database as db_module
         from forex_trader.core import telegram_alerts
-        original_id = leg_trade_id.rsplit("-g", 1)[0]
-        leg_num = leg_trade_id.rsplit("-g", 1)[-1] if "-g" in leg_trade_id else "?"
+        original_id, kind, num = split_leg_trade_id(leg_trade_id)
+        label = leg_label(kind, num)
+        # The EA reports no volume with a leg fill, and the row's lot_size is
+        # Python's own pre-trade sizing -- for a template trade the EA sizes
+        # each leg from the template's own Anchor/Pending Lot instead, so the
+        # two genuinely differ (0.04 sized vs 0.03 filled, live 2026-07-29).
+        # Take the broker's real volume for the promoted leg when we can read
+        # it; keep the existing value if the bridge can't answer.
+        lots = await self._leg_position_volume(ticket)
         now = time.time()
 
         def _apply():
@@ -847,15 +988,28 @@ class EABridge:
                 ).fetchone())
                 if row:
                     conn.execute(
-                        "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=?,"
-                        "order_type='limit',pending_placed_at=? WHERE trade_id=?",
+                        "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,"
+                        "entry_low=?,entry_high=?,lot_size=?,remaining_lots=?,open_time=?,"
+                        "order_type=?,pending_placed_at=? WHERE trade_id=?",
                         # row["open_time"] (read above, before this UPDATE
-                        # overwrites it) is when open_trade() placed the grid
+                        # overwrites it) is when open_trade() placed the
                         # legs -- the only placement timestamp that exists for
-                        # a leg, since grid legs never get their own
+                        # a leg, since template legs never get their own
                         # vantage_pending_orders row.
-                        (ticket, fill_price, now, row["open_time"], original_id),
+                        (ticket, fill_price, fill_price, fill_price,
+                         lots if lots else row["lot_size"],
+                         lots if lots else row["remaining_lots"],
+                         now,
+                         # An anchor leg is a market fill, not a resting order.
+                         "market" if kind == "a" else "limit",
+                         row["open_time"], original_id),
                     )
+                    row = dict(row)
+                    row["mt5_ticket"] = ticket
+                    row["entry_price"] = fill_price
+                    if lots:
+                        row["lot_size"] = lots
+                        row["remaining_lots"] = lots
                     return row, True
                 # Already promoted by an earlier leg. Fetch the row as-is
                 # (no mt5_ticket=0 filter) purely to report THIS leg's fill
@@ -870,9 +1024,13 @@ class EABridge:
         result = await db_module.to_db_thread(_apply)
         row, is_first = result if result else ({}, False)
         if not row:
-            log.warning("[EABridge] grid leg filled (trade_id=%s) but no trade row "
-                        "found at all for original trade_id=%s", leg_trade_id, original_id)
+            log.warning("[EABridge] %s filled (trade_id=%s) but no trade row "
+                        "found at all for original trade_id=%s",
+                        label, leg_trade_id, original_id)
             return
+        log.info("[EABridge] %s live: trade=%s ticket=%s @ %.2f lots=%s (%s)",
+                 label, original_id[:8], ticket, fill_price, lots or row.get("lot_size"),
+                 "promoted this trade's row" if is_first else "sibling leg, row already promoted")
 
         if is_first:
             self._active[original_id] = {"ticket": ticket, "strategy": row["strategy"]}
@@ -888,20 +1046,36 @@ class EABridge:
                 try:
                     await self._engine.close_trade(original_id, "trading_schedule_blocked")
                     asyncio.create_task(telegram_alerts.send_message(
-                        f"EA Template grid leg filled then immediately closed — {_sched_reason}",
-                        original_id, "template_grid_leg_filled_schedule_blocked",
+                        f"EA Template {label} filled then immediately closed — {_sched_reason}",
+                        original_id, "template_leg_filled_schedule_blocked",
                     ))
                 except Exception as e:
                     log.warning("[EABridge] schedule-blocked close failed for %s: %s", original_id, e)
                 return
 
         asyncio.create_task(telegram_alerts.send_message(
-            telegram_alerts.fmt_grid_leg_fill(row, leg_num, ticket, fill_price, is_first),
-            original_id, "template_grid_leg_filled",
+            telegram_alerts.fmt_leg_fill(row, label, ticket, fill_price, lots, is_first),
+            original_id, "template_leg_filled",
         ))
 
+    async def _leg_position_volume(self, ticket) -> Optional[float]:
+        """The broker's own volume for a just-filled leg ticket, or None if it
+        can't be read (bridge offline, position already gone). Best-effort
+        only -- never blocks promoting the row."""
+        try:
+            if not ticket or self._engine is None:
+                return None
+            positions = await self._engine._bridge.get_positions() or []
+            for p in positions:
+                if int(p.get("ticket", 0) or 0) == int(ticket):
+                    vol = round(float(p.get("volume", 0) or 0), 4)
+                    return vol or None
+        except Exception as e:
+            log.debug("[EABridge] leg volume lookup failed for ticket=%s: %s", ticket, e)
+        return None
+
     async def _on_grid_leg_cancelled(self, leg_trade_id: str, reason: str) -> None:
-        """Counterpart to _promote_grid_leg_fill for a leg that never fills.
+        """Counterpart to _promote_leg_fill for a leg that never fills.
         Python has no record of how many legs a grid opened with or how many
         are still resting (only the EA's own g_pending[] knows that), so this
         can't safely decide "the whole grid is dead" from a single leg's
@@ -910,7 +1084,7 @@ class EABridge:
         silently: surface it so a leg that never fills doesn't sit invisible
         in Active Trades until someone stumbles on it by hand."""
         from forex_trader.core import telegram_alerts
-        original_id = leg_trade_id.rsplit("-g", 1)[0]
+        original_id = split_leg_trade_id(leg_trade_id)[0]
         row = await self._fetch_trade(original_id)
         if not row:
             log.debug("[EABridge] grid leg %s cancelled (%s) — no placeholder row (already "
@@ -951,7 +1125,7 @@ class EABridge:
                 # nothing ever alerts, and it sits in Active Trades at $0 until
                 # someone notices and cleans it up by hand (confirmed live,
                 # trade eb8ca404, sat orphaned 2026-07-28 to 2026-07-29).
-                if "-g" in trade_id:
+                if split_leg_trade_id(trade_id)[1]:
                     await self._on_grid_leg_cancelled(trade_id, reason)
                 else:
                     log.warning("[EABridge] pending_order_cancelled for unknown trade_id=%s", trade_id)

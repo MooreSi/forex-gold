@@ -361,7 +361,8 @@ def test_grid_leg_fill_telegram_alert_has_full_trade_detail(fresh_db):
 
     assert len(sent) == 1
     body = sent[0]
-    assert "Grid Leg Fill" in body
+    assert "Grid Leg 1" in body
+    assert "Trade Opened" in body
     assert "555" in body           # MT5 ticket
     assert "Sig Gen Grid" in body  # strategy
     assert "Reversal Engine" in body  # channel

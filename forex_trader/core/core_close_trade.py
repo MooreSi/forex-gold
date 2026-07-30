@@ -147,8 +147,25 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
     row = await db_module.to_db_thread(_fetch_row)
     direction   = row["direction"]
     remaining   = float(row["remaining_lots"])
-    entry_price = float(row["entry_price"])
-    gross_pnl   = _pnl(direction, entry_price, close_price, remaining)
+    entry_price = float(row["entry_price"] or 0)
+    if entry_price > 0:
+        gross_pnl = _pnl(direction, entry_price, close_price, remaining)
+    else:
+        # No entry price recorded -- an EA Template placeholder row whose leg
+        # fill never got promoted (see ea_bridge._promote_leg_fill). _pnl()
+        # against entry 0 produces a number the size of the whole contract
+        # value: a real -$15.63 loss was recorded and reported as -$16,086
+        # (live, trade 76687f1a, 2026-07-29) and credited straight into
+        # vantage_simulation_account. Record 0 and let the broker's own
+        # realised figure land via sync_profit/mt5_profit instead of
+        # inventing one.
+        gross_pnl = float(row.get("mt5_profit") or 0)
+        log.warning(
+            "record_close %s: entry_price is 0 (unpromoted placeholder row?) — "
+            "recording P&L as %.2f from mt5_profit instead of computing it "
+            "from a zero entry",
+            trade_id, gross_pnl,
+        )
     net_pnl     = gross_pnl  # actual fees already in mt5_profit; no double-counting here
     prev_realised = float(row.get("realised_pnl", 0))
     prev_net_pnl  = float(row.get("net_pnl", 0))

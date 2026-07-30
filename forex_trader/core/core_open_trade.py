@@ -18,6 +18,7 @@ needed here (unlike pack 10's CloseTradeContext).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -445,16 +446,56 @@ async def open_trade(
                     _grid_lot = float(ea_rs.get("strategy_lot_size_grid", 0))
                     if _grid_lot > 0:
                         _ea_lot = _grid_lot
-                ea_ack = await _ea.open_trade(
-                    trade_id, direction.upper(), _ea_lot, stop_loss, _tps, strategy,
-                    pcts=_ea_pcts, be_at_pos=_ea_be_at_pos, trail_mode=_ea_trail_mode,
-                    template=_ea_template,
-                    # The signal's own entry zone -- grid-mode templates stage
-                    # their legs across it instead of stepping away from
-                    # current price. See EABridge.open_trade's zone_low/
-                    # zone_high handling for why.
-                    zone_low=entry_low, zone_high=entry_high,
-                )
+                # A template's ack is only sent once the EA has staged EVERY
+                # leg (HandleOpenTemplateGrid's closing SendJson), and each
+                # leg is its own synchronous broker round trip -- so the flat
+                # 5s default is a function of leg count, not a constant. It
+                # was exceeded live on 2026-07-30 with 1 anchor + 3 pendings,
+                # which is what set off the runaway described below.
+                _ack_timeout = 5.0
+                if _ea_template is not None:
+                    _legs = (int(_ea_template.get("anchors", 0) or 0)
+                             + int(_ea_template.get("pendings", 0) or 0))
+                    _ack_timeout = min(60.0, 10.0 + 5.0 * max(1, _legs))
+                try:
+                    ea_ack = await _ea.open_trade(
+                        trade_id, direction.upper(), _ea_lot, stop_loss, _tps, strategy,
+                        pcts=_ea_pcts, be_at_pos=_ea_be_at_pos, trail_mode=_ea_trail_mode,
+                        template=_ea_template,
+                        # The signal's own entry zone -- grid-mode templates stage
+                        # their legs across it instead of stepping away from
+                        # current price. See EABridge.open_trade's zone_low/
+                        # zone_high handling for why.
+                        zone_low=entry_low, zone_high=entry_high,
+                        timeout=_ack_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    if not _is_template:
+                        raise
+                    # A timed-out ack does NOT mean nothing happened -- the EA
+                    # may already have real legs on the book, and on
+                    # 2026-07-30 it did. Raising here used to abort before the
+                    # INSERT, so no row existed, the signal stayed 'pending',
+                    # and PendingWatcher re-activated it every 20s: 5 signals
+                    # became ~133 opens and 36 untracked live positions, none
+                    # of which the app could see or close.
+                    #
+                    # Record the same placeholder row the EA's own grid ack
+                    # produces (ticket 0 / entry 0) instead. Whatever the EA
+                    # actually placed is then reconciled by the existing
+                    # paths -- a leg fill promotes the row, and
+                    # core_template_placeholder_repair adopts or closes it
+                    # from the broker's own records if that event never
+                    # arrives. Critically the signal also flips to 'active'
+                    # below, which is what stops the re-activation loop.
+                    log.error(
+                        "[EA] template open ack timed out after %.0fs (trade=%s, "
+                        "strategy=%s) -- the EA may have placed legs; recording a "
+                        "placeholder for reconciliation rather than retrying",
+                        _ack_timeout, trade_id[:8], strategy,
+                    )
+                    ea_ack = {"type": "trade_opened", "ticket": 0, "fill_price": 0.0,
+                              "ack_timed_out": True}
                 if ea_ack.get("type") == "trade_opened":
                     mt5_ticket  = ea_ack.get("ticket")
                     entry_price = float(ea_ack.get("fill_price", 0))

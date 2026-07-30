@@ -58,6 +58,24 @@ _PENDING_ACTIVATION_BACKOFF_S = 20.0
 # live: three GOLD DIGGERS INSTITUTIONAL signals expired unfilled in a row).
 _TEMPLATE_PENDING_EXPIRY_SEC = 60 * 60
 
+# How many failed activation attempts a single signal gets before it is given
+# up on rather than retried until it expires.
+#
+# There was no cap at all before 2026-07-30. With a 20s backoff and a 1h
+# template expiry that allows ~180 attempts on ONE signal, and an attempt is
+# not free: a grid template stages real broker legs before the failure is
+# even detectable, so a repeatable failure mid-open compounds into live
+# positions. It did -- 5 signals produced ~133 activations and 36 untracked
+# positions when the EA's open ack began timing out. The specific timeout is
+# fixed in core_open_trade, but the cap is what makes ANY future failure mode
+# cost a bounded number of orders instead of an unbounded one.
+_MAX_ACTIVATION_ATTEMPTS = 3
+
+# signal_id -> consecutive failed activation attempts. Module state rather
+# than a new parameter, so every existing caller of this function keeps its
+# signature; pruned on success, expiry and give-up.
+_ACTIVATION_FAILURES: dict[str, int] = {}
+
 
 def _channel_parser_format(source_name: str | None) -> str:
     """The configured parser_format for whichever channel `source_name`
@@ -201,6 +219,7 @@ async def try_activate_pending_signals(
                     None, "orb_zone_expired",
                 ))
             retry_after.pop(sig["signal_id"], None)
+            _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
             continue
 
         # Back off after a failed activation attempt instead of retrying
@@ -317,9 +336,18 @@ async def try_activate_pending_signals(
                 sig["signal_id"], "pending_zone_fill",
             ))
             retry_after.pop(sig["signal_id"], None)
+            _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
         except Exception as exc:
             _exc_msg = str(exc)
             retry_after[sig["signal_id"]] = now + _PENDING_ACTIVATION_BACKOFF_S
+            # "Expected" refusals are the gates deliberately declining to
+            # trade (bad R:R, breaker open, not this node's turn). They cost
+            # nothing at the broker and clear on their own, so they must not
+            # burn the attempt budget -- only genuine failures do.
+            _expected = ("R:R filter" in _exc_msg
+                         or "circuit breaker" in _exc_msg.lower()
+                         or "stood down" in _exc_msg.lower()
+                         or "paused" in _exc_msg.lower())
             if "R:R filter" in _exc_msg or "circuit breaker" in _exc_msg.lower():
                 log.debug("[PendingWatcher] Signal %s not activated (expected): %s",
                           sig["signal_id"][:8], exc)
@@ -331,5 +359,37 @@ async def try_activate_pending_signals(
                 log.warning("[PendingWatcher] Could not activate signal %s: %s — "
                             "backing off %.0fs before retrying",
                             sig["signal_id"][:8], exc, _PENDING_ACTIVATION_BACKOFF_S)
+
+            if _expected:
+                continue
+            _fails = _ACTIVATION_FAILURES.get(sig["signal_id"], 0) + 1
+            _ACTIVATION_FAILURES[sig["signal_id"]] = _fails
+            if _fails < _MAX_ACTIVATION_ATTEMPTS:
+                continue
+            # Give up rather than keep re-attempting until expiry. Each
+            # attempt can leave real orders at the broker before it fails,
+            # so "retry until the window closes" is not a safe default.
+            with db_module.db() as conn:
+                conn.execute(
+                    "UPDATE vantage_signals SET status='expired' WHERE signal_id=?",
+                    (sig["signal_id"],),
+                )
+            retry_after.pop(sig["signal_id"], None)
+            _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
+            log.error("[PendingWatcher] Signal %s abandoned after %d failed "
+                      "activation attempts — last error: %s",
+                      sig["signal_id"][:8], _fails, exc)
+            asyncio.create_task(telegram_alerts.send_message(
+                (
+                    f"*Signal activation abandoned*\n"
+                    f"{sig['direction']} zone "
+                    f"${float(sig['entry_low']):.2f}–${float(sig['entry_high']):.2f}\n"
+                    f"Failed {_fails} times, last error: "
+                    f"{telegram_alerts._md_esc(_exc_msg or type(exc).__name__)}\n"
+                    f"_Stopped retrying — each attempt can place real orders. "
+                    f"Check MT5 for positions this app is not tracking._"
+                ),
+                sig["signal_id"], "pending_activation_abandoned",
+            ))
 
     return True

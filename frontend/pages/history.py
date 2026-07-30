@@ -4,7 +4,6 @@ import asyncio
 import calendar
 import json as _json
 import re as _re
-import sqlite3
 import time
 from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo as _ZoneInfo
@@ -15,34 +14,13 @@ from nicegui import ui
 
 import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
-from backend.src.services.analytics import trade_history_repo
+from backend.src.services.analytics import trade_history_repo, signal_lab_repo
 from backend.src.controllers.history import controller as history_ctl
 from forex_trader.core import telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
 from frontend.pages import ai_trade_analysis as _ai_analysis
 from frontend.pages.trading import trade_source_label, trade_channel_label
-
-
-def _get_env_db_path(env: str) -> str:
-    """Return the absolute DB path for the given environment."""
-    from backend.src.config import DATA_DIR
-    return str(DATA_DIR / f"forex_trader_{env}.db")
-
-
-def _query_env_db(env: str, sql: str, params: tuple = ()) -> list[dict]:
-    """Execute a SELECT against the given environment's database."""
-    db_path = _get_env_db_path(env)
-    if not Path(db_path).exists():
-        return []
-    try:
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(sql, params).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
 
 
 def render(get_engine: Callable):
@@ -831,9 +809,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
     """
     result: dict[date, tuple[str, str]] = {}
     try:
-        from backend.src.config import DATA_DIR
-        sig_db = DATA_DIR / "test_signal.db"
-        if not sig_db.exists():
+        if not signal_lab_repo.is_available():
             return result
 
         if month == 12:
@@ -844,14 +820,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
         ts_start = datetime.combine(date(year, month, 1), datetime.min.time()).timestamp()
         ts_end   = datetime.combine(next_month_first,     datetime.min.time()).timestamp()
 
-        conn = sqlite3.connect(str(sig_db), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT ts, adx, htf_bias FROM test_analysis_log "
-            "WHERE ts >= ? AND ts < ? AND adx IS NOT NULL",
-            (ts_start, ts_end),
-        ).fetchall()
-        conn.close()
+        rows = signal_lab_repo.adx_and_bias_samples(ts_start, ts_end)
 
         # Group ADX + bias samples by date
         day_adx:  dict[date, list[float]] = {}

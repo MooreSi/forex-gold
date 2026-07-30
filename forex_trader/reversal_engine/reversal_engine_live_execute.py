@@ -239,6 +239,52 @@ class _LiveExecuteMixin:
             except Exception:
                 pass
 
+    async def _maybe_stage_grid_template(self, sig_id: int, tick, price: float) -> bool:
+        """Dispatch a just-created signal immediately when the Reversal Engine
+        is assigned a grid EA template, instead of leaving it pending until
+        _check_outcomes sees price enter the zone.
+
+        A grid template's legs are real resting broker orders placed across
+        the signal's own zone, so the zone wait belongs to MT5, not to a 5s
+        Python poll. Waiting first (up to _SIGNAL_MAX_AGE_S, 2h) meant the
+        legs only ever went on the book once price had already arrived --
+        the resting order's entire latency advantage, spent.
+
+        The signal row deliberately stays 'pending' here: it is still
+        _check_outcomes' job to mark it triggered when price actually reaches
+        the zone, so this engine's own outcome/correlation accounting is
+        unchanged. What stops it double-firing is vantage_signal_id, which
+        this path writes via _try_live_execute -- see the guard at that call
+        site. Returns whether live execution was attempted.
+        """
+        from forex_trader.core.core_grid_template_dispatch import grid_template_for_source
+        tpl = grid_template_for_source("Reversal Engine")
+        if tpl is None:
+            return False
+        try:
+            from forex_trader.core import database as core_db
+            if not core_db.get_risk_settings().get("re_live_execution", 0):
+                # Virtual mode: nothing to place, and _try_live_execute would
+                # only write skipped:live_disabled a cycle early.
+                return False
+        except Exception:
+            return False
+
+        sig = re_db.get_signal_by_id(sig_id)
+        if not sig:
+            return False
+        if sig.get("vantage_signal_id"):
+            return False
+
+        _log.info(
+            "[RE-Engine] grid template '%s' -- staging broker legs at signal "
+            "creation for %s (zone %.2f-%.2f, price %.2f)",
+            tpl.get("name", "?"), sig.get("signal_ref"),
+            float(sig.get("entry_low") or 0), float(sig.get("entry_high") or 0), price,
+        )
+        await self._try_live_execute(sig, price, tick)
+        return True
+
     async def _try_re_limit_order(self, sig: dict, vantage_sig_id: str, tick) -> Optional[bool]:
         """Places a genuine EA pending limit order for a Reversal Engine signal
         instead of the market-fill flow. Returns True once handled
@@ -258,6 +304,24 @@ class _LiveExecuteMixin:
         its own EA management branch (ManageConservativeLike, etc.) never
         reads t.pcts/t.beAtPos at all.
         """
+        # Grid template: hand back to the market-fill path, which for a
+        # template is not a market fill at all -- it stages the template's own
+        # resting BuyLimit/SellLimit legs across the zone (core_open_trade.py's
+        # zone_low/zone_high handoff -> HandleOpenTemplateGrid). This function
+        # cannot serve one: place_pending_order() carries no template payload,
+        # and the EA hard-sets isTemplate=false on that path
+        # (HandlePlacePendingOrder), so with the LIMIT ORDER toggle on, a
+        # grid-template-assigned Reversal Engine placed a SINGLE plain limit
+        # with strategy="template:<name>" -- a strategy no EA manager handles
+        # -- losing the grid and every template management rule at once.
+        from forex_trader.core.core_grid_template_dispatch import grid_template_for_source
+        if grid_template_for_source("Reversal Engine") is not None:
+            _log.info(
+                "[RE-Engine] LIMIT ORDER toggle not applied to %s -- a grid template "
+                "stages its own resting legs", sig.get("signal_ref"),
+            )
+            return None
+
         from forex_trader.core import ea_bridge as _ea_mod
         _ea = _ea_mod.get_instance()
         if _ea is None or not _ea.is_ea_healthy():

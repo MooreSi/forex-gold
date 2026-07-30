@@ -458,6 +458,17 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 signal_created = True
                 self._notify_refresh()
 
+                # Grid EA template: place the resting legs NOW rather than
+                # waiting for _check_outcomes to see price enter the zone --
+                # the legs themselves are what waits. No-op unless this
+                # engine is actually assigned a grid template and live
+                # execution is on. See _maybe_stage_grid_template.
+                try:
+                    await self._maybe_stage_grid_template(sig_id, tick, price)
+                except Exception as _grid_exc:
+                    _log.warning("[RE-Engine] grid staging failed for %s: %s",
+                                 sig_data.get("signal_ref"), _grid_exc)
+
         if not signal_created:
             top = candidates[0] if candidates else {}
             self._status_msg = (
@@ -527,8 +538,21 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                         "[RE-Engine] TRIGGERED %s @ %.2f (fill, mid=%.2f)",
                         sig.get("signal_ref", sig_id), fill, price
                     )
-                    # Optionally execute live trade
-                    await self._try_live_execute(sig, fill, tick)
+                    # Optionally execute live trade. A signal that already
+                    # carries a vantage_signal_id was dispatched at creation
+                    # time (grid template -- _maybe_stage_grid_template), so
+                    # its broker legs are already resting and this trigger is
+                    # bookkeeping only; executing again would open a second
+                    # grid on the same setup.
+                    if sig.get("vantage_signal_id"):
+                        _log.info(
+                            "[RE-Engine] %s zone reached -- legs already staged at "
+                            "creation (vantage %s), not re-executing",
+                            sig.get("signal_ref", sig_id),
+                            str(sig.get("vantage_signal_id"))[:8],
+                        )
+                    else:
+                        await self._try_live_execute(sig, fill, tick)
                     self._notify_refresh()
                 continue
 

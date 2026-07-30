@@ -647,6 +647,15 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         self.status_detail = f"{signal_ref} via {trigger_tag}"
         self._notify_refresh()
 
+        # Grid EA template: put the resting legs on the book now rather than
+        # waiting for the next _check_outcomes pass. No-op unless this engine
+        # is assigned a grid template. See _maybe_stage_grid_template.
+        if sig_id:
+            try:
+                await self._maybe_stage_grid_template(sig_id, current_price, tick)
+            except Exception as _grid_exc:
+                _log.warning("[BO-Engine] grid staging failed for %s: %s", signal_ref, _grid_exc)
+
     # ── Outcome monitoring (every 5s) ─────────────────────────────────────────
 
     async def _outcome_loop(self) -> None:
@@ -742,7 +751,16 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 bdb.trigger_signal(sig_id, price_exec)
                 _log.info("[BO-Engine] %s triggered @ %.2f", sig.get("signal_ref"), price_exec)
                 status = "triggered"
-                await self._execute_live(sig, price_exec, tick)
+                # A signal that already carries a vantage_signal_id was
+                # dispatched at creation time (grid template --
+                # _maybe_stage_grid_template); its legs are already resting,
+                # so executing again would open a second grid on the setup.
+                if sig.get("vantage_signal_id"):
+                    _log.info("[BO-Engine] %s already staged at creation (vantage %s) "
+                              "-- not re-executing", sig.get("signal_ref"),
+                              str(sig.get("vantage_signal_id"))[:8])
+                else:
+                    await self._execute_live(sig, price_exec, tick)
 
             if status != "triggered":
                 continue

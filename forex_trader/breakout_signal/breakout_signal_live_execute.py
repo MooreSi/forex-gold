@@ -17,8 +17,99 @@ from forex_trader.core.momentum_exhaustion import check_momentum_exhaustion
 
 _log = logging.getLogger("breakout_signal")
 
+# Narrowest retest band worth spreading grid legs across. Below this the
+# legs collapse onto each other (and onto the market, where the broker's
+# stops level rejects them anyway), so the plain ±0.5 zone is used instead.
+_MIN_GRID_ZONE_WIDTH = 1.0
+
+
+def _grid_zone(sig: dict, direction: str, entry: float) -> tuple[float, float]:
+    """The entry zone handed to the main engine, as (low, high).
+
+    Default is the ±0.5 band this engine has always used -- a breakout is a
+    market entry, and that band only exists because vantage_signals wants a
+    range rather than a price.
+
+    A grid EA template needs a real one. Its pending legs are staged ACROSS
+    the zone (HandleOpenTemplateGrid's useZone branch), so a 1-point band
+    put every leg within the broker's own stops level of the market, where
+    the EA's wrong-side check skipped them -- the "grid" placed its anchor
+    legs and nothing else. The band that actually means something for a
+    breakout is the retest: from the broken level back to current price.
+    Every leg then sits inside the structure that produced the signal, and
+    above its stop by construction (the SL is placed beyond the level).
+
+    Falls back to the default band whenever the level isn't usable -- a
+    sweep whose level sits the wrong side of the entry, a missing
+    broken_level, or a band too narrow to spread legs across.
+    """
+    default = (round(entry - 0.5, 2), round(entry + 0.5, 2))
+
+    from forex_trader.core.core_grid_template_dispatch import grid_template_for_source
+    if grid_template_for_source("Breakout Engine") is None:
+        return default
+
+    level = float(sig.get("broken_level") or 0)
+    if level <= 0:
+        return default
+    low, high = (level, entry) if direction == "BUY" else (entry, level)
+    if high - low < _MIN_GRID_ZONE_WIDTH:
+        _log.info(
+            "[BO-LiveExec] grid zone %s level=%.2f entry=%.2f too narrow "
+            "(<%.1f) -- using the default band",
+            direction, level, entry, _MIN_GRID_ZONE_WIDTH,
+        )
+        return default
+    _log.info("[BO-LiveExec] grid retest zone %s $%.2f-$%.2f (level %.2f, entry %.2f)",
+              direction, low, high, level, entry)
+    return round(low, 2), round(high, 2)
+
 
 class _LiveExecuteMixin:
+    async def _maybe_stage_grid_template(self, sig_id: int, price: float, tick) -> bool:
+        """Dispatch a just-created signal immediately when the Breakout Engine
+        is assigned a grid EA template, instead of leaving it for the next
+        _check_outcomes pass to trigger.
+
+        A grid template's legs rest on the broker's book, so the sooner they
+        are placed the more of the retest they can actually catch -- holding
+        them for up to a full outcome cycle spends that for nothing. The
+        signal row is deliberately left 'pending': _check_outcomes still
+        marks it triggered on its own next pass, so this engine's outcome
+        accounting is unchanged, and vantage_signal_id is what stops it
+        executing a second time (see the guard at that call site).
+
+        Gated on the same Trading Markets session check _check_outcomes
+        applies before triggering, so this cannot place during a session the
+        user has switched off. Returns whether live execution was attempted.
+        """
+        from forex_trader.core.core_grid_template_dispatch import grid_template_for_source
+        tpl = grid_template_for_source("Breakout Engine")
+        if tpl is None:
+            return False
+
+        from forex_trader.core import database as _cdb
+        try:
+            if not bool(_cdb.get_risk_settings().get("bo_live_execution", 0)):
+                return False
+        except Exception:
+            return False
+
+        from forex_trader.core.database import is_session_allowed as _isa
+        _sess_ok, _sess_name = _isa()
+        if not _sess_ok:
+            _log.debug("[BO-LiveExec] grid staging held: session '%s' not enabled", _sess_name)
+            return False
+
+        sig = bdb.get_signal_by_id(sig_id)
+        if not sig or sig.get("vantage_signal_id"):
+            return False
+
+        _log.info("[BO-LiveExec] grid template '%s' -- staging broker legs at signal "
+                  "creation for %s @ %.2f", tpl.get("name", "?"), sig.get("signal_ref"), price)
+        await self._execute_live(sig, price, tick)
+        return True
+
     async def _execute_live(self, sig: dict, fill_px: float, tick) -> None:
         """Place a real MT5 trade via the main engine when bo_live_execution is ON."""
         sig_id     = sig.get("id")
@@ -201,11 +292,13 @@ class _LiveExecuteMixin:
             tp2   = sig.get("tp2")
             tp3   = sig.get("tp3")
 
+            zone_low, zone_high = _grid_zone(sig, direction, entry)
+
             main_sig = self._main_engine.create_signal(
                 source_name = "Breakout Engine",
                 direction   = direction,
-                entry_low   = round(entry - 0.5, 2),
-                entry_high  = round(entry + 0.5, 2),
+                entry_low   = zone_low,
+                entry_high  = zone_high,
                 stop_loss   = sl,
                 tp1=tp1, tp2=tp2, tp3=tp3,
                 lot_size = base_lot,

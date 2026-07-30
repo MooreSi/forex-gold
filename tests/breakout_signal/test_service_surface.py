@@ -14,7 +14,7 @@ EXPECTED_METHODS = [
     "add_refresh_callback", "set_main_engine", "start", "stop",
     "_compute_cost_pts", "_close_and_learn", "_manage_triggered_signal", "_reconcile_live_pnl",
     "_velocity_loop", "_check_velocity_break",
-    "_execute_live",
+    "_execute_live", "_maybe_stage_grid_template",
     "_run_batch_analysis",
     "_cycle_loop", "_run_cycle", "_process_candidate", "_outcome_loop", "_check_outcomes",
 ]

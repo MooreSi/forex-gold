@@ -33,6 +33,7 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core import core_ea_templates as ea_templates
+from forex_trader.core.core_grid_template_dispatch import grid_template
 from forex_trader.core.core_open_trade_from_signal import open_trade_from_signal
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range
 from forex_trader.core.core_trade_reporting import get_open_trades
@@ -178,6 +179,13 @@ async def try_activate_pending_signals(
         # which is what the window was actually about.
         _is_gd2_src = _channel_parser_format(sig.get("source_name")) == "gd2"
         _is_orb_src = "orb/ivb report" in _src
+        # Grid templates place on arrival rather than on zone re-entry -- the
+        # EA's own resting legs are the wait (see core_grid_template_dispatch).
+        # A signal that reached this queue at all (manual add, sync push, bot
+        # /addsignal, ORB report) never went through the Telegram fast path's
+        # equivalent branch, so without this it sat here until price came back
+        # and then opened at market -- exactly what a grid exists to avoid.
+        _grid_tpl = grid_template(effective_strategy)
         if ea_templates.is_template_override(effective_strategy):
             _expiry = _TEMPLATE_PENDING_EXPIRY_SEC
         elif effective_strategy in (STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
@@ -227,8 +235,11 @@ async def try_activate_pending_signals(
         if now < retry_after.get(sig["signal_id"], 0):
             continue
 
-        # Wait until price re-enters the zone
-        if not price_in_entry_range(
+        # Wait until price re-enters the zone -- unless this is a grid
+        # template, whose legs rest AT the zone on the broker's book, so
+        # requiring price to already be there before placing them defeats
+        # the point. MT5 does the waiting for these.
+        if _grid_tpl is None and not price_in_entry_range(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]), tick
         ):
             continue
@@ -254,7 +265,13 @@ async def try_activate_pending_signals(
                      STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
                      STRATEGY_ADAPTIVE_RUNNER_2}
         _act_px = tick.ask if sig["direction"].upper() == "BUY" else tick.bid
-        filter_err = None if _pw_strategy in _self_mgd else check_pre_trade_filters(
+        # Grid templates skip the R:R filter for the same reason
+        # resolve_open_trade_params already exempts every template from it
+        # (core_signal_resolution.py) -- the levels the trade actually runs
+        # on come from the template, not from the signal's own TP1, so
+        # scoring the signal's R:R against a price nowhere near the zone
+        # would decline trades on numbers the EA never uses.
+        filter_err = None if (_grid_tpl is not None or _pw_strategy in _self_mgd) else check_pre_trade_filters(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]),
             float(sig["stop_loss"]), sig.get("tp1"),
             actual_price=_act_px,
@@ -287,8 +304,12 @@ async def try_activate_pending_signals(
 
         # Momentum confirmation: last completed M5 candle must align with direction.
         # A contrary candle suggests the move into the zone is a fakeout/reversal.
+        # Not applied to a grid template: there is no "move into the zone" to
+        # confirm yet -- price hasn't reached it -- and deferring on the
+        # current candle would just reintroduce the Python-side wait this
+        # placement is meant to remove.
         _direction_up = sig["direction"].upper()
-        if dpm_candles:
+        if dpm_candles and _grid_tpl is None:
             _lc = dpm_candles[-1]
             _lc_open  = float(_lc.get("open",  0) or 0)
             _lc_close = float(_lc.get("close", 0) or 0)
@@ -308,10 +329,12 @@ async def try_activate_pending_signals(
         # All fills within the 2-minute window are treated as fresh (full lot)
         _age_lot_mult = 1.0
 
-        # Price is back in zone — activate
-        log.info("[PendingWatcher] Signal %s %s zone $%.2f–$%.2f — activating (age %.0fs)",
+        # Price is back in zone — activate (or, for a grid template, stage the
+        # resting legs across the zone without waiting for price at all)
+        log.info("[PendingWatcher] Signal %s %s zone $%.2f–$%.2f — %s (age %.0fs)",
                  sig["signal_id"][:8], sig["direction"],
-                 float(sig["entry_low"]), float(sig["entry_high"]), age)
+                 float(sig["entry_low"]), float(sig["entry_high"]),
+                 "staging grid legs" if _grid_tpl is not None else "activating", age)
         try:
             trade_result = await open_trade_from_signal(
                 bridge, sig["signal_id"], age_lot_mult=_age_lot_mult,
@@ -326,14 +349,28 @@ async def try_activate_pending_signals(
                     " WHERE signal_id=? AND status='pending'",
                     (sig["signal_id"],),
                 )
-            asyncio.create_task(telegram_alerts.send_message(
-                (
+            if _grid_tpl is not None:
+                # A grid ack carries no fill price (ticket 0 / entry 0 -- the
+                # EA's own placeholder for "legs staged, none filled yet"), so
+                # reporting an entry here would print $0.00.
+                _msg = (
+                    f"*Grid legs staged*\n"
+                    f"{sig['direction']} queued signal handed to the EA — "
+                    f"resting legs across "
+                    f"${float(sig['entry_low']):.2f}–${float(sig['entry_high']):.2f}\n"
+                    f"_Template: {_grid_tpl.get('name', '?')}_"
+                )
+                _cat = "pending_grid_staged"
+            else:
+                _msg = (
                     f"*Zone fill activated*\n"
                     f"{sig['direction']} queued signal entered zone "
                     f"${float(sig['entry_low']):.2f}–${float(sig['entry_high']):.2f}\n"
                     f"Opened @ ${trade_result.get('entry_price', '?'):.2f}"
-                ),
-                sig["signal_id"], "pending_zone_fill",
+                )
+                _cat = "pending_zone_fill"
+            asyncio.create_task(telegram_alerts.send_message(
+                _msg, sig["signal_id"], _cat,
             ))
             retry_after.pop(sig["signal_id"], None)
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)

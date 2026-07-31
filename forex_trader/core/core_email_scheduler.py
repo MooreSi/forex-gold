@@ -32,7 +32,8 @@ from zoneinfo import ZoneInfo
 from forex_trader.core import database as db_module
 from forex_trader.core import claude_ai, email_service
 from forex_trader.core.core_mt5_performance import compute_mt5_performance
-from forex_trader.core.core_orb_report import build_orb_report, orb_auto_execute
+from backend.src.services.analytics.orb_report import build_orb_report
+from forex_trader.core.core_orb_report import orb_auto_execute
 
 log = logging.getLogger(__name__)
 

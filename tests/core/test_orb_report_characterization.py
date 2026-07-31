@@ -54,9 +54,9 @@ def fresh_db():
 
 
 def _patched_now(fixed_dt):
-    """Context manager patching core_orb_report.datetime.now() while
+    """Context manager patching analytics orb_report.datetime.now() while
     leaving direct datetime(...) construction working via the real class."""
-    patcher = mock.patch("forex_trader.core.core_orb_report.datetime")
+    patcher = mock.patch("backend.src.services.analytics.orb_report.datetime")
     mock_dt = patcher.start()
     mock_dt.now.return_value = fixed_dt
     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -163,7 +163,7 @@ def test_bullish_breakout_computes_zone_stop_target(fresh_db):
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2414.5, ask=2415.0))
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch("forex_trader.core.core_orb_report.get_orb_target_multiple",
+        with mock.patch("backend.src.services.analytics.orb_report.get_orb_target_multiple",
                         new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
             report = asyncio.run(SimulationEngine.build_orb_report(e))
     finally:
@@ -188,7 +188,7 @@ def test_bearish_breakout_computes_mirrored_zone_stop_target(fresh_db):
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2385.0, ask=2385.5))
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch("forex_trader.core.core_orb_report.get_orb_target_multiple",
+        with mock.patch("backend.src.services.analytics.orb_report.get_orb_target_multiple",
                         new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
             report = asyncio.run(SimulationEngine.build_orb_report(e))
     finally:
@@ -212,7 +212,7 @@ def test_get_target_multiple_uses_cache_when_dated_today(fresh_db):
     e._bridge = _FakeBridge()
     p = _patched_now(_FIXED_NOW)
     try:
-        with mock.patch("forex_trader.core.core_orb_report.backtest_orb_target_multiple", new=mock.AsyncMock()) as bt:
+        with mock.patch("backend.src.services.analytics.orb_report.backtest_orb_target_multiple", new=mock.AsyncMock()) as bt:
             result = asyncio.run(SimulationEngine._get_orb_target_multiple(e))
     finally:
         p.stop()
@@ -228,7 +228,7 @@ def test_get_target_multiple_recomputes_when_cache_stale(fresh_db):
     p = _patched_now(_FIXED_NOW)
     try:
         with mock.patch(
-            "forex_trader.core.core_orb_report.backtest_orb_target_multiple",
+            "backend.src.services.analytics.orb_report.backtest_orb_target_multiple",
             new=mock.AsyncMock(return_value={"multiple": 2.2, "n": 12, "is_default": False}),
         ) as bt:
             result = asyncio.run(SimulationEngine._get_orb_target_multiple(e))

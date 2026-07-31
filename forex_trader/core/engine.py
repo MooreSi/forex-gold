@@ -214,12 +214,11 @@ from forex_trader.core.core_close_trade import (
     record_close as _record_close_impl,
     close_all_ladder_legs as _close_all_ladder_legs_impl,
 )
-from forex_trader.core.core_orb_report import (
+from backend.src.services.analytics.orb_report import (
     build_orb_report as _build_orb_report_impl,
     get_orb_target_multiple as _get_orb_target_multiple_impl,
-    backtest_orb_target_multiple as _backtest_orb_target_multiple_impl,
-    orb_auto_execute as _orb_auto_execute_impl,
-)
+    backtest_orb_target_multiple as _backtest_orb_target_multiple_impl)
+from forex_trader.core.core_orb_report import orb_auto_execute as _orb_auto_execute_impl
 from forex_trader.core.core_pending_signal_activation import (
     try_activate_pending_signals as _try_activate_pending_signals_impl,
 )

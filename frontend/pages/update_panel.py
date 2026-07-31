@@ -19,7 +19,7 @@ from backend.src.controllers.remote.tls import SERVER_HOST, SERVER_PORT
 
 
 def _read_changelog() -> list[str]:
-    cl = Path(__file__).parent.parent.parent / "forex_trader" / "CHANGELOG.md"
+    cl = Path(__file__).resolve().parents[2] / "CHANGELOG.md"
     if cl.exists():
         return cl.read_text(encoding="utf-8").splitlines()
     return []

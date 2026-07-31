@@ -2021,7 +2021,7 @@ def _render_bridge_control(engine):
                 # file from this checkout's own USER_DATA_DIR (config.py) --
                 # NOT the live app's shared ~/Library/Application Support/
                 # ForexTrader/ folder.
-                from forex_trader import config as _cfg_mod
+                import backend.src.config as _cfg_mod
                 _mac_creds = str(_cfg_mod.USER_DATA_DIR / "bridge_credentials.json")
                 _win_creds = "Z:" + _mac_creds.replace("/", "\\")
                 from urllib.parse import urlparse as _urlparse
@@ -2812,7 +2812,7 @@ def _render_diagnostics(engine):
                 _lic_email = _lic_type = _lic_expiry = _machine_id = "—"
 
             try:
-                from forex_trader import __version__ as _app_ver
+                from backend.src.utils.version_history import __version__ as _app_ver
             except Exception:
                 _app_ver = "—"
 

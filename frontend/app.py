@@ -60,7 +60,7 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 # ── end patch ──────────────────────────────────────────────────────────────────
 
 import backend.src.config as cfg_module
-from forex_trader import __version__ as _APP_VERSION
+from backend.src.utils.version_history import __version__ as _APP_VERSION
 from backend.src.db import database as db_module
 from frontend.pages import backtest as backtest_page
 
@@ -593,7 +593,7 @@ def _render_about():
                 elif section == "version":
                     _sub_header("Version History", "history")
 
-                    from forex_trader.version_history import RELEASES as releases
+                    from backend.src.utils.version_history import RELEASES as releases
 
                     for ver, title, badge_colour, badge_label, changes in releases:
                         # Auto-mark whichever entry matches the running version as Current

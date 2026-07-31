@@ -189,3 +189,24 @@ RELEASES: list[tuple] = [
         ],
     ),
 ]
+
+
+def _derive_version() -> str:
+    """Read the current version from RELEASES[0] and sync the root VERSION file.
+
+    The VERSION file is a fallback for callers that cannot import this module
+    (the remote client/server read it when the package import fails). It lives
+    at the repo root now that the forex_trader package is gone.
+    """
+    from pathlib import Path
+    ver_str = RELEASES[0][0].lstrip("v") if RELEASES else "unknown"
+    ver_file = Path(__file__).resolve().parents[3] / "VERSION"
+    try:
+        if ver_file.read_text(encoding="utf-8").strip() != ver_str:
+            ver_file.write_text(ver_str + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return ver_str
+
+
+__version__ = _derive_version()

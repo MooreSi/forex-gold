@@ -21,7 +21,7 @@ forex-trader = "run:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["forex_trader*", "backend*", "frontend*"]
+include = ["backend*", "frontend*"]
 
 [tool.pytest.ini_options]
 # The suite reads the real clock: dpm_engine.detect_session() branches on the

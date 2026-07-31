@@ -41,7 +41,7 @@ _TOKENS_FILE        = _REMOTE_DIR / "allowed_tokens.json"
 _PENDING_FILE       = _REMOTE_DIR / "pending_registrations.json"
 _REVOKED_FILE       = _REMOTE_DIR / "revoked_tokens.json"
 _ADMIN_MACHINES_FILE = _REMOTE_DIR / "admin_machines.json"
-_CHANGELOG_FILE     = Path(__file__).parent.parent / "CHANGELOG.md"
+_CHANGELOG_FILE     = Path(__file__).resolve().parents[4] / "CHANGELOG.md"
 
 # ── In-memory state ─────────────────────────────────────────────────────────
 
@@ -642,11 +642,11 @@ def _read_version() -> str:
     # must not fall back to parsing CHANGELOG.md (free-text notes, drifts
     # independently — confirmed 3 releases stale).
     try:
-        from forex_trader import __version__
+        from backend.src.utils.version_history import __version__
         return __version__
     except Exception:
         pass
-    ver_file = Path(__file__).parent.parent / "VERSION"
+    ver_file = Path(__file__).resolve().parents[4] / "VERSION"
     if ver_file.exists():
         return ver_file.read_text(encoding="utf-8").strip()
     return "unknown"

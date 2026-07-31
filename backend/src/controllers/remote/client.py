@@ -229,11 +229,11 @@ def _app_version() -> str:
     # VERSION), which made this function silently report a stale version
     # both here and via the HELLO handshake the admin console reads.
     try:
-        from forex_trader import __version__
+        from backend.src.utils.version_history import __version__
         return __version__
     except Exception:
         pass
-    ver_file = Path(__file__).parent.parent / "VERSION"
+    ver_file = Path(__file__).resolve().parents[4] / "VERSION"
     if ver_file.exists():
         return ver_file.read_text(encoding="utf-8").strip()
     return "unknown"

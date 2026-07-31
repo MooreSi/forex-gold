@@ -3092,7 +3092,7 @@ def _render_theme():
     See core_ui_theme.py's module docstring for why this is dark-only
     presets (neutral palette swap) rather than a real light mode.
     """
-    from forex_trader.core import core_ui_theme as theme_mod
+    from backend.src.utils import theme as theme_mod
 
     with ui.column().classes("w-full max-w-2xl gap-3"):
         ui.label("Color Theme").classes("text-base font-bold text-yellow-300")

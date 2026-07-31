@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_reversal_research's extracted
+"""Proves backend.src.services.reversal_engine.research's extracted
 reversal_engine_research_sweep behaves identically to SimulationEngine's original,
 characterized in test_reversal_engine_research_characterization.py -- see
 docs/todo/refactor/core-reversal-research-migration/020-*.md.
@@ -17,7 +17,7 @@ import pytest
 from unittest import mock
 
 from forex_trader.core import database as db
-from forex_trader.core import core_reversal_research as re_research
+from backend.src.services.reversal_engine import research as re_research
 
 
 def _reset_thread_local_connection():

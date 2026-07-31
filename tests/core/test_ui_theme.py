@@ -9,7 +9,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_ui_theme as theme_mod
+from backend.src.utils import theme as theme_mod
 
 
 def _reset_thread_local_connection():

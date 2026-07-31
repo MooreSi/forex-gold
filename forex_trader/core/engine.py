@@ -104,7 +104,7 @@ from backend.src.services.signals.repo import (
     activate_signal as _activate_signal_impl,
     cancel_signal as _cancel_signal_impl,
 )
-from forex_trader.core.core_reversal_research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
+from backend.src.services.reversal_engine.research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
 from backend.src.services.notifications.scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
 from backend.src.services.telegram.bot_readonly import (
     cmd_help as _cmd_help_impl,

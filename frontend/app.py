@@ -734,7 +734,7 @@ def main_page():
     # Settings > Theme -- override CSS is static (all presets), the active
     # preset is picked via a data attribute set inline before first paint
     # (avoids a flash of the wrong theme).
-    from forex_trader.core.core_ui_theme import THEME_HEAD_CSS, get_theme
+    from backend.src.utils.theme import THEME_HEAD_CSS, get_theme
     ui.add_head_html(THEME_HEAD_CSS)
     ui.add_head_html(f'<script>document.documentElement.setAttribute("data-fx-theme","{get_theme()}")</script>')
 

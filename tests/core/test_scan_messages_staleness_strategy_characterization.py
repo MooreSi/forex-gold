@@ -18,7 +18,8 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import telegram_alerts, ai_provider, channel_strategy_ai
+from forex_trader.core import telegram_alerts, channel_strategy_ai
+from backend.src.services.ai import provider as ai_provider
 from forex_trader.core.engine import SimulationEngine
 
 

@@ -11,7 +11,7 @@ import logging
 import time
 
 import backend.src.config as cfg_module
-from forex_trader.core import ai_provider
+from backend.src.services.ai import provider as ai_provider
 
 from forex_trader.breakout_signal import breakout_signal_repo as bdb
 from forex_trader.breakout_signal import adaptive_params as ap

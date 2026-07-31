@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Optional
 
-from forex_trader.core import ai_provider
+from backend.src.services.ai import provider as ai_provider
 
 _log = logging.getLogger("breakout_signal")
 

@@ -24,7 +24,7 @@ import time
 from datetime import datetime, timezone
 
 import backend.src.config as cfg_module
-from forex_trader.core import ai_provider
+from backend.src.services.ai import provider as ai_provider
 
 from forex_trader.test_signal import test_signal_repo as tdb
 from forex_trader.test_signal import adaptive_params as ap

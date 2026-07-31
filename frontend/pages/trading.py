@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 from nicegui import ui
 
-from forex_trader.core import ai_provider
+from backend.src.services.ai import provider as ai_provider
 from forex_trader.core import database as db_module
 from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
@@ -1329,7 +1329,7 @@ def _render_orb_report(engine):
 async def _background_commentary(engine, signal_id: str):
     try:
         import backend.src.config as cfg_module
-        import forex_trader.core.claude_ai as claude_ai
+        import backend.src.services.ai.claude_ai as claude_ai
         config = cfg_module.load()
         with db_module.db() as conn:
             row = db_module.row_to_dict(

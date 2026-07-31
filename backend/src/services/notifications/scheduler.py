@@ -30,7 +30,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from forex_trader.core import database as db_module
-from forex_trader.core import claude_ai
+from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import email_service
 from forex_trader.core.core_mt5_performance import compute_mt5_performance
 from backend.src.services.analytics.orb_report import build_orb_report

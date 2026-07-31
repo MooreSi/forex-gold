@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from forex_trader.core import claude_ai
+from backend.src.services.ai import claude_ai as claude_ai
 from forex_trader.core import database as db_module
 from backend.src.services.notifications import email_service
 from forex_trader.core.core_close_trade import CloseTradeContext, close_trade, get_trading_balance

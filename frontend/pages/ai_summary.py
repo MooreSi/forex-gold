@@ -409,7 +409,7 @@ def render(get_engine: Callable):
         _render_loading()
 
         try:
-            import forex_trader.core.claude_ai as claude_ai
+            import backend.src.services.ai.claude_ai as claude_ai
             config  = cfg_module.load()
             tick    = await engine.get_tick()
             candles = await engine.get_candles("M5", 50)

@@ -17,8 +17,8 @@ from typing import Callable, Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from forex_trader.core import claude_ai as ai_module
-from forex_trader.core import ai_provider
+from backend.src.services.ai import claude_ai as ai_module
+from backend.src.services.ai import provider as ai_provider
 from forex_trader.core import database as db_module
 
 # ── Regex for channel update message scanning ─────────────────────────────────

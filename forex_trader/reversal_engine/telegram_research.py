@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from forex_trader.core import ai_provider
+from backend.src.services.ai import provider as ai_provider
 
 _log = logging.getLogger(__name__)
 

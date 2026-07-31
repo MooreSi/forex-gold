@@ -20,8 +20,8 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import ai_signal_extractor
-from forex_trader.core import claude_ai
+from backend.src.services.ai import signal_extractor as ai_signal_extractor
+from backend.src.services.ai import claude_ai as claude_ai
 from forex_trader.core import core_ai_signal_fallback
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine

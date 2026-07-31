@@ -1173,7 +1173,7 @@ from forex_trader.core.core_db_telegram import (  # noqa: E402,F401
     get_stored_messages,
     get_messages_for_research,
 )
-from forex_trader.core.core_db_commentary import (  # noqa: E402,F401
+from backend.src.services.ai.commentary_repo import (  # noqa: E402,F401
     save_commentary,
 )
 from backend.src.services.notifications.repo import (  # noqa: E402,F401
@@ -1223,7 +1223,7 @@ from forex_trader.core.core_db_learned_rules import (  # noqa: E402,F401
     get_learned_rules_by_type,
     delete_channel_learned_rule,
 )
-from forex_trader.core.core_db_ai_recovered import (  # noqa: E402,F401
+from backend.src.services.ai.recovered_repo import (  # noqa: E402,F401
     save_ai_recovered_signal,
     save_ai_recovered_sl_adjustment,
     try_claim_sl_adjustment,

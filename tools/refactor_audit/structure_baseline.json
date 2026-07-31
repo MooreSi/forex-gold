@@ -99,7 +99,7 @@
       "frontend/pages/trading.py": 3
     },
     "transaction": {
-      "forex_trader/core/core_db_ai_recovered.py": 3,
+      "backend/src/services/ai/recovered_repo.py": 3,
       "forex_trader/core/core_orb_report.py": 1,
       "forex_trader/core/database.py": 1,
       "forex_trader/reversal_engine/database.py": 3,

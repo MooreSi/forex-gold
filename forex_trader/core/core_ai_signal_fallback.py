@@ -25,8 +25,8 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from forex_trader.core import ai_signal_extractor
-from forex_trader.core import claude_ai
+from backend.src.services.ai import signal_extractor as ai_signal_extractor
+from backend.src.services.ai import claude_ai as claude_ai
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.signal_parser import _CURRENCY_RE

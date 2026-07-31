@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.core import ai_provider
+from backend.src.services.ai import provider as ai_provider
 
 log = logging.getLogger(__name__)
 

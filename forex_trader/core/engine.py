@@ -31,8 +31,8 @@ from forex_trader.core.signal_parser import (
     SIGNAL_PREFIX, check_sl_adjustment_rules,
 )
 from forex_trader.core import telegram_alerts
-from forex_trader.core import claude_ai
-from forex_trader.core import ai_provider
+from backend.src.services.ai import claude_ai as claude_ai
+from backend.src.services.ai import provider as ai_provider
 from forex_trader.core import dpm_engine
 from forex_trader.core import core_ea_templates as _ea_templates
 from forex_trader.core.core_monitor_loop import (

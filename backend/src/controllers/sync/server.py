@@ -21,8 +21,8 @@ import time
 from typing import Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.sync import tls_util
-from forex_trader.sync.protocol import (
+from backend.src.controllers.sync import tls_util
+from backend.src.controllers.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
     MSG_SETTINGS_REJECTED, MSG_CHANNEL_STRATEGY_PROPOSE, MSG_CHANNEL_STRATEGY_STATE,
@@ -281,7 +281,7 @@ class SyncServer:
                     continue
                 if t == MSG_MODEL_SNAPSHOT_END:
                     in_upload = False
-                    from forex_trader.sync.model_transfer import unpack_models, data_dir
+                    from backend.src.controllers.sync.model_transfer import unpack_models, data_dir
                     try:
                         written = unpack_models(bytes(upload_buf), data_dir())
                         log.info("[SyncServer] received model snapshot from Mac: %s", written)
@@ -829,8 +829,8 @@ class SyncServer:
     async def _handle_model_snapshot_request(self, ws, msg: dict) -> None:
         """Mac asked to download this node's models. Stream them as
         begin(manifest) -> binary chunks -> end, mirroring the proven
-        pattern from forex_trader.remote's app-update distribution."""
-        from forex_trader.sync.model_transfer import package_models, data_dir
+        pattern from backend.src.controllers.remote's app-update distribution."""
+        from backend.src.controllers.sync.model_transfer import package_models, data_dir
         zip_bytes, names = package_models(data_dir())
         chunk_sz = 32 * 1024
         await ws.send(json.dumps(make(MSG_MODEL_SNAPSHOT_BEGIN, files=names, size=len(zip_bytes))))

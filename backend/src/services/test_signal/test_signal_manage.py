@@ -183,7 +183,7 @@ class _ManagementMixin:
         )
 
         try:
-            from forex_trader.sync.ledger import push_trade_closed
+            from backend.src.controllers.sync.ledger import push_trade_closed
             _sig_for_ledger = tdb.get_signal_by_id(signal_id)
             push_trade_closed({
                 "trade_id":    ref,

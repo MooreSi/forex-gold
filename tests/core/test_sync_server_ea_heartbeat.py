@@ -6,7 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from forex_trader.core import ea_bridge
-from forex_trader.sync.server import SyncServer
+from backend.src.controllers.sync.server import SyncServer
 
 
 class _FakeEngine:

@@ -16,8 +16,8 @@ from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
 from backend.src.services.signals.parser import validate_signal
-from forex_trader.sync import client as sync_client
-from forex_trader.sync.remote_stats_facade import _is_remote_active
+from backend.src.controllers.sync import client as sync_client
+from backend.src.controllers.sync.remote_stats_facade import _is_remote_active
 from frontend.pages.settings import render_risk_card
 
 def _uk(ts) -> str:

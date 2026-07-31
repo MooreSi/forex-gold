@@ -17,8 +17,8 @@ import time
 from typing import Callable, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.sync import tls_util
-from forex_trader.sync.protocol import (
+from backend.src.controllers.sync import tls_util
+from backend.src.controllers.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
     MSG_SETTINGS_REJECTED, MSG_CHANNEL_STRATEGY_PROPOSE, MSG_CHANNEL_STRATEGY_STATE,
@@ -307,7 +307,7 @@ class SyncClient:
                     continue
                 if t == MSG_MODEL_SNAPSHOT_END:
                     self._in_model_download = False
-                    from forex_trader.sync.model_transfer import unpack_models, data_dir
+                    from backend.src.controllers.sync.model_transfer import unpack_models, data_dir
                     try:
                         written = unpack_models(bytes(self._model_download_buf), data_dir())
                         log.info("[SyncClient] downloaded model snapshot from VPS: %s", written)
@@ -812,7 +812,7 @@ class SyncClient:
             await self._ws.send(json.dumps(make(MSG_MODEL_SNAPSHOT_REQUEST)))
             await asyncio.wait_for(self._model_download_event.wait(), timeout=timeout)
         elif direction == "upload":
-            from forex_trader.sync.model_transfer import package_models, data_dir
+            from backend.src.controllers.sync.model_transfer import package_models, data_dir
             zip_bytes, names = package_models(data_dir())
             chunk_sz = 32 * 1024
             await self._ws.send(json.dumps(make(MSG_MODEL_SNAPSHOT_UPLOAD, files=names, size=len(zip_bytes))))

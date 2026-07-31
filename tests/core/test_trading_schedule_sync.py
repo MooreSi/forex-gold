@@ -16,8 +16,8 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.risk import schedule as sched
-from forex_trader.sync.server import SyncServer
-from forex_trader.sync.client import SyncClient
+from backend.src.controllers.sync.server import SyncServer
+from backend.src.controllers.sync.client import SyncClient
 
 
 def _reset_thread_local_connection():
@@ -51,15 +51,15 @@ def _sample_snapshot():
 def test_forward_is_a_noop_when_sync_not_configured(fresh_db):
     """Both get_instance() calls return None until sync is actually set up --
     must not raise, must not hang."""
-    with patch("forex_trader.sync.client.get_instance", return_value=None), \
-         patch("forex_trader.sync.server.get_instance", return_value=None):
+    with patch("backend.src.controllers.sync.client.get_instance", return_value=None), \
+         patch("backend.src.controllers.sync.server.get_instance", return_value=None):
         sched.set_trading_schedule_enabled(True)  # must not raise
 
 
 def test_local_edit_forwards_over_client_when_configured(fresh_db):
     fake_client = AsyncMock()
     fake_client.propose_trading_schedule = AsyncMock()
-    with patch("forex_trader.sync.client.get_instance", return_value=fake_client), \
+    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client), \
          patch("backend.src.services.risk.schedule._schedule_coro") as fake_schedule_coro:
         sched.set_trading_schedule_enabled(True)
         assert fake_schedule_coro.called

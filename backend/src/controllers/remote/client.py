@@ -30,12 +30,12 @@ from typing import Optional
 
 from backend.src.config import USER_DATA_DIR
 from backend.src.config.licence import store as _licence_store
-from forex_trader.remote.protocol import (
+from backend.src.controllers.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
     MSG_PING, MSG_GET_DIAG, MSG_UPDATE_BEGIN, MSG_UPDATE_END, MSG_VERSION_INFO, make,
 )
-from forex_trader.remote.tls import client_ssl_context, SERVER_HOST, SERVER_PORT
+from backend.src.controllers.remote.tls import client_ssl_context, SERVER_HOST, SERVER_PORT
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ def _app_version() -> str:
 
 def _build_hello() -> dict:
     import platform
-    from forex_trader.remote.ip_check import get_machine_uuid
+    from backend.src.controllers.remote.ip_check import get_machine_uuid
     return make(
         MSG_HELLO,
         token=get_or_create_token(),

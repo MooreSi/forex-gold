@@ -1,7 +1,7 @@
 """
 Self-signed TLS certificate generation for the Local/Remote sync channel.
 
-Same pattern as forex_trader.remote.tls (self-signed cert + SHA-256
+Same pattern as backend.src.controllers.remote.tls (self-signed cert + SHA-256
 fingerprint pinning so a fixed-IP VPS doesn't need a real CA certificate),
 but with its own cert/key files under USER_DATA_DIR/sync/ — deliberately
 separate from remote/'s licence-server cert so the two channels can never

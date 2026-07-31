@@ -267,8 +267,8 @@ async def find_and_apply_instant_followup(
     opening a new trade. False means no match — fall through as normal.
     """
     try:
-        from forex_trader.sync.protocol import TRADER_REMOTE_VPS
-        from forex_trader.sync.client import SyncClient, get_instance as _sync_cli_instance
+        from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
+        from backend.src.controllers.sync.client import SyncClient, get_instance as _sync_cli_instance
         _host, _, _ = SyncClient.load_config()
         if _host and db_module.get_active_trader() == TRADER_REMOTE_VPS:
             _rs_fu = await db_module.to_db_thread(db_module.get_risk_settings)

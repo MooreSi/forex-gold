@@ -22,8 +22,8 @@ def _is_centralized_remote_mode() -> bool:
     generation owner just because the shared setting reads true."""
     try:
         from forex_trader.core import database as db_module
-        from forex_trader.sync import server as _sync_srv_mod
-        from forex_trader.sync.protocol import TRADER_REMOTE_VPS
+        from backend.src.controllers.sync import server as _sync_srv_mod
+        from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
         rs = db_module.get_risk_settings()
         if not rs.get("centralized_signal_gen_enabled"):
             return False
@@ -47,7 +47,7 @@ def _is_remote_active() -> bool:
     if _is_centralized_remote_mode():
         return False
     try:
-        from forex_trader.sync import client as sync_client
+        from backend.src.controllers.sync import client as sync_client
         cli = sync_client.get_instance()
         return (
             cli.conn_state == "connected"
@@ -59,7 +59,7 @@ def _is_remote_active() -> bool:
 
 
 def _remote_engine_stats(key: str) -> dict:
-    from forex_trader.sync import client as sync_client
+    from backend.src.controllers.sync import client as sync_client
     return sync_client.get_instance().remote_signal_gen_stats.get(key, {})
 
 

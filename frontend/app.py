@@ -987,7 +987,7 @@ def main_page():
         async def _refresh_mode_btn():
             if _mode_switching[0]:
                 return
-            from forex_trader.sync import client as sync_client
+            from backend.src.controllers.sync import client as sync_client
             cli = sync_client.get_instance()
             if not cli or cli.conn_state != "connected":
                 mode_btn.text = "LOCAL"
@@ -1008,7 +1008,7 @@ def main_page():
                 mode_btn.tooltip("VPS is actively trading; this is a view-only dashboard. Click to take over.")
 
         async def _toggle_mode():
-            from forex_trader.sync import client as sync_client
+            from backend.src.controllers.sync import client as sync_client
             cli = sync_client.get_instance()
             if not cli or cli.conn_state != "connected":
                 ui.notify("Not connected to a remote node — configure one in "

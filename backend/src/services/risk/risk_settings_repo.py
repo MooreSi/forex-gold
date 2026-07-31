@@ -81,7 +81,7 @@ def _forward_settings_over_sync(updates: dict) -> None:
     configured — both get_instance() calls return None until sync.server
     .init()/sync.client.get_instance() have actually been used."""
     try:
-        from forex_trader.sync import client as _sync_cli_mod
+        from backend.src.controllers.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None:
             # propose_settings() queues into cli._pending_settings and only
@@ -95,7 +95,7 @@ def _forward_settings_over_sync(updates: dict) -> None:
         log.debug("[Sync] settings forward (client) failed: %s", e)
 
     try:
-        from forex_trader.sync import server as _sync_srv_mod
+        from backend.src.controllers.sync import server as _sync_srv_mod
         srv = _sync_srv_mod.get_instance()
         if srv is not None:
             _schedule_coro(srv.broadcast_settings())

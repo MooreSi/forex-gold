@@ -292,7 +292,7 @@ def test_remote_forwarding_forwards_when_centralized(fresh_db, engine):
     db.update_risk_settings({"centralized_signal_gen_enabled": 1})
     fake_client = _FakeSyncClient()
 
-    with patch("forex_trader.sync.client.get_instance", return_value=fake_client):
+    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
         result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
 
     assert result["executed_remotely"] is True

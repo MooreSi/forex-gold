@@ -177,7 +177,7 @@ def _show_registration_page() -> None:
             # ── Request Registration (automated flow) ──────────────────────────
 
             async def _request_registration():
-                from forex_trader.remote import client as _rc
+                from backend.src.controllers.remote import client as _rc
                 nickname = nickname_input.value.strip()
                 email    = email_input.value.strip()
                 if len(nickname) < 2:
@@ -284,8 +284,8 @@ def _show_registration_page() -> None:
             # gives the bat loop time to restart run.py cleanly.
 
             async def _check_activation():
-                from forex_trader.remote import client as _rc
-                from forex_trader.remote.client import _do_restart as _restart
+                from backend.src.controllers.remote import client as _rc
+                from backend.src.controllers.remote.client import _do_restart as _restart
                 if _rc.licence_activated.is_set():
                     _lic_timer.cancel()
                     status_lbl.set_text("Licence activated! Loading main app...")

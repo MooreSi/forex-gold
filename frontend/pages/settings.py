@@ -10,7 +10,7 @@ from nicegui import app, ui
 
 from forex_trader.core import database as db_module
 from backend.src.utils import os_utils as _pu
-from forex_trader.sync import client as sync_client
+from backend.src.controllers.sync import client as sync_client
 import backend.src.config as cfg_module
 
 # ── Prevent-sleep state (module-level so it survives page re-renders) ──────────

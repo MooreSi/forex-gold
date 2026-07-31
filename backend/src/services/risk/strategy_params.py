@@ -22,7 +22,7 @@ single tunable value; retuning those is a materially bigger, separate task.
 
 Live values (strategy_params_snapshot()) sync between Local/Remote nodes
 the same way Trading Schedule does -- one combined snapshot proposed/
-confirmed together, not a per-strategy message (see forex_trader.sync).
+confirmed together, not a per-strategy message (see backend.src.controllers.sync).
 The named-template library (strategy_param_templates table) stays
 node-local -- each node keeps its own saved presets.
 """
@@ -234,7 +234,7 @@ def _forward_strategy_params_over_sync() -> None:
     edits to different strategies. No-op (and near-zero cost) if sync
     isn't configured."""
     try:
-        from forex_trader.sync import client as _sync_cli_mod
+        from backend.src.controllers.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None:
             _schedule_coro(cli.propose_strategy_params(strategy_params_snapshot()))
@@ -243,7 +243,7 @@ def _forward_strategy_params_over_sync() -> None:
         log.debug("[Sync] strategy params forward (client) failed: %s", exc)
 
     try:
-        from forex_trader.sync import server as _sync_srv_mod
+        from backend.src.controllers.sync import server as _sync_srv_mod
         srv = _sync_srv_mod.get_instance()
         if srv is not None:
             _schedule_coro(srv.broadcast_strategy_params())

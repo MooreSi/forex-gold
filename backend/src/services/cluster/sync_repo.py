@@ -228,7 +228,7 @@ def should_generate_signals_here() -> bool:
     if not rs.get("centralized_signal_gen_enabled"):
         return True
     try:
-        from forex_trader.sync import server as _sync_srv_mod
+        from backend.src.controllers.sync import server as _sync_srv_mod
     except ImportError:
         return True
     if _sync_srv_mod.get_instance() is None:

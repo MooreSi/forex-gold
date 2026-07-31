@@ -18,7 +18,7 @@ from nicegui import ui
 
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 from forex_trader.core import database as db_module
-from forex_trader.sync import client as sync_client
+from backend.src.controllers.sync import client as sync_client
 from frontend.pages.trading import trade_source_label, trade_channel_label
 
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
@@ -98,8 +98,8 @@ def _untracked_position_node_label() -> str:
     open_trade() guarantees only one node ever opens a given position, so
     this is a reliable inference, not a guess."""
     try:
-        from forex_trader.sync.client import SyncClient
-        from forex_trader.sync.protocol import TRADER_REMOTE_VPS
+        from backend.src.controllers.sync.client import SyncClient
+        from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
         host, _, _ = SyncClient.load_config()
         if host and db_module.get_active_trader() == TRADER_REMOTE_VPS:
             return "Remote"

@@ -32,7 +32,7 @@ def push_trade_closed(trade: dict) -> None:
         return
 
     try:
-        from forex_trader.sync import server as sync_server
+        from backend.src.controllers.sync import server as sync_server
         srv = sync_server.get_instance()
         if srv is not None:
             asyncio.ensure_future(srv.push_own_trade_closed(trade))
@@ -41,7 +41,7 @@ def push_trade_closed(trade: dict) -> None:
         log.debug("[Ledger] server push failed: %s", e)
 
     try:
-        from forex_trader.sync import client as sync_client
+        from backend.src.controllers.sync import client as sync_client
         cli = sync_client.get_instance()
         if cli is not None and cli.conn_state == "connected":
             asyncio.ensure_future(cli.push_trade_closed(trade))

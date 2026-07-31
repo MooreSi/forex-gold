@@ -5,7 +5,7 @@ Runs on the admin's machine (fixed IP 217.155.25.160, port 8443).
 Accepts authenticated connections from remote clients.
 
 Startup:
-    import forex_trader.remote.server as remote_server
+    import backend.src.controllers.remote.server as remote_server
     remote_server.start()          # call once during app startup
     remote_server.stop()           # call on shutdown
 """
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.src.config import USER_DATA_DIR
-from forex_trader.remote.protocol import (
+from backend.src.controllers.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
     MSG_PING, MSG_GET_DIAG, MSG_UPDATE_BEGIN, MSG_UPDATE_END, MSG_VERSION_INFO,
@@ -32,7 +32,7 @@ from forex_trader.remote.protocol import (
     MSG_CLIENTS_PUSH, MSG_LICENCES_PUSH, MSG_ADMIN_RESULT,
     make,
 )
-from forex_trader.remote.tls import server_ssl_context, SERVER_PORT
+from backend.src.controllers.remote.tls import server_ssl_context, SERVER_PORT
 
 log = logging.getLogger(__name__)
 
@@ -708,7 +708,7 @@ async def _handler(websocket) -> None:
             except Exception:
                 pass
             return
-        from forex_trader.remote.auth import verify_password
+        from backend.src.controllers.remote.auth import verify_password
         if not verify_password(password):
             log.warning("[RemoteServer] Admin hello from %s — wrong password", uuid[:8])
             try:
@@ -1152,7 +1152,7 @@ def start() -> None:
     async def _run():
         global _server_obj
         import websockets
-        from forex_trader.remote.ip_check import is_admin_machine, ADMIN_EXTERNAL_IP
+        from backend.src.controllers.remote.ip_check import is_admin_machine, ADMIN_EXTERNAL_IP
 
         # IP gate — refuse to start on any machine that isn't the admin machine
         log.info("[RemoteServer] Verifying external IP before starting…")

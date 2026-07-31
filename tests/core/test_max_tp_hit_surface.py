@@ -114,7 +114,7 @@ def test_tp_level_none_reached():
 def test_missing_open_time_saves_none_directly_no_candle_fetch(fresh_db):
     _insert_trade("t-missing", open_time=0.0, close_time=time.time() - 2000)
     bridge = _FakeBridge()
-    with mock.patch("forex_trader.sync.ledger.push_trade_closed") as mock_push:
+    with mock.patch("backend.src.controllers.sync.ledger.push_trade_closed") as mock_push:
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
     assert _max_tp_hit("t-missing") == "none"
     assert bridge.calls == []
@@ -126,7 +126,7 @@ def test_normal_buy_prefers_sig_tp_over_tp_and_pushes_ledger(fresh_db):
                   sig_tp2=2420.0, net_pnl=15.0, tg_source="chan1", mt5_ticket=777)
     bridge = _FakeBridge(candles=[{"high": 2415.0, "low": 2398.0}, {"high": 2422.0, "low": 2400.0}])
     pushed = []
-    with mock.patch("forex_trader.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
+    with mock.patch("backend.src.controllers.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
     assert _max_tp_hit("t-normal") == "TP2"
     assert len(pushed) == 1
@@ -140,7 +140,7 @@ def test_normal_buy_prefers_sig_tp_over_tp_and_pushes_ledger(fresh_db):
 def test_no_candles_skips_no_save_no_push(fresh_db):
     _insert_trade("t-nocandles", tp1=2405.0)
     bridge = _FakeBridge(candles=[])
-    with mock.patch("forex_trader.sync.ledger.push_trade_closed") as mock_push:
+    with mock.patch("backend.src.controllers.sync.ledger.push_trade_closed") as mock_push:
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
     assert _max_tp_hit("t-nocandles") is None
     mock_push.assert_not_called()
@@ -158,7 +158,7 @@ def test_per_trade_exception_does_not_stop_loop(fresh_db):
             return [{"high": 2410.0, "low": 2398.0}]
 
     bridge = _RaisingBridge()
-    with mock.patch("forex_trader.sync.ledger.push_trade_closed"):
+    with mock.patch("backend.src.controllers.sync.ledger.push_trade_closed"):
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
     assert _max_tp_hit("t-bad") is None
     assert _max_tp_hit("t-good") == "TP1"
@@ -167,7 +167,7 @@ def test_per_trade_exception_does_not_stop_loop(fresh_db):
 def test_ledger_push_exception_swallowed_save_still_happens(fresh_db):
     _insert_trade("t-e", direction="SELL", tp1=2395.0)
     bridge = _FakeBridge(candles=[{"high": 2402.0, "low": 2390.0}])
-    with mock.patch("forex_trader.sync.ledger.push_trade_closed", side_effect=RuntimeError("ledger down")):
+    with mock.patch("backend.src.controllers.sync.ledger.push_trade_closed", side_effect=RuntimeError("ledger down")):
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
     assert _max_tp_hit("t-e") == "TP1"
 
@@ -177,7 +177,7 @@ def test_net_pnl_outcome_thresholds(fresh_db):
     _insert_trade("t-loss", tp1=2405.0, net_pnl=-3.0)
     bridge = _FakeBridge(candles=[{"high": 2410.0, "low": 2398.0}])
     pushed = []
-    with mock.patch("forex_trader.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
+    with mock.patch("backend.src.controllers.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
         asyncio.run(maxtp.max_tp_checker_sweep(bridge))
     by_id = {p["trade_id"]: p["outcome"] for p in pushed}
     assert by_id["t-be"] == "be"
@@ -190,7 +190,7 @@ def test_backfill_skips_when_recomputed_matches_stored(fresh_db):
     _insert_trade("t-same", tp1=2405.0, max_tp_hit="TP1", net_pnl=5.0)
     bridge = _FakeBridge(candles=[{"high": 2408.0, "low": 2398.0}])
     with mock.patch("asyncio.sleep", new=mock.AsyncMock()), \
-         mock.patch("forex_trader.sync.ledger.push_trade_closed") as mock_push:
+         mock.patch("backend.src.controllers.sync.ledger.push_trade_closed") as mock_push:
         asyncio.run(maxtp.backfill_max_tp_hit_corrected(bridge))
     assert _max_tp_hit("t-same") == "TP1"
     mock_push.assert_not_called()
@@ -201,7 +201,7 @@ def test_backfill_saves_and_pushes_when_recomputed_differs(fresh_db):
     bridge = _FakeBridge(candles=[{"high": 2418.0, "low": 2398.0}])
     pushed = []
     with mock.patch("asyncio.sleep", new=mock.AsyncMock()), \
-         mock.patch("forex_trader.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
+         mock.patch("backend.src.controllers.sync.ledger.push_trade_closed", side_effect=lambda d: pushed.append(dict(d))):
         asyncio.run(maxtp.backfill_max_tp_hit_corrected(bridge))
     assert _max_tp_hit("t-diff") == "TP2"
     assert len(pushed) == 1
@@ -230,7 +230,7 @@ def test_backfill_per_trade_exception_does_not_stop_loop(fresh_db):
 
     bridge = _RaisingBridge()
     with mock.patch("asyncio.sleep", new=mock.AsyncMock()), \
-         mock.patch("forex_trader.sync.ledger.push_trade_closed"):
+         mock.patch("backend.src.controllers.sync.ledger.push_trade_closed"):
         asyncio.run(maxtp.backfill_max_tp_hit_corrected(bridge))
     assert _max_tp_hit("t-bad") == "TP1"  # untouched, exception before save
     assert _max_tp_hit("t-good") == "TP2"

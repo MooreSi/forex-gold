@@ -11,7 +11,7 @@ import logging
 from nicegui import ui
 
 from forex_trader.core import database as db_module
-from forex_trader.sync import tls_util
+from backend.src.controllers.sync import tls_util
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def render(get_engine=None) -> None:
                            type="warning")
 
             async def _toggle_server(e):
-                from forex_trader.sync import server as sync_server
+                from backend.src.controllers.sync import server as sync_server
                 db_module.set_app_config("sync_server_enabled", "1" if e.value else "0")
                 db_module.set_app_config("sync_server_port", str(int(port_input.value)))
                 if e.value:
@@ -142,7 +142,7 @@ def render(get_engine=None) -> None:
             remote_status_box = ui.column().classes("w-full gap-1 mt-2")
 
             async def _save_and_connect():
-                from forex_trader.sync import client as sync_client
+                from backend.src.controllers.sync import client as sync_client
                 cli = sync_client.get_instance()
                 host, port, token = host_input.value.strip(), int(cport_input.value), token_input.value.strip()
                 if not host or not token:
@@ -153,7 +153,7 @@ def render(get_engine=None) -> None:
                 ui.notify("Connecting…", type="info")
 
             async def _disconnect():
-                from forex_trader.sync import client as sync_client
+                from backend.src.controllers.sync import client as sync_client
                 sync_client.get_instance().stop()
                 ui.notify("Disconnected from VPS.", type="warning")
 
@@ -162,7 +162,7 @@ def render(get_engine=None) -> None:
                 ui.button("Disconnect", on_click=_disconnect).props("outline")
 
             def _tick_status():
-                from forex_trader.sync import client as sync_client
+                from backend.src.controllers.sync import client as sync_client
                 cli = sync_client.get_instance()
                 conn_status_lbl.text = f"status: {cli.conn_state}" + (
                     f" ({cli.last_error})" if cli.last_error and cli.conn_state != "connected" else ""
@@ -239,7 +239,7 @@ def render(get_engine=None) -> None:
             transfer_status_lbl = ui.label("").classes("text-xs text-gray-400 mt-1")
 
             async def _download_models():
-                from forex_trader.sync import client as sync_client
+                from backend.src.controllers.sync import client as sync_client
                 cli = sync_client.get_instance()
                 if cli.conn_state != "connected":
                     ui.notify("Not connected to a VPS.", type="negative")
@@ -254,7 +254,7 @@ def render(get_engine=None) -> None:
                     ui.notify(f"Download failed: {exc}", type="negative")
 
             async def _upload_models():
-                from forex_trader.sync import client as sync_client
+                from backend.src.controllers.sync import client as sync_client
                 cli = sync_client.get_instance()
                 if cli.conn_state != "connected":
                     ui.notify("Not connected to a VPS.", type="negative")
@@ -274,5 +274,5 @@ def render(get_engine=None) -> None:
 
 
 def _load_client_config() -> tuple[str, int, str]:
-    from forex_trader.sync.client import SyncClient
+    from backend.src.controllers.sync.client import SyncClient
     return SyncClient.load_config()

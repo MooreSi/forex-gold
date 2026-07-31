@@ -1096,7 +1096,7 @@ from forex_trader.core.core_db_retention import (  # noqa: E402,F401
     set_data_retention_days,
     prune_historical_data,
 )
-from forex_trader.core.core_db_sync import (  # noqa: E402,F401
+from backend.src.services.cluster.sync_repo import (  # noqa: E402,F401
     _ensure_sync_tables,
     get_or_create_node_id,
     record_consolidated_trade,
@@ -1240,7 +1240,7 @@ from backend.src.services.ai.recovered_repo import (  # noqa: E402,F401
     mark_ai_recovered_signal_rule_result_by_tg_id,
     discard_ai_recovered_signal_by_tg_id,
 )
-from forex_trader.core.core_db_signal_bus import (  # noqa: E402,F401
+from backend.src.services.cluster.signal_bus import (  # noqa: E402,F401
     _ensure_signal_bus,
     write_signal_bus,
     close_bus_entry,

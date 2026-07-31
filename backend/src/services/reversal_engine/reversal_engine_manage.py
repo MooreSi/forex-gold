@@ -190,7 +190,7 @@ class _ManagementMixin:
             except Exception:
                 pass
             try:
-                from forex_trader.sync.ledger import push_trade_closed
+                from backend.src.controllers.sync.ledger import push_trade_closed
                 push_trade_closed({
                     "trade_id":    sig.get("signal_ref") or str(sig_id),
                     "engine":      "reversal_engine",
@@ -261,7 +261,7 @@ class _ManagementMixin:
             except Exception:
                 pass
             try:
-                from forex_trader.sync.ledger import push_trade_closed
+                from backend.src.controllers.sync.ledger import push_trade_closed
                 push_trade_closed({
                     "trade_id":    sig.get("signal_ref") or str(sig_id),
                     "engine":      "reversal_engine",
@@ -340,7 +340,7 @@ class _ManagementMixin:
             except Exception:
                 pass
             try:
-                from forex_trader.sync.ledger import push_trade_closed
+                from backend.src.controllers.sync.ledger import push_trade_closed
                 push_trade_closed({
                     "trade_id":    sig.get("signal_ref") or str(sig_id),
                     "engine":      "reversal_engine",
@@ -467,7 +467,7 @@ class _ManagementMixin:
         except Exception:
             pass
         try:
-            from forex_trader.sync.ledger import push_trade_closed
+            from backend.src.controllers.sync.ledger import push_trade_closed
             push_trade_closed({
                 "trade_id":    sig.get("signal_ref") or str(sig_id),
                 "engine":      "reversal_engine",

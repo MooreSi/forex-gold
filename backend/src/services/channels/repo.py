@@ -22,7 +22,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
-from forex_trader.core.core_db_sync import _ensure_sync_tables  # noqa: E402
+from backend.src.services.cluster.sync_repo import _ensure_sync_tables  # noqa: E402
 # Imported inside _refresh to avoid an import-order cycle: read_repo imports
 # database, database imports this module, and this module needs read_repo's
 # helpers. Deferring to call time means no order of first-import can break
@@ -492,7 +492,7 @@ def _forward_channel_strategy_over_sync(source: str, strategy: str | None, auto:
     """Send a locally-made channel-strategy change to the paired node,
     whichever role this process has. No-op if sync isn't configured."""
     try:
-        from forex_trader.sync import client as _sync_cli_mod
+        from backend.src.controllers.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None:
             _schedule_coro(cli.propose_channel_strategy(source, strategy, auto))
@@ -501,7 +501,7 @@ def _forward_channel_strategy_over_sync(source: str, strategy: str | None, auto:
         log.debug("[Sync] channel strategy forward (client) failed: %s", e)
 
     try:
-        from forex_trader.sync import server as _sync_srv_mod
+        from backend.src.controllers.sync import server as _sync_srv_mod
         srv = _sync_srv_mod.get_instance()
         if srv is not None:
             _schedule_coro(srv.broadcast_channel_strategy())

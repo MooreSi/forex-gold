@@ -10,7 +10,7 @@ the other's, for seeding a freshly-set-up node with a more mature model.
 
 The actual websocket send/receive loop lives in server.py and client.py
 (mirroring the proven binary-frame pattern already used in
-forex_trader.remote for app updates); this module only packages bytes.
+backend.src.controllers.remote for app updates); this module only packages bytes.
 """
 from __future__ import annotations
 

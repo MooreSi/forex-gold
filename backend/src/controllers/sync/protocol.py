@@ -2,7 +2,7 @@
 Local/Remote node sync protocol — WebSocket messages between the Mac (client)
 and the VPS (server) for the dual-instance feature.
 
-Deliberately separate from forex_trader.remote, which is a hub-and-spoke
+Deliberately separate from backend.src.controllers.remote, which is a hub-and-spoke
 licence/admin/update-distribution protocol for many customer installs
 connecting to a central server. This is a 1:1 peer link between two
 instances of the same person's own app: the VPS (fixed IP, always-on,

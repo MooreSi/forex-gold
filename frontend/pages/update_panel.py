@@ -12,10 +12,10 @@ from pathlib import Path
 
 from nicegui import ui
 
-from forex_trader.remote.client import (
+from backend.src.controllers.remote.client import (
     get_or_create_token, get_status, get_stored_email, request_registration, _app_version,
 )
-from forex_trader.remote.tls import SERVER_HOST, SERVER_PORT
+from backend.src.controllers.remote.tls import SERVER_HOST, SERVER_PORT
 
 
 def _read_changelog() -> list[str]:

@@ -56,7 +56,7 @@ def _no_external_side_effects(monkeypatch):
         lambda engine, signal_id: None,
     )
     monkeypatch.setattr(
-        "forex_trader.sync.ledger.push_trade_closed",
+        "backend.src.controllers.sync.ledger.push_trade_closed",
         lambda trade: None,
     )
 

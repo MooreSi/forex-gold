@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Optional
 
 import backend.src.config as cfg_module
-from forex_trader.core import database as db_module
-from forex_trader.core.engine import SimulationEngine
+from backend.src.db import database as db_module
+from backend.src.runtime import SimulationEngine
 from backend.src.services.telegram.reader import TelegramReader
 
 import backend.src.services.test_signal.test_signal_service as _test_engine_module

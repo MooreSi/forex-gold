@@ -134,7 +134,7 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
     Returns {source: {strategy, reasoning, confidence}}.
     """
     from backend.src.services.ai import provider as ai_provider
-    from forex_trader.core import database as _db
+    from backend.src.db import database as _db
     from backend.src.utils.models import STRATEGY_NAMES
 
     results: dict[str, dict] = {}
@@ -362,7 +362,7 @@ async def evaluate_signal_strategy(
     skip=True means the AI recommends not trading this specific signal.
     """
     from backend.src.services.ai import provider as ai_provider
-    from forex_trader.core import database as _db
+    from backend.src.db import database as _db
     from backend.src.utils.models import STRATEGY_NAMES
 
     valid_strategies = list(STRATEGY_NAMES.keys())

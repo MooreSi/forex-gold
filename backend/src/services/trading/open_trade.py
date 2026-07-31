@@ -23,7 +23,7 @@ import time
 import uuid
 from typing import Any, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.governor import is_trading_paused
 from backend.src.utils.models import (

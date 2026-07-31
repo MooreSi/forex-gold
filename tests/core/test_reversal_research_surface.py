@@ -16,7 +16,7 @@ from datetime import datetime
 import pytest
 from unittest import mock
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.reversal_engine import research as re_research
 
 

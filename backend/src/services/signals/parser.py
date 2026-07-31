@@ -725,7 +725,7 @@ def parse_with_learned_rules(text: str, channel_name: str) -> Optional[dict]:
     before the caller ever needs to fall back to a live AI call — the whole
     point of the approve-and-learn workflow. Returns None if no saved rule
     matches, in which case the caller proceeds exactly as before."""
-    from forex_trader.core import database as _db
+    from backend.src.db import database as _db
     for rule_row in _db.get_learned_parser_rules(channel_name):
         try:
             rule = json.loads(rule_row.get("pattern") or "{}")
@@ -764,7 +764,7 @@ def check_sl_adjustment_rules(text: str, channel_name: str) -> Optional[float]:
     the caller falls back to a live AI classification call — same
     approve-and-learn shortcut as parse_with_learned_rules(), for the
     SL-adjustment message category instead of new entries."""
-    from forex_trader.core import database as _db
+    from backend.src.db import database as _db
     for rule_row in _db.get_learned_rules_by_type(channel_name, "ai_derived_sl_adjust"):
         try:
             rule = json.loads(rule_row.get("pattern") or "{}")

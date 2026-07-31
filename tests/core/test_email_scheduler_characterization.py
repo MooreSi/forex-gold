@@ -16,11 +16,11 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.notifications import email_service
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import scheduler as core_email_scheduler
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

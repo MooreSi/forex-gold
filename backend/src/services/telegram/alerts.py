@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.broker.ea_templates import TEMPLATE_OVERRIDE_PREFIX as _TEMPLATE_OVERRIDE_PREFIX
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 

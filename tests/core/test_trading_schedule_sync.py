@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.risk import schedule as sched
 from backend.src.controllers.sync.server import SyncServer
 from backend.src.controllers.sync.client import SyncClient

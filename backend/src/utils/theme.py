@@ -21,7 +21,7 @@ Remote nodes (this is a local display preference, not trading state).
 """
 from __future__ import annotations
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 _THEME_KEY = "ui_theme"
 DEFAULT_THEME = "midnight"

@@ -394,7 +394,7 @@ class EABridge:
         """Called once per EA connection (on "hello") -- restores every
         still-'working' pending order so a prior EA restart can't leave any
         of them permanently untracked. See restore_pending_order()."""
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
 
         def _fetch():
             with db_module.db() as conn:
@@ -450,7 +450,7 @@ class EABridge:
         Python-managed (non-EA) trades too, not just ones opened after the
         change. Fire-and-forget: no ack expected, same as update_trade.
         """
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         rs = await db_module.to_db_thread(db_module.get_risk_settings)
         msg = {
             "type": "set_global_config",
@@ -508,7 +508,7 @@ class EABridge:
             log.warning("[EABridge] tp_hit handling failed for %s: %s", trade_id, e)
 
     async def _on_sl_moved(self, msg: dict) -> None:
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         from backend.src.services.telegram import alerts as telegram_alerts
         trade_id = msg.get("trade_id")
         new_sl   = float(msg.get("new_sl", 0))
@@ -568,7 +568,7 @@ class EABridge:
         from any other EA-managed trade — same vantage_simulated_trades
         row shape, same self._active tracking, same fallback-watchdog
         reclaim path if the EA later goes unhealthy."""
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         from backend.src.services.telegram import alerts as telegram_alerts
         trade_id   = msg.get("trade_id")
         ticket     = msg.get("ticket")
@@ -668,7 +668,7 @@ class EABridge:
         off, later legs' fills are still managed live by the EA but aren't
         separately reflected here (same single-row shape every other
         strategy uses)."""
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         from backend.src.services.telegram import alerts as telegram_alerts
         original_id = leg_trade_id.rsplit("-g", 1)[0]
         now = time.time()
@@ -727,7 +727,7 @@ class EABridge:
         expiry) or was cancelled manually in the terminal; the EA can't
         reliably distinguish the two from a bare "order gone, no matching
         position" observation, so `reason` is best-effort, not authoritative."""
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         from backend.src.services.telegram import alerts as telegram_alerts
         trade_id = msg.get("trade_id")
         reason   = msg.get("reason", "cancelled")
@@ -759,7 +759,7 @@ class EABridge:
             log.warning("[EABridge] pending_order_cancelled handling failed for %s: %s", trade_id, e)
 
     async def _fetch_pending_order(self, trade_id: str) -> Optional[dict]:
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         def _fetch():
             with db_module.db() as conn:
                 return db_module.row_to_dict(
@@ -770,7 +770,7 @@ class EABridge:
         return await db_module.to_db_thread(_fetch)
 
     async def _fetch_trade(self, trade_id: str) -> Optional[dict]:
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         def _fetch():
             with db_module.db() as conn:
                 return db_module.row_to_dict(
@@ -805,7 +805,7 @@ def get_effective_ea_status() -> tuple[bool, str]:
     Used by the top-bar EA badge (see ui/app.py) so it stays accurate no
     matter which node is actually doing the trading."""
     try:
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         from backend.src.controllers.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None and cli.conn_state == "connected" and db_module.get_active_trader() != "local":

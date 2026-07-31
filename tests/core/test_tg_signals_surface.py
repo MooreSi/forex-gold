@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.signals import tg_repo as tgs
 
 

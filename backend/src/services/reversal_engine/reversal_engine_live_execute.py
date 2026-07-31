@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 from backend.src.services.reversal_engine import level_detector as ld
 
@@ -33,7 +33,7 @@ class _LiveExecuteMixin:
     async def _try_live_execute(self, sig: dict, trigger_price: float, tick=None) -> None:
         """Execute a real MT5 trade if live execution is enabled and ML gate passes."""
         try:
-            from forex_trader.core import database as core_db
+            from backend.src.db import database as core_db
             rs = core_db.get_risk_settings()
             if not rs.get("re_live_execution", 0):
                 # Write a status so the orphan watchdog doesn't misfire on healthy

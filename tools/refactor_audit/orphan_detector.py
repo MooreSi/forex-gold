@@ -28,6 +28,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# core/ was fully dissolved by the restructure; the glob over it returns
+# nothing, which keeps every core_*-scoped check vacuously green while the
+# history-mode tools (divergence_detector) can still be pointed at old paths.
 CORE_DIR = REPO_ROOT / "forex_trader" / "core"
 ALLOWLIST_PATH = Path(__file__).parent / "orphan_allowlist.json"
 

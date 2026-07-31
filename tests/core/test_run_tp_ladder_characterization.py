@@ -15,10 +15,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.risk import strategy_params as sp
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
 
 

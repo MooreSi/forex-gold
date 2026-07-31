@@ -4,7 +4,7 @@ _backtest_orb_target_multiple/_orb_auto_execute on SimulationEngine
 docs/todo/refactor/core-orb-report-migration/010-*.md.
 
 datetime.now(timezone.utc) is controlled via
-unittest.mock.patch("forex_trader.core.engine.datetime"); every expected
+unittest.mock.patch("backend.src.runtime.datetime"); every expected
 value below was traced against unmodified engine.py with concrete
 candle/tick fixtures before being written into assertions, given the
 calendar-window and volume-profile math involved. No real or demo MT5
@@ -21,8 +21,8 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
-from forex_trader.core.engine import SimulationEngine
+from backend.src.db import database as db
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

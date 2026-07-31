@@ -21,7 +21,7 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
 
 
 def save_commentary(commentary: dict, trade_id: Optional[str], signal_id: Optional[str]) -> None:

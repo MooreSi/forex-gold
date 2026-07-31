@@ -29,7 +29,7 @@ import tempfile
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 
 
 def reset_thread_local_connection() -> None:
@@ -114,7 +114,7 @@ def make_engine():
         def test_x(make_engine):
             engine = make_engine(_bridge=FakeBridge(), _tp_cache={})
     """
-    from forex_trader.core.engine import SimulationEngine
+    from backend.src.runtime import SimulationEngine
 
     def _build(**attrs):
         engine = SimulationEngine.__new__(SimulationEngine)

@@ -32,7 +32,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.trading.fees_sizing import pnl as _pnl
 from backend.src.services.risk.governor import rg_apply_halts_on_close
 from backend.src.services.dpm.bookkeeping import finalize_dpm_record

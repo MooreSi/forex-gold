@@ -52,7 +52,7 @@ def _no_external_side_effects(monkeypatch):
         lambda signal_id, outcome: None,
     )
     monkeypatch.setattr(
-        "forex_trader.core.database.close_bus_entry",
+        "backend.src.db.database.close_bus_entry",
         lambda engine, signal_id: None,
     )
     monkeypatch.setattr(

@@ -38,8 +38,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from forex_trader.core.database import db, _schedule_coro
-from forex_trader.core import database as db_module
+from backend.src.db.database import db, _schedule_coro
+from backend.src.db import database as db_module
 
 log = logging.getLogger(__name__)
 

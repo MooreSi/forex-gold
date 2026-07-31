@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 from typing import Callable, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 from nicegui import ui
 
@@ -322,7 +322,7 @@ def render() -> None:
         # snapshot) — same bullet-text style as Bounce/Breakout, for a
         # consistent look across all three Signal Generator tabs.
         try:
-            from forex_trader.core import database as _main_db
+            from backend.src.db import database as _main_db
             _rs = await _main_db.to_db_thread(_main_db.get_risk_settings)
             _live = bool(_rs.get("re_live_execution", 0))
         except Exception:

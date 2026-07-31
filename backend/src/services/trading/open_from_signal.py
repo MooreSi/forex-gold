@@ -28,7 +28,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.signals.resolution import (
     resolve_open_trade_params,

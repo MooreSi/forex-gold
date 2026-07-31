@@ -11,14 +11,14 @@
       "backend/src/controllers/remote/server.py": 1196,
       "backend/src/controllers/sync/client.py": 867,
       "backend/src/controllers/sync/server.py": 1097,
+      "backend/src/db/database.py": 1251,
+      "backend/src/runtime.py": 3143,
       "backend/src/services/backtest/engine.py": 1125,
       "backend/src/services/broker/ea_bridge.py": 816,
       "backend/src/services/notifications/email_service.py": 946,
       "backend/src/services/telegram/reader.py": 1037,
       "backend/src/services/test_signal/ml_engine.py": 896,
       "backend/src/services/test_signal/signal_generator.py": 1052,
-      "forex_trader/core/database.py": 1251,
-      "forex_trader/core/engine.py": 3143,
       "frontend/app.py": 1642,
       "frontend/pages/ai_trade_analysis.py": 1721,
       "frontend/pages/breakout_panel.py": 930,
@@ -32,6 +32,7 @@
     },
     "sql": {
       "backend/src/controllers/sync/server.py": 3,
+      "backend/src/runtime.py": 13,
       "backend/src/services/backtest/engine.py": 2,
       "backend/src/services/breakout_signal/breakout_signal_manage.py": 2,
       "backend/src/services/breakout_signal/breakout_signal_service.py": 1,
@@ -91,7 +92,6 @@
       "backend/src/services/trading/sim_account.py": 6,
       "backend/src/services/trading/update_signal.py": 3,
       "backend/src/utils/retention.py": 1,
-      "forex_trader/core/engine.py": 13,
       "frontend/app.py": 1,
       "frontend/pages/ai_trade_analysis.py": 7,
       "frontend/pages/dpm_analysis.py": 3,
@@ -100,10 +100,10 @@
       "frontend/pages/trading.py": 3
     },
     "transaction": {
+      "backend/src/db/database.py": 1,
       "backend/src/services/ai/recovered_repo.py": 3,
       "backend/src/services/reversal_engine/database.py": 3,
-      "backend/src/services/test_signal/database.py": 1,
-      "forex_trader/core/database.py": 1
+      "backend/src/services/test_signal/database.py": 1
     },
     "ui_db": {
       "frontend/app.py": 1,

@@ -28,7 +28,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.positions.tp_tracking import (

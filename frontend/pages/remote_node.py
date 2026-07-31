@@ -10,7 +10,7 @@ import logging
 
 from nicegui import ui
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.controllers.sync import tls_util
 
 log = logging.getLogger(__name__)

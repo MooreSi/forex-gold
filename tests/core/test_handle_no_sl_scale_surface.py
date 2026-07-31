@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.positions import handle_no_sl_scale as hnss
 from backend.src.services.positions.tp_tracking import TPCache
 

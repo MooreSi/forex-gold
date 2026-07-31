@@ -18,7 +18,7 @@ import logging
 import time
 from typing import Any
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.positions.tp_tracking import TPCache, get_triggered_tps
 from backend.src.utils.models import MAX_TP, Tick

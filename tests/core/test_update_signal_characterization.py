@@ -12,9 +12,9 @@ import time
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_BE_RUNNER,

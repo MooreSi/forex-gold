@@ -20,7 +20,7 @@ import logging
 import time
 from typing import Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.controllers.sync import tls_util
 from backend.src.controllers.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
@@ -375,7 +375,7 @@ class SyncServer:
                     if key is None:
                         error = f"set_ai_eval not supported for {engine_name}"
                     else:
-                        from forex_trader.core import database as _db
+                        from backend.src.db import database as _db
                         _db.update_risk_settings({key: 1 if msg.get("enabled") else 0})
                 else:
                     error = f"unknown action: {action}"

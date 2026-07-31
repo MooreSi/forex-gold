@@ -176,7 +176,7 @@ def ui_db_report() -> dict[str, int]:
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
                 # Both shapes count, and the second is the common one here:
-                #   from forex_trader.core.database import db   -> in node.module
+                #   from backend.src.db.database import db   -> in node.module
                 #   from forex_trader.core import database      -> in node.names
                 if "database" in node.module or node.module == "sqlite3":
                     hits += 1

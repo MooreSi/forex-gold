@@ -156,7 +156,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             pass
 
         try:
-            from forex_trader.core import database as _cdb_so
+            from backend.src.db import database as _cdb_so
             if _cdb_so.get_channel_strategy_override("Breakout Engine") is None:
                 _cdb_so.set_channel_strategy_override("Breakout Engine", "scale_out")
                 _log.info(
@@ -199,7 +199,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         state used by the velocity monitor."""
         self.last_cycle_at = time.time()
 
-        from forex_trader.core import database as _db_module
+        from backend.src.db import database as _db_module
         if await _db_module.to_db_thread(_db_module.is_remote_node):
             self.status_detail = "Remote/VPS node — signal generation is local-node-only"
             return
@@ -246,7 +246,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 _atr_ref = compute_atr(m5_candles[-50:-10], period=14)
                 if _atr_ref > 0:
                     try:
-                        from forex_trader.core import database as _cdb_ac
+                        from backend.src.db import database as _cdb_ac
                         _ac_thr = float(_cdb_ac.get_risk_settings().get("atr_collapse_threshold", 0.65))
                     except Exception:
                         _ac_thr = 0.65
@@ -466,7 +466,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             _log.debug("[BO-Engine] consec_loss check failed: %s", _cl_exc)
 
         try:
-            from forex_trader.core import database as _cdb
+            from backend.src.db import database as _cdb
             if _cdb.has_conflict_on_bus("breakout", candidate["direction"], window_seconds=21600.0):
                 _conf_reason = (
                     f"Cross-engine conflict: another engine has active "
@@ -502,7 +502,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             return
 
         try:
-            from forex_trader.core.database import get_risk_settings as _grs_claude
+            from backend.src.db.database import get_risk_settings as _grs_claude
             _bo_claude_on = bool(_grs_claude().get("bo_claude_eval_enabled", 1))
         except Exception:
             _bo_claude_on = True
@@ -555,7 +555,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         signal_ref = f"BO-{ref_hash}"
 
         try:
-            from forex_trader.core.database import get_risk_settings as _grs
+            from backend.src.db.database import get_risk_settings as _grs
             _bo_strategy = _grs().get("trade_strategy", "conservative")
         except Exception:
             _bo_strategy = "conservative"
@@ -595,7 +595,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             sig_data["news_proximity_norm"] = 1.0
 
         try:
-            from forex_trader.core import database as _cdb
+            from backend.src.db import database as _cdb
             sig_data["regime_score"]          = _cdb.get_regime_score(adx, atr)
             sig_data["equity_drawdown_pct"]   = _cdb.get_equity_drawdown_pct()
             sig_data["concurrent_agreement"]  = _cdb.get_concurrent_agreement(
@@ -607,7 +607,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             sig_data.setdefault("concurrent_agreement", 0.0)
 
         try:
-            from forex_trader.core import database as _cdb
+            from backend.src.db import database as _cdb
             _ml_conf = float(sig_data.get("quality_score") or 0.5)
             _cdb.write_signal_bus("breakout", candidate["direction"], confidence=_ml_conf,
                                    signal_id=sig_id, ttl_seconds=21600.0)
@@ -683,7 +683,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             # ── Live-execution closure sync ───────────────────────────────
             if status == "triggered" and sig.get("mt5_ticket") and sig.get("live_exec_status") == "success":
                 try:
-                    from forex_trader.core import database as _mdb
+                    from backend.src.db import database as _mdb
 
                     def _fetch_mt5_close():
                         import sqlite3 as _sl3
@@ -730,7 +730,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 continue
 
             if status == "pending":
-                from forex_trader.core.database import is_session_allowed as _isa
+                from backend.src.db.database import is_session_allowed as _isa
                 _sess_ok, _sess_name = _isa()
                 if not _sess_ok:
                     _log.debug(

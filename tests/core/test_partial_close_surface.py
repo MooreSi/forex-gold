@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading import partial_close as pc
 
 

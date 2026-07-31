@@ -25,7 +25,7 @@ def _fetch_tg_outcomes(max_age_days: int = 7) -> list[dict]:
     Success = signal's trade reached TP1 (partial close with reason LIKE 'TP1%')."""
     import time as _t
     try:
-        from forex_trader.core import database as _main_db
+        from backend.src.db import database as _main_db
         cutoff = _t.time() - max_age_days * 86400
         with _main_db.db() as conn:
             rows = conn.execute(

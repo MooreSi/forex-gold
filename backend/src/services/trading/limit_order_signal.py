@@ -33,7 +33,7 @@ import time
 import uuid
 from typing import Any, Awaitable, Callable
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.utils.models import MAX_TP, STRATEGY_LIMIT_RUNNER
 

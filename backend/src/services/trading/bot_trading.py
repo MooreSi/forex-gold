@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any
 
 from backend.src.services.ai import claude_ai as claude_ai
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.notifications import email_service
 from backend.src.services.trading.close_trade import CloseTradeContext, close_trade, get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size

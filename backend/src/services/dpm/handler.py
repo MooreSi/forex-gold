@@ -33,7 +33,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.dpm.bookkeeping import (

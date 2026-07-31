@@ -403,7 +403,7 @@ def build_email_html(
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
-    from forex_trader.core import database as db_module
+    from backend.src.db import database as db_module
     from backend.src.services.telegram import alerts as telegram_alerts
     from backend.src.services.notifications import email_service
 

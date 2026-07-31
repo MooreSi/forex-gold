@@ -16,9 +16,9 @@ from unittest import mock
 import pytest
 
 from backend.src.services.positions import safety_net as core_tp_safety_net
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

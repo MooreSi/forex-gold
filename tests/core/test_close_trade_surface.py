@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading import close_trade as ct
 
 

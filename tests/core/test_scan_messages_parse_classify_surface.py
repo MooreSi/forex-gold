@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.signals import scan_parse_classify as pc
 from backend.src.services.signals.parser import SIGNAL_PREFIX

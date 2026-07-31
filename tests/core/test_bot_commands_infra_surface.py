@@ -15,7 +15,7 @@ from unittest import mock
 import pytest
 
 import backend.src.config as cfg_mod
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.telegram import bot_infra as cmds
 
 

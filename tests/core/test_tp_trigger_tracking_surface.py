@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.positions import tp_tracking as tp
 
 

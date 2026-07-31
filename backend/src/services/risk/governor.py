@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.utils.models import (
     CONTRACT_SIZE, Tick,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,

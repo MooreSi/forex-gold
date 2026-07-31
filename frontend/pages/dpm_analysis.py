@@ -7,7 +7,7 @@ from typing import Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

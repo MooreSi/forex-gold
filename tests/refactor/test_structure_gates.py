@@ -46,8 +46,12 @@ def test_a_new_ui_database_import_fails():
 
 
 def test_engine_py_is_in_the_loc_baseline():
-    """It is 3,165 lines and regrew after the last refactor was called done."""
-    assert "forex_trader/core/engine.py" in sg.load_baseline()["loc"]
+    """It is 3,143 lines and regrew after the last refactor was called done.
+
+    The file is now backend/src/runtime.py -- same content, relocated in the
+    finale move -- and the shrink-only ceiling must follow it, not lapse.
+    """
+    assert "backend/src/runtime.py" in sg.load_baseline()["loc"]
 
 
 def test_repo_files_are_exempt_from_the_sql_gate():
@@ -101,7 +105,7 @@ def test_an_unreadable_statement_still_counts():
 
 
 def test_ui_db_gate_sees_the_aliased_import_form():
-    """`from forex_trader.core import database as db_module` is how the pages
+    """`from backend.src.db import database as db_module` is how the pages
     actually do it -- the module path contains no "database" component, so a
     naive check reports 5 files instead of 14. Scoped to frontend/ since Phase 1."""
     report = sg.ui_db_report()

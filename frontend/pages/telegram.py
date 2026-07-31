@@ -9,7 +9,7 @@ from typing import Callable
 
 from nicegui import ui
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.telegram import keywords as logic_kw
 from backend.src.services.telegram.reader import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,

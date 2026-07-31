@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER
 from backend.src.controllers.sync.server import SyncServer

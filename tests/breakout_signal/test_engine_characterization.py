@@ -4,7 +4,7 @@ splits it -- see docs/todo/refactor/breakout-signal-migration/010-*.md.
 Scope note (same as reversal_engine's 020): the async orchestration loops
 (_run_cycle, _velocity_loop, _outcome_loop, _execute_live,
 _run_batch_analysis) are heavily externally coupled (MT5 bridge,
-self._main_engine, forex_trader.core.database, ai_provider/Claude) --
+self._main_engine, backend.src.db.database, ai_provider/Claude) --
 left uncovered by design. Covered here: _compute_cost_pts (pure) and
 _close_and_learn's P&L math, run against a real isolated DB.
 """

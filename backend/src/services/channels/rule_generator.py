@@ -27,7 +27,7 @@ import re
 from typing import Optional
 
 from backend.src.services.ai import provider as ai_provider
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.signals.parser import apply_learned_rule
 
 log = logging.getLogger(__name__)

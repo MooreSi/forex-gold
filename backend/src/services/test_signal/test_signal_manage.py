@@ -48,7 +48,7 @@ def _compute_cost_pts(spread_raw: float = 0.30) -> float:
     `spread_raw` = tick.ask - tick.bid at the time of close.
     """
     try:
-        from forex_trader.core import database as cdb
+        from backend.src.db import database as cdb
         fs = cdb.get_fee_settings()
         slippage_pts = fs.get("estimated_slippage_points", 5.0) * 0.01
         commission_rt = (
@@ -65,7 +65,7 @@ class _ManagementMixin:
     async def _reconcile_live_pnl(self) -> None:
         """Sync closed test_signal P&L with actual MT5 profit where they diverge."""
         try:
-            from forex_trader.core import database as _mdb
+            from backend.src.db import database as _mdb
 
             def _do_reconcile() -> int:
                 import sqlite3 as _sqlite3
@@ -150,7 +150,7 @@ class _ManagementMixin:
                             spread: float = 0.30) -> None:
         # Clear the signal bus entry immediately so other engines see it as resolved
         try:
-            from forex_trader.core import database as _cdb_bus_close
+            from backend.src.db import database as _cdb_bus_close
             _cdb_bus_close.close_bus_entry("bounce", signal_id)
         except Exception:
             pass
@@ -206,7 +206,7 @@ class _ManagementMixin:
         mt5_ticket = sig_row.get("mt5_ticket") if sig_row else None
         if mt5_ticket:
             try:
-                from forex_trader.core import database as _mdb
+                from backend.src.db import database as _mdb
                 with _mdb.db() as _mc:
                     _mr = _mc.execute(
                         "SELECT mt5_profit FROM vantage_simulated_trades"

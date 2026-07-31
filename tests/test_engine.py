@@ -38,8 +38,8 @@ _TEST_CONFIG = {
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from forex_trader.core import database as db_module
-from forex_trader.core.engine import SimulationEngine
+from backend.src.db import database as db_module
+from backend.src.runtime import SimulationEngine
 from backend.src.utils.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
 
 db_module.init(_TEST_DB)

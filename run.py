@@ -180,7 +180,7 @@ def _run_headless() -> None:
     import signal as _signal
 
     async def _main() -> None:
-        from forex_trader.core import app_lifecycle
+        from backend.src import app as app_lifecycle
         await app_lifecycle.startup()
         log.info("Headless FOREX Trader running (no web UI). Send /headless off "
                  "in Telegram to restore the dashboard on next restart.")
@@ -227,7 +227,7 @@ def main():
         port = int(cfg.get("port", 8888))
         _free_port(port)
 
-        from forex_trader.core import database as _db_mod
+        from backend.src.db import database as _db_mod
         _db_mod.init(cfg["db_path"])
 
         if _db_mod.get_app_config("headless_mode_enabled") == "1":

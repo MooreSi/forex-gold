@@ -5,7 +5,7 @@ docs/todo/refactor/core-fees-risk-governor-migration/020-*.md.
 
 None of these three functions ever used `self` in the original -- they
 extract cleanly as plain functions taking explicit parameters, calling
-the shared forex_trader.core.database module (db_module) directly. No
+the shared backend.src.db.database module (db_module) directly. No
 parallel repo needed: db_module already provides real transactional
 semantics (thread-local, re-entrant db()), unlike the isolated per-engine
 databases the reversal_engine/breakout_signal/test_signal packs migrated.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.utils.models import CONTRACT_SIZE, POINT_SIZE
 
 

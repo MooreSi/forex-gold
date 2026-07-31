@@ -21,8 +21,8 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-from forex_trader.core import database as _database_module  # noqa: E402
-from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.db import database as _database_module  # noqa: E402
+from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
 
 
 _RS_CACHE_TTL = 10.0  # seconds — risk settings change only on user edit

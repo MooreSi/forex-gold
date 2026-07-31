@@ -185,7 +185,7 @@ class _ManagementMixin:
             from backend.src.services.reversal_engine import ml_engine as re_ml
             re_ml.record_outcome(sig_id, outcome)
             try:
-                from forex_trader.core import database as _cdb_bus_sl
+                from backend.src.db import database as _cdb_bus_sl
                 _cdb_bus_sl.close_bus_entry("reversal_engine", sig_id)
             except Exception:
                 pass
@@ -256,7 +256,7 @@ class _ManagementMixin:
             from backend.src.services.reversal_engine import ml_engine as re_ml
             re_ml.record_outcome(sig_id, "win")
             try:
-                from forex_trader.core import database as _cdb_bus_tp
+                from backend.src.db import database as _cdb_bus_tp
                 _cdb_bus_tp.close_bus_entry("reversal_engine", sig_id)
             except Exception:
                 pass
@@ -335,7 +335,7 @@ class _ManagementMixin:
             from backend.src.services.reversal_engine import ml_engine as re_ml
             re_ml.record_outcome(sig_id, final_outcome)
             try:
-                from forex_trader.core import database as _cdb_bus_cons
+                from backend.src.db import database as _cdb_bus_cons
                 _cdb_bus_cons.close_bus_entry("reversal_engine", sig_id)
             except Exception:
                 pass
@@ -462,7 +462,7 @@ class _ManagementMixin:
         re_ml.record_outcome(sig_id, outcome)
         self._live_missing_streak.pop(ticket, None)
         try:
-            from forex_trader.core import database as _cdb_bus_live
+            from backend.src.db import database as _cdb_bus_live
             _cdb_bus_live.close_bus_entry("reversal_engine", sig_id)
         except Exception:
             pass

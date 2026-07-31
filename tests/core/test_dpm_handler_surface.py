@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.dpm import handler as dpm_handler
 from backend.src.services.dpm.bookkeeping import DPMCache

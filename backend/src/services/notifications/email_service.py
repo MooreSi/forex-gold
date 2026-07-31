@@ -867,7 +867,7 @@ async def send_email(
     SMTP; silently omitted (text still sends) on Mailjet — see
     _send_via_mailjet's docstring for why.
     """
-    from forex_trader.core import database as db_module
+    from backend.src.db import database as db_module
     if cfg is None:
         cfg = db_module.get_email_config()
 

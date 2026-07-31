@@ -259,7 +259,7 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
         _sg_live = False
         if self._main_engine is not None:
             try:
-                from forex_trader.core import database as _main_db
+                from backend.src.db import database as _main_db
                 _main_rs = _main_db.get_risk_settings()
                 _sg_live = bool(_main_rs.get("sg_live_execution", 0))
             except Exception:
@@ -274,7 +274,7 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
             # ── Live-execution closure sync ───────────────────────────────────
             if sig.get("status") == "triggered" and sig.get("mt5_ticket") and sig.get("live_exec_status") == "success":
                 try:
-                    from forex_trader.core import database as _mdb
+                    from backend.src.db import database as _mdb
 
                     def _fetch_mt5_close():
                         import sqlite3 as _sl3
@@ -332,7 +332,7 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
                         )
                         continue
 
-                    from forex_trader.core.database import is_session_allowed as _isa
+                    from backend.src.db.database import is_session_allowed as _isa
                     _sess_ok, _sess_name = _isa()
                     if not _sess_ok:
                         _log.debug(

@@ -293,7 +293,7 @@ def _build_status() -> dict:
     bridge_ok   = False
     is_native   = False
     try:
-        from forex_trader.core import database as _db
+        from backend.src.db import database as _db
         trades_open = _db.get_open_trade_count() or 0
     except Exception:
         pass
@@ -303,7 +303,7 @@ def _build_status() -> dict:
         # as "Bridge Offline". Read the live engine's own connection state
         # directly instead; only fall back to the HTTP health check when
         # actually running the HTTP bridge.
-        from forex_trader.core.app_lifecycle import get_engine
+        from backend.src.app import get_engine
         engine = get_engine()
         is_native = bool(getattr(engine, "_using_native_bridge", False))
     except Exception:

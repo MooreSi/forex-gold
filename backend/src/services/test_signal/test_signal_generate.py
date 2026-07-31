@@ -49,7 +49,7 @@ def _fetch_recent_tg_signals(max_age_seconds: int = 7200) -> list[dict]:
     """Return up to 3 Telegram signals from the main DB received in the last max_age_seconds."""
     import time as _t
     try:
-        from forex_trader.core import database as _main_db
+        from backend.src.db import database as _main_db
         cutoff = _t.time() - max_age_seconds
         with _main_db.db() as conn:
             rows = conn.execute(
@@ -90,7 +90,7 @@ def _calc_lot_size(
 
 class _GenerateMixin:
     async def _run_cycle(self) -> None:
-        from forex_trader.core import database as _db_module
+        from backend.src.db import database as _db_module
         if await _db_module.to_db_thread(_db_module.is_remote_node):
             self._status = "Remote/VPS node — signal generation is local-node-only"
             return
@@ -231,7 +231,7 @@ class _GenerateMixin:
             _atr_ref = compute_atr(m15_candles[-50:-10], period=14)
             if _atr_ref > 0:
                 try:
-                    from forex_trader.core import database as _cdb_ac
+                    from backend.src.db import database as _cdb_ac
                     _ac_thr = float(_cdb_ac.get_risk_settings().get("atr_collapse_threshold", 0.65))
                 except Exception:
                     _ac_thr = 0.65
@@ -407,7 +407,7 @@ class _GenerateMixin:
 
         # ── 9b. ML feature extraction ─────────────────────────────────────────
         try:
-            from forex_trader.core import database as _cdb_ctx
+            from backend.src.db import database as _cdb_ctx
             from backend.src.utils.news_calendar import get_news_proximity_norm
             candidate["news_proximity_norm"]  = get_news_proximity_norm()
             candidate["equity_drawdown_pct"]  = _cdb_ctx.get_equity_drawdown_pct()
@@ -454,7 +454,7 @@ class _GenerateMixin:
 
         # ── 10. Claude quality gate (optional) ───────────────────────────────
         try:
-            import forex_trader.core.database as _main_db_sg
+            import backend.src.db.database as _main_db_sg
             _sg_claude_on = bool(_main_db_sg.get_risk_settings().get("sg_claude_eval_enabled", 1))
         except Exception:
             _sg_claude_on = True
@@ -475,7 +475,7 @@ class _GenerateMixin:
 
         # ── Cross-engine conflict suppression ─────────────────────────────────
         try:
-            from forex_trader.core import database as _cdb_bus
+            from backend.src.db import database as _cdb_bus
             if _cdb_bus.has_conflict_on_bus("bounce", direction, window_seconds=21600.0):
                 reason = f"Cross-engine conflict: opposite-direction signal active on bus for {direction}"
                 self._status_detail = reason
@@ -560,7 +560,7 @@ class _GenerateMixin:
         sl_dist  = float(risk.get("sl_dist", atr_m15))
 
         try:
-            from forex_trader.core.database import get_risk_settings
+            from backend.src.db.database import get_risk_settings
             rs = get_risk_settings()
             active_strategy = rs.get("trade_strategy", "be_runner")
         except Exception:
@@ -607,7 +607,7 @@ class _GenerateMixin:
             tdb.store_ml_features(signal_id, ml_features)
 
         try:
-            from forex_trader.core import database as _cdb_bus2
+            from backend.src.db import database as _cdb_bus2
             _cdb_bus2.write_signal_bus(
                 "bounce", direction,
                 confidence=float(ml_pred) if ml_pred is not None else 0.5,

@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 from backend.src.services.test_signal import test_signal_repo as _tdb_real
 from backend.src.services.test_signal import test_signal_service as test_engine_module
@@ -138,7 +138,7 @@ def _render_main() -> None:
             "text-yellow-400 font-bold text-sm tracking-widest"
         )
         try:
-            from forex_trader.core import database as _main_db
+            from backend.src.db import database as _main_db
             _live = bool(_main_db.get_risk_settings().get("sg_live_execution", 0))
         except Exception:
             _live = False

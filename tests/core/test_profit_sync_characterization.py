@@ -15,9 +15,9 @@ from unittest import mock
 import pytest
 
 from backend.src.services.trading import profit_sync as core_profit_sync
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading.sim_account import get_sim_account
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

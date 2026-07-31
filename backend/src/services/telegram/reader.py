@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 log = logging.getLogger(__name__)
 

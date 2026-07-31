@@ -17,7 +17,7 @@ import pytest
 
 from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading import ai_signal_fallback as fb
 
 

@@ -15,7 +15,7 @@ import tempfile
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 
 
 def test_init_redirects_the_calling_threads_cached_connection():

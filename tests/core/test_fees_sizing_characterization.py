@@ -11,8 +11,8 @@ import tempfile
 
 import pytest
 
-from forex_trader.core import database as db
-from forex_trader.core.engine import SimulationEngine
+from backend.src.db import database as db
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

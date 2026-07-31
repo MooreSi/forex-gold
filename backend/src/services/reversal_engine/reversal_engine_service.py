@@ -202,7 +202,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         # the whole analysis cycle rather than running it and having its
         # eventual open_trade() call just get forwarded/rejected -- this is
         # what actually saves the CPU on the VPS.
-        from forex_trader.core import database as _db_module
+        from backend.src.db import database as _db_module
         if await _db_module.to_db_thread(_db_module.is_remote_node):
             self._status_msg = "Remote/VPS node — signal generation is local-node-only"
             return
@@ -329,7 +329,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         except Exception:
             news_proximity_norm = 1.0
         try:
-            from forex_trader.core import database as _cdb_feat
+            from backend.src.db import database as _cdb_feat
             regime_score         = _cdb_feat.get_regime_score(context.get("adx", 0), context.get("atr", 5))
             equity_drawdown_pct  = _cdb_feat.get_equity_drawdown_pct()
         except Exception:
@@ -382,7 +382,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
             # Cross-engine conflict suppression
             try:
-                from forex_trader.core import database as _cdb_cf
+                from backend.src.db import database as _cdb_cf
                 if _cdb_cf.has_conflict_on_bus("reversal_engine", direction, window_seconds=180.0):
                     _log.info("[RE-Engine] %s suppressed — cross-engine conflict", direction)
                     continue
@@ -406,7 +406,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             feat_input["minutes_since_last_ref"] = cadence[0]
             feat_input["ref_signals_today"]      = cadence[1]
             try:
-                from forex_trader.core import database as _cdb_agree
+                from backend.src.db import database as _cdb_agree
                 feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("reversal_engine", direction)
             except Exception:
                 feat_input["concurrent_agreement"] = 0.0
@@ -423,7 +423,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             if sig_id:
                 # Write to shared signal bus
                 try:
-                    from forex_trader.core import database as _cdb_bus
+                    from backend.src.db import database as _cdb_bus
                     _cdb_bus.write_signal_bus(
                         "reversal_engine", direction,
                         confidence=float(level.get("score", 0.5)),
@@ -588,7 +588,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         manage real the reference channel trades -- so RE's virtual outcomes are modelled on the
         same SL/TP management rules, not an unrelated leftover default."""
         try:
-            from forex_trader.core import database as core_db
+            from backend.src.db import database as core_db
             from backend.src.utils.models import STRATEGY_SCALE_OUT
             override = core_db.get_channel_strategy_override("Reversal Engine")
             if override and override != "auto":

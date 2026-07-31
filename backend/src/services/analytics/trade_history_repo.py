@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 
 def _rows(sql: str, params: tuple = ()) -> list[tuple]:

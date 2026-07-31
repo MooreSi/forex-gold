@@ -107,7 +107,7 @@ class _CorrelationMixin:
             # Offloaded to the DB worker thread -- see test_signal.engine's
             # _reconcile_live_pnl for why a raw sqlite3.connect() here is a
             # whole-app hazard, not just a slow-task-local one.
-            from forex_trader.core import database as _mdb
+            from backend.src.db import database as _mdb
             _fetch_result = await _mdb.to_db_thread(_fetch_ref_data)
         except Exception as exc:
             _log.debug("[RE-Engine] REF fetch error: %s", exc)
@@ -267,7 +267,7 @@ class _CorrelationMixin:
 
         try:
             # Offloaded to the DB worker thread -- see _check_correlation.
-            from forex_trader.core import database as _mdb
+            from backend.src.db import database as _mdb
             _result = await _mdb.to_db_thread(_fetch)
         except Exception as exc:
             _log.debug("[RE-Engine] cadence stats error: %s", exc)

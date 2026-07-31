@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from forex_trader.core.engine import Engine
+    from backend.src.runtime import Engine
 
 _log = logging.getLogger("forex_trader")
 

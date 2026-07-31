@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.utils.models import CONTRACT_SIZE
 
 

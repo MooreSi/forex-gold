@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.positions import max_tp_repo as maxtp
 
 

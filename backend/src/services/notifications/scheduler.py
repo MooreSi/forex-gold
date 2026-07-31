@@ -29,7 +29,7 @@ from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import email_service
 from backend.src.services.broker.mt5_performance import compute_mt5_performance

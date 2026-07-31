@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 from nicegui import ui
 
@@ -101,7 +101,7 @@ def render() -> None:
         ui.label("Breakout Engine").classes(
             "text-orange-400 font-bold text-sm tracking-widest"
         )
-        from forex_trader.core import database as _cdb_hdr
+        from backend.src.db import database as _cdb_hdr
         _bo_live_hdr = bool(_cdb_hdr.get_risk_settings().get("bo_live_execution", 0))
         exec_lbl = ui.label(
             "• LIVE EXECUTION — MT5 ORDERS ACTIVE •" if _bo_live_hdr
@@ -819,7 +819,7 @@ def render() -> None:
             await _render_log()
 
             # Update live/virtual execution label in header
-            from forex_trader.core import database as _cdb_ref
+            from backend.src.db import database as _cdb_ref
             _rs_live = await _cdb_ref.to_db_thread(_cdb_ref.get_risk_settings)
             _live_now = bool(_rs_live.get("bo_live_execution", 0))
             exec_lbl.set_text(

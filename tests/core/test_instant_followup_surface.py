@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading import instant_followup as followup
 from backend.src.utils.models import STRATEGY_BE_RUNNER
 

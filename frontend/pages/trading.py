@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 from nicegui import ui
 
 from backend.src.services.ai import provider as ai_provider
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
@@ -1806,7 +1806,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     psychology icon to avoid stacking extra height.
     """
     import asyncio as _aio
-    from forex_trader.core import database as _csdb
+    from backend.src.db import database as _csdb
     from backend.src.services.channels import strategy_ai as _csai
     from backend.src.services.broker import ea_templates as _et
     from backend.src.utils.models import STRATEGY_NAMES

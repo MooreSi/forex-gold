@@ -40,7 +40,7 @@ class _LiveExecuteMixin:
         # this call still generated and will still track/close/train
         # normally. Trading > Strategy > Risk Settings toggle, shared with
         # the Breakout generator, off by default.
-        from forex_trader.core import database as _cdb_hour
+        from backend.src.db import database as _cdb_hour
         if bool(_cdb_hour.get_risk_settings().get("hour_blocklist_enabled", 0)):
             from backend.src.utils.regime import BOUNCE_BLOCKED_HOURS_UTC
             _hour_now = datetime.now(timezone.utc).hour
@@ -77,7 +77,7 @@ class _LiveExecuteMixin:
 
             # Kelly Criterion fractional sizing — adjusts lot by rolling win-rate edge
             try:
-                from forex_trader.core import database as _cdb_kelly
+                from backend.src.db import database as _cdb_kelly
                 if bool(_cdb_kelly.get_risk_settings().get("kelly_sizing_enabled", 0)):
                     _recent = tdb.get_recent_closed_signals(limit=50)
                     _wins   = [s for s in _recent if s.get("outcome") == "win"]

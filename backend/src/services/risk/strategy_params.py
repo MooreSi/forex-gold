@@ -32,8 +32,8 @@ import json
 import logging
 import time
 
-from forex_trader.core import database as db_module
-from forex_trader.core.database import _schedule_coro
+from backend.src.db import database as db_module
+from backend.src.db.database import _schedule_coro
 from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,

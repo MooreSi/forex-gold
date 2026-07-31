@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading import open_trade as ot
 from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER

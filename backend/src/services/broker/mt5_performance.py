@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 log = logging.getLogger(__name__)
 

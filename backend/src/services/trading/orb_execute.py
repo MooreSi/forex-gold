@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.utils.models import STRATEGY_ORB_FIXED
 

@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.positions import tp_ladder as ladder
 from backend.src.services.risk import strategy_params as sp
 from backend.src.services.positions.tp_tracking import TPCache

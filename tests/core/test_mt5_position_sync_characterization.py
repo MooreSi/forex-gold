@@ -17,9 +17,9 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

@@ -18,7 +18,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.notifications import email_service
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import scheduler as sched

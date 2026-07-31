@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Callable, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.controllers.sync import tls_util
 from backend.src.controllers.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,

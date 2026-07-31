@@ -1083,7 +1083,7 @@ def signals_from_db(live_trades_only: bool = False) -> list[BtSignal]:
     live_trades_only=True: signals that resulted in an actual MT5 trade
     (Breakout Engine, Signal Generator/bounce, Telegram channels).
     """
-    from forex_trader.core import database as db
+    from backend.src.db import database as db
     results = []
     try:
         with db.db() as conn:

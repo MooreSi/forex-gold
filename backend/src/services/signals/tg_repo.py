@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 
 def get_tg_signals(limit: int = 50, tg_reader: Optional[Any] = None) -> list[dict]:

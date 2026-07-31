@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, TYPE_CHECKING
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.utils.models import (
     Tick, CONTRACT_SIZE, POINT_SIZE,
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP, STRATEGY_PROTECTED_SCALE,

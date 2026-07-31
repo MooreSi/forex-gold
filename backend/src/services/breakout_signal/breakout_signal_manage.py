@@ -32,7 +32,7 @@ class _ManagementMixin:
     def _compute_cost_pts(self, spread_raw: float) -> float:
         """Round-trip trade cost in price units (same scale as pnl_pts)."""
         try:
-            from forex_trader.core import database as cdb
+            from backend.src.db import database as cdb
             fs = cdb.get_fee_settings()
             slippage_pts = fs.get("estimated_slippage_points", 5.0) * 0.01
             commission_rt = (
@@ -103,7 +103,7 @@ class _ManagementMixin:
         mt5_ticket = sig.get("mt5_ticket") if sig else None
         if mt5_ticket:
             try:
-                from forex_trader.core import database as _mdb
+                from backend.src.db import database as _mdb
                 with _mdb.db() as _mc:
                     _mr = _mc.execute(
                         "SELECT mt5_profit FROM vantage_simulated_trades"
@@ -129,7 +129,7 @@ class _ManagementMixin:
         bo_ml.record_outcome(sig_id, ml_outcome)
 
         try:
-            from forex_trader.core import database as _cdb_bus
+            from backend.src.db import database as _cdb_bus
             _cdb_bus.close_bus_entry("breakout", sig_id)
         except Exception:
             pass
@@ -258,7 +258,7 @@ class _ManagementMixin:
         MT5 profit.
         """
         try:
-            from forex_trader.core import database as _mdb
+            from backend.src.db import database as _mdb
 
             def _do_reconcile() -> int:
                 import sqlite3 as _sqlite3

@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.broker import deposits as td
 from backend.src.services.broker import mt5_performance as perf_mod
 from backend.src.services.broker import history_import as imp

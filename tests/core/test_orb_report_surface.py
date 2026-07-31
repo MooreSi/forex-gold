@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.analytics import orb_report as orb
 from backend.src.services.trading import orb_execute as orb_exec
 

@@ -94,7 +94,7 @@ def test_the_scan_path_and_the_manual_path_now_size_identically():
     core_fees_sizing.db_module.get_risk_settings = fake_get_risk_settings
     try:
         engine_like = types.SimpleNamespace()
-        from forex_trader.core.engine import SimulationEngine
+        from backend.src.runtime import SimulationEngine
         scan_path = SimulationEngine.suggest_lot_size(
             engine_like, 2000.0, 1990.0, 10_000.0, 5.0)
         manual_path = core_fees_sizing.suggest_lot_size(

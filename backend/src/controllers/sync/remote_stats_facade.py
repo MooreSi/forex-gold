@@ -21,7 +21,7 @@ def _is_centralized_remote_mode() -> bool:
     is False there) — it must never be labeled "Local" or treated as the
     generation owner just because the shared setting reads true."""
     try:
-        from forex_trader.core import database as db_module
+        from backend.src.db import database as db_module
         from backend.src.controllers.sync import server as _sync_srv_mod
         from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
         rs = db_module.get_risk_settings()

@@ -16,7 +16,7 @@ import time
 import uuid
 from typing import Any
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.trading.fees_sizing import pnl as _pnl
 
 log = logging.getLogger(__name__)

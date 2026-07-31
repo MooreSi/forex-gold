@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.signals import resolution as sr
 from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import (

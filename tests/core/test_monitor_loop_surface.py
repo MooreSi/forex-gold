@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import CloseTradeContext

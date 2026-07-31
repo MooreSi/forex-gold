@@ -17,11 +17,11 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from backend.src.services.dpm.bookkeeping import DPMCache as _DPMCache
-from forex_trader.core.engine import SimulationEngine
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():

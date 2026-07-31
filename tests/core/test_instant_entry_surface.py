@@ -18,7 +18,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading import instant_entry as ime
 
 

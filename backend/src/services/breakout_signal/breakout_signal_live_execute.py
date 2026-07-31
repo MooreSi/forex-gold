@@ -29,7 +29,7 @@ class _LiveExecuteMixin:
                 bdb.update_live_exec_result(sig_id, None, None, "skipped:no_main_engine")
             return
 
-        from forex_trader.core import database as _cdb
+        from backend.src.db import database as _cdb
         rs = _cdb.get_risk_settings()
         if not bool(rs.get("bo_live_execution", 0)):
             if sig_id:

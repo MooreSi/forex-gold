@@ -61,14 +61,14 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 
 import backend.src.config as cfg_module
 from forex_trader import __version__ as _APP_VERSION
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from frontend.pages import backtest as backtest_page
 
 log = logging.getLogger(__name__)
 
 # Admin panel availability + engine lifecycle now live in core/app_lifecycle.py
 # so the headless entry point sees the same logic without importing NiceGUI.
-from forex_trader.core.app_lifecycle import (          # noqa: E402
+from backend.src.app import (          # noqa: E402
     admin_open_fn as _admin_open_fn, ADMIN_AVAILABLE,
     get_engine, get_tg_reader,
     startup as _lifecycle_startup, shutdown as _lifecycle_shutdown,

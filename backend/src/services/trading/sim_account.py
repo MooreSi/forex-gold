@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 
 def get_sim_account() -> dict:

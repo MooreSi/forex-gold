@@ -61,7 +61,7 @@ class _VelocityMixin:
             try:
                 _now_chk = time.time()
                 if _now_chk - _last_remote_check >= _CANDLE_REFRESH_INTERVAL:
-                    from forex_trader.core import database as _db_module
+                    from backend.src.db import database as _db_module
                     _is_remote = await _db_module.to_db_thread(_db_module.is_remote_node)
                     _last_remote_check = _now_chk
                 if _is_remote:

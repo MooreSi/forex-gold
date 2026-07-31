@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 log = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading import open_from_signal as otfs
 from backend.src.services.risk import strategy_params as sp
@@ -147,7 +147,7 @@ def test_atomic_claim_blocks_concurrent_duplicate(fresh_db):
         return real_get_cb(*a, **kw)
 
     bridge = _FakeBridge()
-    with patch("forex_trader.core.database.get_circuit_breaker_state", side_effect=_steal_claim):
+    with patch("backend.src.db.database.get_circuit_breaker_state", side_effect=_steal_claim):
         with pytest.raises(ValueError, match="duplicate suppressed"):
             asyncio.run(otfs.open_trade_from_signal(bridge, "sig-1"))
     assert bridge.place_order_calls == []

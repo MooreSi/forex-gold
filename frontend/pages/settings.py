@@ -8,7 +8,7 @@ from typing import Callable
 
 from nicegui import app, ui
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.utils import os_utils as _pu
 from backend.src.controllers.sync import client as sync_client
 import backend.src.config as cfg_module
@@ -1267,7 +1267,7 @@ def _render_email():
                 return
             schedule_test_lbl.text = "Building ORB report..."
             schedule_test_lbl.classes(replace="text-sm text-gray-400")
-            from forex_trader.core.app_lifecycle import get_engine as _get_engine
+            from backend.src.app import get_engine as _get_engine
             engine = _get_engine()
             report = await engine.build_orb_report()
             if not report:
@@ -2693,7 +2693,7 @@ def _render_diagnostics(engine):
         import time as _time
         from datetime import datetime as _dt
         from pathlib import Path as _Path
-        from forex_trader.core import database as _db
+        from backend.src.db import database as _db
         import httpx as _httpx
 
         DAYS       = 5

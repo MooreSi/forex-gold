@@ -24,8 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.core import database as db
-from forex_trader.core.engine import SimulationEngine
+from backend.src.db import database as db
+from backend.src.runtime import SimulationEngine
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,

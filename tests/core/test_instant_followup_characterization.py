@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.core import database as db
-from forex_trader.core.engine import SimulationEngine
+from backend.src.db import database as db
+from backend.src.runtime import SimulationEngine
 from backend.src.utils.models import STRATEGY_BE_RUNNER
 
 

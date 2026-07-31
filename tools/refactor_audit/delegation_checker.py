@@ -37,7 +37,7 @@ import sys
 
 from tools.refactor_audit import orphan_detector as od
 
-ENGINE_PATH = od.REPO_ROOT / "forex_trader" / "core" / "engine.py"
+ENGINE_PATH = od.REPO_ROOT / "backend" / "src" / "runtime.py"
 ALLOWLIST_PATH = od.REPO_ROOT / "tools" / "refactor_audit" / "delegation_allowlist.json"
 
 # A wrapper's whole body is "call the thing and hand back the result". Anything

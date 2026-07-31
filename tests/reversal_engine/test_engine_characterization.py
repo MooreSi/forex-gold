@@ -10,7 +10,7 @@ Scope note (unchanged from 020): the async orchestration loops
 (_run_cycle, _check_outcomes, _check_correlation) are heavily coupled to
 externals this file doesn't attempt to fully mock -- a live MT5 bridge
 (self._bridge), the main SimulationEngine (self._main_eng), and
-forex_trader.core.database. Covered instead: every pure/isolable method
+backend.src.db.database. Covered instead: every pure/isolable method
 ReversalEngine exposes, plus the money math and the DB-backed helper methods
 (_level_on_cooldown, _already_open, _today_signal_count).
 """

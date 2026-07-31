@@ -15,7 +15,7 @@ import math
 from datetime import datetime
 from typing import Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 
 
 def get_open_trades() -> list[dict]:

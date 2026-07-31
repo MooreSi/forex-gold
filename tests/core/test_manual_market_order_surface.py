@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.core import database as db
+from backend.src.db import database as db
 from backend.src.services.trading import manual_market_order as mmo
 from backend.src.utils.models import STRATEGY_TRAIL_STOP
 

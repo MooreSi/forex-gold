@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 
-from forex_trader.core import database as db_module
+from backend.src.db import database as db_module
 from backend.src.services.trading.fees_sizing import pnl
 from backend.src.services.trading.sim_account import get_sim_account
 from backend.src.services.positions.tp_tracking import last_closed_tp

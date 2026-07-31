@@ -333,6 +333,41 @@ def test_template_uses_lot_anchor_for_sizing(fresh_db):
     assert result["lot_size"] == 0.05
 
 
+def test_template_lot_anchor_not_scaled_by_channel_multiplier(fresh_db):
+    """A template's fixed Anchor Lot is a deliberate manual value, same as
+    lot_size_override -- the channel scorecard's rolling-performance
+    multiplier must not scale it. Regression for Reversal Engine's
+    real-world 1.3x multiplier turning a configured 0.1 Anchor Lot into
+    0.13 on a live trade (ticket 1687672591): the channel-multiplier
+    exemption only checked lot_size_override, not the template-fixed path a
+    few lines above it."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("BoostedTpl", {"lot_anchor": 0.10, "risk_pct": 0})
+    _insert_signal(source_name="BoostedChannel")
+    _set_channel_perf("BoostedChannel", lot_mult=1.3)
+    db.set_channel_strategy_override("BoostedChannel", et.override_for_template("BoostedTpl"))
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["lot_size"] == 0.10
+
+
+def test_template_risk_pct_sizing_still_scaled_by_channel_multiplier(fresh_db):
+    """Unlike the fixed Anchor Lot, a template's risk_pct branch is
+    genuinely risk-derived -- same as the generic non-template path -- so
+    the channel multiplier is meant to keep applying there."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("RiskBoostedTpl", {"lot_anchor": 0.05, "risk_pct": 1.0})
+    _insert_signal(source_name="BoostedChannel", stop_loss=2390.0)
+    _set_channel_perf("BoostedChannel", lot_mult=2.0)
+    db.set_channel_strategy_override("BoostedChannel", et.override_for_template("RiskBoostedTpl"))
+    bridge = _FakeBridge(account={"balance": 10000.0})
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    # entry ~2400, SL 2390 -> 10pt distance; 1% of 10000 = $100 risk -> 0.10
+    # lot unscaled (see test_template_risk_pct_sizes_from_risk_instead_of_lot_anchor),
+    # x2.0 channel multiplier -> 0.20.
+    assert result["lot_size"] == 0.20
+
+
 def test_template_lot_anchor_capped_by_max_lot_size(fresh_db):
     """Global parameters still apply as a ceiling even though the
     template's fixed lot is the primary sizing source."""

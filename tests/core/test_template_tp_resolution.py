@@ -10,6 +10,13 @@ Safety Net -- therefore reported levels nobody was trading.
 
 Also covers "Use TP Levels from Telegram", the per-ladder switch that makes a
 Telegram message's own TP prices win over the pips column.
+
+tp{n}_pips (and the pips resolve_template_tps computes for the pending
+ladder) is genuine pips as of 2026-07-31 -- 1 pip = 0.10 price on this
+XAUUSD feed, matching the reference channels' own wording and
+ForexTraderBridge.mq5's PipsToPrice(). Before that fix these were added to
+price as raw points, placing every anchor TP 10x further out than a pips
+value implies. See core_pips.PIPS_TO_PRICE_XAUUSD.
 """
 import os
 import tempfile
@@ -98,8 +105,8 @@ def test_template_pips_define_the_ladder_not_the_signal(fresh_db):
     tps, pcts, pen = resolve_template_tps(
         _template(fresh_db), "BUY", _Tick(), SIGNAL_TPS, "Reversal Engine")
     assert sorted(tps) == [1, 2, 3, 4, 5, 6]
-    assert tps[1] == pytest.approx(4059.18)     # ask 4039.18 + 20
-    assert tps[6] == pytest.approx(4159.18)     # ask 4039.18 + 120
+    assert tps[1] == pytest.approx(4041.18)     # ask 4039.18 + 20 pips (2.0 price)
+    assert tps[6] == pytest.approx(4051.18)     # ask 4039.18 + 120 pips (12.0 price)
     for level in tps.values():
         assert level not in SIGNAL_TPS
     assert pen is None
@@ -108,16 +115,19 @@ def test_template_pips_define_the_ladder_not_the_signal(fresh_db):
 def test_levels_past_the_percentage_table_keep_zero_percent(fresh_db):
     """TP5/TP6 are deliberately 0% on this template -- the trailing stop takes
     anything past TP4. A ladder-fill that forced 100% onto the last level
-    would close the runner the trail is there to hold."""
+    would close the runner the trail is there to hold.
+
+    pcts is a 0-1 fraction on the wire (DoPartialClose: lots = orig_lots *
+    pct), not the 0-100 number the % column stores -- 10.0 here means 10%."""
     _, pcts, _ = resolve_template_tps(
         _template(fresh_db), "BUY", _Tick(), SIGNAL_TPS, "Reversal Engine")
-    assert pcts == [10.0, 20.0, 40.0, 10.0, 0.0, 0.0]
+    assert pcts == pytest.approx([0.10, 0.20, 0.40, 0.10, 0.0, 0.0])
 
 
 def test_sell_direction_subtracts_pips(fresh_db):
     tps, _, _ = resolve_template_tps(
         _template(fresh_db), "SELL", _Tick(), SIGNAL_TPS, "Reversal Engine")
-    assert tps[1] == pytest.approx(4018.94)     # bid 4038.94 - 20
+    assert tps[1] == pytest.approx(4036.94)     # bid 4038.94 - 20 pips (2.0 price)
 
 
 def test_template_with_no_pips_sends_no_levels(fresh_db):
@@ -150,8 +160,8 @@ def test_last_telegram_level_closes_the_remainder(fresh_db):
     tpl = _template(fresh_db, tp_from_telegram=True)
     _, pcts, _ = resolve_template_tps(
         tpl, "BUY", _Tick(), SIGNAL_TPS, "Gold Diggers VIP")
-    assert pcts[-1] == 100.0
-    assert pcts[:4] == [10.0, 20.0, 40.0, 10.0]
+    assert pcts[-1] == 1.0
+    assert pcts[:4] == pytest.approx([0.10, 0.20, 0.40, 0.10])
 
 
 def test_switch_does_not_apply_to_internal_generators(fresh_db):
@@ -160,7 +170,7 @@ def test_switch_does_not_apply_to_internal_generators(fresh_db):
     tpl = _template(fresh_db, tp_from_telegram=True)
     tps, _, _ = resolve_template_tps(
         tpl, "BUY", _Tick(), SIGNAL_TPS, "Reversal Engine")
-    assert tps[1] == pytest.approx(4059.18)
+    assert tps[1] == pytest.approx(4041.18)     # 20 pips = 2.0 price
     assert sorted(tps) == [1, 2, 3, 4, 5, 6]
 
 
@@ -168,7 +178,7 @@ def test_telegram_signal_with_no_levels_falls_back_to_the_pips(fresh_db):
     tpl = _template(fresh_db, tp_from_telegram=True)
     tps, _, _ = resolve_template_tps(
         tpl, "BUY", _Tick(), [None] * 8, "Gold Diggers VIP")
-    assert tps[1] == pytest.approx(4059.18)
+    assert tps[1] == pytest.approx(4041.18)     # 20 pips = 2.0 price
 
 
 # ── Use TP Levels from Telegram: pending ──────────────────────────────────────
@@ -193,21 +203,24 @@ def test_both_switches_on_puts_pending_on_the_absolute_levels(fresh_db):
 def test_pending_only_converts_message_prices_to_pips_from_the_ea_base(fresh_db):
     """Anchor stays on the template while pending follows the message, so the
     absolute tp{n} on the wire belong to the anchor and the fallback would
-    hand pending the wrong ladder. Converted to pips from the EA's OWN
-    staging base (bid for a BUY), which reproduces the message price."""
+    hand pending the wrong ladder. Converted to genuine pips from the EA's
+    OWN staging base (bid for a BUY) -- the EA applies its own PipsToPrice()
+    (pips * 10 * _Point) to whatever arrives here, so this must send pips,
+    not the raw price gap, or the pending leg's TP lands 10x closer than the
+    message actually stated."""
     tpl = _template(fresh_db, tp_pen_from_telegram=True)
     _, _, pen = resolve_template_tps(
         tpl, "BUY", _Tick(), SIGNAL_TPS, "Gold Diggers VIP")
-    assert pen[1] == pytest.approx(4040.68 - _Tick.bid)
-    # and the EA's own arithmetic gets back to the message's level
-    assert _Tick.bid + pen[1] == pytest.approx(4040.68)
+    assert pen[1] == pytest.approx((4040.68 - _Tick.bid) / 0.10)
+    # and the EA's own arithmetic (PipsToPrice) gets back to the message's level
+    assert _Tick.bid + pen[1] * 0.10 == pytest.approx(4040.68)
 
 
 def test_pending_only_uses_the_ask_side_for_a_sell(fresh_db):
     tpl = _template(fresh_db, tp_pen_from_telegram=True)
     _, _, pen = resolve_template_tps(
         tpl, "SELL", _Tick(), [4030.0], "Gold Diggers VIP")
-    assert _Tick.ask - pen[1] == pytest.approx(4030.0)
+    assert _Tick.ask - pen[1] * 0.10 == pytest.approx(4030.0)
 
 
 def test_pending_switch_ignored_for_internal_generators(fresh_db):
@@ -294,8 +307,8 @@ def test_row_records_the_templates_levels_not_the_signals(monkeypatch, fresh_db)
     NULL past that -- not the signal's eight."""
     row, ea = _open_template_trade(monkeypatch, fresh_db, "Reversal Engine")
 
-    assert row["tp1"] == pytest.approx(4059.18)
-    assert row["tp6"] == pytest.approx(4159.18)
+    assert row["tp1"] == pytest.approx(4041.18)     # 20 pips = 2.0 price
+    assert row["tp6"] == pytest.approx(4051.18)     # 120 pips = 12.0 price
     assert row["tp7"] is None and row["tp8"] is None
     for n in range(1, 9):
         assert row[f"tp{n}"] not in SIGNAL_TPS

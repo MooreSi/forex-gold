@@ -23,10 +23,13 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_logic_keyword_triggers import should_skip_ai_fallback_for_no_signal_candidate
+from forex_trader.core.core_second_message_merge import (
+    attach_followup, hold_or_resolve, is_enabled as second_message_enabled,
+)
 from forex_trader.core.signal_parser import (
     parse_gold_signal, parse_gd2_signal, parse_gd2_partial,
     is_gd2_message, is_format_ab_signal, parse_with_learned_rules, _CURRENCY_RE,
-    parse_limit_order_signal,
+    parse_limit_order_signal, parse_partial_any_format, parse_tp_sl_only,
 )
 
 log = logging.getLogger(__name__)
@@ -71,6 +74,20 @@ async def classify_and_parse(
 
     if parsed:
         return parsed
+
+    # ── TP/SL in Second Message ──────────────────────────────────────────
+    # Ahead of every parser below: a levels-only follow-up names no
+    # direction and no entry, so none of them would recognise it anyway,
+    # and it must be consumed here rather than falling through to the AI
+    # fallback / unrecognised queue. The bare entry it completes is picked
+    # up on the held message's next re-scan (see core_second_message_merge).
+    if second_message_enabled(rs):
+        _followup = parse_tp_sl_only(text)
+        if _followup and attach_followup(channel_name, _followup):
+            return None
+        _partial_any = parse_partial_any_format(text)
+        if _partial_any:
+            return hold_or_resolve(tg_id, channel_name, _partial_any, rs)
 
     # Limit Runner's "BUY/SELL [LIMITS] GOLD @ high/low AREA" layout -- any
     # channel, format-matched only, checked ahead of the parser_fmt

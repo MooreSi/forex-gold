@@ -905,6 +905,49 @@ def _apply_schema() -> None:
             "ALTER TABLE vantage_risk_settings ADD COLUMN internal_hedge_mode TEXT NOT NULL DEFAULT 'off'",
             "ALTER TABLE vantage_risk_settings ADD COLUMN internal_net_exposure_max_lots REAL NOT NULL DEFAULT 0.30",
         ] + [
+            # Parsing Settings > TP/SL in Second Message (2026-07-31). Holds a
+            # bare "direction + entry, no levels yet" signal while its
+            # follow-up is awaited. Deliberately NOT vantage_tg_signals: a row
+            # there marks the message as seen and stops _scan_messages
+            # re-reading it, and re-reading each cycle is exactly how the hold
+            # gets re-evaluated (see core_second_message_merge.py).
+            """CREATE TABLE IF NOT EXISTS vantage_second_message_holds (
+                tg_message_id TEXT PRIMARY KEY,
+                channel_name  TEXT NOT NULL,
+                partial_json  TEXT NOT NULL,
+                levels_json   TEXT,
+                first_seen_at REAL NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'waiting'
+            )""",
+            # Parsing Settings > Queue Closed Market Limits (2026-07-31).
+            # A LIMIT signal arriving over the weekend is currently discarded
+            # outright (handle_limit_order_signal returns on !sess_ok); this
+            # holds the parsed dict verbatim so it can be replayed once the
+            # market reopens. tg_message_id is the PK so the same buffered
+            # message re-scanned on a later cycle can't queue twice.
+            """CREATE TABLE IF NOT EXISTS vantage_closed_market_queue (
+                tg_message_id TEXT PRIMARY KEY,
+                channel_name  TEXT NOT NULL,
+                source_label  TEXT NOT NULL,
+                parsed_json   TEXT NOT NULL,
+                queued_at     REAL NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'queued'
+            )""",
+            # Parsing Settings (2026-07-31) -- all three default OFF: each one
+            # changes what actually gets executed, so an existing install must
+            # keep behaving exactly as it did until the user opts in.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_mirror_copy INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_queue_closed_market_limits INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_enable_second_message_tp_sl INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_second_message_match_window_sec INTEGER NOT NULL DEFAULT 120",
+            # Reversal Engine REF confirmation gate (2026-07-31) -- off by
+            # default. Only live-executes a signal when the professional
+            # channels posted a matching entry within the window. See
+            # reversal_engine/ref_confirmation.py for the measured decay curve
+            # behind the 60-minute default and for why it isn't on by default.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN re_require_ref_confirmation INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE vantage_risk_settings ADD COLUMN re_ref_confirmation_window_min INTEGER NOT NULL DEFAULT 60",
+        ] + [
             # EA Templates > Group TP Action (2026-07-28) -- grid mode only:
             # the first TP any leg of the group clears cancels every other
             # still-resting sibling and moves every other already-live
@@ -1103,6 +1146,42 @@ def _apply_schema() -> None:
             "    WHERE t.trade_id = dpm_trade_performance.trade_id"
             ") WHERE tg_source IS NULL OR tg_source LIKE 'instant:%'"
         )
+        # One-off unit fix (2026-07-31): the Anchor TP ladder's tp{n}_pips
+        # columns were being added straight into price as raw points, not
+        # pips -- 1 pip is 0.10 price on this XAUUSD feed (10 * _Point,
+        # _Point=0.01), the same conversion ForexTraderBridge.mq5's own
+        # PipsToPrice() already applies correctly for the Pending ladder.
+        # Root-caused live 2026-07-31 (GD Instituational - single, ticket
+        # 1689710560): tp1_pips=30 sent TP1 to entry+30.0 (300 pips) instead
+        # of entry+3.0 (30 pips, what the channel's own "+30 PIPS" wording
+        # means). See core_open_trade.py's _PIPS_TO_PRICE_XAUUSD.
+        #
+        # Fixing the conversion without this backfill would silently move
+        # every existing template's TPs 10x closer than they trade today.
+        # Guarded by an app_config marker rather than a WHERE-clause shape
+        # like the backfills above -- there is no way to tell an
+        # already-migrated 30 from a value someone deliberately enters as 30
+        # after this fix ships, so this must run exactly once, ever, rather
+        # than once per not-yet-migrated-looking row.
+        try:
+            _already = conn.execute(
+                "SELECT 1 FROM app_config WHERE key='anchor_tp_pips_migrated_2026_07_31'"
+            ).fetchone()
+        except Exception:
+            _already = None
+        if not _already:
+            try:
+                for _n in range(1, 9):
+                    conn.execute(
+                        f"UPDATE ea_trade_templates SET tp{_n}_pips = tp{_n}_pips * 10 "
+                        f"WHERE tp{_n}_pips != 0"
+                    )
+                conn.execute(
+                    "INSERT OR REPLACE INTO app_config (key,value) VALUES (?,?)",
+                    ("anchor_tp_pips_migrated_2026_07_31", "1"),
+                )
+            except Exception:
+                pass  # ea_trade_templates doesn't exist on this schema version yet
         # singleton rows
         from forex_trader.config import get as cfg_get
         starting_balance = cfg_get("starting_balance", 1000.0)

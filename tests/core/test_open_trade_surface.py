@@ -370,7 +370,13 @@ def test_anchor_tp_computed_from_template_ignoring_signal_gap(fresh_db):
     """Regression for the 2026-07-29 precedence change: the template's own
     tp{n}_pips computes EVERY level (entry ± pips from the fill reference
     price), even one the signal happened to leave blank -- there is no
-    "signal fills what the template doesn't" merging any more."""
+    "signal fills what the template doesn't" merging any more.
+
+    tp{n}_pips is genuine pips as of 2026-07-31 (1 pip = 0.10 price on this
+    XAUUSD feed, matching the reference channels' own wording and
+    ForexTraderBridge.mq5's PipsToPrice()) -- previously added to price as
+    raw points, which placed every anchor TP 10x further out than a pips
+    value implies. See core_pips.PIPS_TO_PRICE_XAUUSD."""
     from forex_trader.core import core_ea_templates as et
     et.save_ea_template("Anchor Test", {
         "tp1_pips": 20.0, "tp1_pct": 25.0,
@@ -389,9 +395,11 @@ def test_anchor_tp_computed_from_template_ignoring_signal_gap(fresh_db):
     ))
 
     call = fake_ea.open_trade_calls[0]
-    assert call["tps"][1] == pytest.approx(2400.2 + 20.0)  # BUY: ask + tp1_pips
-    assert call["tps"][2] == pytest.approx(2400.2 + 50.0)  # BUY: ask + tp2_pips
-    assert call["pcts"] == [25.0, 100.0]                # template's %s, positional by TP number
+    assert call["tps"][1] == pytest.approx(2400.2 + 2.0)  # BUY: ask + 20 pips (2.0 price)
+    assert call["tps"][2] == pytest.approx(2400.2 + 5.0)  # BUY: ask + 50 pips (5.0 price)
+    # 0-1 fraction on the wire (DoPartialClose: lots = orig_lots * pct), not
+    # the 0-100 number the % column stores -- 25.0/100.0 here means 25%.
+    assert call["pcts"] == pytest.approx([0.25, 1.00])   # template's %s, positional by TP number
 
 
 def test_anchor_tp_overrides_a_tp_the_signal_did_supply(fresh_db):
@@ -411,8 +419,8 @@ def test_anchor_tp_overrides_a_tp_the_signal_did_supply(fresh_db):
         bridge, **_open_kwargs(strategy=et.override_for_template("Anchor Test"), tp1=2410.0)
     ))
 
-    # entry (ask 2400.2) + 999 pips, NOT the signal's 2410.0
-    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2400.2 + 999.0)
+    # entry (ask 2400.2) + 999 pips (99.9 price), NOT the signal's 2410.0
+    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2400.2 + 99.9)
 
 
 def test_anchor_tp_level_left_at_zero_is_simply_unused(fresh_db):
@@ -437,7 +445,7 @@ def test_anchor_tp_level_left_at_zero_is_simply_unused(fresh_db):
 
     call = fake_ea.open_trade_calls[0]
     assert list(call["tps"].keys()) == [1]  # tp2/tp3 never appear at all
-    assert call["tps"][1] == pytest.approx(2400.2 + 20.0)
+    assert call["tps"][1] == pytest.approx(2400.2 + 2.0)  # 20 pips = 2.0 price
 
 
 def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
@@ -456,7 +464,50 @@ def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
         )
     ))
 
-    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2399.8 - 30.0)  # SELL: bid - pips
+    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2399.8 - 3.0)  # SELL: bid - 30 pips (3.0 price)
+
+
+def test_anchor_tp_pct_is_a_fraction_not_a_percentage_on_the_wire(fresh_db):
+    """Reproduces ticket 1690279387 live, 2026-07-31: template "Conservative
+    Trial" configured tp1_pct=5.0 (meaning 5%) intending a 5% partial close
+    at TP1, SL to breakeven only at TP2. The EA's DoPartialClose computes
+    `lots = orig_lots * pct`, then clamps to whatever remains open -- so
+    receiving the raw percentage number 5.0 instead of the fraction 0.05
+    made it compute orig_lots * 5.0 (far more than the position itself),
+    clamped down to the ENTIRE remaining lot. Terminal Expert log confirmed
+    it: "partial close OK ... tp=1 lots=0.1 remaining=0.0" for a position
+    that should have kept 95% open. The built-in ladder strategies
+    (_GDVR_PCTS/_CLIMBER_PCTS) already send fractions like 0.30/0.70; this
+    is what made the Anchor TP ladder consistent with them and with the EA's
+    own pending-leg conversion (tpl_tp_pen{n}_pct / 100.0)."""
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Conservative Trial", {
+        "tp1_pips": 30.0, "tp1_pct": 5.0,
+        "tp2_pips": 70.0, "tp2_pct": 20.0,
+        "tp3_pips": 120.0, "tp3_pct": 40.0,
+        "be_trigger": 2,
+    })
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Conservative Trial"))
+    ))
+
+    pcts = fake_ea.open_trade_calls[0]["pcts"]
+    assert pcts == pytest.approx([0.05, 0.20, 0.40])
+
+    # The actual bug, made concrete: on a 0.1 lot, the broken 5.0 would have
+    # computed 0.1 * 5.0 = 0.5 lots at TP1 -- 5x the whole position, clamped
+    # by the EA's own MathMin(lots, remaining) down to a full close. The
+    # fixed fraction keeps TP1 a genuine partial.
+    orig_lots = 0.1
+    lots_at_tp1 = round(orig_lots * pcts[0], 4)
+    assert lots_at_tp1 == pytest.approx(0.005)
+    assert lots_at_tp1 < orig_lots
 
 
 def test_anchor_tp_all_zero_pct_sends_no_pcts_field(fresh_db):

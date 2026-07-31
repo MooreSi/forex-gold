@@ -278,10 +278,17 @@ def _clean_fields(fields: dict) -> dict:
     merged.update({k: v for k, v in fields.items() if k in DEFAULTS})
     for f in _BOOL_FIELDS:
         merged[f] = bool(merged[f])
+    # A ui.number box NiceGUI's Anchor/Pending TP grid uses reports its value
+    # as None while empty -- momentarily true for every keystroke that clears
+    # a field before typing the next number, not just an abandoned edit.
+    # Falling back to the schema default (0.0 for every pips/pct column, so
+    # a field left blank simply reads as "unused") keeps a save mid-edit from
+    # throwing instead of a bare float(None)/int(None) TypeError aborting the
+    # whole template. Root-caused live 2026-07-31 editing Anchor TP pips.
     for f in _INT_FIELDS:
-        merged[f] = int(merged[f])
+        merged[f] = int(DEFAULTS[f]) if merged[f] is None else int(merged[f])
     for f in _FLOAT_FIELDS:
-        merged[f] = float(merged[f])
+        merged[f] = float(DEFAULTS[f]) if merged[f] is None else float(merged[f])
     for f, choices in _CHOICES.items():
         if merged[f] not in choices:
             raise ValueError(f"Invalid {f}: {merged[f]!r} (must be one of {choices})")

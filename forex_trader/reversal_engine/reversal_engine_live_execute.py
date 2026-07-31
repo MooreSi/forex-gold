@@ -70,6 +70,27 @@ class _LiveExecuteMixin:
                           sig.get("signal_ref"), _exp_reason)
                 return
 
+            # REF confirmation gate (2026-07-31, OFF by default) -- only trade
+            # when the professional channels have just posted a matching entry.
+            # Checked here rather than at signal creation because the whole
+            # point is recency: a signal can sit pending for up to 2h, and the
+            # measured edge decays to nothing over exactly that span (see
+            # ref_confirmation's module docstring for the numbers and for why
+            # this is off by default). Virtual tracking continues regardless,
+            # so the ML keeps learning from what this would have skipped.
+            from forex_trader.reversal_engine import ref_confirmation as _ref_conf
+            _ref_ok, _ref_reason = _ref_conf.check(
+                sig.get("direction", ""), sig.get("entry_low"), sig.get("entry_high"), rs,
+            )
+            if not _ref_ok:
+                re_db.update_live_exec(sig["id"], status="skipped:no_ref_confirmation")
+                _log.info("[RE-Engine] REF confirmation gate blocked live exec %s -- %s",
+                          sig.get("signal_ref"), _ref_reason)
+                return
+            if _ref_reason:
+                _log.info("[RE-Engine] REF confirmation for %s -- %s",
+                          sig.get("signal_ref"), _ref_reason)
+
             # Fill-time re-evaluation (2026-07-17) -- a pending zone signal can
             # sit anywhere from a couple of minutes to 4h (Reversal Runner/
             # Adaptive Runner's expiry window) before price actually reaches

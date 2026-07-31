@@ -26,6 +26,7 @@ from typing import Any, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import core_ea_templates as ea_templates
+from forex_trader.core.core_pips import PIPS_TO_PRICE_XAUUSD
 from forex_trader.core.core_risk_governor import is_trading_paused, price_in_entry_range
 from forex_trader.core.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
@@ -158,7 +159,7 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
         for n in range(1, ea_templates.MAX_TP_LEVELS + 1):
             pips = float(template.get(f"{prefix}{n}_pips", 0.0) or 0.0)
             if pips > 0:
-                out[n] = ref + sign * pips
+                out[n] = ref + sign * (pips * PIPS_TO_PRICE_XAUUSD)
         return out
 
     if use_tg_anchor:
@@ -172,7 +173,25 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
 
     pcts = None
     if tps:
-        table = [float(template.get(f"tp{n}_pct", 0.0) or 0.0) for n in sorted(tps)]
+        # /100: tp{n}_pct is stored and edited as a 0-100 percentage (the
+        # Anchor TP UI's "%" column -- 5.0 means "5%"), but the wire's
+        # "pct{i}" key and the EA's DoPartialClose (lots = orig_lots * pct)
+        # both expect a 0-1 fraction, same convention the built-in ladder
+        # strategies' own _GDVR_PCTS/_CLIMBER_PCTS tables already use
+        # (0.30, 0.70, ...). Without this, DoPartialClose computed
+        # orig_lots * 5.0 for a "5%" level -- always far more than the
+        # position itself, so MathMin(lots, remaining) silently closed 100%
+        # of the remaining lot at the FIRST triggered TP on every template
+        # trade with any partial-close percentage configured, regardless of
+        # what percentage was actually set. Root-caused live 2026-07-31,
+        # ticket 1690279387 ("Conservative Trial", tp1_pct=5.0): terminal
+        # Expert log showed "partial close OK ... tp=1 lots=0.1
+        # remaining=0.0" -- the full 0.1 lot, not 5% of it. The EA's own
+        # pending-leg conversion (tpl_tp_pen{n}_pct / 100.0, see
+        # ForexTraderBridge.mq5) proves this is the EA's real convention;
+        # the anchor ladder's "pct{i}" path was simply missing the same
+        # divide-by-100 that pending already has.
+        table = [float(template.get(f"tp{n}_pct", 0.0) or 0.0) / 100.0 for n in sorted(tps)]
         if use_tg_anchor and table:
             # Whatever ends up being the last level closes the remainder, so
             # a message with more TPs than the pct column defines can never
@@ -180,7 +199,7 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
             # the Telegram branch -- a template-driven ladder deliberately
             # allows a trailing 0% (Sig Gen Grid runs TP5/TP6 at 0 and lets
             # the trailing stop take them).
-            table[-1] = 100.0
+            table[-1] = 1.0
         if any(p > 0 for p in table):
             pcts = table
 
@@ -198,8 +217,13 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
             # the wrong ladder -- convert the message's prices into pips
             # from the EA's own staging base instead, which reproduces them
             # under the default "unified" anchor mode.
+            #
+            # Genuine pips, not a raw price difference: the EA applies its
+            # own PipsToPrice() (pips * 10 * _Point) to whatever arrives in
+            # tpl_tp_pen{n}_pips, so a raw price gap sent here would land the
+            # pending leg's TP 10x closer than the message actually stated.
             pending_pips = {
-                n: abs(price - ea_base)
+                n: abs(price - ea_base) / PIPS_TO_PRICE_XAUUSD
                 for n, price in enumerate(msg_tps[:ea_templates.MAX_TP_LEVELS], start=1)
             }
     return tps, pcts, pending_pips

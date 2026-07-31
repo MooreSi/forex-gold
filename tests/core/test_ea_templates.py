@@ -171,3 +171,32 @@ def test_override_helpers_roundtrip():
     assert not et.is_template_override("")
     assert et.template_name_from_override("template:My Grid") == "My Grid"
     assert et.override_for_template("My Grid") == "template:My Grid"
+
+
+# ── None-valued numeric fields (2026-07-31) ──────────────────────────────────
+# NiceGUI's ui.number reports its value as None while its box is empty --
+# true for every keystroke that clears a field before typing the next
+# number, not just an abandoned edit. save_ea_template previously ran
+# float()/int() on every numeric field unguarded, so saving while any pips/
+# pct/count box was mid-clear raised "float() argument must be a string or a
+# real number, not 'NoneType'" and aborted the whole save. Root-caused live
+# 2026-07-31 editing Anchor TP pips.
+
+def test_none_pips_value_falls_back_to_default_instead_of_crashing(fresh_db):
+    t = et.save_ea_template("Cleared Field", {"tp1_pips": None, "tp2_pips": 30.0})
+    assert t["tp1_pips"] == 0.0
+    assert t["tp2_pips"] == 30.0
+
+
+def test_none_int_field_falls_back_to_default_instead_of_crashing(fresh_db):
+    t = et.save_ea_template("Cleared Int", {"anchors": None})
+    assert t["anchors"] == et.DEFAULTS["anchors"]
+
+
+def test_none_pct_and_float_fields_all_fall_back(fresh_db):
+    t = et.save_ea_template("Cleared Many", {
+        "tp1_pct": None, "sl_pips": None, "guard_pips": None,
+    })
+    assert t["tp1_pct"] == et.DEFAULTS["tp1_pct"]
+    assert t["sl_pips"] == et.DEFAULTS["sl_pips"]
+    assert t["guard_pips"] == et.DEFAULTS["guard_pips"]

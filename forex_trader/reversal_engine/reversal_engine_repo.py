@@ -183,6 +183,16 @@ def _run_migrations() -> None:
         "ALTER TABLE re_signals ADD COLUMN source_channel TEXT DEFAULT 'Gold Diggers VIP'",
         "ALTER TABLE re_signals ADD COLUMN ml_prob_at_fill REAL",
         "ALTER TABLE re_signals ADD COLUMN htf_bias_at_fill TEXT",
+        # The REF level type this signal correlated against (2026-07-31).
+        # Classified at correlation time by reversal_engine_correlate's
+        # _classify_ref_level but previously discarded straight after being
+        # counted, so when the signal later closed there was no way to tell
+        # ml_engine which level type had just won or lost -- which is why
+        # record_ref_signal was only ever called with was_win=None and the
+        # `wins` counter behind ref_level_win_rate sat at 0 forever.
+        # Mirrored in reversal_engine/database.py's own migration list, which
+        # is a structural twin of this one.
+        "ALTER TABLE re_signals ADD COLUMN correlated_ref_level_type TEXT",
     ]
     for stmt in migrations:
         try:
@@ -418,11 +428,17 @@ def store_ml_prob_at_fill(sig_id: int, prob: float, htf_bias: str) -> None:
 
 
 def update_correlation(sig_id: int, ref_signal_id: str,
-                       time_delta_s: float, distance_pts: float) -> None:
+                       time_delta_s: float, distance_pts: float,
+                       ref_level_type: Optional[str] = None) -> None:
+    """`ref_level_type` is persisted so the eventual win/loss can be credited
+    back to that level type when this signal closes (ml_engine.record_outcome
+    -> record_ref_signal(was_win=...)). Without it the correlation's outcome
+    was unrecoverable and ref_level_win_rate could only ever read 0."""
     get_db().run(
         "UPDATE re_signals SET correlated_ref_signal_id=?, correlation_time_delta_s=?, "
-        "correlation_distance_pts=?, correlation_confirmed=1 WHERE id=?",
-        ref_signal_id, time_delta_s, distance_pts, sig_id,
+        "correlation_distance_pts=?, correlation_confirmed=1, correlated_ref_level_type=? "
+        "WHERE id=?",
+        ref_signal_id, time_delta_s, distance_pts, ref_level_type, sig_id,
     )
 
 

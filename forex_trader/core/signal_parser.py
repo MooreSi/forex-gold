@@ -604,6 +604,113 @@ def parse_limit_order_signal(text: str) -> Optional[dict]:
     return parsed
 
 
+def parse_format_ab_partial(text: str) -> Optional[dict]:
+    """Format A/B counterpart to parse_gd2_partial: direction + entry range
+    with no Stop Loss and no TP yet. parse_gold_signal returns None outright
+    when _SL_RE/_SL_B_RE don't match, so without this a Format A/B channel
+    that splits its entry and its levels across two messages produces no
+    signal dict at all -- there was nothing for a follow-up to complete.
+
+    Returns {"direction", "entry_low", "entry_high"} or None. Returns None
+    when SL or any TP is already present (that's a full signal -- use
+    parse_gold_signal) and for a non-XAUUSD Currency line, matching
+    parse_gold_signal's own gate so this can't smuggle in a pair the app
+    doesn't trade."""
+    currency_m = _CURRENCY_RE.search(text)
+    if currency_m and currency_m.group(1).upper().replace("/", "").replace("-", "") != "XAUUSD":
+        return None
+
+    clean = re.sub(r'\*+([^*\n]+)\*+', r'\1', text)
+
+    direction = entry_low = entry_high = None
+    m = _DIRECTION_RE.search(clean)
+    if m:
+        direction = m.group(1).upper()
+        price_a, price_b = _f(m.group(2)), _f(m.group(3))
+        entry_low, entry_high = min(price_a, price_b), max(price_a, price_b)
+    else:
+        mb, eb = _DIRECTION_B_RE.search(clean), _ENTRY_B_RE.search(clean)
+        if mb and eb:
+            direction = mb.group(1).upper()
+            price_a, price_b = _f(eb.group(1)), _f(eb.group(2))
+            entry_low, entry_high = min(price_a, price_b), max(price_a, price_b)
+
+    if direction is None:
+        return None
+    if _SL_RE.search(clean) or _SL_B_RE.search(clean):
+        return None
+    if _TP_RE.search(clean) or _TP_B_RE.search(clean):
+        return None
+    return {"direction": direction, "entry_low": entry_low, "entry_high": entry_high}
+
+
+def _extract_levels(text: str) -> dict:
+    """Every SL/TP this message states, in any supported format's syntax.
+    Values absent from the text come back as None."""
+    clean = re.sub(r'\*+([^*\n]+)\*+', r'\1', text)
+
+    sl_m = _SL_RE.search(clean) or _SL_B_RE.search(clean) or _GD2_SL_RE.search(clean)
+    tps: dict[int, float] = {}
+    for pattern in (_TP_RE, _TP_B_RE, _GD2_TP_RE):
+        for tm in pattern.finditer(clean):
+            n = int(tm.group(1))
+            if n <= 8:
+                tps.setdefault(n, _f(tm.group(2)))
+
+    return {
+        "stop_loss": _f(sl_m.group(1)) if sl_m else None,
+        **{f"tp{i}": tps.get(i) for i in range(1, 9)},
+    }
+
+
+def parse_partial_any_format(text: str) -> Optional[dict]:
+    """Format-agnostic "direction + entry, levels still to come" detector for
+    TP/SL in Second Message. Tries GD2's existing partial parser first (it
+    covers all three GD2 layouts), then Format A/B's.
+
+    Carries through any SL/TP the message *did* state: parse_gd2_partial
+    treats a message as partial when either SL or TP is missing, so a GD2
+    entry that quotes its Stop Loss but no targets yet reaches here with a
+    real SL that must not be thrown away -- holding it and later executing
+    bare would otherwise place the trade with no stop at all.
+
+    Returns {"direction", "entry_low", "entry_high", "stop_loss",
+    "tp1".."tp8"} or None."""
+    partial = parse_gd2_partial(text) or parse_format_ab_partial(text)
+    if not partial:
+        return None
+    result = {**partial, **_extract_levels(text)}
+    # `tp_open` is what routes a signal to Limit Runner's resting pending
+    # order rather than market execution, so a held C3 "[LIMITS] GOLD @"
+    # entry has to carry it through the merge or it would come back out as
+    # an ordinary market signal.
+    if is_limit_order_signal(text):
+        result["tp_open"] = bool(_GD2_TP_OPEN_RE.search(text))
+    return result
+
+
+def parse_tp_sl_only(text: str) -> Optional[dict]:
+    """The other half of TP/SL in Second Message: a follow-up message that
+    carries Stop Loss and/or TP levels but names no direction and no entry
+    of its own, so it can only be read as completing an earlier signal.
+
+    Returns {"stop_loss", "tp1".."tp8"} (any of which may be None) or None
+    if the message states a direction, or carries neither SL nor any TP.
+    Refusing anything with a direction is what keeps this from swallowing a
+    complete standalone signal -- that must go through the normal parsers."""
+    if (_DIRECTION_RE.search(text) or _DIRECTION_B_RE.search(text)
+            or _GD2_DIRECTION_RE.search(text) or _GD2_ZONE_DIRECTION_RE.search(text)
+            or _GD2_LIMITS_DIRECTION_RE.search(text)):
+        return None
+
+    levels = _extract_levels(text)
+    if levels["stop_loss"] is None and all(levels[f"tp{i}"] is None for i in range(1, 9)):
+        return None
+    if _GD2_TP_OPEN_RE.search(text):
+        levels["tp_open"] = True
+    return levels
+
+
 def validate_signal(direction: str, entry_low: float, entry_high: float,
                     stop_loss: float, *tp_args) -> list[str]:
     """

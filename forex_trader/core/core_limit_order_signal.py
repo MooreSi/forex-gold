@@ -57,6 +57,7 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from forex_trader.core import database as db_module
+from forex_trader.core.core_closed_market_queue import queue_closed_market_limit, should_queue
 from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.models import MAX_TP, STRATEGY_LIMIT_RUNNER
 
@@ -189,6 +190,19 @@ async def handle_limit_order_signal(
     valid value -- realignment then simply can't fire.
     """
     if not sess_ok:
+        # Queue Closed Market Limits -- only for a genuine weekend close, not
+        # for a session the user deliberately switched off (should_queue
+        # checks is_weekly_market_closed itself). Queued here rather than at
+        # the call site so the market-closed EA-health check below, which
+        # would also fail with the terminal down over a weekend, can't reject
+        # the signal before it ever reaches the queue.
+        if should_queue(rs):
+            if queue_closed_market_limit(tg_id, channel_name, source_label, parsed):
+                return {"skip_reason": (
+                    "Market closed — limit order queued, will be placed automatically "
+                    "when the market reopens."
+                )}
+            return {"skip_reason": "Market closed — limit order already queued."}
         return {"skip_reason": skip_reason}
     if per_signal_skip:
         return {"skip_reason": f"Auto-eval declined signal: {per_signal_skip_reason}"}

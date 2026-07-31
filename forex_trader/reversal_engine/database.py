@@ -194,6 +194,14 @@ def _run_migrations() -> None:
         # from ml_prob/htf_bias (creation-time) so both remain visible.
         "ALTER TABLE re_signals ADD COLUMN ml_prob_at_fill REAL",
         "ALTER TABLE re_signals ADD COLUMN htf_bias_at_fill TEXT",
+        # The REF level type this signal correlated against (2026-07-31).
+        # Classified at correlation time by reversal_engine_correlate's
+        # _classify_ref_level but previously discarded immediately after being
+        # counted, so when the signal later closed there was no way to tell
+        # ml_engine which level type had just won or lost -- which is why
+        # record_ref_signal was only ever called with was_win=None and the
+        # `wins` counter behind ref_level_win_rate sat at 0 forever.
+        "ALTER TABLE re_signals ADD COLUMN correlated_ref_level_type TEXT",
     ]
     with _conn() as con:
         for stmt in _migrations:

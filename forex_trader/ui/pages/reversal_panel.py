@@ -37,6 +37,25 @@ re_db, re_ml, _ = make_facades("reversal_engine", _re_db_real, _re_ml_real)
 _STARTING_BALANCE = 1000.0
 
 
+def _get_realised_pnl() -> dict:
+    """What this engine's trades actually made, from the core trade ledger.
+
+    Deliberately not read from reversal_engine.db: that database records
+    every signal the generator produced and prices them all at the virtual
+    lot, whether or not the trade was ever placed. Only rows here in
+    vantage_simulated_trades correspond to orders that really went to MT5.
+    """
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(net_pnl), 0) total "
+            "FROM vantage_simulated_trades "
+            "WHERE status='closed' AND tg_source='Reversal Engine'"
+        ).fetchone()
+    n = int(row[0] or 0)
+    total = float(row[1] or 0.0)
+    return {"n": n, "total": total, "per_trade": (total / n) if n else 0.0}
+
+
 # ── Formatting helpers ────────────────────────────────────────────────────────
 
 def _fmt_ts(ts) -> str:
@@ -204,9 +223,32 @@ def render() -> None:
     with ui.row().classes(
         "w-full items-center gap-6 px-4 py-3 bg-gray-900 border-b border-gray-700"
     ):
+        # Realised first, and larger, because it is the one that is real
+        # money. The virtual balance beside it is the signal generator's
+        # hypothetical ledger over EVERY signal it produced -- including the
+        # ~75% that the live-execution gates (ML score, momentum, exposure,
+        # schedule, circuit breaker) deliberately blocked and never traded.
+        # Those blocked signals are overwhelmingly the losers, so the two
+        # numbers diverge hard and in opposite directions: measured
+        # 2026-07-31, virtual sat at -$1,651 while the trades actually placed
+        # were +$1,076. Showing only the virtual figure made a profitable
+        # engine look like it was bleeding.
         with ui.column().classes("items-center"):
-            balance_lbl = ui.label("$—").classes("text-2xl font-bold font-mono text-green-400")
-            ui.label("Virtual Balance").classes("text-xs text-gray-500")
+            live_pnl_lbl = ui.label("$—").classes("text-2xl font-bold font-mono text-green-400")
+            ui.label("Realised P&L (executed)").classes("text-xs text-gray-500")
+            live_n_lbl = ui.label("").classes("text-xs text-gray-600")
+
+        ui.separator().props("vertical").classes("h-10 border-gray-700")
+
+        with ui.column().classes("items-center"):
+            balance_lbl = ui.label("$—").classes("text-lg font-mono text-gray-400")
+            ui.label("Virtual Balance").classes("text-xs text-gray-600")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Hypothetical balance if every signal this engine generated had "
+                "been traded, including the ones the live-execution gates blocked. "
+                "Useful for judging raw signal quality, not for judging money — "
+                "for that, read Realised P&L."
+            )
 
         ui.separator().props("vertical").classes("h-10 border-gray-700")
 
@@ -363,13 +405,29 @@ def render() -> None:
             dd   = await db_module.to_db_thread(re_db.get_max_drawdown)
             balance_lbl.text = f"${bal:,.2f}"
             balance_lbl.classes(
-                replace="text-2xl font-bold font-mono "
-                + ("text-green-400" if bal >= _STARTING_BALANCE else "text-red-400")
+                replace="text-lg font-mono "
+                + ("text-gray-300" if bal >= _STARTING_BALANCE else "text-red-400")
             )
             pnl_lbl.text = _pnl_str(pnl, "$")
             pnl_lbl.classes(replace=f"text-lg font-bold font-mono {_pnl_color(pnl)}")
             pnl_pct_lbl.text = f"Total P&L ({pnl / _STARTING_BALANCE * 100:+.1f}%)"
             dd_lbl.text = f"${dd:,.2f}"
+        except Exception:
+            pass
+
+        # Realised P&L -- the trades this engine actually placed, read from
+        # the core trade ledger rather than the engine's own virtual one.
+        try:
+            live = await db_module.to_db_thread(_get_realised_pnl)
+            live_pnl_lbl.text = f"${live['total']:,.2f}"
+            live_pnl_lbl.classes(
+                replace="text-2xl font-bold font-mono "
+                + ("text-green-400" if live["total"] >= 0 else "text-red-400")
+            )
+            live_n_lbl.text = (
+                f"{live['n']} closed · {live['per_trade']:+.2f}/trade"
+                if live["n"] else "no closed trades yet"
+            )
         except Exception:
             pass
 

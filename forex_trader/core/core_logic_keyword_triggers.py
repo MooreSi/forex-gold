@@ -131,6 +131,48 @@ def should_skip_ai_fallback_for_no_signal_candidate(text: str, rs: dict) -> Opti
     return "no symbol/buy/limit keyword matched (Logic Keywords) — AI fallback skipped"
 
 
+def apply_mirror_copy(parsed: dict, rs: dict) -> Optional[str]:
+    """Reverse/Mirror Copy (2026-07-31) -- inverts BUY<->SELL and reflects
+    SL and every TP through the entry zone's midpoint, in place on `parsed`.
+    Returns a short description of what changed (for the log/alert), or None
+    if the toggle is off or the signal can't be mirrored.
+
+    The midpoint is the pivot rather than a single entry price because every
+    parser here produces an entry *range*: reflecting through the midpoint
+    maps entry_low onto entry_high, so the zone lands exactly on itself and
+    only the levels around it flip sides. That in turn keeps the mirrored
+    SL/TP geometry valid by construction -- a BUY with its SL below the zone
+    becomes a SELL with its SL above it -- so the mirrored dict passes the
+    same validate_signal checks the original would have.
+
+    Deliberately does NOT touch `tp_open`: that key is what routes a signal
+    to the Limit Runner rather than market execution, and this app has no
+    LIMIT/STOP order-type duality for a mirror to swap (confirmed with the
+    user 2026-07-31). Mirroring changes which way the trade faces, not how
+    the order is placed."""
+    if not bool(rs.get("lk_enable_mirror_copy", 0)):
+        return None
+    direction = str(parsed.get("direction") or "").upper()
+    if direction not in ("BUY", "SELL"):
+        return None
+    entry_low, entry_high = parsed.get("entry_low"), parsed.get("entry_high")
+    if entry_low is None or entry_high is None:
+        return None
+
+    pivot = (float(entry_low) + float(entry_high)) / 2.0
+
+    def _reflect(value):
+        return None if value is None else round(2.0 * pivot - float(value), 5)
+
+    parsed["direction"] = "SELL" if direction == "BUY" else "BUY"
+    parsed["stop_loss"] = _reflect(parsed.get("stop_loss"))
+    for i in range(1, 9):
+        key = f"tp{i}"
+        if key in parsed:
+            parsed[key] = _reflect(parsed[key])
+    return f"{direction} -> {parsed['direction']} mirrored through {pivot:.2f}"
+
+
 async def try_handle_close_all_trigger(
     text: str, channel_name: str, tg_id: str, rs: dict,
     close_trade_fn: Callable[[str, str], Awaitable[dict]],

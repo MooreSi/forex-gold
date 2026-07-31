@@ -259,6 +259,7 @@ async def resolve_open_trade_params(
         raise ValueError(f"Channel '{_ch_src}' is paused by the scorecard — trade skipped")
 
     lot_size = lot_size_override or sig.get("lot_size")
+    _lot_is_template_fixed = False
     if not lot_size and _is_template and _template is not None:
         # A template's own Entries & Lots fields are authoritative for
         # sizing, not the generic per-strategy path below. Grid mode's
@@ -287,14 +288,22 @@ async def resolve_open_trade_params(
             # that function entirely so it needs its own cap.
             _max_lot = float(rs.get("max_lot_size", 0.10))
             lot_size = min(float(_template.get("lot_anchor") or 0.01), _max_lot)
+            _lot_is_template_fixed = True
     if not lot_size:
         risk_pct  = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
         balance   = await get_trading_balance(bridge, starting_balance)
         entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
         lot_size  = suggest_lot_size(entry_mid, float(sig["stop_loss"]), balance, risk_pct)
     # Apply the channel multiplier to the risk-derived size (not to a manual
-    # fixed override, which the user set deliberately).
-    if _ch_mult != 1.0 and not lot_size_override:
+    # fixed override, which the user set deliberately). A template's own
+    # fixed Anchor Lot (risk_pct == 0 branch above) is the same kind of
+    # deliberate manual value as lot_size_override -- scaling it silently
+    # (e.g. Reversal Engine's 1.3x -> 0.1 becoming 0.13) defeats the point
+    # of setting a fixed lot on the template. The risk_pct>0 template branch
+    # is excluded from this exemption: that path is genuinely risk-derived,
+    # same as the generic non-template sizing below, so the multiplier is
+    # meant to apply there.
+    if _ch_mult != 1.0 and not lot_size_override and not _lot_is_template_fixed:
         lot_size = lot_size * _ch_mult
     lot_size = max(0.01, round(lot_size, 2))
 

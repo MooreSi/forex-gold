@@ -55,7 +55,10 @@ from forex_trader.core.core_logic_keyword_triggers import (
     try_handle_close_all_trigger,
     try_handle_risk_free_be_trigger,
     try_handle_tp_hit_trigger,
+    apply_mirror_copy,
 )
+from forex_trader.core.core_closed_market_queue import flush_queued_limits
+from forex_trader.core.core_ref_signal_backfill import backfill_ref_signals
 from forex_trader.core.core_scan_messages_edit_reparse import (
     handle_signal_edit as _handle_signal_edit_impl,
 )
@@ -356,6 +359,8 @@ class SimulationEngine:
         self._ai_model_refresh_task: Optional[asyncio.Task] = None
         self._data_retention_task: Optional[asyncio.Task] = None
         self._reversal_engine_research_task: Optional[asyncio.Task] = None
+        self._closed_market_queue_task: Optional[asyncio.Task] = None
+        self._ref_backfill_task: Optional[asyncio.Task] = None
     def set_telegram_reader(self, reader: "TelegramReader") -> None:
         self._tg_reader = reader
 
@@ -381,6 +386,8 @@ class SimulationEngine:
         self._ai_model_refresh_task = asyncio.create_task(self._ai_model_refresh_loop())
         self._data_retention_task = asyncio.create_task(self._data_retention_loop())
         self._reversal_engine_research_task = asyncio.create_task(self._reversal_engine_research_loop())
+        self._closed_market_queue_task = asyncio.create_task(self._closed_market_queue_loop())
+        self._ref_backfill_task = asyncio.create_task(self._ref_backfill_loop())
         from forex_trader.core.self_healer import SelfHealer
         self._self_healer = SelfHealer(self)
         self._self_healer.start()
@@ -404,7 +411,9 @@ class SimulationEngine:
                   self._max_tp_task, self._signal_bus_prune_task,
                   self._tp_safety_net_task, self._channel_ai_task,
                   self._ai_model_refresh_task, self._data_retention_task,
-                  self._reversal_engine_research_task):
+                  self._reversal_engine_research_task,
+                  self._closed_market_queue_task,
+                  self._ref_backfill_task):
             if t and not t.done():
                 t.cancel()
         if hasattr(self, "_self_healer"):
@@ -2292,6 +2301,17 @@ class SimulationEngine:
             if not bool(rs.get("lk_enable_sl_parsing", 1)):
                 parsed["stop_loss"] = None
 
+            # ── Parsing Settings: Reverse / Mirror Copy ──────────────────────
+            # Must run before _record_staleness_or_new_impl below, which
+            # writes `parsed` verbatim into vantage_tg_signals -- that row is
+            # what the UI, the "signal detected" Telegram alert and the audit
+            # trail all read back, so mirroring after it would leave the
+            # recorded signal facing the opposite way to the trade actually
+            # placed from it.
+            _mirror = apply_mirror_copy(parsed, rs)
+            if _mirror:
+                log.info("[ParsingSettings] Mirror Copy tg_id=%s — %s", tg_id, _mirror)
+
             # Staleness guard — signals are scalps: an entry zone is only valid for
             # minutes. Anything older than 4 minutes at processing time is recorded
             # as historical and never executed. The previous 2-hour window let a
@@ -2514,6 +2534,50 @@ class SimulationEngine:
             except Exception as e:
                 log.debug("_tp_safety_net_loop error: %s", e)
             await asyncio.sleep(self._TP_SAFETY_NET_INTERVAL)
+
+    # Deliberately its own loop rather than a step inside _monitor_loop:
+    # that loop's whole body sits behind `if tick:`, and over a weekend --
+    # exactly when this queue fills up -- there is no tick to be had, so a
+    # step added there would never run at the moment it's needed. 60s is
+    # ample for a reopen the caller only has to notice within a minute.
+    _CLOSED_MARKET_FLUSH_INTERVAL = 60  # seconds between reopen checks
+
+    async def _closed_market_queue_loop(self) -> None:
+        while self._monitor_running:
+            try:
+                rs = await db_module.to_db_thread(db_module.get_risk_settings)
+                if bool(rs.get("lk_queue_closed_market_limits", 0)):
+                    async def _place(parsed, tg_id, channel_name, source_label):
+                        return await _handle_limit_order_signal_impl(
+                            parsed, tg_id, channel_name, source_label, rs,
+                            True, False, "", "",
+                            get_trading_balance_fn=self._get_trading_balance,
+                            suggest_lot_size_fn=self.suggest_lot_size,
+                            bridge=self._bridge,
+                        )
+                    await flush_queued_limits(rs, _place)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug("_closed_market_queue_loop error: %s", e)
+            await asyncio.sleep(self._CLOSED_MARKET_FLUSH_INTERVAL)
+
+    # Hourly rather than startup-only: while accept_tg_signals is off, new
+    # messages keep arriving and keep going unparsed, so a one-shot at boot
+    # would leave the REF feed going stale again within the hour. Reads and
+    # records only -- see core_ref_signal_backfill's module docstring for why
+    # this can never open a trade.
+    _REF_BACKFILL_INTERVAL = 3600
+
+    async def _ref_backfill_loop(self) -> None:
+        while self._monitor_running:
+            try:
+                await db_module.to_db_thread(backfill_ref_signals)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug("_ref_backfill_loop error: %s", e)
+            await asyncio.sleep(self._REF_BACKFILL_INTERVAL)
 
     async def _channel_ai_auto_eval_loop(self) -> None:
         """

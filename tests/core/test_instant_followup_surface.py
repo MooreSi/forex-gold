@@ -372,7 +372,7 @@ def test_watchdog_skips_ea_managed_trade_when_ea_healthy(fresh_db, monkeypatch):
         def is_ea_healthy(self):
             return True
 
-    from forex_trader.core import ea_bridge
+    from backend.src.services.broker import ea_bridge as ea_bridge
     monkeypatch.setattr(ea_bridge, "_instance", _FakeEA())
     asyncio.run(followup.ime_timeout_watchdog(tick, bridge))
     trade = _trade_dict("t-ea")
@@ -393,7 +393,7 @@ def test_watchdog_falls_through_for_ea_managed_trade_when_ea_unhealthy(fresh_db,
         def is_ea_healthy(self):
             return False
 
-    from forex_trader.core import ea_bridge
+    from backend.src.services.broker import ea_bridge as ea_bridge
     monkeypatch.setattr(ea_bridge, "_instance", _FakeEA())
     asyncio.run(followup.ime_timeout_watchdog(tick, bridge))
     trade = _trade_dict("t-ea-down")

@@ -92,7 +92,7 @@ async def handle_limit_order_signal(
     if per_signal_skip:
         return {"skip_reason": f"Auto-eval declined signal: {per_signal_skip_reason}"}
 
-    from forex_trader.core import ea_bridge as _ea_mod
+    from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()
     if _ea is None or not _ea.is_ea_healthy():
         return {

@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_total_deposits/core_mt5_performance/
+"""Proves backend.src.services.broker.deposits/core_mt5_performance/
 core_mt5_import's extracted functions behave identically to the
 SimulationEngine methods characterized in
 test_mt5_history_characterization.py -- see
@@ -16,9 +16,9 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_total_deposits as td
-from forex_trader.core import core_mt5_performance as perf_mod
-from forex_trader.core import core_mt5_import as imp
+from backend.src.services.broker import deposits as td
+from backend.src.services.broker import mt5_performance as perf_mod
+from backend.src.services.broker import history_import as imp
 
 
 def _reset_thread_local_connection():

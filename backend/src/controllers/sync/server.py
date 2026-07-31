@@ -896,7 +896,7 @@ class SyncServer:
 
         ea_connected = False
         try:
-            from forex_trader.core import ea_bridge as _ea_bridge_mod
+            from backend.src.services.broker import ea_bridge as _ea_bridge_mod
             _ea = _ea_bridge_mod.get_instance()
             ea_connected = _ea is not None and _ea.is_ea_healthy()
         except Exception:

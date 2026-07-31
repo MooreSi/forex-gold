@@ -79,7 +79,7 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     # override > auto-Claude rec > this channel's own default (orb_fixed,
     # not the global Active Strategy, since orb_fixed is what actually
     # suits a single-target breakout entry).
-    from forex_trader.core import core_ea_templates as ea_templates
+    from backend.src.services.broker import ea_templates as ea_templates
     _ch_override = await db_module.to_db_thread(
         db_module.get_channel_strategy_override, "ORB/IVB Report (auto)"
     )
@@ -106,7 +106,7 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
         ))
         return
 
-    from forex_trader.core import ea_bridge as _ea_mod
+    from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()
     if _ea is None or not _ea.is_ea_healthy():
         log.info("[ORB auto-execute] EA not connected/healthy — setup not captured")

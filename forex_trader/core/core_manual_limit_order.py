@@ -55,7 +55,7 @@ async def open_manual_limit_order(
     if direction not in ("BUY", "SELL"):
         raise ValueError(f"Invalid direction: {direction}")
 
-    from forex_trader.core import ea_bridge as _ea_mod
+    from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()
     if _ea is None or not _ea.is_ea_healthy():
         raise ConnectionError(

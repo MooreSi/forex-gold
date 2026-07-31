@@ -27,11 +27,13 @@ def test_direct_symbol_import_is_a_use():
 
 def test_aliased_module_attribute_is_a_use():
     # frontend/pages/trading.py once did exactly this with the schedule module.
+    # Fictional module name on purpose: every synthetic example that borrowed a
+    # real module's name has been rewritten by a later phase's bulk rename.
     used = usage_of(
-        "from forex_trader.core import core_ea_templates as et\n"
+        "from forex_trader.core import core_zz_example as et\n"
         "et.is_template_override('x')\n"
     )
-    assert ("core_ea_templates", "is_template_override") in used
+    assert ("core_zz_example", "is_template_override") in used
 
 
 def test_unaliased_module_import_then_attribute_is_a_use():

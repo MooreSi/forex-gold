@@ -99,7 +99,7 @@ class EABridge:
         # equivalent to fall back to (see core_open_trade.open_trade's
         # template branch, which raises rather than falling through to the
         # Python bridge path when the EA isn't reachable).
-        from forex_trader.core.core_ea_templates import is_template_override
+        from backend.src.services.broker.ea_templates import is_template_override
         if is_template_override(strategy):
             return True
         return strategy in EA_PORTABLE_STRATEGIES

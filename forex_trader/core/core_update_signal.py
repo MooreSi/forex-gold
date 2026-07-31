@@ -117,7 +117,7 @@ async def update_signal(bridge: Any, signal_id: str, updates: dict) -> dict:
                 _ea_managing = False
                 if trade_row.get("managed_by") == "ea":
                     try:
-                        from forex_trader.core import ea_bridge as _ea_mod0
+                        from backend.src.services.broker import ea_bridge as _ea_mod0
                         _ea0 = _ea_mod0.get_instance()
                         _ea_managing = bool(_ea0 is not None and _ea0.is_ea_healthy())
                     except Exception:
@@ -143,7 +143,7 @@ async def update_signal(bridge: Any, signal_id: str, updates: dict) -> dict:
                 # permanently invisible to the EA's on-tick TpCleared() check.
                 if trade_row.get("managed_by") == "ea":
                     try:
-                        from forex_trader.core import ea_bridge as _ea_mod
+                        from backend.src.services.broker import ea_bridge as _ea_mod
                         _ea = _ea_mod.get_instance()
                         if _ea is not None:
                             _new_tps = {

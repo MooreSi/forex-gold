@@ -2514,7 +2514,7 @@ def _render_diagnostics(engine):
                         elif trade_allowed is True:
                             ui.badge("AutoTrading ON", color="green")
 
-                    from forex_trader.core import ea_bridge as _ea_bridge_mod
+                    from backend.src.services.broker import ea_bridge as _ea_bridge_mod
                     _ea_ok, _ea_scope = _ea_bridge_mod.get_effective_ea_status()
                     ui.badge(
                         f"EA {'Connected' if _ea_ok else 'Not Connected'}"

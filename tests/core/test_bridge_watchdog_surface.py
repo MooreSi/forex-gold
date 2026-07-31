@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_bridge_watchdog.bridge_watchdog_check
+"""Proves backend.src.services.broker.watchdog.bridge_watchdog_check
 behaves identically to SimulationEngine's original, characterized in
 test_bridge_watchdog_characterization.py -- see
 docs/todo/refactor/core-bridge-watchdog-migration/020-*.md.
@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core import core_bridge_watchdog as watchdog
+from backend.src.services.broker import watchdog as watchdog
 
 
 def _reset_thread_local_connection():

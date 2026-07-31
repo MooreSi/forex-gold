@@ -1196,7 +1196,7 @@ from backend.src.services.positions.spread_cache_repo import (  # noqa: E402,F40
     get_cached_spreads,
     cache_spread,
 )
-from forex_trader.core.core_db_credentials import (  # noqa: E402,F401
+from backend.src.services.broker.credentials_repo import (  # noqa: E402,F401
     _master_creds_path,
     _CRED_SECRET_COLS,
     get_mt5_credentials,

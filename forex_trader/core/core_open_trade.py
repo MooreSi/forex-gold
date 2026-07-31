@@ -24,7 +24,7 @@ import uuid
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import core_ea_templates as ea_templates
+from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.governor import is_trading_paused
 from backend.src.utils.models import (
     Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
@@ -228,7 +228,7 @@ async def open_trade(
 
     # Hand off to the companion MQL5 EA when it's enabled, connected, and
     # this strategy's SL/TP/partial-close rules are ones it can run
-    # natively on OnTick — see forex_trader.core.ea_bridge for why DPM
+    # natively on OnTick — see backend.src.services.broker.ea_bridge for why DPM
     # never qualifies. Falls straight through to the existing bridge
     # path (unchanged) if the EA is off, unreachable, or the strategy
     # isn't portable, so this is purely additive — no existing behaviour
@@ -242,7 +242,7 @@ async def open_trade(
     ea_rs = await db_module.to_db_thread(db_module.get_risk_settings)
     if bool(ea_rs.get("ea_bridge_enabled", 0)) and mt5_tp_override is None:
         try:
-            from forex_trader.core import ea_bridge as _ea_mod
+            from backend.src.services.broker import ea_bridge as _ea_mod
             _ea = _ea_mod.get_instance()
             # TEMP diagnostic — every adaptive_runner trade today has
             # gone Python-only despite ea_bridge_enabled=1, no [EA] log

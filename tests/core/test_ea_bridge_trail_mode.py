@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from forex_trader.core import ea_bridge
+from backend.src.services.broker import ea_bridge as ea_bridge
 
 
 class _FakeWriter:

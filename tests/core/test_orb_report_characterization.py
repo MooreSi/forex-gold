@@ -323,7 +323,7 @@ def test_auto_execute_not_proceeding_creates_no_signal(fresh_db):
     e._bridge = _FakeBridge()
     fake_ea = _FakeEA()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=False), \
-         mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
     assert fake_ea.calls == []
     with db.db() as conn:
@@ -336,7 +336,7 @@ def test_auto_execute_direction_inside_creates_no_signal(fresh_db):
     e._bridge = _FakeBridge()
     fake_ea = _FakeEA()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(SimulationEngine._orb_auto_execute(e, {"direction": "inside"}))
     assert fake_ea.calls == []
     with db.db() as conn:
@@ -349,7 +349,7 @@ def test_auto_execute_ea_unhealthy_creates_no_signal(fresh_db):
     e._bridge = _FakeBridge()
     fake_ea = _FakeEA(healthy=False)
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
     assert fake_ea.calls == []
     with db.db() as conn:
@@ -362,7 +362,7 @@ def test_auto_execute_bullish_places_pending_order_at_near_edge(fresh_db):
     e._bridge = _FakeBridge()
     fake_ea = _FakeEA()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
 
     assert len(fake_ea.calls) == 1
@@ -396,7 +396,7 @@ def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
     e._bridge = _FakeBridge()
     fake_ea = _FakeEA()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
     assert fake_ea.calls[0]["lot_size"] == 0.05
     with db.db() as conn:
@@ -413,7 +413,7 @@ def test_auto_execute_place_pending_order_failure_does_not_raise(fresh_db):
             raise ConnectionError("EA send failed")
     fake_ea = _RaisingEA()
     with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))  # must not raise
     with db.db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]

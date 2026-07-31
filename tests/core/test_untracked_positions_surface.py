@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_untracked_positions's extracted function
+"""Proves backend.src.services.broker.untracked's extracted function
 behaves identically to SimulationEngine.get_untracked_mt5_positions,
 characterized in test_untracked_positions_characterization.py -- see
 docs/todo/refactor/core-untracked-positions-migration/020-*.md.
@@ -15,7 +15,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_untracked_positions as up
+from backend.src.services.broker import untracked as up
 
 
 def _reset_thread_local_connection():

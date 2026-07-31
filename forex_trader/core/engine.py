@@ -24,8 +24,8 @@ from backend.src.utils.models import (
     STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
     STRATEGY_NAMES, MAX_TP,
 )
-from forex_trader.core.mt5_bridge import MT5BridgeClient
-from forex_trader.core.mt5_bridge_native import NativeMT5Bridge, is_available as _native_bridge_available
+from backend.src.services.broker.mt5_client import MT5BridgeClient
+from backend.src.services.broker.mt5_native import NativeMT5Bridge, is_available as _native_bridge_available
 from backend.src.services.signals.parser import (
     parse_instant_entry, parse_gd2_instant_entry, is_gd2_message,
     SIGNAL_PREFIX, check_sl_adjustment_rules,
@@ -34,7 +34,7 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.services.dpm import engine as dpm_engine
-from forex_trader.core import core_ea_templates as _ea_templates
+from backend.src.services.broker import ea_templates as _ea_templates
 from backend.src.services.positions.monitor_loop import (
     check_sl as _check_sl_impl,
     reconcile_sl_hit as _reconcile_sl_hit_impl,
@@ -73,11 +73,11 @@ from backend.src.services.positions.max_tp import (
 from forex_trader.core.core_fees_sizing import (
     pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl,
     calculate_fees as _calculate_fees_impl)
-from forex_trader.core.core_mt5_performance import (
+from backend.src.services.broker.mt5_performance import (
     compute_mt5_performance as _compute_mt5_performance_impl,
     _platform_fee_rate, _apply_fee,
 )
-from forex_trader.core.core_total_deposits import get_total_deposits as _get_total_deposits_impl
+from backend.src.services.broker.deposits import get_total_deposits as _get_total_deposits_impl
 from forex_trader.core.core_sim_account import (
     get_sim_account as _get_sim_account_impl,
     update_sim_balance as _update_sim_balance_impl,
@@ -88,7 +88,7 @@ from backend.src.services.analytics.reporting import (
     get_all_trades as _get_all_trades_impl,
     compute_performance as _compute_performance_impl,
 )
-from forex_trader.core.core_mt5_import import import_mt5_history as _import_mt5_history_impl
+from backend.src.services.broker.history_import import import_mt5_history as _import_mt5_history_impl
 from backend.src.services.signals.tg_repo import get_tg_signals as _get_tg_signals_impl
 from backend.src.services.positions.tp_tracking import (
     TPCache as _TPCache,
@@ -133,7 +133,7 @@ from forex_trader.core.core_bot_commands_trading import (
     cmd_activate as _cmd_activate_impl,
     cmd_report as _cmd_report_impl,
 )
-from forex_trader.core.core_bridge_watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
+from backend.src.services.broker.watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
 from forex_trader.core.core_profit_sync import (
     sync_profit as _sync_profit_impl,
     schedule_profit_sync as _schedule_profit_sync_impl,
@@ -153,7 +153,7 @@ from backend.src.services.positions.safety_net import (
     tp_safety_net_check_trade as _tp_safety_net_check_trade_impl,
     compute_be_cost_pts as _compute_be_cost_pts_impl,
 )
-from forex_trader.core.core_untracked_positions import (
+from backend.src.services.broker.untracked import (
     get_untracked_mt5_positions as _get_untracked_mt5_positions_impl,
 )
 from forex_trader.core.core_ai_signal_fallback import (
@@ -382,7 +382,7 @@ class SimulationEngine:
         # any trade only happens when ea_bridge_enabled is on in Risk Settings
         # AND the EA is actually connected — see open_trade()'s handoff check.
         try:
-            from forex_trader.core import ea_bridge as _ea_mod
+            from backend.src.services.broker import ea_bridge as _ea_mod
             self._ea_bridge = _ea_mod.EABridge(self)
             await self._ea_bridge.start()
             _ea_mod.set_instance(self._ea_bridge)
@@ -1287,7 +1287,7 @@ class SimulationEngine:
                     # regardless once EA handoff is working for these strategies.
                     if ladder_trades:
                         try:
-                            from forex_trader.core import ea_bridge as _ea_mod
+                            from backend.src.services.broker import ea_bridge as _ea_mod
                             _ea = _ea_mod.get_instance()
                             _ea_healthy = _ea is not None and _ea.is_ea_healthy()
                         except ImportError:

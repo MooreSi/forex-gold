@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import ea_bridge
+from backend.src.services.broker import ea_bridge as ea_bridge
 from forex_trader.core import core_scan_messages_auto_execute as ae
 
 

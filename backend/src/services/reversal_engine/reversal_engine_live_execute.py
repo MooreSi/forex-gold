@@ -224,7 +224,7 @@ class _LiveExecuteMixin:
         its own EA management branch (ManageConservativeLike, etc.) never
         reads t.pcts/t.beAtPos at all.
         """
-        from forex_trader.core import ea_bridge as _ea_mod
+        from backend.src.services.broker import ea_bridge as _ea_mod
         _ea = _ea_mod.get_instance()
         if _ea is None or not _ea.is_ea_healthy():
             return None

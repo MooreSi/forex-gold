@@ -320,7 +320,7 @@ async def process_instant_entry(
             )
             if trade_result.get("managed_by") == "ea":
                 try:
-                    from forex_trader.core import ea_bridge as _ea_mod
+                    from backend.src.services.broker import ea_bridge as _ea_mod
                     _ea = _ea_mod.get_instance()
                     if _ea is not None:
                         _ime_new_tps = {1: _ime_ex_tp1}

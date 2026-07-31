@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import ea_bridge
+from backend.src.services.broker import ea_bridge as ea_bridge
 
 
 def _reset_thread_local_connection():

@@ -1808,7 +1808,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     import asyncio as _aio
     from forex_trader.core import database as _csdb
     from backend.src.services.channels import strategy_ai as _csai
-    from forex_trader.core import core_ea_templates as _et
+    from backend.src.services.broker import ea_templates as _et
     from backend.src.utils.models import STRATEGY_NAMES
 
     with ui.row().classes("items-center gap-2 mb-1"):
@@ -2251,7 +2251,7 @@ def _render_global_parameters_card(rs: dict) -> None:
                 "risk_per_trade_pct":            float(risk_pct.value or 0),
                 "max_risk_per_trade_pct":        float(max_risk_pct.value or 0),
             })
-            from forex_trader.core import ea_bridge as _ea_mod
+            from backend.src.services.broker import ea_bridge as _ea_mod
             _ea = _ea_mod.get_instance()
             if _ea is not None:
                 asyncio.create_task(_ea.push_global_config())
@@ -2282,7 +2282,7 @@ def _render_ea_templates_card() -> None:
     signal didn't supply, pct always wins over the signal (which never
     states a close percentage) -- see core_open_trade.py's EA-handoff block.
     """
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
 
     with ui.row().classes("items-center gap-2 mb-2"):
         ui.label("EA Templates").classes("text-base font-bold text-yellow-300")

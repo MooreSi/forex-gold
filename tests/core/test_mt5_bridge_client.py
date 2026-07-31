@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from forex_trader.core import mt5_bridge
+from backend.src.services.broker import mt5_client as mt5_bridge
 
 
 @pytest.fixture(autouse=True)

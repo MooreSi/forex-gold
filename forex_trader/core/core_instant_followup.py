@@ -215,7 +215,7 @@ async def apply_followup_to_instant_trade(
             # in-memory tracking (see update_trade()'s docstring).
             if instant_trade.get("managed_by") == "ea":
                 try:
-                    from forex_trader.core import ea_bridge as _ea_mod
+                    from backend.src.services.broker import ea_bridge as _ea_mod
                     _ea = _ea_mod.get_instance()
                     if _ea is not None:
                         _new_tps = {
@@ -369,7 +369,7 @@ async def ime_timeout_watchdog(tick: "Tick", bridge: Any) -> None:
         # the template's own stealth/harvest/trail management.
         if trade.get("managed_by") == "ea":
             try:
-                from forex_trader.core import ea_bridge as _ea_mod
+                from backend.src.services.broker import ea_bridge as _ea_mod
                 _ea = _ea_mod.get_instance()
                 if _ea is not None and _ea.is_ea_healthy():
                     continue

@@ -139,7 +139,7 @@ async def open_trade_from_signal(
         )
         if result.get("managed_by") == "ea":
             try:
-                from forex_trader.core import ea_bridge as _ea_mod
+                from backend.src.services.broker import ea_bridge as _ea_mod
                 _ea = _ea_mod.get_instance()
                 if _ea is not None:
                     await _ea.update_trade(result["trade_id"], {1: exact_tp1})
@@ -180,7 +180,7 @@ async def open_trade_from_signal(
         )
         if result.get("managed_by") == "ea":
             try:
-                from forex_trader.core import ea_bridge as _ea_mod
+                from backend.src.services.broker import ea_bridge as _ea_mod
                 _ea = _ea_mod.get_instance()
                 if _ea is not None:
                     await _ea.update_trade(result["trade_id"], {1: exact_tp1, 2: exact_tp2})

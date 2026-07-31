@@ -7,7 +7,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_ea_templates as et
+from backend.src.services.broker import ea_templates as et
 
 
 def _reset_thread_local_connection():

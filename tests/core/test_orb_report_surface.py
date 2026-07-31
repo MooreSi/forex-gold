@@ -292,7 +292,7 @@ class _FakeEA:
 
 def test_auto_execute_not_proceeding_creates_no_signal(fresh_db):
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), False))
     assert fake_ea.calls == []
     with db.db() as conn:
@@ -302,7 +302,7 @@ def test_auto_execute_not_proceeding_creates_no_signal(fresh_db):
 
 def test_auto_execute_direction_inside_creates_no_signal(fresh_db):
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute({"direction": "inside"}, _FakeBridge(), True))
     assert fake_ea.calls == []
     with db.db() as conn:
@@ -314,7 +314,7 @@ def test_auto_execute_ea_unhealthy_creates_no_signal(fresh_db):
     """No Python-bridge fallback -- an unavailable EA means the setup is
     simply not captured, not simulated some other way."""
     fake_ea = _FakeEA(healthy=False)
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls == []
     with db.db() as conn:
@@ -324,7 +324,7 @@ def test_auto_execute_ea_unhealthy_creates_no_signal(fresh_db):
 
 def test_auto_execute_bullish_places_pending_order_at_near_edge(fresh_db):
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
 
     assert len(fake_ea.calls) == 1
@@ -356,7 +356,7 @@ def test_auto_execute_bearish_uses_entry_zone_low_as_price(fresh_db):
         "stop": 2400.0, "target": 2350.0,
     }
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(bearish_report, _FakeBridge(), True))
     assert fake_ea.calls[0]["direction"] == "SELL"
     assert fake_ea.calls[0]["price"] == 2392.0  # entry_zone_low -- near edge for a SELL
@@ -367,7 +367,7 @@ def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
     rs["orb_lot_size"] = 0.05
     db.update_risk_settings(rs)
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls[0]["lot_size"] == 0.05
     with db.db() as conn:
@@ -380,7 +380,7 @@ def test_auto_execute_place_pending_order_failure_does_not_raise(fresh_db):
         async def place_pending_order(self, *a, **kw):
             raise ConnectionError("EA send failed")
     fake_ea = _RaisingEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))  # must not raise
     with db.db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
@@ -389,7 +389,7 @@ def test_auto_execute_place_pending_order_failure_does_not_raise(fresh_db):
 
 def test_auto_execute_ea_rejection_does_not_write_db_rows(fresh_db):
     fake_ea = _FakeEA(ack={"type": "pending_order_open_failed", "error": "Invalid stops"})
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     with db.db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
@@ -402,7 +402,7 @@ def test_auto_execute_ea_rejection_does_not_write_db_rows(fresh_db):
 def test_auto_execute_respects_channel_strategy_override(fresh_db):
     db.set_channel_strategy_override("ORB/IVB Report (auto)", "trend_ratchet")
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls[0]["strategy"] == "trend_ratchet"
     with db.db() as conn:
@@ -414,14 +414,14 @@ def test_auto_execute_auto_mode_uses_channel_strategy_rec(fresh_db):
     db.set_channel_strategy_override("ORB/IVB Report (auto)", None, auto=True)
     db.set_channel_strategy_rec("ORB/IVB Report (auto)", "breakeven_runner", "trending", 0.8)
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls[0]["strategy"] == "breakeven_runner"
 
 
 def test_auto_execute_no_override_still_defaults_to_orb_fixed(fresh_db):
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls[0]["strategy"] == "orb_fixed"
 
@@ -437,13 +437,13 @@ def test_auto_execute_ea_template_override_skips_with_no_ea_call(fresh_db):
     ORB/IVB's pending zone-entry order, so this must skip cleanly rather
     than silently placing a template-tagged pending order the EA's grid/
     single-mode dispatch was never built to receive."""
-    from forex_trader.core import core_ea_templates as ea_templates
+    from backend.src.services.broker import ea_templates as ea_templates
     ea_templates.save_ea_template("Scalp Grid", {"mode": "grid"})
     db.set_channel_strategy_override(
         "ORB/IVB Report (auto)", ea_templates.override_for_template("Scalp Grid"),
     )
     fake_ea = _FakeEA()
-    with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         with mock.patch("backend.src.services.telegram.alerts.send_message"):
             asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls == []

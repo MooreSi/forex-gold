@@ -1245,7 +1245,7 @@ def main_page():
             # refreshes on its own (sync heartbeat every 3s; local EABridge
             # health computed fresh here), so no extra polling is needed.
             try:
-                from forex_trader.core import ea_bridge as _ea_bridge_mod
+                from backend.src.services.broker import ea_bridge as _ea_bridge_mod
                 ea_ok, ea_scope = _ea_bridge_mod.get_effective_ea_status()
                 ea_badge.props(f"color={'green' if ea_ok else 'red'}")
                 ea_badge.tooltip(

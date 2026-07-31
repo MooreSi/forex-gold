@@ -206,7 +206,7 @@ def test_strategy_resolution_falls_back_to_global_default(fresh_db):
 # ── EA Templates ─────────────────────────────────────────────────────────────
 
 def test_template_override_resolves_as_template_unmodified_sl(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
     _insert_signal(source_name="TplChannel", stop_loss=2390.0)
     db.set_channel_strategy_override("TplChannel", et.override_for_template("Grid Stealth"))
@@ -230,7 +230,7 @@ def test_template_missing_raises(fresh_db):
 
 
 def test_template_sig_guard_blocks_when_trade_already_open(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Guarded", {"sig_guard": True})
     _insert_signal(sig_id="other-sig", source_name="GuardChannel", direction="BUY")
     _insert_signal(source_name="GuardChannel", direction="BUY")
@@ -249,7 +249,7 @@ def test_template_sig_guard_blocks_when_trade_already_open(fresh_db):
 
 
 def test_template_sig_guard_off_does_not_block(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Unguarded", {"sig_guard": False})
     _insert_signal(sig_id="other-sig", source_name="GuardChannel", direction="BUY")
     _insert_signal(source_name="GuardChannel", direction="BUY")

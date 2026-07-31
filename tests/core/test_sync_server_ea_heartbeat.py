@@ -5,7 +5,7 @@ across a Local/Remote pairing."""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from forex_trader.core import ea_bridge
+from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.controllers.sync.server import SyncServer
 
 

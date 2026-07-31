@@ -158,7 +158,7 @@ async def test_skips_when_per_signal_skip(fresh_db):
 
 @pytest.mark.asyncio
 async def test_skips_when_ea_not_connected(fresh_db):
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=None):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=None):
         result = await los.handle_limit_order_signal(
             _parsed(), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -171,7 +171,7 @@ async def test_skips_when_ea_not_connected(fresh_db):
 @pytest.mark.asyncio
 async def test_skips_when_ea_unhealthy(fresh_db):
     fake_ea = _FakeEA(healthy=False)
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             _parsed(), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -186,7 +186,7 @@ async def test_skips_when_ea_unhealthy(fresh_db):
 async def test_no_tps_is_skipped(fresh_db):
     parsed = _parsed(n_tps=0)
     fake_ea = _FakeEA()
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             parsed, "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -201,7 +201,7 @@ async def test_no_tps_is_skipped(fresh_db):
 async def test_buy_uses_entry_high_as_price(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -215,7 +215,7 @@ async def test_buy_uses_entry_high_as_price(fresh_db):
 async def test_sell_uses_entry_low_as_price(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("SELL"), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -229,7 +229,7 @@ async def test_sell_uses_entry_low_as_price(fresh_db):
 async def test_tp_open_reserves_runner_pct_and_sets_close_full_on_last_false(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY", tp_open=True, n_tps=3), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -248,7 +248,7 @@ async def test_tp_open_reserves_runner_pct_and_sets_close_full_on_last_false(fre
 async def test_no_tp_open_splits_evenly_and_closes_full_on_last(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -267,7 +267,7 @@ async def test_be_at_pos_param_is_converted_from_1_based_to_0_indexed(fresh_db):
     fake_ea = _FakeEA()
     with patch("backend.src.controllers.sync.client.get_instance", return_value=None), \
          patch("backend.src.controllers.sync.server.get_instance", return_value=None), \
-         patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+         patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -281,7 +281,7 @@ async def test_be_at_pos_param_is_converted_from_1_based_to_0_indexed(fresh_db):
 async def test_ea_rejection_is_reported_as_skip_reason(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA(ack={"type": "pending_order_open_failed", "error": "Invalid stops"})
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -295,7 +295,7 @@ async def test_ea_rejection_is_reported_as_skip_reason(fresh_db):
 async def test_successful_placement_writes_db_rows(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA(ack={"type": "pending_order_placed", "ticket": 999})
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             _parsed("BUY", tp_open=True, n_tps=3), "tg1", "chan_x", "chan_x", _rs(),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -346,7 +346,7 @@ async def test_realignment_off_by_default_ignores_price_breach(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
     bridge = _FakeBridge(bid=4149.8, ask=4150.0)  # ask 4150 > entry_high 4148
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=False),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -364,7 +364,7 @@ async def test_realignment_enabled_no_bridge_falls_back_to_pending(fresh_db):
     not error, just behave as if realignment were off."""
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=True),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -380,7 +380,7 @@ async def test_realignment_enabled_zone_not_breached_still_places_pending(fresh_
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA()
     bridge = _FakeBridge(bid=4146.8, ask=4147.0)  # ask 4147 < entry_high 4148 -- not breached
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=True),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -397,7 +397,7 @@ async def test_realignment_buy_breach_opens_at_market_with_shifted_levels(fresh_
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 777, "fill_price": 4150.0})
     bridge = _FakeBridge(bid=4149.8, ask=4150.0)  # breaches entry_high 4148 by 2.0
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan", "chan", _rs(realign=True),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -421,7 +421,7 @@ async def test_realignment_sell_breach_opens_at_market_with_shifted_levels(fresh
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 778, "fill_price": 4140.0})
     bridge = _FakeBridge(bid=4140.0, ask=4140.2)  # breaches entry_low 4142 by -2.0
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             _parsed("SELL", tp_open=False, n_tps=3), "tg1", "chan", "chan", _rs(realign=True),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -443,7 +443,7 @@ async def test_realignment_ea_rejection_reported_as_skip_reason(fresh_db):
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA(open_trade_ack={"type": "trade_open_failed", "error": "No money"})
     bridge = _FakeBridge(bid=4149.8, ask=4150.0)
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         result = await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(realign=True),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
@@ -465,7 +465,7 @@ async def test_realignment_writes_market_order_row_no_pending_order_row(fresh_db
     await _insert_tg_row("tg1")
     fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 900, "fill_price": 4150.0})
     bridge = _FakeBridge(bid=4149.8, ask=4150.0)
-    with patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY", tp_open=True, n_tps=3), "tg1", "chan_x", "chan_x", _rs(realign=True),
             sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",

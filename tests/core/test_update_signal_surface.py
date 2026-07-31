@@ -15,7 +15,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import ea_bridge
+from backend.src.services.broker import ea_bridge as ea_bridge
 from forex_trader.core import core_update_signal as us
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,

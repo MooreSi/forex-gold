@@ -49,7 +49,7 @@ from backend.src.services.breakout_signal.breakout_signal_manage import _Managem
 from backend.src.services.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
 
 if TYPE_CHECKING:
-    from forex_trader.core.mt5_bridge import MT5BridgeClient
+    from backend.src.services.broker.mt5_client import MT5BridgeClient
 
 _log = logging.getLogger("breakout_signal")
 

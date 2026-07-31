@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import ea_bridge
+from backend.src.services.broker import ea_bridge as ea_bridge
 from forex_trader.core import core_open_trade as ot
 from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER
 
@@ -256,7 +256,7 @@ def test_falls_through_to_python_bridge_when_strategy_not_portable(fresh_db):
 # ── EA Templates -- no Python-bridge fallback ────────────────────────────────
 
 def test_template_strategy_ea_managed_forwards_template_payload(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1})
@@ -274,7 +274,7 @@ def test_template_strategy_ea_managed_forwards_template_payload(fresh_db):
 
 def test_template_grid_mode_uses_fixed_lot_size_grid_override(fresh_db):
     # Trading > Global Parameters > Fixed Lot Size (Grid) -- 2026-07-24.
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.25})
@@ -290,7 +290,7 @@ def test_template_grid_mode_uses_fixed_lot_size_grid_override(fresh_db):
 
 
 def test_template_single_mode_ignores_fixed_lot_size_grid(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Single Stealth", {"mode": "single", "tpsl_mode": "stealth"})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.25})
@@ -306,7 +306,7 @@ def test_template_single_mode_ignores_fixed_lot_size_grid(fresh_db):
 
 
 def test_template_grid_mode_zero_override_keeps_normal_lot(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1, "strategy_lot_size_grid": 0.0})
@@ -334,7 +334,7 @@ def test_non_template_strategy_ignores_fixed_lot_size_grid(fresh_db):
 
 
 def test_template_strategy_raises_when_ea_unhealthy_no_python_fallback(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Grid Stealth", {})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1})
@@ -349,7 +349,7 @@ def test_template_strategy_raises_when_ea_unhealthy_no_python_fallback(fresh_db)
 
 
 def test_template_strategy_raises_when_ea_bridge_disabled_no_python_fallback(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Grid Stealth", {})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 0})
@@ -365,7 +365,7 @@ def test_template_strategy_raises_when_ea_bridge_disabled_no_python_fallback(fre
 # ── EA Templates -- Anchor TP (2026-07-24) ──────────────────────────────────
 
 def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Anchor Test", {
         "tp1_pips": 20.0, "tp1_pct": 25.0,
         "tp2_pips": 50.0, "tp2_pct": 100.0,
@@ -391,7 +391,7 @@ def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
 
 
 def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Anchor Test", {"tp1_pips": 999.0, "tp1_pct": 50.0})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1})
@@ -407,7 +407,7 @@ def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
 
 
 def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Anchor Test", {"tp1_pips": 30.0, "tp1_pct": 100.0})
     _insert_signal(direction="SELL")
     db.update_risk_settings({"ea_bridge_enabled": 1})
@@ -428,7 +428,7 @@ def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
 def test_anchor_tp_all_zero_pct_sends_no_pcts_field(fresh_db):
     # Every template saved before this feature existed has tp{n}_pct all at
     # the 0.0 default -- must behave exactly as before (pcts stays None).
-    from forex_trader.core import core_ea_templates as et
+    from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Plain Template", {"mode": "single", "tpsl_mode": "stealth"})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1})

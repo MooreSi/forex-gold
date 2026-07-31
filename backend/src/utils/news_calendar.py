@@ -78,7 +78,7 @@ def _fetch_next_event_minutes() -> Optional[float]:
 def _from_mt5() -> Optional[float]:
     """Query MT5 economic calendar via the bridge. Returns minutes or None."""
     try:
-        from forex_trader.core import mt5_bridge as bridge
+        from backend.src.services.broker import mt5_client as bridge
         if not bridge.is_connected():
             return None
 

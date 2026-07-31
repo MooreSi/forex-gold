@@ -37,7 +37,7 @@ from backend.src.services.test_signal.test_signal_live_execute import _LiveExecu
 from backend.src.services.test_signal.test_signal_generate import _GenerateMixin
 
 if TYPE_CHECKING:
-    from forex_trader.core.mt5_bridge import MT5BridgeClient
+    from backend.src.services.broker.mt5_client import MT5BridgeClient
 
 _log = logging.getLogger("test_signal")
 

@@ -131,7 +131,7 @@ def strategy_display_label(strategy: str) -> str:
     """
     if not strategy:
         return "—"
-    from forex_trader.core import core_ea_templates as _et
+    from backend.src.services.broker import ea_templates as _et
     if _et.is_template_override(strategy):
         return f"Template: {_et.template_name_from_override(strategy)}"
     return STRATEGY_LABELS.get(strategy, STRATEGY_NAMES.get(strategy, "—"))

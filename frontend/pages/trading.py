@@ -1807,7 +1807,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     """
     import asyncio as _aio
     from forex_trader.core import database as _csdb
-    from forex_trader.core import channel_strategy_ai as _csai
+    from backend.src.services.channels import strategy_ai as _csai
     from forex_trader.core import core_ea_templates as _et
     from backend.src.utils.models import STRATEGY_NAMES
 

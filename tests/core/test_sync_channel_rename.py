@@ -23,7 +23,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_db_channel as cdc
+from backend.src.services.channels import repo as cdc
 
 
 def _reset_thread_local_connection():

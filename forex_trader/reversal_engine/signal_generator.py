@@ -43,7 +43,7 @@ _GD2_GROUP_ID = "2616846888"
 def _current_channel_name(is_gd2: bool) -> str:
     """The real channel's CURRENT display name, resolved by stable group_id
     rather than hardcoded -- see core_db_channel._TG_GROUP_ID_MAP."""
-    from forex_trader.core.core_db_channel import _normalise_tg_source
+    from backend.src.services.channels.repo import _normalise_tg_source
     return _normalise_tg_source(_GD2_GROUP_ID if is_gd2 else _REF_GROUP_ID)
 
 

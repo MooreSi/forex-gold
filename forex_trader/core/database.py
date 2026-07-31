@@ -1130,7 +1130,7 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-from forex_trader.core.core_db_channel import (  # noqa: E402,F401
+from backend.src.services.channels.repo import (  # noqa: E402,F401
     _TG_GROUP_ID_MAP,
     _normalise_tg_source,
     sync_channel_rename,
@@ -1204,18 +1204,18 @@ from forex_trader.core.core_db_credentials import (  # noqa: E402,F401
     _bridge_creds_path,
     sync_bridge_credentials_file,
 )
-from forex_trader.core.core_db_channel_parser import (  # noqa: E402,F401
+from backend.src.services.channels.parser_repo import (  # noqa: E402,F401
     get_channel_parser_config,
     get_all_channel_parser_configs,
     save_channel_parser_config,
 )
-from forex_trader.core.core_db_unrecognised import (  # noqa: E402,F401
+from backend.src.services.channels.unrecognised_repo import (  # noqa: E402,F401
     save_unrecognised_message,
     update_unrecognised_message,
     get_pending_unrecognised_messages,
     get_all_unrecognised_messages,
 )
-from forex_trader.core.core_db_learned_rules import (  # noqa: E402,F401
+from backend.src.services.channels.learned_rules_repo import (  # noqa: E402,F401
     get_channel_learned_rules,
     save_channel_learned_rule,
     save_synced_learned_rule,

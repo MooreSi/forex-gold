@@ -2400,7 +2400,7 @@ class SimulationEngine:
         while self._monitor_running:
             try:
                 if ai_provider.is_configured(self._cfg):
-                    from forex_trader.core import channel_strategy_ai as _csai
+                    from backend.src.services.channels import strategy_ai as _csai
                     await _csai.evaluate_channels(self, self._cfg)
             except asyncio.CancelledError:
                 break

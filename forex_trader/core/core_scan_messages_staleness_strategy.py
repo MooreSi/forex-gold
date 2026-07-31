@@ -22,7 +22,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import core_ea_templates as ea_templates
-from forex_trader.core import telegram_alerts, channel_strategy_ai
+from forex_trader.core import telegram_alerts
+from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
 

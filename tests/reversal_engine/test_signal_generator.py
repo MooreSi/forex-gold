@@ -23,7 +23,7 @@ def test_gd2_channel_resolves_to_current_live_name():
 
 
 def test_gd2_channel_reflects_a_future_rename_with_no_code_change():
-    from forex_trader.core import core_db_channel as cdc
+    from backend.src.services.channels import repo as cdc
     snapshot = dict(cdc._TG_GROUP_ID_MAP)
     try:
         cdc._TG_GROUP_ID_MAP["2616846888"] = "Some Future Name"

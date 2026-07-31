@@ -116,7 +116,7 @@ class _CorrelationMixin:
             return
         ref_rows, ref_today_count = _fetch_result
 
-        from forex_trader.core import core_db_channel as _cdc
+        from backend.src.services.channels import repo as _cdc
 
         # Build lookup of recent RE signals (pending/triggered, last 4h)
         re_recent = [

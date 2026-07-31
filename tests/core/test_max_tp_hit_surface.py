@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_max_tp_hit's extracted functions behave
+"""Proves backend.src.services.positions.max_tp's extracted functions behave
 identically to SimulationEngine's originals, characterized in
 test_max_tp_hit_characterization.py -- see
 docs/todo/refactor/core-max-tp-hit-migration/020-*.md.
@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_max_tp_hit as maxtp
+from backend.src.services.positions import max_tp as maxtp
 
 
 def _reset_thread_local_connection():

@@ -45,7 +45,7 @@ def _parse(value: str) -> datetime:
 
 def pytest_configure(config):
     pinned = _parse(config.getoption("--market-clock"))
-    from forex_trader.core import dpm_engine
+    from backend.src.services.dpm import engine as dpm_engine
 
     hour = pinned.hour
     london = 7 <= hour < 16

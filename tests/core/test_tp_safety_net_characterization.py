@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import core_tp_safety_net
+from backend.src.services.positions import safety_net as core_tp_safety_net
 from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from forex_trader.core.engine import SimulationEngine

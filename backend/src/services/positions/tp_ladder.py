@@ -27,7 +27,7 @@ from forex_trader.core import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
 from forex_trader.core.core_open_trade import _CLIMBER_PCTS, _GDVR_PCTS
-from forex_trader.core.core_tp_trigger_tracking import (
+from backend.src.services.positions.tp_tracking import (
     TPCache, get_triggered_tps, log_tp_wait_diagnostic, get_remaining_lots,
 )
 from backend.src.utils.models import MAX_TP, Tick

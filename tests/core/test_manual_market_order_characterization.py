@@ -135,7 +135,7 @@ def test_explicit_sl_too_far_raises(fresh_db, engine):
 def test_no_sl_dpm_enabled_uses_atr_based_sl(fresh_db, engine):
     db.update_risk_settings({"dpm_enabled": 1})
     engine._bridge = _FakeBridge(candles=[{"h": 1, "l": 1, "c": 1}])
-    with patch("forex_trader.core.dpm_engine.compute_atr", return_value=10.0):
+    with patch("backend.src.services.dpm.engine.compute_atr", return_value=10.0):
         result = asyncio.run(SimulationEngine.open_manual_market_order(engine, "BUY"))
     trade_id = result["trade_id"]
     sig_id = _sig_id_for_trade(trade_id)

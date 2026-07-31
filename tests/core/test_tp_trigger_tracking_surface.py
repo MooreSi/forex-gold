@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_tp_trigger_tracking's extracted functions
+"""Proves backend.src.services.positions.tp_tracking's extracted functions
 behave identically to the SimulationEngine methods characterized in
 test_tp_trigger_tracking_characterization.py -- see
 docs/todo/refactor/core-tp-trigger-tracking-migration/020-*.md.
@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_tp_trigger_tracking as tp
+from backend.src.services.positions import tp_tracking as tp
 
 
 def _reset_thread_local_connection():

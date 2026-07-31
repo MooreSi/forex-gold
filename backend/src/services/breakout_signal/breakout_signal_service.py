@@ -41,7 +41,7 @@ from backend.src.services.breakout_signal.signal_generator import (
     check_liquidity_sweep,
     calculate_breakout_risk_levels,
 )
-from forex_trader.core.dpm_engine import compute_atr
+from backend.src.services.dpm.engine import compute_atr
 from backend.src.services.breakout_signal.claude_reviewer import review_signal
 from backend.src.services.breakout_signal.breakout_signal_learn import _LearnMixin
 from backend.src.services.breakout_signal.breakout_signal_velocity import _VelocityMixin

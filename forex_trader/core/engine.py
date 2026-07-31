@@ -33,9 +33,9 @@ from backend.src.services.signals.parser import (
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.ai import provider as ai_provider
-from forex_trader.core import dpm_engine
+from backend.src.services.dpm import engine as dpm_engine
 from forex_trader.core import core_ea_templates as _ea_templates
-from forex_trader.core.core_monitor_loop import (
+from backend.src.services.positions.monitor_loop import (
     check_sl as _check_sl_impl,
     reconcile_sl_hit as _reconcile_sl_hit_impl,
     check_profit_close_target as _check_profit_close_target_impl,
@@ -65,7 +65,7 @@ from backend.src.services.signals.scan_staleness import (
     record_staleness_or_new as _record_staleness_or_new_impl,
     resolve_strategy_and_skip_reason as _resolve_strategy_and_skip_reason_impl,
 )
-from forex_trader.core.core_max_tp_hit import (
+from backend.src.services.positions.max_tp import (
     _tp_level_from_extreme,
     max_tp_checker_sweep as _max_tp_checker_sweep_impl,
     backfill_max_tp_hit_corrected as _backfill_max_tp_hit_corrected_impl,
@@ -90,7 +90,7 @@ from backend.src.services.analytics.reporting import (
 )
 from forex_trader.core.core_mt5_import import import_mt5_history as _import_mt5_history_impl
 from backend.src.services.signals.tg_repo import get_tg_signals as _get_tg_signals_impl
-from forex_trader.core.core_tp_trigger_tracking import (
+from backend.src.services.positions.tp_tracking import (
     TPCache as _TPCache,
     get_triggered_tps as _get_triggered_tps_impl,
     last_closed_tp as _last_closed_tp_impl,
@@ -148,7 +148,7 @@ from backend.src.services.risk.governor import (
     rg_check_halt as _rg_check_halt_impl,
     rg_apply_halts_on_close as _rg_apply_halts_on_close_impl,
 )
-from forex_trader.core.core_tp_safety_net import (
+from backend.src.services.positions.safety_net import (
     tp_safety_net_sweep as _tp_safety_net_sweep_impl,
     tp_safety_net_check_trade as _tp_safety_net_check_trade_impl,
     compute_be_cost_pts as _compute_be_cost_pts_impl,
@@ -171,7 +171,7 @@ from forex_trader.core.core_instant_followup import (
 from forex_trader.core.core_instant_entry import (
     process_instant_entry as _process_instant_entry_impl,
 )
-from forex_trader.core.core_run_tp_ladder import (
+from backend.src.services.positions.tp_ladder import (
     run_tp_ladder as _run_tp_ladder_impl,
     handle_signal_climber as _handle_signal_climber_impl,
     handle_reversal_runner as _handle_reversal_runner_impl,
@@ -179,20 +179,20 @@ from forex_trader.core.core_run_tp_ladder import (
     handle_adaptive_runner_2 as _handle_adaptive_runner_2_impl,
     handle_limit_runner as _handle_limit_runner_impl,
 )
-from forex_trader.core.core_handle_scale_out import handle_scale_out as _handle_scale_out_impl
-from forex_trader.core.core_handle_be_runner import handle_be_runner as _handle_be_runner_impl
-from forex_trader.core.core_handle_trail_stop import handle_trail_stop as _handle_trail_stop_impl
-from forex_trader.core.core_handle_protected_scale import (
+from backend.src.services.positions.handle_scale_out import handle_scale_out as _handle_scale_out_impl
+from backend.src.services.positions.handle_be_runner import handle_be_runner as _handle_be_runner_impl
+from backend.src.services.positions.handle_trail_stop import handle_trail_stop as _handle_trail_stop_impl
+from backend.src.services.positions.handle_protected_scale import (
     handle_protected_scale as _handle_protected_scale_impl,
 )
-from forex_trader.core.core_handle_no_sl_scale import handle_no_sl_scale as _handle_no_sl_scale_impl
-from forex_trader.core.core_handle_conservative import handle_conservative as _handle_conservative_impl
-from forex_trader.core.core_handle_conservative_trial import (
+from backend.src.services.positions.handle_no_sl_scale import handle_no_sl_scale as _handle_no_sl_scale_impl
+from backend.src.services.positions.handle_conservative import handle_conservative as _handle_conservative_impl
+from backend.src.services.positions.handle_conservative_trial import (
     handle_conservative_trial as _handle_conservative_trial_impl,
 )
-from forex_trader.core.core_handle_scalp_runner import handle_scalp_runner as _handle_scalp_runner_impl
-from forex_trader.core.core_handle_orb_fixed import handle_orb_fixed as _handle_orb_fixed_impl
-from forex_trader.core.core_dpm_handler import (
+from backend.src.services.positions.handle_scalp_runner import handle_scalp_runner as _handle_scalp_runner_impl
+from backend.src.services.positions.handle_orb_fixed import handle_orb_fixed as _handle_orb_fixed_impl
+from backend.src.services.dpm.handler import (
     run_dpm_calibration as _run_dpm_calibration_impl,
     handle_dynamic_position_management as _handle_dynamic_position_management_impl,
 )
@@ -222,7 +222,7 @@ from forex_trader.core.core_orb_report import orb_auto_execute as _orb_auto_exec
 from backend.src.services.signals.pending_activation import (
     try_activate_pending_signals as _try_activate_pending_signals_impl,
 )
-from forex_trader.core.core_dpm_bookkeeping import (
+from backend.src.services.dpm.bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
     record_dpm_entry as _record_dpm_entry_impl,

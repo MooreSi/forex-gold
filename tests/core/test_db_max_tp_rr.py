@@ -9,7 +9,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_db_max_tp as maxtp
+from backend.src.services.positions import max_tp_repo as maxtp
 
 
 def _reset_thread_local_connection():

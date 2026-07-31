@@ -16,7 +16,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
-from forex_trader.core.core_dpm_bookkeeping import DPMCache
+from backend.src.services.dpm.bookkeeping import DPMCache
 from backend.src.utils.models import CONTRACT_SIZE
 
 

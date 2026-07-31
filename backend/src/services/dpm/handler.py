@@ -34,14 +34,14 @@ import time
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import dpm_engine
+from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.core_dpm_bookkeeping import (
+from backend.src.services.dpm.bookkeeping import (
     DPMCache, load_dpm_calibrated, record_dpm_entry, update_dpm_peak, set_dpm_milestone,
 )
 from forex_trader.core.core_fees_sizing import pnl
 from forex_trader.core.core_partial_close import partial_close_trade
-from forex_trader.core.core_tp_trigger_tracking import TPCache, get_triggered_tps, get_remaining_lots
+from backend.src.services.positions.tp_tracking import TPCache, get_triggered_tps, get_remaining_lots
 from backend.src.utils.models import MAX_TP, Tick
 
 log = logging.getLogger(__name__)

@@ -352,7 +352,7 @@ def test_no_sl_scale_blocks_when_adx_below_30(fresh_db):
     _insert_signal()
     db.update_risk_settings({"trade_strategy": STRATEGY_NO_SL_SCALE})
     bridge = _FakeBridge()
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=15.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=15.0):
         with pytest.raises(ValueError, match="ADX"):
             asyncio.run(sr.resolve_open_trade_params(
                 bridge, "sig-1", dpm_candles=[{"h": 1, "l": 1, "c": 1}]))
@@ -362,7 +362,7 @@ def test_no_sl_scale_allows_when_adx_above_30(fresh_db):
     _insert_signal()
     db.update_risk_settings({"trade_strategy": STRATEGY_NO_SL_SCALE})
     bridge = _FakeBridge()
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=35.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=35.0):
         result = asyncio.run(sr.resolve_open_trade_params(
             bridge, "sig-1", dpm_candles=[{"h": 1, "l": 1, "c": 1}]))
     assert result["strategy"] == STRATEGY_NO_SL_SCALE

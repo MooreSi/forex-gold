@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_handle_scale_out's extracted function
+"""Proves backend.src.services.positions.handle_scale_out's extracted function
 behaves identically to SimulationEngine._handle_scale_out, characterized
 in test_handle_scale_out_characterization.py -- see
 docs/todo/refactor/core-scale-out-handler-migration/020-*.md.
@@ -18,9 +18,9 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_handle_scale_out as hso
+from backend.src.services.positions import handle_scale_out as hso
 from backend.src.services.risk import strategy_params as sp
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions.tp_tracking import TPCache
 from backend.src.utils.models import STRATEGY_SCALE_OUT
 
 

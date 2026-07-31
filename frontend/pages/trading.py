@@ -1457,7 +1457,7 @@ def _render_schedule():
         def _compute_session_label() -> tuple[str, str]:
             """Return (label, badge_color) based on clock + enabled sessions."""
             from datetime import datetime, timezone as _tz
-            from forex_trader.core.dpm_engine import is_weekly_market_closed
+            from backend.src.services.dpm.engine import is_weekly_market_closed
             if is_weekly_market_closed():
                 return "Markets Closed", "grey"
             h = datetime.now(_tz.utc).hour

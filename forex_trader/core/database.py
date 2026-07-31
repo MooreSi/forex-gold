@@ -1180,19 +1180,19 @@ from backend.src.services.notifications.repo import (  # noqa: E402,F401
     get_email_config,
     save_email_config,
 )
-from forex_trader.core.core_db_ladder import (  # noqa: E402,F401
+from backend.src.services.positions.ladder_repo import (  # noqa: E402,F401
     create_ladder_leg,
     get_ladder_legs,
     close_ladder_leg,
 )
-from forex_trader.core.core_db_max_tp import (  # noqa: E402,F401
+from backend.src.services.positions.max_tp_repo import (  # noqa: E402,F401
     save_max_tp_hit,
     get_trades_with_max_tp_set,
     get_max_tp_map_by_ticket,
     get_rr_map_by_ticket,
     get_trades_pending_max_tp,
 )
-from forex_trader.core.core_db_spread_cache import (  # noqa: E402,F401
+from backend.src.services.positions.spread_cache_repo import (  # noqa: E402,F401
     get_cached_spreads,
     cache_spread,
 )

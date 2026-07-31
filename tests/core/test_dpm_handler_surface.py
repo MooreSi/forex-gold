@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_dpm_handler's extracted functions behave
+"""Proves backend.src.services.dpm.handler's extracted functions behave
 identically to SimulationEngine._handle_dynamic_position_management/
 _run_dpm_calibration, characterized in
 test_dpm_handler_characterization.py -- see
@@ -18,10 +18,10 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import dpm_engine
-from forex_trader.core import core_dpm_handler as dpm_handler
-from forex_trader.core.core_dpm_bookkeeping import DPMCache
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.dpm import engine as dpm_engine
+from backend.src.services.dpm import handler as dpm_handler
+from backend.src.services.dpm.bookkeeping import DPMCache
+from backend.src.services.positions.tp_tracking import TPCache
 
 
 def _reset_thread_local_connection():

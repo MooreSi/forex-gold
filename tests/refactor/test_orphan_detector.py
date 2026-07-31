@@ -136,10 +136,16 @@ def test_wired_extractions_are_not_reported():
 
 
 def test_check_sl_exists_in_exactly_one_module():
-    """It was extracted twice; core_monitor_loop's copy is the wired one."""
+    """It was extracted twice; the surviving copy now lives in positions/.
+
+    The duplicate in core_tp_trigger_tracking was deleted in phase 0; the wired
+    copy moved to services/positions/monitor_loop.py in phase 7. The property
+    being pinned is unchanged: exactly one definition, anywhere in production.
+    """
     from tools.refactor_audit.ast_normalise import find_function
     defining = [
-        p.stem for p in sorted(od.CORE_DIR.glob("core_*.py"))
-        if find_function(ast.parse(p.read_text(encoding="utf-8")), "check_sl")
+        str(p.relative_to(od.REPO_ROOT)) for p in sorted(od.production_files())
+        if p.suffix == ".py" and "check_sl" in p.read_text(encoding="utf-8")
+        and find_function(ast.parse(p.read_text(encoding="utf-8")), "check_sl")
     ]
-    assert defining == ["core_monitor_loop"]
+    assert defining == ["backend/src/services/positions/monitor_loop.py"]

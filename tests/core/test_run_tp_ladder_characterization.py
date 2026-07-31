@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.risk import strategy_params as sp
-from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
+from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
 

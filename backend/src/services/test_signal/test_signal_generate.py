@@ -12,7 +12,7 @@ import logging
 import math
 import time
 
-from forex_trader.core.dpm_engine import compute_atr
+from backend.src.services.dpm.engine import compute_atr
 
 from backend.src.services.test_signal import test_signal_repo as tdb
 from backend.src.services.test_signal import adaptive_params as ap

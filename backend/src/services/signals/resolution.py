@@ -272,7 +272,7 @@ async def resolve_open_trade_params(
     elif strategy == STRATEGY_NO_SL_SCALE:
         # ADX > 30 gate: only open Trend Ratchet in confirmed trending conditions
         if dpm_candles:
-            from forex_trader.core.dpm_engine import compute_adx
+            from backend.src.services.dpm.engine import compute_adx
             _tr_adx = compute_adx(dpm_candles)
             if _tr_adx < 30:
                 raise ValueError(
@@ -387,7 +387,7 @@ async def resolve_open_trade_params(
         _rg_atr = 0.0
         if dpm_candles:
             try:
-                from forex_trader.core import dpm_engine as _dpm_rg
+                from backend.src.services.dpm import engine as _dpm_rg
                 _rg_atr = _dpm_rg.compute_atr(dpm_candles) or 0.0
             except Exception:
                 _rg_atr = 0.0

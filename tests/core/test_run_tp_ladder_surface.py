@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_run_tp_ladder's extracted functions
+"""Proves backend.src.services.positions.tp_ladder's extracted functions
 behave identically to SimulationEngine._run_tp_ladder and its three
 wrapper handlers, characterized in
 test_run_tp_ladder_characterization.py -- see
@@ -17,9 +17,9 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_run_tp_ladder as ladder
+from backend.src.services.positions import tp_ladder as ladder
 from backend.src.services.risk import strategy_params as sp
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions.tp_tracking import TPCache
 from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
 
 

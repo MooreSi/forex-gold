@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_dpm_bookkeeping's extracted functions behave
+"""Proves backend.src.services.dpm.bookkeeping's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_dpm_bookkeeping_characterization.py -- see
 docs/todo/refactor/core-dpm-bookkeeping-migration/020-*.md.
@@ -14,7 +14,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_dpm_bookkeeping as dpm
+from backend.src.services.dpm import bookkeeping as dpm
 
 
 def _reset_thread_local_connection():

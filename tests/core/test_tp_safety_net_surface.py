@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_tp_safety_net's extracted functions
+"""Proves backend.src.services.positions.safety_net's extracted functions
 behave identically to SimulationEngine's originals, characterized in
 test_tp_safety_net_characterization.py -- see
 docs/todo/refactor/core-tp-safety-net-migration/020-*.md.
@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
-from forex_trader.core import core_tp_safety_net as tpsn
+from backend.src.services.positions import safety_net as tpsn
 
 
 def _reset_thread_local_connection():

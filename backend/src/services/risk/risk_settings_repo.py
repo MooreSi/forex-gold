@@ -112,7 +112,7 @@ def is_session_allowed(rs: Optional[dict] = None) -> tuple[bool, str]:
       "overlap" → London OR New York button (12:00–16:00 UTC)
       "ny"      → New York button (16:00–21:00 UTC, post-overlap)
     """
-    from forex_trader.core.dpm_engine import detect_session, is_weekly_market_closed  # local to avoid circular import
+    from backend.src.services.dpm.engine import detect_session, is_weekly_market_closed  # local to avoid circular import
     if is_weekly_market_closed():
         return False, "closed"
     if rs is None:

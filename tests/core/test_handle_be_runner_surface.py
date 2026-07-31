@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_handle_be_runner's extracted function
+"""Proves backend.src.services.positions.handle_be_runner's extracted function
 behaves identically to SimulationEngine._handle_be_runner, characterized
 in test_handle_be_runner_characterization.py -- see
 docs/todo/refactor/core-be-runner-handler-migration/020-*.md.
@@ -17,9 +17,9 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_handle_be_runner as hbr
+from backend.src.services.positions import handle_be_runner as hbr
 from backend.src.services.risk import strategy_params as sp
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions.tp_tracking import TPCache
 from backend.src.utils.models import STRATEGY_BE_RUNNER
 
 
@@ -107,7 +107,7 @@ def test_adx_ranging_falls_back_to_scale_out(fresh_db):
     _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0)
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=15.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=15.0):
         asyncio.run(hbr.handle_be_runner(
             trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {},
             dpm_candles=[{"h": 1, "l": 1, "c": 1}],
@@ -120,7 +120,7 @@ def test_adx_trending_runs_normal_be_runner_logic(fresh_db):
     _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0)
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=35.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=35.0):
         asyncio.run(hbr.handle_be_runner(
             trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {},
             dpm_candles=[{"h": 1, "l": 1, "c": 1}],
@@ -137,7 +137,7 @@ def test_adx_ranging_threshold_is_live_tunable(fresh_db):
     _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0)
     trade = _trade_dict("t-1")
     bridge = _FakeBridge()
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=20.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=20.0):
         asyncio.run(hbr.handle_be_runner(
             trade, _tick(bid=2415.0, ask=2415.5), bridge, TPCache(), {},
             dpm_candles=[{"h": 1, "l": 1, "c": 1}],

@@ -131,7 +131,7 @@ def test_explicit_sl_too_far_raises(fresh_db):
 def test_no_sl_dpm_enabled_uses_atr_based_sl(fresh_db):
     db.update_risk_settings({"dpm_enabled": 1})
     bridge = _FakeBridge(candles=[{"h": 1, "l": 1, "c": 1}])
-    with patch("forex_trader.core.dpm_engine.compute_atr", return_value=10.0):
+    with patch("backend.src.services.dpm.engine.compute_atr", return_value=10.0):
         result = asyncio.run(mmo.open_manual_market_order(bridge, "BUY"))
     sig = _get_signal_row(_sig_id_for_trade(result["trade_id"]))
     assert sig["stop_loss"] == 2388.2

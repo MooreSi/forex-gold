@@ -30,7 +30,7 @@ from forex_trader.core import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
 from backend.src.services.risk.strategy_params import get_strategy_params
-from forex_trader.core.core_tp_trigger_tracking import (
+from backend.src.services.positions.tp_tracking import (
     TPCache, get_triggered_tps, get_remaining_lots,
 )
 from backend.src.utils.models import STRATEGY_CONSERVATIVE_TRIAL, Tick

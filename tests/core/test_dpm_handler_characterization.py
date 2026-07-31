@@ -18,9 +18,9 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import dpm_engine
-from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
-from forex_trader.core.core_dpm_bookkeeping import DPMCache as _DPMCache
+from backend.src.services.dpm import engine as dpm_engine
+from backend.src.services.positions.tp_tracking import TPCache as _TPCache
+from backend.src.services.dpm.bookkeeping import DPMCache as _DPMCache
 from forex_trader.core.engine import SimulationEngine
 
 

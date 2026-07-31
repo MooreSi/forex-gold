@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_handle_scalp_runner's extracted function
+"""Proves backend.src.services.positions.handle_scalp_runner's extracted function
 behaves identically to SimulationEngine._handle_scalp_runner,
 characterized in test_handle_scalp_runner_characterization.py -- see
 docs/todo/refactor/core-scalp-runner-handler-migration/020-*.md.
@@ -16,8 +16,8 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_handle_scalp_runner as hsr
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions import handle_scalp_runner as hsr
+from backend.src.services.positions.tp_tracking import TPCache
 
 
 def _reset_thread_local_connection():

@@ -66,7 +66,7 @@ def engine(fresh_db):
     normally set there (_tp_trigger_cache, a core_tp_trigger_tracking.TPCache
     bundling the old separate _tp_cache/_tp_wait_log_ts dicts since engine.py
     was wired to delegate to the extracted module) is set manually."""
-    from forex_trader.core.core_tp_trigger_tracking import TPCache
+    from backend.src.services.positions.tp_tracking import TPCache
     e = SimulationEngine.__new__(SimulationEngine)
     e._tp_trigger_cache = TPCache()
     return e

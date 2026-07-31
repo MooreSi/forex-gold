@@ -20,11 +20,11 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import dpm_engine
+from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.core_handle_scale_out import handle_scale_out
+from backend.src.services.positions.handle_scale_out import handle_scale_out
 from backend.src.services.risk.strategy_params import get_strategy_params
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions.tp_tracking import TPCache
 from backend.src.utils.models import MAX_TP, STRATEGY_BE_RUNNER, Tick
 
 log = logging.getLogger(__name__)

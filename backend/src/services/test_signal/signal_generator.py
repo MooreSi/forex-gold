@@ -15,7 +15,7 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.core.dpm_engine import compute_atr
+from backend.src.services.dpm.engine import compute_atr
 from backend.src.services.test_signal import adaptive_params as ap
 
 

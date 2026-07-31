@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_monitor_loop's extracted functions behave
+"""Proves backend.src.services.positions.monitor_loop's extracted functions behave
 identically to SimulationEngine's originals, characterized in
 test_monitor_loop_characterization.py -- see
 docs/todo/refactor/core-monitor-loop-migration/020-*.md.
@@ -19,7 +19,7 @@ from forex_trader.core import database as db
 from forex_trader.core import ea_bridge
 from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_close_trade import CloseTradeContext
-from forex_trader.core import core_monitor_loop as ml
+from backend.src.services.positions import monitor_loop as ml
 
 
 def _reset_thread_local_connection():
@@ -148,8 +148,8 @@ def test_sl_hit_mt5_still_fully_open_deferred(fresh_db):
     trade = _trade_row("t-defer")
     bridge = _FakeBridge(positions=[{"ticket": 555, "volume": 0.10}])
     ctx, sched_calls, commentary_calls = _make_ctx(bridge)
-    with mock.patch("forex_trader.core.core_monitor_loop.partial_close_trade") as mock_partial, \
-         mock.patch("forex_trader.core.core_monitor_loop.record_close") as mock_record:
+    with mock.patch("backend.src.services.positions.monitor_loop.partial_close_trade") as mock_partial, \
+         mock.patch("backend.src.services.positions.monitor_loop.record_close") as mock_record:
         outcome = asyncio.run(ml.reconcile_sl_hit(trade, _SL_TICK, 2390.0, "SL", bridge, ctx))
     assert outcome == "deferred"
     mock_partial.assert_not_called()
@@ -166,7 +166,7 @@ def test_sl_hit_mt5_partially_closed_records_partial(fresh_db):
     async def fake_partial(tid, lots, price, reason):
         partial_calls.append((tid, lots, price, reason))
 
-    with mock.patch("forex_trader.core.core_monitor_loop.partial_close_trade", side_effect=fake_partial), \
+    with mock.patch("backend.src.services.positions.monitor_loop.partial_close_trade", side_effect=fake_partial), \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
         outcome = asyncio.run(ml.reconcile_sl_hit(trade, _SL_TICK, 2390.0, "SL", bridge, ctx))
     assert outcome == "partial"

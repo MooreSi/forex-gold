@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_handle_orb_fixed's extracted function
+"""Proves backend.src.services.positions.handle_orb_fixed's extracted function
 behaves identically to SimulationEngine._handle_orb_fixed, characterized
 in test_handle_orb_fixed_characterization.py -- see
 docs/todo/refactor/core-orb-fixed-handler-migration/020-*.md.
@@ -16,8 +16,8 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_handle_orb_fixed as hof
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions import handle_orb_fixed as hof
+from backend.src.services.positions.tp_tracking import TPCache
 
 
 def _reset_thread_local_connection():

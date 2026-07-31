@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_handle_conservative_trial's extracted
+"""Proves backend.src.services.positions.handle_conservative_trial's extracted
 function behaves identically to SimulationEngine._handle_conservative_trial,
 characterized in test_handle_conservative_trial_characterization.py -- see
 docs/todo/refactor/core-conservative-trial-handler-migration/020-*.md.
@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_handle_conservative_trial as hct
+from backend.src.services.positions import handle_conservative_trial as hct
 from backend.src.services.risk import strategy_params as sp
-from forex_trader.core.core_tp_trigger_tracking import TPCache
+from backend.src.services.positions.tp_tracking import TPCache
 from backend.src.utils.models import STRATEGY_CONSERVATIVE_TRIAL
 
 

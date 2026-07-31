@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
+from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -112,7 +112,7 @@ def test_adx_ranging_falls_back_to_scale_out(fresh_db, engine):
     _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0)
     trade = _trade_dict("t-1")
     engine._dpm_candles = [{"h": 1, "l": 1, "c": 1}]
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=15.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=15.0):
         asyncio.run(SimulationEngine._handle_be_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
     # scale_out's tiered 40% partial close fired instead of BE Runner's SL-only ratchet
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.04}]
@@ -123,7 +123,7 @@ def test_adx_trending_runs_normal_be_runner_logic(fresh_db, engine):
     _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0)
     trade = _trade_dict("t-1")
     engine._dpm_candles = [{"h": 1, "l": 1, "c": 1}]
-    with patch("forex_trader.core.dpm_engine.compute_adx", return_value=35.0):
+    with patch("backend.src.services.dpm.engine.compute_adx", return_value=35.0):
         asyncio.run(SimulationEngine._handle_be_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
     assert engine._bridge.partial_close_calls == []  # BE Runner never partial-closes
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]

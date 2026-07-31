@@ -22,7 +22,7 @@ import uuid
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import dpm_engine
+from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_open_trade import open_trade

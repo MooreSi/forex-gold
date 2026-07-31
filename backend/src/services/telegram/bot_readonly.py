@@ -22,7 +22,7 @@ from typing import Any, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core.core_fees_sizing import pnl
 from forex_trader.core.core_sim_account import get_sim_account
-from forex_trader.core.core_tp_trigger_tracking import last_closed_tp
+from backend.src.services.positions.tp_tracking import last_closed_tp
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP,

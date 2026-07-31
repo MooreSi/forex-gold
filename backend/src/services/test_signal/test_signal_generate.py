@@ -14,9 +14,9 @@ import time
 
 from forex_trader.core.dpm_engine import compute_atr
 
-from forex_trader.test_signal import test_signal_repo as tdb
-from forex_trader.test_signal import adaptive_params as ap
-from forex_trader.test_signal.signal_generator import (
+from backend.src.services.test_signal import test_signal_repo as tdb
+from backend.src.services.test_signal import adaptive_params as ap
+from backend.src.services.test_signal.signal_generator import (
     compute_htf_bias,
     compute_h4_bias,
     compute_adx,
@@ -29,10 +29,10 @@ from forex_trader.test_signal.signal_generator import (
     get_session,
     is_news_window,
 )
-from forex_trader.test_signal.claude_reviewer import review_signal
-from forex_trader.test_signal import ml_engine as ml
-from forex_trader.test_signal import market_context as mktctx
-from forex_trader.test_signal.test_signal_velocity import _compute_swing_levels
+from backend.src.services.test_signal.claude_reviewer import review_signal
+from backend.src.services.test_signal import ml_engine as ml
+from backend.src.services.test_signal import market_context as mktctx
+from backend.src.services.test_signal.test_signal_velocity import _compute_swing_levels
 
 _log = logging.getLogger("test_signal")
 

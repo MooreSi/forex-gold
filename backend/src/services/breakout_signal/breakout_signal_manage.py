@@ -19,8 +19,8 @@ from __future__ import annotations
 import logging
 import time
 
-from forex_trader.breakout_signal import breakout_signal_repo as bdb
-from forex_trader.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import breakout_signal_repo as bdb
+from backend.src.services.breakout_signal import adaptive_params as ap
 
 _log = logging.getLogger("breakout_signal")
 
@@ -125,7 +125,7 @@ class _ManagementMixin:
             except Exception as _e:
                 _log.debug("[BO-Engine] MT5 P&L lookup failed for sig %d: %s", sig_id, _e)
 
-        from forex_trader.breakout_signal import ml_engine as bo_ml
+        from backend.src.services.breakout_signal import ml_engine as bo_ml
         bo_ml.record_outcome(sig_id, ml_outcome)
 
         try:
@@ -299,7 +299,7 @@ class _ManagementMixin:
                                 sig_id, ticket, actual_profit, mt5_outcome,
                             )
                         if sim_outcome != mt5_outcome:
-                            from forex_trader.breakout_signal import ml_engine as bo_ml
+                            from backend.src.services.breakout_signal import ml_engine as bo_ml
                             bo_ml.record_outcome(sig_id, mt5_outcome)
                         updated += 1
                         _log.info(

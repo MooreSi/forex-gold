@@ -239,7 +239,7 @@ def ref_match_rate_for_type(level_type: str) -> Optional[float]:
 def _get_training_data():
     """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
     try:
-        from forex_trader.reversal_engine import reversal_engine_repo as re_db
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
         rows = re_db.get_ml_training_data()
         X, y = [], []
         for r in rows:
@@ -320,7 +320,7 @@ def get_daily_research_scores() -> tuple[float, float]:
     nightly Telegram research run, read at signal-generation time. Neutral
     0.5/0.5 prior until the first research run has completed."""
     try:
-        from forex_trader.reversal_engine import reversal_engine_repo as re_db
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
         d = float(re_db.get_config("ref_discipline_score", "0.5") or 0.5)
         a = float(re_db.get_config("ref_aggression_score", "0.5") or 0.5)
         return d, a
@@ -365,7 +365,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     """Called when a signal closes — update online learner + maybe retrain batch."""
     global _model_online, _labeled_count
 
-    from forex_trader.reversal_engine import reversal_engine_repo as re_db
+    from backend.src.services.reversal_engine import reversal_engine_repo as re_db
     sig = re_db.get_signal_by_id(signal_id)
     if not sig:
         return
@@ -482,7 +482,7 @@ def get_ml_metrics() -> dict:
         "labeled_count":    _labeled_count,
     }
     try:
-        from forex_trader.reversal_engine import reversal_engine_repo as re_db
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
         rows = re_db.get_db().all(
             "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
             "FROM re_signals "

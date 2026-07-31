@@ -16,11 +16,11 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from forex_trader.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import adaptive_params as ap
 
 # ── Re-export shared utilities from the bounce engine (read-only) ──────────────
 # These are pure functions with no side effects. Importing is safe and DRY.
-from forex_trader.test_signal.signal_generator import (
+from backend.src.services.test_signal.signal_generator import (
     compute_htf_bias,
     compute_h4_bias,
     compute_adx,

@@ -8,7 +8,7 @@ generated signal with the dead pre-rename name forever, which in turn
 broke reversal_engine_correlate.py's real-signal matching (it compares
 against this exact field).
 """
-from forex_trader.reversal_engine.signal_generator import (
+from backend.src.services.reversal_engine.signal_generator import (
     _current_channel_name, build_signal,
 )
 

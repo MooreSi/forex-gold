@@ -5,7 +5,7 @@ candidates are filtered to levels near the BOT's own price, not the REF's.
 This silently mislabeled the majority of REF-level pattern-learning data.
 Now it widens the search to the full unfiltered level set before falling
 back to an honest "unknown"."""
-from forex_trader.reversal_engine.reversal_engine_correlate import _CorrelationMixin
+from backend.src.services.reversal_engine.reversal_engine_correlate import _CorrelationMixin
 
 
 class _Stub(_CorrelationMixin):

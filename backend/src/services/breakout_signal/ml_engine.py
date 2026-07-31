@@ -223,7 +223,7 @@ def extract_features(signal_data: dict, market_ctx: Optional[dict] = None) -> Op
         angle = hour / 24.0 * 2 * math.pi
 
         try:
-            from forex_trader.breakout_signal.breakout_signal_repo import get_recent_win_rate
+            from backend.src.services.breakout_signal.breakout_signal_repo import get_recent_win_rate
             recent_wr = get_recent_win_rate(n=10)
         except Exception:
             recent_wr = 0.5
@@ -318,7 +318,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
         return
     global _labeled_count, _new_since_retrain
 
-    from forex_trader.breakout_signal import breakout_signal_repo as bdb
+    from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 
     features_json = bdb.get_ml_features_for_signal(signal_id)
     if not features_json:
@@ -384,7 +384,7 @@ def _retrain() -> None:
     if not _ML_AVAILABLE:
         return
 
-    from forex_trader.breakout_signal import breakout_signal_repo as bdb
+    from backend.src.services.breakout_signal import breakout_signal_repo as bdb
     rows = bdb.get_ml_training_data()
     if not rows:
         return
@@ -580,7 +580,7 @@ def get_ml_metrics() -> dict:
     if not _ML_AVAILABLE:
         return _blank
     try:
-        from forex_trader.breakout_signal import breakout_signal_repo as bdb
+        from backend.src.services.breakout_signal import breakout_signal_repo as bdb
         rows = bdb.get_db().all(
             "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
             "FROM bo_signals "

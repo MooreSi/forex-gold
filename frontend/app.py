@@ -979,9 +979,9 @@ def main_page():
         _mode_switching = [False]
 
         def _mode_sub_engines():
-            from forex_trader.breakout_signal import breakout_signal_service as _bo_m
-            from forex_trader.test_signal import test_signal_service as _bc_m
-            from forex_trader.reversal_engine import reversal_engine_service as _gd_m
+            from backend.src.services.breakout_signal import breakout_signal_service as _bo_m
+            from backend.src.services.test_signal import test_signal_service as _bc_m
+            from backend.src.services.reversal_engine import reversal_engine_service as _gd_m
             return _bo_m.get_instance(), _bc_m.get_instance(), _gd_m.get_instance()
 
         async def _refresh_mode_btn():
@@ -1126,7 +1126,7 @@ def main_page():
 
             # News event badge — check live calendar; send one Telegram alert on entry
             try:
-                from forex_trader.test_signal.news_filter import get_current_event as _get_news_event
+                from backend.src.services.test_signal.news_filter import get_current_event as _get_news_event
                 _news_ev = _get_news_event()
                 if _news_ev:
                     import datetime as _dt_news

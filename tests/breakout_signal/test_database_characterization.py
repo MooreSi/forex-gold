@@ -1,4 +1,4 @@
-"""Characterizes the CURRENT behavior of forex_trader.breakout_signal.database
+"""Characterizes the CURRENT behavior of backend.src.services.breakout_signal.database
 -- see docs/todo/refactor/breakout-signal-migration/010-*.md and 020-*.md.
 
 The `fresh_db` fixture is parametrized over both database.py and the new
@@ -12,8 +12,8 @@ import tempfile
 
 import pytest
 
-from forex_trader.breakout_signal import database as database_module
-from forex_trader.breakout_signal import breakout_signal_repo as repo_module
+from backend.src.services.breakout_signal import database as database_module
+from backend.src.services.breakout_signal import breakout_signal_repo as repo_module
 
 
 @pytest.fixture

@@ -6,11 +6,11 @@ docs/todo/refactor/backend-foundation/040-*.md.
 """
 import inspect
 
-from forex_trader.reversal_engine import reversal_engine_service as service
-from forex_trader.reversal_engine.reversal_engine_correlate import _CorrelationMixin
-from forex_trader.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
-from forex_trader.reversal_engine.reversal_engine_manage import _ManagementMixin
-from forex_trader.reversal_engine.reversal_engine_service import ReversalEngine
+from backend.src.services.reversal_engine import reversal_engine_service as service
+from backend.src.services.reversal_engine.reversal_engine_correlate import _CorrelationMixin
+from backend.src.services.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
+from backend.src.services.reversal_engine.reversal_engine_manage import _ManagementMixin
+from backend.src.services.reversal_engine.reversal_engine_service import ReversalEngine
 
 # Every public method engine.py exposed before the split -- if any of these
 # goes missing (or silently stops being callable) after a future edit, this

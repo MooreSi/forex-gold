@@ -22,9 +22,9 @@ from forex_trader.core import database as db_module
 
 from nicegui import ui
 
-from forex_trader.reversal_engine import reversal_engine_repo as _re_db_real
-from forex_trader.reversal_engine import reversal_engine_service as re_engine_module
-from forex_trader.reversal_engine import ml_engine as _re_ml_real
+from backend.src.services.reversal_engine import reversal_engine_repo as _re_db_real
+from backend.src.services.reversal_engine import reversal_engine_service as re_engine_module
+from backend.src.services.reversal_engine import ml_engine as _re_ml_real
 from forex_trader.sync import client as sync_client
 from forex_trader.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode
 

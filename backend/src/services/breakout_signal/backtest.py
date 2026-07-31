@@ -9,7 +9,7 @@ no counterfactual check.
 
 Usage (from a script or REPL):
 
-    from forex_trader.breakout_signal.backtest import run_walkforward, report
+    from backend.src.services.breakout_signal.backtest import run_walkforward, report
 
     candles = {...}   # {"M5": [...], "M1": [...], "H1": [...], "H4": [...]}
                       # each candle: {"time": unix_utc, "open","high","low","close"}
@@ -34,11 +34,11 @@ import bisect
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.breakout_signal import adaptive_params as ap
-from forex_trader.breakout_signal.signal_generator import (
+from backend.src.services.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal.signal_generator import (
     check_breakout_go, check_breakout_retest, calculate_breakout_risk_levels,
 )
-from forex_trader.test_signal.signal_generator import (
+from backend.src.services.test_signal.signal_generator import (
     compute_htf_bias, compute_h4_bias, compute_adx, compute_macd_hist,
     identify_key_levels, compute_atr,
 )

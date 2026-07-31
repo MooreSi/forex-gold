@@ -16,10 +16,10 @@ from nicegui import ui
 
 from forex_trader.core import database as db_module
 
-from forex_trader.test_signal import test_signal_repo as _tdb_real
-from forex_trader.test_signal import test_signal_service as test_engine_module
-from forex_trader.test_signal import adaptive_params as _ap_real
-from forex_trader.test_signal import ml_engine as _ml_real
+from backend.src.services.test_signal import test_signal_repo as _tdb_real
+from backend.src.services.test_signal import test_signal_service as test_engine_module
+from backend.src.services.test_signal import adaptive_params as _ap_real
+from backend.src.services.test_signal import ml_engine as _ml_real
 from forex_trader.sync import client as sync_client
 from forex_trader.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode
 

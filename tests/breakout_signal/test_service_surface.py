@@ -3,12 +3,12 @@ mis-wired method on BreakoutEngine after splitting engine.py across
 breakout_signal_service.py + the four mixin files. See
 docs/todo/refactor/breakout-signal-migration/030-*.md.
 """
-from forex_trader.breakout_signal import breakout_signal_service as service
-from forex_trader.breakout_signal.breakout_signal_learn import _LearnMixin
-from forex_trader.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
-from forex_trader.breakout_signal.breakout_signal_manage import _ManagementMixin
-from forex_trader.breakout_signal.breakout_signal_service import BreakoutEngine
-from forex_trader.breakout_signal.breakout_signal_velocity import _VelocityMixin
+from backend.src.services.breakout_signal import breakout_signal_service as service
+from backend.src.services.breakout_signal.breakout_signal_learn import _LearnMixin
+from backend.src.services.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
+from backend.src.services.breakout_signal.breakout_signal_manage import _ManagementMixin
+from backend.src.services.breakout_signal.breakout_signal_service import BreakoutEngine
+from backend.src.services.breakout_signal.breakout_signal_velocity import _VelocityMixin
 
 EXPECTED_METHODS = [
     "add_refresh_callback", "set_main_engine", "start", "stop",

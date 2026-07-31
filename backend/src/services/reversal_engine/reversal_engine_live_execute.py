@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.reversal_engine import reversal_engine_repo as re_db
-from forex_trader.reversal_engine import level_detector as ld
+from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+from backend.src.services.reversal_engine import level_detector as ld
 
 _log = logging.getLogger("reversal_engine")
 
@@ -118,7 +118,7 @@ class _LiveExecuteMixin:
                     except Exception:
                         pass
                     try:
-                        from forex_trader.reversal_engine import ml_engine as re_ml
+                        from backend.src.services.reversal_engine import ml_engine as re_ml
                         fresh_sig["ref_discipline_score"], fresh_sig["ref_aggression_score"] = \
                             re_ml.get_daily_research_scores()
                     except Exception:
@@ -127,7 +127,7 @@ class _LiveExecuteMixin:
                     fresh_sig["minutes_since_last_ref"] = cadence[0]
                     fresh_sig["ref_signals_today"]      = cadence[1]
 
-                    from forex_trader.reversal_engine import ml_engine as re_ml
+                    from backend.src.services.reversal_engine import ml_engine as re_ml
                     win_rate = re_db.get_recent_win_rate(20)
                     fresh_feats = re_ml.extract_features(fresh_sig, win_rate)
                     if fresh_feats:

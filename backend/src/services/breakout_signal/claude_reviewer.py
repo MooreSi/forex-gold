@@ -141,7 +141,7 @@ async def review_signal(
 
         min_score = 0.45
         try:
-            from forex_trader.breakout_signal import adaptive_params as _ap
+            from backend.src.services.breakout_signal import adaptive_params as _ap
             min_score = _ap.get("min_quality_score")
         except Exception:
             pass

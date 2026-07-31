@@ -36,13 +36,13 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import backend.src.config as _cfg_module
-from forex_trader.reversal_engine import reversal_engine_repo as re_db
-from forex_trader.reversal_engine import level_detector as ld
-from forex_trader.reversal_engine import ml_engine as re_ml
-from forex_trader.reversal_engine import signal_generator as sg
-from forex_trader.reversal_engine.reversal_engine_correlate import _CorrelationMixin
-from forex_trader.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
-from forex_trader.reversal_engine.reversal_engine_manage import _ManagementMixin
+from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+from backend.src.services.reversal_engine import level_detector as ld
+from backend.src.services.reversal_engine import ml_engine as re_ml
+from backend.src.services.reversal_engine import signal_generator as sg
+from backend.src.services.reversal_engine.reversal_engine_correlate import _CorrelationMixin
+from backend.src.services.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
+from backend.src.services.reversal_engine.reversal_engine_manage import _ManagementMixin
 
 _log = logging.getLogger("reversal_engine")
 

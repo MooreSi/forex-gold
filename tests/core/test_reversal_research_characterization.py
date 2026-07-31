@@ -73,7 +73,7 @@ def _stop_after_second_sleep(engine):
     return _sleep
 
 
-_TARGET = "forex_trader.reversal_engine.telegram_research.run_nightly_research"
+_TARGET = "backend.src.services.reversal_engine.telegram_research.run_nightly_research"
 
 
 def test_not_2200_no_pipeline_call_no_dedup_write(fresh_db):

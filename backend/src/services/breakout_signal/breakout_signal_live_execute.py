@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from forex_trader.breakout_signal import breakout_signal_repo as bdb
+from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 
 _log = logging.getLogger("breakout_signal")
 
@@ -60,7 +60,7 @@ class _LiveExecuteMixin:
 
         vantage_sig_id = None
         try:
-            from forex_trader.breakout_signal import ml_engine as bo_ml
+            from backend.src.services.breakout_signal import ml_engine as bo_ml
 
             base_lot = float(sig.get("lot_size") or 0)
             ml_prob  = sig.get("ml_prob")

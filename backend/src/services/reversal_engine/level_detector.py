@@ -29,7 +29,7 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
-from forex_trader.reversal_engine import ict_patterns as ict
+from backend.src.services.reversal_engine import ict_patterns as ict
 
 _log = logging.getLogger(__name__)
 

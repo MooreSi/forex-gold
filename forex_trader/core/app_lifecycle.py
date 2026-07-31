@@ -23,9 +23,9 @@ from forex_trader.core import database as db_module
 from forex_trader.core.engine import SimulationEngine
 from backend.src.services.telegram.reader import TelegramReader
 
-import forex_trader.test_signal.test_signal_service as _test_engine_module
-import forex_trader.breakout_signal.breakout_signal_service as _breakout_engine_module
-import forex_trader.reversal_engine.reversal_engine_service as _re_engine_module
+import backend.src.services.test_signal.test_signal_service as _test_engine_module
+import backend.src.services.breakout_signal.breakout_signal_service as _breakout_engine_module
+import backend.src.services.reversal_engine.reversal_engine_service as _re_engine_module
 import forex_trader.remote.client as _remote_client
 import forex_trader.remote.server as _remote_server
 from forex_trader.remote.auth import password_is_set
@@ -124,7 +124,7 @@ async def _signal_engine_watchdog_loop() -> None:
     while True:
         await asyncio.sleep(300)
         try:
-            from forex_trader.test_signal import test_signal_repo as _tdb
+            from backend.src.services.test_signal import test_signal_repo as _tdb
             if _tdb.get_config("sg_engine_enabled", "1") != "0":
                 te = _test_engine_module.get_instance()
                 if te and not te.is_running:
@@ -133,7 +133,7 @@ async def _signal_engine_watchdog_loop() -> None:
         except Exception as _e:
             log.debug("[AppWatchdog] Bounce health check error: %s", _e)
         try:
-            from forex_trader.breakout_signal import breakout_signal_repo as _bodb_wd
+            from backend.src.services.breakout_signal import breakout_signal_repo as _bodb_wd
             if _bodb_wd.get_config("bo_engine_enabled", "1") != "0":
                 bo = _breakout_engine_module.get_instance()
                 if bo and not bo.is_running:
@@ -142,7 +142,7 @@ async def _signal_engine_watchdog_loop() -> None:
         except Exception as _e:
             log.debug("[AppWatchdog] Breakout health check error: %s", _e)
         try:
-            from forex_trader.reversal_engine import reversal_engine_repo as _re_repo_wd
+            from backend.src.services.reversal_engine import reversal_engine_repo as _re_repo_wd
             if _re_repo_wd.get_config("re_user_stopped", "0") != "1":
                 re_eng = _re_engine_module.get_instance()
                 if re_eng and not re_eng.is_running:
@@ -189,9 +189,9 @@ async def startup() -> None:
     _new_re_db = _DATA_DIR / "reversal_engine.db"
     if _old_re_db.exists() and not _new_re_db.exists():
         _old_re_db.rename(_new_re_db)
-    from forex_trader.reversal_engine import reversal_engine_repo as _re_repo
+    from backend.src.services.reversal_engine import reversal_engine_repo as _re_repo
     _re_repo.init(str(_new_re_db))
-    from forex_trader.reversal_engine import ml_engine as _re_ml
+    from backend.src.services.reversal_engine import ml_engine as _re_ml
     _re_ml.init(str(_DATA_DIR))
     _re_engine_module.init(_engine._bridge)
 
@@ -218,7 +218,7 @@ async def startup() -> None:
 
     # Respect the persistent on/off preference saved by the Stop Engine button.
     # Default is enabled (first run or preference not set).
-    from forex_trader.test_signal import test_signal_repo as _tdb
+    from backend.src.services.test_signal import test_signal_repo as _tdb
     if _tdb.get_config("sg_engine_enabled", "1") != "0":
         te.start()
         log.info("[startup] Signal engine auto-started")
@@ -226,7 +226,7 @@ async def startup() -> None:
         log.info("[startup] Signal engine auto-start suppressed (user disabled)")
 
     # Auto-start breakout engine — respect the persistent on/off preference.
-    from forex_trader.breakout_signal import breakout_signal_repo as _bodb2
+    from backend.src.services.breakout_signal import breakout_signal_repo as _bodb2
     bo_eng = _breakout_engine_module.get_instance()
     if bo_eng:
         bo_eng.set_main_engine(_engine)
@@ -239,7 +239,7 @@ async def startup() -> None:
     # Auto-start Reversal Engine — always on unless the user explicitly stopped it.
     # Uses re_user_stopped="1" (not re_engine_enabled) so normal app restarts
     # don't reset the preference; only a deliberate UI stop persists a "0".
-    from forex_trader.reversal_engine import reversal_engine_repo as _re_repo2
+    from backend.src.services.reversal_engine import reversal_engine_repo as _re_repo2
     re_eng = _re_engine_module.get_instance()
     if re_eng:
         re_eng.set_main_engine(_engine)

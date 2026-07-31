@@ -15,9 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.breakout_signal import breakout_signal_repo as db
-from forex_trader.breakout_signal import database as _legacy_bo_db
-from forex_trader.breakout_signal.breakout_signal_service import BreakoutEngine
+from backend.src.services.breakout_signal import breakout_signal_repo as db
+from backend.src.services.breakout_signal import database as _legacy_bo_db
+from backend.src.services.breakout_signal.breakout_signal_service import BreakoutEngine
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def fresh_db():
     os.close(fd)
     db.init(path)
     # _close_and_learn -> bo_ml.record_outcome reaches into the legacy
-    # forex_trader.breakout_signal.database module directly (not yet
+    # backend.src.services.breakout_signal.database module directly (not yet
     # migrated to breakout_signal_repo) for its ml_features/signal lookups.
     # That module's _DB_PATH is process-wide global state, not reset between
     # test files -- without initializing it here too, this test only passes

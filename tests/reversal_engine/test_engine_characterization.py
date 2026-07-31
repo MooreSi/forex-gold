@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.reversal_engine import reversal_engine_repo as db
-from forex_trader.reversal_engine.reversal_engine_service import ReversalEngine
+from backend.src.services.reversal_engine import reversal_engine_repo as db
+from backend.src.services.reversal_engine.reversal_engine_service import ReversalEngine
 
 
 @pytest.fixture
@@ -185,7 +185,7 @@ def test_today_signal_count_matches_db(engine, fresh_db):
 # the SAME dict passed to create_signal(), not a separate feat_input copy.
 
 def test_build_signal_output_plus_strategy_is_a_valid_create_signal_dict(engine, fresh_db):
-    from forex_trader.reversal_engine import signal_generator as sg
+    from backend.src.services.reversal_engine import signal_generator as sg
 
     level = {"price": 4000.0, "type": "swing_high", "score": 0.8}
     context = {

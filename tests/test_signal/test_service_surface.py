@@ -3,13 +3,13 @@ mis-wired method on TestSignalEngine after splitting engine.py across
 test_signal_service.py + the four mixin files. See
 docs/todo/refactor/test-signal-migration/030-*.md.
 """
-from forex_trader.test_signal import test_signal_service as service
-from forex_trader.test_signal.test_signal_generate import _GenerateMixin
-from forex_trader.test_signal.test_signal_learn import _LearnMixin
-from forex_trader.test_signal.test_signal_live_execute import _LiveExecuteMixin
-from forex_trader.test_signal.test_signal_manage import _ManagementMixin
-from forex_trader.test_signal.test_signal_service import TestSignalEngine
-from forex_trader.test_signal.test_signal_velocity import _VelocityMixin
+from backend.src.services.test_signal import test_signal_service as service
+from backend.src.services.test_signal.test_signal_generate import _GenerateMixin
+from backend.src.services.test_signal.test_signal_learn import _LearnMixin
+from backend.src.services.test_signal.test_signal_live_execute import _LiveExecuteMixin
+from backend.src.services.test_signal.test_signal_manage import _ManagementMixin
+from backend.src.services.test_signal.test_signal_service import TestSignalEngine
+from backend.src.services.test_signal.test_signal_velocity import _VelocityMixin
 
 EXPECTED_METHODS = [
     "start", "stop", "set_main_engine", "add_refresh_callback",

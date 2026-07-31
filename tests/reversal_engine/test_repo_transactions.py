@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.reversal_engine import reversal_engine_repo as repo
-from forex_trader.reversal_engine.reversal_engine_repo import get_db
+from backend.src.services.reversal_engine import reversal_engine_repo as repo
+from backend.src.services.reversal_engine.reversal_engine_repo import get_db
 
 
 @pytest.fixture

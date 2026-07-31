@@ -13,8 +13,8 @@ import time
 import backend.src.config as cfg_module
 from backend.src.services.ai import provider as ai_provider
 
-from forex_trader.breakout_signal import breakout_signal_repo as bdb
-from forex_trader.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import breakout_signal_repo as bdb
+from backend.src.services.breakout_signal import adaptive_params as ap
 
 _log = logging.getLogger("breakout_signal")
 
@@ -41,7 +41,7 @@ class _LearnMixin:
         by_type   = bdb.get_perf_by_breakout_type()
         by_adx    = bdb.get_perf_by_adx_band()
         by_bias   = bdb.get_perf_by_bias()
-        from forex_trader.breakout_signal import ml_engine as bo_ml
+        from backend.src.services.breakout_signal import ml_engine as bo_ml
         ml_info   = bo_ml.summary()
         balance   = bdb.get_virtual_balance()
 

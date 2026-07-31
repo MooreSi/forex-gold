@@ -26,9 +26,9 @@ from datetime import datetime, timezone
 import backend.src.config as cfg_module
 from backend.src.services.ai import provider as ai_provider
 
-from forex_trader.test_signal import test_signal_repo as tdb
-from forex_trader.test_signal import adaptive_params as ap
-from forex_trader.test_signal import ml_engine as ml
+from backend.src.services.test_signal import test_signal_repo as tdb
+from backend.src.services.test_signal import adaptive_params as ap
+from backend.src.services.test_signal import ml_engine as ml
 
 _log = logging.getLogger("test_signal")
 

@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 import backend.src.config as cfg_module
 
-from forex_trader.breakout_signal import breakout_signal_repo as bdb
-from forex_trader.breakout_signal import adaptive_params as ap
-from forex_trader.breakout_signal import ml_engine as bo_ml
-from forex_trader.breakout_signal.signal_generator import (
+from backend.src.services.breakout_signal import breakout_signal_repo as bdb
+from backend.src.services.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import ml_engine as bo_ml
+from backend.src.services.breakout_signal.signal_generator import (
     compute_htf_bias,
     compute_h4_bias,
     compute_adx,
@@ -42,11 +42,11 @@ from forex_trader.breakout_signal.signal_generator import (
     calculate_breakout_risk_levels,
 )
 from forex_trader.core.dpm_engine import compute_atr
-from forex_trader.breakout_signal.claude_reviewer import review_signal
-from forex_trader.breakout_signal.breakout_signal_learn import _LearnMixin
-from forex_trader.breakout_signal.breakout_signal_velocity import _VelocityMixin
-from forex_trader.breakout_signal.breakout_signal_manage import _ManagementMixin
-from forex_trader.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
+from backend.src.services.breakout_signal.claude_reviewer import review_signal
+from backend.src.services.breakout_signal.breakout_signal_learn import _LearnMixin
+from backend.src.services.breakout_signal.breakout_signal_velocity import _VelocityMixin
+from backend.src.services.breakout_signal.breakout_signal_manage import _ManagementMixin
+from backend.src.services.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
 
 if TYPE_CHECKING:
     from forex_trader.core.mt5_bridge import MT5BridgeClient
@@ -583,7 +583,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         sig_id = bdb.create_signal(sig_data)
 
         try:
-            from forex_trader.test_signal.market_context import get_context as _get_ctx
+            from backend.src.services.test_signal.market_context import get_context as _get_ctx
             _market_ctx = _get_ctx()
         except Exception:
             _market_ctx = {}

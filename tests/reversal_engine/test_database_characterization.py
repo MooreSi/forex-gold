@@ -1,4 +1,4 @@
-"""Characterizes the CURRENT behavior of forex_trader.reversal_engine.database
+"""Characterizes the CURRENT behavior of backend.src.services.reversal_engine.database
 before it's touched by task 030 (repo/adapter migration) or task 040
 (service extraction) -- see
 docs/todo/refactor/backend-foundation/020-characterize-reversal-engine-current-behavior.md.
@@ -14,8 +14,8 @@ import tempfile
 
 import pytest
 
-from forex_trader.reversal_engine import database as database_module
-from forex_trader.reversal_engine import reversal_engine_repo as repo_module
+from backend.src.services.reversal_engine import database as database_module
+from backend.src.services.reversal_engine import reversal_engine_repo as repo_module
 
 
 @pytest.fixture

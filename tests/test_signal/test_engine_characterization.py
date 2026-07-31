@@ -12,12 +12,12 @@ import tempfile
 
 import pytest
 
-from forex_trader.test_signal import test_signal_repo as db
-from forex_trader.test_signal import database as _legacy_db
-from forex_trader.test_signal.test_signal_service import TestSignalEngine
-from forex_trader.test_signal.test_signal_generate import _calc_lot_size
-from forex_trader.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
-from forex_trader.test_signal.test_signal_velocity import _compute_swing_levels
+from backend.src.services.test_signal import test_signal_repo as db
+from backend.src.services.test_signal import database as _legacy_db
+from backend.src.services.test_signal.test_signal_service import TestSignalEngine
+from backend.src.services.test_signal.test_signal_generate import _calc_lot_size
+from backend.src.services.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
+from backend.src.services.test_signal.test_signal_velocity import _compute_swing_levels
 
 
 @pytest.fixture

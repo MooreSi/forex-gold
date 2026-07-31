@@ -14,9 +14,9 @@ import asyncio
 import logging
 import time
 
-from forex_trader.breakout_signal import breakout_signal_repo as bdb
-from forex_trader.breakout_signal import adaptive_params as ap
-from forex_trader.breakout_signal.signal_generator import (
+from backend.src.services.breakout_signal import breakout_signal_repo as bdb
+from backend.src.services.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal.signal_generator import (
     get_session,
     session_is_active,
     is_news_window,

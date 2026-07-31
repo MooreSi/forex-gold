@@ -4,7 +4,7 @@ never actually reachable until both call sites started passing h4_candles),
 and get_congestion_zones() (documented/scored since inception but never
 actually implemented until now).
 """
-from forex_trader.reversal_engine import level_detector as ld
+from backend.src.services.reversal_engine import level_detector as ld
 
 
 def _candle(high, low):

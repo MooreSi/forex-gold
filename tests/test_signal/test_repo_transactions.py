@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from forex_trader.test_signal import test_signal_repo as repo
-from forex_trader.test_signal.test_signal_repo import get_db
+from backend.src.services.test_signal import test_signal_repo as repo
+from backend.src.services.test_signal.test_signal_repo import get_db
 
 
 @pytest.fixture

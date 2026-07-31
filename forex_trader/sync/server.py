@@ -989,9 +989,9 @@ class SyncServer:
     @staticmethod
     def _breakout_stats() -> dict:
         try:
-            from forex_trader.breakout_signal import breakout_signal_repo as bdb
-            from forex_trader.breakout_signal import adaptive_params as ap
-            from forex_trader.breakout_signal import ml_engine as bo_ml
+            from backend.src.services.breakout_signal import breakout_signal_repo as bdb
+            from backend.src.services.breakout_signal import adaptive_params as ap
+            from backend.src.services.breakout_signal import ml_engine as bo_ml
             return {
                 "virtual_balance":        bdb.get_virtual_balance(),
                 "max_drawdown":           bdb.get_max_drawdown(),
@@ -1013,9 +1013,9 @@ class SyncServer:
     @staticmethod
     def _bounce_stats() -> dict:
         try:
-            from forex_trader.test_signal import test_signal_repo as tdb
-            from forex_trader.test_signal import adaptive_params as ap
-            from forex_trader.test_signal import ml_engine as ml
+            from backend.src.services.test_signal import test_signal_repo as tdb
+            from backend.src.services.test_signal import adaptive_params as ap
+            from backend.src.services.test_signal import ml_engine as ml
             return {
                 "virtual_balance":     tdb.get_virtual_balance(),
                 "max_drawdown":        tdb.get_max_drawdown(),
@@ -1039,8 +1039,8 @@ class SyncServer:
     @staticmethod
     def _reversal_engine_stats() -> dict:
         try:
-            from forex_trader.reversal_engine import reversal_engine_repo as re_db
-            from forex_trader.reversal_engine import ml_engine as re_ml
+            from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+            from backend.src.services.reversal_engine import ml_engine as re_ml
             return {
                 "virtual_balance":      re_db.get_virtual_balance(),
                 "max_drawdown":         re_db.get_max_drawdown(),

@@ -19,9 +19,9 @@ _DEFAULT_PORT = tls_util.DEFAULT_SYNC_PORT
 
 
 def _get_sub_engines():
-    from forex_trader.breakout_signal import breakout_signal_service as _bo_mod
-    from forex_trader.test_signal import test_signal_service as _bc_mod
-    from forex_trader.reversal_engine import reversal_engine_service as _gd_mod
+    from backend.src.services.breakout_signal import breakout_signal_service as _bo_mod
+    from backend.src.services.test_signal import test_signal_service as _bc_mod
+    from backend.src.services.reversal_engine import reversal_engine_service as _gd_mod
     return _bo_mod.get_instance(), _bc_mod.get_instance(), _gd_mod.get_instance()
 
 

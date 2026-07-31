@@ -591,7 +591,7 @@ def _build_update_zip() -> tuple[bytes, str, list[str]]:
     # scalping signal engine, a hard runtime dependency of ui/app.py,
     # breakout_signal, history.py and test_panel.py. Excluding it here used to
     # ship a build that crashed every client on startup with
-    # ModuleNotFoundError: No module named 'forex_trader.test_signal'.
+    # ModuleNotFoundError: No module named 'backend.src.services.test_signal'.
     _SKIP_PARTS = {".venv", "__pycache__", ".git", ".update_tmp",
                    "tests", "installer"}
     # Extensions that are never runtime assets.

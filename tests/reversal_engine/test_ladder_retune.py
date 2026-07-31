@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from forex_trader.reversal_engine import reversal_engine_manage as manage
-from forex_trader.reversal_engine import reversal_engine_repo as db
-from forex_trader.reversal_engine.reversal_engine_service import ReversalEngine
+from backend.src.services.reversal_engine import reversal_engine_manage as manage
+from backend.src.services.reversal_engine import reversal_engine_repo as db
+from backend.src.services.reversal_engine.reversal_engine_service import ReversalEngine
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def engine(fresh_db):
 @pytest.fixture(autouse=True)
 def _no_external_side_effects(monkeypatch):
     monkeypatch.setattr(
-        "forex_trader.reversal_engine.ml_engine.record_outcome",
+        "backend.src.services.reversal_engine.ml_engine.record_outcome",
         lambda signal_id, outcome: None,
     )
     monkeypatch.setattr(

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from forex_trader.core.dpm_engine import compute_atr
-from forex_trader.test_signal import adaptive_params as ap
+from backend.src.services.test_signal import adaptive_params as ap
 
 
 # ── Session detection ─────────────────────────────────────────────────────────
@@ -362,7 +362,7 @@ def is_news_window() -> bool:
     Forex Factory calendar feed, falling back to hardcoded dates on failure.
     """
     try:
-        from forex_trader.test_signal import news_filter as _nf
+        from backend.src.services.test_signal import news_filter as _nf
         return _nf.is_high_impact_window()
     except Exception:
         # Last-resort fallback: hardcoded routine-data suppression only

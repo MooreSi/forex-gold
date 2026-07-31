@@ -185,8 +185,8 @@ async def run_nightly_research(engine) -> dict:
     keyed by date and store_daily_research does INSERT OR REPLACE, and a
     duplicate run simply overwrites the cached scores and retrains again
     rather than corrupting anything."""
-    from forex_trader.reversal_engine import reversal_engine_repo as re_db
-    from forex_trader.reversal_engine import ml_engine as re_ml
+    from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+    from backend.src.services.reversal_engine import ml_engine as re_ml
     from forex_trader.core import database as db_module
     from backend.src.services.notifications import email_service
 

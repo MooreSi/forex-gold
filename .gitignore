@@ -14,7 +14,7 @@ config.yaml
 bridge_credentials.json
 
 # TEST module — ship .passwd intentionally, do not auto-commit it
-forex_trader/test_signal/.passwd
+backend/src/services/test_signal/.passwd
 
 # Secrets / credentials — private keys, WinRM certs, SSH keys
 .claude_ssh/

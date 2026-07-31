@@ -28,13 +28,13 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from forex_trader.test_signal import test_signal_repo as tdb
-from forex_trader.test_signal import ml_engine as ml
-from forex_trader.test_signal.test_signal_learn import _LearnMixin
-from forex_trader.test_signal.test_signal_velocity import _VelocityMixin
-from forex_trader.test_signal.test_signal_manage import _ManagementMixin
-from forex_trader.test_signal.test_signal_live_execute import _LiveExecuteMixin
-from forex_trader.test_signal.test_signal_generate import _GenerateMixin
+from backend.src.services.test_signal import test_signal_repo as tdb
+from backend.src.services.test_signal import ml_engine as ml
+from backend.src.services.test_signal.test_signal_learn import _LearnMixin
+from backend.src.services.test_signal.test_signal_velocity import _VelocityMixin
+from backend.src.services.test_signal.test_signal_manage import _ManagementMixin
+from backend.src.services.test_signal.test_signal_live_execute import _LiveExecuteMixin
+from backend.src.services.test_signal.test_signal_generate import _GenerateMixin
 
 if TYPE_CHECKING:
     from forex_trader.core.mt5_bridge import MT5BridgeClient

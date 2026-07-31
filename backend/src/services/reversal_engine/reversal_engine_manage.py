@@ -13,7 +13,7 @@ import logging
 import time
 
 from backend.src.utils.models import STRATEGY_CONSERVATIVE
-from forex_trader.reversal_engine import reversal_engine_repo as re_db
+from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 
 _log = logging.getLogger("reversal_engine")
 
@@ -182,7 +182,7 @@ class _ManagementMixin:
                 pnl_dollars=round(partial_booked + gross_leg, 2),
                 balance_delta=round(net_leg, 2),
             )
-            from forex_trader.reversal_engine import ml_engine as re_ml
+            from backend.src.services.reversal_engine import ml_engine as re_ml
             re_ml.record_outcome(sig_id, outcome)
             try:
                 from forex_trader.core import database as _cdb_bus_sl
@@ -253,7 +253,7 @@ class _ManagementMixin:
                 pnl_dollars=round(partial_booked + gross_leg, 2),
                 balance_delta=round(net_leg, 2),
             )
-            from forex_trader.reversal_engine import ml_engine as re_ml
+            from backend.src.services.reversal_engine import ml_engine as re_ml
             re_ml.record_outcome(sig_id, "win")
             try:
                 from forex_trader.core import database as _cdb_bus_tp
@@ -332,7 +332,7 @@ class _ManagementMixin:
                 pnl_dollars=round(partial_booked + gross_leg, 2),
                 balance_delta=round(net_leg, 2),
             )
-            from forex_trader.reversal_engine import ml_engine as re_ml
+            from backend.src.services.reversal_engine import ml_engine as re_ml
             re_ml.record_outcome(sig_id, final_outcome)
             try:
                 from forex_trader.core import database as _cdb_bus_cons
@@ -458,7 +458,7 @@ class _ManagementMixin:
             sig_id, float(close_price or entry_ref), outcome, pnl_pts,
             net_pnl_dollars=net_pnl, pnl_dollars=net_pnl, balance_delta=net_pnl,
         )
-        from forex_trader.reversal_engine import ml_engine as re_ml
+        from backend.src.services.reversal_engine import ml_engine as re_ml
         re_ml.record_outcome(sig_id, outcome)
         self._live_missing_streak.pop(ticket, None)
         try:

@@ -18,7 +18,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from forex_trader.reversal_engine import reversal_engine_repo as re_db
+from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 
 _log = logging.getLogger("reversal_engine")
 
@@ -210,7 +210,7 @@ class _CorrelationMixin:
 
                     # Feed REF level type back to ML (pattern learning)
                     ref_level_type = self._classify_ref_level(ref_mid)
-                    from forex_trader.reversal_engine import ml_engine as re_ml
+                    from backend.src.services.reversal_engine import ml_engine as re_ml
                     re_ml.record_ref_signal(ref_level_type)
 
                     break  # one REF match per RE signal

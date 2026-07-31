@@ -35,7 +35,7 @@ async def reversal_engine_research_sweep(engine: Any, now: Optional[datetime] = 
         date_str = now.strftime("%Y-%m-%d")
         if db_module.get_app_config("re_research_last") != date_str:
             if research_runner is None:
-                from forex_trader.reversal_engine import telegram_research
+                from backend.src.services.reversal_engine import telegram_research
                 research_runner = telegram_research.run_nightly_research
             result = await research_runner(engine)
             if result.get("ran"):

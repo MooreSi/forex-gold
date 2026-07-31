@@ -41,11 +41,11 @@ from backend.src.services.positions.monitor_loop import (
     check_profit_close_target as _check_profit_close_target_impl,
     reclaim_ea_managed_trade as _reclaim_ea_managed_trade_impl,
 )
-from forex_trader.core.core_scan_messages_auto_execute import (
+from backend.src.services.trading.scan_auto_execute import (
     price_in_entry_range as _price_in_entry_range_impl,
     execute_auto_signal as _execute_auto_signal_impl,
 )
-from forex_trader.core.core_limit_order_signal import (
+from backend.src.services.trading.limit_order_signal import (
     handle_limit_order_signal as _handle_limit_order_signal_impl,
 )
 from backend.src.services.telegram.keyword_triggers import (
@@ -70,7 +70,7 @@ from backend.src.services.positions.max_tp import (
     max_tp_checker_sweep as _max_tp_checker_sweep_impl,
     backfill_max_tp_hit_corrected as _backfill_max_tp_hit_corrected_impl,
 )
-from forex_trader.core.core_fees_sizing import (
+from backend.src.services.trading.fees_sizing import (
     pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl,
     calculate_fees as _calculate_fees_impl)
 from backend.src.services.broker.mt5_performance import (
@@ -78,7 +78,7 @@ from backend.src.services.broker.mt5_performance import (
     _platform_fee_rate, _apply_fee,
 )
 from backend.src.services.broker.deposits import get_total_deposits as _get_total_deposits_impl
-from forex_trader.core.core_sim_account import (
+from backend.src.services.trading.sim_account import (
     get_sim_account as _get_sim_account_impl,
     update_sim_balance as _update_sim_balance_impl,
     reset_simulation as _reset_simulation_impl,
@@ -129,17 +129,17 @@ from backend.src.services.telegram.bot_infra import (
     cmd_switch_demo as _cmd_switch_demo_impl,
     cmd_switch_env as _cmd_switch_env_impl,
 )
-from forex_trader.core.core_bot_commands_trading import (
+from backend.src.services.trading.bot_trading import (
     cmd_activate as _cmd_activate_impl,
     cmd_report as _cmd_report_impl,
 )
 from backend.src.services.broker.watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
-from forex_trader.core.core_profit_sync import (
+from backend.src.services.trading.profit_sync import (
     sync_profit as _sync_profit_impl,
     schedule_profit_sync as _schedule_profit_sync_impl,
     profit_sweep as _profit_sweep_impl,
 )
-from forex_trader.core.core_update_signal import update_signal as _update_signal_impl
+from backend.src.services.trading.update_signal import update_signal as _update_signal_impl
 from backend.src.services.risk.governor import (
     is_trading_paused as _is_trading_paused_impl,
     check_pre_trade_filters as _check_pre_trade_filters_impl,
@@ -156,19 +156,19 @@ from backend.src.services.positions.safety_net import (
 from backend.src.services.broker.untracked import (
     get_untracked_mt5_positions as _get_untracked_mt5_positions_impl,
 )
-from forex_trader.core.core_ai_signal_fallback import (
+from backend.src.services.trading.ai_signal_fallback import (
     try_ai_signal_fallback as _try_ai_signal_fallback_impl,
     push_ai_recovered_created as _push_ai_recovered_created_impl,
     apply_sl_adjustment as _apply_sl_adjustment_impl,
     queue_unrecognised as _queue_unrecognised_impl,
     analyse_unrecognised_message as _analyse_unrecognised_message_impl,
 )
-from forex_trader.core.core_instant_followup import (
+from backend.src.services.trading.instant_followup import (
     apply_followup_to_instant_trade as _apply_followup_to_instant_trade_impl,
     find_and_apply_instant_followup as _find_and_apply_instant_followup_impl,
     ime_timeout_watchdog as _ime_timeout_watchdog_impl,
 )
-from forex_trader.core.core_instant_entry import (
+from backend.src.services.trading.instant_entry import (
     process_instant_entry as _process_instant_entry_impl,
 )
 from backend.src.services.positions.tp_ladder import (
@@ -196,18 +196,18 @@ from backend.src.services.dpm.handler import (
     run_dpm_calibration as _run_dpm_calibration_impl,
     handle_dynamic_position_management as _handle_dynamic_position_management_impl,
 )
-from forex_trader.core.core_partial_close import partial_close_trade as _partial_close_trade_impl
-from forex_trader.core.core_open_trade import open_trade as _open_trade_impl
-from forex_trader.core.core_manual_market_order import (
+from backend.src.services.trading.partial_close import partial_close_trade as _partial_close_trade_impl
+from backend.src.services.trading.open_trade import open_trade as _open_trade_impl
+from backend.src.services.trading.manual_market_order import (
     open_manual_market_order as _open_manual_market_order_impl,
 )
-from forex_trader.core.core_manual_limit_order import (
+from backend.src.services.trading.manual_limit_order import (
     open_manual_limit_order as _open_manual_limit_order_impl,
 )
-from forex_trader.core.core_open_trade_from_signal import (
+from backend.src.services.trading.open_from_signal import (
     open_trade_from_signal as _open_trade_from_signal_impl,
 )
-from forex_trader.core.core_close_trade import (
+from backend.src.services.trading.close_trade import (
     CloseTradeContext as _CloseTradeContext,
     get_trading_balance as _get_trading_balance_impl,
     close_trade as _close_trade_impl,
@@ -218,7 +218,7 @@ from backend.src.services.analytics.orb_report import (
     build_orb_report as _build_orb_report_impl,
     get_orb_target_multiple as _get_orb_target_multiple_impl,
     backtest_orb_target_multiple as _backtest_orb_target_multiple_impl)
-from forex_trader.core.core_orb_report import orb_auto_execute as _orb_auto_execute_impl
+from backend.src.services.trading.orb_execute import orb_auto_execute as _orb_auto_execute_impl
 from backend.src.services.signals.pending_activation import (
     try_activate_pending_signals as _try_activate_pending_signals_impl,
 )

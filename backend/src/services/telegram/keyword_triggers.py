@@ -204,7 +204,7 @@ async def try_handle_risk_free_be_trigger(
                  "TG CMD off, not acting", channel_name, phrase, trade["trade_id"][:8])
         return True
     entry_price = float(trade["entry_price"])
-    from forex_trader.core.core_ai_signal_fallback import apply_sl_adjustment
+    from backend.src.services.trading.ai_signal_fallback import apply_sl_adjustment
     await apply_sl_adjustment(entry_price, channel_name, tg_id, "logic_keyword", bridge)
     return True
 

@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_instant_followup's extracted functions
+"""Proves backend.src.services.trading.instant_followup's extracted functions
 behave identically to SimulationEngine's originals, characterized in
 test_instant_followup_characterization.py -- see
 docs/todo/refactor/core-instant-followup-migration/020-*.md.
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_instant_followup as followup
+from backend.src.services.trading import instant_followup as followup
 from backend.src.utils.models import STRATEGY_BE_RUNNER
 
 

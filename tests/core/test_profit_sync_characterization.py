@@ -14,9 +14,9 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import core_profit_sync
+from backend.src.services.trading import profit_sync as core_profit_sync
 from forex_trader.core import database as db
-from forex_trader.core.core_sim_account import get_sim_account
+from backend.src.services.trading.sim_account import get_sim_account
 from forex_trader.core.engine import SimulationEngine
 
 

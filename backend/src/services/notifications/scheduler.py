@@ -34,7 +34,7 @@ from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import email_service
 from backend.src.services.broker.mt5_performance import compute_mt5_performance
 from backend.src.services.analytics.orb_report import build_orb_report
-from forex_trader.core.core_orb_report import orb_auto_execute
+from backend.src.services.trading.orb_execute import orb_auto_execute
 
 log = logging.getLogger(__name__)
 

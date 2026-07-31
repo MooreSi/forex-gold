@@ -20,8 +20,8 @@ def usage_of(src: str) -> set[tuple[str, str]]:
 
 
 def test_direct_symbol_import_is_a_use():
-    assert ("core_open_trade", "open_trade") in usage_of(
-        "from forex_trader.core.core_open_trade import open_trade"
+    assert ("core_zz_example", "zz_fn") in usage_of(
+        "from forex_trader.core.core_zz_example import zz_fn"
     )
 
 

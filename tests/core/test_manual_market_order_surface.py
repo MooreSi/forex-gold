@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_manual_market_order's extracted function
+"""Proves backend.src.services.trading.manual_market_order's extracted function
 behaves identically to SimulationEngine.open_manual_market_order,
 characterized in test_manual_market_order_characterization.py -- see
 docs/todo/refactor/core-manual-market-order-migration/020-*.md.
@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_manual_market_order as mmo
+from backend.src.services.trading import manual_market_order as mmo
 from backend.src.utils.models import STRATEGY_TRAIL_STOP
 
 

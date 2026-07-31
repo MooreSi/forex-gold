@@ -20,7 +20,7 @@ from typing import Any
 
 from forex_trader.core import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.core_update_signal import update_signal
+from backend.src.services.trading.update_signal import update_signal
 from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_BE_RUNNER, Tick,
 )

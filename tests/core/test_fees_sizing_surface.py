@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_fees_sizing's extracted functions behave
+"""Proves backend.src.services.trading.fees_sizing's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_fees_sizing_characterization.py -- see
 docs/todo/refactor/core-fees-risk-governor-migration/020-*.md.
@@ -11,7 +11,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_fees_sizing as fs
+from backend.src.services.trading import fees_sizing as fs
 
 
 def _reset_thread_local_connection():

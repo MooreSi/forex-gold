@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_sim_account's extracted functions behave
+"""Proves backend.src.services.trading.sim_account's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_sim_account_characterization.py -- see
 docs/todo/refactor/core-fees-risk-governor-migration/020-*.md.
@@ -10,7 +10,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_sim_account as sa
+from backend.src.services.trading import sim_account as sa
 
 
 def _reset_thread_local_connection():

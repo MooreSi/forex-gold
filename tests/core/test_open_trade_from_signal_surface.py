@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_open_trade_from_signal's extracted
+"""Proves backend.src.services.trading.open_from_signal's extracted
 function behaves identically to the back half of SimulationEngine.
 open_trade_from_signal, characterized in
 test_open_trade_from_signal_characterization.py -- see
@@ -19,7 +19,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core import core_open_trade_from_signal as otfs
+from backend.src.services.trading import open_from_signal as otfs
 from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,

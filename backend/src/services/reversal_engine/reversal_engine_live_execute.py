@@ -229,7 +229,7 @@ class _LiveExecuteMixin:
         if _ea is None or not _ea.is_ea_healthy():
             return None
 
-        from forex_trader.core.core_open_trade import (
+        from backend.src.services.trading.open_trade import (
             _EA_LADDER_PCTS, _EA_LADDER_BE_AT_POS, _EA_LADDER_TRAIL_MODE,
         )
         from backend.src.services.signals.resolution import resolve_open_trade_params

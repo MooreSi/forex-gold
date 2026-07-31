@@ -25,8 +25,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.core_partial_close import partial_close_trade
-from forex_trader.core.core_open_trade import _CLIMBER_PCTS, _GDVR_PCTS
+from backend.src.services.trading.partial_close import partial_close_trade
+from backend.src.services.trading.open_trade import _CLIMBER_PCTS, _GDVR_PCTS
 from backend.src.services.positions.tp_tracking import (
     TPCache, get_triggered_tps, log_tp_wait_diagnostic, get_remaining_lots,
 )

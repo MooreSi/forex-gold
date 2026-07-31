@@ -128,8 +128,8 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     if _lot_val > 0:
         lot = _lot_val
     else:
-        from forex_trader.core.core_close_trade import get_trading_balance
-        from forex_trader.core.core_fees_sizing import suggest_lot_size
+        from backend.src.services.trading.close_trade import get_trading_balance
+        from backend.src.services.trading.fees_sizing import suggest_lot_size
         balance = await get_trading_balance(bridge, 1000.0)
         lot = suggest_lot_size(price, stop_loss, balance, float(rs.get("risk_per_trade_pct", 0.5)))
 

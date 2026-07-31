@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_open_trade's extracted function behaves
+"""Proves backend.src.services.trading.open_trade's extracted function behaves
 identically to SimulationEngine.open_trade, characterized in
 test_open_trade_characterization.py -- see
 docs/todo/refactor/core-open-trade-migration/020-*.md.
@@ -18,7 +18,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core import core_open_trade as ot
+from backend.src.services.trading import open_trade as ot
 from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER
 
 

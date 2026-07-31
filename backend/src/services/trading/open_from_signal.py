@@ -29,7 +29,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core.core_open_trade import open_trade
+from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.signals.resolution import (
     resolve_open_trade_params,
     _rr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,

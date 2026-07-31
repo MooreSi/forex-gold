@@ -22,9 +22,9 @@ from typing import Any, Optional
 
 from forex_trader.core import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.core_close_trade import CloseTradeContext, record_close
-from forex_trader.core.core_fees_sizing import pnl as _pnl
-from forex_trader.core.core_partial_close import partial_close_trade
+from backend.src.services.trading.close_trade import CloseTradeContext, record_close
+from backend.src.services.trading.fees_sizing import pnl as _pnl
+from backend.src.services.trading.partial_close import partial_close_trade
 
 log = logging.getLogger(__name__)
 

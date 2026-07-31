@@ -202,6 +202,6 @@ def test_manual_market_order_never_reaches_the_gate():
     resolve_open_trade_params (the only caller of check_trading_schedule),
     or manual orders would stop being exempt from the schedule."""
     import inspect
-    from forex_trader.core import core_manual_market_order as manual_mod
+    from backend.src.services.trading import manual_market_order as manual_mod
     source = inspect.getsource(manual_mod)
     assert "resolve_open_trade_params" not in source

@@ -39,8 +39,8 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.dpm.bookkeeping import (
     DPMCache, load_dpm_calibrated, record_dpm_entry, update_dpm_peak, set_dpm_milestone,
 )
-from forex_trader.core.core_fees_sizing import pnl
-from forex_trader.core.core_partial_close import partial_close_trade
+from backend.src.services.trading.fees_sizing import pnl
+from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.positions.tp_tracking import TPCache, get_triggered_tps, get_remaining_lots
 from backend.src.utils.models import MAX_TP, Tick
 

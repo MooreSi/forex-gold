@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_bot_commands_trading's extracted
+"""Proves backend.src.services.trading.bot_trading's extracted
 functions behave identically to SimulationEngine's originals, characterized
 in test_bot_commands_trading_characterization.py -- see
 docs/todo/refactor/core-bot-commands-trading-migration/020-*.md.
@@ -17,7 +17,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_bot_commands_trading as cmds
+from backend.src.services.trading import bot_trading as cmds
 
 
 def _reset_thread_local_connection():

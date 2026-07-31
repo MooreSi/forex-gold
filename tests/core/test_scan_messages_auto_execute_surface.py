@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_scan_messages_auto_execute.execute_auto_signal
+"""Proves backend.src.services.trading.scan_auto_execute.execute_auto_signal
 behaves identically to SimulationEngine's original, characterized in
 test_scan_messages_auto_execute_characterization.py -- see
 docs/todo/refactor/core-scan-messages-auto-execute-migration/020-*.md.
@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core import core_scan_messages_auto_execute as ae
+from backend.src.services.trading import scan_auto_execute as ae
 
 
 def _reset_thread_local_connection():

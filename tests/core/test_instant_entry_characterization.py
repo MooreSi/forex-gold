@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-from forex_trader.core import core_instant_entry
+from backend.src.services.trading import instant_entry as core_instant_entry
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
 

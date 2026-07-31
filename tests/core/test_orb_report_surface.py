@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_orb_report's extracted functions behave
+"""Proves backend.src.services.trading.orb_execute's extracted functions behave
 identically to SimulationEngine's originals, characterized in
 test_orb_report_characterization.py -- see
 docs/todo/refactor/core-orb-report-migration/020-*.md.
@@ -18,7 +18,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.analytics import orb_report as orb
-from forex_trader.core import core_orb_report as orb_exec
+from backend.src.services.trading import orb_execute as orb_exec
 
 
 def _reset_thread_local_connection():

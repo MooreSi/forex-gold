@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_ai_signal_fallback's extracted functions
+"""Proves backend.src.services.trading.ai_signal_fallback's extracted functions
 behave identically to SimulationEngine's originals, characterized in
 test_ai_signal_fallback_characterization.py -- see
 docs/todo/refactor/core-ai-signal-fallback-migration/020-*.md.
@@ -18,7 +18,7 @@ import pytest
 from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
 from forex_trader.core import database as db
-from forex_trader.core import core_ai_signal_fallback as fb
+from backend.src.services.trading import ai_signal_fallback as fb
 
 
 def _reset_thread_local_connection():

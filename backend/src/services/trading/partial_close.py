@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 
 from forex_trader.core import database as db_module
-from forex_trader.core.core_fees_sizing import pnl as _pnl
+from backend.src.services.trading.fees_sizing import pnl as _pnl
 
 
 async def partial_close_trade(trade_id: str, lots_to_close: float,

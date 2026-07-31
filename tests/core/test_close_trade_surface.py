@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_close_trade's extracted functions behave
+"""Proves backend.src.services.trading.close_trade's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_close_trade_characterization.py -- see
 docs/todo/refactor/core-close-trade-migration/020-*.md.
@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_close_trade as ct
+from backend.src.services.trading import close_trade as ct
 
 
 def _reset_thread_local_connection():

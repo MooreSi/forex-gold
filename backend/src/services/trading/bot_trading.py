@@ -25,11 +25,11 @@ from typing import Any
 from backend.src.services.ai import claude_ai as claude_ai
 from forex_trader.core import database as db_module
 from backend.src.services.notifications import email_service
-from forex_trader.core.core_close_trade import CloseTradeContext, close_trade, get_trading_balance
-from forex_trader.core.core_fees_sizing import suggest_lot_size
-from forex_trader.core.core_manual_market_order import open_manual_market_order
+from backend.src.services.trading.close_trade import CloseTradeContext, close_trade, get_trading_balance
+from backend.src.services.trading.fees_sizing import suggest_lot_size
+from backend.src.services.trading.manual_market_order import open_manual_market_order
 from backend.src.services.broker.mt5_performance import compute_mt5_performance
-from forex_trader.core.core_open_trade import open_trade
+from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.risk.governor import price_in_entry_range
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import STRATEGY_SCALE_OUT

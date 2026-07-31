@@ -98,7 +98,7 @@ def get_rr_map_by_ticket() -> dict[str, float]:
     Available immediately at close (net_pnl/entry_price/lot_size are all
     set by record_close()), no async job involved -- excluded whenever any
     input is missing or the resolved risk distance is zero."""
-    from forex_trader.core.core_fees_sizing import pnl as _pnl
+    from backend.src.services.trading.fees_sizing import pnl as _pnl
     with db() as conn:
         rows = conn.execute(
             "SELECT t.mt5_ticket, t.direction, t.entry_price, "

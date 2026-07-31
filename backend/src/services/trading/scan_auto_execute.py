@@ -37,7 +37,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core.core_open_trade import open_trade as _real_open_trade
+from backend.src.services.trading.open_trade import open_trade as _real_open_trade
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.utils.models import (
     Tick,

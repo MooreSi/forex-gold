@@ -19,7 +19,7 @@ import pytest
 
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import email_service
-from forex_trader.core import core_bot_commands_trading as cmds
+from backend.src.services.trading import bot_trading as cmds
 from forex_trader.core import database as db
 from forex_trader.core.engine import SimulationEngine
 

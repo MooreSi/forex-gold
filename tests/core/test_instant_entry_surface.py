@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_instant_entry's extracted function
+"""Proves backend.src.services.trading.instant_entry's extracted function
 behaves identically to SimulationEngine._process_instant_entry,
 characterized in test_instant_entry_characterization.py -- see
 docs/todo/refactor/core-instant-entry-migration/020-*.md.
@@ -19,7 +19,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_instant_entry as ime
+from backend.src.services.trading import instant_entry as ime
 
 
 def _reset_thread_local_connection():

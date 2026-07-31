@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_update_signal's extracted function
+"""Proves backend.src.services.trading.update_signal's extracted function
 behaves identically to SimulationEngine.update_signal, characterized in
 test_update_signal_characterization.py -- see
 docs/todo/refactor/core-update-signal-migration/020-*.md.
@@ -16,7 +16,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from forex_trader.core import core_update_signal as us
+from backend.src.services.trading import update_signal as us
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_BE_RUNNER,

@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_limit_order_signal as los
+from backend.src.services.trading import limit_order_signal as los
 from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER, Tick
 

@@ -67,7 +67,7 @@ def test_only_the_extracted_copy_owns_the_risk_ceiling():
     )
     extracted_fn = next(
         n for n in ast.walk(ast.parse(
-            (dc.od.CORE_DIR / "core_fees_sizing.py").read_text(encoding="utf-8")))
+            (dc.od.REPO_ROOT / "backend/src/services/trading/fees_sizing.py").read_text(encoding="utf-8")))
         if isinstance(n, ast.FunctionDef) and n.name == "suggest_lot_size"
     )
     assert "max_risk_per_trade_pct" in ast.unparse(extracted_fn)
@@ -82,7 +82,7 @@ def test_the_scan_path_and_the_manual_path_now_size_identically():
     produce the same number for the same inputs, or the fork is back.
     """
     import types
-    from forex_trader.core import core_fees_sizing
+    from backend.src.services.trading import fees_sizing as core_fees_sizing
 
     captured = {}
 

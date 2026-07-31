@@ -45,7 +45,7 @@ def production_files() -> list[Path]:
 
 
 def module_stem(dotted: str) -> str:
-    """'forex_trader.core.core_open_trade' -> 'core_open_trade'."""
+    """'backend.src.services.trading.open_trade' -> 'core_open_trade'."""
     return dotted.rsplit(".", 1)[-1]
 
 

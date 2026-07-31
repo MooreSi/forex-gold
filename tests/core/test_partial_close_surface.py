@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_partial_close's extracted function behaves
+"""Proves backend.src.services.trading.partial_close's extracted function behaves
 identically to SimulationEngine.partial_close_trade, characterized in
 test_partial_close_characterization.py -- see
 docs/todo/refactor/core-partial-close-migration/020-*.md.
@@ -13,7 +13,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_partial_close as pc
+from backend.src.services.trading import partial_close as pc
 
 
 def _reset_thread_local_connection():

@@ -17,7 +17,7 @@ import uuid
 from typing import Any
 
 from forex_trader.core import database as db_module
-from forex_trader.core.core_fees_sizing import pnl as _pnl
+from backend.src.services.trading.fees_sizing import pnl as _pnl
 
 log = logging.getLogger(__name__)
 

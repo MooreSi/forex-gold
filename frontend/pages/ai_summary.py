@@ -12,6 +12,7 @@ from nicegui import ui
 
 import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
+from backend.src.services.analytics import read_repo
 from backend.src.utils.models import STRATEGY_NAMES
 
 def _uk_time() -> str:
@@ -335,13 +336,7 @@ def render(get_engine: Callable):
                     if not blurb and strat_rec:
                         # Custom strategy — look up description from DB
                         try:
-                            with db_module.db() as _conn:
-                                _cs = _conn.execute(
-                                    "SELECT name, description FROM custom_strategies WHERE id=?",
-                                    (strat_rec,),
-                                ).fetchone()
-                                if _cs:
-                                    blurb = (_cs[1] or "").split("\n")[0].strip().lstrip("#").strip()
+                            blurb = read_repo.custom_strategy_blurb(strat_rec) or ""
                         except Exception:
                             pass
                     if blurb:
@@ -422,15 +417,7 @@ def render(get_engine: Callable):
             # Recent signals (last 24h)
             import time as _time
             cutoff = _time.time() - 86400
-            with db_module.db() as conn:
-                recent_sigs = [
-                    db_module.row_to_dict(r)
-                    for r in conn.execute(
-                        "SELECT * FROM vantage_tg_signals WHERE parsed_at>? "
-                        "ORDER BY parsed_at DESC",
-                        (cutoff,),
-                    ).fetchall()
-                ]
+            recent_sigs = read_repo.recent_tg_signals(cutoff)
 
             perf = {}
             try:
@@ -440,13 +427,7 @@ def render(get_engine: Callable):
 
             custom_strats = []
             try:
-                with db_module.db() as conn:
-                    custom_strats = [
-                        db_module.row_to_dict(r)
-                        for r in conn.execute(
-                            "SELECT id, name, description FROM custom_strategies ORDER BY created_at"
-                        ).fetchall()
-                    ]
+                custom_strats = read_repo.all_custom_strategies()
             except Exception:
                 pass
 

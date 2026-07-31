@@ -1112,13 +1112,24 @@ from forex_trader.core.core_db_sync import (  # noqa: E402,F401
     generate_sync_token,
     get_sync_token,
 )
-from backend.src.services.analytics.read_repo import (  # noqa: E402,F401
-    _session_for_hour,
-    _trade_pts,
-    get_hourly_pnl_grid,
-    get_equity_drawdown_pct,
-    get_regime_score,
-)
+# Analytics names resolve lazily via __getattr__ below rather than an eager
+# from-import. read_repo lives in backend/ now and legitimately gets imported
+# on its own; an eager import here made "which module was imported first"
+# decide whether the process bootstraps -- read_repo imported first meant this
+# line ran while read_repo was half-initialised and raised ImportError.
+_ANALYTICS_LAZY = {
+    "_session_for_hour", "_trade_pts", "get_hourly_pnl_grid",
+    "get_equity_drawdown_pct", "get_regime_score",
+}
+
+
+def __getattr__(name):
+    if name in _ANALYTICS_LAZY:
+        from backend.src.services.analytics import read_repo as _rr
+        return getattr(_rr, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 from forex_trader.core.core_db_channel import (  # noqa: E402,F401
     _TG_GROUP_ID_MAP,
     _normalise_tg_source,

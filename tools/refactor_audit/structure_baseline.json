@@ -8,7 +8,7 @@
   "baseline": {
     "loc": {
       "forex_trader/core/backtest_engine.py": 1125,
-      "forex_trader/core/database.py": 1240,
+      "forex_trader/core/database.py": 1251,
       "forex_trader/core/ea_bridge.py": 816,
       "forex_trader/core/email_service.py": 946,
       "forex_trader/core/engine.py": 3144,
@@ -92,7 +92,6 @@
       "forex_trader/test_signal/test_signal_manage.py": 2,
       "forex_trader/test_signal/test_signal_service.py": 1,
       "frontend/app.py": 1,
-      "frontend/pages/ai_summary.py": 3,
       "frontend/pages/ai_trade_analysis.py": 7,
       "frontend/pages/dpm_analysis.py": 3,
       "frontend/pages/settings.py": 1,
@@ -113,7 +112,6 @@
       "frontend/pages/breakout_panel.py": 3,
       "frontend/pages/chart.py": 1,
       "frontend/pages/dpm_analysis.py": 1,
-      "frontend/pages/edge_dashboard.py": 1,
       "frontend/pages/history.py": 1,
       "frontend/pages/remote_node.py": 1,
       "frontend/pages/reversal_panel.py": 2,

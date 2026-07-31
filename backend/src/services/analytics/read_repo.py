@@ -157,3 +157,47 @@ def get_regime_score(adx: float, atr: float, atr_avg: float = 0.0) -> float:
         regime = max(regime, 0.5)
 
     return regime
+
+
+# ── AI research inputs ────────────────────────────────────────────────────────
+# Moved from frontend/pages/ai_summary.py. All three feed the AI market-research
+# prompt; none is on any trading path.
+
+def custom_strategy_blurb(strategy_id: str):
+    """First line of a custom strategy's description, or None.
+
+    Built-in strategies have hardcoded blurbs in the view; only user-defined
+    ones live in the DB.
+    """
+    with db() as conn:
+        row = conn.execute(
+            "SELECT name, description FROM custom_strategies WHERE id=?",
+            (strategy_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return (row[1] or "").split("\n")[0].strip().lstrip("#").strip()
+
+
+def recent_tg_signals(cutoff: float) -> list[dict]:
+    """Parsed Telegram signals since `cutoff`, newest first."""
+    with db() as conn:
+        return [
+            row_to_dict(r)
+            for r in conn.execute(
+                "SELECT * FROM vantage_tg_signals WHERE parsed_at>? "
+                "ORDER BY parsed_at DESC",
+                (cutoff,),
+            ).fetchall()
+        ]
+
+
+def all_custom_strategies() -> list[dict]:
+    """Every user-defined strategy, oldest first (creation order)."""
+    with db() as conn:
+        return [
+            row_to_dict(r)
+            for r in conn.execute(
+                "SELECT id, name, description FROM custom_strategies ORDER BY created_at"
+            ).fetchall()
+        ]

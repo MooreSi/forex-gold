@@ -23,7 +23,13 @@ log = logging.getLogger(__name__)
 
 from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
 from forex_trader.core.core_db_sync import _ensure_sync_tables  # noqa: E402
-from backend.src.services.analytics.read_repo import _session_for_hour, _trade_pts  # noqa: E402
+# Imported inside _refresh to avoid an import-order cycle: read_repo imports
+# database, database imports this module, and this module needs read_repo's
+# helpers. Deferring to call time means no order of first-import can break
+# process bootstrap.
+def _analytics_helpers():
+    from backend.src.services.analytics.read_repo import _session_for_hour, _trade_pts
+    return _session_for_hour, _trade_pts
 
 _TG_GROUP_ID_MAP: dict[str, str] = {
     "1608388054": "Gold Diggers VIP",
@@ -142,6 +148,7 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
             "sessions": {"london": 0.0, "ny": 0.0, "overlap": 0.0, "asian": 0.0},
         })
         pnl = float(pnl or 0)
+        _session_for_hour, _trade_pts = _analytics_helpers()
         pts = _trade_pts(direction, float(entry or 0), float(close or 0))
         a["trades"]  += 1
         a["net_pnl"] += pnl

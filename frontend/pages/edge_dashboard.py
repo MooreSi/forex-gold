@@ -7,101 +7,13 @@ engine's 12:00-15:00 UTC losses hid in aggregate stats for weeks).
 """
 from __future__ import annotations
 
-import logging
-import sqlite3
 import time
-from pathlib import Path
 
 from nicegui import ui
 
-log = logging.getLogger(__name__)
+from backend.src.services.analytics import edge_stats
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-# Engine registry: label → (db filename, table, pnl expression, time column)
-# pnl expression must be a closed-trade net-dollar value.
-_ENGINES: dict[str, dict] = {
-    "Breakout": {
-        "db": "breakout_signal.db", "table": "bo_signals",
-        "pnl": "net_pnl_dollars", "tcol": "COALESCE(trigger_time, close_time)",
-    },
-    "Bounce": {
-        "db": "test_signal.db", "table": "test_signals",
-        "pnl": "pnl_dollars", "tcol": "COALESCE(trigger_time, close_time)",
-    },
-    "Reversal Engine": {
-        "db": "reversal_engine.db", "table": "re_signals",
-        "pnl": "net_pnl_dollars", "tcol": "COALESCE(trigger_time, close_time)",
-    },
-}
-
-
-def _data_dir() -> Path:
-    from backend.src.config import DATA_DIR
-    return Path(DATA_DIR)
-
-
-def _query(db_file: str, sql: str, params: tuple = ()) -> list[tuple]:
-    """Read-only query against an engine DB; missing DB returns []."""
-    path = _data_dir() / db_file
-    if not path.exists():
-        return []
-    try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0) as conn:
-            return conn.execute(sql, params).fetchall()
-    except Exception as e:
-        log.debug("[Edge] query failed on %s: %s", db_file, e)
-        return []
-
-
-def _engine_stats(cfg: dict, days: int) -> dict:
-    cutoff = time.time() - days * 86400 if days > 0 else 0
-    rows = _query(cfg["db"], f"""
-        SELECT {cfg['pnl']} FROM {cfg['table']}
-        WHERE outcome IN ('win','loss','be') AND {cfg['pnl']} IS NOT NULL
-          AND COALESCE(close_time, 0) >= ?
-    """, (cutoff,))
-    pnls = [float(r[0]) for r in rows]
-    n = len(pnls)
-    if n == 0:
-        return {"n": 0}
-    wins    = [p for p in pnls if p > 0]
-    losses  = [p for p in pnls if p < 0]
-    gross_w = sum(wins)
-    gross_l = -sum(losses)
-    return {
-        "n":          n,
-        "net":        sum(pnls),
-        "pf":         (gross_w / gross_l) if gross_l > 0 else float("inf"),
-        "win_rate":   len(wins) / n,
-        "expectancy": sum(pnls) / n,
-        "avg_win":    (gross_w / len(wins)) if wins else 0.0,
-        "avg_loss":   (gross_l / len(losses)) if losses else 0.0,
-    }
-
-
-def _heatmap_data(cfg: dict, days: int) -> list[list]:
-    """Return [[hour, weekday_idx, net_pnl], ...] for closed trades."""
-    cutoff = time.time() - days * 86400 if days > 0 else 0
-    rows = _query(cfg["db"], f"""
-        SELECT CAST(strftime('%H', {cfg['tcol']}, 'unixepoch') AS INT)  AS h,
-               CAST(strftime('%w', {cfg['tcol']}, 'unixepoch') AS INT)  AS dow,
-               ROUND(SUM({cfg['pnl']}), 2)
-        FROM {cfg['table']}
-        WHERE outcome IN ('win','loss','be') AND {cfg['pnl']} IS NOT NULL
-          AND COALESCE(close_time, 0) >= ?
-        GROUP BY h, dow
-    """, (cutoff,))
-    # SQLite %w: 0=Sunday … 6=Saturday → remap to Mon=0 … Sun=6
-    return [[int(h), (int(dow) + 6) % 7, float(v or 0)] for h, dow, v in rows]
-
-
-def _hour_totals(cfg: dict, days: int) -> dict[int, float]:
-    out: dict[int, float] = {}
-    for h, _dow, v in _heatmap_data(cfg, days):
-        out[h] = out.get(h, 0.0) + v
-    return out
-
 
 def render(get_engine=None) -> None:  # get_engine unused; matches page signature
     state = {"engine": "Breakout", "days": 0}
@@ -122,7 +34,7 @@ def render(get_engine=None) -> None:  # get_engine unused; matches page signatur
             ui.label("P&L by hour and weekday (UTC)").classes(
                 "text-sm font-semibold text-gray-400 uppercase tracking-wider")
             engine_sel = ui.select(
-                list(_ENGINES.keys()), value="Breakout",
+                list(edge_stats.ENGINES.keys()), value="Breakout",
             ).classes("w-40").props("dense dark outlined")
 
         chart_box = ui.column().classes("w-full")
@@ -135,8 +47,8 @@ def render(get_engine=None) -> None:  # get_engine unused; matches page signatur
     def _build_cards() -> None:
         cards_row.clear()
         with cards_row:
-            for name, cfg in _ENGINES.items():
-                s = _engine_stats(cfg, state["days"])
+            for name, cfg in edge_stats.ENGINES.items():
+                s = edge_stats.engine_stats(cfg, state["days"])
                 with ui.card().classes("rounded-lg p-4 min-w-56 bg-gray-800"):
                     ui.label(name).classes("text-base font-bold text-yellow-400")
                     if s["n"] == 0:
@@ -164,8 +76,8 @@ def render(get_engine=None) -> None:  # get_engine unused; matches page signatur
     def _build_heatmap() -> None:
         chart_box.clear()
         insight_box.clear()
-        cfg  = _ENGINES[state["engine"]]
-        data = _heatmap_data(cfg, state["days"])
+        cfg  = edge_stats.ENGINES[state["engine"]]
+        data = edge_stats.heatmap_data(cfg, state["days"])
         with chart_box:
             if not data:
                 ui.label("No closed trades for this engine/window").classes("text-gray-500")
@@ -199,7 +111,7 @@ def render(get_engine=None) -> None:  # get_engine unused; matches page signatur
             }).classes("w-full h-80")
 
         # Best / worst hours — the actionable summary
-        totals = _hour_totals(cfg, state["days"])
+        totals = edge_stats.hour_totals(cfg, state["days"])
         if totals:
             ranked = sorted(totals.items(), key=lambda kv: kv[1])
             worst  = [f"{h:02d}:00 (${v:+,.0f})" for h, v in ranked[:3] if v < 0]

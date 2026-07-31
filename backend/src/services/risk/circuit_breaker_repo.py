@@ -22,7 +22,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
-from forex_trader.core.core_db_risk_settings import get_risk_settings, update_risk_settings  # noqa: E402
+from backend.src.services.risk.risk_settings_repo import get_risk_settings, update_risk_settings  # noqa: E402
 
 # ── Global Circuit Breaker ────────────────────────────────────────────────────
 # State is persisted in vantage_risk_settings so it survives restarts.

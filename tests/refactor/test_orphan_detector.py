@@ -26,12 +26,12 @@ def test_direct_symbol_import_is_a_use():
 
 
 def test_aliased_module_attribute_is_a_use():
-    # ui/pages/trading.py:1434 does exactly this.
+    # frontend/pages/trading.py once did exactly this with the schedule module.
     used = usage_of(
-        "from forex_trader.core import core_trading_schedule as sched\n"
-        "sched.is_session_allowed('GOLD')\n"
+        "from forex_trader.core import core_ea_templates as et\n"
+        "et.is_template_override('x')\n"
     )
-    assert ("core_trading_schedule", "is_session_allowed") in used
+    assert ("core_ea_templates", "is_template_override") in used
 
 
 def test_unaliased_module_import_then_attribute_is_a_use():
@@ -44,10 +44,10 @@ def test_unaliased_module_import_then_attribute_is_a_use():
 
 def test_dotted_import_with_alias_is_a_use():
     used = usage_of(
-        "import forex_trader.core.core_risk_governor as rg\n"
-        "rg.rg_check_halt()\n"
+        "import forex_trader.core.core_signals as cs\n"
+        "cs.create_signal()\n"
     )
-    assert ("core_risk_governor", "rg_check_halt") in used
+    assert ("core_signals", "create_signal") in used
 
 
 def test_keyword_argument_of_the_same_name_is_not_a_use():
@@ -110,7 +110,7 @@ def test_public_functions_skips_private_and_reports_loc(tmp_path):
 
 @pytest.mark.parametrize("ident", [
     "core_logic_keywords::default_lexicon",
-    "core_strategy_params::default_params",
+    "core_logic_keywords::set_all_lexicons",
 ])
 def test_known_orphans_are_still_detected(ident):
     """What the detector should still see: two-line in-module defaults.
@@ -133,7 +133,7 @@ def test_wired_extractions_are_not_reported():
                   "core_monitor_loop::check_sl",
                   "core_fees_sizing::calculate_fees",
                   "core_fees_sizing::suggest_lot_size",
-                  "core_risk_governor::rg_check_halt"):
+                  "core_signals::create_signal"):
         assert ident not in found
 
 

@@ -27,7 +27,7 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_open_trade import open_trade
 from backend.src.services.analytics.reporting import get_open_trades
-from forex_trader.core.core_trading_schedule import check_trading_schedule
+from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, Tick,

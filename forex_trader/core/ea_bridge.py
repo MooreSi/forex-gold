@@ -26,7 +26,7 @@ import logging
 import time
 from typing import Optional
 
-from forex_trader.core.core_trading_schedule import check_trading_schedule
+from backend.src.services.risk.schedule import check_trading_schedule
 
 log = logging.getLogger("ea_bridge")
 

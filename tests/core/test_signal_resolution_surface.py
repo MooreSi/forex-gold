@@ -20,7 +20,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_signal_resolution as sr
-from forex_trader.core import core_strategy_params as sp
+from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,
@@ -167,7 +167,7 @@ def test_raises_when_outside_trading_schedule(fresh_db):
     """Proves the gate is actually wired in, not just correct in isolation.
     Enabled with every block left disabled -- blocks regardless of the
     actual wall-clock time the test happens to run at."""
-    from forex_trader.core import core_trading_schedule as sched
+    from backend.src.services.risk import schedule as sched
     sched.set_trading_schedule_enabled(True)
     sched.set_trading_schedule(sched._default_schedule())
     _insert_signal()

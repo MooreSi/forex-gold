@@ -31,7 +31,7 @@ from forex_trader.core import telegram_alerts
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_limit_order_signal import _limit_runner_pcts
-from forex_trader.core.core_strategy_params import get_strategy_params
+from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
 
 _DEFAULT_EXPIRE_MINUTES = 240

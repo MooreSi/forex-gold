@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_risk_governor's extracted functions behave
+"""Proves backend.src.services.risk.governor's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_risk_governor_characterization.py -- see
 docs/todo/refactor/core-fees-risk-governor-migration/020-*.md.
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_risk_governor as rg
+from backend.src.services.risk import governor as rg
 
 
 def _reset_thread_local_connection():

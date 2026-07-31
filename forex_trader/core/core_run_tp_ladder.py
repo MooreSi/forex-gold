@@ -213,7 +213,7 @@ async def handle_signal_climber(
     Designed for professional multi-TP signals (GD2, GDV) where TP5/6 is
     the intended target and dumping 80% at TP1 destroys the expected value.
     """
-    from forex_trader.core.core_strategy_params import get_strategy_params
+    from backend.src.services.risk.strategy_params import get_strategy_params
     from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
 
     be_at_pos_1based = int(get_strategy_params(STRATEGY_SIGNAL_CLIMBER).get("be_at_pos", 1))
@@ -301,7 +301,7 @@ def _limit_runner_pcts_table(trade: dict) -> tuple[dict[int, list[float]], bool]
     (pcts_table, close_full_on_last); a single-entry table since n is
     already fixed for this trade -- run_tp_ladder's own n-keyed lookup
     resolves straight to it."""
-    from forex_trader.core.core_strategy_params import get_strategy_params
+    from backend.src.services.risk.strategy_params import get_strategy_params
     from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
     n = sum(1 for i in range(1, MAX_TP + 1) if trade.get(f"tp{i}") is not None)
     if n == 0:
@@ -335,7 +335,7 @@ async def handle_limit_runner(
     remaining (close_full_on_last=False) -- whatever's left keeps riding on
     the trailing SL with no further target.
     """
-    from forex_trader.core.core_strategy_params import get_strategy_params
+    from backend.src.services.risk.strategy_params import get_strategy_params
     from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
     pcts_table, close_full_on_last = _limit_runner_pcts_table(trade)
     be_at_pos_1based = int(get_strategy_params(STRATEGY_LIMIT_RUNNER).get("be_at_pos", 1))

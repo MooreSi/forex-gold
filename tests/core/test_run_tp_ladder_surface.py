@@ -18,7 +18,7 @@ import pytest
 
 from forex_trader.core import database as db
 from forex_trader.core import core_run_tp_ladder as ladder
-from forex_trader.core import core_strategy_params as sp
+from backend.src.services.risk import strategy_params as sp
 from forex_trader.core.core_tp_trigger_tracking import TPCache
 from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
 

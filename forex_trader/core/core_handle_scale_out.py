@@ -30,7 +30,7 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
-from forex_trader.core.core_strategy_params import get_strategy_params
+from backend.src.services.risk.strategy_params import get_strategy_params
 from forex_trader.core.core_tp_trigger_tracking import TPCache, check_tp_hits, get_remaining_lots
 from backend.src.utils.models import MAX_TP, STRATEGY_SCALE_OUT, Tick
 

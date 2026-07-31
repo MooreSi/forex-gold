@@ -14,7 +14,7 @@ from datetime import datetime
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_trading_schedule as sched
+from backend.src.services.risk import schedule as sched
 
 
 def _reset_thread_local_connection():

@@ -1352,7 +1352,7 @@ async def _background_commentary(engine, signal_id: str):
 
 # ── Strategy comparison data ───────────────────────────────────────────────────
 
-from forex_trader.core import core_strategy_params as _sp
+from backend.src.services.risk import strategy_params as _sp
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT as _SO, STRATEGY_BE_RUNNER as _BE,
     STRATEGY_TRAIL_STOP as _TS, STRATEGY_PROTECTED_SCALE as _PS,
@@ -1429,7 +1429,7 @@ def _render_schedule():
     Engine/Breakout Engine (2026-07-24) -- e.g. Reversal Engine performs
     well overnight but loses during London/NY, the opposite of the Telegram
     channels, so a single blanket switch isn't enough."""
-    from forex_trader.core import core_trading_schedule as sched
+    from backend.src.services.risk import schedule as sched
 
     schedule = sched.get_trading_schedule()
     enabled_now = sched.is_trading_schedule_enabled()
@@ -2014,7 +2014,7 @@ def _render_strategy_params_card() -> None:
     MQL5 changes at all (every strategy here is already fully resolved
     to concrete SL/TP prices by Python before any EA sees the trade).
     """
-    from forex_trader.core import core_strategy_params as sp
+    from backend.src.services.risk import strategy_params as sp
 
     with ui.row().classes("items-center gap-2 mb-2"):
         ui.label("Strategy Parameters").classes("text-base font-bold text-yellow-300")

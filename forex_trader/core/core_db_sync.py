@@ -22,8 +22,8 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
-from forex_trader.core.core_db_app_config import get_app_config, set_app_config  # noqa: E402
-from forex_trader.core.core_db_risk_settings import get_risk_settings  # noqa: E402
+from backend.src.services.risk.app_config_repo import get_app_config, set_app_config  # noqa: E402
+from backend.src.services.risk.risk_settings_repo import get_risk_settings  # noqa: E402
 
 # ── Local/Remote sync — consolidated ledger, active-trader flag, node config ──
 # Additive only: this never touches the per-engine operational tables

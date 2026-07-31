@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_trading_schedule as sched
+from backend.src.services.risk import schedule as sched
 from forex_trader.sync.server import SyncServer
 from forex_trader.sync.client import SyncClient
 
@@ -60,7 +60,7 @@ def test_local_edit_forwards_over_client_when_configured(fresh_db):
     fake_client = AsyncMock()
     fake_client.propose_trading_schedule = AsyncMock()
     with patch("forex_trader.sync.client.get_instance", return_value=fake_client), \
-         patch("forex_trader.core.core_trading_schedule._schedule_coro") as fake_schedule_coro:
+         patch("backend.src.services.risk.schedule._schedule_coro") as fake_schedule_coro:
         sched.set_trading_schedule_enabled(True)
         assert fake_schedule_coro.called
         # the coroutine object passed to _schedule_coro was propose_trading_schedule(...)
@@ -72,7 +72,7 @@ def test_applying_a_sync_snapshot_does_not_reforward(fresh_db):
     """The core re-entrancy guard: mirroring an incoming snapshot must NOT
     trigger another outbound propose, or the two nodes ping-pong forever."""
     with patch(
-        "forex_trader.core.core_trading_schedule._forward_trading_schedule_over_sync"
+        "backend.src.services.risk.schedule._forward_trading_schedule_over_sync"
     ) as fake_forward:
         sched.apply_trading_schedule_snapshot(_sample_snapshot())
         fake_forward.assert_not_called()

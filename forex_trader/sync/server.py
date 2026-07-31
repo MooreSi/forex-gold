@@ -596,13 +596,13 @@ class SyncServer:
     # ── Trading Schedule sync ────────────────────────────────────────────────
 
     def _trading_schedule_snapshot(self) -> dict:
-        from forex_trader.core.core_trading_schedule import trading_schedule_snapshot
+        from backend.src.services.risk.schedule import trading_schedule_snapshot
         return trading_schedule_snapshot()
 
     async def _handle_trading_schedule_propose(self, ws, msg: dict) -> None:
         snapshot = msg.get("trading_schedule") or {}
         try:
-            from forex_trader.core.core_trading_schedule import apply_trading_schedule_snapshot
+            from backend.src.services.risk.schedule import apply_trading_schedule_snapshot
             apply_trading_schedule_snapshot(snapshot)
             log.info("[SyncServer] applied trading schedule from Mac")
         except Exception as e:
@@ -621,13 +621,13 @@ class SyncServer:
     # ── Strategy Parameters sync ─────────────────────────────────────────────
 
     def _strategy_params_snapshot(self) -> dict:
-        from forex_trader.core.core_strategy_params import strategy_params_snapshot
+        from backend.src.services.risk.strategy_params import strategy_params_snapshot
         return strategy_params_snapshot()
 
     async def _handle_strategy_params_propose(self, ws, msg: dict) -> None:
         snapshot = msg.get("strategy_params") or {}
         try:
-            from forex_trader.core.core_strategy_params import apply_strategy_params_snapshot
+            from backend.src.services.risk.strategy_params import apply_strategy_params_snapshot
             apply_strategy_params_snapshot(snapshot)
             log.info("[SyncServer] applied strategy params from Mac")
         except Exception as e:

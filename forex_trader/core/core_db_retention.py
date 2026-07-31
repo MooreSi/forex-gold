@@ -22,7 +22,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from forex_trader.core.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
-from forex_trader.core.core_db_app_config import get_app_config, set_app_config  # noqa: E402
+from backend.src.services.risk.app_config_repo import get_app_config, set_app_config  # noqa: E402
 
 # ── Data retention ──────────────────────────────────────────────────────────
 # Per-node preference (app_config, not synced) for how long historical data

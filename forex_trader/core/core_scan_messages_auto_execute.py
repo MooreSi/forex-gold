@@ -38,7 +38,7 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import ea_bridge
 from forex_trader.core.core_open_trade import open_trade as _real_open_trade
-from forex_trader.core.core_strategy_params import get_strategy_params
+from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.utils.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,

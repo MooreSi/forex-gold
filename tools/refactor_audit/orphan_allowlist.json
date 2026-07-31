@@ -27,14 +27,6 @@
       "reason": "Bulk setter with no current caller. Harmless.",
       "phase": null,
       "action": "Permanent -- no action."
-    },
-    {
-      "id": "core_strategy_params::default_params",
-      "loc": 2,
-      "verdict": "no twin",
-      "reason": "Two-line default, reachable in-module via get_strategy_params.",
-      "phase": null,
-      "action": "Permanent -- no action."
     }
   ]
 }

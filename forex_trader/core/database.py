@@ -1062,7 +1062,7 @@ def _schedule_coro(coro) -> None:
 # Every name below is a verbatim extraction (function bodies AST-verified byte-identical
 # to the pre-split original). Imported here so every existing `db_module.<name>` call site
 # app-wide continues to work completely unchanged.
-from forex_trader.core.core_db_app_config import (  # noqa: E402,F401
+from backend.src.services.risk.app_config_repo import (  # noqa: E402,F401
     get_app_config,
     set_app_config,
 )
@@ -1075,7 +1075,7 @@ from forex_trader.core.core_db_app_config import (  # noqa: E402,F401
 _rs_cache:    Optional[dict] = None
 _rs_cache_ts: float = 0.0
 
-from forex_trader.core.core_db_risk_settings import (  # noqa: E402,F401
+from backend.src.services.risk.risk_settings_repo import (  # noqa: E402,F401
     _RS_CACHE_TTL,
     get_risk_settings,
     _applying_sync_settings,
@@ -1086,7 +1086,7 @@ from forex_trader.core.core_db_risk_settings import (  # noqa: E402,F401
     update_fee_settings,
     get_effective_strategy,
 )
-from forex_trader.core.core_db_circuit_breaker import (  # noqa: E402,F401
+from backend.src.services.risk.circuit_breaker_repo import (  # noqa: E402,F401
     get_circuit_breaker_state,
     record_live_trade_outcome,
     reset_circuit_breaker,
@@ -1159,7 +1159,7 @@ from backend.src.services.channels.repo import (  # noqa: E402,F401
     set_channel_paused,
     get_channel_performance_map,
 )
-from forex_trader.core.core_db_custom_strategies import (  # noqa: E402,F401
+from backend.src.services.risk.custom_strategies_repo import (  # noqa: E402,F401
     get_custom_strategies,
     save_custom_strategy,
     delete_custom_strategy,

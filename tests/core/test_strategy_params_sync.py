@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_strategy_params as sp
+from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER
 from forex_trader.sync.server import SyncServer
 from forex_trader.sync.client import SyncClient
@@ -64,7 +64,7 @@ def test_local_edit_forwards_over_client_when_configured(fresh_db):
     fake_client = AsyncMock()
     fake_client.propose_strategy_params = AsyncMock()
     with patch("forex_trader.sync.client.get_instance", return_value=fake_client), \
-         patch("forex_trader.core.core_strategy_params._schedule_coro") as fake_schedule_coro:
+         patch("backend.src.services.risk.strategy_params._schedule_coro") as fake_schedule_coro:
         sp.set_strategy_params(STRATEGY_CONSERVATIVE, {"sl_pt": 6.0})
         assert fake_schedule_coro.called
         # the coroutine object passed to _schedule_coro was propose_strategy_params(...)
@@ -76,7 +76,7 @@ def test_applying_a_sync_snapshot_does_not_reforward(fresh_db):
     """The core re-entrancy guard: mirroring an incoming snapshot must NOT
     trigger another outbound propose, or the two nodes ping-pong forever."""
     with patch(
-        "forex_trader.core.core_strategy_params._forward_strategy_params_over_sync"
+        "backend.src.services.risk.strategy_params._forward_strategy_params_over_sync"
     ) as fake_forward:
         sp.apply_strategy_params_snapshot(_sample_snapshot())
         fake_forward.assert_not_called()
@@ -89,14 +89,14 @@ def test_reset_and_apply_template_also_forward(fresh_db):
     fake_client = AsyncMock()
     fake_client.propose_strategy_params = AsyncMock()
     with patch("forex_trader.sync.client.get_instance", return_value=fake_client), \
-         patch("forex_trader.core.core_strategy_params._schedule_coro") as fake_schedule_coro:
+         patch("backend.src.services.risk.strategy_params._schedule_coro") as fake_schedule_coro:
         sp.reset_strategy_params(STRATEGY_CONSERVATIVE)
         assert fake_schedule_coro.called
         fake_schedule_coro.call_args[0][0].close()
 
     tid = sp.save_template(STRATEGY_SCALP_RUNNER, "Wide", {"sl_pt": 20.0})
     with patch("forex_trader.sync.client.get_instance", return_value=fake_client), \
-         patch("forex_trader.core.core_strategy_params._schedule_coro") as fake_schedule_coro2:
+         patch("backend.src.services.risk.strategy_params._schedule_coro") as fake_schedule_coro2:
         sp.apply_template(tid)
         assert fake_schedule_coro2.called
         fake_schedule_coro2.call_args[0][0].close()

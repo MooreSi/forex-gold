@@ -447,7 +447,7 @@ class SyncClient:
         if self._pending_trading_schedule:
             return
         try:
-            from forex_trader.core.core_trading_schedule import apply_trading_schedule_snapshot
+            from backend.src.services.risk.schedule import apply_trading_schedule_snapshot
             apply_trading_schedule_snapshot(snapshot)
         except Exception as e:
             log.debug("[SyncClient] trading schedule mirror failed: %s", e)
@@ -461,7 +461,7 @@ class SyncClient:
         if self._pending_strategy_params:
             return
         try:
-            from forex_trader.core.core_strategy_params import apply_strategy_params_snapshot
+            from backend.src.services.risk.strategy_params import apply_strategy_params_snapshot
             apply_strategy_params_snapshot(snapshot)
         except Exception as e:
             log.debug("[SyncClient] strategy params mirror failed: %s", e)

@@ -25,9 +25,9 @@ from forex_trader.core import database as db_module
 from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
-from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
-from forex_trader.core.core_strategy_params import get_strategy_params
-from forex_trader.core.core_trading_schedule import check_trading_schedule
+from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
+from backend.src.services.risk.strategy_params import get_strategy_params
+from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.utils.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,

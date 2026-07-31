@@ -39,7 +39,7 @@ class _LiveExecuteMixin:
         # Trading Schedule gate, Breakout Engine source (2026-07-24) -- each
         # of the 7x3 windows independently allows/blocks this engine rather
         # than one blanket automated-order switch. See core_trading_schedule.py.
-        from forex_trader.core.core_trading_schedule import check_trading_schedule
+        from backend.src.services.risk.schedule import check_trading_schedule
         _sched_ok, _sched_reason = check_trading_schedule(source="breakout_engine")
         if not _sched_ok:
             _log.info("[BO-LiveExec] %s skipped -- %s", signal_ref, _sched_reason)

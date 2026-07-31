@@ -34,7 +34,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core.core_fees_sizing import pnl as _pnl
-from forex_trader.core.core_risk_governor import rg_apply_halts_on_close
+from backend.src.services.risk.governor import rg_apply_halts_on_close
 from forex_trader.core.core_dpm_bookkeeping import finalize_dpm_record
 from forex_trader.core.core_tp_trigger_tracking import TPCache
 

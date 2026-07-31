@@ -33,7 +33,7 @@ from typing import Any, Awaitable, Callable, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_open_trade_from_signal import open_trade_from_signal
-from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range
+from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,

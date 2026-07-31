@@ -46,7 +46,7 @@ class _LiveExecuteMixin:
             # London/NY, the opposite of the Telegram channels, so each
             # window independently allows/blocks it rather than one blanket
             # automated-order switch. See core_trading_schedule.py.
-            from forex_trader.core.core_trading_schedule import check_trading_schedule
+            from backend.src.services.risk.schedule import check_trading_schedule
             _sched_ok, _sched_reason = check_trading_schedule(source="reversal_engine")
             if not _sched_ok:
                 re_db.update_live_exec(sig["id"], status="skipped:schedule")

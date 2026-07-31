@@ -140,7 +140,7 @@ from forex_trader.core.core_profit_sync import (
     profit_sweep as _profit_sweep_impl,
 )
 from forex_trader.core.core_update_signal import update_signal as _update_signal_impl
-from forex_trader.core.core_risk_governor import (
+from backend.src.services.risk.governor import (
     is_trading_paused as _is_trading_paused_impl,
     check_pre_trade_filters as _check_pre_trade_filters_impl,
     rg_day_start_ts as _rg_day_start_ts_impl,

@@ -27,7 +27,7 @@ import uuid
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_limit_order_signal import _limit_runner_pcts

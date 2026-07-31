@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_bot_commands_readonly's extracted
+"""Proves backend.src.services.telegram.bot_readonly's extracted
 functions behave identically to SimulationEngine's originals, characterized
 in test_bot_commands_readonly_characterization.py -- see
 docs/todo/refactor/core-bot-commands-readonly-migration/020-*.md.
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_bot_commands_readonly as cmds
+from backend.src.services.telegram import bot_readonly as cmds
 
 
 def _reset_thread_local_connection():

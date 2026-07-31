@@ -17,7 +17,8 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import telegram_alerts, ea_bridge
+from forex_trader.core import ea_bridge
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core import core_monitor_loop as ml
 from forex_trader.core.core_tp_trigger_tracking import TPCache as _TPCache
 from forex_trader.core.engine import SimulationEngine

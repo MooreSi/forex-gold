@@ -274,7 +274,7 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
                 log.warning(
                     "[CB] Circuit breaker triggered — live trading blocked for %d min.", cooldown_mins
                 )
-                from forex_trader.core import telegram_alerts
+                from backend.src.services.telegram import alerts as telegram_alerts
                 asyncio.create_task(telegram_alerts.send_message(
                     f"*Circuit Breaker Triggered*\n"
                     f"{threshold} consecutive live losses — new trade execution is "

@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core import core_scan_messages_parse_classify as pc
 from forex_trader.core.signal_parser import SIGNAL_PREFIX
 
@@ -276,7 +276,7 @@ def test_ai_fallback_proceeds_when_symbol_token_present(fresh_db):
 
 
 def test_ai_fallback_gate_disabled_when_all_three_lexicons_emptied(fresh_db):
-    from forex_trader.core import core_logic_keywords as logic_kw
+    from backend.src.services.telegram import keywords as logic_kw
     logic_kw.set_lexicon("symbol_tokens", [])
     logic_kw.set_lexicon("buy_orders", [])
     logic_kw.set_lexicon("limit_orders", [])

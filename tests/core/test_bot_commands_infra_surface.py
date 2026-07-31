@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_bot_commands_infra's extracted functions
+"""Proves backend.src.services.telegram.bot_infra's extracted functions
 behave identically to SimulationEngine's originals, characterized in
 test_bot_commands_infra_characterization.py -- see
 docs/todo/refactor/core-bot-commands-infra-migration/020-*.md.
@@ -16,7 +16,7 @@ import pytest
 
 import backend.src.config as cfg_mod
 from forex_trader.core import database as db
-from forex_trader.core import core_bot_commands_infra as cmds
+from backend.src.services.telegram import bot_infra as cmds
 
 
 def _reset_thread_local_connection():

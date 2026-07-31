@@ -444,7 +444,7 @@ def test_auto_execute_ea_template_override_skips_with_no_ea_call(fresh_db):
     )
     fake_ea = _FakeEA()
     with mock.patch("forex_trader.core.ea_bridge.get_instance", return_value=fake_ea):
-        with mock.patch("forex_trader.core.telegram_alerts.send_message"):
+        with mock.patch("backend.src.services.telegram.alerts.send_message"):
             asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
     assert fake_ea.calls == []
     with db.db() as conn:

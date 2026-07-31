@@ -961,7 +961,7 @@ class SyncServer:
                     f"falling back to generating its own. Check the Mac node "
                     f"(Settings > Remote Node) as soon as possible."
                 )
-                from forex_trader.core import telegram_alerts
+                from backend.src.services.telegram import alerts as telegram_alerts
                 from backend.src.services.notifications import email_service
                 await telegram_alerts.send_message(msg, event_type="sync_liveness")
                 try:

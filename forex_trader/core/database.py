@@ -1164,7 +1164,7 @@ from backend.src.services.risk.custom_strategies_repo import (  # noqa: E402,F40
     save_custom_strategy,
     delete_custom_strategy,
 )
-from forex_trader.core.core_db_telegram import (  # noqa: E402,F401
+from backend.src.services.telegram.repo import (  # noqa: E402,F401
     get_telegram_config,
     save_telegram_config,
     log_telegram_event,

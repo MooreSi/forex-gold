@@ -327,7 +327,7 @@ If a channel has no performance data, recommend "conservative" with confidence 0
                 )
         if _changed:
             import asyncio
-            from forex_trader.core import telegram_alerts
+            from backend.src.services.telegram import alerts as telegram_alerts
             body = "\n\n".join(_changed)
             asyncio.create_task(telegram_alerts.send_message(
                 f"Auto strategy updated ({session_label}):\n\n{body}",

@@ -7,7 +7,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import telegram_alerts as ta
+from backend.src.services.telegram import alerts as ta
 
 
 def _reset_thread_local_connection():

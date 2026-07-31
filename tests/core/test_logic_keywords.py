@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_logic_keywords as lk
+from backend.src.services.telegram import keywords as lk
 
 
 def _reset_thread_local_connection():

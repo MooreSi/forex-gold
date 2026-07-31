@@ -28,7 +28,7 @@ import logging
 import time
 from typing import Any, Callable, Awaitable, Optional
 
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 
 log = logging.getLogger(__name__)
 

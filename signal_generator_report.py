@@ -404,7 +404,7 @@ def build_email_html(
 
 async def main() -> None:
     from forex_trader.core import database as db_module
-    from forex_trader.core import telegram_alerts
+    from backend.src.services.telegram import alerts as telegram_alerts
     from backend.src.services.notifications import email_service
 
     # Point the core database module at the main app DB so Telegram/email

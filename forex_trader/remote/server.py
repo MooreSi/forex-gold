@@ -213,7 +213,7 @@ async def _push_state_to_admin(ws) -> None:
 async def _notify_new_registration(hostname: str, email: str, nickname: str, ip: str) -> None:
     """Send a Telegram alert to the admin when a new licence/registration request comes in."""
     try:
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         msg = (
             "New registration request\n"
             f"Name: {nickname or '—'}\n"

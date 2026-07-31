@@ -10,8 +10,8 @@ from typing import Callable
 from nicegui import ui
 
 from forex_trader.core import database as db_module
-from forex_trader.core import core_logic_keywords as logic_kw
-from forex_trader.core.telegram_reader import (
+from backend.src.services.telegram import keywords as logic_kw
+from backend.src.services.telegram.reader import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,
     AUTH_CONNECTED, AUTH_RECONNECTING, AUTH_FAILED,
 )

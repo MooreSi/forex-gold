@@ -35,7 +35,7 @@ from typing import Any, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core import dpm_engine
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_dpm_bookkeeping import (
     DPMCache, load_dpm_calibrated, record_dpm_entry, update_dpm_peak, set_dpm_milestone,
 )

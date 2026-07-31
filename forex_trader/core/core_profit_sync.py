@@ -22,7 +22,7 @@ import time
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_close_trade import CloseTradeContext, record_close
 
 log = logging.getLogger(__name__)

@@ -16,7 +16,7 @@ import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from backend.src.services.analytics import trade_history_repo, signal_lab_repo
 from backend.src.controllers.history import controller as history_ctl
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.engine import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
 from frontend.pages import ai_trade_analysis as _ai_analysis

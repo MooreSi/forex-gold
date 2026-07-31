@@ -141,7 +141,7 @@ async def _send_heal_notification(condition: str, action: str) -> None:
     )
 
     try:
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         await telegram_alerts.send_message(msg)
     except Exception as e:
         _log.warning("[SelfHealer] Telegram notification failed: %s", e)
@@ -248,7 +248,7 @@ class SelfHealer:
 
         elif condition == "telegram_dropped":
             try:
-                from forex_trader.core import telegram_alerts as _ta
+                from backend.src.services.telegram import alerts as _ta
                 # Access the reader through the engine if available
                 reader = getattr(self._engine, "_tg_reader", None)
                 if reader:

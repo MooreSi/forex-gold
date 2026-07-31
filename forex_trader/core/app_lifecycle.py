@@ -21,7 +21,7 @@ from typing import Optional
 import backend.src.config as cfg_module
 from forex_trader.core import database as db_module
 from forex_trader.core.engine import SimulationEngine
-from forex_trader.core.telegram_reader import TelegramReader
+from backend.src.services.telegram.reader import TelegramReader
 
 import forex_trader.test_signal.test_signal_service as _test_engine_module
 import forex_trader.breakout_signal.breakout_signal_service as _breakout_engine_module

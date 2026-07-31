@@ -30,7 +30,7 @@ from forex_trader.core.signal_parser import (
     parse_instant_entry, parse_gd2_instant_entry, is_gd2_message,
     SIGNAL_PREFIX, check_sl_adjustment_rules,
 )
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.ai import provider as ai_provider
 from forex_trader.core import dpm_engine
@@ -48,7 +48,7 @@ from forex_trader.core.core_scan_messages_auto_execute import (
 from forex_trader.core.core_limit_order_signal import (
     handle_limit_order_signal as _handle_limit_order_signal_impl,
 )
-from forex_trader.core.core_logic_keyword_triggers import (
+from backend.src.services.telegram.keyword_triggers import (
     should_skip_media_or_forwarded,
     should_skip_for_exclusion,
     try_handle_close_all_trigger,
@@ -106,7 +106,7 @@ from forex_trader.core.core_signals import (
 )
 from forex_trader.core.core_reversal_research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
 from backend.src.services.notifications.scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
-from forex_trader.core.core_bot_commands_readonly import (
+from backend.src.services.telegram.bot_readonly import (
     cmd_help as _cmd_help_impl,
     cmd_balance as _cmd_balance_impl,
     cmd_daily as _cmd_daily_impl,
@@ -121,7 +121,7 @@ from forex_trader.core.core_bot_commands_readonly import (
     cmd_ime_on as _cmd_ime_on_impl,
     cmd_ime_off as _cmd_ime_off_impl,
 )
-from forex_trader.core.core_bot_commands_infra import (
+from backend.src.services.telegram.bot_infra import (
     cmd_restart_bridge as _cmd_restart_bridge_impl,
     cmd_restart_app as _cmd_restart_app_impl,
     cmd_headless as _cmd_headless_impl,
@@ -232,7 +232,7 @@ from forex_trader.core.core_dpm_bookkeeping import (
 )
 
 if TYPE_CHECKING:
-    from forex_trader.core.telegram_reader import TelegramReader
+    from backend.src.services.telegram.reader import TelegramReader
 
 log = logging.getLogger(__name__)
 

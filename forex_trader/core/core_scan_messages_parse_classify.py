@@ -21,8 +21,8 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core import telegram_alerts
-from forex_trader.core.core_logic_keyword_triggers import should_skip_ai_fallback_for_no_signal_candidate
+from backend.src.services.telegram import alerts as telegram_alerts
+from backend.src.services.telegram.keyword_triggers import should_skip_ai_fallback_for_no_signal_candidate
 from forex_trader.core.signal_parser import (
     parse_gold_signal, parse_gd2_signal, parse_gd2_partial,
     is_gd2_message, is_format_ab_signal, parse_with_learned_rules, _CURRENCY_RE,

@@ -108,21 +108,20 @@ def test_public_functions_skips_private_and_reports_loc(tmp_path):
     assert od.public_functions(mod) == [("public_one", 1, 3)]
 
 
-@pytest.mark.parametrize("ident", [
-    "core_logic_keywords::default_lexicon",
-    "core_logic_keywords::set_all_lexicons",
-])
-def test_known_orphans_are_still_detected(ident):
-    """What the detector should still see: two-line in-module defaults.
+def test_no_substantive_orphans_remain_in_core():
+    """Every substantive orphan found by the phase-0 audit is resolved.
 
-    Every substantive orphan is gone. The four order-path ones and
-    core_mt5_position_sync were deleted 2026-07-27 rather than wired;
-    core_fees_sizing::calculate_fees is now delegated to; the duplicated
-    core_tp_trigger_tracking::check_sl was removed. Dead code fell from 456 LOC
-    to 8. Each removal from this list, in the commit that did it, is the proof.
+    The original ten fell to zero across phases 0-5: five deleted (the
+    CloseTradeContext cluster), two resolved by delegation (calculate_fees,
+    check_sl), and the trivial in-module defaults moved out of core/ with
+    their services (logic keywords to telegram/, strategy params to risk/).
+    The orphan detector still runs in CI over what remains in core/ -- this
+    asserts its report stays inside the allowlist, which is now the whole
+    contract rather than a pinned example.
     """
+    allowed = od.load_allowlist()
     found = {f"{o['module']}::{o['function']}" for o in od.find_orphans()}
-    assert ident in found
+    assert found <= allowed, found - allowed
 
 
 def test_wired_extractions_are_not_reported():

@@ -28,8 +28,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core import database as db_module
-from forex_trader.core import telegram_alerts
-from forex_trader.core.core_logic_keywords import claim_trigger, get_lexicon, text_matches_any
+from backend.src.services.telegram import alerts as telegram_alerts
+from backend.src.services.telegram.keywords import claim_trigger, get_lexicon, text_matches_any
 
 log = logging.getLogger(__name__)
 

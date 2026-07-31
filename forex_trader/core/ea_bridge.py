@@ -489,7 +489,7 @@ class EABridge:
             log.debug("[EABridge] unhandled message type: %s", t)
 
     async def _on_tp_hit(self, msg: dict) -> None:
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         trade_id = msg.get("trade_id")
         tp_num   = int(msg.get("tp_num", 0))
         price    = float(msg.get("price", 0))
@@ -509,7 +509,7 @@ class EABridge:
 
     async def _on_sl_moved(self, msg: dict) -> None:
         from forex_trader.core import database as db_module
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         trade_id = msg.get("trade_id")
         new_sl   = float(msg.get("new_sl", 0))
         # 1-based TP number that triggered this move, 0 if not tied to a
@@ -548,7 +548,7 @@ class EABridge:
                 return
             result = await self._engine._record_close(trade_id, close_price, reason)
             account = await self._engine.get_mt5_account()
-            from forex_trader.core import telegram_alerts
+            from backend.src.services.telegram import alerts as telegram_alerts
             closed_row = await self._fetch_trade(trade_id)
             asyncio.create_task(telegram_alerts.send_message(
                 telegram_alerts.fmt_trade_close(closed_row, result, {}, account),
@@ -569,7 +569,7 @@ class EABridge:
         row shape, same self._active tracking, same fallback-watchdog
         reclaim path if the EA later goes unhealthy."""
         from forex_trader.core import database as db_module
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         trade_id   = msg.get("trade_id")
         ticket     = msg.get("ticket")
         fill_price = float(msg.get("fill_price", 0))
@@ -669,7 +669,7 @@ class EABridge:
         separately reflected here (same single-row shape every other
         strategy uses)."""
         from forex_trader.core import database as db_module
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         original_id = leg_trade_id.rsplit("-g", 1)[0]
         now = time.time()
 
@@ -728,7 +728,7 @@ class EABridge:
         reliably distinguish the two from a bare "order gone, no matching
         position" observation, so `reason` is best-effort, not authoritative."""
         from forex_trader.core import database as db_module
-        from forex_trader.core import telegram_alerts
+        from backend.src.services.telegram import alerts as telegram_alerts
         trade_id = msg.get("trade_id")
         reason   = msg.get("reason", "cancelled")
         try:

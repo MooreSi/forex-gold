@@ -268,7 +268,7 @@ def test_analyse_unrecognised_message_success_updates_row(fresh_db, engine):
     unrec_id = db.save_unrecognised_message("Chan", "tg-9", "??? what is this")
     analysis = {"is_signal": False, "summary": "just chatter"}
     with mock.patch.object(claude_ai, "classify_unknown_message", return_value=analysis), \
-         mock.patch("forex_trader.core.telegram_alerts.send_message", new=mock.AsyncMock()):
+         mock.patch("backend.src.services.telegram.alerts.send_message", new=mock.AsyncMock()):
         asyncio.run(SimulationEngine._analyse_unrecognised_message(engine, unrec_id, "Chan", "??? what is this"))
 
     with db.db() as conn:
@@ -281,7 +281,7 @@ def test_analyse_unrecognised_message_success_updates_row(fresh_db, engine):
 def test_analyse_unrecognised_message_exception_still_updates_row(fresh_db, engine):
     unrec_id = db.save_unrecognised_message("Chan", "tg-9", "??? what is this")
     with mock.patch.object(claude_ai, "classify_unknown_message", side_effect=RuntimeError("ai down")), \
-         mock.patch("forex_trader.core.telegram_alerts.send_message", new=mock.AsyncMock()):
+         mock.patch("backend.src.services.telegram.alerts.send_message", new=mock.AsyncMock()):
         asyncio.run(SimulationEngine._analyse_unrecognised_message(engine, unrec_id, "Chan", "??? what is this"))
 
     with db.db() as conn:

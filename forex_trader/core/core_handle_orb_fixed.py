@@ -19,7 +19,7 @@ import logging
 from typing import Any
 
 from forex_trader.core import database as db_module
-from forex_trader.core import telegram_alerts
+from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core.core_partial_close import partial_close_trade
 from forex_trader.core.core_tp_trigger_tracking import TPCache, check_tp_hits, get_remaining_lots
 from backend.src.utils.models import Tick

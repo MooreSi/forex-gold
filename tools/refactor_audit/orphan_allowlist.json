@@ -11,22 +11,5 @@
     "",
     "What remains are three trivial in-module defaults, permanently allowed."
   ],
-  "allowed": [
-    {
-      "id": "core_logic_keywords::default_lexicon",
-      "loc": 2,
-      "verdict": "no twin",
-      "reason": "Two-line default, reachable in-module via get_lexicon. Not a wiring failure.",
-      "phase": null,
-      "action": "Permanent -- no action."
-    },
-    {
-      "id": "core_logic_keywords::set_all_lexicons",
-      "loc": 4,
-      "verdict": "no twin",
-      "reason": "Bulk setter with no current caller. Harmless.",
-      "phase": null,
-      "action": "Permanent -- no action."
-    }
-  ]
+  "allowed": []
 }

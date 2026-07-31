@@ -232,7 +232,7 @@ class _LiveExecuteMixin:
         from forex_trader.core.core_open_trade import (
             _EA_LADDER_PCTS, _EA_LADDER_BE_AT_POS, _EA_LADDER_TRAIL_MODE,
         )
-        from forex_trader.core.core_signal_resolution import resolve_open_trade_params
+        from backend.src.services.signals.resolution import resolve_open_trade_params
 
         try:
             resolved = await resolve_open_trade_params(self._bridge, vantage_sig_id, tick=tick)

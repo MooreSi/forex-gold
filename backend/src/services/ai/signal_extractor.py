@@ -21,7 +21,7 @@ import re
 from typing import Optional
 
 from backend.src.services.ai import provider as ai_provider
-from forex_trader.core.signal_parser import _autocorrect_tps
+from backend.src.services.signals.parser import _autocorrect_tps
 
 log = logging.getLogger(__name__)
 

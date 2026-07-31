@@ -2,7 +2,7 @@
 [LIMITS] GOLD @ high/low AREA" layout (GD2 Format C3) used to trigger a
 genuine EA pending order (STRATEGY_LIMIT_RUNNER), not the Python-simulated
 zone-wait path every other strategy uses. See core_limit_order_signal.py."""
-from forex_trader.core.signal_parser import (
+from backend.src.services.signals.parser import (
     is_limit_order_signal, parse_limit_order_signal,
 )
 

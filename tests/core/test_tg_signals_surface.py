@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_tg_signals's extracted function behaves
+"""Proves backend.src.services.signals.tg_repo's extracted function behaves
 identically to SimulationEngine.get_tg_signals, characterized in
 test_tg_signals_characterization.py -- see
 docs/todo/refactor/core-tg-signals-migration/020-*.md.
@@ -12,7 +12,7 @@ import time
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_tg_signals as tgs
+from backend.src.services.signals import tg_repo as tgs
 
 
 def _reset_thread_local_connection():

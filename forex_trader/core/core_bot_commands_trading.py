@@ -33,7 +33,7 @@ from forex_trader.core.core_open_trade import open_trade
 from backend.src.services.risk.governor import price_in_entry_range
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import STRATEGY_SCALE_OUT
-from forex_trader.core.signal_parser import validate_signal
+from backend.src.services.signals.parser import validate_signal
 
 log = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_scan_messages_parse_classify.classify_and_parse
+"""Proves backend.src.services.signals.scan_parse_classify.classify_and_parse
 behaves identically to SimulationEngine's original, characterized in
 test_scan_messages_parse_classify_characterization.py -- see
 docs/todo/refactor/core-scan-messages-parse-classify-migration/020-*.md.
@@ -17,8 +17,8 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core import core_scan_messages_parse_classify as pc
-from forex_trader.core.signal_parser import SIGNAL_PREFIX
+from backend.src.services.signals import scan_parse_classify as pc
+from backend.src.services.signals.parser import SIGNAL_PREFIX
 
 
 def _reset_thread_local_connection():
@@ -97,7 +97,7 @@ def _call(tg_id, text, parser_fmt, sig_prefix="", channel_name="TestChannel", gr
             mock.patch.object(pc, "parse_gd2_signal", return_value=None),
             mock.patch.object(pc, "parse_gd2_partial", return_value=None),
         ]
-        import forex_trader.core.signal_parser as sp
+        import backend.src.services.signals.parser as sp
         patches.append(mock.patch.object(sp, "parse_gd2_instant_entry", return_value=None))
     if learned_rules_return is not None:
         patches.append(mock.patch.object(pc, "parse_with_learned_rules", return_value=learned_rules_return))

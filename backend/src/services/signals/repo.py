@@ -17,7 +17,7 @@ import uuid
 from typing import Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core.signal_parser import validate_signal
+from backend.src.services.signals.parser import validate_signal
 
 
 def create_signal(source_name: str, direction: str, entry_low: float,

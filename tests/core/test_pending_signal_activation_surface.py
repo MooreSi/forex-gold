@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_pending_signal_activation's extracted
+"""Proves backend.src.services.signals.pending_activation's extracted
 function behaves identically to SimulationEngine._try_activate_pending_signals,
 characterized in test_pending_signal_activation_characterization.py -- see
 docs/todo/refactor/core-pending-signal-activation-migration/020-*.md.
@@ -26,7 +26,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_pending_signal_activation as psa
+from backend.src.services.signals import pending_activation as psa
 
 
 def _reset_thread_local_connection():

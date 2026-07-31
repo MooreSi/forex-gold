@@ -45,7 +45,7 @@ from backend.src.utils.models import (
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
 )
-from forex_trader.core.signal_parser import validate_signal
+from backend.src.services.signals.parser import validate_signal
 
 log = logging.getLogger(__name__)
 

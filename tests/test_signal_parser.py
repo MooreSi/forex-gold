@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from forex_trader.core.signal_parser import parse_gold_signal, parse_gd2_signal, validate_signal
+from backend.src.services.signals.parser import parse_gold_signal, parse_gd2_signal, validate_signal
 
 
 class TestParseGoldSignal(unittest.TestCase):

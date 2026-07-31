@@ -18,7 +18,7 @@ import pytest
 from forex_trader.core import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
 from forex_trader.core import engine as engine_mod
-from forex_trader.core import core_scan_messages_parse_classify as pc
+from backend.src.services.signals import scan_parse_classify as pc
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -123,7 +123,7 @@ def _run(msgs, ai_return=None, force_gd2_all_fail=False, learned_rules_return=No
         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send),
     ]
     if force_gd2_all_fail:
-        import forex_trader.core.signal_parser as sp
+        import backend.src.services.signals.parser as sp
         patches += [
             mock.patch.object(pc, "parse_gd2_signal", return_value=None),
             mock.patch.object(pc, "parse_gd2_partial", return_value=None),

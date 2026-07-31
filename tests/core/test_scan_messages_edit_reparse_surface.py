@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_scan_messages_edit_reparse.handle_signal_edit
+"""Proves backend.src.services.signals.scan_edit_reparse.handle_signal_edit
 behaves identically to SimulationEngine's original, characterized in
 test_scan_messages_edit_reparse_characterization.py -- see
 docs/todo/refactor/core-scan-messages-edit-reparse-migration/020-*.md.
@@ -17,7 +17,7 @@ import pytest
 
 from forex_trader.core import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core import core_scan_messages_edit_reparse as ser
+from backend.src.services.signals import scan_edit_reparse as ser
 
 
 def _reset_thread_local_connection():

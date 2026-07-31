@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_signal_resolution's extracted function
+"""Proves backend.src.services.signals.resolution's extracted function
 behaves identically to the front half of SimulationEngine.
 open_trade_from_signal, characterized in
 test_signal_resolution_characterization.py -- see
@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_signal_resolution as sr
+from backend.src.services.signals import resolution as sr
 from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,

@@ -17,7 +17,7 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_pending_signal_activation as psa
+from backend.src.services.signals import pending_activation as psa
 from forex_trader.core.engine import SimulationEngine
 
 

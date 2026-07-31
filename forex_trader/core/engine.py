@@ -26,7 +26,7 @@ from backend.src.utils.models import (
 )
 from forex_trader.core.mt5_bridge import MT5BridgeClient
 from forex_trader.core.mt5_bridge_native import NativeMT5Bridge, is_available as _native_bridge_available
-from forex_trader.core.signal_parser import (
+from backend.src.services.signals.parser import (
     parse_instant_entry, parse_gd2_instant_entry, is_gd2_message,
     SIGNAL_PREFIX, check_sl_adjustment_rules,
 )
@@ -55,13 +55,13 @@ from backend.src.services.telegram.keyword_triggers import (
     try_handle_risk_free_be_trigger,
     try_handle_tp_hit_trigger,
 )
-from forex_trader.core.core_scan_messages_edit_reparse import (
+from backend.src.services.signals.scan_edit_reparse import (
     handle_signal_edit as _handle_signal_edit_impl,
 )
-from forex_trader.core.core_scan_messages_parse_classify import (
+from backend.src.services.signals.scan_parse_classify import (
     classify_and_parse as _classify_and_parse_impl,
 )
-from forex_trader.core.core_scan_messages_staleness_strategy import (
+from backend.src.services.signals.scan_staleness import (
     record_staleness_or_new as _record_staleness_or_new_impl,
     resolve_strategy_and_skip_reason as _resolve_strategy_and_skip_reason_impl,
 )
@@ -89,7 +89,7 @@ from backend.src.services.analytics.reporting import (
     compute_performance as _compute_performance_impl,
 )
 from forex_trader.core.core_mt5_import import import_mt5_history as _import_mt5_history_impl
-from forex_trader.core.core_tg_signals import get_tg_signals as _get_tg_signals_impl
+from backend.src.services.signals.tg_repo import get_tg_signals as _get_tg_signals_impl
 from forex_trader.core.core_tp_trigger_tracking import (
     TPCache as _TPCache,
     get_triggered_tps as _get_triggered_tps_impl,
@@ -98,7 +98,7 @@ from forex_trader.core.core_tp_trigger_tracking import (
     check_tp_hits as _check_tp_hits_impl,
     get_remaining_lots as _get_remaining_lots_impl,
 )
-from forex_trader.core.core_signals import (
+from backend.src.services.signals.repo import (
     create_signal as _create_signal_impl,
     get_signals as _get_signals_impl,
     activate_signal as _activate_signal_impl,
@@ -219,7 +219,7 @@ from backend.src.services.analytics.orb_report import (
     get_orb_target_multiple as _get_orb_target_multiple_impl,
     backtest_orb_target_multiple as _backtest_orb_target_multiple_impl)
 from forex_trader.core.core_orb_report import orb_auto_execute as _orb_auto_execute_impl
-from forex_trader.core.core_pending_signal_activation import (
+from backend.src.services.signals.pending_activation import (
     try_activate_pending_signals as _try_activate_pending_signals_impl,
 )
 from forex_trader.core.core_dpm_bookkeeping import (

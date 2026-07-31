@@ -29,7 +29,7 @@ from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
 from forex_trader.core import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
-from forex_trader.core.signal_parser import _CURRENCY_RE
+from backend.src.services.signals.parser import _CURRENCY_RE
 
 log = logging.getLogger(__name__)
 

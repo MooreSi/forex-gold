@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_scan_messages_staleness_strategy's
+"""Proves backend.src.services.signals.scan_staleness's
 extracted functions behave identically to SimulationEngine's originals,
 characterized in test_scan_messages_staleness_strategy_characterization.py
 -- see docs/todo/refactor/core-scan-messages-staleness-strategy-migration/020-*.md.
@@ -19,7 +19,7 @@ from forex_trader.core import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
-from forex_trader.core import core_scan_messages_staleness_strategy as ss
+from backend.src.services.signals import scan_staleness as ss
 
 
 def _reset_thread_local_connection():

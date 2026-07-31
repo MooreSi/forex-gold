@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_signals's extracted functions behave
+"""Proves backend.src.services.signals.repo's extracted functions behave
 identically to the SimulationEngine methods characterized in
 test_signal_crud_characterization.py -- see
 docs/todo/refactor/core-signal-crud-migration/020-*.md.
@@ -12,7 +12,7 @@ import tempfile
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import core_signals as sig
+from backend.src.services.signals import repo as sig
 
 
 def _reset_thread_local_connection():

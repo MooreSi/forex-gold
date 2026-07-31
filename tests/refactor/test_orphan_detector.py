@@ -36,18 +36,18 @@ def test_aliased_module_attribute_is_a_use():
 
 def test_unaliased_module_import_then_attribute_is_a_use():
     used = usage_of(
-        "from forex_trader.core import core_signals\n"
-        "core_signals.get_signal('x')\n"
+        "from forex_trader.core import core_zz_example\n"
+        "core_zz_example.get_signal('x')\n"
     )
-    assert ("core_signals", "get_signal") in used
+    assert ("core_zz_example", "get_signal") in used
 
 
 def test_dotted_import_with_alias_is_a_use():
     used = usage_of(
-        "import forex_trader.core.core_signals as cs\n"
+        "import forex_trader.core.core_zz_example as cs\n"
         "cs.create_signal()\n"
     )
-    assert ("core_signals", "create_signal") in used
+    assert ("core_zz_example", "create_signal") in used
 
 
 def test_keyword_argument_of_the_same_name_is_not_a_use():
@@ -68,24 +68,24 @@ def test_attribute_on_an_unknown_name_is_not_a_use():
 
 def test_getattr_with_a_literal_is_a_use():
     used = usage_of(
-        "from forex_trader.core import core_signals\n"
-        "getattr(core_signals, 'get_signal')\n"
+        "from forex_trader.core import core_zz_example\n"
+        "getattr(core_zz_example, 'get_signal')\n"
     )
-    assert ("core_signals", "get_signal") in used
+    assert ("core_zz_example", "get_signal") in used
 
 
 def test_getattr_with_a_dynamic_name_marks_the_whole_module_reachable():
     """We can't resolve it, so we must not claim anything in it is dead."""
     used = usage_of(
-        "from forex_trader.core import core_signals\n"
-        "getattr(core_signals, name)\n"
+        "from forex_trader.core import core_zz_example\n"
+        "getattr(core_zz_example, name)\n"
     )
-    assert ("core_signals", "*") in used
+    assert ("core_zz_example", "*") in used
 
 
 def test_star_import_marks_the_whole_module_reachable():
-    assert ("core_signals", "*") in usage_of(
-        "from forex_trader.core.core_signals import *"
+    assert ("core_zz_example", "*") in usage_of(
+        "from forex_trader.core.core_zz_example import *"
     )
 
 
@@ -131,8 +131,7 @@ def test_wired_extractions_are_not_reported():
                   "core_close_trade::close_trade",
                   "core_monitor_loop::check_sl",
                   "core_fees_sizing::calculate_fees",
-                  "core_fees_sizing::suggest_lot_size",
-                  "core_signals::create_signal"):
+                  "core_fees_sizing::suggest_lot_size"):
         assert ident not in found
 
 

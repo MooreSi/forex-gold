@@ -28,7 +28,7 @@ from typing import Optional
 
 from backend.src.services.ai import provider as ai_provider
 from forex_trader.core import database as db_module
-from forex_trader.core.signal_parser import apply_learned_rule
+from backend.src.services.signals.parser import apply_learned_rule
 
 log = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ def _validate_sl_adjustment_rule(rule: dict, raw_text: str, new_stop_loss: float
     generated rule through the exact same code live parsing will use
     (apply_sl_adjustment_rule) and confirm it reproduces the confirmed
     value."""
-    from forex_trader.core.signal_parser import apply_sl_adjustment_rule
+    from backend.src.services.signals.parser import apply_sl_adjustment_rule
     result = apply_sl_adjustment_rule(rule, raw_text)
     if result is None:
         return False, "rule did not match the source message at all (bad pattern or gate)"

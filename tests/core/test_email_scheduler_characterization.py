@@ -17,8 +17,9 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import email_service, claude_ai
-from forex_trader.core import core_email_scheduler
+from backend.src.services.notifications import email_service
+from forex_trader.core import claude_ai
+from backend.src.services.notifications import scheduler as core_email_scheduler
 from forex_trader.core.engine import SimulationEngine
 
 
@@ -53,7 +54,7 @@ def _patched_now(fixed_dt):
     _email_scheduler_loop actually computes the current time, having
     delegated to email_scheduler_sweep) while leaving direct datetime(...)
     construction working via the real class."""
-    patcher = mock.patch("forex_trader.core.core_email_scheduler.datetime")
+    patcher = mock.patch("backend.src.services.notifications.scheduler.datetime")
     mock_dt = patcher.start()
     mock_dt.now.return_value = fixed_dt
     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)

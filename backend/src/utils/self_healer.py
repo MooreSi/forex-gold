@@ -147,7 +147,7 @@ async def _send_heal_notification(condition: str, action: str) -> None:
         _log.warning("[SelfHealer] Telegram notification failed: %s", e)
 
     try:
-        from forex_trader.core import email_service
+        from backend.src.services.notifications import email_service
         html = (
             "<h2>FOREX Trader — Self-Heal Event</h2>"
             f"<p><b>Condition:</b> {condition}</p>"

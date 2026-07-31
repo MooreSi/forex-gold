@@ -1231,7 +1231,7 @@ def _render_email():
         schedule_test_lbl = ui.label("").classes("text-sm mt-3")
 
         async def test_scheduled_email():
-            from forex_trader.core import email_service
+            from backend.src.services.notifications import email_service
             provider = send_provider_sel.value or "resend"
             fresh = db_module.get_email_config()
             to_addr = (fresh.get("to_addr") or "").strip()
@@ -1258,7 +1258,7 @@ def _render_email():
 
         async def test_orb_email():
             from datetime import datetime as _dt
-            from forex_trader.core import email_service
+            from backend.src.services.notifications import email_service
             fresh = db_module.get_email_config()
             to_addr = (fresh.get("to_addr") or "").strip()
             if not to_addr:
@@ -1354,7 +1354,7 @@ def _render_email():
             async def test_resend():
                 rs_result.text = "Testing Resend..."
                 rs_result.classes(replace="text-sm text-gray-400")
-                from forex_trader.core import email_service
+                from backend.src.services.notifications import email_service
                 _fresh = db_module.get_email_config()
                 cfg_snap = {
                     "resend_api_key": rs_key.value,
@@ -1690,7 +1690,7 @@ def _render_email():
             test_result.text = "Connecting to SMTP server..."
             test_result.classes(replace="text-sm mt-3 text-gray-400 leading-relaxed")
             try:
-                from forex_trader.core import email_service
+                from backend.src.services.notifications import email_service
                 cfg_snap = {
                     "smtp_host":     smtp_host.value,
                     "smtp_port":     int(smtp_port.value or 587),

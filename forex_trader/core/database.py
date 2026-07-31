@@ -1176,7 +1176,7 @@ from forex_trader.core.core_db_telegram import (  # noqa: E402,F401
 from forex_trader.core.core_db_commentary import (  # noqa: E402,F401
     save_commentary,
 )
-from forex_trader.core.core_db_email import (  # noqa: E402,F401
+from backend.src.services.notifications.repo import (  # noqa: E402,F401
     get_email_config,
     save_email_config,
 )

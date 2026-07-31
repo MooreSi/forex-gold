@@ -105,7 +105,7 @@ from forex_trader.core.core_signals import (
     cancel_signal as _cancel_signal_impl,
 )
 from forex_trader.core.core_reversal_research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
-from forex_trader.core.core_email_scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
+from backend.src.services.notifications.scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
 from forex_trader.core.core_bot_commands_readonly import (
     cmd_help as _cmd_help_impl,
     cmd_balance as _cmd_balance_impl,

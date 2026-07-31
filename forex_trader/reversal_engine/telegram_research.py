@@ -157,7 +157,7 @@ async def _send_failure_alert(date_str: str, n_messages: int, reason: str) -> No
     would see it. This sends a short, distinct alert only for genuine
     failures (AI call error, unparseable response) so silence always means
     'nothing to report' and never 'something broke'."""
-    from forex_trader.core import email_service
+    from backend.src.services.notifications import email_service
     html = (
         f'<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;">'
         f'<h2 style="color:#ef4444;">Reversal Engine — Nightly Research FAILED</h2>'
@@ -188,7 +188,7 @@ async def run_nightly_research(engine) -> dict:
     from forex_trader.reversal_engine import reversal_engine_repo as re_db
     from forex_trader.reversal_engine import ml_engine as re_ml
     from forex_trader.core import database as db_module
-    from forex_trader.core import email_service
+    from backend.src.services.notifications import email_service
 
     cfg = engine._cfg
     # engine._cfg is the same live-updated dict Settings > AI's save handlers

@@ -1,4 +1,4 @@
-"""Proves forex_trader.core.core_email_scheduler.email_scheduler_sweep
+"""Proves backend.src.services.notifications.scheduler.email_scheduler_sweep
 behaves identically to SimulationEngine's original, characterized in
 test_email_scheduler_characterization.py -- see
 docs/todo/refactor/core-email-scheduler-migration/020-*.md.
@@ -19,8 +19,9 @@ from unittest import mock
 import pytest
 
 from forex_trader.core import database as db
-from forex_trader.core import email_service, claude_ai
-from forex_trader.core import core_email_scheduler as sched
+from backend.src.services.notifications import email_service
+from forex_trader.core import claude_ai
+from backend.src.services.notifications import scheduler as sched
 
 
 def _reset_thread_local_connection():

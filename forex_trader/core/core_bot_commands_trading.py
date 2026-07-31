@@ -24,7 +24,7 @@ from typing import Any
 
 from forex_trader.core import claude_ai
 from forex_trader.core import database as db_module
-from forex_trader.core import email_service
+from backend.src.services.notifications import email_service
 from forex_trader.core.core_close_trade import CloseTradeContext, close_trade, get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_manual_market_order import open_manual_market_order

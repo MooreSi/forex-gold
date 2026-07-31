@@ -144,7 +144,8 @@ def test_report_no_recipient_configured(fresh_db):
 
 
 def test_report_send_succeeds(fresh_db):
-    from forex_trader.core import claude_ai, email_service
+    from forex_trader.core import claude_ai
+    from backend.src.services.notifications import email_service
     ecfg = db.get_email_config()
     ecfg["to_addr"] = "ops@example.com"
     db.save_email_config(ecfg)
@@ -158,7 +159,8 @@ def test_report_send_succeeds(fresh_db):
 
 
 def test_report_send_fails(fresh_db):
-    from forex_trader.core import claude_ai, email_service
+    from forex_trader.core import claude_ai
+    from backend.src.services.notifications import email_service
     ecfg = db.get_email_config()
     ecfg["to_addr"] = "ops@example.com"
     db.save_email_config(ecfg)

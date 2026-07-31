@@ -7,16 +7,16 @@
   ],
   "baseline": {
     "loc": {
+      "backend/src/services/notifications/email_service.py": 946,
       "forex_trader/core/backtest_engine.py": 1125,
       "forex_trader/core/database.py": 1251,
       "forex_trader/core/ea_bridge.py": 816,
-      "forex_trader/core/email_service.py": 946,
-      "forex_trader/core/engine.py": 3144,
+      "forex_trader/core/engine.py": 3143,
       "forex_trader/core/telegram_reader.py": 1037,
       "forex_trader/remote/client.py": 920,
       "forex_trader/remote/server.py": 1196,
       "forex_trader/sync/client.py": 867,
-      "forex_trader/sync/server.py": 1096,
+      "forex_trader/sync/server.py": 1097,
       "forex_trader/test_signal/ml_engine.py": 896,
       "forex_trader/test_signal/signal_generator.py": 1052,
       "frontend/app.py": 1642,
@@ -31,6 +31,7 @@
       "mt5_bridge.py": 1335
     },
     "sql": {
+      "backend/src/services/notifications/scheduler.py": 2,
       "forex_trader/breakout_signal/breakout_signal_manage.py": 2,
       "forex_trader/breakout_signal/breakout_signal_service.py": 1,
       "forex_trader/breakout_signal/ml_engine.py": 1,
@@ -42,7 +43,6 @@
       "forex_trader/core/core_dpm_bookkeeping.py": 5,
       "forex_trader/core/core_dpm_handler.py": 7,
       "forex_trader/core/core_ea_templates.py": 5,
-      "forex_trader/core/core_email_scheduler.py": 2,
       "forex_trader/core/core_handle_be_runner.py": 2,
       "forex_trader/core/core_handle_conservative.py": 2,
       "forex_trader/core/core_handle_conservative_trial.py": 1,

@@ -1134,7 +1134,7 @@ def _render_orb_report(engine):
     volume profile, reload-zone entry setup, manual execute, and an
     auto-execute-every-morning toggle (places a genuine EA pending order)."""
     import base64
-    from forex_trader.core import email_service
+    from backend.src.services.notifications import email_service
 
     ui.button("Refresh", icon="refresh", on_click=lambda: refresh()).props("flat").classes(
         "text-gray-400 mb-2"

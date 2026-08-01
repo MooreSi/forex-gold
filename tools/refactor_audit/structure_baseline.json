@@ -13,7 +13,6 @@
       "backend/src/controllers/sync/server.py": 1073,
       "backend/src/db/database.py": 1251,
       "backend/src/runtime.py": 3143,
-      "backend/src/services/test_signal/ml_engine.py": 896,
       "frontend/app.py": 1642,
       "frontend/pages/ai_trade_analysis.py": 1721,
       "frontend/pages/breakout_panel.py": 930,

@@ -30,6 +30,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from backend.src.db import database as db_module
+from backend.src.services.notifications import repo as notifications_repo
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import email_service
 from backend.src.services.broker.mt5_performance import compute_mt5_performance
@@ -86,16 +87,7 @@ async def _run_daily_section(bridge: Any, cfg: dict, cfg_obj: Any,
     if last_daily == today_str:
         return
     day_cutoff = local_now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    with db_module.db() as conn:
-        closed_today = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades "
-                "WHERE status='closed' AND close_time>? "
-                "ORDER BY close_time DESC",
-                (day_cutoff,),
-            ).fetchall()
-        ]
+    closed_today = notifications_repo.fetch_closed_trades_since(day_cutoff)
     _balance = float(perf.get("balance", 0) or 0)
     _dpnl = float(perf.get("daily_pnl", 0) or 0)
     try:
@@ -129,16 +121,7 @@ async def _run_weekly_section(cfg: dict, is_active_trader_node: bool,
     if last_weekly == week_key:
         return
     cutoff_week = time.time() - 7 * 86400
-    with db_module.db() as conn:
-        week_trades = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades "
-                "WHERE status='closed' AND close_time>? "
-                "ORDER BY close_time DESC",
-                (cutoff_week,),
-            ).fetchall()
-        ]
+    week_trades = notifications_repo.fetch_closed_trades_since(cutoff_week)
     html = email_service.build_weekly_html(
         perf, week_trades,
         f"Week ending {local_now.strftime('%d %B %Y')}",

@@ -661,3 +661,63 @@ def get_analysis_log(limit: int = 40) -> list[dict]:
                     pass
         result.append(d)
     return result
+
+
+# ── Main-app-DB reads, collected from breakout_signal_manage.py /
+#    breakout_signal_service.py / ml_engine.py (M1 SQL sweep). Same
+#    connection mechanics as inline: db_module.db() for the single lookup,
+#    one read-only URI connection for the reconciliation sweep.
+
+def fetch_main_mt5_profit(mt5_ticket) -> object:
+    from backend.src.db import database as _mdb
+    with _mdb.db() as _mc:
+        return _mc.execute(
+            "SELECT mt5_profit FROM vantage_simulated_trades"
+            " WHERE mt5_ticket=? AND status='closed'",
+            (mt5_ticket,),
+        ).fetchone()
+
+
+def fetch_main_closed_rows_ro(tickets: list) -> dict:
+    """One read-only connection, one lookup per ticket -- returns
+    {ticket: Row} for tickets that have a closed main-DB trade."""
+    import sqlite3 as _sqlite3
+    from backend.src.db import database as _mdb
+    out: dict = {}
+    main_conn = _sqlite3.connect(f"file:{_mdb._DB_PATH}?mode=ro", uri=True)
+    main_conn.row_factory = _sqlite3.Row
+    try:
+        for ticket in tickets:
+            cur = main_conn.execute(
+                "SELECT mt5_profit, status FROM vantage_simulated_trades"
+                " WHERE mt5_ticket=? AND status='closed'",
+                (ticket,),
+            )
+            main_row = cur.fetchone()
+            if main_row:
+                out[ticket] = main_row
+    finally:
+        main_conn.close()
+    return out
+
+
+def fetch_main_close_ro(mt5_ticket) -> object:
+    import sqlite3 as _sl3
+    from backend.src.db import database as _mdb
+    with _sl3.connect(f"file:{_mdb._DB_PATH}?mode=ro", uri=True) as _mc:
+        _mc.row_factory = _sl3.Row
+        return _mc.execute(
+            "SELECT status, mt5_profit, net_pnl, sl_moved_to_be "
+            "FROM vantage_simulated_trades WHERE mt5_ticket=? AND status='closed'",
+            (mt5_ticket,),
+        ).fetchone()
+
+
+def fetch_ml_outcome_rows() -> list:
+    """Completed, ML-scored BO signals -- the calibration-report corpus."""
+    return get_db().all(
+        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
+        "FROM bo_signals "
+        "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
+        "ORDER BY id"
+    )

@@ -581,12 +581,7 @@ def get_ml_metrics() -> dict:
         return _blank
     try:
         from backend.src.services.breakout_signal import breakout_signal_repo as bdb
-        rows = bdb.get_db().all(
-            "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
-            "FROM bo_signals "
-            "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
-            "ORDER BY id"
-        )
+        rows = bdb.fetch_ml_outcome_rows()
         if not rows:
             return {**_blank, "train_history": _train_history}
 

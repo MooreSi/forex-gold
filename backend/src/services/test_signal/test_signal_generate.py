@@ -49,15 +49,8 @@ def _fetch_recent_tg_signals(max_age_seconds: int = 7200) -> list[dict]:
     """Return up to 3 Telegram signals from the main DB received in the last max_age_seconds."""
     import time as _t
     try:
-        from backend.src.db import database as _main_db
         cutoff = _t.time() - max_age_seconds
-        with _main_db.db() as conn:
-            rows = conn.execute(
-                "SELECT source_name, direction, entry_low, entry_high, stop_loss, "
-                "tp1, tp2, tp3, created_at FROM vantage_signals "
-                "WHERE created_at >= ? ORDER BY created_at DESC LIMIT 3",
-                (cutoff,),
-            ).fetchall()
+        rows = tdb.fetch_recent_main_tg_signals(cutoff)
         return [dict(r) for r in rows]
     except Exception as e:
         _log.debug("[TestSignal] TG signal fetch error: %s", e)

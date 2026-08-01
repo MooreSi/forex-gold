@@ -22,6 +22,7 @@ import logging
 import time
 
 from backend.src.db import database as db_module
+from backend.src.services.broker import repo as broker_repo
 
 log = logging.getLogger(__name__)
 
@@ -95,18 +96,11 @@ def _row_to_template(row) -> dict:
 
 
 def list_ea_templates() -> list[dict]:
-    with db_module.db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM ea_trade_templates ORDER BY name COLLATE NOCASE"
-        ).fetchall()
-    return [_row_to_template(r) for r in rows]
+    return [_row_to_template(r) for r in broker_repo.fetch_ea_templates()]
 
 
 def get_ea_template(name: str) -> dict | None:
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT * FROM ea_trade_templates WHERE name=?", (name,),
-        ).fetchone()
+    row = broker_repo.fetch_ea_template(name)
     return _row_to_template(row) if row else None
 
 
@@ -136,25 +130,11 @@ def save_ea_template(name: str, fields: dict) -> dict:
         raise ValueError("Template name is required")
     clean = _clean_fields(fields)
     now = time.time()
-    with db_module.db() as conn:
-        existing = conn.execute(
-            "SELECT created_at FROM ea_trade_templates WHERE name=?", (name,),
-        ).fetchone()
-        created_at = existing[0] if existing else now
-        cols = list(clean.keys())
-        conn.execute(
-            f"INSERT INTO ea_trade_templates (name, {', '.join(cols)}, created_at, updated_at) "
-            f"VALUES (?, {', '.join('?' for _ in cols)}, ?, ?) "
-            f"ON CONFLICT(name) DO UPDATE SET "
-            + ", ".join(f"{c}=excluded.{c}" for c in cols)
-            + ", updated_at=excluded.updated_at",
-            (name, *[clean[c] for c in cols], created_at, now),
-        )
+    broker_repo.upsert_ea_template(name, clean, now)
     log.info("[EATemplates] saved template %r: %s", name, clean)
     return get_ea_template(name)
 
 
 def delete_ea_template(name: str) -> None:
-    with db_module.db() as conn:
-        conn.execute("DELETE FROM ea_trade_templates WHERE name=?", (name,))
+    broker_repo.delete_ea_template(name)
     log.info("[EATemplates] deleted template %r", name)

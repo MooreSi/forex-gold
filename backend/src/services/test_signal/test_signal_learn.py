@@ -25,22 +25,8 @@ def _fetch_tg_outcomes(max_age_days: int = 7) -> list[dict]:
     Success = signal's trade reached TP1 (partial close with reason LIKE 'TP1%')."""
     import time as _t
     try:
-        from backend.src.db import database as _main_db
         cutoff = _t.time() - max_age_days * 86400
-        with _main_db.db() as conn:
-            rows = conn.execute(
-                """SELECT vs.source_name, vs.direction,
-                          CASE WHEN tp1_hit.trade_id IS NOT NULL THEN 1 ELSE 0 END as success
-                   FROM vantage_signals vs
-                   LEFT JOIN vantage_simulated_trades vst ON vst.signal_id = vs.signal_id
-                   LEFT JOIN (
-                       SELECT DISTINCT trade_id FROM vantage_partial_closes
-                       WHERE reason LIKE 'TP1%' AND lots_closed > 0
-                   ) tp1_hit ON tp1_hit.trade_id = vst.trade_id
-                   WHERE vs.created_at >= ?
-                   ORDER BY vs.created_at DESC LIMIT 100""",
-                (cutoff,),
-            ).fetchall()
+        rows = tdb.fetch_channel_success_rows(cutoff)
         return [dict(r) for r in rows]
     except Exception as e:
         _log.debug("[TestSignal] TG outcome fetch error: %s", e)

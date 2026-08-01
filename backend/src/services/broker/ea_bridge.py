@@ -396,14 +396,8 @@ class EABridge:
         of them permanently untracked. See restore_pending_order()."""
         from backend.src.db import database as db_module
 
-        def _fetch():
-            with db_module.db() as conn:
-                return [
-                    db_module.row_to_dict(r) for r in conn.execute(
-                        "SELECT * FROM vantage_pending_orders WHERE status='working'"
-                    ).fetchall()
-                ]
-        rows = await db_module.to_db_thread(_fetch)
+        from backend.src.services.broker import repo as broker_repo
+        rows = await db_module.to_db_thread(broker_repo.fetch_working_pending_orders)
         for row in rows:
             try:
                 await self.restore_pending_order(row)
@@ -523,13 +517,8 @@ class EABridge:
             if not trade:
                 log.warning("[EABridge] sl_moved for unknown trade_id=%s", trade_id)
                 return
-            def _apply():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET stop_loss=?, sl_moved_to_be=1 WHERE trade_id=?",
-                        (new_sl, trade_id),
-                    )
-            await db_module.to_db_thread(_apply)
+            from backend.src.services.broker import repo as broker_repo
+            await db_module.to_db_thread(broker_repo.set_stop_loss_be, trade_id, new_sl)
             asyncio.create_task(telegram_alerts.send_message(
                 telegram_alerts.fmt_sl_moved(trade, tp_cleared_num, new_sl),
                 trade_id, "sl_moved_ea",
@@ -590,39 +579,11 @@ class EABridge:
             tps = json.loads(row["tps_json"])
             now = time.time()
 
-            def _apply():
-                with db_module.db() as conn:
-                    conn.execute(
-                        """INSERT INTO vantage_simulated_trades
-                           (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
-                            lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                            status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                            tg_source,managed_by,tp_open,order_type,pending_placed_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (trade_id, row["signal_id"], ticket, row["direction"],
-                         row["price"], row["price"], fill_price,
-                         row["lot_size"], row["lot_size"], row["stop_loss"],
-                         tps.get("1"), tps.get("2"), tps.get("3"), tps.get("4"),
-                         tps.get("5"), tps.get("6"), tps.get("7"), tps.get("8"),
-                         "open", now, 0.0, 0.0, 0.0, 0.0, row["strategy"],
-                         # channel_name was known and stored at placement time
-                         # (core_limit_order_signal.py / orb_auto_execute) but
-                         # never carried over here -- confirmed live 2026-07-23
-                         # that every Limit Runner fill lost its real channel
-                         # attribution and showed as an unattributed trade in
-                         # Trade Analysis.
-                         row["channel_name"], "ea", row["tp_open"],
-                         "limit", row["created_at"]),
-                    )
-                    conn.execute(
-                        "UPDATE vantage_signals SET status='active' WHERE signal_id=?",
-                        (row["signal_id"],),
-                    )
-                    conn.execute(
-                        "UPDATE vantage_pending_orders SET status='filled',resolved_at=? WHERE trade_id=?",
-                        (now, trade_id),
-                    )
-            await db_module.to_db_thread(_apply)
+            from backend.src.services.broker import repo as broker_repo
+            await db_module.to_db_thread(
+                broker_repo.apply_pending_fill,
+                trade_id, row, ticket, fill_price, tps, now,
+            )
             self._active[trade_id] = {"ticket": ticket, "strategy": row["strategy"]}
             self._pending_orders.pop(trade_id, None)
 
@@ -673,25 +634,9 @@ class EABridge:
         original_id = leg_trade_id.rsplit("-g", 1)[0]
         now = time.time()
 
-        def _apply():
-            with db_module.db() as conn:
-                row = db_module.row_to_dict(conn.execute(
-                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=? AND mt5_ticket=0",
-                    (original_id,),
-                ).fetchone())
-                if not row:
-                    return None
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=?,"
-                    "order_type='limit',pending_placed_at=? WHERE trade_id=?",
-                    # row["open_time"] (read above, before this UPDATE overwrites
-                    # it) is when open_trade() placed the grid legs -- the only
-                    # placement timestamp that exists for a leg, since grid legs
-                    # never get their own vantage_pending_orders row.
-                    (ticket, fill_price, now, row["open_time"], original_id),
-                )
-                return row
-        row = await db_module.to_db_thread(_apply)
+        from backend.src.services.broker import repo as broker_repo
+        row = await db_module.to_db_thread(
+            broker_repo.claim_grid_leg_fill, original_id, ticket, fill_price, now)
         if row is None:
             log.warning("[EABridge] grid leg filled (trade_id=%s) but no open placeholder "
                         "row found for original trade_id=%s", leg_trade_id, original_id)
@@ -738,17 +683,9 @@ class EABridge:
                 return
             now = time.time()
 
-            def _apply():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_pending_orders SET status='cancelled',resolved_at=? WHERE trade_id=?",
-                        (now, trade_id),
-                    )
-                    conn.execute(
-                        "UPDATE vantage_signals SET status='cancelled',cancelled_at=? WHERE signal_id=?",
-                        (now, row["signal_id"]),
-                    )
-            await db_module.to_db_thread(_apply)
+            from backend.src.services.broker import repo as broker_repo
+            await db_module.to_db_thread(
+                broker_repo.apply_pending_cancelled, trade_id, row["signal_id"], now)
             self._pending_orders.pop(trade_id, None)
             asyncio.create_task(telegram_alerts.send_message(
                 f"Limit order not filled — {row['direction']} @ {float(row['price']):.2f} "
@@ -760,23 +697,13 @@ class EABridge:
 
     async def _fetch_pending_order(self, trade_id: str) -> Optional[dict]:
         from backend.src.db import database as db_module
-        def _fetch():
-            with db_module.db() as conn:
-                return db_module.row_to_dict(
-                    conn.execute(
-                        "SELECT * FROM vantage_pending_orders WHERE trade_id=?", (trade_id,)
-                    ).fetchone()
-                )
-        return await db_module.to_db_thread(_fetch)
+        from backend.src.services.broker import repo as broker_repo
+        return await db_module.to_db_thread(broker_repo.fetch_pending_order, trade_id)
 
     async def _fetch_trade(self, trade_id: str) -> Optional[dict]:
         from backend.src.db import database as db_module
-        def _fetch():
-            with db_module.db() as conn:
-                return db_module.row_to_dict(
-                    conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)).fetchone()
-                )
-        return await db_module.to_db_thread(_fetch)
+        from backend.src.services.broker import repo as broker_repo
+        return await db_module.to_db_thread(broker_repo.fetch_trade, trade_id)
 
 
 _instance: Optional[EABridge] = None

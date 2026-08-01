@@ -37,3 +37,17 @@ def save_email_config(updates: dict) -> None:
             f"UPDATE email_config SET {set_clause} WHERE id=1",
             list(data.values()),
         )
+
+
+def fetch_closed_trades_since(cutoff: float) -> list[dict]:
+    """Closed trades for the daily/weekly report emails (M1 SQL sweep)."""
+    with db() as conn:
+        return [
+            row_to_dict(r)
+            for r in conn.execute(
+                "SELECT * FROM vantage_simulated_trades "
+                "WHERE status='closed' AND close_time>? "
+                "ORDER BY close_time DESC",
+                (cutoff,),
+            ).fetchall()
+        ]

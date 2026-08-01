@@ -277,14 +277,7 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
                     from backend.src.db import database as _mdb
 
                     def _fetch_mt5_close():
-                        import sqlite3 as _sl3
-                        with _sl3.connect(f"file:{_mdb._DB_PATH}?mode=ro", uri=True) as _mc:
-                            _mc.row_factory = _sl3.Row
-                            return _mc.execute(
-                                "SELECT status, mt5_profit, net_pnl FROM vantage_simulated_trades "
-                                "WHERE mt5_ticket=? AND status='closed'",
-                                (sig["mt5_ticket"],),
-                            ).fetchone()
+                        return tdb.fetch_main_close_ro(sig["mt5_ticket"])
 
                     _mrow = await _mdb.to_db_thread(_fetch_mt5_close)
                     if _mrow:

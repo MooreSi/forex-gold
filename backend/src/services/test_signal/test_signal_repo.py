@@ -677,3 +677,80 @@ def get_perf_by_bias() -> list[dict]:
            GROUP BY htf_bias ORDER BY total_pnl DESC"""
     )
     return [_row(r) for r in rows]
+
+
+# ── Main-app-DB reads, collected from test_signal_manage.py /
+#    test_signal_generate.py / test_signal_learn.py / test_signal_service.py
+#    (M1 SQL sweep). Same connection mechanics as inline.
+
+def fetch_main_mt5_profit(mt5_ticket) -> object:
+    from backend.src.db import database as _mdb
+    with _mdb.db() as _mc:
+        return _mc.execute(
+            "SELECT mt5_profit FROM vantage_simulated_trades"
+            " WHERE mt5_ticket=? AND status='closed'",
+            (mt5_ticket,),
+        ).fetchone()
+
+
+def fetch_main_closed_profits_ro(tickets: list) -> dict:
+    """One read-only connection, one lookup per ticket -- returns
+    {ticket: Row} for tickets that have a closed main-DB trade."""
+    import sqlite3 as _sqlite3
+    from backend.src.db import database as _mdb
+    out: dict = {}
+    main_conn = _sqlite3.connect(f"file:{_mdb._DB_PATH}?mode=ro", uri=True)
+    main_conn.row_factory = _sqlite3.Row
+    try:
+        for ticket in tickets:
+            main_row = main_conn.execute(
+                "SELECT mt5_profit FROM vantage_simulated_trades"
+                " WHERE mt5_ticket=? AND status='closed'",
+                (ticket,),
+            ).fetchone()
+            if main_row:
+                out[ticket] = main_row
+    finally:
+        main_conn.close()
+    return out
+
+
+def fetch_main_close_ro(mt5_ticket) -> object:
+    import sqlite3 as _sl3
+    from backend.src.db import database as _mdb
+    with _sl3.connect(f"file:{_mdb._DB_PATH}?mode=ro", uri=True) as _mc:
+        _mc.row_factory = _sl3.Row
+        return _mc.execute(
+            "SELECT status, mt5_profit, net_pnl FROM vantage_simulated_trades "
+            "WHERE mt5_ticket=? AND status='closed'",
+            (mt5_ticket,),
+        ).fetchone()
+
+
+def fetch_recent_main_tg_signals(cutoff: float) -> list:
+    from backend.src.db import database as _main_db
+    with _main_db.db() as conn:
+        return conn.execute(
+            "SELECT source_name, direction, entry_low, entry_high, stop_loss, "
+            "tp1, tp2, tp3, created_at FROM vantage_signals "
+            "WHERE created_at >= ? ORDER BY created_at DESC LIMIT 3",
+            (cutoff,),
+        ).fetchall()
+
+
+def fetch_channel_success_rows(cutoff: float) -> list:
+    from backend.src.db import database as _main_db
+    with _main_db.db() as conn:
+        return conn.execute(
+            """SELECT vs.source_name, vs.direction,
+                      CASE WHEN tp1_hit.trade_id IS NOT NULL THEN 1 ELSE 0 END as success
+               FROM vantage_signals vs
+               LEFT JOIN vantage_simulated_trades vst ON vst.signal_id = vs.signal_id
+               LEFT JOIN (
+                   SELECT DISTINCT trade_id FROM vantage_partial_closes
+                   WHERE reason LIKE 'TP1%' AND lots_closed > 0
+               ) tp1_hit ON tp1_hit.trade_id = vst.trade_id
+               WHERE vs.created_at >= ?
+               ORDER BY vs.created_at DESC LIMIT 100""",
+            (cutoff,),
+        ).fetchall()

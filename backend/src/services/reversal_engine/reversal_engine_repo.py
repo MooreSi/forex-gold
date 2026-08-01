@@ -18,7 +18,9 @@ import time
 from typing import Optional
 
 import sqlite3
+from datetime import datetime, timezone
 
+from backend.src.config import get as cfg_get
 from backend.src.db import connection as _conn_mod
 
 _NAMESPACE = "reversal_engine"
@@ -686,3 +688,112 @@ def get_analysis_log(limit: int = 50) -> list[dict]:
             d["levels"] = []
         result.append(d)
     return result
+
+
+# ── Main-app-DB statements, collected from reversal_engine_live_execute.py
+#    and ml_engine.py (M1 SQL sweep). These hit the MAIN database through
+#    db_module -- not this engine's own file -- exactly as the callers did.
+
+def claim_vantage_signal_activation(signal_id) -> int:
+    from backend.src.db import database as db_module
+    with db_module.db() as conn:
+        return conn.execute(
+            "UPDATE vantage_signals SET status='activating' "
+            "WHERE signal_id=? AND status IN ('pending','active')",
+            (signal_id,),
+        ).rowcount
+
+
+def restore_vantage_signal_pending(signal_id) -> None:
+    from backend.src.db import database as db_module
+    with db_module.db() as conn:
+        conn.execute(
+            "UPDATE vantage_signals SET status='pending' WHERE signal_id=? AND status='activating'",
+            (signal_id,),
+        )
+
+
+def insert_vantage_pending_order(row: tuple) -> None:
+    from backend.src.db import database as db_module
+    with db_module.db() as conn:
+        conn.execute(
+            """INSERT INTO vantage_pending_orders
+               (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
+                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            row,
+        )
+
+
+def fetch_ml_outcome_rows() -> list:
+    """Completed, ML-scored RE signals -- the calibration-report corpus."""
+    return get_db().all(
+        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
+        "FROM re_signals "
+        "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
+        "ORDER BY id"
+    )
+
+
+def fetch_ref_signal_window(covered_group_ids, cutoff: float):
+    """The VIP-reference cross-DB read (M1 SQL sweep): a raw connection to
+    the configured db_path, exactly as inline -- see the named-adapter note
+    in the refactor plan. Returns (rows_in_window, today_count) or None."""
+    db_path = cfg_get("db_path", "")
+    if not db_path:
+        return None
+    con = sqlite3.connect(db_path, timeout=5)
+    con.row_factory = sqlite3.Row
+    try:
+        _ph = ",".join("?" for _ in covered_group_ids)
+        ref_rows = con.execute(f"""
+            SELECT id, group_name, direction, entry_low, entry_high, parsed_at, status
+            FROM vantage_tg_signals
+            WHERE group_id IN ({_ph})
+            AND direction IN ('BUY','SELL')
+            AND parsed_at > ?
+            ORDER BY parsed_at DESC
+            LIMIT 100
+        """, (*covered_group_ids, cutoff)).fetchall()
+        # True count of real signals received so far *today* (UTC), both
+        # channels combined -- distinct from ref_rows above, which is only
+        # a 4h rolling window used for matching.
+        day_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).timestamp()
+        ref_today_count = con.execute(f"""
+            SELECT COUNT(*) FROM vantage_tg_signals
+            WHERE group_id IN ({_ph})
+            AND direction IN ('BUY','SELL')
+            AND parsed_at >= ?
+        """, (*covered_group_ids, day_start)).fetchone()[0]
+        return ref_rows, ref_today_count
+    finally:
+        con.close()
+
+
+def fetch_ref_cadence(ref_group_id):
+    """Last-signal timestamp and today's count for the cadence model.
+    Same raw cross-DB connection as fetch_ref_signal_window."""
+    db_path = cfg_get("db_path", "")
+    if not db_path:
+        return None
+    con = sqlite3.connect(db_path, timeout=5)
+    con.row_factory = sqlite3.Row
+    try:
+        last_row = con.execute("""
+            SELECT parsed_at FROM vantage_tg_signals
+            WHERE group_id=? AND direction IN ('BUY','SELL')
+            ORDER BY parsed_at DESC LIMIT 1
+        """, (ref_group_id,)).fetchone()
+        day_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).timestamp()
+        today_count = con.execute("""
+            SELECT COUNT(*) FROM vantage_tg_signals
+            WHERE group_id=? AND direction IN ('BUY','SELL')
+            AND parsed_at >= ?
+        """, (ref_group_id, day_start)).fetchone()[0]
+        return (last_row["parsed_at"] if last_row else None), today_count
+    finally:
+        con.close()

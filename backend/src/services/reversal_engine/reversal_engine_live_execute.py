@@ -265,12 +265,7 @@ class _LiveExecuteMixin:
         # open_trade_from_signal uses, so a signal can't be opened twice by
         # two concurrent callers (this path and the market-fill path both
         # read the same 'pending'/'active' signal row before either writes).
-        with db_module.db() as conn:
-            claimed = conn.execute(
-                "UPDATE vantage_signals SET status='activating' "
-                "WHERE signal_id=? AND status IN ('pending','active')",
-                (vantage_sig_id,),
-            ).rowcount
+        claimed = re_db.claim_vantage_signal_activation(vantage_sig_id)
         if not claimed:
             return True
 
@@ -281,21 +276,13 @@ class _LiveExecuteMixin:
                 expire_minutes=240.0, close_full_on_last=True, trail_mode=trail_mode,
             )
         except Exception as exc:
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_signals SET status='pending' WHERE signal_id=? AND status='activating'",
-                    (vantage_sig_id,),
-                )
+            re_db.restore_vantage_signal_pending(vantage_sig_id)
             _log.warning("[RE-Engine] place_pending_order failed: %s", exc)
             re_db.update_live_exec(sig["id"], status=f"limit_order_error:{exc}")
             return True
 
         if ack.get("type") != "pending_order_placed":
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_signals SET status='pending' WHERE signal_id=? AND status='activating'",
-                    (vantage_sig_id,),
-                )
+            re_db.restore_vantage_signal_pending(vantage_sig_id)
             _err = ack.get("error", "unknown error")
             _log.warning("[RE-Engine] EA rejected pending order: %s", _err)
             re_db.update_live_exec(sig["id"], status=f"limit_order_rejected:{_err}")
@@ -303,16 +290,10 @@ class _LiveExecuteMixin:
 
         ticket = ack.get("ticket")
         now = time.time()
-        with db_module.db() as conn:
-            conn.execute(
-                """INSERT INTO vantage_pending_orders
-                   (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
-                    tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (trade_id, vantage_sig_id, None, "Reversal Engine", direction, price, stop_loss,
-                 json.dumps(tps), json.dumps(pcts), be_at_pos, 0, lot_size, ticket,
-                 "working", now, strategy),
-            )
+        re_db.insert_vantage_pending_order(
+            (trade_id, vantage_sig_id, None, "Reversal Engine", direction, price, stop_loss,
+             json.dumps(tps), json.dumps(pcts), be_at_pos, 0, lot_size, ticket,
+             "working", now, strategy))
         re_db.update_live_exec(sig["id"], vantage_sig_id=vantage_sig_id, status=f"limit_order_placed:{ticket}")
         _log.info("[RE-Engine] pending %s ticket=%s @ %.2f strategy=%s", direction, ticket, price, strategy)
         return True

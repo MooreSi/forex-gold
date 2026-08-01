@@ -274,3 +274,40 @@ def get_sync_token() -> str:
     from backend.src.config import secrets as _sec
     enc = get_app_config("sync_token_enc") or ""
     return _sec.decrypt(enc) if enc else ""
+
+
+# ── Collected from controllers/sync/server.py (M1 SQL sweep) ─────────────────
+
+def mirror_insert_signal_if_absent(signal_id, kwargs: dict) -> None:
+    """Mirror a Mac-side generator signal into this node's DB, once."""
+    with db() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM vantage_signals WHERE signal_id=?", (signal_id,)
+        ).fetchone()
+        if not exists:
+            now = time.time()
+            conn.execute(
+                """INSERT INTO vantage_signals
+                   (signal_id, source_name, direction, entry_low, entry_high,
+                    stop_loss, tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
+                    lot_size, notes, status, created_at, activated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (signal_id, kwargs["tg_source"] or "centralized_forward",
+                 kwargs["direction"], kwargs["entry_low"], kwargs["entry_high"],
+                 kwargs["stop_loss"], kwargs["tp1"], kwargs["tp2"], kwargs["tp3"],
+                 kwargs["tp4"], kwargs["tp5"], kwargs["tp6"], kwargs["tp7"], kwargs["tp8"],
+                 kwargs["lot_size"],
+                 "Mirrored from Mac-side generator under centralized signal generation",
+                 "active", now, now),
+            )
+
+
+def find_latest_instant_trade(channel_name: str) -> Optional[dict]:
+    with db() as conn:
+        _irow = conn.execute(
+            "SELECT * FROM vantage_simulated_trades "
+            "WHERE status='open' AND tg_source IN (?,?) "
+            "ORDER BY open_time DESC LIMIT 1",
+            (channel_name, f"instant:{channel_name}"),
+        ).fetchone()
+        return row_to_dict(_irow) if _irow else None

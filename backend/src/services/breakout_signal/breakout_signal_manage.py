@@ -103,13 +103,7 @@ class _ManagementMixin:
         mt5_ticket = sig.get("mt5_ticket") if sig else None
         if mt5_ticket:
             try:
-                from backend.src.db import database as _mdb
-                with _mdb.db() as _mc:
-                    _mr = _mc.execute(
-                        "SELECT mt5_profit FROM vantage_simulated_trades"
-                        " WHERE mt5_ticket=? AND status='closed'",
-                        (mt5_ticket,),
-                    ).fetchone()
+                _mr = bdb.fetch_main_mt5_profit(mt5_ticket)
                 if _mr and _mr[0] is not None:
                     actual_profit = float(_mr[0])
                     ml_outcome = (
@@ -261,53 +255,43 @@ class _ManagementMixin:
             from backend.src.db import database as _mdb
 
             def _do_reconcile() -> int:
-                import sqlite3 as _sqlite3
                 rows = bdb.get_closed_or_expired_signals_with_mt5_ticket()
                 if not rows:
                     return 0
-                _db_path = _mdb._DB_PATH  # type: ignore[attr-defined]
-                main_conn = _sqlite3.connect(f"file:{_db_path}?mode=ro", uri=True)
-                main_conn.row_factory = _sqlite3.Row
+                main_rows = bdb.fetch_main_closed_rows_ro(
+                    [row["mt5_ticket"] for row in rows])
                 updated = 0
-                try:
-                    for row in rows:
-                        sig_id, ticket, sim_pnl, sim_outcome, sig_status = (
-                            row["id"], row["mt5_ticket"], row["pnl_dollars"] or 0.0,
-                            row["outcome"] or "", row["status"] or "",
-                        )
-                        cur = main_conn.execute(
-                            "SELECT mt5_profit, status FROM vantage_simulated_trades"
-                            " WHERE mt5_ticket=? AND status='closed'",
-                            (ticket,),
-                        )
-                        main_row = cur.fetchone()
-                        if not main_row:
-                            continue
-                        actual_profit = float(main_row["mt5_profit"] or 0.0)
-                        if abs(actual_profit - float(sim_pnl)) < 0.01 and sig_status == "closed":
-                            continue
-                        mt5_outcome = (
-                            "win"  if actual_profit > 1.0  else
-                            "loss" if actual_profit < -1.0 else
-                            "be"
-                        )
-                        bdb.update_signal_pnl_from_mt5(sig_id, actual_profit, mt5_outcome)
-                        if sig_status == "expired":
-                            bdb.promote_expired_to_closed(sig_id)
-                            _log.info(
-                                "[BO-Engine] Expired live signal %d (ticket %s) promoted to closed: MT5=$%.2f (%s)",
-                                sig_id, ticket, actual_profit, mt5_outcome,
-                            )
-                        if sim_outcome != mt5_outcome:
-                            from backend.src.services.breakout_signal import ml_engine as bo_ml
-                            bo_ml.record_outcome(sig_id, mt5_outcome)
-                        updated += 1
+                for row in rows:
+                    sig_id, ticket, sim_pnl, sim_outcome, sig_status = (
+                        row["id"], row["mt5_ticket"], row["pnl_dollars"] or 0.0,
+                        row["outcome"] or "", row["status"] or "",
+                    )
+                    main_row = main_rows.get(ticket)
+                    if not main_row:
+                        continue
+                    actual_profit = float(main_row["mt5_profit"] or 0.0)
+                    if abs(actual_profit - float(sim_pnl)) < 0.01 and sig_status == "closed":
+                        continue
+                    mt5_outcome = (
+                        "win"  if actual_profit > 1.0  else
+                        "loss" if actual_profit < -1.0 else
+                        "be"
+                    )
+                    bdb.update_signal_pnl_from_mt5(sig_id, actual_profit, mt5_outcome)
+                    if sig_status == "expired":
+                        bdb.promote_expired_to_closed(sig_id)
                         _log.info(
-                            "[BO-Engine] Reconciled signal %d (ticket %s): sim=$%.2f → MT5=$%.2f (%s)",
-                            sig_id, ticket, sim_pnl, actual_profit, mt5_outcome,
+                            "[BO-Engine] Expired live signal %d (ticket %s) promoted to closed: MT5=$%.2f (%s)",
+                            sig_id, ticket, actual_profit, mt5_outcome,
                         )
-                finally:
-                    main_conn.close()
+                    if sim_outcome != mt5_outcome:
+                        from backend.src.services.breakout_signal import ml_engine as bo_ml
+                        bo_ml.record_outcome(sig_id, mt5_outcome)
+                    updated += 1
+                    _log.info(
+                        "[BO-Engine] Reconciled signal %d (ticket %s): sim=$%.2f → MT5=$%.2f (%s)",
+                        sig_id, ticket, sim_pnl, actual_profit, mt5_outcome,
+                    )
                 return updated
 
             updated = await _mdb.to_db_thread(_do_reconcile)

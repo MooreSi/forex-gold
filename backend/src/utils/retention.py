@@ -21,6 +21,7 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+from backend.src.db import retention_repo
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
 from backend.src.services.risk.app_config_repo import get_app_config, set_app_config  # noqa: E402
 
@@ -68,17 +69,14 @@ def prune_historical_data() -> dict:
     cutoff_iso = datetime.fromtimestamp(cutoff_epoch, tz=timezone.utc).isoformat()
     deleted: dict[str, int] = {}
     try:
-        with db() as conn:
-            for table, clause, param in (
-                ("telegram_messages", "received_at < ?", cutoff_iso),
-                ("vantage_simulated_trades", "status='closed' AND close_time < ?", cutoff_epoch),
-                ("vantage_signals", "status IN ('closed','expired') AND created_at < ?", cutoff_epoch),
-                ("vantage_tg_signals", "parsed_at < ?", cutoff_epoch),
-                ("channel_unrecognised_messages", "received_at < ?", cutoff_epoch),
-                ("ai_recovered_signals", "created_at < ?", cutoff_epoch),
-            ):
-                cur = conn.execute(f"DELETE FROM {table} WHERE {clause}", (param,))
-                deleted[table] = cur.rowcount
+        deleted = retention_repo.prune_tables((
+            ("telegram_messages", "received_at < ?", cutoff_iso),
+            ("vantage_simulated_trades", "status='closed' AND close_time < ?", cutoff_epoch),
+            ("vantage_signals", "status IN ('closed','expired') AND created_at < ?", cutoff_epoch),
+            ("vantage_tg_signals", "parsed_at < ?", cutoff_epoch),
+            ("channel_unrecognised_messages", "received_at < ?", cutoff_epoch),
+            ("ai_recovered_signals", "created_at < ?", cutoff_epoch),
+        ))
     except Exception as e:
         log.warning("prune_historical_data failed: %s", e)
         return {"pruned": False, "reason": str(e), "deleted": deleted}

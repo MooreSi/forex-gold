@@ -455,26 +455,8 @@ class SyncServer:
                 strategy=msg.get("strategy"),
                 tg_source=msg.get("tg_source"),
             )
-            with db_module.db() as conn:
-                exists = conn.execute(
-                    "SELECT 1 FROM vantage_signals WHERE signal_id=?", (signal_id,)
-                ).fetchone()
-                if not exists:
-                    now = time.time()
-                    conn.execute(
-                        """INSERT INTO vantage_signals
-                           (signal_id, source_name, direction, entry_low, entry_high,
-                            stop_loss, tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
-                            lot_size, notes, status, created_at, activated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (signal_id, kwargs["tg_source"] or "centralized_forward",
-                         kwargs["direction"], kwargs["entry_low"], kwargs["entry_high"],
-                         kwargs["stop_loss"], kwargs["tp1"], kwargs["tp2"], kwargs["tp3"],
-                         kwargs["tp4"], kwargs["tp5"], kwargs["tp6"], kwargs["tp7"], kwargs["tp8"],
-                         kwargs["lot_size"],
-                         "Mirrored from Mac-side generator under centralized signal generation",
-                         "active", now, now),
-                    )
+            from backend.src.services.cluster import sync_repo as _sync_repo
+            _sync_repo.mirror_insert_signal_if_absent(signal_id, kwargs)
             result = await self._main_engine.open_trade(**kwargs)
             await ws.send(json.dumps(make(MSG_SIGNAL_ORDER_ACK, result=result)))
             # This node is the one that actually placed the trade, so its own
@@ -519,14 +501,8 @@ class SyncServer:
             direction    = (msg.get("direction") or "").upper()
             updates      = msg.get("updates") or {}
             tg_id        = msg.get("tg_id")
-            with db_module.db() as conn:
-                _irow = conn.execute(
-                    "SELECT * FROM vantage_simulated_trades "
-                    "WHERE status='open' AND tg_source IN (?,?) "
-                    "ORDER BY open_time DESC LIMIT 1",
-                    (channel_name, f"instant:{channel_name}"),
-                ).fetchone()
-                _instant = db_module.row_to_dict(_irow) if _irow else None
+            from backend.src.services.cluster import sync_repo as _sync_repo
+            _instant = _sync_repo.find_latest_instant_trade(channel_name)
             if not _instant or _instant.get("direction", "").upper() != direction:
                 await ws.send(json.dumps(make(MSG_SIGNAL_FOLLOWUP_ACK, matched=False)))
                 return

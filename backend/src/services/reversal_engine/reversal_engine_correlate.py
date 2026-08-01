@@ -69,39 +69,7 @@ class _CorrelationMixin:
         cutoff = time.time() - 14400
 
         def _fetch_ref_data():
-            import sqlite3
-            from backend.src.config import get as cfg_get
-            db_path = cfg_get("db_path", "")
-            if not db_path:
-                return None
-            con = sqlite3.connect(db_path, timeout=5)
-            con.row_factory = sqlite3.Row
-            try:
-                _ph = ",".join("?" for _ in _covered_group_ids)
-                ref_rows = con.execute(f"""
-                    SELECT id, group_name, direction, entry_low, entry_high, parsed_at, status
-                    FROM vantage_tg_signals
-                    WHERE group_id IN ({_ph})
-                    AND direction IN ('BUY','SELL')
-                    AND parsed_at > ?
-                    ORDER BY parsed_at DESC
-                    LIMIT 100
-                """, (*_covered_group_ids, cutoff)).fetchall()
-                # True count of real signals received so far *today* (UTC), both
-                # channels combined -- distinct from ref_rows above, which is only
-                # a 4h rolling window used for matching.
-                day_start = datetime.now(timezone.utc).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                ).timestamp()
-                ref_today_count = con.execute(f"""
-                    SELECT COUNT(*) FROM vantage_tg_signals
-                    WHERE group_id IN ({_ph})
-                    AND direction IN ('BUY','SELL')
-                    AND parsed_at >= ?
-                """, (*_covered_group_ids, day_start)).fetchone()[0]
-                return ref_rows, ref_today_count
-            finally:
-                con.close()
+            return re_db.fetch_ref_signal_window(_covered_group_ids, cutoff)
 
         try:
             # Offloaded to the DB worker thread -- see test_signal.engine's
@@ -240,30 +208,7 @@ class _CorrelationMixin:
         rhythm (e.g. quiet for 3h+ -> higher chance one is "due") instead of
         relying purely on static level geometry."""
         def _fetch():
-            import sqlite3
-            from backend.src.config import get as cfg_get
-            db_path = cfg_get("db_path", "")
-            if not db_path:
-                return None
-            con = sqlite3.connect(db_path, timeout=5)
-            con.row_factory = sqlite3.Row
-            try:
-                last_row = con.execute("""
-                    SELECT parsed_at FROM vantage_tg_signals
-                    WHERE group_id=? AND direction IN ('BUY','SELL')
-                    ORDER BY parsed_at DESC LIMIT 1
-                """, (_REF_GROUP_ID,)).fetchone()
-                day_start = datetime.now(timezone.utc).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                ).timestamp()
-                today_count = con.execute("""
-                    SELECT COUNT(*) FROM vantage_tg_signals
-                    WHERE group_id=? AND direction IN ('BUY','SELL')
-                    AND parsed_at >= ?
-                """, (_REF_GROUP_ID, day_start)).fetchone()[0]
-                return (last_row["parsed_at"] if last_row else None), today_count
-            finally:
-                con.close()
+            return re_db.fetch_ref_cadence(_REF_GROUP_ID)
 
         try:
             # Offloaded to the DB worker thread -- see _check_correlation.

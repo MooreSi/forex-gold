@@ -12,31 +12,16 @@ from __future__ import annotations
 import time
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 
 
 def get_sim_account() -> dict:
-    with db_module.db() as conn:
-        return db_module.row_to_dict(
-            conn.execute("SELECT * FROM vantage_simulation_account WHERE id=1").fetchone()
-        )
+    return trade_repo.get_simulation_account()
 
 
 def update_sim_balance(delta: float) -> None:
-    with db_module.db() as conn:
-        conn.execute(
-            "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-            (delta,),
-        )
+    trade_repo.add_to_sim_balance(delta)
 
 
 def reset_simulation(starting_balance: float) -> None:
-    with db_module.db() as conn:
-        conn.execute(
-            "UPDATE vantage_simulation_account SET balance=?, reset_at=? WHERE id=1",
-            (starting_balance, time.time()),
-        )
-        conn.execute("DELETE FROM vantage_simulated_trades")
-        conn.execute("DELETE FROM vantage_partial_closes")
-        conn.execute(
-            "UPDATE vantage_signals SET status='cancelled' WHERE status IN ('pending','active')"
-        )
+    trade_repo.reset_simulation_data(starting_balance, time.time())

@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SCALP_RUNNER,
     STRATEGY_BE_RUNNER,
@@ -32,19 +33,7 @@ async def update_signal(bridge: Any, signal_id: str, updates: dict) -> dict:
     if not safe:
         return {"status": "no_changes"}
 
-    with db_module.db() as conn:
-        set_clause = ", ".join(f"{k}=?" for k in safe)
-        conn.execute(
-            f"UPDATE vantage_signals SET {set_clause} WHERE signal_id=?",
-            list(safe.values()) + [signal_id],
-        )
-        trade_row = db_module.row_to_dict(
-            conn.execute(
-                "SELECT * FROM vantage_simulated_trades "
-                "WHERE signal_id=? AND status='open'",
-                (signal_id,),
-            ).fetchone()
-        )
+    trade_row = trade_repo.update_signal_fields(signal_id, safe)
 
     trade_updated = False
     # Conservative, Conservative Trial, and Scalp Runner calculate their own
@@ -64,12 +53,7 @@ async def update_signal(bridge: Any, signal_id: str, updates: dict) -> dict:
             if k in ("stop_loss", "tp1", "tp2", "tp3", "tp4", "tp5", "tp6", "tp7", "tp8")
         }
         if trade_fields:
-            with db_module.db() as conn:
-                tc = ", ".join(f"{k}=?" for k in trade_fields)
-                conn.execute(
-                    f"UPDATE vantage_simulated_trades SET {tc} WHERE trade_id=?",
-                    list(trade_fields.values()) + [trade_row["trade_id"]],
-                )
+            trade_repo.update_trade_fields(trade_row["trade_id"], trade_fields)
             mt5_ticket = trade_row.get("mt5_ticket")
             if mt5_ticket:
                 _dir   = trade_row.get("direction", "").upper()

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.utils.models import STRATEGY_ORB_FIXED
 
@@ -160,26 +161,15 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     ticket = ack.get("ticket")
     now = time.time()
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,lot_size,notes,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, "ORB/IVB Report (auto)", mt5_direction,
-             report["entry_zone_low"], report["entry_zone_high"], stop_loss, target, lot,
-             f"ORB/IVB pending order @ {price:.2f} (EA ticket {ticket})",
-             "pending", now),
-        )
-        conn.execute(
-            """INSERT INTO vantage_pending_orders
-               (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
-                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (trade_id, signal_id, None, "ORB/IVB Report (auto)", mt5_direction, price, stop_loss,
-             json.dumps({1: target}), json.dumps([1.0]), 0, 0, lot, ticket,
-             "working", now, strategy),
-        )
+    trade_repo.insert_orb_pending(
+        signal_id, mt5_direction, report["entry_zone_low"], report["entry_zone_high"],
+        stop_loss, target, lot,
+        f"ORB/IVB pending order @ {price:.2f} (EA ticket {ticket})",
+        now,
+        (trade_id, signal_id, None, "ORB/IVB Report (auto)", mt5_direction, price, stop_loss,
+         json.dumps({1: target}), json.dumps([1.0]), 0, 0, lot, ticket,
+         "working", now, strategy),
+    )
     log.info(
         "[ORB auto-execute] pending %s ticket=%s @ %.2f stop=%.2f target=%.2f lot=%.2f",
         mt5_direction, ticket, price, stop_loss, target, lot,

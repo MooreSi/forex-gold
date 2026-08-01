@@ -28,6 +28,7 @@ from typing import Any, Optional
 from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.signals.parser import _CURRENCY_RE
 
@@ -201,13 +202,7 @@ async def apply_sl_adjustment(
     ):
         return
 
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT * FROM vantage_simulated_trades WHERE status='open' AND "
-            "(tg_source=? OR tg_source=? OR tg_source LIKE ?) "
-            "ORDER BY open_time DESC LIMIT 1",
-            (channel_name, f"instant:{channel_name}", f"Telegram Auto ({channel_name})"),
-        ).fetchone()
+    row = trade_repo.find_channel_open_trade(channel_name)
     trade = db_module.row_to_dict(row) if row else None
     if not trade:
         log.info(
@@ -230,11 +225,7 @@ async def apply_sl_adjustment(
     try:
         if mt5_ticket:
             await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                (new_sl, trade_id),
-            )
+        trade_repo.set_stop_loss(trade_id, new_sl)
         log.info(
             "[%s] SL adjustment (tg_id=%s, via=%s) applied to trade=%s (ticket %s): %s -> %s",
             channel_name, tg_id, via, trade_id[:8], mt5_ticket, old_sl, new_sl,
@@ -266,11 +257,7 @@ async def apply_sl_adjustment(
 
 def queue_unrecognised(tg_id: str, channel_name: str, text: str, cfg: dict) -> None:
     try:
-        with db_module.db() as conn:
-            exists = conn.execute(
-                "SELECT id FROM channel_unrecognised_messages WHERE tg_message_id=?",
-                (tg_id,),
-            ).fetchone()
+        exists = trade_repo.unrecognised_message_exists(tg_id)
         if not exists:
             unrec_id = db_module.save_unrecognised_message(channel_name, tg_id, text)
             if unrec_id:

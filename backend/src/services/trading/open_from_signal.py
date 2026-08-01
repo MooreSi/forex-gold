@@ -29,6 +29,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.signals.resolution import (
     resolve_open_trade_params,
@@ -73,12 +74,7 @@ async def open_trade_from_signal(
     # window before any trade row exists. Claim the signal with a single
     # conditional UPDATE; SQLite's writer lock guarantees only one caller
     # flips 'pending'/'active' → 'activating'. The loser bails out here.
-    with db_module.db() as conn:
-        _claimed = conn.execute(
-            "UPDATE vantage_signals SET status='activating' "
-            "WHERE signal_id=? AND status IN ('pending','active')",
-            (signal_id,),
-        ).rowcount
+    _claimed = trade_repo.claim_signal_activation(signal_id)
     if not _claimed:
         raise ValueError(f"Signal {signal_id} is already being opened — duplicate suppressed")
 
@@ -98,12 +94,7 @@ async def open_trade_from_signal(
         )
     except Exception:
         # Restore so a transient failure (e.g. MT5 reject) stays retryable.
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_signals SET status='pending' "
-                "WHERE signal_id=? AND status='activating'",
-                (signal_id,),
-            )
+        trade_repo.restore_signal_after_failed_open(signal_id)
         raise
 
     _entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
@@ -116,14 +107,7 @@ async def open_trade_from_signal(
         _fill      = float(result.get("entry_price", _entry_mid))
         exact_sl   = round(_fill - _sign * _cons_p["sl_pt"], 2)
         exact_tp1  = round(_fill + _sign * _cons_p["tp1_pt"], 2)
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET stop_loss=?, tp1=?, tp2=NULL, tp3=NULL, tp4=NULL, tp5=NULL,
-                       tp6=NULL, tp7=NULL, tp8=NULL
-                   WHERE trade_id=?""",
-                (exact_sl, exact_tp1, result["trade_id"]),
-            )
+        trade_repo.set_trade_levels(result["trade_id"], exact_sl, tp1=exact_tp1)
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:
@@ -155,14 +139,8 @@ async def open_trade_from_signal(
         exact_sl  = round(_fill - _sign * _sr_p["sl_pt"], 2)
         exact_tp1 = round(_fill + _sign * _sr_p["tp1_pt"], 2)
         exact_tp2 = round(_fill + _sign * _sr_p["tp2_pt"], 2)
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET stop_loss=?, tp1=?, tp2=?, tp3=NULL, tp4=NULL, tp5=NULL,
-                       tp6=NULL, tp7=NULL, tp8=NULL
-                   WHERE trade_id=?""",
-                (exact_sl, exact_tp1, exact_tp2, result["trade_id"]),
-            )
+        trade_repo.set_trade_levels(result["trade_id"], exact_sl,
+                                    tp1=exact_tp1, tp2=exact_tp2)
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:
@@ -197,16 +175,10 @@ async def open_trade_from_signal(
         exact_sl   = round(_fill - _sign * _ct_sl_pts, 2)
         # TP offsets (pts from fill), live-tunable via Strategy Parameters.
         ct_tps = [round(_fill + _sign * _ct_p[f"tp{i}_pt"], 2) for i in range(1, 7)]
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET stop_loss=?, tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?,
-                       tp7=NULL, tp8=NULL
-                   WHERE trade_id=?""",
-                (exact_sl,
-                 ct_tps[0], ct_tps[1], ct_tps[2], ct_tps[3], ct_tps[4], ct_tps[5],
-                 result["trade_id"]),
-            )
+        trade_repo.set_trade_levels(
+            result["trade_id"], exact_sl,
+            tp1=ct_tps[0], tp2=ct_tps[1], tp3=ct_tps[2],
+            tp4=ct_tps[3], tp5=ct_tps[4], tp6=ct_tps[5])
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:
@@ -228,11 +200,7 @@ async def open_trade_from_signal(
         _fill      = float(result.get("entry_price", _entry_mid))
         _gv_sl_pt2 = _rr_sl_dist(abs(_entry_mid - float(sig["stop_loss"])))
         exact_sl   = round(_fill - _sign * _gv_sl_pt2, 2)
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                (exact_sl, result["trade_id"]),
-            )
+        trade_repo.set_stop_loss(result["trade_id"], exact_sl)
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:
@@ -256,11 +224,7 @@ async def open_trade_from_signal(
             abs(_entry_mid - float(sig["stop_loss"])), _ar_final_tp_dist2,
         )
         exact_sl = round(_fill - _sign * _ar_sl_pt2, 2)
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                (exact_sl, result["trade_id"]),
-            )
+        trade_repo.set_stop_loss(result["trade_id"], exact_sl)
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:
@@ -283,11 +247,7 @@ async def open_trade_from_signal(
         _ar2_p   = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2)
         _fill    = float(result.get("entry_price", _entry_mid))
         exact_sl = round(_fill - _sign * _ar2_p["sl_pt"], 2)
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                (exact_sl, result["trade_id"]),
-            )
+        trade_repo.set_stop_loss(result["trade_id"], exact_sl)
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:
@@ -310,16 +270,10 @@ async def open_trade_from_signal(
         _fill       = float(result.get("entry_price", _entry_mid))
         exact_sl    = round(_fill - _sign * _ts_sl_pts, 2)
         ts_tps      = [round(_fill + _sign * (n * _trail_dist), 2) for n in range(1, 9)]
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET stop_loss=?, tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?, tp7=?, tp8=?
-                   WHERE trade_id=?""",
-                (exact_sl,
-                 ts_tps[0], ts_tps[1], ts_tps[2], ts_tps[3],
-                 ts_tps[4], ts_tps[5], ts_tps[6], ts_tps[7],
-                 result["trade_id"]),
-            )
+        trade_repo.set_trade_levels(
+            result["trade_id"], exact_sl,
+            tp1=ts_tps[0], tp2=ts_tps[1], tp3=ts_tps[2], tp4=ts_tps[3],
+            tp5=ts_tps[4], tp6=ts_tps[5], tp7=ts_tps[6], tp8=ts_tps[7])
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:

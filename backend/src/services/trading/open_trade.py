@@ -24,6 +24,7 @@ import uuid
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.governor import is_trading_paused
 from backend.src.utils.models import (
@@ -200,10 +201,7 @@ async def open_trade(
     # the trade row) rather than in the callers, so it's checked against
     # whichever node's table is about to receive the INSERT.
     rs = await db_module.to_db_thread(db_module.get_risk_settings)
-    with db_module.db() as conn:
-        open_count = conn.execute(
-            "SELECT COUNT(*) FROM vantage_simulated_trades WHERE status='open'"
-        ).fetchone()[0]
+    open_count = trade_repo.count_open_trades()
     if open_count >= int(rs.get("max_open_trades", 1)):
         raise ValueError(f"Max open trades reached ({rs.get('max_open_trades', 1)})")
 
@@ -348,23 +346,12 @@ async def open_trade(
         log.info("MT5 order placed: ticket=%s dir=%s lots=%s @ %s",
                  mt5_ticket, direction, lot_size, entry_price)
 
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_simulated_trades
-               (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
-                lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,tg_source,
-                managed_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (trade_id, signal_id, mt5_ticket, direction.upper(), entry_low, entry_high, entry_price,
-             lot_size, lot_size, stop_loss, tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
-             "open", now,
-             0.0, 0.0, 0.0, 0.0,
-             strategy, tg_source, managed_by),
-        )
-        conn.execute(
-            "UPDATE vantage_signals SET status='active' WHERE signal_id=?", (signal_id,)
-        )
+    trade_repo.insert_trade_and_activate_signal(
+        trade_id, signal_id, mt5_ticket, direction.upper(),
+        entry_low, entry_high, entry_price, lot_size, stop_loss,
+        tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
+        now, strategy, tg_source, managed_by,
+    )
 
     return {
         "trade_id":    trade_id,

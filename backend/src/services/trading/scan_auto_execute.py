@@ -36,6 +36,7 @@ import uuid
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading.open_trade import open_trade as _real_open_trade
 from backend.src.services.risk.strategy_params import get_strategy_params
@@ -238,28 +239,14 @@ async def execute_auto_signal(
 
                         if not in_range:
                             side = "above" if direction == "BUY" else "below"
-                            with db_module.db() as conn:
-                                conn.execute(
-                                    """INSERT INTO vantage_signals
-                                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                                        lot_size,notes,status,created_at)
-                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (signal_id, f"Telegram Auto ({source_label})",
-                                     parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                                     parsed["stop_loss"],
-                                     parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                                     parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                                     lot,
-                                     f"Queued: {direction} price ${cur_px:.2f} is {side} zone "
-                                     f"${el:.2f}–${eh:.2f}",
-                                     "pending", time.time()),
-                                )
-                                conn.execute(
-                                    "UPDATE vantage_tg_signals SET status='pending',signal_id=?"
-                                    " WHERE tg_message_id=?",
-                                    (signal_id, tg_id),
-                                )
+                            trade_repo.insert_scan_signal(
+                                signal_id, f"Telegram Auto ({source_label})",
+                                parsed, lot,
+                                f"Queued: {direction} price ${cur_px:.2f} is {side} zone "
+                                f"${el:.2f}–${eh:.2f}",
+                                "pending", time.time(), None,
+                                tg_id, "pending",
+                            )
                             log.info("[%s] Signal queued (price $%.2f %s zone $%.2f–$%.2f)",
                                     source_label, cur_px, side, el, eh)
                             skip_reason = (
@@ -268,26 +255,14 @@ async def execute_auto_signal(
                                 f"Will auto-activate when price returns to zone."
                             )
                         else:
-                            with db_module.db() as conn:
-                                conn.execute(
-                                    """INSERT INTO vantage_signals
-                                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                                        lot_size,notes,status,created_at,activated_at)
-                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (signal_id, f"Telegram Auto ({source_label})",
-                                     parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                                     parsed["stop_loss"],
-                                     parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                                     parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                                     lot, f"Auto-executed from Telegram {tg_id} ({source_label})",
-                                     "active", time.time(), time.time()),
-                                )
-                                conn.execute(
-                                    "UPDATE vantage_tg_signals SET status='activated',signal_id=?"
-                                    " WHERE tg_message_id=?",
-                                    (signal_id, tg_id),
-                                )
+                            _now_exec = time.time()
+                            trade_repo.insert_scan_signal(
+                                signal_id, f"Telegram Auto ({source_label})",
+                                parsed, lot,
+                                f"Auto-executed from Telegram {tg_id} ({source_label})",
+                                "active", _now_exec, _now_exec,
+                                tg_id, "activated",
+                            )
                             if strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
                                 tg_co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
                                 tg_sl_pt = get_strategy_params(strategy)["sl_pt"]
@@ -333,14 +308,9 @@ async def execute_auto_signal(
                                         round(fill + co_sign * tp2_pt, 2)
                                         if tp2_pt is not None else None
                                     )
-                                    with db_module.db() as conn:
-                                        conn.execute(
-                                            """UPDATE vantage_simulated_trades
-                                               SET stop_loss=?, tp1=?, tp2=?, tp3=NULL,
-                                                   tp4=NULL, tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
-                                               WHERE trade_id=?""",
-                                            (exact_sl, exact_tp1, exact_tp2, trade_result["trade_id"]),
-                                        )
+                                    trade_repo.set_trade_levels(
+                                        trade_result["trade_id"], exact_sl,
+                                        tp1=exact_tp1, tp2=exact_tp2)
                                     mt5_tkt = trade_result.get("mt5_ticket")
                                     if mt5_tkt:
                                         try:
@@ -380,11 +350,8 @@ async def execute_auto_signal(
                                     fill = float(exec_price or entry_mid)
                                     co_sign = 1.0 if parsed["direction"].upper() == "BUY" else -1.0
                                     exact_sl = round(fill - co_sign * _ar2_p["sl_pt"], 2)
-                                    with db_module.db() as conn:
-                                        conn.execute(
-                                            "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                                            (exact_sl, trade_result["trade_id"]),
-                                        )
+                                    trade_repo.set_stop_loss(
+                                        trade_result["trade_id"], exact_sl)
                                     mt5_tkt = trade_result.get("mt5_ticket")
                                     if mt5_tkt:
                                         try:
@@ -405,12 +372,7 @@ async def execute_auto_signal(
                                         "[%s] Signal deferred to active node (stood down): %s",
                                         source_label, e_str,
                                     )
-                                    with db_module.db() as conn:
-                                        conn.execute(
-                                            "UPDATE vantage_signals SET status='pending', activated_at=NULL"
-                                            " WHERE signal_id=?",
-                                            (signal_id,),
-                                        )
+                                    trade_repo.reset_signal_to_pending(signal_id)
                                     return {"executed": executed, "exec_lot": exec_lot, "exec_price": exec_price,
                                             "trade_result": trade_result, "skip_reason": skip_reason,
                                             "gap_note": gap_note, "deferred_stood_down": True}
@@ -418,12 +380,7 @@ async def execute_auto_signal(
                                     log.warning("[CB] TG trade blocked for %s: %s", source_label, e_str)
                                 else:
                                     log.error("[%s] Auto-exec failed: %s", source_label, e)
-                                with db_module.db() as conn:
-                                    conn.execute(
-                                        "UPDATE vantage_signals SET status='pending', activated_at=NULL"
-                                        " WHERE signal_id=?",
-                                        (signal_id,),
-                                    )
+                                trade_repo.reset_signal_to_pending(signal_id)
                                 skip_reason = e_str if is_cb else f"Auto-execution failed: {e_str}"
 
     return {"executed": executed, "exec_lot": exec_lot, "exec_price": exec_price,

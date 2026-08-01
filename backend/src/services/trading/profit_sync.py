@@ -22,6 +22,7 @@ import time
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import CloseTradeContext, record_close
 
@@ -42,49 +43,15 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
         sum(float(d.get("profit", 0)) + float(d.get("swap", 0)) + float(d.get("fee", 0))
             for d in deals), 2,
     )
-    def _apply_profit_sync():
-        with db_module.db() as conn:
-            existing = db_module.row_to_dict(conn.execute(
-                "SELECT mt5_profit, net_pnl FROM vantage_simulated_trades WHERE trade_id=?",
-                (trade_id,),
-            ).fetchone())
-            # First-time sync only: if our estimated net_pnl differs from the real MT5
-            # figure (e.g. due to SL slippage, swap, commission), correct the simulated
-            # account balance so it stays in sync with the broker.
-            if existing and existing.get("mt5_profit") is None:
-                our_estimate = float(existing.get("net_pnl") or 0)
-                correction = round(mt5_profit - our_estimate, 4)
-                if abs(correction) >= 0.01:
-                    conn.execute(
-                        "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                        (correction,),
-                    )
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET net_pnl=? WHERE trade_id=?",
-                        (mt5_profit, trade_id),
-                    )
-                    log.info(
-                        "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
-                        trade_id, our_estimate, mt5_profit, correction,
-                    )
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",
-                (mt5_profit, trade_id),
-            )
-    await db_module.to_db_thread(_apply_profit_sync)
+    await db_module.to_db_thread(trade_repo.apply_profit_sync, trade_id, mt5_profit)
     return mt5_profit
 
 
 async def schedule_profit_sync(trade_id: str, mt5_ticket: int, bridge: Any) -> None:
-    def _fetch_profit():
-        with db_module.db() as conn:
-            return conn.execute(
-                "SELECT mt5_profit FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-            ).fetchone()
     for delay in (0, 10, 60, 300, 1800):
         if delay:
             await asyncio.sleep(delay)
-        row = await db_module.to_db_thread(_fetch_profit)
+        row = await db_module.to_db_thread(trade_repo.fetch_mt5_profit, trade_id)
         if row and row[0] is not None:
             return
         result = await sync_profit(trade_id, mt5_ticket, bridge)
@@ -94,15 +61,7 @@ async def schedule_profit_sync(trade_id: str, mt5_ticket: int, bridge: Any) -> N
 
 async def profit_sweep(bridge: Any) -> None:
     cutoff = time.time() - 86400
-    def _fetch_unsynced():
-        with db_module.db() as conn:
-            return conn.execute(
-                """SELECT trade_id,mt5_ticket FROM vantage_simulated_trades
-                   WHERE status='closed' AND mt5_ticket IS NOT NULL
-                     AND (mt5_profit IS NULL OR (mt5_profit=0.0 AND close_time>?))""",
-                (cutoff,),
-            ).fetchall()
-    rows = await db_module.to_db_thread(_fetch_unsynced)
+    rows = await db_module.to_db_thread(trade_repo.fetch_unsynced_closed, cutoff)
     for row in rows:
         try:
             await sync_profit(row[0], int(row[1]), bridge)

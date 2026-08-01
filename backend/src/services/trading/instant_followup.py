@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.update_signal import update_signal
 from backend.src.utils.models import (
@@ -67,11 +68,7 @@ async def apply_followup_to_instant_trade(
                 "but channel %s sets %s — correcting and applying signal levels",
                 trade_id[:8], _trade_strategy, channel_name, _ch_ov_fu,
             )
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET strategy=? WHERE trade_id=?",
-                    (_ch_ov_fu, trade_id),
-                )
+            trade_repo.set_trade_strategy(trade_id, _ch_ov_fu)
             # Rebuild instant_trade with the corrected strategy so the
             # TP validity check and MT5 modify below use it correctly.
             instant_trade = dict(instant_trade)
@@ -84,12 +81,7 @@ async def apply_followup_to_instant_trade(
                 trade_id[:8], _trade_strategy,
             )
             if signal_id:
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_tg_signals SET status='followup_applied', signal_id=?"
-                        " WHERE tg_message_id=?",
-                        (signal_id, tg_id),
-                    )
+                trade_repo.set_tg_followup_applied(tg_id, signal_id)
             return
 
     updates: dict = {
@@ -181,12 +173,7 @@ async def apply_followup_to_instant_trade(
         await update_signal(bridge, signal_id, updates)
     else:
         # Fallback — no linked signal record; update the trade row directly
-        with db_module.db() as conn:
-            set_clause = ", ".join(f"{k}=?" for k in updates)
-            conn.execute(
-                f"UPDATE vantage_simulated_trades SET {set_clause} WHERE trade_id=?",
-                list(updates.values()) + [trade_id],
-            )
+        trade_repo.update_trade_fields(trade_id, updates)
         mt5_ticket = instant_trade.get("mt5_ticket")
         if mt5_ticket:
             try:
@@ -228,12 +215,7 @@ async def apply_followup_to_instant_trade(
                 except Exception as exc:
                     log.warning("EA update_trade after IME follow-up failed: %s", exc)
 
-    with db_module.db() as conn:
-        conn.execute(
-            "UPDATE vantage_tg_signals SET status='followup_applied', signal_id=?"
-            " WHERE tg_message_id=?",
-            (signal_id, tg_id),
-        )
+    trade_repo.set_tg_followup_applied(tg_id, signal_id)
 
     sl_px   = float(parsed["stop_loss"])
     tp1_px  = parsed.get("tp1")
@@ -302,14 +284,8 @@ async def find_and_apply_instant_followup(
     except ImportError:
         pass
 
-    with db_module.db() as _conn:
-        _irow = _conn.execute(
-            "SELECT * FROM vantage_simulated_trades "
-            "WHERE status='open' AND tg_source IN (?,?) "
-            "ORDER BY open_time DESC LIMIT 1",
-            (channel_name, f"instant:{channel_name}"),
-        ).fetchone()
-        _instant = db_module.row_to_dict(_irow) if _irow else None
+    _irow = trade_repo.find_latest_instant_trade(channel_name)
+    _instant = db_module.row_to_dict(_irow) if _irow else None
     if not _instant or _instant.get("direction", "").upper() != direction.upper():
         return False
     await apply_followup_to_instant_trade(
@@ -338,12 +314,7 @@ async def ime_timeout_watchdog(tick: "Tick", bridge: Any) -> None:
     _TP_OFFSETS        = [3.0, 5.0, 7.0, 10.0, 14.0, 18.0]  # pts from entry
 
     now = time.time()
-    with db_module.db() as conn:
-        rows = conn.execute(
-            """SELECT * FROM vantage_simulated_trades
-               WHERE status='open' AND tp1 IS NULL AND open_time < ?""",
-            (now - _IME_TIMEOUT_SEC,),
-        ).fetchall()
+    rows = trade_repo.fetch_open_trades_missing_tp1(now - _IME_TIMEOUT_SEC)
 
     if not rows:
         return
@@ -405,14 +376,8 @@ async def ime_timeout_watchdog(tick: "Tick", bridge: Any) -> None:
             sl_moved_db = 1
 
         # ── Update DB ──────────────────────────────────────────────────────
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?,
-                       stop_loss=?, sl_moved_to_be=?
-                   WHERE trade_id=?""",
-                (*tp_vals[:6], new_sl, sl_moved_db, trade_id),
-            )
+        trade_repo.apply_followup_watchdog_levels(
+            trade_id, tuple(tp_vals[:6]), new_sl, sl_moved_db)
 
         # ── Update MT5 ─────────────────────────────────────────────────────
         if mt5_ticket:

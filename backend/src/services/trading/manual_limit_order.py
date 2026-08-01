@@ -27,6 +27,7 @@ import uuid
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
@@ -104,27 +105,15 @@ async def open_manual_limit_order(
     ticket = ack.get("ticket")
     now = time.time()
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,lot_size,notes,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, "Manual Limit Order", direction, entry_low, entry_high,
-             stop_loss, tps.get(1), tps.get(2), tps.get(3), tps.get(4), tps.get(5),
-             tps.get(6), tps.get(7), tps.get(8), lot,
-             notes or f"Manual limit order @ {price:.2f} (EA ticket {ticket})",
-             "pending", now),
-        )
-        conn.execute(
-            """INSERT INTO vantage_pending_orders
-               (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
-                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (trade_id, signal_id, None, "Manual", direction, price, stop_loss,
-             json.dumps(tps), json.dumps(pcts), be_at_pos, 0,
-             lot, ticket, "working", now, STRATEGY_LIMIT_RUNNER),
-        )
+    trade_repo.insert_pending_order_signal(
+        signal_id, "Manual Limit Order", direction, entry_low, entry_high,
+        stop_loss, tps, lot,
+        notes or f"Manual limit order @ {price:.2f} (EA ticket {ticket})",
+        now, None,
+        (trade_id, signal_id, None, "Manual", direction, price, stop_loss,
+         json.dumps(tps), json.dumps(pcts), be_at_pos, 0,
+         lot, ticket, "working", now, STRATEGY_LIMIT_RUNNER),
+    )
 
     _tg_text = (
         f"*Manual Limit Order Placed*\n"

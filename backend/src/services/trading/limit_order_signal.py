@@ -34,6 +34,7 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.utils.models import MAX_TP, STRATEGY_LIMIT_RUNNER
 
@@ -158,31 +159,15 @@ async def handle_limit_order_signal(
     ticket = ack.get("ticket")
     now = time.time()
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,lot_size,notes,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, f"Telegram Auto ({source_label})", direction, entry_low, entry_high,
-             stop_loss, tps.get(1), tps.get(2), tps.get(3), tps.get(4), tps.get(5),
-             tps.get(6), tps.get(7), tps.get(8), lot,
-             f"Limit Runner pending order @ {price:.2f} (EA ticket {ticket})",
-             "pending", now),
-        )
-        conn.execute(
-            "UPDATE vantage_tg_signals SET status='pending',signal_id=? WHERE tg_message_id=?",
-            (signal_id, tg_id),
-        )
-        conn.execute(
-            """INSERT INTO vantage_pending_orders
-               (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
-                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (trade_id, signal_id, tg_id, channel_name, direction, price, stop_loss,
-             json.dumps(tps), json.dumps(pcts), be_at_pos, int(tp_open), lot, ticket,
-             "working", now, STRATEGY_LIMIT_RUNNER),
-        )
+    trade_repo.insert_pending_order_signal(
+        signal_id, f"Telegram Auto ({source_label})", direction,
+        entry_low, entry_high, stop_loss, tps, lot,
+        f"Limit Runner pending order @ {price:.2f} (EA ticket {ticket})",
+        now, ("pending", tg_id),
+        (trade_id, signal_id, tg_id, channel_name, direction, price, stop_loss,
+         json.dumps(tps), json.dumps(pcts), be_at_pos, int(tp_open), lot, ticket,
+         "working", now, STRATEGY_LIMIT_RUNNER),
+    )
     log.info(
         "[LimitRunner] pending order placed tg_id=%s ticket=%s %s %.2f lots @ %.2f SL=%.2f tps=%s tp_open=%s",
         tg_id, ticket, direction, lot, price, stop_loss, tps, tp_open,
@@ -231,39 +216,21 @@ async def _open_realigned_market_order(
     fill_price = float(ack.get("fill_price", market_px))
     now = time.time()
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,lot_size,notes,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, f"Telegram Auto ({source_label})", direction, entry_low, entry_high,
-             realigned_sl, realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
-             realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
-             realigned_tps.get(7), realigned_tps.get(8), lot,
-             f"Limit Runner entry realigned — zone already breached, entered at "
-             f"market {fill_price:.2f} (was {original_price:.2f}), EA ticket {ticket}",
-             "active", now),
-        )
-        conn.execute(
-            "UPDATE vantage_tg_signals SET status='active',signal_id=? WHERE tg_message_id=?",
-            (signal_id, tg_id),
-        )
-        conn.execute(
-            """INSERT INTO vantage_simulated_trades
-               (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
-                lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                tg_source,managed_by,tp_open,order_type,pending_placed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (trade_id, signal_id, ticket, direction, entry_low, entry_high, fill_price,
-             lot, lot, realigned_sl,
-             realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
-             realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
-             realigned_tps.get(7), realigned_tps.get(8),
-             "open", now, 0.0, 0.0, 0.0, 0.0, STRATEGY_LIMIT_RUNNER,
-             channel_name, "ea", int(tp_open), "market", None),
-        )
+    trade_repo.insert_realigned_limit_entry(
+        signal_id, source_label, direction, entry_low, entry_high,
+        realigned_sl, realigned_tps, lot,
+        f"Limit Runner entry realigned — zone already breached, entered at "
+        f"market {fill_price:.2f} (was {original_price:.2f}), EA ticket {ticket}",
+        tg_id,
+        (trade_id, signal_id, ticket, direction, entry_low, entry_high, fill_price,
+         lot, lot, realigned_sl,
+         realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
+         realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
+         realigned_tps.get(7), realigned_tps.get(8),
+         "open", now, 0.0, 0.0, 0.0, 0.0, STRATEGY_LIMIT_RUNNER,
+         channel_name, "ea", int(tp_open), "market", None),
+        now,
+    )
     log.info(
         "[LimitRunner] entry realigned tg_id=%s ticket=%s %s %.2f lots @ %.2f "
         "(was %.2f, delta %+.2f) SL=%.2f tps=%s",

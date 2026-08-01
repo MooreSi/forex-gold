@@ -22,6 +22,7 @@ import uuid
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
@@ -125,18 +126,8 @@ async def open_manual_market_order(
 
     # Create a backing signal record so foreign-key references work
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,tp1,
-                lot_size,notes,status,created_at,activated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, "Manual Market Order",
-             direction, entry_px, entry_px, sl, take_profit,
-             final_lot,
-             "Manual market order placed from dashboard",
-             "active", time.time(), time.time()),
-        )
+    trade_repo.insert_manual_market_signal(
+        signal_id, direction, entry_px, sl, take_profit, final_lot, time.time())
 
     result = await open_trade(
         bridge,

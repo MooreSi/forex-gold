@@ -22,6 +22,7 @@ import uuid
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
@@ -84,19 +85,10 @@ async def process_instant_entry(
         is_stale = True
 
     _status = "instant_historical" if is_stale else "instant_pending"
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT OR IGNORE INTO vantage_tg_signals
-               (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (tg_id, group_id, channel_name, msg.get("sender_name", ""), msg_ts_str,
-             text, time.time(),
-             direction, None, None, None,
-             None, None, None, None, None, None, None, None,
-             _status),
-        )
+    trade_repo.insert_instant_tg_row(
+        tg_id, group_id, channel_name, msg.get("sender_name", ""), msg_ts_str,
+        text, time.time(), direction, _status,
+    )
 
     if is_stale:
         log.debug("[IME] Stale instant tg_id=%s — recorded only", tg_id)
@@ -226,25 +218,11 @@ async def process_instant_entry(
         _ime_max_loss = round(_IME_SL_DIST * lot * 100.0, 2)
 
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                lot_size,notes,status,created_at,activated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, f"Telegram Instant ({channel_name})",
-             direction, entry_px, entry_px, provisional_sl,
-             None, None, None, None, None, None, None, None,
-             lot,
-             f"Instant market entry — provisional SL ${provisional_sl:.2f} ({_IME_SL_DIST:.1f} pts = -${_ime_max_loss:.0f} max) — awaiting follow-up SL/TP (tg_id={tg_id})",
-             "active", time.time(), time.time()),
-        )
-        conn.execute(
-            "UPDATE vantage_tg_signals SET status='instant_activated', signal_id=?"
-            " WHERE tg_message_id=?",
-            (signal_id, tg_id),
-        )
+    trade_repo.insert_instant_signal(
+        signal_id, channel_name, direction, entry_px, provisional_sl, lot,
+        f"Instant market entry — provisional SL ${provisional_sl:.2f} ({_IME_SL_DIST:.1f} pts = -${_ime_max_loss:.0f} max) — awaiting follow-up SL/TP (tg_id={tg_id})",
+        time.time(), tg_id,
+    )
 
     try:
         from backend.src.utils import latency_trace as _lt_ime
@@ -298,14 +276,9 @@ async def process_instant_entry(
                 round(exec_price + _ime_sign * _ime_tp2_pt, 2)
                 if _ime_tp2_pt is not None else None
             )
-            with db_module.db() as conn:
-                conn.execute(
-                    """UPDATE vantage_simulated_trades
-                       SET stop_loss=?, tp1=?, tp2=?, tp3=NULL,
-                           tp4=NULL, tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
-                       WHERE trade_id=?""",
-                    (_ime_ex_sl, _ime_ex_tp1, _ime_ex_tp2, trade_result["trade_id"]),
-                )
+            trade_repo.set_trade_levels(
+                trade_result["trade_id"], _ime_ex_sl,
+                tp1=_ime_ex_tp1, tp2=_ime_ex_tp2)
             _ime_tkt = trade_result.get("mt5_ticket")
             if _ime_tkt:
                 try:
@@ -358,17 +331,10 @@ async def process_instant_entry(
                     round(exec_price + _ime_sign * off, 2)
                     for off in (5.0, 10.0, 14.0, 20.0, 27.0, 35.0)
                 ]
-                with db_module.db() as conn:
-                    conn.execute(
-                        """UPDATE vantage_simulated_trades
-                           SET stop_loss=?, tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?,
-                               tp7=NULL, tp8=NULL
-                           WHERE trade_id=?""",
-                        (exact_sl,
-                         ct_tps[0], ct_tps[1], ct_tps[2],
-                         ct_tps[3], ct_tps[4], ct_tps[5],
-                         trade_result["trade_id"]),
-                    )
+                trade_repo.set_trade_levels(
+                    trade_result["trade_id"], exact_sl,
+                    tp1=ct_tps[0], tp2=ct_tps[1], tp3=ct_tps[2],
+                    tp4=ct_tps[3], tp5=ct_tps[4], tp6=ct_tps[5])
                 _cot_mt5 = trade_result.get("mt5_ticket")
                 if _cot_mt5:
                     try:
@@ -401,10 +367,4 @@ async def process_instant_entry(
             log.info("[IME] Instant entry blocked: %s", exc)
         else:
             log.error("[IME] Instant entry failed: %s", exc)
-        with db_module.db() as conn:
-            conn.execute("DELETE FROM vantage_signals WHERE signal_id=?", (signal_id,))
-            conn.execute(
-                "UPDATE vantage_tg_signals SET status='instant_failed'"
-                " WHERE tg_message_id=?",
-                (tg_id,),
-            )
+        trade_repo.delete_failed_instant_signal(signal_id, tg_id)

@@ -33,6 +33,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.trading.fees_sizing import pnl as _pnl
 from backend.src.services.risk.governor import rg_apply_halts_on_close
 from backend.src.services.dpm.bookkeeping import finalize_dpm_record
@@ -79,19 +80,13 @@ async def get_trading_balance(bridge: Any, starting_balance: float) -> float:
             return float(mt5_acc["balance"])
     except Exception:
         pass
-    with db_module.db() as conn:
-        acc = db_module.row_to_dict(
-            conn.execute("SELECT * FROM vantage_simulation_account WHERE id=1").fetchone()
-        )
+    acc = trade_repo.get_simulation_account()
     return float(acc.get("balance") or starting_balance)
 
 
 async def close_trade(trade_id: str, reason: str, ctx: CloseTradeContext) -> dict:
     tick = await ctx.bridge.get_tick()
-    with db_module.db() as conn:
-        row = db_module.row_to_dict(
-            conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)).fetchone()
-        )
+    row = trade_repo.get_trade(trade_id)
     if not row or row["status"] != "open":
         raise ValueError(f"Trade {trade_id} is not open")
 
@@ -139,12 +134,7 @@ async def close_trade(trade_id: str, reason: str, ctx: CloseTradeContext) -> dic
 
 
 async def record_close(trade_id: str, close_price: float, reason: str, ctx: CloseTradeContext) -> dict:
-    def _fetch_row():
-        with db_module.db() as conn:
-            return db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)).fetchone()
-            )
-    row = await db_module.to_db_thread(_fetch_row)
+    row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
     direction   = row["direction"]
     remaining   = float(row["remaining_lots"])
     entry_price = float(row["entry_price"])
@@ -154,26 +144,12 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
     prev_net_pnl  = float(row.get("net_pnl", 0))
     now = time.time()
 
-    def _apply_close():
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET status=?,close_time=?,close_price=?,exit_reason=?,
-                       gross_pnl=?,realised_pnl=?,swap_est=?,net_pnl=?,remaining_lots=0
-                   WHERE trade_id=?""",
-                ("closed", now, round(close_price, 2), reason,
-                 round(gross_pnl, 4), round(prev_realised + gross_pnl, 4),
-                 0.0, round(prev_net_pnl + net_pnl, 4), trade_id),
-            )
-            conn.execute(
-                "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                (net_pnl,),
-            )
-            conn.execute(
-                "UPDATE vantage_signals SET status='closed' WHERE signal_id=?",
-                (row["signal_id"],),
-            )
-    await db_module.to_db_thread(_apply_close)
+    await db_module.to_db_thread(
+        trade_repo.apply_full_close,
+        trade_id, now, round(close_price, 2), reason,
+        round(gross_pnl, 4), round(prev_realised + gross_pnl, 4),
+        round(prev_net_pnl + net_pnl, 4), net_pnl, row["signal_id"],
+    )
     if gross_pnl > 0 and ctx.on_profit:
         ctx.on_profit()
 
@@ -328,32 +304,12 @@ async def close_all_ladder_legs(
         last_price = close_price
         closed_any = True
 
-    def _apply():
-        with db_module.db() as conn:
-            if closed_any:
-                conn.execute(
-                    "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,"
-                    "close_price,pnl,reason) VALUES (?,?,?,?,?,?)",
-                    (trade_id, time.time(),
-                     sum(float(l["lots"]) for l in legs if l["status"] == "open"),
-                     last_price, total_pnl, reason),
-                )
-                conn.execute(
-                    "UPDATE vantage_simulation_account SET balance=balance+? WHERE id=1",
-                    (total_pnl,),
-                )
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET status='closed',close_time=?,close_price=?,exit_reason=?,
-                       realised_pnl=realised_pnl+?,net_pnl=net_pnl+?,remaining_lots=0
-                   WHERE trade_id=?""",
-                (time.time(), round(last_price, 2), reason, total_pnl, total_pnl, trade_id),
-            )
-            conn.execute(
-                "UPDATE vantage_signals SET status='closed' WHERE signal_id=?",
-                (row["signal_id"],),
-            )
-    await db_module.to_db_thread(_apply)
+    await db_module.to_db_thread(
+        trade_repo.apply_ladder_close,
+        trade_id, closed_any,
+        sum(float(l["lots"]) for l in legs if l["status"] == "open"),
+        last_price, total_pnl, reason, row["signal_id"], time.time(),
+    )
 
     result = {
         "trade_id":    trade_id,

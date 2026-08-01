@@ -142,7 +142,11 @@ def test_reset_simulation_is_atomic_via_existing_single_with_block(fresh_db):
             yield _FailingConn(real_conn)
 
     engine = _FakeEngine(starting_balance=1000.0)
-    with patch.object(SimulationEngine.reset_simulation.__globals__["db_module"], "db", _wrapped_db):
+    # The write set moved into trade_repo.reset_simulation_data (M1 SQL sweep),
+    # which reaches the database through its own `transaction` binding -- the
+    # patch target follows the SQL. Same forced-failure proof, same property.
+    from backend.src.services.trading import trade_repo as _tr
+    with patch.object(_tr, "transaction", _wrapped_db):
         with pytest.raises(RuntimeError):
             SimulationEngine.reset_simulation(engine)
 

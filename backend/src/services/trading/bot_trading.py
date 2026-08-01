@@ -24,6 +24,7 @@ from typing import Any
 
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.db import database as db_module
+from backend.src.services.trading import trade_repo
 from backend.src.services.notifications import email_service
 from backend.src.services.trading.close_trade import CloseTradeContext, close_trade, get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
@@ -39,10 +40,7 @@ log = logging.getLogger(__name__)
 
 
 async def cmd_activate(args: list, bridge: Any, starting_balance: float = 1000.0) -> str:
-    with db_module.db() as conn:
-        tg_sig = db_module.row_to_dict(conn.execute(
-            "SELECT * FROM vantage_tg_signals WHERE status='new' ORDER BY parsed_at DESC LIMIT 1"
-        ).fetchone())
+    tg_sig = trade_repo.fetch_newest_unactivated_tg_signal()
     if not tg_sig:
         return "No pending signals to activate."
 
@@ -58,23 +56,7 @@ async def cmd_activate(args: list, bridge: Any, starting_balance: float = 1000.0
     rs        = db_module.get_risk_settings()
     strategy  = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
     signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,notes,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, "Telegram Bot", tg_sig["direction"],
-             tg_sig["entry_low"], tg_sig["entry_high"], tg_sig["stop_loss"],
-             tg_sig["tp1"], tg_sig["tp2"], tg_sig["tp3"], tg_sig["tp4"], tg_sig["tp5"],
-             tg_sig.get("tp6"), tg_sig.get("tp7"), tg_sig.get("tp8"),
-             f"Bot-activated from Telegram {tg_sig['tg_message_id']}",
-             "active", time.time()),
-        )
-        conn.execute(
-            "UPDATE vantage_tg_signals SET status='activated',signal_id=? WHERE tg_message_id=?",
-            (signal_id, tg_sig["tg_message_id"]),
-        )
+    trade_repo.insert_bot_signal(signal_id, tg_sig, time.time())
 
     tick = await bridge.get_tick()
     if not tick:
@@ -86,11 +68,7 @@ async def cmd_activate(args: list, bridge: Any, starting_balance: float = 1000.0
     if not price_in_entry_range(_dir, _el, _eh, tick):
         cur_px = tick.ask if _dir == "BUY" else tick.bid
         _side  = "above" if _dir == "BUY" else "below"
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_signals SET status='pending' WHERE signal_id=?",
-                (signal_id,),
-            )
+        trade_repo.park_signal_pending(signal_id)
         return (
             f"Signal saved as pending — {_dir} price ${cur_px:.2f} is {_side} "
             f"the entry zone ${_el:.2f}–${_eh:.2f}. "
@@ -135,15 +113,7 @@ async def cmd_report(args: list, bridge: Any, cfg: dict) -> str:
     day_cutoff = datetime.now().replace(
         hour=0, minute=0, second=0, microsecond=0
     ).timestamp()
-    with db_module.db() as conn:
-        closed_today = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades "
-                "WHERE status='closed' AND close_time>? ORDER BY close_time DESC",
-                (day_cutoff,),
-            ).fetchall()
-        ]
+    closed_today = trade_repo.fetch_closed_trades_since(day_cutoff)
 
     today_str   = datetime.now().strftime("%A, %d %B %Y")
     _balance    = float(perf.get("balance", 0) or 0)

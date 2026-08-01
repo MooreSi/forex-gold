@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.positions.tp_tracking import TPCache, get_triggered_tps
 from backend.src.utils.models import MAX_TP, Tick
@@ -57,13 +58,7 @@ async def handle_trail_stop(trade: dict, tick: Tick, bridge: Any, tp_cache: TPCa
     # also check the DB directly to avoid a one-cycle miss on first activation.
     trailing_active = bool(trade.get("sl_moved_to_be"))
     if not trailing_active:
-        def _fetch_be_flag():
-            with db_module.db() as conn:
-                return conn.execute(
-                    "SELECT sl_moved_to_be FROM vantage_simulated_trades WHERE trade_id=?",
-                    (trade_id,)
-                ).fetchone()
-        row = await db_module.to_db_thread(_fetch_be_flag)
+        row = await db_module.to_db_thread(positions_repo.fetch_be_flag, trade_id)
         if row and row[0]:
             trailing_active = True
 
@@ -86,18 +81,10 @@ async def handle_trail_stop(trade: dict, tick: Tick, bridge: Any, tp_cache: TPCa
     if not trailing_active:
         new_sl = entry_price          # risk-free from this tick onward
         should_update = True          # always write on first activation
-        def _apply_activation():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET sl_moved_to_be=1 WHERE trade_id=?",
-                    (trade_id,),
-                )
-                conn.execute(
-                    "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                    " VALUES (?,?,?,?,?,?)",
-                    (trade_id, time.time(), 0.0, float(tp1 or entry_price), 0.0, "TP1_TRAIL_START"),
-                )
-        await db_module.to_db_thread(_apply_activation)
+        await db_module.to_db_thread(
+            positions_repo.mark_trailing_started,
+            trade_id, time.time(), float(tp1 or entry_price),
+        )
         log.info("[trail_stop] %s TP1 cleared — SL locked at entry %.2f (trail_dist=%.2f)",
                  trade_id[:8], entry_price, trail_dist)
         asyncio.create_task(telegram_alerts.send_message(
@@ -120,13 +107,7 @@ async def handle_trail_stop(trade: dict, tick: Tick, bridge: Any, tp_cache: TPCa
     if should_update:
         if mt5_ticket:
             await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-        def _apply_sl():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                    (new_sl, trade_id),
-                )
-        await db_module.to_db_thread(_apply_sl)
+        await db_module.to_db_thread(positions_repo.set_stop_loss, trade_id, new_sl)
         log.debug("[trail_stop] %s SL → %.2f (bid=%.2f)", trade_id[:8], new_sl, tick.bid)
 
     # ── Record TP2-TP5 markers so UI chips reflect price path ─────────────
@@ -145,12 +126,8 @@ async def handle_trail_stop(trade: dict, tick: Tick, bridge: Any, tp_cache: TPCa
         tp_hit = (direction == "BUY"  and tick.bid >= tp_val_f) or \
                  (direction == "SELL" and tick.ask <= tp_val_f)
         if tp_hit:
-            def _mark_tp(tp_num=tp_num, tp_val_f=tp_val_f):
-                with db_module.db() as conn:
-                    conn.execute(
-                        "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                        " VALUES (?,?,?,?,?,?)",
-                        (trade_id, time.time(), 0.0, tp_val_f, 0.0, f"TP{tp_num}_TRAIL_MARKER"),
-                    )
-            await db_module.to_db_thread(_mark_tp)
+            await db_module.to_db_thread(
+                positions_repo.insert_tp_marker,
+                trade_id, time.time(), tp_val_f, f"TP{tp_num}_TRAIL_MARKER",
+            )
             log.info("[trail_stop] %s TP%d marked at %.2f (trailing)", trade_id[:8], tp_num, tp_val_f)

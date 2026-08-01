@@ -21,6 +21,7 @@ import logging
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import CloseTradeContext, record_close
 from backend.src.services.trading.fees_sizing import pnl as _pnl
@@ -151,13 +152,8 @@ async def reclaim_ea_managed_trade(trade: dict, strategy: str) -> bool:
         trade["trade_id"][:8], trade.get("mt5_ticket"),
     )
 
-    def _reclaim(tid=trade["trade_id"]):
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET managed_by='python' WHERE trade_id=?",
-                (tid,),
-            )
-    await db_module.to_db_thread(_reclaim)
+    await db_module.to_db_thread(
+        positions_repo.reclaim_management, trade["trade_id"])
     asyncio.create_task(telegram_alerts.send_message(
         f"*EA Bridge Lost*\n"
         f"Ticket {trade.get('mt5_ticket')} ({strategy}) was being "

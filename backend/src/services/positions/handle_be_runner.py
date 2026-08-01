@@ -20,6 +20,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.positions.handle_scale_out import handle_scale_out
@@ -81,18 +82,10 @@ async def handle_be_runner(
     if mt5_ticket:
         await bridge.modify_order(int(mt5_ticket), sl=target_sl, tp=None)
     trigger_tp_num = tp_vals[best_step - 1][0]
-    def _apply():
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1 WHERE trade_id=?",
-                (target_sl, trade_id),
-            )
-            conn.execute(
-                "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                " VALUES (?,?,?,?,?,?)",
-                (trade_id, time.time(), 0.0, target_sl, 0.0, f"TP{best_step}_SL_LOCKED"),
-            )
-    await db_module.to_db_thread(_apply)
+    await db_module.to_db_thread(
+        positions_repo.lock_sl_with_marker,
+        trade_id, target_sl, time.time(), target_sl, f"TP{best_step}_SL_LOCKED",
+    )
     asyncio.create_task(telegram_alerts.send_message(
         telegram_alerts.fmt_sl_moved(trade, trigger_tp_num, target_sl),
         trade_id, "sl_moved",

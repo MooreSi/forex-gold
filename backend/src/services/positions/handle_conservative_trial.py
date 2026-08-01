@@ -27,6 +27,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.risk.strategy_params import get_strategy_params
@@ -129,14 +130,8 @@ async def handle_conservative_trial(
                 await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
             except Exception as _e:
                 log.warning("[conservative_trial] modify_order failed (%s): %s", reason_tag, _e)
-        def _apply_ct_sl():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET stop_loss=?, sl_moved_to_be=1 "
-                    "WHERE trade_id=?",
-                    (new_sl, trade_id),
-                )
-        await db_module.to_db_thread(_apply_ct_sl)
+        await db_module.to_db_thread(
+            positions_repo.set_stop_loss_be, trade_id, new_sl)
         asyncio.create_task(telegram_alerts.send_message(
             telegram_alerts.fmt_sl_moved(trade, tp_num, new_sl),
             trade_id, f"sl_moved_{reason_tag}",

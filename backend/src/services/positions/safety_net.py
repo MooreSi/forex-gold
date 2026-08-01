@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import STRATEGY_BE_RUNNER, STRATEGY_REVERSAL_RUNNER, STRATEGY_SCALP_RUNNER
@@ -177,11 +178,7 @@ async def tp_safety_net_check_trade(trade: dict, now: float, bridge: Any, last_a
                 ))
             return  # don't mark protected if the broker-side move failed
 
-    with db_module.db() as conn:
-        conn.execute(
-            "UPDATE vantage_simulated_trades SET stop_loss=?, sl_moved_to_be=1 WHERE trade_id=?",
-            (be_price, trade["trade_id"]),
-        )
+    positions_repo.set_stop_loss_be(trade["trade_id"], be_price)
     log.warning(
         "[TP-SafetyNet] ticket=%s reached %s (extreme=%.2f) but was never protected by "
         "the live loop — SL moved to breakeven+cost %.2f",

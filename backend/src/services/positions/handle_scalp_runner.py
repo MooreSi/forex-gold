@@ -25,6 +25,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.positions.tp_tracking import (
@@ -145,14 +146,8 @@ async def handle_scalp_runner(
             if should_move:
                 if mt5_ticket:
                     await bridge.modify_order(int(mt5_ticket), sl=entry_price, tp=None)
-                def _apply_be_sl():
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "UPDATE vantage_simulated_trades "
-                            "SET stop_loss=?, sl_moved_to_be=1 WHERE trade_id=?",
-                            (entry_price, trade_id),
-                        )
-                await db_module.to_db_thread(_apply_be_sl)
+                await db_module.to_db_thread(
+                    positions_repo.set_stop_loss_be, trade_id, entry_price)
                 asyncio.create_task(telegram_alerts.send_message(
                     telegram_alerts.fmt_sl_moved(trade, 2, entry_price),
                     trade_id, "sl_moved_be",
@@ -175,12 +170,6 @@ async def handle_scalp_runner(
     if should_update:
         if mt5_ticket:
             await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-        def _apply_trail_sl():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                    (new_sl, trade_id),
-                )
-        await db_module.to_db_thread(_apply_trail_sl)
+        await db_module.to_db_thread(positions_repo.set_stop_loss, trade_id, new_sl)
         log.debug("[scalp_runner] %s trail SL → %.2f (bid=%.2f)",
                   trade_id[:8], new_sl, tick.bid)

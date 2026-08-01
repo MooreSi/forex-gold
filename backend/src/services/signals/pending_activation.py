@@ -31,6 +31,8 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.signals import repo as signals_repo
+from backend.src.services.signals import tg_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.open_from_signal import open_trade_from_signal
 from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range
@@ -77,28 +79,7 @@ async def try_activate_pending_signals(
     just because no trade happens to be open yet (see _monitor_loop).
     """
     now = time.time()
-    with db_module.db() as conn:
-        pending = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                # Excludes any signal with a currently-resting genuine EA
-                # pending order (Limit Runner / ORB auto-execute) -- without
-                # this, the moment price re-enters the same entry zone that
-                # order is watching, this generic market-fill watcher would
-                # race it and open a SECOND, duplicate trade before the real
-                # pending order has even filled. Once that order resolves
-                # (filled or cancelled), vantage_pending_orders.status stops
-                # being 'working' and/or vantage_signals.status itself moves
-                # off 'pending' (see ea_bridge._on_pending_order_filled/
-                # _on_pending_order_cancelled), so this exclusion is only
-                # ever load-bearing during that narrow placed-but-not-yet-
-                # resolved window.
-                "SELECT * FROM vantage_signals WHERE status='pending' "
-                "AND signal_id NOT IN ("
-                "  SELECT signal_id FROM vantage_pending_orders WHERE status='working'"
-                ") ORDER BY created_at ASC"
-            ).fetchall()
-        ]
+    pending = signals_repo.get_pending_signals_awaiting_zone_fill()
     if not pending:
         return False
 
@@ -139,11 +120,7 @@ async def try_activate_pending_signals(
             _expiry = _EXPIRY
         age = now - float(sig.get("created_at") or now)
         if age > _expiry:
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_signals SET status='expired' WHERE signal_id=?",
-                    (sig["signal_id"],),
-                )
+            signals_repo.expire_signal(sig["signal_id"])
             log.info("[PendingWatcher] Signal %s expired — no zone fill after %.0fs",
                      sig["signal_id"][:8], age)
             if _is_orb_src:
@@ -207,18 +184,9 @@ async def try_activate_pending_signals(
 
         # Guard: if _execute_live already opened a trade for this signal,
         # don't open a second one — just mark it activated and skip.
-        with db_module.db() as conn:
-            _existing = conn.execute(
-                "SELECT trade_id FROM vantage_simulated_trades "
-                "WHERE signal_id=? AND status IN ('open','pending')",
-                (sig["signal_id"],),
-            ).fetchone()
+        _existing = signals_repo.find_open_trade_for_signal(sig["signal_id"])
         if _existing:
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_signals SET status='activated' WHERE signal_id=?",
-                    (sig["signal_id"],),
-                )
+            signals_repo.mark_signal_activated(sig["signal_id"])
             log.info(
                 "[PendingWatcher] Signal %s already has an open trade (%s) — skipping duplicate activation",
                 sig["signal_id"][:8], _existing[0][:8],
@@ -260,12 +228,7 @@ async def try_activate_pending_signals(
             )
             open_count += 1
             # Flip the TG signal row from 'pending' → 'activated' so the UI updates
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_tg_signals SET status='activated'"
-                    " WHERE signal_id=? AND status='pending'",
-                    (sig["signal_id"],),
-                )
+            tg_repo.activate_pending_tg_signal(sig["signal_id"])
             asyncio.create_task(telegram_alerts.send_message(
                 (
                     f"*Zone fill activated*\n"

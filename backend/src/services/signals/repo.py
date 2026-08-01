@@ -89,3 +89,87 @@ def cancel_signal(signal_id: str) -> None:
             "UPDATE vantage_signals SET status='cancelled', cancelled_at=? WHERE signal_id=?",
             (time.time(), signal_id),
         )
+
+
+# ── Reads/writes collected from the scan/activation paths (M1 SQL sweep) ─────
+# Verbatim statements; the callers run them from the same places in the same
+# order they always did.
+
+def get_signal(signal_id: str) -> dict:
+    with db_module.db() as conn:
+        return db_module.row_to_dict(
+            conn.execute("SELECT * FROM vantage_signals WHERE signal_id=?", (signal_id,)).fetchone()
+        )
+
+
+def get_pending_signals_awaiting_zone_fill() -> list[dict]:
+    """Pending signals with no genuine EA pending order currently resting.
+
+    Excludes any signal with a 'working' row in vantage_pending_orders --
+    without this, the moment price re-enters the same entry zone that order
+    is watching, the generic market-fill watcher would race it and open a
+    SECOND, duplicate trade before the real pending order has even filled.
+    Once that order resolves, vantage_pending_orders.status stops being
+    'working' and/or vantage_signals.status moves off 'pending', so the
+    exclusion is only load-bearing during that narrow window.
+    """
+    with db_module.db() as conn:
+        return [
+            db_module.row_to_dict(r)
+            for r in conn.execute(
+                "SELECT * FROM vantage_signals WHERE status='pending' "
+                "AND signal_id NOT IN ("
+                "  SELECT signal_id FROM vantage_pending_orders WHERE status='working'"
+                ") ORDER BY created_at ASC"
+            ).fetchall()
+        ]
+
+
+def expire_signal(signal_id: str) -> None:
+    with db_module.db() as conn:
+        conn.execute(
+            "UPDATE vantage_signals SET status='expired' WHERE signal_id=?",
+            (signal_id,),
+        )
+
+
+def mark_signal_activated(signal_id: str) -> None:
+    with db_module.db() as conn:
+        conn.execute(
+            "UPDATE vantage_signals SET status='activated' WHERE signal_id=?",
+            (signal_id,),
+        )
+
+
+def find_open_trade_for_signal(signal_id: str):
+    """The duplicate-activation guard: any open/pending trade for this signal."""
+    with db_module.db() as conn:
+        return conn.execute(
+            "SELECT trade_id FROM vantage_simulated_trades "
+            "WHERE signal_id=? AND status IN ('open','pending')",
+            (signal_id,),
+        ).fetchone()
+
+
+def find_latest_open_trade_for_source(channel_name: str) -> Optional[dict]:
+    """Most recent open trade attributed to a channel (direct or instant)."""
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT * FROM vantage_simulated_trades "
+            "WHERE status='open' AND tg_source IN (?,?) "
+            "ORDER BY open_time DESC LIMIT 1",
+            (channel_name, f"instant:{channel_name}"),
+        ).fetchone()
+        return db_module.row_to_dict(row) if row else None
+
+
+def template_trade_open_for(channel_name: str, direction: str,
+                            strategy_like: str) -> bool:
+    """Sig Guard's question: is a template-managed trade already open here?"""
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM vantage_simulated_trades WHERE status='open' "
+            "AND tg_source=? AND direction=? AND strategy LIKE ? LIMIT 1",
+            (channel_name, direction, strategy_like),
+        ).fetchone()
+    return row is not None

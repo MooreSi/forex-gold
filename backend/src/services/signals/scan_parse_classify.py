@@ -21,6 +21,8 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.signals import repo as signals_repo
+from backend.src.services.signals import tg_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.telegram.keyword_triggers import should_skip_ai_fallback_for_no_signal_candidate
 from backend.src.services.signals.parser import (
@@ -111,32 +113,12 @@ async def classify_and_parse(
             import re
             _dir_m = re.search(r'\bDirection\s+(BUY|SELL)\b', text, re.IGNORECASE)
             _dir = _dir_m.group(1).upper() if _dir_m else None
-            _was_new = False
             _dup_found = False
-            with db_module.db() as conn:
-                _cur = conn.execute(
-                    """INSERT OR IGNORE INTO vantage_tg_signals
-                       (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                        direction,entry_low,entry_high,stop_loss,
-                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (tg_id, group_id, channel_name,
-                     msg.get("sender_name", ""), msg_ts_str,
-                     text, time.time(),
-                     _dir, None, None, None,
-                     None, None, None, None, None, None, None, None,
-                     "unsupported_currency"),
-                )
-                _was_new = _cur.rowcount > 0
-                if _was_new:
-                    _recent_rows = conn.execute(
-                        """SELECT raw_text FROM vantage_tg_signals
-                           WHERE group_id=? AND status='unsupported_currency'
-                           AND direction=? AND tg_message_id!=? AND parsed_at>?""",
-                        (group_id, _dir, tg_id, time.time() - _RECENT_DUP_WINDOW),
-                    ).fetchall()
-                else:
-                    _recent_rows = []
+            _was_new, _recent_rows = tg_repo.record_unsupported_currency(
+                tg_id, group_id, channel_name,
+                msg.get("sender_name", ""), msg_ts_str, text,
+                _dir, _RECENT_DUP_WINDOW,
+            )
             _norm_currency = currency.replace("/", "").replace("-", "")
             for (_prior_text,) in _recent_rows:
                 _prior_cm = _CURRENCY_RE.search(_prior_text or "")
@@ -177,21 +159,10 @@ async def classify_and_parse(
             _partial = parse_gd2_partial(text)
             if _partial:
                 msg_ts_str = msg.get("timestamp") or ""
-                with db_module.db() as conn:
-                    conn.execute(
-                        """INSERT OR IGNORE INTO vantage_tg_signals
-                           (tg_message_id,group_id,group_name,sender_name,message_ts,
-                            raw_text,parsed_at,direction,entry_low,entry_high,
-                            stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (tg_id, group_id, channel_name,
-                         msg.get("sender_name", ""), msg_ts_str,
-                         text, time.time(),
-                         _partial["direction"],
-                         _partial["entry_low"], _partial["entry_high"],
-                         None, None, None, None, None, None, None, None, None,
-                         "pending_followup"),
-                    )
+                tg_repo.insert_tg_signal_if_new(
+                    tg_id, group_id, channel_name, msg.get("sender_name", ""),
+                    msg_ts_str, text, _partial, "pending_followup",
+                )
                 log.info(
                     "[%s] Partial GD2 tg_id=%s %s entry %s-%s — awaiting SL/TP edit",
                     channel_name, tg_id, _partial["direction"],
@@ -225,21 +196,10 @@ async def classify_and_parse(
                 _partial = parse_gd2_partial(text)
                 if _partial:
                     msg_ts_str = msg.get("timestamp") or ""
-                    with db_module.db() as conn:
-                        conn.execute(
-                            """INSERT OR IGNORE INTO vantage_tg_signals
-                               (tg_message_id,group_id,group_name,sender_name,message_ts,
-                                raw_text,parsed_at,direction,entry_low,entry_high,
-                                stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                            (tg_id, group_id, channel_name,
-                             msg.get("sender_name", ""), msg_ts_str,
-                             text, time.time(),
-                             _partial["direction"],
-                             _partial["entry_low"], _partial["entry_high"],
-                             None, None, None, None, None, None, None, None, None,
-                             "pending_followup"),
-                        )
+                    tg_repo.insert_tg_signal_if_new(
+                        tg_id, group_id, channel_name, msg.get("sender_name", ""),
+                        msg_ts_str, text, _partial, "pending_followup",
+                    )
                     log.info(
                         "[%s] Partial GD2 tg_id=%s %s entry %s-%s — awaiting SL/TP edit",
                         channel_name, tg_id, _partial["direction"],

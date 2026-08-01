@@ -21,6 +21,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.signals import tg_repo
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.channels import strategy_ai as channel_strategy_ai
@@ -61,22 +62,10 @@ async def record_staleness_or_new(
     is_stale = msg_age_secs is None or msg_age_secs > _MAX_SIGNAL_AGE_SECS
 
     if is_stale:
-        with db_module.db() as conn:
-            _cur = conn.execute(
-                """INSERT OR IGNORE INTO vantage_tg_signals
-                   (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                    direction,entry_low,entry_high,stop_loss,
-                    tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (tg_id, group_id, channel_name, msg.get("sender_name", ""), msg_ts_str,
-                 msg.get("text") or "", time.time(),
-                 parsed["direction"], parsed["entry_low"], parsed["entry_high"],
-                 parsed["stop_loss"],
-                 parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-                 parsed["tp6"], parsed["tp7"], parsed["tp8"],
-                 "historical"),
-            )
-            _was_new = _cur.rowcount > 0
+        _was_new = tg_repo.insert_tg_signal_if_new(
+            tg_id, group_id, channel_name, msg.get("sender_name", ""),
+            msg_ts_str, msg.get("text") or "", parsed, "historical",
+        )
         age_hrs = (msg_age_secs or 0) / 3600
         log.info("[%s] Stale signal tg_id=%s age=%.1fh — recorded only",
                  source_label, tg_id, age_hrs)
@@ -92,19 +81,10 @@ async def record_staleness_or_new(
             )
         return False
 
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT OR IGNORE INTO vantage_tg_signals
-               (tg_message_id,group_id,group_name,sender_name,message_ts,raw_text,parsed_at,
-                direction,entry_low,entry_high,stop_loss,
-                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (tg_id, group_id, channel_name, msg.get("sender_name", ""), msg_ts_str,
-             msg.get("text") or "", time.time(),
-             parsed["direction"], parsed["entry_low"], parsed["entry_high"], parsed["stop_loss"],
-             parsed["tp1"], parsed["tp2"], parsed["tp3"], parsed["tp4"], parsed["tp5"],
-             parsed["tp6"], parsed["tp7"], parsed["tp8"], "new"),
-        )
+    tg_repo.insert_tg_signal_if_new(
+        tg_id, group_id, channel_name, msg.get("sender_name", ""),
+        msg_ts_str, msg.get("text") or "", parsed, "new",
+    )
     log.info("[%s] New signal tg_id=%s %s entry %s-%s SL %s",
              source_label, tg_id, parsed["direction"],
              parsed["entry_low"], parsed["entry_high"], parsed["stop_loss"])

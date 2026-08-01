@@ -22,6 +22,8 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.signals import repo as signals_repo
+from backend.src.services.signals import tg_repo
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
@@ -92,13 +94,9 @@ def _adaptive_final_tp_dist(sig: dict, entry_mid: float, is_buy: bool) -> float:
 def _sig_guard_blocks(channel_name: str, direction: str) -> bool:
     """True if a template-managed trade is already open for this channel +
     direction -- Sig Guard blocks a new one from opening alongside it."""
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM vantage_simulated_trades WHERE status='open' "
-            "AND tg_source=? AND direction=? AND strategy LIKE ? LIMIT 1",
-            (channel_name, direction.upper(), f"{ea_templates.TEMPLATE_OVERRIDE_PREFIX}%"),
-        ).fetchone()
-    return row is not None
+    return signals_repo.template_trade_open_for(
+        channel_name, direction.upper(),
+        f"{ea_templates.TEMPLATE_OVERRIDE_PREFIX}%")
 
 
 async def resolve_open_trade_params(
@@ -113,10 +111,7 @@ async def resolve_open_trade_params(
     """Resolve a pending/active signal into everything open_trade() needs.
     Returns {sig, strategy, lot_size, stop_loss_to_use, tick}. Raises
     ValueError/RuntimeError on any gate failure, exactly as the original."""
-    with db_module.db() as conn:
-        sig = db_module.row_to_dict(
-            conn.execute("SELECT * FROM vantage_signals WHERE signal_id=?", (signal_id,)).fetchone()
-        )
+    sig = signals_repo.get_signal(signal_id)
     if not sig:
         raise ValueError(f"Signal {signal_id} not found")
     if sig["status"] not in ("pending", "active"):

@@ -29,6 +29,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.positions.tp_tracking import (
@@ -148,14 +149,10 @@ async def handle_no_sl_scale(
             log.warning("[no_sl_scale] TP%d (close-all) failed: %s", tp_num, exc)
 
     async def _mark_skipped(tp_num: int, tp_val: float) -> None:
-        def _apply():
-            with db_module.db() as conn:
-                conn.execute(
-                    "INSERT INTO vantage_partial_closes "
-                    "(trade_id,ts,lots_closed,close_price,pnl,reason) VALUES (?,?,?,?,?,?)",
-                    (trade_id, time.time(), 0.0, tp_val, 0.0, f"TP{tp_num}_SKIPPED"),
-                )
-        await db_module.to_db_thread(_apply)
+        await db_module.to_db_thread(
+            positions_repo.insert_tp_marker,
+            trade_id, time.time(), tp_val, f"TP{tp_num}_SKIPPED",
+        )
         triggered.add(tp_num)
 
     async def _move_sl(tp_num: int, new_sl: float, label: str) -> None:
@@ -165,13 +162,7 @@ async def handle_no_sl_scale(
             return
         if mt5_ticket:
             await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-        def _apply():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                    (new_sl, trade_id),
-                )
-        await db_module.to_db_thread(_apply)
+        await db_module.to_db_thread(positions_repo.set_stop_loss, trade_id, new_sl)
         asyncio.create_task(telegram_alerts.send_message(
             telegram_alerts.fmt_sl_moved(trade, tp_num, new_sl),
             trade_id, label,

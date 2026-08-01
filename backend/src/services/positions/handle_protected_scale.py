@@ -22,6 +22,7 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.risk.strategy_params import get_strategy_params
@@ -52,14 +53,10 @@ async def handle_protected_scale(
             (direction == "BUY"  and tp1_vf > entry_price and tick.bid >= tp1_vf) or
             (direction == "SELL" and tp1_vf < entry_price and tick.ask <= tp1_vf)
         ):
-            def _mark_tp1_skipped():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                        " VALUES (?,?,?,?,?,?)",
-                        (trade_id, time.time(), 0.0, tp1_vf, 0.0, "TP1_SKIPPED"),
-                    )
-            await db_module.to_db_thread(_mark_tp1_skipped)
+            await db_module.to_db_thread(
+                positions_repo.insert_tp_marker,
+                trade_id, time.time(), tp1_vf, "TP1_SKIPPED",
+            )
             triggered.add(1)
 
     if 2 not in triggered:
@@ -69,27 +66,18 @@ async def handle_protected_scale(
             (direction == "BUY"  and tp2_vf > entry_price and tick.bid >= tp2_vf) or
             (direction == "SELL" and tp2_vf < entry_price and tick.ask <= tp2_vf)
         ):
-            def _mark_tp2_be():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                        " VALUES (?,?,?,?,?,?)",
-                        (trade_id, time.time(), 0.0, tp2_vf, 0.0, "TP2_BE_LOCKED"),
-                    )
-            await db_module.to_db_thread(_mark_tp2_be)
+            await db_module.to_db_thread(
+                positions_repo.insert_tp_marker,
+                trade_id, time.time(), tp2_vf, "TP2_BE_LOCKED",
+            )
             triggered.add(2)
             should_update = (direction == "BUY" and entry_price > current_sl) or \
                             (direction == "SELL" and entry_price < current_sl)
             if should_update:
                 if mt5_ticket:
                     await bridge.modify_order(int(mt5_ticket), sl=entry_price, tp=None)
-                def _apply_be_sl():
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1 WHERE trade_id=?",
-                            (entry_price, trade_id),
-                        )
-                await db_module.to_db_thread(_apply_be_sl)
+                await db_module.to_db_thread(
+                    positions_repo.set_stop_loss_be, trade_id, entry_price)
                 asyncio.create_task(telegram_alerts.send_message(
                     telegram_alerts.fmt_sl_moved(trade, 2, entry_price),
                     trade_id, "sl_moved_be",

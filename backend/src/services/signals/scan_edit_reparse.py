@@ -26,6 +26,8 @@ import time
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.signals import repo as signals_repo
+from backend.src.services.signals import tg_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.signals.parser import (
     parse_gold_signal, parse_gd2_signal, parse_instant_entry, parse_gd2_instant_entry,
@@ -82,14 +84,7 @@ async def handle_signal_edit(
                         "(status=%s) — flattening open position",
                         channel_name, tg_id, _ex_dir, _fix_dir, _ex_status,
                     )
-                    with db_module.db() as _conn:
-                        _irow = _conn.execute(
-                            "SELECT * FROM vantage_simulated_trades "
-                            "WHERE status='open' AND tg_source IN (?,?) "
-                            "ORDER BY open_time DESC LIMIT 1",
-                            (channel_name, f"instant:{channel_name}")
-                        ).fetchone()
-                        _itrade = db_module.row_to_dict(_irow) if _irow else None
+                    _itrade = signals_repo.find_latest_open_trade_for_source(channel_name)
                     _flat_note = "no matching open trade found — nothing to close"
                     if (_itrade and
                             _itrade.get("direction", "").upper() == _ex_dir):
@@ -106,12 +101,7 @@ async def handle_signal_edit(
                                 "failed to flatten %s: %s",
                                 channel_name, tg_id, _itrade["trade_id"][:8], _flat_exc,
                             )
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "UPDATE vantage_tg_signals SET direction=?, raw_text=? "
-                            "WHERE tg_message_id=?",
-                            (_fix_dir, text, tg_id),
-                        )
+                    tg_repo.correct_direction_and_text(tg_id, _fix_dir, text)
                     _alert_txt = (
                         f"INSTANT SIGNAL CORRECTED via edit\n"
                         f"Channel: {channel_name}\n"
@@ -126,12 +116,7 @@ async def handle_signal_edit(
                         )
                     )
                 else:
-                    with db_module.db() as conn:
-                        conn.execute(
-                            "UPDATE vantage_tg_signals SET raw_text=? "
-                            "WHERE tg_message_id=?",
-                            (text, tg_id),
-                        )
+                    tg_repo.set_raw_text(tg_id, text)
                 return None
         _ai_edit = await ai_fallback_fn(text, channel_name, tg_id)
         if _ai_edit:
@@ -155,20 +140,7 @@ async def handle_signal_edit(
                 "[%s] Updating fields for tg_id=%s (%s)",
                 channel_name, tg_id, _log_reason,
             )
-            with db_module.db() as conn:
-                conn.execute(
-                    """UPDATE vantage_tg_signals
-                       SET raw_text=?, entry_low=?, entry_high=?, stop_loss=?,
-                           tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?, tp7=?, tp8=?,
-                           status=CASE WHEN status='pending_followup' THEN 'new' ELSE status END
-                       WHERE tg_message_id=?""",
-                    (text,
-                     _reparse["entry_low"], _reparse["entry_high"], _reparse["stop_loss"],
-                     _reparse.get("tp1"), _reparse.get("tp2"), _reparse.get("tp3"),
-                     _reparse.get("tp4"), _reparse.get("tp5"), _reparse.get("tp6"),
-                     _reparse.get("tp7"), _reparse.get("tp8"),
-                     tg_id),
-                )
+            tg_repo.update_reparsed_fields(tg_id, text, _reparse)
             if _ex_status == "pending_followup":
                 log.info(
                     "[%s] pending_followup tg_id=%s now complete — executing",
@@ -182,11 +154,7 @@ async def handle_signal_edit(
                         channel_name, _new_dir, _reparse, tg_id,
                     )
         else:
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_tg_signals SET raw_text=? WHERE tg_message_id=?",
-                    (text, tg_id),
-                )
+            tg_repo.set_raw_text(tg_id, text)
         if not _promote_execute:
             return None
         return _reparse
@@ -196,23 +164,7 @@ async def handle_signal_edit(
             "[%s] EDIT CORRECTION tg_id=%s: %s → %s (status=%s) — updating signal",
             channel_name, tg_id, _ex_dir, _new_dir, _ex_status,
         )
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_tg_signals
-                   SET direction=?, entry_low=?, entry_high=?, stop_loss=?,
-                       tp1=?, tp2=?, tp3=?, tp4=?, tp5=?, tp6=?, tp7=?, tp8=?,
-                       raw_text=?
-                   WHERE tg_message_id=?""",
-                (
-                    _reparse["direction"],
-                    _reparse["entry_low"], _reparse["entry_high"],
-                    _reparse["stop_loss"],
-                    _reparse.get("tp1"), _reparse.get("tp2"), _reparse.get("tp3"),
-                    _reparse.get("tp4"), _reparse.get("tp5"), _reparse.get("tp6"),
-                    _reparse.get("tp7"), _reparse.get("tp8"),
-                    text, tg_id,
-                ),
-            )
+        tg_repo.apply_direction_correction(tg_id, _reparse, text)
         _alert_txt = (
             f"SIGNAL CORRECTED via edit\n"
             f"Channel: {channel_name}\n"
@@ -225,11 +177,7 @@ async def handle_signal_edit(
             telegram_alerts.send_message(_alert_txt, tg_id, "signal_edit_corrected")
         )
     else:
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_tg_signals SET raw_text=? WHERE tg_message_id=?",
-                (text, tg_id),
-            )
+        tg_repo.set_raw_text(tg_id, text)
         log.warning(
             "[%s] EDIT WARNING tg_id=%s: direction changed %s → %s "
             "but signal status=%s — manual review required",

@@ -24,6 +24,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.partial_close import partial_close_trade
 from backend.src.services.trading.open_trade import _CLIMBER_PCTS, _GDVR_PCTS
@@ -176,13 +177,8 @@ async def run_tp_ladder(
         if should_update:
             if mt5_ticket:
                 await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-            def _apply_ladder_sl(new_sl=new_sl, sl_moved_be=sl_moved_be):
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=? WHERE trade_id=?",
-                        (new_sl, sl_moved_be, trade_id),
-                    )
-            await db_module.to_db_thread(_apply_ladder_sl)
+            await db_module.to_db_thread(
+                positions_repo.set_stop_loss_be_flag, trade_id, new_sl, sl_moved_be)
             current_sl = new_sl
             if pos == be_at_pos:
                 asyncio.create_task(telegram_alerts.send_message(

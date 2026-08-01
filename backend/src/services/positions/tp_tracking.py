@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.utils.models import Tick, MAX_TP
 
 log = logging.getLogger(__name__)
@@ -43,12 +44,8 @@ async def get_triggered_tps(cache: TPCache, trade_id: str) -> set[int]:
         cached_set, cached_ts = cached
         if now - cached_ts < _TP_CACHE_TTL:
             return cached_set
-    def _fetch():
-        with db_module.db() as conn:
-            return conn.execute(
-                "SELECT reason FROM vantage_partial_closes WHERE trade_id=?", (trade_id,)
-            ).fetchall()
-    rows = await db_module.to_db_thread(_fetch)
+    rows = await db_module.to_db_thread(
+        positions_repo.fetch_tp_marker_reasons, trade_id)
     triggered: set[int] = set()
     for row in rows:
         m = _TP_NUM_RE.match(row[0] or "")
@@ -60,13 +57,7 @@ async def get_triggered_tps(cache: TPCache, trade_id: str) -> set[int]:
 
 def last_closed_tp(trade_id: str) -> Optional[int]:
     """Return the TP number of the most recent real partial close (lots > 0), or None."""
-    with db_module.db() as conn:
-        rows = conn.execute(
-            "SELECT reason FROM vantage_partial_closes "
-            "WHERE trade_id=? AND lots_closed > 0 "
-            "ORDER BY ts DESC LIMIT 10",
-            (trade_id,),
-        ).fetchall()
+    rows = positions_repo.fetch_recent_real_close_reasons(trade_id)
     for row in rows:
         m = _TP_NUM_RE.match(row[0] or "")
         if m:
@@ -119,9 +110,5 @@ async def check_tp_hits(cache: TPCache, trade: dict, tick: Tick) -> list[tuple]:
 
 def get_remaining_lots(trade_id: str) -> float:
     """Read current remaining_lots from DB to avoid stale snapshot."""
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT remaining_lots FROM vantage_simulated_trades WHERE trade_id=?",
-            (trade_id,)
-        ).fetchone()
+    row = positions_repo.fetch_remaining_lots(trade_id)
     return float(row[0]) if row else 0.0

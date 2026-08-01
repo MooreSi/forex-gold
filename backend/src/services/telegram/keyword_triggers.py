@@ -28,27 +28,14 @@ from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.db import database as db_module
+from backend.src.services.telegram import repo as telegram_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.telegram.keywords import claim_trigger, get_lexicon, text_matches_any
 
 log = logging.getLogger(__name__)
 
-# Same tg_source matching convention as core_ai_signal_fallback.apply_sl_adjustment
-# -- direct channel name, an instant-entry-prefixed variant, or the
-# "Telegram Auto (...)" wrapper auto-execution stamps trades with.
-_OPEN_TRADE_SQL = (
-    "SELECT * FROM vantage_simulated_trades WHERE status='open' AND "
-    "(tg_source=? OR tg_source=? OR tg_source LIKE ?) "
-    "ORDER BY open_time DESC LIMIT 1"
-)
-
-
 def _find_channel_open_trade(channel_name: str) -> Optional[dict]:
-    with db_module.db() as conn:
-        row = conn.execute(
-            _OPEN_TRADE_SQL,
-            (channel_name, f"instant:{channel_name}", f"Telegram Auto ({channel_name})"),
-        ).fetchone()
+    row = telegram_repo.find_channel_open_trade(channel_name)
     return db_module.row_to_dict(row) if row else None
 
 

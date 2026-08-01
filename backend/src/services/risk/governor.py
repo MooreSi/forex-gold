@@ -27,6 +27,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.risk import repo as risk_repo
 from backend.src.utils.models import (
     CONTRACT_SIZE, Tick,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
@@ -123,12 +124,7 @@ def check_pre_trade_filters(
 
     # ── Filter 2: Directional cap ──────────────────────────────────────────
     _MAX_UNPROTECTED = 2
-    with db_module.db() as conn:
-        same_dir_unprotected = conn.execute(
-            "SELECT COUNT(*) FROM vantage_simulated_trades "
-            "WHERE status='open' AND direction=? AND sl_moved_to_be=0",
-            (direction,),
-        ).fetchone()[0]
+    same_dir_unprotected = risk_repo.count_unprotected_same_direction(direction)
     if same_dir_unprotected >= _MAX_UNPROTECTED:
         return (
             f"Directional cap blocked: {same_dir_unprotected} open {direction} "
@@ -197,12 +193,7 @@ def rg_size_and_check(*, direction: str, ref_price: float,
             )
 
     # (E) Directional cap — at most 2 unprotected same-direction trades.
-    with db_module.db() as conn:
-        same_dir = conn.execute(
-            "SELECT COUNT(*) FROM vantage_simulated_trades "
-            "WHERE status='open' AND direction=? AND sl_moved_to_be=0",
-            (direction,),
-        ).fetchone()[0]
+    same_dir = risk_repo.count_unprotected_same_direction(direction)
     if same_dir >= 2:
         return None, (
             f"{same_dir} unprotected {direction} trade(s) already open "
@@ -223,11 +214,7 @@ def rg_check_halt(rs: dict, balance: float) -> Optional[str]:
     account's actual health.
     """
     day_start = rg_day_start_ts()
-    with db_module.db() as conn:
-        realised_today = conn.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "
-            "WHERE close_time >= ?", (day_start,),
-        ).fetchone()[0] or 0.0
+    realised_today = risk_repo.sum_realised_pnl_since(day_start)
 
     # (C) Daily loss limit — base off balance before today's realised P&L.
     max_daily = float(rs.get("max_daily_loss_pct", 20.0) or 0)

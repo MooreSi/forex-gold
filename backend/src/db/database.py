@@ -1240,7 +1240,7 @@ from backend.src.services.ai.recovered_repo import (  # noqa: E402,F401
     mark_ai_recovered_signal_rule_result_by_tg_id,
     discard_ai_recovered_signal_by_tg_id,
 )
-from backend.src.services.cluster.signal_bus import (  # noqa: E402,F401
+from backend.src.services.cluster.signal_bus_repo import (  # noqa: E402,F401
     _ensure_signal_bus,
     write_signal_bus,
     close_bus_entry,

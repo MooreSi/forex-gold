@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.telegram import repo as telegram_repo
 
 log = logging.getLogger(__name__)
 
@@ -187,8 +188,7 @@ class TelegramReader:
 
     def get_status(self) -> dict:
         try:
-            with db_module.db() as conn:
-                total = conn.execute("SELECT COUNT(*) FROM telegram_messages").fetchone()[0]
+            total = telegram_repo.count_telegram_messages()
         except Exception:
             total = 0
         slots = [
@@ -829,10 +829,7 @@ class TelegramReader:
     async def _restore_listeners(self) -> None:
         """Restart listeners for any previously selected groups stored in DB."""
         try:
-            with db_module.db() as conn:
-                row = conn.execute(
-                    "SELECT value FROM app_config WHERE key='selected_groups'"
-                ).fetchone()
+            row = telegram_repo.get_selected_groups_json()
             if not row:
                 return
             saved = json.loads(row[0])

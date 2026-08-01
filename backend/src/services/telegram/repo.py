@@ -133,3 +133,75 @@ def get_messages_for_research(group_ids: list[str], since_iso: str) -> list[dict
             (*group_ids, since_iso),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Collected from keywords.py / reader.py / bot_readonly.py /
+#    keyword_triggers.py (M1 SQL sweep). Verbatim statements; the callers run
+#    them from the same places in the same order they always did.
+
+def get_lexicon_json(category: str):
+    """Raw phrases_json row for a Logic Keywords category, or None."""
+    with db() as conn:
+        return conn.execute(
+            "SELECT phrases_json FROM logic_keyword_lexicons WHERE category=?",
+            (category,),
+        ).fetchone()
+
+
+def upsert_lexicon(category: str, phrases_json: str) -> None:
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO logic_keyword_lexicons (category, phrases_json) VALUES (?,?) "
+            "ON CONFLICT(category) DO UPDATE SET phrases_json=excluded.phrases_json",
+            (category, phrases_json),
+        )
+
+
+def count_telegram_messages() -> int:
+    with db() as conn:
+        return conn.execute("SELECT COUNT(*) FROM telegram_messages").fetchone()[0]
+
+
+def get_selected_groups_json():
+    """Raw JSON row of the reader's previously selected groups, or None."""
+    with db() as conn:
+        return conn.execute(
+            "SELECT value FROM app_config WHERE key='selected_groups'"
+        ).fetchone()
+
+
+def fetch_today_closed_trades(day_cutoff: float) -> list[dict]:
+    with db() as conn:
+        return [
+            row_to_dict(r)
+            for r in conn.execute(
+                "SELECT * FROM vantage_simulated_trades "
+                "WHERE status='closed' AND close_time >= ? "
+                "ORDER BY close_time DESC",
+                (day_cutoff,),
+            ).fetchall()
+        ]
+
+
+# Same tg_source matching convention as ai_signal_fallback.apply_sl_adjustment
+# -- direct channel name, an instant-entry-prefixed variant, or the
+# "Telegram Auto (...)" wrapper auto-execution stamps trades with.
+def find_channel_open_trade(channel_name: str):
+    with db() as conn:
+        return conn.execute(
+            "SELECT * FROM vantage_simulated_trades WHERE status='open' AND "
+            "(tg_source=? OR tg_source=? OR tg_source LIKE ?) "
+            "ORDER BY open_time DESC LIMIT 1",
+            (channel_name, f"instant:{channel_name}", f"Telegram Auto ({channel_name})"),
+        ).fetchone()
+
+
+def try_claim_trigger(tg_message_id: str, trigger_type: str, applied_at: float) -> bool:
+    """Dedup guard for the keyword triggers -- True only on the first claim."""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO logic_keyword_triggers_applied "
+            "(tg_message_id, trigger_type, applied_at) VALUES (?,?,?)",
+            (tg_message_id, trigger_type, applied_at),
+        )
+        return cur.rowcount > 0

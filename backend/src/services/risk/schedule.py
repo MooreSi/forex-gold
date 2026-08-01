@@ -40,6 +40,7 @@ from typing import Optional
 
 from backend.src.db.database import db, _schedule_coro
 from backend.src.db import database as db_module
+from backend.src.services.risk import repo as risk_repo
 
 log = logging.getLogger(__name__)
 
@@ -206,13 +207,7 @@ def _block_realized_pnl(block: dict, now: datetime) -> float:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     window_start = day_start.timestamp() + _parse_hm(block["start"]) * 60
     window_end   = day_start.timestamp() + _parse_hm(block["end"]) * 60
-    with db() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "
-            "WHERE status='closed' AND open_time >= ? AND open_time < ?",
-            (window_start, window_end),
-        ).fetchone()
-    return float(row[0] or 0.0)
+    return risk_repo.sum_closed_pnl_opened_between(window_start, window_end)
 
 
 def check_trading_schedule(

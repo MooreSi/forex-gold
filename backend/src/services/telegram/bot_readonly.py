@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.telegram import repo as telegram_repo
 from backend.src.services.trading.fees_sizing import pnl
 from backend.src.services.trading.sim_account import get_sim_account
 from backend.src.services.positions.tp_tracking import last_closed_tp
@@ -141,16 +142,7 @@ async def cmd_daily(args: list, bridge: Any) -> str:
 
     # ── Today's closed trades from DB ─────────────────────────────────────
     # close_time is always a proper UTC epoch (time.time() at moment of close)
-    with db_module.db() as conn:
-        today_closed = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades "
-                "WHERE status='closed' AND close_time >= ? "
-                "ORDER BY close_time DESC",
-                (day_cutoff,),
-            ).fetchall()
-        ]
+    today_closed = telegram_repo.fetch_today_closed_trades(day_cutoff)
 
     # P&L uses mt5_profit when available (accurate broker figure), else net_pnl
     def _trade_pnl(t: dict) -> float:

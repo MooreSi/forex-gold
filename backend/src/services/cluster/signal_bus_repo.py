@@ -1,4 +1,4 @@
-"""Signal Bus — split from core/database.py.
+"""Signal Bus repo — split from core/database.py.
 Extracted from forex_trader/core/database.py -- see
 docs/todo/refactor/core-database-migration/. Verbatim port: same functions,
 same SQL, same behavior, using database.py's own db()/to_db_thread()

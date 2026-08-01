@@ -34,6 +34,7 @@ import time
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.dpm import repo as dpm_repo
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.dpm.bookkeeping import (
@@ -67,14 +68,7 @@ async def run_dpm_calibration(dpm_cache: DPMCache) -> None:
     if time.time() - last_run < 7_200:
         return
 
-    with db_module.db() as conn:
-        trades = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                "SELECT * FROM dpm_trade_performance "
-                "WHERE closed_at IS NOT NULL AND final_pnl IS NOT NULL"
-            ).fetchall()
-        ]
+    trades = dpm_repo.fetch_closed_trade_performance()
 
     if len(trades) < 20:
         log.debug("[DPM Cal] Only %d closed trades — need 20+ to calibrate", len(trades))
@@ -94,18 +88,7 @@ async def run_dpm_calibration(dpm_cache: DPMCache) -> None:
         log.debug("[DPM Cal] No groups with enough samples")
         return
 
-    with db_module.db() as conn:
-        for r in results:
-            conn.execute(
-                """INSERT INTO dpm_calibration
-                   (calibrated_at, session, momentum_bucket, be_multiplier, trail_multiplier,
-                    tp1_partial_pct, sample_size, profit_factor, win_rate, avg_r_multiple, notes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (r["calibrated_at"], r["session"], r["momentum_bucket"],
-                 r["be_multiplier"], r["trail_multiplier"], r["tp1_partial_pct"],
-                 r["sample_size"], r["profit_factor"], r["win_rate"],
-                 r["avg_r_multiple"], r["notes"]),
-            )
+    dpm_repo.insert_calibration_rows(results)
 
     db_module.set_app_config("dpm_cal_last_run", str(time.time()))
     db_module.set_app_config("dpm_cal_trade_count", str(len(trades)))
@@ -151,13 +134,7 @@ async def handle_dynamic_position_management(
     # unrealised P&L, vs ~28% for trades that tightened via TP1).
     sl_at_be = bool(trade.get("sl_moved_to_be"))
     if not sl_at_be:
-        def _fetch_be_flag():
-            with db_module.db() as conn:
-                return conn.execute(
-                    "SELECT sl_moved_to_be FROM vantage_simulated_trades WHERE trade_id=?",
-                    (trade_id,),
-                ).fetchone()
-        row = await db_module.to_db_thread(_fetch_be_flag)
+        row = await db_module.to_db_thread(dpm_repo.fetch_be_flag, trade_id)
         if row and row[0]:
             sl_at_be = True
 
@@ -235,14 +212,8 @@ async def handle_dynamic_position_management(
                 if should_move:
                     if mt5_ticket:
                         await bridge.modify_order(int(mt5_ticket), sl=entry_price, tp=None)
-                    def _apply_tp1_be():
-                        with db_module.db() as conn:
-                            conn.execute(
-                                "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1"
-                                " WHERE trade_id=?",
-                                (entry_price, trade_id),
-                            )
-                    await db_module.to_db_thread(_apply_tp1_be)
+                    await db_module.to_db_thread(
+                        dpm_repo.set_stop_loss_be, trade_id, entry_price)
                     asyncio.create_task(telegram_alerts.send_message(
                         telegram_alerts.fmt_sl_moved(trade, 1, entry_price),
                         trade_id, "sl_moved_be",
@@ -256,14 +227,8 @@ async def handle_dynamic_position_management(
         if should_move:
             if mt5_ticket:
                 await bridge.modify_order(int(mt5_ticket), sl=entry_price, tp=None)
-            def _apply_be_trigger():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET stop_loss=?,sl_moved_to_be=1"
-                        " WHERE trade_id=?",
-                        (entry_price, trade_id),
-                    )
-            await db_module.to_db_thread(_apply_be_trigger)
+            await db_module.to_db_thread(
+                dpm_repo.set_stop_loss_be, trade_id, entry_price)
             asyncio.create_task(telegram_alerts.send_message(
                 telegram_alerts.fmt_sl_moved(trade, 1, entry_price),
                 trade_id, "sl_moved_be_dpm",
@@ -297,13 +262,7 @@ async def handle_dynamic_position_management(
         if should_update:
             if mt5_ticket:
                 await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
-            def _apply_dpm_trail():
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                        (new_sl, trade_id),
-                    )
-            await db_module.to_db_thread(_apply_dpm_trail)
+            await db_module.to_db_thread(dpm_repo.set_stop_loss, trade_id, new_sl)
             src = "structural" if swing_sl and (
                 (direction == "BUY"  and new_sl == swing_sl) or
                 (direction == "SELL" and new_sl == swing_sl)
@@ -326,12 +285,7 @@ async def handle_dynamic_position_management(
         tp_hit = (direction == "BUY" and tick.bid >= tp_vf2) or \
                  (direction == "SELL" and tick.ask <= tp_vf2)
         if tp_hit:
-            def _mark_dpm_tp(tp_num=tp_num, tp_vf2=tp_vf2):
-                with db_module.db() as conn:
-                    conn.execute(
-                        "INSERT INTO vantage_partial_closes"
-                        " (trade_id,ts,lots_closed,close_price,pnl,reason)"
-                        " VALUES (?,?,?,?,?,?)",
-                        (trade_id, time.time(), 0.0, tp_vf2, 0.0, f"TP{tp_num}_DPM_MARKER"),
-                    )
-            await db_module.to_db_thread(_mark_dpm_tp)
+            await db_module.to_db_thread(
+                dpm_repo.insert_tp_marker,
+                trade_id, time.time(), tp_vf2, f"TP{tp_num}_DPM_MARKER",
+            )

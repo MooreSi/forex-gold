@@ -38,6 +38,7 @@ import time
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.telegram import repo as telegram_repo
 
 log = logging.getLogger(__name__)
 
@@ -98,11 +99,7 @@ def default_lexicon(category: str) -> list[str]:
 def get_lexicon(category: str) -> list[str]:
     """Live phrase list for `category` -- DB override if saved, else the
     built-in default. Never raises on a corrupt/missing row."""
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT phrases_json FROM logic_keyword_lexicons WHERE category=?",
-            (category,),
-        ).fetchone()
+    row = telegram_repo.get_lexicon_json(category)
     if not row:
         return default_lexicon(category)
     try:
@@ -121,12 +118,7 @@ def set_lexicon(category: str, phrases: list[str]) -> list[str]:
     if category not in DEFAULT_LEXICONS:
         raise ValueError(f"Unknown Logic Keywords category: {category}")
     clean = [p.strip().upper() for p in phrases if p and p.strip()]
-    with db_module.db() as conn:
-        conn.execute(
-            "INSERT INTO logic_keyword_lexicons (category, phrases_json) VALUES (?,?) "
-            "ON CONFLICT(category) DO UPDATE SET phrases_json=excluded.phrases_json",
-            (category, json.dumps(clean)),
-        )
+    telegram_repo.upsert_lexicon(category, json.dumps(clean))
     return clean
 
 
@@ -155,13 +147,7 @@ def claim_trigger(tg_message_id: str, trigger_type: str) -> bool:
     pair is seen, False on every subsequent call against the same buffered
     message."""
     try:
-        with db_module.db() as conn:
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO logic_keyword_triggers_applied "
-                "(tg_message_id, trigger_type, applied_at) VALUES (?,?,?)",
-                (tg_message_id, trigger_type, time.time()),
-            )
-            return cur.rowcount > 0
+        return telegram_repo.try_claim_trigger(tg_message_id, trigger_type, time.time())
     except Exception as exc:
         log.warning("[LogicKeywords] claim_trigger failed: %s", exc)
         return False

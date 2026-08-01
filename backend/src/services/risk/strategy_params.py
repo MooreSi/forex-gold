@@ -33,6 +33,7 @@ import logging
 import time
 
 from backend.src.db import database as db_module
+from backend.src.services.risk import repo as risk_repo
 from backend.src.db.database import _schedule_coro
 from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
@@ -278,11 +279,7 @@ def apply_strategy_params_snapshot(snapshot: dict) -> None:
 # ── Named template library ───────────────────────────────────────────────────
 
 def list_templates(strategy: str) -> list[dict]:
-    with db_module.db() as conn:
-        rows = conn.execute(
-            "SELECT id, strategy, name, params_json, created_at FROM strategy_param_templates "
-            "WHERE strategy=? ORDER BY created_at DESC", (strategy,),
-        ).fetchall()
+    rows = risk_repo.list_param_templates(strategy)
     out = []
     for r in rows:
         d = db_module.row_to_dict(r)
@@ -302,27 +299,17 @@ def save_template(strategy: str, name: str, params: dict) -> int:
         raise ValueError("Template name is required")
     valid_keys = set(_DEFAULTS[strategy])
     clean = {k: float(v) for k, v in params.items() if k in valid_keys}
-    with db_module.db() as conn:
-        cur = conn.execute(
-            "INSERT INTO strategy_param_templates (strategy, name, params_json, created_at) "
-            "VALUES (?,?,?,?)",
-            (strategy, name, json.dumps(clean), time.time()),
-        )
-        return cur.lastrowid
+    return risk_repo.insert_param_template(
+        strategy, name, json.dumps(clean), time.time())
 
 
 def delete_template(template_id: int) -> None:
-    with db_module.db() as conn:
-        conn.execute("DELETE FROM strategy_param_templates WHERE id=?", (template_id,))
+    risk_repo.delete_param_template(template_id)
 
 
 def apply_template(template_id: int) -> dict:
     """Load a saved template and make it the strategy's live values."""
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT strategy, params_json FROM strategy_param_templates WHERE id=?",
-            (template_id,),
-        ).fetchone()
+    row = risk_repo.get_param_template(template_id)
     if not row:
         raise ValueError(f"Template {template_id} not found")
     strategy, params_json = row[0], row[1]

@@ -1246,6 +1246,13 @@ def start() -> None:
     global _server_task
     _load_tokens()
     _load_admin_machines()
+    # Re-sign step must happen after _load_tokens(), not at forex_admin.py's
+    # import time -- register_kg_callbacks() runs during that earlier import,
+    # before this module's _allowed_tokens dict has anything loaded into it,
+    # so a resign attempted there always finds zero tokens to act on.
+    resign_result = resign_all_licences()
+    if resign_result.get("resigned"):
+        log.info("[RemoteServer] Licence re-sign on startup: %s", resign_result)
 
     async def _run():
         global _server_obj

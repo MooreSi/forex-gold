@@ -347,29 +347,34 @@ def enforce() -> None:
     stored_machine_id = data["machine_id"]
     expiry_date       = data["expiry_date"]
     licence_key       = data["licence_key"]
-    # email and licence_type are stored but not required for HMAC verification
+    # email and licence_type are stored but not required for signature verification
     current_machine   = get_fingerprint()
+    already_verified  = False
 
     if stored_machine_id != current_machine:
-        # Fingerprints differ — this can happen when macOS updates change how hardware
-        # values are reported (e.g. system_profiler field format changes) even though
-        # the physical machine hasn't changed.
+        # Fingerprints differ — this can happen when OS updates change how hardware
+        # values are reported (e.g. system_profiler field format changes on macOS, or
+        # a flaky WMI/CIM query on Windows returning a slightly different value between
+        # calls) even though the physical machine hasn't changed.
         #
-        # Verify the HMAC against the STORED machine_id (the one the key was issued for).
-        # If it passes, the key is genuine for this machine — the drift is benign.
-        # Update the stored ID to the new fingerprint so future startups skip this path.
-        # Security is unchanged: the HMAC is still validated; a key for machine A will
-        # not pass this check on a genuinely different machine B.
+        # Verify the signature against the STORED machine_id (the one the key was
+        # actually issued for). If it passes, the key is genuine for this machine —
+        # the drift is benign. Update the stored ID to the new fingerprint so future
+        # startups skip this path, but keep verifying against the ORIGINAL id for the
+        # rest of this run: the key was only ever signed for that id, so re-checking
+        # it against the new, different current_machine below would always fail even
+        # though nothing was actually tampered with (confirmed live: this was turning
+        # every benign drift into a false "invalid or tampered" error).
         if _verify_licence_key(stored_machine_id, expiry_date, licence_key):
             log.info(
                 "Fingerprint drift detected (stored %s → current %s) — "
-                "HMAC verified against original ID, updating store.",
+                "signature verified against original ID, updating store.",
                 stored_machine_id[:8], current_machine[:8],
             )
             updated = dict(data)
             updated["machine_id"] = current_machine
             _store.save(updated)
-            stored_machine_id = current_machine  # continue with expiry check below
+            already_verified = True
         else:
             log.warning(
                 "Machine ID mismatch — stored %s, current %s",
@@ -379,8 +384,8 @@ def enforce() -> None:
             _show_error_and_exit("", allow_register=True)
             return
 
-    if not _verify_licence_key(stored_machine_id, expiry_date, licence_key):
-        log.warning("Licence HMAC verification failed — clearing store.")
+    if not already_verified and not _verify_licence_key(stored_machine_id, expiry_date, licence_key):
+        log.warning("Licence signature verification failed — clearing store.")
         _store.clear()
         _show_error_and_exit("Your licence key is invalid or has been tampered with.")
         return

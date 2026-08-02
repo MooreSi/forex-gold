@@ -21,6 +21,21 @@ log = logging.getLogger(__name__)
 from forex_trader.licence.verify import verify_licence_key as _verify_licence_key
 
 
+def _app_port() -> int:
+    """The port the real app will actually run on, once past this licence
+    gate -- must match run.py's own port (config.get("port"), default 8890
+    per config.py) exactly, or the activation/error screens end up serving
+    on a different port than the app restarts into: the "click here to open
+    FOREX Trader" link and its auto-reload poll are both relative to
+    wherever THIS page loaded from, so a mismatch leaves them pointed at a
+    dead port forever."""
+    try:
+        import forex_trader.config as _config
+        return int(_config.get("port", 8890))
+    except Exception:
+        return 8890
+
+
 def _parse_activation_code(code: str):
     """
     Parse KEY, KEY|EXPIRY, or KEY|EXPIRY|TYPE → (key, expiry_date, licence_type).
@@ -55,7 +70,7 @@ def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
             ui.label(reason).classes("text-red-300 text-sm")
             ui.label("Contact your administrator for assistance.").classes("text-gray-500 text-xs")
 
-    ui.run(host="0.0.0.0", port=8888, title="FOREX Trader — Licence Error",
+    ui.run(host="0.0.0.0", port=_app_port(), title="FOREX Trader — Licence Error",
            dark=True, reload=False)
     sys.exit(1)
 
@@ -299,7 +314,7 @@ def _show_registration_page() -> None:
 
             _lic_timer = ui.timer(1.0, _check_activation)
 
-    ui.run(host="0.0.0.0", port=8888, title="FOREX Trader — Activate",
+    ui.run(host="0.0.0.0", port=_app_port(), title="FOREX Trader — Activate",
            dark=True, reload=False)
     sys.exit(0)
 

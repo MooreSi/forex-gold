@@ -28,6 +28,7 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
+from forex_trader import config as _app_config
 from forex_trader.config import USER_DATA_DIR
 from forex_trader.licence import store as _licence_store
 from forex_trader.remote.protocol import (
@@ -647,6 +648,47 @@ async def _apply_update(zip_data: bytes, sha256: str, version: str,
     except Exception as _cache_err:
         log.warning("[RemoteClient] __pycache__ cleanup failed: %s", _cache_err)
 
+    # Bootstrap this install into a real git checkout so the Settings > Update
+    # page's GitHub self-update panel (core_app_update.py, which needs a
+    # `.git` dir to run `git fetch`/`pull`) works after this push — the zip
+    # above never contains `.git` (server.py's _build_update_zip skips it
+    # deliberately; streaming raw git internals through a file-diff/prune
+    # sync is fragile). Only runs once — skipped once `.git` already exists.
+    # Requires `git` on PATH and network access to GitHub (repo is public,
+    # so no credentials needed); either failure path just skips bootstrapping
+    # and leaves "not a git checkout" in place for that machine — never blocks
+    # the actual code update or restart below.
+    if not (app_root / ".git").exists() and not shutil.which("git"):
+        log.warning(
+            "[RemoteClient] git not found on PATH — skipping git-checkout "
+            "bootstrap; GitHub Updates panel will keep showing 'not a git "
+            "checkout' until git is installed and another update is pushed"
+        )
+    if not (app_root / ".git").exists() and shutil.which("git"):
+        _repo_url = "https://github.com/MooreSi/forex.git"  # keep in sync with core_app_update.py's _GITHUB_REPO_URL
+        _branch   = "main"
+        try:
+            def _git(*args):
+                return subprocess.run(
+                    ["git", *args], cwd=str(app_root), capture_output=True,
+                    text=True, timeout=60, check=False,
+                )
+            _git("init")
+            _git("remote", "add", "origin", _repo_url)
+            fetch = _git("fetch", "origin", _branch)
+            if fetch.returncode == 0:
+                co = _git("checkout", "-B", _branch, "--track", f"origin/{_branch}", "-f")
+                if co.returncode == 0:
+                    log.info("[RemoteClient] Bootstrapped git checkout for self-update")
+                else:
+                    log.warning("[RemoteClient] git checkout failed during bootstrap: %s",
+                                co.stderr.strip())
+            else:
+                log.warning("[RemoteClient] git fetch failed during bootstrap: %s",
+                            fetch.stderr.strip())
+        except Exception as _git_err:
+            log.warning("[RemoteClient] git bootstrap failed: %s", _git_err)
+
     log.info("[RemoteClient] Update applied — restarting")
     if sys.platform == "win32":
         _refresh_desktop_icon(Path(__file__).parent.parent)
@@ -758,6 +800,23 @@ async def _connect_loop() -> None:
                         _flag_file.unlink(missing_ok=True)
                 except Exception:
                     pass
+
+                # A successful MSG_WELCOME means the server already has this
+                # token in its approved list. Persist that so app_lifecycle.py's
+                # startup check (config.get("remote_admin_client_enabled"),
+                # default False) auto-starts this loop on every future launch —
+                # without this, the only thing that ever calls _connect_loop()
+                # is the manual Settings > Request Registration button, which
+                # calls it directly and never touches this config key at all.
+                if not _app_config.get("remote_admin_client_enabled", False):
+                    try:
+                        _app_config.save_to_yaml({"remote_admin_client_enabled": True})
+                    except Exception as _cfg_err:
+                        log.warning(
+                            "[RemoteClient] Could not persist remote_admin_client_enabled: %s",
+                            _cfg_err,
+                        )
+
                 backoff = 10  # reset on success
                 log.info("[RemoteClient] Connected to admin server (%s)%s",
                          host, " [remote admin]" if is_admin else "")

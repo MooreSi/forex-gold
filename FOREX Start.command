@@ -9,6 +9,7 @@ VENV_DIR="$SCRIPT_DIR/.venv"
 REQS_FILE="$SCRIPT_DIR/requirements.txt"
 MARKER="$VENV_DIR/.setup_complete"
 LIBOMP_NOTICE="$VENV_DIR/.libomp_notice_shown"
+GIT_NOTICE="$VENV_DIR/.git_notice_shown"
 USER_DATA="$HOME/Library/Application Support/ForexTrader"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -90,6 +91,49 @@ ensure_libomp() {
     return 1
 }
 
+# ── git (needed for the Settings > Update page's GitHub self-update panel, and
+# for the git-checkout bootstrap that runs after every admin-console push —
+# see remote/client.py's _apply_update()) ─────────────────────────────────────
+# Most Macs already have a `git` shim from Xcode Command Line Tools, so this
+# is a smaller gap than on Windows, but not guaranteed on a fresh machine.
+# Mirrors ensure_libomp()'s shape: silent brew install when Homebrew is
+# present, one-time manual notice otherwise — never blocks the app itself.
+
+ensure_git() {
+    command -v git >/dev/null 2>&1 && return 0
+
+    BREW=$(find_brew || true)
+    if [ -n "$BREW" ]; then
+        echo "  Installing git..."
+        "$BREW" install git --quiet 2>/dev/null
+        if command -v git >/dev/null 2>&1; then
+            echo "  git installed."
+            rm -f "$GIT_NOTICE"
+            return 0
+        fi
+        echo "  git install failed — will retry next launch."
+        return 1
+    fi
+
+    # Homebrew not available — show a one-time notice; app still runs fine,
+    # only the GitHub self-update panel is affected.
+    if [ ! -f "$GIT_NOTICE" ]; then
+        echo ""
+        echo "  ─────────────────────────────────────────────────────────────"
+        echo "  Note: git not found — cannot auto-install it without Homebrew."
+        echo "  The Settings > Update page's GitHub update check will show"
+        echo "  'not a git checkout' until this is resolved."
+        echo ""
+        echo "  To fix (one-time setup):"
+        echo "    Run in Terminal: xcode-select --install"
+        echo "    (or install Homebrew from https://brew.sh, then: brew install git)"
+        echo "  ─────────────────────────────────────────────────────────────"
+        echo ""
+        touch "$GIT_NOTICE"
+    fi
+    return 1
+}
+
 # ── First-run / dependency check ──────────────────────────────────────────────
 # Setup runs when the venv is missing or requirements.txt has changed.
 
@@ -153,6 +197,9 @@ if [ ! -f "$MARKER" ] || [ "$STORED_HASH" != "$CURRENT_HASH" ]; then
     # ── Install libomp (OpenMP runtime — required by LightGBM) ───────────────
     ensure_libomp
 
+    # ── Install git (needed for the GitHub self-update panel) ────────────────
+    ensure_git
+
     # ── Create user data directory ────────────────────────────────────────────
     mkdir -p "$USER_DATA/data/sessions"
 
@@ -178,6 +225,9 @@ fi
 # Even if this is skipped (old script on existing installs), ml_engine.py
 # contains the same self-healing logic as a defence-in-depth fallback.
 ensure_libomp || true
+
+# ── git check on every launch (instant command-check when already present) ───
+ensure_git || true
 
 # ── Migrate stale Claude model IDs in config.yaml ────────────────────────────
 # Runs on every launch; instant no-op when the value is already current.

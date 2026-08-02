@@ -30,7 +30,7 @@ BASE_DIR = Path(__file__).parent.parent  # project root — code only
 # remote-admin server, all before this fix existed). "ForexTrader-Refactor2"
 # is a separate, genuinely empty folder by default -- override with the
 # FOREX_TRADER_DATA_DIR env var if a different location is ever needed.
-_APP_DATA_FOLDER = os.environ.get("FOREX_TRADER_DATA_DIR_NAME", "ForexTrader-Refactor2")
+_APP_DATA_FOLDER = os.environ.get("FOREX_TRADER_DATA_DIR_NAME", "ForexTrader")
 if sys.platform == "win32":
     USER_DATA_DIR = Path.home() / "AppData" / "Roaming" / _APP_DATA_FOLDER
 elif sys.platform == "darwin":

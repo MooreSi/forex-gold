@@ -74,7 +74,7 @@ CONTRACT_SIZE = 100          # XAUUSD: 1.00 lot = 100 oz
 MAX_PLAUSIBLE_STOP_DISTANCE = 100.0
 BROKER_UTC_OFFSET = 3 * 3600  # Vantage MT5 stamps deals in UTC+3, not UTC
 BRIDGE = "http://localhost:9010"
-DB = ("/Users/simon/Library/Application Support/ForexTrader-Refactor2/"
+DB = ("/Users/simon/Library/Application Support/ForexTrader/"
       "data/forex_trader_demo.db")
 
 

@@ -76,7 +76,7 @@ import sqlite3
 import sys
 import urllib.request
 
-DB = ("/Users/simon/Library/Application Support/ForexTrader-Refactor2/"
+DB = ("/Users/simon/Library/Application Support/ForexTrader/"
       "data/forex_trader_demo.db")
 BRIDGE = "http://localhost:9010"
 MAX_PLAUSIBLE_STOP = 100.0

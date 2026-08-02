@@ -64,11 +64,11 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Dirs]
 ; Ensure the user data directory tree exists (config.py also creates it, but
 ; having it here means the shortcuts and first-run paths are valid immediately).
-; Must match config.py's _APP_DATA_FOLDER exactly -- this used to say
-; "ForexTrader" (no suffix), which silently created and seeded an orphaned
-; folder the app never actually reads from (confirmed live: config.yaml sat
-; there unused while the app read from ForexTrader-Refactor2 the whole time).
-Name: "{userappdata}\ForexTrader-Refactor2\data\sessions"
+; Must match config.py's _APP_DATA_FOLDER exactly (plain "ForexTrader" --
+; the "-Refactor2" suffix was a leftover fork-isolation default, reverted
+; now that this checkout is the only app, not a fork running alongside a
+; separate original).
+Name: "{userappdata}\ForexTrader\data\sessions"
 
 [Files]
 ; ── Application source files ──────────────────────────────────────────────────

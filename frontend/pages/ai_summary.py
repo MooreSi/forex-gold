@@ -11,7 +11,7 @@ from typing import Callable, Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from backend.src.db import database as db_module
+from backend.src.controllers.settings import controller as settings_controller
 from backend.src.services.analytics import read_repo
 from backend.src.utils.models import STRATEGY_NAMES
 
@@ -372,11 +372,11 @@ def render(get_engine: Callable):
     # ── Save research to DB ─────────────────────────────────────────────────────
     def _save_research(data: dict, gen_time: str) -> None:
         payload = json.dumps({"data": data, "saved_at": gen_time})
-        db_module.set_app_config("ai_last_research", payload)
+        settings_controller.set_app_config("ai_last_research", payload)
 
     # ── Load stored research on page open ───────────────────────────────────────
     def _load_stored_research() -> None:
-        stored = db_module.get_app_config("ai_last_research")
+        stored = settings_controller.get_app_config("ai_last_research")
         if not stored:
             _render_placeholder()
             return

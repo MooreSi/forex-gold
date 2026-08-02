@@ -7,7 +7,7 @@ from typing import Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from backend.src.db import database as db_module
+from backend.src.controllers.dpm import controller as dpm_controller
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -72,51 +72,9 @@ def _milestones(row: dict) -> str:
     return " > ".join(parts) if parts else "none"
 
 
-def _fetch_perf_rows() -> list[dict]:
-    """Return all dpm_trade_performance rows, newest first."""
-    try:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT p.*, t.open_time, t.close_time, t.mt5_ticket, "
-                "COALESCE(p.tg_source, t.tg_source) AS tg_source "
-                "FROM dpm_trade_performance p "
-                "LEFT JOIN vantage_simulated_trades t ON t.trade_id = p.trade_id "
-                "ORDER BY p.opened_at DESC"
-            ).fetchall()
-        return [db_module.row_to_dict(r) for r in rows]
-    except Exception:
-        return []
-
-
-def _fetch_calibration_rows() -> list[dict]:
-    """Return the most recent calibration run rows."""
-    try:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT * FROM dpm_calibration "
-                "WHERE calibrated_at = (SELECT MAX(calibrated_at) FROM dpm_calibration) "
-                "ORDER BY session, momentum_bucket"
-            ).fetchall()
-        return [db_module.row_to_dict(r) for r in rows]
-    except Exception:
-        return []
-
-
-def _fetch_all_calibration_runs() -> list[dict]:
-    """Return summary of each past calibration run."""
-    try:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT calibrated_at, COUNT(*) as buckets, "
-                "AVG(win_rate) as avg_win_rate, AVG(avg_r_multiple) as avg_r, "
-                "AVG(profit_factor) as avg_pf, SUM(sample_size) as total_samples "
-                "FROM dpm_calibration "
-                "GROUP BY calibrated_at "
-                "ORDER BY calibrated_at DESC LIMIT 10"
-            ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
+# The three DB reads this page used to run itself now live behind
+# backend.src.controllers.dpm.controller (M3 page drain): same queries, same
+# off-loop dispatch, plain dicts back.
 
 
 def _summary_stats(rows: list[dict]) -> dict:
@@ -335,12 +293,12 @@ def render() -> None:
     # ── Refresh logic ─────────────────────────────────────────────────────────
 
     async def _refresh():
-        # Offloaded — these are synchronous DB reads; running them directly
-        # on the event loop blocked the whole app every 30s.
-        perf_rows = await db_module.to_db_thread(_fetch_perf_rows)
+        # The controller runs each read on the DB worker thread; running them
+        # directly on the event loop blocked the whole app every 30s.
+        perf_rows = await dpm_controller.get_perf_rows()
         stats     = _summary_stats(perf_rows)
-        cal_rows  = await db_module.to_db_thread(_fetch_calibration_rows)
-        run_rows  = await db_module.to_db_thread(_fetch_all_calibration_runs)
+        cal_rows  = await dpm_controller.get_calibration_rows()
+        run_rows  = await dpm_controller.get_calibration_runs()
 
         # Update summary cards
         wr_ref[0].text    = _pct(stats["win_rate"])

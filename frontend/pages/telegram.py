@@ -2,14 +2,13 @@
 
 import asyncio
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 from nicegui import ui
 
-from backend.src.db import database as db_module
+from backend.src.controllers.telegram import controller as tg_controller
 from backend.src.services.telegram import keywords as logic_kw
 from backend.src.services.telegram.reader import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,
@@ -54,7 +53,7 @@ _LK_TOGGLES: list[tuple[str, str, str]] = [
 
 
 def _render_logic_keywords_section() -> None:
-    rs = db_module.get_risk_settings()
+    rs = tg_controller.get_risk_settings()
 
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
         with ui.row().classes("items-center gap-2 mb-3"):
@@ -73,7 +72,7 @@ def _render_logic_keywords_section() -> None:
                     ui.label(tip).classes("text-xs text-gray-500 mt-1")
 
                     def _on_toggle(e, key=key, label=label):
-                        db_module.update_risk_settings({key: 1 if e.value else 0})
+                        tg_controller.update_risk_settings({key: 1 if e.value else 0})
                         ui.notify(f"{label} {'enabled' if e.value else 'disabled'}",
                                  type="positive" if e.value else "info")
                     sw.on_value_change(_on_toggle)
@@ -95,7 +94,7 @@ def _render_logic_keywords_section() -> None:
                 ).classes("text-xs text-gray-500 mt-1")
 
                 def _on_auto_toggle(e):
-                    db_module.update_risk_settings({"auto_execute_signals": 1 if e.value else 0})
+                    tg_controller.update_risk_settings({"auto_execute_signals": 1 if e.value else 0})
                     ui.notify(f"Auto-execution {'enabled' if e.value else 'disabled'}",
                              type="positive" if e.value else "info")
                 auto_sw.on_value_change(_on_auto_toggle)
@@ -112,7 +111,7 @@ def _render_logic_keywords_section() -> None:
                 ).classes("text-xs text-gray-500 mt-1")
 
                 def _on_ime_toggle(e):
-                    db_module.update_risk_settings({"immediate_market_entry": 1 if e.value else 0})
+                    tg_controller.update_risk_settings({"immediate_market_entry": 1 if e.value else 0})
                     ui.notify(f"Immediate market entry {'enabled' if e.value else 'disabled'}",
                              type="positive" if e.value else "info")
                 ime_sw.on_value_change(_on_ime_toggle)
@@ -130,7 +129,7 @@ def _render_logic_keywords_section() -> None:
                 ).classes("text-xs text-gray-500 mt-1")
 
                 def _on_realign_toggle(e):
-                    db_module.update_risk_settings({"lk_entry_realignment": 1 if e.value else 0})
+                    tg_controller.update_risk_settings({"lk_entry_realignment": 1 if e.value else 0})
                     ui.notify(f"Entry realignment {'enabled' if e.value else 'disabled'}",
                              type="positive" if e.value else "info")
                 realign_sw.on_value_change(_on_realign_toggle)
@@ -199,7 +198,7 @@ def _render_channels_active_section(reader) -> None:
         with ui.grid(columns=3).classes("w-full gap-3"):
             for s in slots:
                 channel_name = s["group_name"]
-                cfg = db_module.get_channel_parser_config(channel_name) or {}
+                cfg = tg_controller.get_channel_parser_config(channel_name) or {}
                 with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
                     sw = ui.switch(
                         channel_name, value=bool(cfg.get("enabled", 1)),
@@ -207,7 +206,7 @@ def _render_channels_active_section(reader) -> None:
                     ui.label(f"Slot {s['slot']}").classes("text-xs text-gray-500 mt-1")
 
                     def _on_toggle(e, ch=channel_name, existing=cfg):
-                        db_module.save_channel_parser_config(
+                        tg_controller.save_channel_parser_config(
                             ch,
                             existing.get("parser_format", "auto"),
                             existing.get("signal_prefix", ""),
@@ -417,7 +416,7 @@ def _render_connected(reader):
         # Offloaded — reader.get_status() runs a SELECT COUNT(*) against the
         # telegram_messages table; doing that synchronously every 2s directly
         # on the event loop blocked the whole app for its duration.
-        status = await db_module.to_db_thread(reader.get_status)
+        status = await tg_controller.get_reader_status(reader)
         slot_status_row.clear()
         with slot_status_row:
             for s_info in status.get("slots", []):
@@ -444,7 +443,7 @@ def _render_connected(reader):
     _pending_container = ui.column().classes("w-full gap-2")
 
     async def _refresh_pending():
-        rows = await db_module.to_db_thread(db_module.get_pending_unrecognised_messages, limit=20)
+        rows = await tg_controller.get_pending_unrecognised(limit=20)
         if not rows:
             _pending_card.style("display:none")
             return
@@ -532,7 +531,7 @@ def _render_slot_feed(reader, slot: int):
             # Read current slot info fresh every tick — offloaded, see
             # _update_slot_status for why reader.get_status() must not run
             # directly on the event loop.
-            status = await db_module.to_db_thread(reader.get_status)
+            status = await tg_controller.get_reader_status(reader)
             slot_info_now = next(
                 (s for s in status.get("slots", []) if s.get("slot") == slot), {}
             )
@@ -597,24 +596,7 @@ def _render_stored_messages():
     import backend.src.config as _cfg
 
     def _query_messages(limit: int = 100) -> tuple[list[dict], int]:
-        try:
-            from backend.src.config import DATA_DIR
-            env = _cfg.get("account_env", "demo")
-            db_path = str(DATA_DIR / f"forex_trader_{env}.db")
-            conn = sqlite3.connect(db_path, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            total = conn.execute("SELECT COUNT(*) FROM telegram_messages").fetchone()[0]
-            rows  = conn.execute(
-                "SELECT group_name, sender_name, timestamp, received_at, text, "
-                "       has_media, media_type "
-                "FROM telegram_messages "
-                "ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            conn.close()
-            return [dict(r) for r in rows], total
-        except Exception:
-            return [], 0
+        return tg_controller.fetch_stored_messages(limit)
 
     with ui.expansion("Stored Messages (SQLite)", icon="storage").classes(
         "w-full bg-gray-800 rounded-lg mt-3"
@@ -707,18 +689,18 @@ def _render_pending_question(row: dict, refresh: Callable) -> None:
                 # Store learned rule from this resolution
                 rule_notes = f"User resolved: {resolution}"
                 pattern    = rt.split("\n")[0][:80]
-                db_module.save_channel_learned_rule(
+                tg_controller.save_channel_learned_rule(
                     ch, "ignore_pattern" if resolution == "ignore" else "parser_format",
                     pattern, resolution, rule_notes, str(rid),
                 )
-                db_module.update_unrecognised_message(
+                tg_controller.update_unrecognised_message(
                     rid, resolution=resolution, status="resolved"
                 )
                 # Update channel config if a format was chosen
                 if resolution in ("format_ab", "gd2"):
-                    existing = db_module.get_channel_parser_config(ch)
+                    existing = tg_controller.get_channel_parser_config(ch)
                     if existing:
-                        db_module.save_channel_parser_config(
+                        tg_controller.save_channel_parser_config(
                             ch, resolution,
                             existing.get("signal_prefix", ""),
                             bool(existing.get("instant_entry_enabled", 0)),
@@ -746,7 +728,7 @@ def _render_pending_question(row: dict, refresh: Callable) -> None:
             ui.button(
                 "Dismiss", icon="close",
                 on_click=lambda: (
-                    db_module.update_unrecognised_message(unrec_id, status="dismissed"),
+                    tg_controller.update_unrecognised_message(unrec_id, status="dismissed"),
                     asyncio.create_task(refresh()),
                 ),
             ).classes("bg-gray-600 text-white text-xs px-2 py-1")

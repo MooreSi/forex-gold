@@ -10,7 +10,7 @@ import logging
 
 from nicegui import ui
 
-from backend.src.db import database as db_module
+from backend.src.controllers.remote_node import controller as rn_controller
 from backend.src.controllers.sync import tls_util
 
 log = logging.getLogger(__name__)
@@ -38,10 +38,10 @@ def render(get_engine=None) -> None:
             ui.label("This machine is the VPS").classes("text-base font-bold text-yellow-300")
             server_enabled = ui.switch(
                 "Accept remote connections",
-                value=bool(int(db_module.get_app_config("sync_server_enabled") or "0")),
+                value=bool(int(rn_controller.get_app_config("sync_server_enabled") or "0")),
             )
             port_input = ui.number(
-                "Listen port", value=int(db_module.get_app_config("sync_server_port") or _DEFAULT_PORT),
+                "Listen port", value=int(rn_controller.get_app_config("sync_server_port") or _DEFAULT_PORT),
                 min=1024, max=65535,
             ).classes("w-40")
             fingerprint_lbl = ui.label("").classes("text-xs text-gray-400 font-mono break-all")
@@ -54,17 +54,17 @@ def render(get_engine=None) -> None:
                     "Cert fingerprint: (generated on first start)"
 
             async def _generate_token():
-                tok = db_module.generate_sync_token()
+                tok = rn_controller.generate_sync_token()
                 token_lbl.text = f"Token (copy to the Mac's settings — shown once): {tok}"
                 ui.notify("New token generated. Any previously-paired Mac must be reconfigured.",
                            type="warning")
 
             async def _toggle_server(e):
                 from backend.src.controllers.sync import server as sync_server
-                db_module.set_app_config("sync_server_enabled", "1" if e.value else "0")
-                db_module.set_app_config("sync_server_port", str(int(port_input.value)))
+                rn_controller.set_app_config("sync_server_enabled", "1" if e.value else "0")
+                rn_controller.set_app_config("sync_server_port", str(int(port_input.value)))
                 if e.value:
-                    token = db_module.get_sync_token()
+                    token = rn_controller.get_sync_token()
                     if not token:
                         ui.notify("Generate a token first.", type="negative")
                         server_enabled.value = False
@@ -113,12 +113,12 @@ def render(get_engine=None) -> None:
             ).classes("text-xs text-gray-500")
             headless_enabled = ui.switch(
                 "Run headless (no web UI)",
-                value=bool(int(db_module.get_app_config("headless_mode_enabled") or "0")),
+                value=bool(int(rn_controller.get_app_config("headless_mode_enabled") or "0")),
             )
             headless_status_lbl = ui.label("").classes("text-xs text-gray-500")
 
             async def _toggle_headless(e):
-                db_module.set_app_config("headless_mode_enabled", "1" if e.value else "0")
+                rn_controller.set_app_config("headless_mode_enabled", "1" if e.value else "0")
                 engine = get_engine() if get_engine else None
                 if engine is None:
                     ui.notify("Setting saved — restart the app for it to take effect.",
@@ -216,11 +216,11 @@ def render(get_engine=None) -> None:
             ).classes("text-xs text-gray-500")
             centralized_enabled = ui.switch(
                 "Generate signals on this node only, forward to the active trader",
-                value=bool(db_module.get_risk_settings().get("centralized_signal_gen_enabled")),
+                value=bool(rn_controller.get_risk_settings().get("centralized_signal_gen_enabled")),
             )
 
             def _toggle_centralized(e):
-                db_module.update_risk_settings({"centralized_signal_gen_enabled": 1 if e.value else 0})
+                rn_controller.update_risk_settings({"centralized_signal_gen_enabled": 1 if e.value else 0})
                 ui.notify(
                     "Centralized signal generation " + ("enabled." if e.value else "disabled."),
                     type="warning" if e.value else "info",

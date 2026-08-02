@@ -106,7 +106,18 @@ def test_an_unreadable_statement_still_counts():
 
 def test_ui_db_gate_sees_the_aliased_import_form():
     """`from backend.src.db import database as db_module` is how the pages
-    actually do it -- the module path contains no "database" component, so a
-    naive check reports 5 files instead of 14. Scoped to frontend/ since Phase 1."""
+    do it -- the module path contains no "database" component, so a naive
+    check misses it. The original assertion pinned "more than 10 files",
+    which stopped being true the moment M3 started draining pages; what the
+    gate must actually guarantee is that EVERY frontend file still using
+    the alias form is reported -- down to zero when the drain completes."""
     report = sg.ui_db_report()
-    assert len(report) > 10, f"only found {len(report)}; the alias form is being missed"
+    offenders = set()
+    for path in sg.od.production_files():
+        if "frontend" not in path.parts or path.suffix != ".py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "import database" in text or "import sqlite3" in text:
+            offenders.add(str(path.relative_to(sg.od.REPO_ROOT)))
+    missed = offenders - set(report)
+    assert not missed, f"alias-form importers missed by the gate: {missed}"

@@ -205,3 +205,27 @@ def try_claim_trigger(tg_message_id: str, trigger_type: str, applied_at: float) 
             (tg_message_id, trigger_type, applied_at),
         )
         return cur.rowcount > 0
+
+
+def fetch_stored_messages(limit: int = 100) -> tuple[list[dict], int]:
+    """Last N rows of telegram_messages plus the total count, read from the
+    active environment's own DB file by explicit path -- exactly the fresh
+    read-only-style connection the Telegram page always made (M3 page drain).
+    """
+    import sqlite3
+    import backend.src.config as _cfg
+    from backend.src.config import DATA_DIR
+    env = _cfg.get("account_env", "demo")
+    db_path = str(DATA_DIR / f"forex_trader_{env}.db")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    total = conn.execute("SELECT COUNT(*) FROM telegram_messages").fetchone()[0]
+    rows  = conn.execute(
+        "SELECT group_name, sender_name, timestamp, received_at, text, "
+        "       has_media, media_type "
+        "FROM telegram_messages "
+        "ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows], total

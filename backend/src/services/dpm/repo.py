@@ -176,3 +176,45 @@ def insert_calibration_rows(results: list[dict]) -> None:
                  r["sample_size"], r["profit_factor"], r["win_rate"],
                  r["avg_r_multiple"], r["notes"]),
             )
+
+
+# ── Reads for the DPM Analysis page (M3 page drain) ──────────────────────────
+
+def fetch_performance_with_trades() -> list[dict]:
+    """All dpm_trade_performance rows joined to their trades, newest first."""
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                "SELECT p.*, t.open_time, t.close_time, t.mt5_ticket, "
+                "COALESCE(p.tg_source, t.tg_source) AS tg_source "
+                "FROM dpm_trade_performance p "
+                "LEFT JOIN vantage_simulated_trades t ON t.trade_id = p.trade_id "
+                "ORDER BY p.opened_at DESC"
+            ).fetchall()
+        ]
+
+
+def fetch_latest_calibration_full() -> list[dict]:
+    """Every column of the most recent calibration run's rows."""
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                "SELECT * FROM dpm_calibration "
+                "WHERE calibrated_at = (SELECT MAX(calibrated_at) FROM dpm_calibration) "
+                "ORDER BY session, momentum_bucket"
+            ).fetchall()
+        ]
+
+
+def fetch_calibration_run_summaries() -> list[dict]:
+    with db() as conn:
+        return [
+            dict(r) for r in conn.execute(
+                "SELECT calibrated_at, COUNT(*) as buckets, "
+                "AVG(win_rate) as avg_win_rate, AVG(avg_r_multiple) as avg_r, "
+                "AVG(profit_factor) as avg_pf, SUM(sample_size) as total_samples "
+                "FROM dpm_calibration "
+                "GROUP BY calibrated_at "
+                "ORDER BY calibrated_at DESC LIMIT 10"
+            ).fetchall()
+        ]

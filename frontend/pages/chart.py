@@ -17,7 +17,7 @@ from typing import Optional, Callable
 from nicegui import ui
 
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
-from backend.src.db import database as db_module
+from backend.src.controllers.chart import controller as chart_controller
 from backend.src.controllers.sync import client as sync_client
 from frontend.pages.trading import trade_source_label, trade_channel_label
 
@@ -101,7 +101,7 @@ def _untracked_position_node_label() -> str:
         from backend.src.controllers.sync.client import SyncClient
         from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
         host, _, _ = SyncClient.load_config()
-        if host and db_module.get_active_trader() == TRADER_REMOTE_VPS:
+        if host and chart_controller.get_active_trader() == TRADER_REMOTE_VPS:
             return "Remote"
         return "Local"
     except Exception:
@@ -602,7 +602,7 @@ def render(get_engine: Callable):
                                         "text-sm font-mono font-semibold"
                                     ).style(f"color:{col}")
 
-            rs_chart   = db_module.get_risk_settings()
+            rs_chart   = chart_controller.get_risk_settings()
             dpm_active = bool(rs_chart.get("dpm_enabled", 0))
             for t in trades:
                 direction = t.get("direction", "?")
@@ -799,7 +799,7 @@ def render(get_engine: Callable):
     async def _refresh_fast():
         try:
             tick       = await engine.get_tick()
-            trades     = await db_module.to_db_thread(engine.get_open_trades)
+            trades     = await chart_controller.get_open_trades(engine)
             untracked  = await engine.get_untracked_mt5_positions()
             _state["tick"] = tick
 

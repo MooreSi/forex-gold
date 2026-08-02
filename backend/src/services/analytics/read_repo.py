@@ -201,3 +201,42 @@ def all_custom_strategies() -> list[dict]:
                 "SELECT id, name, description FROM custom_strategies ORDER BY created_at"
             ).fetchall()
         ]
+
+
+def fetch_signal_execution_lags(db_path: str) -> list:
+    """Telegram->execution latency samples for the diagnostics panel (M3
+    page drain): seconds between a signal's parsed_at and its trade's
+    open_time, newest 200, by explicit env-DB path -- same fresh connection
+    the Settings page always made."""
+    import sqlite3 as _sqlite3
+    _conn = _sqlite3.connect(db_path, check_same_thread=False)
+    _conn.row_factory = _sqlite3.Row
+    try:
+        return _conn.execute("""
+            SELECT
+                (st.open_time - ts.parsed_at) AS lag_s,
+                ts.parsed_at
+            FROM vantage_tg_signals ts
+            JOIN vantage_simulated_trades st ON ts.signal_id = st.signal_id
+            WHERE st.status IN ('open','closed')
+              AND ts.parsed_at IS NOT NULL
+              AND st.open_time IS NOT NULL
+              AND (st.open_time - ts.parsed_at) BETWEEN 0 AND 300
+            ORDER BY ts.parsed_at DESC
+            LIMIT 200
+        """).fetchall()
+    finally:
+        _conn.close()
+
+
+def fetch_realised_pnl_last_24h(cutoff: float) -> float:
+    """Sum of closed-trade P&L since cutoff (prefers the real MT5 figure) --
+    the History-tab celebration check (M3 app-shell drain)."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(COALESCE(mt5_profit, net_pnl, 0)), 0) "
+            "FROM vantage_simulated_trades "
+            "WHERE status='closed' AND close_time > ?",
+            (cutoff,),
+        ).fetchone()
+    return float(row[0] or 0.0)

@@ -8,7 +8,7 @@ from typing import Callable
 
 from nicegui import app, ui
 
-from backend.src.db import database as db_module
+from backend.src.controllers.settings import controller as settings_ctl
 from backend.src.utils import os_utils as _pu
 from backend.src.controllers.sync import client as sync_client
 import backend.src.config as cfg_module
@@ -148,7 +148,7 @@ def _render_mt5(engine):
 
     cfg = cfg_module.load()
     # Always read credentials from the master (demo) DB — env-independent
-    creds = db_module.get_mt5_credentials()
+    creds = settings_ctl.get_mt5_credentials()
 
     status_lbl = ui.label("").classes("text-sm text-gray-400 mb-2")
 
@@ -184,12 +184,12 @@ def _render_mt5(engine):
                             updates["updated_at"]   = _t.time()
 
                         # Always save to master (demo) credential store
-                        db_module.save_mt5_credentials(updates)
+                        settings_ctl.save_mt5_credentials(updates)
 
                         # Keep bridge_credentials.json in sync if this env is active
                         current_env = cfg_module.get("account_env", "demo")
                         if _env == current_env:
-                            db_module.sync_bridge_credentials_file(current_env)
+                            settings_ctl.sync_bridge_credentials_file(current_env)
 
                         # Push to bridge if this env is currently active
                         if _env == current_env:
@@ -213,7 +213,7 @@ def _render_mt5(engine):
                     _env=env, _login=login_v, _pw=pw_v, _srv=srv_v, _lbl=test_lbl,
                 ):
                     pfx   = "live_" if _env == "live" else ""
-                    saved = db_module.get_mt5_credentials()
+                    saved = settings_ctl.get_mt5_credentials()
                     login_val = int(_login.value or 0)
                     pwd_val   = _pw.value.strip() or saved.get(f"{pfx}password_enc", "")
                     srv_val   = _srv.value.strip() or saved.get(f"{pfx}server", "")
@@ -253,7 +253,7 @@ def _render_mt5(engine):
 
     ui.separator().classes("my-4")
 
-    rs = db_module.get_risk_settings()
+    rs = settings_ctl.get_risk_settings()
     with ui.card().classes("w-full max-w-xl bg-gray-800 border border-blue-600 p-4 rounded-lg"):
         with ui.row().classes("w-full items-center justify-between"):
             ea_bridge_sw = ui.switch(
@@ -280,7 +280,7 @@ def _render_mt5(engine):
             ).classes("text-gray-300")
 
         def _save_ea_bridge():
-            db_module.update_risk_settings({
+            settings_ctl.update_risk_settings({
                 "ea_bridge_enabled": int(bool(ea_bridge_sw.value)),
             })
             ui.notify("EA Bridge setting saved", type="positive")
@@ -508,7 +508,7 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
     to be greyed in/out against each other from here — this card doesn't
     return anything for a host page to wire up anymore.
     """
-    rs = db_module.get_risk_settings()
+    rs = settings_ctl.get_risk_settings()
 
     with ui.card().classes(card_classes):
         with ui.row().classes("items-center gap-2 mb-3"):
@@ -629,7 +629,7 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
             )
 
         def _cb_reset():
-            db_module.reset_circuit_breaker()
+            settings_ctl.reset_circuit_breaker()
             ui.notify("Circuit breaker reset — live trading unblocked.", type="positive")
 
         with ui.row().classes("items-center gap-2"):
@@ -660,7 +660,7 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
         ).classes("text-sm text-gray-200")
 
         def _hour_block_toggle(e):
-            db_module.update_risk_settings({"hour_blocklist_enabled": 1 if e.value else 0})
+            settings_ctl.update_risk_settings({"hour_blocklist_enabled": 1 if e.value else 0})
             hour_block_badge.props(f"color={'red' if e.value else 'grey'}")
             hour_block_badge.text = "BLOCKLIST ON" if e.value else "BLOCKLIST OFF"
             ui.notify(
@@ -692,7 +692,7 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
 
         def save_risk():
             try:
-                db_module.update_risk_settings({
+                settings_ctl.update_risk_settings({
                     "risk_governor_enabled":          int(bool(risk_gov.value)),
                     "max_daily_loss_pct":             float(max_dd.value      or 0),
                     "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),
@@ -965,7 +965,7 @@ def _fmt_last_refresh(ts: float) -> str:
 
 
 def _render_tg_bot():
-    tg_cfg = db_module.get_telegram_config()
+    tg_cfg = settings_ctl.get_telegram_config()
     cfg    = cfg_module.load()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
@@ -999,7 +999,7 @@ def _render_tg_bot():
             )
 
         def save_tg():
-            db_module.save_telegram_config(bot_token.value, chat_id.value, enabled.value)
+            settings_ctl.save_telegram_config(bot_token.value, chat_id.value, enabled.value)
             ui.notify("Telegram config saved", type="positive")
 
         async def test_tg():
@@ -1130,7 +1130,7 @@ def _smtp_friendly_error(raw: str) -> str:
 
 
 def _render_email():
-    ecfg = db_module.get_email_config()
+    ecfg = settings_ctl.get_email_config()
 
     # ── Schedule & Delivery card (top) ────────────────────────────────────────
     _SEND_PROVIDERS = {
@@ -1219,7 +1219,7 @@ def _render_email():
             )
 
         def save_schedule():
-            db_module.save_email_config({
+            settings_ctl.save_email_config({
                 "send_provider":      send_provider_sel.value or "resend",
                 "daily_enabled":      int(daily_enabled.value),
                 "weekly_enabled":     int(weekly_enabled.value),
@@ -1233,7 +1233,7 @@ def _render_email():
         async def test_scheduled_email():
             from backend.src.services.notifications import email_service
             provider = send_provider_sel.value or "resend"
-            fresh = db_module.get_email_config()
+            fresh = settings_ctl.get_email_config()
             to_addr = (fresh.get("to_addr") or "").strip()
             if not to_addr:
                 schedule_test_lbl.text = "Set 'Send reports to' in the SMTP section below first"
@@ -1259,7 +1259,7 @@ def _render_email():
         async def test_orb_email():
             from datetime import datetime as _dt
             from backend.src.services.notifications import email_service
-            fresh = db_module.get_email_config()
+            fresh = settings_ctl.get_email_config()
             to_addr = (fresh.get("to_addr") or "").strip()
             if not to_addr:
                 schedule_test_lbl.text = "Set 'Send reports to' in the SMTP section below first"
@@ -1355,7 +1355,7 @@ def _render_email():
                 rs_result.text = "Testing Resend..."
                 rs_result.classes(replace="text-sm text-gray-400")
                 from backend.src.services.notifications import email_service
-                _fresh = db_module.get_email_config()
+                _fresh = settings_ctl.get_email_config()
                 cfg_snap = {
                     "resend_api_key": rs_key.value,
                     "to_addr": _fresh.get("to_addr") or _fresh.get("smtp_user") or "",
@@ -1381,7 +1381,7 @@ def _render_email():
                     rs_result.classes(replace="text-sm text-red-300")
 
             def save_resend():
-                db_module.save_email_config({"resend_api_key": rs_key.value or ""})
+                settings_ctl.save_email_config({"resend_api_key": rs_key.value or ""})
                 ui.notify("Resend API key saved", type="positive")
 
             with ui.row().classes("gap-3 mt-1"):
@@ -1739,7 +1739,7 @@ def _render_email():
             }
             if smtp_password.value:
                 updates["smtp_password"] = smtp_password.value
-            db_module.save_email_config(updates)
+            settings_ctl.save_email_config(updates)
             ui.notify("SMTP settings saved", type="positive")
 
         with ui.row().classes("gap-3 mt-4 flex-wrap"):
@@ -1897,7 +1897,7 @@ def _render_bridge_control(engine):
                 return
 
             env = cfg_module.get("account_env", "demo")
-            ok  = db_module.sync_bridge_credentials_file(env)
+            ok  = settings_ctl.sync_bridge_credentials_file(env)
             if not ok:
                 bridge_log_lbl.text = (
                     f"Cannot start — no credentials for {env} env.\n"
@@ -2383,7 +2383,7 @@ def _render_diagnostics(engine):
             # synchronously on the event loop blocked the whole app for as
             # long as this took, same class of bug as the sqlite3.connect()
             # sites fixed earlier.
-            lines = await db_module.to_db_thread(_live_log_lines)
+            lines = await settings_ctl.run_db(_live_log_lines)
             if not lines:
                 ui.label(
                     "No events recorded yet since last restart. Start the engine and generate some activity."
@@ -2420,7 +2420,6 @@ def _render_diagnostics(engine):
     async def run_diag():
         import platform as _platform
         import sys as _sys
-        import sqlite3 as _sqlite3
         import time as _t
 
         diag_container.clear()
@@ -2458,24 +2457,10 @@ def _render_diagnostics(engine):
             from backend.src.config import DATA_DIR as _ddir, load as _cfg_load
             _env = _cfg_load().get("account_env", "demo")
             _db_path = str(_ddir / f"forex_trader_{_env}.db")
-            _conn = _sqlite3.connect(_db_path, check_same_thread=False)
-            _conn.row_factory = _sqlite3.Row
             try:
                 # parsed_at = when signal was received by the app
                 # open_time = when the trade was actually opened in MT5
-                _rows = _conn.execute("""
-                    SELECT
-                        (st.open_time - ts.parsed_at) AS lag_s,
-                        ts.parsed_at
-                    FROM vantage_tg_signals ts
-                    JOIN vantage_simulated_trades st ON ts.signal_id = st.signal_id
-                    WHERE st.status IN ('open','closed')
-                      AND ts.parsed_at IS NOT NULL
-                      AND st.open_time IS NOT NULL
-                      AND (st.open_time - ts.parsed_at) BETWEEN 0 AND 300
-                    ORDER BY ts.parsed_at DESC
-                    LIMIT 200
-                """).fetchall()
+                _rows = settings_ctl.fetch_signal_execution_lags(_db_path)
                 lags = [float(r["lag_s"]) for r in _rows if r["lag_s"] is not None]
                 if lags:
                     lags_sorted = sorted(lags)
@@ -2488,7 +2473,7 @@ def _render_diagnostics(engine):
                         "max_s":  round(lags_sorted[-1], 2),
                     }
             finally:
-                _conn.close()
+                pass
         except Exception:
             pass
 
@@ -2693,7 +2678,7 @@ def _render_diagnostics(engine):
         import time as _time
         from datetime import datetime as _dt
         from pathlib import Path as _Path
-        from backend.src.db import database as _db
+        from backend.src.controllers.settings import controller as _db_ctl
         import httpx as _httpx
 
         DAYS       = 5
@@ -2817,7 +2802,7 @@ def _render_diagnostics(engine):
                 _app_ver = "—"
 
             _env_label = (
-                db_module.get_app_config("account_env") or "demo"
+                settings_ctl.get_app_config("account_env") or "demo"
             ).upper()
             _py_ver  = _sys.version.split()[0]
             _os_info = f"{_platform.system()} {_platform.release()} ({_platform.machine()})"
@@ -2911,7 +2896,7 @@ def _render_diagnostics(engine):
 </body></html>"""
 
             # ── Send via Resend with attachment ───────────────────────────────
-            ecfg    = _db.get_email_config()
+            ecfg    = _db_ctl.get_email_config()
             api_key = (ecfg.get("resend_api_key") or "").strip()
             if not api_key:
                 export_lbl.text = "No Resend API key configured — set it in Settings → Email Reports."
@@ -3035,7 +3020,7 @@ def _render_diagnostics(engine):
             "365": "365 days",
             "custom": "Custom…",
         }
-        _current_days = db_module.get_data_retention_days()
+        _current_days = settings_ctl.get_data_retention_days()
         _preset_days = {0, 30, 90, 180, 365}
         _initial_key = str(_current_days) if _current_days in _preset_days else "custom"
 
@@ -3067,7 +3052,7 @@ def _render_diagnostics(engine):
                     return
             else:
                 days = int(key)
-            db_module.set_data_retention_days(days)
+            settings_ctl.set_data_retention_days(days)
             ui.notify(
                 "Data retention set to indefinite — nothing will be deleted."
                 if days == 0 else

@@ -61,7 +61,7 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 
 import backend.src.config as cfg_module
 from backend.src.utils.version_history import __version__ as _APP_VERSION
-from backend.src.db import database as db_module
+from backend.src.controllers.settings import controller as settings_ctl
 from frontend.pages import backtest as backtest_page
 
 log = logging.getLogger(__name__)
@@ -837,7 +837,7 @@ def main_page():
                     pause_result.text = "Pause time must be in the future"
                     return
 
-                db_module.set_app_config("trade_pause_until", str(pause_ts))
+                settings_ctl.set_app_config("trade_pause_until", str(pause_ts))
                 exp = _dt.fromtimestamp(pause_ts)
                 _pause_dialog.close()
                 ui.notify(
@@ -848,7 +848,7 @@ def main_page():
                 pause_result.text = f"Error: {e}"
 
         def _do_resume():
-            db_module.set_app_config("trade_pause_until", "0")
+            settings_ctl.set_app_config("trade_pause_until", "0")
             _pause_dialog.close()
             ui.notify("Trading resumed", type="positive")
 
@@ -870,7 +870,7 @@ def main_page():
             if not e.value:
                 return
             from datetime import datetime as _dt
-            raw = db_module.get_app_config("trade_pause_until")
+            raw = settings_ctl.get_app_config("trade_pause_until")
             paused = raw is not None and float(raw or 0) > _time.time()
             if paused:
                 try:
@@ -997,7 +997,7 @@ def main_page():
                     "Configure one in Settings > Remote Node."
                 )
                 return
-            active = db_module.get_active_trader()
+            active = settings_ctl.get_active_trader()
             if active == "local":
                 mode_btn.text = "LOCAL"
                 mode_btn.props("color=amber")
@@ -1021,7 +1021,7 @@ def main_page():
             mode_btn.props("color=grey")
             mode_btn.disable()
             try:
-                current = db_module.get_active_trader()
+                current = settings_ctl.get_active_trader()
                 if current != "local":
                     # Remote -> Local: take over. Must succeed on the VPS
                     # side (its ack) before this node starts trading.
@@ -1030,7 +1030,7 @@ def main_page():
                     except Exception as exc:
                         ui.notify(f"VPS did not acknowledge stand-down: {exc}", type="negative")
                         return
-                    db_module.set_active_trader("local")
+                    settings_ctl.set_active_trader("local")
                     bo, bc, gd = _mode_sub_engines()
                     for eng in (bo, bc, gd):
                         if eng is not None and not getattr(eng, "is_running", False):
@@ -1061,9 +1061,9 @@ def main_page():
                         ui.notify(f"VPS did not acknowledge resume: {exc}", type="negative")
                         # Engines are already stopped locally; leave them stopped
                         # rather than guess whether the VPS actually resumed.
-                        db_module.set_active_trader("remote_vps")
+                        settings_ctl.set_active_trader("remote_vps")
                         return
-                    db_module.set_active_trader("remote_vps")
+                    settings_ctl.set_active_trader("remote_vps")
                     ui.notify(
                         "Control handed back to the VPS."
                         + (f" ({len(open_trades)} local position(s) still running to their own SL/TP)"
@@ -1120,7 +1120,7 @@ def main_page():
             tick   = await engine.get_tick()
 
             # Pause badge
-            pause_raw = db_module.get_app_config("trade_pause_until")
+            pause_raw = settings_ctl.get_app_config("trade_pause_until")
             is_paused = pause_raw and float(pause_raw or 0) > _time.time()
             pause_badge.style("" if is_paused else "display:none")
 
@@ -1355,7 +1355,7 @@ def main_page():
         """Switch env: save config + swap DB, reconnect bridge, show MT5 reminder, reload."""
         engine = get_engine()
         # Always read from master credential store (demo DB) — env-independent
-        creds = db_module.get_mt5_credentials()
+        creds = settings_ctl.get_mt5_credentials()
 
         if new_env == "live":
             login    = int(creds.get("live_login") or 0)
@@ -1383,12 +1383,12 @@ def main_page():
 
         # 1. Swap DB and persist new env immediately
         from backend.src.config import DATA_DIR as _DATA_DIR
-        db_module.init(str(_DATA_DIR / f"forex_trader_{new_env}.db"))
+        settings_ctl.switch_environment_db(str(_DATA_DIR / f"forex_trader_{new_env}.db"))
         cfg_module.save_to_yaml({"account_env": new_env})
         _is_live[0] = (new_env == "live")
 
         # 2. Write bridge_credentials.json so bridge connects correctly on restart
-        db_module.sync_bridge_credentials_file(new_env)
+        settings_ctl.sync_bridge_credentials_file(new_env)
 
         # 3. Tell the bridge to switch to the target account, auto-recover if needed
         bridge_note      = ""
@@ -1534,7 +1534,7 @@ def main_page():
 
         def _refresh_cb_badge():
             try:
-                cb = db_module.get_circuit_breaker_state()
+                cb = settings_ctl.get_circuit_breaker_state()
             except Exception:
                 return
             if cb.get("is_active"):
@@ -1559,14 +1559,7 @@ def main_page():
         # Only celebrate if today's closed-trade P&L is positive
         cutoff = _time.time() - 86400
         try:
-            with db_module.db() as conn:
-                row = conn.execute(
-                    "SELECT COALESCE(SUM(COALESCE(mt5_profit, net_pnl, 0)), 0) "
-                    "FROM vantage_simulated_trades "
-                    "WHERE status='closed' AND close_time > ?",
-                    (cutoff,),
-                ).fetchone()
-            daily_pnl = float(row[0]) if row and row[0] is not None else 0.0
+            daily_pnl = settings_ctl.fetch_realised_pnl_last_24h(cutoff)
         except Exception:
             daily_pnl = 0.0
         if daily_pnl <= 0:

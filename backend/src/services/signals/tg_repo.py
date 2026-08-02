@@ -176,3 +176,8 @@ def insert_tg_signal_if_new(tg_id, group_id, channel_name: str,
              status),
         )
         return cur.rowcount > 0
+
+
+def delete_tg_signal_row(row_id) -> None:
+    with db_module.db() as conn:
+        conn.execute("DELETE FROM vantage_tg_signals WHERE id=?", (row_id,))

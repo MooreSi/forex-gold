@@ -173,3 +173,11 @@ def template_trade_open_for(channel_name: str, direction: str,
             (channel_name, direction, strategy_like),
         ).fetchone()
     return row is not None
+
+
+def set_signal_commentary(signal_id: str, commentary_json: str) -> None:
+    with db_module.db() as conn:
+        conn.execute(
+            "UPDATE vantage_signals SET claude_commentary=? WHERE signal_id=?",
+            (commentary_json, signal_id),
+        )

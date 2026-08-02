@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 from nicegui import ui
 
 from backend.src.services.ai import provider as ai_provider
-from backend.src.db import database as db_module
+from backend.src.controllers.trading import controller as trading_ctl
 from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
@@ -40,34 +40,12 @@ def _uk(ts) -> str:
         return str(ts)[:16]
 
 
-def trade_source_label(tg_source: str) -> str:
-    """Return a short human-readable label for where a trade originated.
-
-    tg_source values:
-      - "manual_market"  → placed via Market Order button
-      - "MT5_imported"   → position imported from MT5 sync
-      - channel name     → Telegram signal (auto-executed, activated, or IME)
-      - "" / None        → manually created signal via New Signal form
-    """
-    if not tg_source:
-        return "Manual Signal"
-    if tg_source == "manual_market":
-        return "Manual Market"
-    if tg_source == "MT5_imported":
-        return "MT5 Import"
-    # Strip legacy "instant:" prefix stored in older DB records
-    if tg_source.startswith("instant:"):
-        tg_source = tg_source[len("instant:"):]
-    return tg_source
-
-
-def trade_channel_label(tg_source: str) -> str:
-    """Return the Telegram channel name, or empty string if not a Telegram signal."""
-    if not tg_source or tg_source in ("manual_market", "MT5_imported", "Signal Generator", "Bounce Generator"):
-        return ""
-    if tg_source.startswith("instant:"):
-        return tg_source[len("instant:"):]
-    return tg_source
+# trade_source_label / trade_channel_label moved to the history controller
+# (M3 page drain) -- they are display shaping the controllers need too.
+# Re-imported here because several pages import them from this module.
+from backend.src.controllers.history.controller import (  # noqa: E402,F401
+    trade_channel_label, trade_source_label,
+)
 
 
 def _pnl_colour(v: float) -> str:
@@ -133,7 +111,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
             pass
         # Circuit breaker badge (right-aligned)
         try:
-            _cb = db_module.get_circuit_breaker_state()
+            _cb = trading_ctl.get_circuit_breaker_state()
             if _cb["is_active"]:
                 _rem = int(_cb["remaining_secs"])
                 _hms = f"{_rem // 3600:02d}:{(_rem % 3600) // 60:02d}:{_rem % 60:02d}"
@@ -313,7 +291,7 @@ def _render_active_trades(engine):
         # new data is ready means the swap only happens once, atomically.
         try:
             tick       = await engine.get_tick()
-            trades     = await db_module.to_db_thread(engine.get_open_trades)
+            trades     = await trading_ctl.run_db(engine.get_open_trades)
             untracked  = await engine.get_untracked_mt5_positions()
         except Exception:
             trades, tick, untracked = [], None, []
@@ -369,9 +347,9 @@ def _render_active_trades(engine):
                             "text-xs text-orange-300 italic"
                         )
 
-            rs         = db_module.get_risk_settings()
+            rs         = trading_ctl.get_risk_settings()
             dpm_active = bool(rs.get("dpm_enabled", 0))
-            _, ooh_now = db_module.get_effective_strategy(rs)
+            _, ooh_now = trading_ctl.get_effective_strategy(rs)
             _ooh_strat = rs.get("ooh_strategy", "conservative") or "conservative"
             _ooh_label = f"OOH: {STRATEGY_NAMES.get(_ooh_strat, _ooh_strat)}"
 
@@ -452,7 +430,7 @@ def _render_active_trades(engine):
                             _stat_cell("STRATEGY", strat_name,
                                        "text-blue-400" if dpm_active else "text-amber-400")
                             # Take Profit At (profit_close_usd) — show if set
-                            rs_now = db_module.get_risk_settings()
+                            rs_now = trading_ctl.get_risk_settings()
                             pcu = float(rs_now.get("profit_close_usd", 0) or 0)
                             if pcu > 0:
                                 _stat_cell("CLOSE AT", f"${pcu:.2f}", "text-green-400")
@@ -501,9 +479,9 @@ def _render_active_trades(engine):
                                 ).classes("text-green-400 text-xs")
 
                         # DPM live status row
-                        dpm_on = bool(db_module.get_risk_settings().get("dpm_enabled", 0))
+                        dpm_on = bool(trading_ctl.get_risk_settings().get("dpm_enabled", 0))
                         if dpm_on:
-                            dpm_status = db_module.get_app_config(
+                            dpm_status = trading_ctl.get_app_config(
                                 f"dpm_status_{trade_id}"
                             ) or "Analysing market..."
                             with ui.row().classes(
@@ -586,7 +564,7 @@ def _render_pending_signals(engine):
 
     async def refresh():
         container.clear()
-        sigs = await db_module.to_db_thread(engine.get_signals, status="pending")
+        sigs = await trading_ctl.run_db(engine.get_signals, status="pending")
         with container:
             if not sigs:
                 ui.label(
@@ -974,7 +952,7 @@ def _render_market_order_form(engine):
         )
 
         # Strategy / DPM status banner
-        rs_now   = db_module.get_risk_settings()
+        rs_now   = trading_ctl.get_risk_settings()
         dpm_on   = bool(rs_now.get("dpm_enabled", 0))
         strat_nm = STRATEGY_NAMES.get(rs_now.get("trade_strategy", ""), "Scale Out")
         mode_txt = "DPM" if dpm_on else strat_nm
@@ -1033,7 +1011,7 @@ def _render_market_order_form(engine):
                 k: v for k, v in STRATEGY_NAMES.items()
                 if k != STRATEGY_ORB_FIXED
             }
-            _mo_rs = db_module.get_risk_settings()
+            _mo_rs = trading_ctl.get_risk_settings()
             _mo_default = _mo_rs.get("trade_strategy", STRATEGY_SCALE_OUT)
             mo_strategy = ui.select(
                 _mo_strat_names,
@@ -1108,7 +1086,7 @@ def _render_market_order_form(engine):
                         f"Current price:  Bid {bid:.2f}  |  Ask {ask:.2f}  "
                         f"|  Spread {tick.spread_points:.0f} pts"
                     )
-                rs_r  = await db_module.to_db_thread(db_module.get_risk_settings)
+                rs_r  = await trading_ctl.get_risk_settings_async()
                 d_on  = bool(rs_r.get("dpm_enabled", 0))
                 s_nm  = STRATEGY_NAMES.get(rs_r.get("trade_strategy", ""), "Scale Out")
                 m_txt = "DPM" if d_on else s_nm
@@ -1276,7 +1254,7 @@ def _render_orb_report(engine):
 
                     with ui.row().classes("items-center gap-2 mt-2"):
                         ui.label("Lot size").classes("text-xs text-gray-400 font-medium")
-                        _orb_lot_rs = db_module.get_risk_settings()
+                        _orb_lot_rs = trading_ctl.get_risk_settings()
                         lot_inp = ui.number(
                             value=float(_orb_lot_rs.get("orb_lot_size", 0) or 0),
                             min=0.0, max=10.0, step=0.01, format="%.2f",
@@ -1289,7 +1267,7 @@ def _render_orb_report(engine):
                         )
 
                         def _lot_change(e):
-                            db_module.update_risk_settings({"orb_lot_size": float(e.value or 0)})
+                            trading_ctl.update_risk_settings({"orb_lot_size": float(e.value or 0)})
 
                         lot_inp.on_value_change(_lot_change)
                 else:
@@ -1300,7 +1278,7 @@ def _render_orb_report(engine):
 
                 # Auto-execute toggle
                 ui.separator().classes("my-3")
-                rs_now = db_module.get_risk_settings()
+                rs_now = trading_ctl.get_risk_settings()
                 auto_val = bool(rs_now.get("orb_auto_execute_enabled", 0))
                 with ui.row().classes("items-center gap-2"):
                     auto_chk = ui.checkbox(
@@ -1315,7 +1293,7 @@ def _render_orb_report(engine):
                     )
 
                     def _auto_toggle(e):
-                        db_module.update_risk_settings({"orb_auto_execute_enabled": 1 if e.value else 0})
+                        trading_ctl.update_risk_settings({"orb_auto_execute_enabled": 1 if e.value else 0})
                         ui.notify(
                             "ORB auto-execute enabled" if e.value else "ORB auto-execute disabled",
                             type="positive" if e.value else "info",
@@ -1331,21 +1309,14 @@ async def _background_commentary(engine, signal_id: str):
         import backend.src.config as cfg_module
         import backend.src.services.ai.claude_ai as claude_ai
         config = cfg_module.load()
-        with db_module.db() as conn:
-            row = db_module.row_to_dict(
-                conn.execute("SELECT * FROM vantage_signals WHERE signal_id=?", (signal_id,)).fetchone()
-            )
+        row = trading_ctl.get_signal(signal_id)
         tick    = await engine.get_tick()
         candles = await engine.get_candles("M5", 20)
         commentary = await claude_ai.request_commentary(
             "signal_saved", None, row, tick, candles, config,
         )
         if commentary.get("summary"):
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_signals SET claude_commentary=? WHERE signal_id=?",
-                    (json.dumps(commentary), signal_id),
-                )
+            trading_ctl.set_signal_commentary(signal_id, commentary)
     except Exception as _exc:
         log.warning("Background commentary failed for signal %s: %s", signal_id, _exc)
 
@@ -1433,7 +1404,7 @@ def _render_schedule():
 
     schedule = sched.get_trading_schedule()
     enabled_now = sched.is_trading_schedule_enabled()
-    rs = db_module.get_risk_settings()
+    rs = trading_ctl.get_risk_settings()
 
     # ── Trading Markets card ─────────────────────────────────────────────────
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mb-3"):
@@ -1465,7 +1436,7 @@ def _render_schedule():
             ny_open     = 12 <= h < 21
             asia_open   = not (london_open or ny_open)  # 21:00-07:00 UTC
 
-            latest = db_module.get_risk_settings()
+            latest = trading_ctl.get_risk_settings()
             asia_en   = bool(latest.get("session_asia_enabled",   1))
             london_en = bool(latest.get("session_london_enabled", 1))
             ny_en     = bool(latest.get("session_ny_enabled",     1))
@@ -1545,16 +1516,16 @@ def _render_schedule():
         ).classes("text-xs text-gray-400 mt-1" if _active else "text-xs text-red-400 mt-1")
 
         def _toggle_market(key: str, btn, caption=mkt_caption):
-            cur = bool(db_module.get_risk_settings().get(key, 1))
+            cur = bool(trading_ctl.get_risk_settings().get(key, 1))
             new = not cur
-            db_module.update_risk_settings({key: 1 if new else 0})
+            trading_ctl.update_risk_settings({key: 1 if new else 0})
             if new:
                 btn.props("color=green")
                 btn.props(remove="flat")
             else:
                 btn.props("flat color=grey")
             # Rebuild caption
-            latest = db_module.get_risk_settings()
+            latest = trading_ctl.get_risk_settings()
             parts = []
             if latest.get("session_asia_enabled",   1): parts.append("Asia")
             if latest.get("session_london_enabled", 1): parts.append("London")
@@ -1674,7 +1645,7 @@ def _render_schedule():
 
 
 def _get_hidden_strategies() -> set:
-    raw = db_module.get_app_config("hidden_strategies") or "[]"
+    raw = trading_ctl.get_app_config("hidden_strategies") or "[]"
     try:
         return set(json.loads(raw))
     except Exception:
@@ -1684,7 +1655,7 @@ def _get_hidden_strategies() -> set:
 def _hide_builtin_strategy(sid: str) -> None:
     hidden = _get_hidden_strategies()
     hidden.add(sid)
-    db_module.set_app_config("hidden_strategies", json.dumps(sorted(hidden)))
+    trading_ctl.set_app_config("hidden_strategies", json.dumps(sorted(hidden)))
 
 _COMPARE_ROWS = [
     ("Partial closes", {
@@ -1806,7 +1777,6 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     psychology icon to avoid stacking extra height.
     """
     import asyncio as _aio
-    from backend.src.db import database as _csdb
     from backend.src.services.channels import strategy_ai as _csai
     from backend.src.services.broker import ea_templates as _et
     from backend.src.utils.models import STRATEGY_NAMES
@@ -1818,7 +1788,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
             "conditions and update the recommendation every 30 min."
         )
 
-    channels = _csdb.get_all_channel_strategy_settings()
+    channels = trading_ctl.get_all_channel_strategy_settings()
 
     strat_opts = {"": "— Inherit Global —", "auto": "Auto (Claude)"}
     strat_opts.update(STRATEGY_NAMES)
@@ -1839,7 +1809,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
             src     = ch["source"]
             is_auto = ch.get("auto_strategy", False)
             cur_ov  = "auto" if is_auto else (ch.get("strategy_override") or "")
-            rec     = _csdb.get_channel_strategy_rec(src)
+            rec     = trading_ctl.get_channel_strategy_rec(src)
             pnl_col = "text-green-400" if (ch["net_pnl"] or 0) >= 0 else "text-red-400"
             rec_tip = _rec_label_text(rec, strat_opts)
             # Single stats label with fixed width keeps all dropdowns left-aligned
@@ -1868,7 +1838,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
                 val = (_v or "") if _v is not None else ""
                 is_a = (val == "auto")
                 override = None if (val in ("", "auto")) else val
-                _csdb.set_channel_strategy_override(_src, override, auto=is_a)
+                trading_ctl.set_channel_strategy_override(_src, override, auto=is_a)
                 status = "Auto (Claude)" if is_a else (
                     f"Manual: {strat_opts.get(val, val)}" if val else "Inheriting global"
                 )
@@ -1884,7 +1854,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     def _update_rec_tooltips(results: dict) -> None:
         for src, _r in results.items():
             if src in _rec_icons:
-                new_rec = _csdb.get_channel_strategy_rec(src)
+                new_rec = trading_ctl.get_channel_strategy_rec(src)
                 tip = _rec_label_text(new_rec, strat_opts)
                 _rec_icons[src].tooltip(tip or "No recommendation yet")
 
@@ -1897,12 +1867,9 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
         would again multiply real API calls.
         """
         try:
-            def _fetch_recs():
-                return {src: _csdb.get_channel_strategy_rec(src) for src in _rec_icons}
-
             # Offloaded — see _render_live_lines (settings.py) for why a
             # per-channel sync DB call directly in a timer callback matters.
-            recs = await db_module.to_db_thread(_fetch_recs)
+            recs = await trading_ctl.get_channel_strategy_recs(list(_rec_icons))
             for src, new_rec in recs.items():
                 tip = _rec_label_text(new_rec, strat_opts)
                 _rec_icons[src].tooltip(tip or "No recommendation yet")
@@ -1913,7 +1880,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
 
     def _apply_and_close(res: dict, dialog) -> None:
         for src, r in res.items():
-            _csdb.set_channel_strategy_override(src, r["strategy"], auto=False)
+            trading_ctl.set_channel_strategy_override(src, r["strategy"], auto=False)
             if src in _sel_map:
                 _sel_map[src].value = r["strategy"]
         ui.notify("Recommendations applied to all channels", type="positive")
@@ -2243,7 +2210,7 @@ def _render_global_parameters_card(rs: dict) -> None:
 
     def _save_global_params():
         try:
-            db_module.update_risk_settings({
+            trading_ctl.update_risk_settings({
                 "global_harvest_enabled":       int(bool(harvest_enabled.value)),
                 "global_harvest_threshold_usd": float(harvest_threshold.value or 0),
                 "strategy_lot_size":             float(fixed_lot_single.value or 0),
@@ -2516,7 +2483,7 @@ def render_signals_card() -> None:
     """Per-source live-execution toggles (Telegram/Bounce/Breakout/Reversal Engine) --
     self-contained, importable by other pages (moved to the top of the
     Parsing page, 2026-07-22 -- was previously part of Trading > Strategy)."""
-    rs = db_module.get_risk_settings()
+    rs = trading_ctl.get_risk_settings()
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):
         ui.label("Signals").classes("text-base font-bold text-yellow-300 mb-3")
 
@@ -2541,8 +2508,8 @@ def render_signals_card() -> None:
                 )
 
                 def toggle_tg_signals(badge=tg_sig_badge):
-                    cur = bool(db_module.get_risk_settings().get("accept_tg_signals", 1))
-                    db_module.update_risk_settings({"accept_tg_signals": 0 if cur else 1})
+                    cur = bool(trading_ctl.get_risk_settings().get("accept_tg_signals", 1))
+                    trading_ctl.update_risk_settings({"accept_tg_signals": 0 if cur else 1})
                     new = not cur
                     badge.props(f"color={'green' if new else 'grey'}")
                     badge.text = "TG SIGNALS ON" if new else "TG SIGNALS OFF"
@@ -2577,9 +2544,9 @@ def render_signals_card() -> None:
                 )
 
                 def toggle_sg_live(badge=sg_live_badge):
-                    cur = bool(db_module.get_risk_settings().get("sg_live_execution", 0))
+                    cur = bool(trading_ctl.get_risk_settings().get("sg_live_execution", 0))
                     new = not cur
-                    db_module.update_risk_settings({"sg_live_execution": 1 if new else 0})
+                    trading_ctl.update_risk_settings({"sg_live_execution": 1 if new else 0})
                     badge.props(f"color={'green' if new else 'grey'}")
                     badge.text = "SG LIVE ON" if new else "SG LIVE OFF"
                     ui.notify(
@@ -2627,9 +2594,9 @@ def render_signals_card() -> None:
                             return
                         cli.remote_settings[key] = 1 if new else 0
                     else:
-                        cur = bool(db_module.get_risk_settings().get(key, 1))
+                        cur = bool(trading_ctl.get_risk_settings().get(key, 1))
                         new = not cur
-                        db_module.update_risk_settings({key: 1 if new else 0})
+                        trading_ctl.update_risk_settings({key: 1 if new else 0})
                     badge.props(f"color={'blue' if new else 'grey'}")
                     badge.text = "AI ON" if new else "AI OFF"
                     ui.notify(
@@ -2664,9 +2631,9 @@ def render_signals_card() -> None:
                 )
 
                 def toggle_bo_live(badge=bo_live_badge):
-                    cur = bool(db_module.get_risk_settings().get("bo_live_execution", 0))
+                    cur = bool(trading_ctl.get_risk_settings().get("bo_live_execution", 0))
                     new = not cur
-                    db_module.update_risk_settings({"bo_live_execution": 1 if new else 0})
+                    trading_ctl.update_risk_settings({"bo_live_execution": 1 if new else 0})
                     badge.props(f"color={'green' if new else 'grey'}")
                     badge.text = "BO LIVE ON" if new else "BO LIVE OFF"
                     ui.notify(
@@ -2677,7 +2644,7 @@ def render_signals_card() -> None:
 
                 # Sync badge to live state on each page refresh (30s timer)
                 def _sync_bo_badge(badge=bo_live_badge):
-                    _live = bool(db_module.get_risk_settings().get("bo_live_execution", 0))
+                    _live = bool(trading_ctl.get_risk_settings().get("bo_live_execution", 0))
                     badge.text = "BO LIVE ON" if _live else "BO LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
                 ui.timer(30, _sync_bo_badge)
@@ -2717,9 +2684,9 @@ def render_signals_card() -> None:
                             return
                         cli.remote_settings[key] = 1 if new else 0
                     else:
-                        cur = bool(db_module.get_risk_settings().get(key, 1))
+                        cur = bool(trading_ctl.get_risk_settings().get(key, 1))
                         new = not cur
-                        db_module.update_risk_settings({key: 1 if new else 0})
+                        trading_ctl.update_risk_settings({key: 1 if new else 0})
                     badge.props(f"color={'blue' if new else 'grey'}")
                     badge.text = "AI ON" if new else "AI OFF"
                     ui.notify(
@@ -2755,9 +2722,9 @@ def render_signals_card() -> None:
                 )
 
                 def toggle_re_live(badge=re_live_badge):
-                    cur = bool(db_module.get_risk_settings().get("re_live_execution", 0))
+                    cur = bool(trading_ctl.get_risk_settings().get("re_live_execution", 0))
                     new = not cur
-                    db_module.update_risk_settings({"re_live_execution": 1 if new else 0})
+                    trading_ctl.update_risk_settings({"re_live_execution": 1 if new else 0})
                     badge.props(f"color={'green' if new else 'grey'}")
                     badge.text = "RE LIVE ON" if new else "RE LIVE OFF"
                     ui.notify(
@@ -2767,7 +2734,7 @@ def render_signals_card() -> None:
                     )
 
                 def _sync_re_badge(badge=re_live_badge):
-                    _live = bool(db_module.get_risk_settings().get("re_live_execution", 0))
+                    _live = bool(trading_ctl.get_risk_settings().get("re_live_execution", 0))
                     badge.text = "RE LIVE ON" if _live else "RE LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
                 ui.timer(30, _sync_re_badge)
@@ -2786,8 +2753,8 @@ def _render_strategy(engine):
             _draw()
 
     def _draw():  # noqa: C901  (complex but linear)
-        rs            = db_module.get_risk_settings()
-        custom_strats = db_module.get_custom_strategies()
+        rs            = trading_ctl.get_risk_settings()
+        custom_strats = trading_ctl.get_custom_strategies()
         _hidden       = _get_hidden_strategies()
         custom_strats = [cs for cs in custom_strats if cs["id"] not in _hidden]
         custom_ids    = {cs["id"] for cs in custom_strats}
@@ -2891,7 +2858,7 @@ def _render_strategy(engine):
 
                 def save_strategy():
                     try:
-                        db_module.update_risk_settings({
+                        trading_ctl.update_risk_settings({
                             "trail_stop_sl_pts":       float(trail_stop_sl.value or 5.0),
                             "trailing_stop_distance":  float(trail_dist.value or 3.0),
                             "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
@@ -2926,7 +2893,7 @@ def _render_strategy(engine):
                 ).classes("text-sm text-gray-200")
 
                 def _dpm_toggle(e):
-                    db_module.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
+                    trading_ctl.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
                     dpm_badge.props(f"color={'blue' if e.value else 'grey'}")
                     dpm_badge.text = "DPM ON" if e.value else "DPM OFF"
                     ui.notify(
@@ -2964,7 +2931,7 @@ def _render_strategy(engine):
                     def _save_dpm_profit():
                         try:
                             val = max(0.0, float(dpm_profit_inp.value or 0))
-                            db_module.update_risk_settings({"profit_close_usd": val})
+                            trading_ctl.update_risk_settings({"profit_close_usd": val})
                             if val > 0:
                                 ui.notify(
                                     f"Profit take set to ${val:.2f} — DPM will close when "
@@ -3000,7 +2967,7 @@ def _render_strategy(engine):
 
         def _draw_compare():
             compare_container.clear()
-            fresh_customs = db_module.get_custom_strategies()
+            fresh_customs = trading_ctl.get_custom_strategies()
             _hidden_now   = _get_hidden_strategies()
             fresh_customs = [cs for cs in fresh_customs if cs["id"] not in _hidden_now]
 
@@ -3045,7 +3012,7 @@ def _render_strategy(engine):
                             if not sid:
                                 return
                             if sid.startswith("custom_"):
-                                db_module.delete_custom_strategy(sid)
+                                trading_ctl.delete_custom_strategy(sid)
                             else:
                                 _hide_builtin_strategy(sid)
                             del_dialog.close()
@@ -3152,7 +3119,7 @@ def _render_tg_signals(engine):
 
     async def refresh():
         container.clear()
-        sigs = await db_module.to_db_thread(engine.get_tg_signals, 50)
+        sigs = await trading_ctl.run_db(engine.get_tg_signals, 50)
         with container:
             if not sigs:
                 ui.label("No Telegram signals detected yet.").classes(
@@ -3186,10 +3153,7 @@ def _render_tg_signals(engine):
 
                 async def delete_sig(row_id=sig_id):
                     try:
-                        with db_module.db() as conn:
-                            conn.execute(
-                                "DELETE FROM vantage_tg_signals WHERE id=?", (row_id,)
-                            )
+                        trading_ctl.delete_tg_signal_row(row_id)
                         await refresh()
                     except Exception as ex:
                         ui.notify(str(ex), type="negative")

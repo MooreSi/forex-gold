@@ -135,3 +135,269 @@ def strategy_display_label(strategy: str) -> str:
     if _et.is_template_override(strategy):
         return f"Template: {_et.template_name_from_override(strategy)}"
     return STRATEGY_LABELS.get(strategy, STRATEGY_NAMES.get(strategy, "—"))
+
+
+# ── M3 page drain: the ticket-map builders and DB passthroughs ───────────────
+# Moved verbatim from frontend/pages/history.py's nested helpers. Each async
+# wrapper runs its builder on the DB worker thread, exactly as the page's own
+# `await db_module.to_db_thread(...)` calls did -- these run inside refresh
+# handlers on the event loop.
+
+from backend.src.db import database as db_module  # noqa: E402
+from backend.src.services.analytics import trade_history_repo  # noqa: E402
+
+
+def trade_source_label(tg_source: str) -> str:
+    """Return a short human-readable label for where a trade originated.
+
+    tg_source values:
+      - "manual_market"  → placed via Market Order button
+      - "MT5_imported"   → position imported from MT5 sync
+      - channel name     → Telegram signal (auto-executed, activated, or IME)
+      - "" / None        → manually created signal via New Signal form
+    """
+    if not tg_source:
+        return "Manual Signal"
+    if tg_source == "manual_market":
+        return "Manual Market"
+    if tg_source == "MT5_imported":
+        return "MT5 Import"
+    # Strip legacy "instant:" prefix stored in older DB records
+    if tg_source.startswith("instant:"):
+        tg_source = tg_source[len("instant:"):]
+    return tg_source
+
+
+def trade_channel_label(tg_source: str) -> str:
+    """Return the Telegram channel name, or empty string if not a Telegram signal."""
+    if not tg_source or tg_source in ("manual_market", "MT5_imported", "Signal Generator", "Bounce Generator"):
+        return ""
+    if tg_source.startswith("instant:"):
+        return tg_source[len("instant:"):]
+    return tg_source
+
+
+def _ticket_source_map_sync(days: int) -> dict[str, str]:
+    import time
+    cutoff = time.time() - days * 86400
+    result: dict[str, str] = {}
+    try:
+        ledger_channels, _, _ = db_module.get_consolidated_ticket_maps()
+        for ticket, tg_source in ledger_channels.items():
+            ch = trade_channel_label(tg_source or "")
+            result[ticket] = ch if ch else trade_source_label(tg_source or "")
+    except Exception:
+        pass
+    try:
+        rows = trade_history_repo.ticket_sources(cutoff)
+        for mt5_ticket, tg_source in rows:
+            ch = trade_channel_label(tg_source or "")
+            result[str(mt5_ticket)] = ch if ch else trade_source_label(tg_source or "")
+    except Exception:
+        pass
+    try:
+        # Adaptive Runner ladder legs 2+ are opened as their own raw MT5
+        # tickets, tracked only in vantage_ladder_legs -- they never get
+        # their own vantage_simulated_trades row; inherit the real channel
+        # from the parent trade instead.
+        rows = trade_history_repo.ticket_sources_for_legs(cutoff)
+        for mt5_ticket, tg_source in rows:
+            ch = trade_channel_label(tg_source or "")
+            result[str(mt5_ticket)] = ch if ch else trade_source_label(tg_source or "")
+    except Exception:
+        pass
+    return result
+
+
+def _ticket_strategy_map_sync(days: int) -> dict[str, str]:
+    import time
+    cutoff = time.time() - days * 86400
+    result: dict[str, str] = {}
+    try:
+        _, ledger_strategies, _ = db_module.get_consolidated_ticket_maps()
+        for ticket, strategy in ledger_strategies.items():
+            result[ticket] = strategy_display_label(strategy or "")
+    except Exception:
+        pass
+    try:
+        rows = trade_history_repo.ticket_strategies(cutoff)
+        for mt5_ticket, strategy, dpm_trade_id in rows:
+            label = "DPM" if dpm_trade_id else strategy_display_label(strategy or "")
+            result[str(mt5_ticket)] = label
+    except Exception:
+        pass
+    try:
+        rows = trade_history_repo.ticket_strategies_for_legs(cutoff)
+        for mt5_ticket, strategy in rows:
+            result[str(mt5_ticket)] = strategy_display_label(strategy or "")
+    except Exception:
+        pass
+    return result
+
+
+def _ticket_max_tp_map_sync() -> dict[str, str]:
+    result: dict[str, str] = {}
+    try:
+        ledger_max_tp, _ = db_module.get_consolidated_extra_maps()
+        result.update(ledger_max_tp)
+    except Exception:
+        pass
+    try:
+        result.update(db_module.get_max_tp_map_by_ticket())
+    except Exception:
+        pass
+    return result
+
+
+def _ticket_rr_map_sync() -> dict[str, float]:
+    result: dict[str, float] = {}
+    try:
+        _, ledger_rr = db_module.get_consolidated_extra_maps()
+        result.update(ledger_rr)
+    except Exception:
+        pass
+    try:
+        result.update(db_module.get_rr_map_by_ticket())
+    except Exception:
+        pass
+    return result
+
+
+def _ticket_order_type_map_sync(days: int) -> dict[str, tuple[str, Optional[float]]]:
+    """order_type/pending_placed_at aren't in the consolidated-ledger sync
+    protocol yet, so a ticket the OTHER node opened falls back to
+    "Market"/no pending time; local-only for now."""
+    import time
+    cutoff = time.time() - days * 86400
+    result: dict[str, tuple[str, Optional[float]]] = {}
+    try:
+        rows = trade_history_repo.ticket_order_types(cutoff)
+        for mt5_ticket, order_type, pending_placed_at in rows:
+            result[str(mt5_ticket)] = (order_type or "market", pending_placed_at)
+    except Exception:
+        pass
+    return result
+
+
+def _ticket_group_map_sync() -> dict[str, tuple[str, int]]:
+    """{mt5_ticket_str: (trade_id, tier)} for Adaptive Runner ladder legs,
+    used to collapse a signal's N broker-side tickets into one table row."""
+    result: dict[str, tuple[str, int]] = {}
+    try:
+        rows = trade_history_repo.ticket_groups()
+        for trade_id, ticket, tier in rows:
+            result[str(ticket)] = (trade_id, int(tier))
+    except Exception:
+        pass
+    return result
+
+
+def _ticket_info_sync() -> dict:
+    """{ticket_str: (source_label, strategy_label, direction)} with the same
+    cross-node consolidated-ledger fallback as the maps above."""
+    info: dict[str, tuple] = {}
+    try:
+        ledger_channels, ledger_strategies, ledger_directions = db_module.get_consolidated_ticket_maps()
+        for ticket, tg_source in ledger_channels.items():
+            ch = trade_channel_label(tg_source or "")
+            label = ch if ch else trade_source_label(tg_source or "")
+            strat = ledger_strategies.get(ticket, "")
+            info[ticket] = (
+                label,
+                strategy_display_label(strat or ""),
+                ledger_directions.get(ticket, ""),
+            )
+    except Exception:
+        pass
+    try:
+        rows = trade_history_repo.all_ticket_info()
+        for tk, src, strat, dir_ in rows:
+            ch = trade_channel_label(src or "")
+            label = ch if ch else trade_source_label(src or "")
+            # Local data always wins where both exist.
+            info[str(tk)] = (label, strategy_display_label(strat or ""), dir_ or "")
+    except Exception:
+        pass
+    try:
+        rows = trade_history_repo.all_ticket_info_for_legs()
+        for tk, src, strat, dir_ in rows:
+            ch = trade_channel_label(src or "")
+            label = ch if ch else trade_source_label(src or "")
+            info[str(tk)] = (label, strategy_display_label(strat or ""), dir_ or "")
+    except Exception:
+        pass
+    return info
+
+
+async def ticket_source_map(days: int) -> dict[str, str]:
+    return await db_module.to_db_thread(_ticket_source_map_sync, days)
+
+
+async def ticket_strategy_map(days: int) -> dict[str, str]:
+    return await db_module.to_db_thread(_ticket_strategy_map_sync, days)
+
+
+async def ticket_max_tp_map() -> dict[str, str]:
+    return await db_module.to_db_thread(_ticket_max_tp_map_sync)
+
+
+async def ticket_rr_map() -> dict[str, float]:
+    return await db_module.to_db_thread(_ticket_rr_map_sync)
+
+
+async def ticket_order_type_map(days: int) -> dict[str, tuple[str, Optional[float]]]:
+    return await db_module.to_db_thread(_ticket_order_type_map_sync, days)
+
+
+async def ticket_group_map() -> dict[str, tuple[str, int]]:
+    return await db_module.to_db_thread(_ticket_group_map_sync)
+
+
+async def ticket_info() -> dict:
+    return await db_module.to_db_thread(_ticket_info_sync)
+
+
+async def run_db(fn, *args, **kwargs):
+    """Off-loop dispatch for the page's remaining one-off reads."""
+    return await db_module.to_db_thread(fn, *args, **kwargs)
+
+
+async def get_cached_spreads(tickets: list) -> dict:
+    return await db_module.to_db_thread(db_module.get_cached_spreads, tickets)
+
+
+async def cache_spread(ticket, price, points, cost) -> None:
+    return await db_module.to_db_thread(
+        db_module.cache_spread, ticket, price, points, cost)
+
+
+def get_hourly_pnl_grid(days: int):
+    return db_module.get_hourly_pnl_grid(days)
+
+
+def session_for_hour(h: int) -> str:
+    return db_module._session_for_hour(h)
+
+
+def get_app_config(key: str):
+    return db_module.get_app_config(key)
+
+
+def set_app_config(key: str, value: str) -> None:
+    db_module.set_app_config(key, value)
+
+
+def recompute_channel_performance(days: int):
+    return db_module.recompute_channel_performance(days)
+
+
+def get_channel_scorecard(days: int):
+    return db_module.get_channel_scorecard(days)
+
+
+def get_channel_performance_map():
+    return db_module.get_channel_performance_map()
+
+
+def set_channel_paused(source: str, paused) -> None:
+    db_module.set_channel_paused(source, paused)

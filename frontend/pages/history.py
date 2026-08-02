@@ -13,14 +13,13 @@ from typing import Callable, Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from backend.src.db import database as db_module
 from backend.src.services.analytics import trade_history_repo, signal_lab_repo
 from backend.src.controllers.history import controller as history_ctl
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.runtime import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
 from frontend.pages import ai_trade_analysis as _ai_analysis
-from frontend.pages.trading import trade_source_label, trade_channel_label
+from backend.src.controllers.history.controller import trade_source_label, trade_channel_label
 
 
 def render(get_engine: Callable):
@@ -261,161 +260,8 @@ def _render_equity_curve(engine):
 
 # Short display names for the strategy column
 def _render_trade_table(engine):
-    def _ticket_source_map(days: int) -> dict[str, str]:
-        """Return {mt5_ticket_str: channel_or_source_label}.
-
-        Built primarily from THIS node's own vantage_simulated_trades — but
-        History's "Closed Trades" view reads MT5's real broker-side deal
-        history, which is the same shared account both a Mac and a paired
-        VPS trade against. A ticket opened by the OTHER node has no local
-        row here at all, so it fell through to a blank channel. The
-        consolidated ledger (populated by both nodes over the sync channel)
-        fills exactly that gap — local data always wins where both exist.
-
-        `days` bounds the local queries to the same window the page is
-        showing -- this table only grows over a long-running session, and
-        there is no reason to build a map covering every trade ever opened
-        when the caller only needs the tickets in the selected period.
-        """
-        cutoff = time.time() - days * 86400
-        result: dict[str, str] = {}
-        try:
-            ledger_channels, _, _ = db_module.get_consolidated_ticket_maps()
-            for ticket, tg_source in ledger_channels.items():
-                ch = trade_channel_label(tg_source or "")
-                result[ticket] = ch if ch else trade_source_label(tg_source or "")
-        except Exception:
-            pass
-        try:
-            rows = trade_history_repo.ticket_sources(cutoff)
-            for mt5_ticket, tg_source in rows:
-                ch = trade_channel_label(tg_source or "")
-                result[str(mt5_ticket)] = ch if ch else trade_source_label(tg_source or "")
-        except Exception:
-            pass
-        try:
-            # Adaptive Runner ladder legs 2+ (see core/engine.py's
-            # _open_adaptive_runner_ladder) are opened as their own raw MT5
-            # tickets, tracked only in vantage_ladder_legs — they never get
-            # their own vantage_simulated_trades row, so the query above
-            # never finds them and they fell back to whatever stale/generic
-            # label the consolidated ledger happened to have (or none at
-            # all). Inherit the real channel from the parent trade instead.
-            rows = trade_history_repo.ticket_sources_for_legs(cutoff)
-            for mt5_ticket, tg_source in rows:
-                ch = trade_channel_label(tg_source or "")
-                result[str(mt5_ticket)] = ch if ch else trade_source_label(tg_source or "")
-        except Exception:
-            pass
-        return result
-
-    def _ticket_strategy_map(days: int) -> dict[str, str]:
-        """Return {mt5_ticket_str: strategy_display}.
-        Shows 'DPM' when the trade has a dpm_trade_performance record (DPM managed it),
-        otherwise falls back to the base strategy stored on the trade row.
-        Same cross-node fallback and `days` windowing as _ticket_source_map — see its docstring.
-        """
-        cutoff = time.time() - days * 86400
-        result: dict[str, str] = {}
-        try:
-            _, ledger_strategies, _ = db_module.get_consolidated_ticket_maps()
-            for ticket, strategy in ledger_strategies.items():
-                result[ticket] = history_ctl.strategy_display_label(strategy or "")
-        except Exception:
-            pass
-        try:
-            rows = trade_history_repo.ticket_strategies(cutoff)
-            for mt5_ticket, strategy, dpm_trade_id in rows:
-                if dpm_trade_id:
-                    label = "DPM"
-                else:
-                    label = history_ctl.strategy_display_label(strategy or "")
-                result[str(mt5_ticket)] = label
-        except Exception:
-            pass
-        try:
-            # Same ladder-leg gap as _ticket_source_map — legs 2+ have no
-            # vantage_simulated_trades row of their own, only a
-            # vantage_ladder_legs row; inherit the parent's strategy.
-            rows = trade_history_repo.ticket_strategies_for_legs(cutoff)
-            for mt5_ticket, strategy in rows:
-                result[str(mt5_ticket)] = history_ctl.strategy_display_label(strategy or "")
-        except Exception:
-            pass
-        return result
-
-    def _ticket_max_tp_map() -> dict[str, str]:
-        """Return {mt5_ticket_str: max_tp_hit_display} from vantage_simulated_trades.
-        Falls back to the consolidated ledger for tickets the OTHER node opened —
-        same cross-node gap/fallback pattern as _ticket_source_map."""
-        result: dict[str, str] = {}
-        try:
-            ledger_max_tp, _ = db_module.get_consolidated_extra_maps()
-            result.update(ledger_max_tp)
-        except Exception:
-            pass
-        try:
-            result.update(db_module.get_max_tp_map_by_ticket())
-        except Exception:
-            pass
-        return result
-
-    def _ticket_rr_map() -> dict[str, float]:
-        """Return {mt5_ticket_str: rr} — R:R computed from the trade's own final
-        entry/stop/tp1 levels. Falls back to the consolidated ledger for tickets
-        the OTHER node opened — same cross-node fallback pattern as _ticket_source_map."""
-        result: dict[str, float] = {}
-        try:
-            _, ledger_rr = db_module.get_consolidated_extra_maps()
-            result.update(ledger_rr)
-        except Exception:
-            pass
-        try:
-            result.update(db_module.get_rr_map_by_ticket())
-        except Exception:
-            pass
-        return result
-
-    def _ticket_order_type_map(days: int) -> dict[str, tuple[str, Optional[float]]]:
-        """Return {mt5_ticket_str: (order_type, pending_placed_at)} from this
-        node's own vantage_simulated_trades. order_type/pending_placed_at
-        (2026-07-23) aren't part of the Local/Remote consolidated-ledger sync
-        protocol yet, so — unlike every other map above — a ticket the OTHER
-        node opened just falls back to "Market"/no pending time here rather
-        than showing the real value; local-only for now."""
-        cutoff = time.time() - days * 86400
-        result: dict[str, tuple[str, Optional[float]]] = {}
-        try:
-            rows = trade_history_repo.ticket_order_types(cutoff)
-            for mt5_ticket, order_type, pending_placed_at in rows:
-                result[str(mt5_ticket)] = (order_type or "market", pending_placed_at)
-        except Exception:
-            pass
-        return result
-
-    def _ticket_group_map() -> dict[str, tuple[str, int]]:
-        """Return {mt5_ticket_str: (trade_id, tier)} for every ticket that is
-        part of an Adaptive Runner ladder (one signal split into N resting
-        broker-side TP tickets — see core/engine.py's
-        _open_adaptive_runner_ladder). Used to collapse all of a signal's
-        legs into a single row in the Closed Trades table instead of N flat
-        rows, since from the user's perspective TP1-TP8 are tiers of ONE
-        trade, not N separate trades — the multi-ticket split is purely an
-        MT5-hedging-mode implementation detail (a ticket's native TP applies
-        to its whole volume, so genuine broker-side partial profit-taking at
-        each tier requires N tickets; see the ladder work's own docstring).
-        Trades with only 1 recorded leg (e.g. the "no post-fill TP left"
-        fallback) are intentionally excluded by the caller — grouping a
-        group of one is pointless.
-        """
-        result: dict[str, tuple[str, int]] = {}
-        try:
-            rows = trade_history_repo.ticket_groups()
-            for trade_id, ticket, tier in rows:
-                result[str(ticket)] = (trade_id, int(tier))
-        except Exception:
-            pass
-        return result
+    # The six ticket-map builders moved verbatim to
+    # backend.src.controllers.history.controller (M3 page drain).
 
     with ui.card().classes("w-full bg-gray-800 rounded-lg overflow-hidden"):
         with ui.row().classes("items-center justify-between px-4 py-2 flex-wrap gap-2"):
@@ -547,12 +393,12 @@ def _render_trade_table(engine):
             # Offloaded — these are all synchronous DB reads; running them
             # directly on the event loop blocked the whole app every 15s.
             _days_now  = int(days_sel.value)
-            src_map    = await db_module.to_db_thread(_ticket_source_map, _days_now)
-            strat_map  = await db_module.to_db_thread(_ticket_strategy_map, _days_now)
-            max_tp_map = await db_module.to_db_thread(_ticket_max_tp_map)
-            rr_map     = await db_module.to_db_thread(_ticket_rr_map)
-            order_type_map = await db_module.to_db_thread(_ticket_order_type_map, _days_now)
-            comm_rate  = await db_module.to_db_thread(_platform_fee_rate)
+            src_map    = await history_ctl.ticket_source_map(_days_now)
+            strat_map  = await history_ctl.ticket_strategy_map(_days_now)
+            max_tp_map = await history_ctl.ticket_max_tp_map()
+            rr_map     = await history_ctl.ticket_rr_map()
+            order_type_map = await history_ctl.ticket_order_type_map(_days_now)
+            comm_rate  = await history_ctl.run_db(_platform_fee_rate)
             try:
                 deals = await engine._bridge.get_deal_history(int(days_sel.value))
                 if deals:
@@ -565,8 +411,8 @@ def _render_trade_table(engine):
                     # Spread paid at entry is a historical fact — it never changes once
                     # computed, so cache it permanently and only ask MT5 for tickets
                     # this table has never seen before (this loop re-runs every 15s).
-                    spread_cache = await db_module.to_db_thread(
-                        db_module.get_cached_spreads, list(by_pos.keys())
+                    spread_cache = await history_ctl.get_cached_spreads(
+                        list(by_pos.keys())
                     )
 
                     # Fetch every still-uncached ticket's entry-time tick concurrently
@@ -600,8 +446,8 @@ def _render_trade_table(engine):
                                 "spread_price": sp_price, "spread_points": sp_points,
                                 "spread_cost_usd": sp_cost,
                             }
-                            await db_module.to_db_thread(
-                                db_module.cache_spread, ticket, sp_price, sp_points, sp_cost
+                            await history_ctl.cache_spread(
+                                ticket, sp_price, sp_points, sp_cost
                             )
 
                     for ticket, pos_deals in by_pos.items():
@@ -712,7 +558,7 @@ def _render_trade_table(engine):
             except Exception as exc:
                 mt5_error = str(exc)
 
-            group_map = await db_module.to_db_thread(_ticket_group_map)
+            group_map = await history_ctl.ticket_group_map()
             groups: dict[str, list[dict]] = {}
             flat_rows: list[dict] = []
             for ticket, row in rows_by_ticket.items():
@@ -876,58 +722,15 @@ def _render_calendar(engine):
 
     _detail_store: dict = {}   # {date: [ {ticket, source, strategy, direction, pnl}, ... ]}
 
-    def _ticket_info() -> dict:
-        """{ticket_str: (source_label, strategy_label, direction)}.
-
-        Same cross-node fallback as _ticket_source_map/_ticket_strategy_map
-        above — this node's own vantage_simulated_trades has no row at all
-        for a ticket the OTHER node opened, so without merging in the
-        consolidated ledger every VPS-origin (or Mac-origin, from the VPS's
-        point of view) ticket showed "Unknown" in the calendar day-detail
-        view even though the Closed Trades table already had this fixed.
-        """
-        info: dict[str, tuple] = {}
-        try:
-            ledger_channels, ledger_strategies, ledger_directions = db_module.get_consolidated_ticket_maps()
-            for ticket, tg_source in ledger_channels.items():
-                ch = trade_channel_label(tg_source or "")
-                label = ch if ch else trade_source_label(tg_source or "")
-                strat = ledger_strategies.get(ticket, "")
-                info[ticket] = (
-                    label,
-                    history_ctl.strategy_display_label(strat or ""),
-                    ledger_directions.get(ticket, ""),
-                )
-        except Exception:
-            pass
-        try:
-            rows = trade_history_repo.all_ticket_info()
-            for tk, src, strat, dir_ in rows:
-                ch = trade_channel_label(src or "")
-                label = ch if ch else trade_source_label(src or "")
-                # Local data always wins where both exist.
-                info[str(tk)] = (label, history_ctl.strategy_display_label(strat or ""), dir_ or "")
-        except Exception:
-            pass
-        try:
-            # Same ladder-leg gap as _ticket_source_map/_ticket_strategy_map
-            # — legs 2+ have no vantage_simulated_trades row of their own.
-            rows = trade_history_repo.all_ticket_info_for_legs()
-            for tk, src, strat, dir_ in rows:
-                ch = trade_channel_label(src or "")
-                label = ch if ch else trade_source_label(src or "")
-                info[str(tk)] = (label, history_ctl.strategy_display_label(strat or ""), dir_ or "")
-        except Exception:
-            pass
-        return info
+    # _ticket_info moved verbatim to the history controller (M3 page drain).
 
     async def _build_day_map(year: int, month: int) -> tuple[dict, dict, str]:
         """Build day-level P&L map exclusively from MT5 deal history."""
         trade_map: dict[int, tuple[date, float]] = {}  # ticket → (date, pnl)
         _detail_store.clear()
         # Offloaded — both are synchronous DB reads.
-        _tinfo    = await db_module.to_db_thread(_ticket_info)
-        comm_rate = await db_module.to_db_thread(_platform_fee_rate)
+        _tinfo    = await history_ctl.ticket_info()
+        comm_rate = await history_ctl.run_db(_platform_fee_rate)
 
         try:
             today_d   = datetime.now(_UK_TZ).date()
@@ -1285,7 +1088,7 @@ def _render_heatmap(engine):
     def _draw():
         container = _refs["container"]
         container.clear()
-        grid = db_module.get_hourly_pnl_grid(period["days"])
+        grid = history_ctl.get_hourly_pnl_grid(period["days"])
         with container:
             ui.label(
                 "Average net P&L by UTC hour × weekday — deep red = hours that consistently "
@@ -1325,7 +1128,7 @@ def _render_heatmap(engine):
 
             sess = {"london": [0.0, 0], "overlap": [0.0, 0], "ny": [0.0, 0], "asian": [0.0, 0]}
             for (di, h), c in grid.items():
-                s = db_module._session_for_hour(h)
+                s = history_ctl.session_for_hour(h)
                 sess[s][0] += c["pnl"]
                 sess[s][1] += c["n"]
             ui.separator().classes("my-2")
@@ -1345,7 +1148,7 @@ def _render_heatmap(engine):
         from backend.src.config import load as _cfg_load
         _analysis_body = _refs["analysis_body"]
 
-        stored = db_module.get_app_config("heatmap_analysis_cache")
+        stored = history_ctl.get_app_config("heatmap_analysis_cache")
         if stored and not force:
             try:
                 obj = _json.loads(stored)
@@ -1366,7 +1169,7 @@ def _render_heatmap(engine):
 
         async def _run_analysis():
             _body = _refs["analysis_body"]
-            grid  = db_module.get_hourly_pnl_grid(period["days"])
+            grid  = history_ctl.get_hourly_pnl_grid(period["days"])
             if not grid:
                 _body.clear()
                 with _body:
@@ -1377,7 +1180,7 @@ def _render_heatmap(engine):
             best_hours:  list = []
             worst_hours: list = []
             for (di, h), c in grid.items():
-                s = db_module._session_for_hour(h)
+                s = history_ctl.session_for_hour(h)
                 if s not in sess_totals:
                     sess_totals[s] = {"pnl": 0.0, "n": 0, "wins": 0}
                 sess_totals[s]["pnl"] += c["pnl"]
@@ -1429,7 +1232,7 @@ def _render_heatmap(engine):
                 import json as _json2
                 from datetime import datetime as _dt2
                 ts = _dt2.now().timestamp()
-                db_module.set_app_config("heatmap_analysis_cache", _json2.dumps({
+                history_ctl.set_app_config("heatmap_analysis_cache", _json2.dumps({
                     "ts": ts, "result": {"text": result_text, "period": period["days"]}
                 }))
                 _render_heatmap_analysis({"text": result_text, "period": period["days"]}, ts)
@@ -1520,15 +1323,15 @@ def _render_channels(engine):
 
     def _draw():
         container.clear()
-        newly_paused = db_module.recompute_channel_performance(period["days"])
+        newly_paused = history_ctl.recompute_channel_performance(period["days"])
         for _src in newly_paused:
             asyncio.create_task(telegram_alerts.send_message(
                 f"Channel auto-paused: *{_src}*\n"
                 "Profit factor dropped below 0.8 over the rolling 30-day window. "
                 "The channel will not open new trades until performance recovers or you re-enable it manually.",
             ))
-        scorecard = db_module.get_channel_scorecard(period["days"])
-        perfmap   = db_module.get_channel_performance_map()
+        scorecard = history_ctl.get_channel_scorecard(period["days"])
+        perfmap   = history_ctl.get_channel_performance_map()
         with container:
             ui.label(
                 "Rolling performance by signal source. The lot multiplier scales position "
@@ -1577,7 +1380,7 @@ def _render_channels(engine):
                             _btn_col = "bg-green-700" if paused else "bg-red-800"
 
                             def _toggle(_=None, s=src, p=paused):
-                                db_module.set_channel_paused(s, not p)
+                                history_ctl.set_channel_paused(s, not p)
                                 ui.notify(
                                     f"Channel '{s}' {'resumed' if p else 'paused'}",
                                     type="info" if p else "warning",

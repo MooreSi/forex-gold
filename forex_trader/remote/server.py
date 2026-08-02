@@ -1086,8 +1086,10 @@ async def push_update(progress_cb=None) -> dict:
         try:
             await ws.send(json.dumps(make(MSG_GIT_UPDATE)))
             sent += 1
+            log.info("[RemoteServer] Sent MSG_GIT_UPDATE to %s", name)
             _update_progress(f"Triggered git update on {name}")
         except Exception as exc:
+            log.warning("[RemoteServer] Failed to send MSG_GIT_UPDATE to %s: %s", name, exc)
             _update_progress(f"Failed to trigger update on {name}: {exc}")
 
     return {"sent": sent, "version": version}
@@ -1112,9 +1114,11 @@ async def push_update_to_client(token: str, progress_cb=None) -> dict:
     name = entry["info"].get("name", token[:8])
     try:
         await ws.send(json.dumps(make(MSG_GIT_UPDATE)))
+        log.info("[RemoteServer] Sent MSG_GIT_UPDATE to %s", name)
         _update_progress(f"Triggered git update on {name}")
         return {"sent": 1, "version": _read_version()}
     except Exception as exc:
+        log.warning("[RemoteServer] Failed to send MSG_GIT_UPDATE to %s: %s", name, exc)
         _update_progress(f"Failed to trigger update on {name}: {exc}")
         return {"sent": 0, "version": _read_version(), "error": str(exc)}
 

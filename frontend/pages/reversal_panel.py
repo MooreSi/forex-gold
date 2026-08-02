@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 from typing import Callable, Optional
 
-from backend.src.db import database as db_module
+from backend.src.controllers.engines import controller as engines_controller
 
 from nicegui import ui
 
@@ -257,7 +257,7 @@ def render() -> None:
                     ui.label("Active Positions").classes(
                         "text-sm font-bold text-yellow-300"
                     )
-                    _limit_order_val = bool(db_module.get_risk_settings().get("re_use_limit_order", 0))
+                    _limit_order_val = bool(engines_controller.get_risk_settings().get("re_use_limit_order", 0))
                     limit_order_sw = ui.switch(
                         "LIMIT ORDER", value=_limit_order_val,
                     ).classes("text-xs").props("dense color=amber")
@@ -270,7 +270,7 @@ def render() -> None:
                     )
 
                     def _toggle_limit_order(e):
-                        db_module.update_risk_settings({"re_use_limit_order": 1 if e.value else 0})
+                        engines_controller.update_risk_settings({"re_use_limit_order": 1 if e.value else 0})
                         ui.notify(
                             f"Reversal Engine LIMIT ORDER {'enabled' if e.value else 'disabled'}",
                             type="positive" if e.value else "info",
@@ -322,8 +322,7 @@ def render() -> None:
         # snapshot) — same bullet-text style as Bounce/Breakout, for a
         # consistent look across all three Signal Generator tabs.
         try:
-            from backend.src.db import database as _main_db
-            _rs = await _main_db.to_db_thread(_main_db.get_risk_settings)
+            _rs = await engines_controller.get_risk_settings_async()
             _live = bool(_rs.get("re_live_execution", 0))
         except Exception:
             _live = False
@@ -358,9 +357,9 @@ def render() -> None:
 
         # Balance
         try:
-            bal  = await db_module.to_db_thread(re_db.get_virtual_balance)
+            bal  = await engines_controller.run_db(re_db.get_virtual_balance)
             pnl  = bal - _STARTING_BALANCE
-            dd   = await db_module.to_db_thread(re_db.get_max_drawdown)
+            dd   = await engines_controller.run_db(re_db.get_max_drawdown)
             balance_lbl.text = f"${bal:,.2f}"
             balance_lbl.classes(
                 replace="text-2xl font-bold font-mono "
@@ -375,7 +374,7 @@ def render() -> None:
 
         # Stats
         try:
-            stats = await db_module.to_db_thread(re_db.get_stats)
+            stats = await engines_controller.run_db(re_db.get_stats)
             stat_cards["Total"].text    = str(stats["total"])
             stat_cards["Wins"].text     = str(stats["wins"])
             stat_cards["Losses"].text   = str(stats["losses"])
@@ -392,7 +391,7 @@ def render() -> None:
         levels_container.clear()
         try:
             cached_levels = eng._cached.get("levels", []) if eng else []
-            db_levels     = await db_module.to_db_thread(re_db.get_active_levels)
+            db_levels     = await engines_controller.run_db(re_db.get_active_levels)
             display_lvls  = cached_levels[:6] if cached_levels else []
 
             if display_lvls:
@@ -417,7 +416,7 @@ def render() -> None:
         # Open signals
         open_container.clear()
         try:
-            open_sigs = await db_module.to_db_thread(re_db.get_open_signals)
+            open_sigs = await engines_controller.run_db(re_db.get_open_signals)
             if open_sigs:
                 with open_container:
                     for sig in open_sigs:
@@ -460,7 +459,7 @@ def render() -> None:
         # plus the REF correlation lead/lag column those two don't have).
         history_container.clear()
         try:
-            all_sigs = await db_module.to_db_thread(re_db.get_all_signals, limit=80)
+            all_sigs = await engines_controller.run_db(re_db.get_all_signals, limit=80)
             closed   = [s for s in all_sigs if s.get("status") == "closed"][:60]
 
             if closed:
@@ -565,8 +564,8 @@ def render() -> None:
         # Bounce/Breakout's ML Learning panels (ported from breakout_panel.py).
         ml_container.clear()
         try:
-            ml_sum = await db_module.to_db_thread(re_ml.summary)
-            mets   = await db_module.to_db_thread(re_ml.get_ml_metrics)
+            ml_sum = await engines_controller.run_db(re_ml.summary)
+            mets   = await engines_controller.run_db(re_ml.get_ml_metrics)
             with ml_container:
                 with ui.row().classes("w-full gap-2 flex-wrap"):
                     ui.badge(
@@ -716,9 +715,9 @@ def render() -> None:
         # shape as Bounce/Breakout's Performance Analytics card.
         analytics_container.clear()
         try:
-            by_session = await db_module.to_db_thread(re_db.get_perf_by_session)
-            by_bias    = await db_module.to_db_thread(re_db.get_perf_by_bias)
-            by_level   = await db_module.to_db_thread(re_db.get_perf_by_level_type)
+            by_session = await engines_controller.run_db(re_db.get_perf_by_session)
+            by_bias    = await engines_controller.run_db(re_db.get_perf_by_bias)
+            by_level   = await engines_controller.run_db(re_db.get_perf_by_level_type)
             with analytics_container:
                 def _perf_table(title: str, rows: list[dict], key_col: str):
                     if not rows:
@@ -757,7 +756,7 @@ def render() -> None:
         # Cycle log
         log_container.clear()
         try:
-            log_entries = await db_module.to_db_thread(re_db.get_analysis_log, limit=30)
+            log_entries = await engines_controller.run_db(re_db.get_analysis_log, limit=30)
             with log_container:
                 for entry in log_entries:
                     is_signal = entry.get("result") == "signal"

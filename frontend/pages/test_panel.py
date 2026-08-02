@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-from backend.src.db import database as db_module
+from backend.src.controllers.engines import controller as engines_controller
 
 from backend.src.services.test_signal import test_signal_repo as _tdb_real
 from backend.src.services.test_signal import test_signal_service as test_engine_module
@@ -138,8 +138,7 @@ def _render_main() -> None:
             "text-yellow-400 font-bold text-sm tracking-widest"
         )
         try:
-            from backend.src.db import database as _main_db
-            _live = bool(_main_db.get_risk_settings().get("sg_live_execution", 0))
+            _live = bool(engines_controller.get_risk_settings().get("sg_live_execution", 0))
         except Exception:
             _live = False
         ui.label("• LIVE EXECUTION — MT5 ORDERS ACTIVE •" if _live else "• VIRTUAL — NO MT5 ORDERS •").classes(
@@ -176,12 +175,12 @@ def _render_main() -> None:
     )
 
     async def _render_balance_banner():
-        balance    = await db_module.to_db_thread(tdb.get_virtual_balance)
+        balance    = await engines_controller.run_db(tdb.get_virtual_balance)
         pnl_total  = round(balance - _STARTING_BALANCE, 2)
         pnl_pct    = round((pnl_total / _STARTING_BALANCE) * 100, 1)
-        max_dd     = await db_module.to_db_thread(tdb.get_max_drawdown)
-        stats      = await db_module.to_db_thread(tdb.get_stats)
-        consec     = await db_module.to_db_thread(tdb.get_consecutive_losses)
+        max_dd     = await engines_controller.run_db(tdb.get_max_drawdown)
+        stats      = await engines_controller.run_db(tdb.get_stats)
+        consec     = await engines_controller.run_db(tdb.get_consecutive_losses)
         balance_row.clear()
         with balance_row:
             bal_color  = "text-green-400" if balance >= _STARTING_BALANCE else "text-red-400"
@@ -240,8 +239,8 @@ def _render_main() -> None:
     stats_row = ui.row().classes("w-full gap-3 flex-wrap px-4 pt-3")
 
     async def _render_stats():
-        stats = await db_module.to_db_thread(tdb.get_stats)
-        balance = await db_module.to_db_thread(tdb.get_virtual_balance)
+        stats = await engines_controller.run_db(tdb.get_stats)
+        balance = await engines_controller.run_db(tdb.get_virtual_balance)
         pnl_total = round(balance - _STARTING_BALANCE, 2)
         stats_row.clear()
         with stats_row:
@@ -288,7 +287,7 @@ def _render_main() -> None:
             active_area = ui.column().classes("w-full gap-2")
 
             async def _render_active():
-                sigs = await db_module.to_db_thread(tdb.get_open_signals)
+                sigs = await engines_controller.run_db(tdb.get_open_signals)
                 active_area.clear()
                 with active_area:
                     if not sigs:
@@ -427,7 +426,7 @@ def _render_main() -> None:
             history_area = ui.column().classes("w-full")
 
             async def _render_history():
-                sigs   = await db_module.to_db_thread(tdb.get_all_signals, limit=100)
+                sigs   = await engines_controller.run_db(tdb.get_all_signals, limit=100)
                 closed = [s for s in sigs if s.get("status") not in ("pending", "triggered")]
                 history_area.clear()
                 with history_area:
@@ -602,9 +601,9 @@ def _render_main() -> None:
             analytics_area = ui.column().classes("w-full gap-3")
 
             async def _render_analytics():
-                by_session = await db_module.to_db_thread(tdb.get_perf_by_session)
-                by_bias    = await db_module.to_db_thread(tdb.get_perf_by_bias)
-                by_level   = await db_module.to_db_thread(tdb.get_perf_by_level_type)
+                by_session = await engines_controller.run_db(tdb.get_perf_by_session)
+                by_bias    = await engines_controller.run_db(tdb.get_perf_by_bias)
+                by_level   = await engines_controller.run_db(tdb.get_perf_by_level_type)
                 analytics_area.clear()
                 with analytics_area:
                     _COL_TIPS = {
@@ -697,9 +696,9 @@ def _render_main() -> None:
             ap_area = ui.column().classes("w-full gap-1")
 
             async def _render_ap():
-                all_p     = await db_module.to_db_thread(ap.get_all)
-                overrides = await db_module.to_db_thread(ap.get_regime_overrides)
-                _log_rows = await db_module.to_db_thread(tdb.get_analysis_log, limit=60)
+                all_p     = await engines_controller.run_db(ap.get_all)
+                overrides = await engines_controller.run_db(ap.get_regime_overrides)
+                _log_rows = await engines_controller.run_db(tdb.get_analysis_log, limit=60)
                 param_changes = [e for e in _log_rows if (e.get("result") or "").startswith("param_")]
                 ap_area.clear()
                 with ap_area:
@@ -798,8 +797,8 @@ def _render_main() -> None:
             ml_area = ui.column().classes("w-full gap-2")
 
             async def _render_ml():
-                s    = await db_module.to_db_thread(ml.summary)
-                mets = await db_module.to_db_thread(ml.get_ml_metrics)
+                s    = await engines_controller.run_db(ml.summary)
+                mets = await engines_controller.run_db(ml.get_ml_metrics)
                 ml_area.clear()
                 with ml_area:
 
@@ -1070,7 +1069,7 @@ def _render_main() -> None:
             )
 
             async def _render_log():
-                entries = await db_module.to_db_thread(tdb.get_analysis_log, limit=40)
+                entries = await engines_controller.run_db(tdb.get_analysis_log, limit=40)
                 log_area.clear()
                 with log_area:
                     if not entries:
@@ -1151,7 +1150,7 @@ def _render_main() -> None:
                 return (tuple(sorted(stats.items())), balance, opens)
             # Offloaded — this runs every 30s tick unconditionally (it's the
             # diffing check itself), same class of bug as the render fetches.
-            return await db_module.to_db_thread(_fetch)
+            return await engines_controller.run_db(_fetch)
         except Exception:
             return None
 

@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from backend.src.db import database as db_module
+from backend.src.controllers.engines import controller as engines_controller
 
 from nicegui import ui
 
@@ -101,8 +101,7 @@ def render() -> None:
         ui.label("Breakout Engine").classes(
             "text-orange-400 font-bold text-sm tracking-widest"
         )
-        from backend.src.db import database as _cdb_hdr
-        _bo_live_hdr = bool(_cdb_hdr.get_risk_settings().get("bo_live_execution", 0))
+        _bo_live_hdr = bool(engines_controller.get_risk_settings().get("bo_live_execution", 0))
         exec_lbl = ui.label(
             "• LIVE EXECUTION — MT5 ORDERS ACTIVE •" if _bo_live_hdr
             else "• VIRTUAL — NO MT5 ORDERS •"
@@ -122,11 +121,11 @@ def render() -> None:
     )
 
     async def _render_balance():
-        balance   = await db_module.to_db_thread(bdb.get_virtual_balance)
+        balance   = await engines_controller.run_db(bdb.get_virtual_balance)
         pnl_total = round(balance - _STARTING_BALANCE, 2)
         pnl_pct   = round(pnl_total / _STARTING_BALANCE * 100, 1)
-        max_dd    = await db_module.to_db_thread(bdb.get_max_drawdown)
-        stats     = await db_module.to_db_thread(bdb.get_stats)
+        max_dd    = await engines_controller.run_db(bdb.get_max_drawdown)
+        stats     = await engines_controller.run_db(bdb.get_stats)
         balance_row.clear()
         with balance_row:
             bal_color = "text-green-400" if balance >= _STARTING_BALANCE else "text-red-400"
@@ -179,8 +178,8 @@ def render() -> None:
     stats_row = ui.row().classes("w-full gap-3 flex-wrap px-4 pt-3")
 
     async def _render_stats():
-        stats   = await db_module.to_db_thread(bdb.get_stats)
-        balance = await db_module.to_db_thread(bdb.get_virtual_balance)
+        stats   = await engines_controller.run_db(bdb.get_stats)
+        balance = await engines_controller.run_db(bdb.get_virtual_balance)
         pnl_tot = round(balance - _STARTING_BALANCE, 2)
         stats_row.clear()
         with stats_row:
@@ -225,7 +224,7 @@ def render() -> None:
             active_area = ui.column().classes("w-full gap-2")
 
             async def _render_active():
-                sigs = await db_module.to_db_thread(bdb.get_open_signals)
+                sigs = await engines_controller.run_db(bdb.get_open_signals)
                 active_area.clear()
                 with active_area:
                     if not sigs:
@@ -310,7 +309,7 @@ def render() -> None:
             history_area = ui.column().classes("w-full")
 
             async def _render_history():
-                sigs   = await db_module.to_db_thread(bdb.get_all_signals, limit=80)
+                sigs   = await engines_controller.run_db(bdb.get_all_signals, limit=80)
                 closed = [s for s in sigs if s.get("status") not in ("pending", "triggered")]
                 history_area.clear()
                 with history_area:
@@ -428,10 +427,10 @@ def render() -> None:
             analytics_area = ui.column().classes("w-full gap-3")
 
             async def _render_analytics():
-                by_type    = await db_module.to_db_thread(bdb.get_perf_by_breakout_type)
-                by_adx     = await db_module.to_db_thread(bdb.get_perf_by_adx_band)
-                by_session = await db_module.to_db_thread(bdb.get_perf_by_session)
-                by_bias    = await db_module.to_db_thread(bdb.get_perf_by_bias)
+                by_type    = await engines_controller.run_db(bdb.get_perf_by_breakout_type)
+                by_adx     = await engines_controller.run_db(bdb.get_perf_by_adx_band)
+                by_session = await engines_controller.run_db(bdb.get_perf_by_session)
+                by_bias    = await engines_controller.run_db(bdb.get_perf_by_bias)
                 analytics_area.clear()
                 with analytics_area:
 
@@ -477,7 +476,7 @@ def render() -> None:
             ap_area = ui.column().classes("w-full gap-1")
 
             async def _render_ap():
-                all_p = await db_module.to_db_thread(ap.get_all)
+                all_p = await engines_controller.run_db(ap.get_all)
                 ap_area.clear()
                 with ap_area:
                     with ui.element("table").classes("w-full text-xs"):
@@ -524,8 +523,8 @@ def render() -> None:
             ml_area = ui.column().classes("w-full gap-2")
 
             async def _render_ml():
-                s    = await db_module.to_db_thread(bo_ml.summary)
-                mets = await db_module.to_db_thread(bo_ml.get_ml_metrics)
+                s    = await engines_controller.run_db(bo_ml.summary)
+                mets = await engines_controller.run_db(bo_ml.get_ml_metrics)
                 ml_area.clear()
                 with ml_area:
 
@@ -754,7 +753,7 @@ def render() -> None:
             )
 
             async def _render_log():
-                entries = await db_module.to_db_thread(bdb.get_analysis_log, limit=40)
+                entries = await engines_controller.run_db(bdb.get_analysis_log, limit=40)
                 log_area.clear()
                 with log_area:
                     if not entries:
@@ -819,8 +818,7 @@ def render() -> None:
             await _render_log()
 
             # Update live/virtual execution label in header
-            from backend.src.db import database as _cdb_ref
-            _rs_live = await _cdb_ref.to_db_thread(_cdb_ref.get_risk_settings)
+            _rs_live = await engines_controller.get_risk_settings_async()
             _live_now = bool(_rs_live.get("bo_live_execution", 0))
             exec_lbl.set_text(
                 "• LIVE EXECUTION — MT5 ORDERS ACTIVE •" if _live_now

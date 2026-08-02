@@ -15,12 +15,12 @@
       "backend/src/runtime.py": 3143,
       "frontend/app.py": 1642,
       "frontend/pages/ai_trade_analysis.py": 1721,
-      "frontend/pages/breakout_panel.py": 930,
+      "frontend/pages/breakout_panel.py": 928,
       "frontend/pages/chart.py": 842,
       "frontend/pages/history.py": 1613,
-      "frontend/pages/reversal_panel.py": 813,
+      "frontend/pages/reversal_panel.py": 812,
       "frontend/pages/settings.py": 3204,
-      "frontend/pages/test_panel.py": 1264,
+      "frontend/pages/test_panel.py": 1263,
       "frontend/pages/trading.py": 3290,
       "mt5_bridge.py": 1335
     },
@@ -41,11 +41,8 @@
     "ui_db": {
       "frontend/app.py": 1,
       "frontend/pages/ai_trade_analysis.py": 2,
-      "frontend/pages/breakout_panel.py": 3,
       "frontend/pages/history.py": 1,
-      "frontend/pages/reversal_panel.py": 2,
       "frontend/pages/settings.py": 3,
-      "frontend/pages/test_panel.py": 2,
       "frontend/pages/trading.py": 2
     }
   }

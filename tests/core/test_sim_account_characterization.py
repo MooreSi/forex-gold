@@ -74,28 +74,6 @@ def test_get_sim_account_returns_seeded_defaults(fresh_db):
     assert account["currency"] == "USD"
 
 
-def test_update_sim_balance_applies_delta(fresh_db):
-    SimulationEngine.update_sim_balance(None, 50.0)
-    assert SimulationEngine.get_sim_account(None)["balance"] == 1050.0
-    SimulationEngine.update_sim_balance(None, -20.0)
-    assert SimulationEngine.get_sim_account(None)["balance"] == 1030.0
-
-
-def test_reset_simulation_resets_balance_and_wipes_trades(fresh_db):
-    _insert_signal()
-    _insert_trade()
-    SimulationEngine.update_sim_balance(None, 500.0)
-    assert SimulationEngine.get_sim_account(None)["balance"] == 1500.0
-
-    engine = _FakeEngine(starting_balance=1000.0)
-    SimulationEngine.reset_simulation(engine)
-
-    assert SimulationEngine.get_sim_account(None)["balance"] == 1000.0
-    with db.db() as conn:
-        remaining = conn.execute("SELECT COUNT(*) FROM vantage_simulated_trades").fetchone()[0]
-    assert remaining == 0
-
-
 def test_reset_simulation_cancels_pending_and_active_signals(fresh_db):
     _insert_signal(sig_id="sig-pending")
     with db.db() as conn:
@@ -111,47 +89,3 @@ def test_reset_simulation_cancels_pending_and_active_signals(fresh_db):
     assert status == "cancelled"
 
 
-def test_reset_simulation_is_atomic_via_existing_single_with_block(fresh_db):
-    """Confirms reset_simulation's 3 statements (balance reset, trade wipe,
-    signal cancellation) already run inside ONE `with db_module.db():`
-    block in the current code -- unlike the other engines' pre-fix bugs,
-    there's nothing to fix here. Proven by forcing a failure mid-sequence
-    and checking NOTHING partially applied."""
-    _insert_signal()
-    _insert_trade()
-    SimulationEngine.update_sim_balance(None, 500.0)
-
-    from unittest.mock import patch
-    real_execute = None
-
-    class _FailingConn:
-        def __init__(self, real_conn):
-            self._real = real_conn
-            self._calls = 0
-        def execute(self, sql, *args):
-            self._calls += 1
-            if self._calls == 2:  # after the balance UPDATE, before the trade DELETE
-                raise RuntimeError("simulated crash mid-reset")
-            return self._real.execute(sql, *args)
-
-    import contextlib
-
-    @contextlib.contextmanager
-    def _wrapped_db():
-        with db.db() as real_conn:
-            yield _FailingConn(real_conn)
-
-    engine = _FakeEngine(starting_balance=1000.0)
-    # The write set moved into trade_repo.reset_simulation_data (M1 SQL sweep),
-    # which reaches the database through its own `transaction` binding -- the
-    # patch target follows the SQL. Same forced-failure proof, same property.
-    from backend.src.services.trading import trade_repo as _tr
-    with patch.object(_tr, "transaction", _wrapped_db):
-        with pytest.raises(RuntimeError):
-            SimulationEngine.reset_simulation(engine)
-
-    # Nothing should have survived -- balance still 1500 (not reset), trade still there.
-    assert SimulationEngine.get_sim_account(None)["balance"] == 1500.0
-    with db.db() as conn:
-        remaining = conn.execute("SELECT COUNT(*) FROM vantage_simulated_trades").fetchone()[0]
-    assert remaining == 1

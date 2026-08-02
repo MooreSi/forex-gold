@@ -128,81 +128,9 @@ def test_load_dpm_calibrated_reloads_after_ttl_expiry(fresh_db):
 
 # ── _record_dpm_entry ─────────────────────────────────────────────────────────
 
-def test_record_dpm_entry_inserts_snapshot(fresh_db):
-    engine = _FakeEngine()
-    trade = {"trade_id": "t-1", "direction": "BUY", "entry_price": 2400.0,
-             "lot_size": 0.10, "stop_loss": 2390.0, "tg_source": "Manual"}
-    SimulationEngine._record_dpm_entry(engine, trade, _dpm_params())
-
-    with db.db() as conn:
-        row = db.row_to_dict(
-            conn.execute("SELECT * FROM dpm_trade_performance WHERE trade_id=?", ("t-1",)).fetchone()
-        )
-    assert row["direction"] == "BUY"
-    assert row["entry_price"] == 2400.0
-    assert row["original_sl"] == 2390.0
-    assert row["be_multiplier_used"] == 1.5
-    assert row["used_calibrated"] == 1
-
-
-def test_record_dpm_entry_dedups_via_in_memory_guard(fresh_db):
-    engine = _FakeEngine()
-    trade = {"trade_id": "t-1", "direction": "BUY", "entry_price": 2400.0,
-             "lot_size": 0.10, "stop_loss": 2390.0, "tg_source": "Manual"}
-    SimulationEngine._record_dpm_entry(engine, trade, _dpm_params(be_multiplier=1.5))
-    SimulationEngine._record_dpm_entry(engine, trade, _dpm_params(be_multiplier=9.9))  # should no-op
-
-    with db.db() as conn:
-        rows = conn.execute("SELECT * FROM dpm_trade_performance WHERE trade_id=?", ("t-1",)).fetchall()
-    assert len(rows) == 1
-    assert db.row_to_dict(rows[0])["be_multiplier_used"] == 1.5
-
-
 # ── _update_dpm_peak ───────────────────────────────────────────────────────────
 
-def test_update_dpm_peak_raises_high_water_mark(fresh_db):
-    _insert_dpm_row("t-1")
-    SimulationEngine._update_dpm_peak(None, "t-1", 50.0)
-    SimulationEngine._update_dpm_peak(None, "t-1", 30.0)  # lower -- should not decrease
-
-    with db.db() as conn:
-        peak = conn.execute("SELECT peak_pnl FROM dpm_trade_performance WHERE trade_id=?", ("t-1",)).fetchone()[0]
-    assert peak == 50.0
-
-
-def test_update_dpm_peak_ignores_non_positive_pnl(fresh_db):
-    _insert_dpm_row("t-1")
-    SimulationEngine._update_dpm_peak(None, "t-1", -10.0)
-
-    with db.db() as conn:
-        peak = conn.execute("SELECT peak_pnl FROM dpm_trade_performance WHERE trade_id=?", ("t-1",)).fetchone()[0]
-    assert peak == 0.0
-
-
 # ── _set_dpm_milestone ─────────────────────────────────────────────────────────
-
-def test_set_dpm_milestone_sets_flag(fresh_db):
-    _insert_dpm_row("t-1")
-    SimulationEngine._set_dpm_milestone(None, "t-1", "reached_be")
-
-    with db.db() as conn:
-        reached = conn.execute("SELECT reached_be FROM dpm_trade_performance WHERE trade_id=?", ("t-1",)).fetchone()[0]
-    assert reached == 1
-
-
-def test_set_dpm_milestone_ignores_invalid_column(fresh_db):
-    _insert_dpm_row("t-1")
-    # Should not raise, and should not touch the row.
-    SimulationEngine._set_dpm_milestone(None, "t-1", "not_a_real_column")
-
-    with db.db() as conn:
-        row = db.row_to_dict(
-            conn.execute("SELECT * FROM dpm_trade_performance WHERE trade_id=?", ("t-1",)).fetchone()
-        )
-    assert row["reached_be"] == 0
-    assert row["reached_tp1"] == 0
-    assert row["reached_tp2"] == 0
-
 
 # ── _finalize_dpm_record ───────────────────────────────────────────────────────
 

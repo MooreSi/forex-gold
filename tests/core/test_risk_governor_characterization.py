@@ -88,26 +88,6 @@ def test_is_trading_paused_false_when_past_timestamp(engine):
 
 # ── _price_in_entry_range ─────────────────────────────────────────────────────
 
-def test_price_in_entry_range_buy_within_zone(engine):
-    assert engine._price_in_entry_range("BUY", 2399.0, 2401.0, _tick(bid=2400.0, ask=2400.5)) is True
-
-
-def test_price_in_entry_range_buy_chasing_above_zone(engine):
-    assert engine._price_in_entry_range("BUY", 2399.0, 2401.0, _tick(bid=2402.0, ask=2402.5)) is False
-
-
-def test_price_in_entry_range_buy_better_fill_below_zone(engine):
-    assert engine._price_in_entry_range("BUY", 2399.0, 2401.0, _tick(bid=2398.0, ask=2398.5)) is True
-
-
-def test_price_in_entry_range_sell_within_zone(engine):
-    assert engine._price_in_entry_range("SELL", 2399.0, 2401.0, _tick(bid=2400.0, ask=2400.5)) is True
-
-
-def test_price_in_entry_range_sell_chasing_below_zone(engine):
-    assert engine._price_in_entry_range("SELL", 2399.0, 2401.0, _tick(bid=2398.0, ask=2398.5)) is False
-
-
 # ── _check_pre_trade_filters ──────────────────────────────────────────────────
 
 def test_check_pre_trade_filters_passes_good_rr(engine):
@@ -160,114 +140,9 @@ def test_check_pre_trade_filters_directional_cap_ignores_protected_trades(engine
 
 # ── _rg_day_start_ts ──────────────────────────────────────────────────────────
 
-def test_rg_day_start_ts_is_in_the_past_and_within_24h(engine):
-    ts = engine._rg_day_start_ts()
-    now = time.time()
-    assert ts <= now
-    assert (now - ts) < 86400
-
-
 # ── _rg_size_and_check ────────────────────────────────────────────────────────
 
-def test_rg_size_and_check_normal_case(engine):
-    rs = db.get_risk_settings()  # defaults: risk_per_trade_pct=0.5, max_risk_per_trade_pct=1.0
-    lot, reason = engine._rg_size_and_check(
-        direction="BUY", ref_price=2400.0, stop_loss=2390.0, tp1=2415.0,
-        strategy="scale_out", atr=8.0, balance=1000.0, rs=rs,
-    )
-    assert reason is None
-    assert lot is not None and lot > 0
-
-
-def test_rg_size_and_check_rejects_zero_stop_distance(engine):
-    rs = db.get_risk_settings()
-    lot, reason = engine._rg_size_and_check(
-        direction="BUY", ref_price=2400.0, stop_loss=2400.0, tp1=2415.0,
-        strategy="scale_out", atr=8.0, balance=1000.0, rs=rs,
-    )
-    assert lot is None
-    assert "zero" in reason
-
-
-def test_rg_size_and_check_rejects_stop_wider_than_atr_cap(engine):
-    rs = db.get_risk_settings()
-    lot, reason = engine._rg_size_and_check(
-        direction="BUY", ref_price=2400.0, stop_loss=2380.0,  # 20pt stop
-        tp1=2415.0, strategy="scale_out", atr=8.0,  # 1.5x ATR = 12pts, stop is wider
-        balance=1000.0, rs=rs,
-    )
-    assert lot is None
-    assert "too wide" in reason
-
-
-def test_rg_size_and_check_rejects_low_tp1_rr(engine):
-    rs = db.get_risk_settings()
-    lot, reason = engine._rg_size_and_check(
-        direction="BUY", ref_price=2400.0, stop_loss=2390.0, tp1=2401.0,  # 1pt TP1 vs 10pt SL
-        strategy="scale_out", atr=8.0, balance=1000.0, rs=rs,
-    )
-    assert lot is None
-    assert "R:R" in reason
-
-
-def test_rg_size_and_check_exempts_reversal_runner_from_tp1_rr(engine):
-    rs = db.get_risk_settings()
-    lot, reason = engine._rg_size_and_check(
-        direction="BUY", ref_price=2400.0, stop_loss=2390.0, tp1=2401.0,
-        strategy="reversal_runner", atr=8.0, balance=1000.0, rs=rs,
-    )
-    assert reason is None
-    assert lot is not None
-
-
-def test_rg_size_and_check_directional_cap(engine):
-    _insert_signal("sig-1")
-    _insert_signal("sig-2")
-    _insert_trade("t-1", "sig-1", direction="BUY", sl_moved_to_be=0)
-    _insert_trade("t-2", "sig-2", direction="BUY", sl_moved_to_be=0)
-    rs = db.get_risk_settings()
-    lot, reason = engine._rg_size_and_check(
-        direction="BUY", ref_price=2400.0, stop_loss=2390.0, tp1=2415.0,
-        strategy="scale_out", atr=8.0, balance=1000.0, rs=rs,
-    )
-    assert lot is None
-    assert "directional cap" in reason
-
-
 # ── _rg_check_halt ────────────────────────────────────────────────────────────
-
-def test_rg_check_halt_no_halt_when_within_limits(engine):
-    rs = db.get_risk_settings()
-    reason = engine._rg_check_halt(rs, balance=1000.0)
-    assert reason is None
-
-
-def test_rg_check_halt_daily_loss_limit(engine):
-    _insert_signal("sig-1")
-    day_start = engine._rg_day_start_ts()
-    _insert_trade("t-1", "sig-1", status="closed", close_time=day_start + 100,
-                  net_pnl=-500.0)  # big loss today
-    rs = db.get_risk_settings()  # max_daily_loss_pct default 3.0
-    reason = engine._rg_check_halt(rs, balance=1000.0)
-    assert reason is not None
-    assert "Daily loss" in reason
-
-
-def test_rg_check_halt_total_drawdown_from_peak(engine):
-    db.set_app_config("peak_balance", "2000.0")
-    rs = db.get_risk_settings()  # max_total_drawdown_pct default 8.0
-    # balance 1000 vs peak 2000 = 50% drawdown, way above 8%
-    reason = engine._rg_check_halt(rs, balance=1000.0)
-    assert reason is not None
-    assert "Total drawdown" in reason
-
-
-def test_rg_check_halt_no_drawdown_when_balance_at_or_above_peak(engine):
-    db.set_app_config("peak_balance", "1000.0")
-    rs = db.get_risk_settings()
-    reason = engine._rg_check_halt(rs, balance=1000.0)
-    assert reason is None
-
 
 # ── _rg_apply_halts_on_close -- the atomicity gap ─────────────────────────────
 

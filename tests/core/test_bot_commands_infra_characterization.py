@@ -136,48 +136,6 @@ def test_restart_bridge_auto_enable_fails(fresh_db, engine):
 
 # ── _cmd_switch_env ───────────────────────────────────────────────────────
 
-def test_switch_env_no_credentials_configured(fresh_db, engine):
-    with mock.patch.object(db, "get_mt5_credentials", return_value={}), \
-         mock.patch.object(db, "init") as init_mock:
-        result = asyncio.run(SimulationEngine._cmd_switch_env(engine, "demo"))
-    assert "credentials not configured" in result
-    assert not init_mock.called
-
-
-def test_switch_env_succeeds(fresh_db, engine):
-    engine._bridge = _FakeBridge(send_result={"status": "connected"}, health={"trade_allowed": True})
-    with mock.patch.object(db, "get_mt5_credentials", return_value=_CREDS), \
-         mock.patch.object(db, "init") as init_mock, \
-         mock.patch.object(cfg_mod, "save_to_yaml") as save_mock, \
-         mock.patch.object(db, "sync_bridge_credentials_file"):
-        result = asyncio.run(SimulationEngine._cmd_switch_env(engine, "demo"))
-    assert "Switched to Demo account (login 12345)" in result
-    assert init_mock.called
-    assert "forex_trader_demo.db" in str(init_mock.call_args)
-    save_mock.assert_called_once_with({"account_env": "demo"})
-    assert engine._bridge.send_credentials_calls == [(12345, "pw", "Demo-Server")]
-
-
-def test_switch_env_bridge_error_status(fresh_db, engine):
-    engine._bridge = _FakeBridge(send_result={"status": "error", "error": "bad creds"})
-    with mock.patch.object(db, "get_mt5_credentials", return_value=_CREDS), \
-         mock.patch.object(db, "init"), mock.patch.object(cfg_mod, "save_to_yaml"), \
-         mock.patch.object(db, "sync_bridge_credentials_file"):
-        result = asyncio.run(SimulationEngine._cmd_switch_env(engine, "demo"))
-    assert "MT5 bridge returned: bad creds" in result
-    assert "/restartbridge" in result
-
-
-def test_switch_env_live_uses_live_credentials(fresh_db, engine):
-    engine._bridge = _FakeBridge(send_result={"status": "connected"}, health={"trade_allowed": False})
-    with mock.patch.object(db, "get_mt5_credentials", return_value=_CREDS), \
-         mock.patch.object(db, "init"), mock.patch.object(cfg_mod, "save_to_yaml"), \
-         mock.patch.object(db, "sync_bridge_credentials_file"):
-        result = asyncio.run(SimulationEngine._cmd_switch_env(engine, "live"))
-    assert "Switched to Live account (login 99999)" in result
-    assert engine._bridge.send_credentials_calls == [(99999, "pw2", "Live-Server")]
-
-
 # ── _cmd_restart_app ──────────────────────────────────────────────────────
 
 def test_restart_app_success(fresh_db, engine):

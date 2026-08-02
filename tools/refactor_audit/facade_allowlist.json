@@ -1,5 +1,4 @@
 [
-  "activate_signal",
   "build_orb_report",
   "calculate_fees",
   "cancel_signal",
@@ -7,7 +6,6 @@
   "compute_mt5_performance",
   "compute_performance",
   "create_signal",
-  "get_all_trades",
   "get_bridge_health",
   "get_candles",
   "get_candles_for_symbol",
@@ -34,6 +32,5 @@
   "shutdown",
   "startup",
   "suggest_lot_size",
-  "update_signal",
-  "update_sim_balance"
+  "update_signal"
 ]

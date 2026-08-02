@@ -460,9 +460,6 @@ class SimulationEngine:
     def get_sim_account(self) -> dict:
         return _get_sim_account_impl()
 
-    def update_sim_balance(self, delta: float) -> None:
-        _update_sim_balance_impl(delta)
-
     def reset_simulation(self) -> None:
         starting = float(self._cfg.get("starting_balance", 1000.0))
         _reset_simulation_impl(starting)
@@ -481,9 +478,6 @@ class SimulationEngine:
 
     def get_signals(self, status: Optional[str] = None) -> list[dict]:
         return _get_signals_impl(status)
-
-    def activate_signal(self, signal_id: str) -> None:
-        _activate_signal_impl(signal_id)
 
     def cancel_signal(self, signal_id: str) -> None:
         _cancel_signal_impl(signal_id)
@@ -589,17 +583,6 @@ class SimulationEngine:
             starting_balance=self._cfg.get("starting_balance", 1000.0),
         )
 
-    async def _close_all_ladder_legs(self, trade_id: str, row: dict, legs: list[dict],
-                                     reason: str) -> dict:
-        """Manual/forced full close of an Adaptive Runner ladder trade —
-        closes every still-open leg at market (each is its own MT5 ticket),
-        sums their real P&L, and records the parent trade closed. Used by
-        close_trade() so /close and the UI's Close button don't orphan
-        every leg but the anchor."""
-        return await _close_all_ladder_legs_impl(
-            trade_id, row, legs, reason, self._make_close_trade_ctx()
-        )
-
     async def close_trade(self, trade_id: str, reason: str = "manual_close") -> dict:
         return await _close_trade_impl(trade_id, reason, self._make_close_trade_ctx())
 
@@ -621,9 +604,6 @@ class SimulationEngine:
         """
         return await _get_untracked_mt5_positions_impl(self._bridge)
 
-    def get_all_trades(self, status: Optional[str] = None, limit: int = 100) -> list[dict]:
-        return _get_all_trades_impl(status, limit)
-
     # ── Performance ───────────────────────────────────────────────────────────
 
     def compute_performance(self) -> dict:
@@ -640,28 +620,10 @@ class SimulationEngine:
 
     _TP_WAIT_LOG_INTERVAL = 60.0  # seconds between diagnostic log lines per trade
 
-    def _log_tp_wait_diagnostic(
-        self, trade_id: str, tag: str, direction: str,
-        current_price: float, target_price: float, hit: bool,
-    ) -> None:
-        """Throttled, always-on (INFO, not DEBUG) visibility into the TP1-wait
-        comparison every strategy handler runs every poll. One line per trade
-        per _TP_WAIT_LOG_INTERVAL, plus always logs the transition to hit=True."""
-        _log_tp_wait_diagnostic_impl(
-            self._tp_trigger_cache, trade_id, tag, direction, current_price, target_price, hit,
-        )
-
     def _check_sl(self, trade: dict, tick: Tick) -> Optional[tuple]:
         return _check_sl_impl(trade, tick)
 
-    async def _check_tp_hits(self, trade: dict, tick: Tick) -> list[tuple]:
-        return await _check_tp_hits_impl(self._tp_trigger_cache, trade, tick)
-
     # ── Strategy handlers ─────────────────────────────────────────────────────
-
-    def _get_remaining_lots(self, trade_id: str) -> float:
-        """Read current remaining_lots from DB to avoid stale snapshot."""
-        return _get_remaining_lots_impl(trade_id)
 
     async def _handle_scale_out(self, trade: dict, tick: Tick) -> None:
         return await _handle_scale_out_impl(
@@ -850,23 +812,6 @@ class SimulationEngine:
             close_full_after_tps=self._close_full_after_tps,
         )
 
-    async def _run_tp_ladder(
-        self, trade: dict, tick: Tick, pcts_table: dict[int, list[float]], log_tag: str,
-        be_at_pos: int = 0,
-    ) -> None:
-        """Shared TP-ladder walk used by Signal Climber and Reversal Runner.
-
-        Closes fractions of the original lot at each signal TP (per pcts_table,
-        keyed by TP count). SL is left untouched until the TP at index
-        `be_at_pos` (0 = TP1, 1 = TP2, ...) is hit, at which point it moves to
-        breakeven; every subsequent TP after that trails SL to the previous
-        TP's price.
-        """
-        return await _run_tp_ladder_impl(
-            trade, tick, pcts_table, log_tag, self._bridge, self._tp_trigger_cache,
-            be_at_pos=be_at_pos, close_full_after_tps=self._close_full_after_tps,
-        )
-
     async def _handle_conservative_trial(self, trade: dict, tick: Tick) -> None:
         """
         Conservative Trial strategy:
@@ -912,18 +857,6 @@ class SimulationEngine:
         """
         return _load_dpm_calibrated_impl(self._dpm_cache)
 
-    def _record_dpm_entry(self, trade: dict, params: dict) -> None:
-        """Snapshot market state and DPM parameters on the first cycle for a trade."""
-        _record_dpm_entry_impl(self._dpm_cache, trade, params)
-
-    def _update_dpm_peak(self, trade_id: str, unrealized_pnl: float) -> None:
-        """Keep the high-water P&L for this trade so calibration can compute capture ratio."""
-        _update_dpm_peak_impl(trade_id, unrealized_pnl)
-
-    def _set_dpm_milestone(self, trade_id: str, column: str) -> None:
-        """Mark a milestone column (reached_be, reached_tp1, reached_tp2) as 1."""
-        _set_dpm_milestone_impl(trade_id, column)
-
     def _finalize_dpm_record(self, trade_id: str, close_price: float,
                              exit_type: str, final_pnl: float) -> None:
         """Write close-time fields to the DPM performance record."""
@@ -961,11 +894,6 @@ class SimulationEngine:
 
     def is_trading_paused(self) -> bool:
         return _is_trading_paused_impl()
-
-    @staticmethod
-    def _price_in_entry_range(direction: str, entry_low: float, entry_high: float,
-                               tick: "Tick") -> bool:
-        return _price_in_entry_range_impl(direction, entry_low, entry_high, tick)
 
     # ── Pre-trade filters ─────────────────────────────────────────────────────
 
@@ -1005,31 +933,6 @@ class SimulationEngine:
     #   (E) rejects trades below a minimum TP1 R:R or beyond the directional cap.
     # All thresholds come from existing vantage_risk_settings columns. When the
     # toggle is off none of this runs and strategies behave exactly as before.
-
-    def _rg_day_start_ts(self) -> float:
-        """Epoch of the current trading day's start, in broker time (UTC+3)."""
-        return _rg_day_start_ts_impl()
-
-    def _rg_size_and_check(self, *, direction: str, ref_price: float,
-                           stop_loss: float, tp1, strategy: str,
-                           atr: float, balance: float, rs: dict):
-        """Return (lot_size, None) when a trade is allowed, or (None, reason)."""
-        return _rg_size_and_check_impl(
-            direction=direction, ref_price=ref_price, stop_loss=stop_loss,
-            tp1=tp1, strategy=strategy, atr=atr, balance=balance, rs=rs,
-        )
-
-    def _rg_check_halt(self, rs: dict, balance: float) -> Optional[str]:
-        """Return a reason string when the Risk Governor should halt trading.
-
-        balance must be the live MT5 balance (see the caller in _record_close)
-        — this used to read vantage_simulation_account directly, which is this
-        app's own internally-computed P&L ledger and can drift significantly
-        from the real account (confirmed 2026-07-07: $707 sim vs $1122 real),
-        producing a false drawdown-halt reason based on a number unrelated to
-        the account's actual health.
-        """
-        return _rg_check_halt_impl(rs, balance)
 
     def _rg_apply_halts_on_close(self, rs: dict, balance: float) -> None:
         """After a close, trip the pause flag if a circuit breaker fired."""
@@ -1680,30 +1583,6 @@ class SimulationEngine:
             pass
         return True
 
-    async def _orb_auto_execute(self, report: dict) -> None:
-        """
-        Places the ORB/IVB Report's recommended trade unattended, every
-        morning, when the auto-execute toggle is on.
-
-        This scheduler runs independently and unconditionally on *both* Mac
-        and VPS (same as the email report above it). Normally it deliberately
-        does NOT forward to the other node the way the Trading tab's Execute
-        Trade button does — that button forwards because it's a single user
-        click on one specific node's UI with nowhere else to go, whereas here
-        both nodes compute the same report on the same clock, so only the
-        active trader should ever act, or the same trade fires twice.
-
-        Under centralized signal generation (Settings > Remote Node), that
-        inverts: the VPS has stopped analyzing entirely
-        (should_generate_signals_here() is False there), so it must defer
-        even though it's the active trader — and the Mac proceeds even
-        though it *isn't* the active trader, since open_trade() (called via
-        open_manual_market_order() below) forwards the resolved trade to the
-        VPS for execution under that mode. Still exactly one node ever acts:
-        whichever one currently owns generation.
-        """
-        return await _orb_auto_execute_impl(report, self._bridge, self._is_active_trader_node())
-
     async def _try_ai_signal_fallback(self, text: str, channel_name: str, tg_id: str) -> Optional[dict]:
         """Last-resort AI extraction for a message the deterministic
         parser (is_format_ab_signal/parse_gold_signal, is_gd2_message/
@@ -1749,19 +1628,6 @@ class SimulationEngine:
             self._is_active_trader_node(), self._bridge,
         )
 
-    @staticmethod
-    async def _push_ai_recovered_created(
-        tg_id: str, channel_name: str, text: str, message_type: str,
-        confidence: float, reasoning: str, **fields,
-    ) -> None:
-        """Mirror a newly-created ai_recovered_signals row to the paired
-        Local/Remote node — see sync/protocol.py's MSG_AI_RECOVERED_SIGNAL_SYNC
-        comment. Best-effort: a missed delivery is caught by the periodic
-        full-queue pull (sync.client.SyncClient._ai_recovered_pull_loop)."""
-        return await _push_ai_recovered_created_impl(
-            tg_id, channel_name, text, message_type, confidence, reasoning, **fields,
-        )
-
     async def _apply_sl_adjustment(
         self, new_sl: float, channel_name: str, tg_id: str, via: str,
     ) -> None:
@@ -1791,11 +1657,6 @@ class SimulationEngine:
 
     def _queue_unrecognised(self, tg_id: str, channel_name: str, text: str) -> None:
         return _queue_unrecognised_impl(tg_id, channel_name, text, self._cfg)
-
-    async def _analyse_unrecognised_message(
-        self, unrec_id: int, channel_name: str, text: str
-    ) -> None:
-        return await _analyse_unrecognised_message_impl(unrec_id, channel_name, text, self._cfg)
 
     # ── Signal scanner ────────────────────────────────────────────────────────
 
@@ -2247,16 +2108,6 @@ class SimulationEngine:
                 log.debug("_max_tp_checker_loop error: %s", e)
             await asyncio.sleep(300)  # run every 5 minutes
 
-    async def _backfill_max_tp_hit_corrected(self) -> None:
-        """One-off (2026-07-18): recompute max_tp_hit for every already-closed
-        trade using the corrected open_time->close_time window, replacing
-        values computed under the old close_time+30min window that could
-        attribute post-close continuation moves to a trade that was already
-        flat (see _max_tp_checker_loop docstring). Safe to leave running at
-        startup — recompute-and-compare is idempotent, and it no-ops once
-        every row already matches its corrected value."""
-        await _backfill_max_tp_hit_corrected_impl(self._bridge)
-
     # ── TP safety net ────────────────────────────────────────────────────────
     # 2026-07-03: several open trades ran deep into a favourable TP ladder
     # (confirmed via real M1 candle history — the same reliable method as
@@ -2356,17 +2207,6 @@ class SimulationEngine:
 
     async def _tp_safety_net_sweep(self) -> None:
         return await _tp_safety_net_sweep_impl(self._bridge, self._tp_safety_net_last_alert)
-
-    async def _tp_safety_net_check_trade(self, trade: dict, now: float) -> None:
-        return await _tp_safety_net_check_trade_impl(
-            trade, now, self._bridge, self._tp_safety_net_last_alert,
-        )
-
-    def _compute_be_cost_pts(self, trade: dict) -> float:
-        """Round-trip cost estimate (spread+commission+slippage) in points,
-        for a breakeven-plus-cost stop rather than a raw-entry stop that
-        quietly bleeds the spread on every safety-net-protected trade."""
-        return _compute_be_cost_pts_impl(trade)
 
     # ── Signal bus maintenance ────────────────────────────────────────────────
 
@@ -2485,27 +2325,6 @@ class SimulationEngine:
         return await _build_orb_report_impl(self._bridge)
 
     # ── Empirical target-multiple backtest ────────────────────────────────────
-
-    async def _get_orb_target_multiple(self) -> dict:
-        """Cached wrapper — the backtest only needs to run once per day."""
-        return await _get_orb_target_multiple_impl(self._bridge)
-
-    async def _backtest_orb_target_multiple(self) -> dict:
-        """
-        Genuine, disclosed analog to the video's proprietary "protection
-        level" — measures, over this account's own recent gold history, how
-        far price actually travelled past the Asian session range on days
-        it cleanly broke one side only after London open, expressed as a
-        multiple of that day's range height. Falls back to the standard
-        ORB-literature 2x default if there isn't yet enough clean-breakout
-        history.
-
-        Reference range matches build_orb_report's own basis (see that
-        method's docstring) — must stay in sync, since a mismatch here would
-        calibrate the multiplier against a different-sized unit than what
-        the live report actually multiplies it by.
-        """
-        return await _backtest_orb_target_multiple_impl(self._bridge)
 
     # ── Email scheduler ───────────────────────────────────────────────────────
 
@@ -3006,10 +2825,6 @@ class SimulationEngine:
 
     async def _cmd_switch_demo(self, args: list) -> str:
         return await _cmd_switch_demo_impl(args, self._bridge)
-
-    async def _cmd_switch_env(self, new_env: str) -> str:
-        """Switch the active MT5 account environment (live/demo)."""
-        return await _cmd_switch_env_impl(new_env, self._bridge)
 
     async def _cmd_market_price_buy(self, args: list) -> str:
         try:

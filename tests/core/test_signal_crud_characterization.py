@@ -105,22 +105,6 @@ def test_get_signals_returns_all_newest_first(fresh_db):
     assert ids[1] == r1["signal_id"]
 
 
-def test_get_signals_filters_by_status(fresh_db):
-    r1 = SimulationEngine.create_signal(
-        None, source_name="A", direction="BUY",
-        entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
-    )
-    SimulationEngine.create_signal(
-        None, source_name="B", direction="SELL",
-        entry_low=2399.0, entry_high=2401.0, stop_loss=2410.0, tp1=2390.0,
-    )
-    SimulationEngine.activate_signal(None, r1["signal_id"])
-
-    active = SimulationEngine.get_signals(None, status="active")
-    assert len(active) == 1
-    assert active[0]["signal_id"] == r1["signal_id"]
-
-
 def test_get_signals_parses_claude_commentary_json(fresh_db):
     r1 = SimulationEngine.create_signal(
         None, source_name="A", direction="BUY",
@@ -152,36 +136,6 @@ def test_get_signals_leaves_bad_json_commentary_alone(fresh_db):
 
 
 # ── activate_signal ───────────────────────────────────────────────────────────
-
-def test_activate_signal_transitions_pending_to_active(fresh_db):
-    r1 = SimulationEngine.create_signal(
-        None, source_name="A", direction="BUY",
-        entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
-    )
-    SimulationEngine.activate_signal(None, r1["signal_id"])
-    with db.db() as conn:
-        row = db.row_to_dict(
-            conn.execute("SELECT * FROM vantage_signals WHERE signal_id=?",
-                        (r1["signal_id"],)).fetchone()
-        )
-    assert row["status"] == "active"
-    assert row["activated_at"] is not None
-
-
-def test_activate_signal_raises_on_unknown_id(fresh_db):
-    with pytest.raises(ValueError, match="not found"):
-        SimulationEngine.activate_signal(None, "does-not-exist")
-
-
-def test_activate_signal_raises_when_not_pending(fresh_db):
-    r1 = SimulationEngine.create_signal(
-        None, source_name="A", direction="BUY",
-        entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
-    )
-    SimulationEngine.activate_signal(None, r1["signal_id"])
-    with pytest.raises(ValueError, match="cannot activate"):
-        SimulationEngine.activate_signal(None, r1["signal_id"])  # already active
-
 
 # ── cancel_signal ─────────────────────────────────────────────────────────────
 

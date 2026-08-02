@@ -186,16 +186,6 @@ def test_last_closed_tp_returns_none_when_no_match(fresh_db):
 
 # ── _log_tp_wait_diagnostic ────────────────────────────────────────────────────
 
-def test_log_tp_wait_diagnostic_does_not_raise(fresh_db, engine):
-    SimulationEngine._log_tp_wait_diagnostic(
-        engine, "t-1", "TP1_WAIT", "BUY", current_price=2400.0, target_price=2410.0, hit=False,
-    )
-    SimulationEngine._log_tp_wait_diagnostic(
-        engine, "t-1", "TP1_WAIT", "SELL", current_price=2400.0, target_price=2390.0, hit=True,
-    )
-    assert "t-1" in engine._tp_trigger_cache.wait_log_ts
-
-
 # ── _check_sl ──────────────────────────────────────────────────────────────────
 
 def test_check_sl_buy_hit(fresh_db):
@@ -224,60 +214,5 @@ def test_check_sl_no_stop_set(fresh_db):
 
 # ── _check_tp_hits ─────────────────────────────────────────────────────────────
 
-def test_check_tp_hits_buy_single_hit(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", tp1=2410.0, tp2=2420.0)
-    trade = {"trade_id": "t-1", "direction": "BUY", "entry_price": 2400.0,
-             "tp1": 2410.0, "tp2": 2420.0}
-    hits = asyncio.run(SimulationEngine._check_tp_hits(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-    assert hits == [("t-1", 1)]
-
-
-def test_check_tp_hits_skips_already_triggered(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1")
-    _insert_partial_close("t-1", "TP1")
-    trade = {"trade_id": "t-1", "direction": "BUY", "entry_price": 2400.0,
-             "tp1": 2410.0, "tp2": 2420.0}
-    hits = asyncio.run(SimulationEngine._check_tp_hits(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-    assert hits == []  # TP1 already triggered, price hasn't reached TP2
-
-
-def test_check_tp_hits_skips_tp_on_wrong_side_of_entry(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1")
-    trade = {"trade_id": "t-1", "direction": "BUY", "entry_price": 2400.0,
-             "tp1": 2395.0}  # TP1 below entry -- not a valid BUY target
-    hits = asyncio.run(SimulationEngine._check_tp_hits(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-    assert hits == []
-
-
-def test_check_tp_hits_sell_direction(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", direction="SELL")
-    trade = {"trade_id": "t-1", "direction": "SELL", "entry_price": 2400.0, "tp1": 2390.0}
-    hits = asyncio.run(SimulationEngine._check_tp_hits(engine, trade, _tick(bid=2389.5, ask=2389.0)))
-    assert hits == [("t-1", 1)]
-
-
-def test_check_tp_hits_multiple_simultaneous(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1")
-    trade = {"trade_id": "t-1", "direction": "BUY", "entry_price": 2400.0,
-             "tp1": 2405.0, "tp2": 2410.0, "tp3": 2415.0}
-    hits = asyncio.run(SimulationEngine._check_tp_hits(engine, trade, _tick(bid=2420.0, ask=2420.5)))
-    assert hits == [("t-1", 1), ("t-1", 2), ("t-1", 3)]
-
-
 # ── _get_remaining_lots ────────────────────────────────────────────────────────
 
-def test_get_remaining_lots_reads_current_value(fresh_db):
-    _insert_signal()
-    _insert_trade("t-1", remaining_lots=0.07)
-    result = SimulationEngine._get_remaining_lots(None, "t-1")
-    assert result == 0.07
-
-
-def test_get_remaining_lots_returns_zero_for_unknown_trade(fresh_db):
-    result = SimulationEngine._get_remaining_lots(None, "does-not-exist")
-    assert result == 0.0

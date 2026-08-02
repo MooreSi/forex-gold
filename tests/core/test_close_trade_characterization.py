@@ -327,30 +327,3 @@ def test_record_close_records_circuit_breaker_for_mt5_trade(fresh_db, engine):
 
 # ── _close_all_ladder_legs ────────────────────────────────────────────────────
 
-def test_close_all_ladder_legs_sums_pnl_and_skips_rejected(fresh_db, engine):
-    _insert_signal("sig-1")
-    _insert_trade("t-1", "sig-1", direction="BUY", mt5_ticket=100)
-    row = _get_trade("t-1")
-    legs = [
-        {"id": 1, "tier": 1, "status": "open", "mt5_ticket": 101, "entry_price": 2400.0,
-         "lots": 0.05, "tp_price": 2410.0},
-        {"id": 2, "tier": 2, "status": "open", "mt5_ticket": 102, "entry_price": 2400.0,
-         "lots": 0.05, "tp_price": 2420.0},
-        {"id": 3, "tier": 3, "status": "closed", "mt5_ticket": 103, "entry_price": 2400.0,
-         "lots": 0.05, "tp_price": 2430.0},
-    ]
-    for leg in legs:
-        _insert_ladder_leg("t-1", leg["tier"], leg["tier"], leg["tp_price"], leg["lots"],
-                           leg["mt5_ticket"], status=leg["status"], entry_price=leg["entry_price"])
-
-    engine._bridge = _FakeBridge(close_results={
-        101: {"success": True, "close_price": 2411.0},
-        102: {"success": False, "error": "rejected"},  # rejected -- skipped
-    })
-    result = asyncio.run(SimulationEngine._close_all_ladder_legs(engine, "t-1", row, legs, "manual_close"))
-
-    assert engine._bridge.close_position_calls == [101, 102]
-    assert result["gross_pnl"] != 0  # only leg 101's pnl counted
-
-    trade = _get_trade("t-1")
-    assert trade["status"] == "closed"

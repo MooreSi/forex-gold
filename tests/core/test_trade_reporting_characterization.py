@@ -117,35 +117,6 @@ def test_get_open_trades_leaves_bad_json_alone(fresh_db):
 
 # ── get_all_trades ────────────────────────────────────────────────────────────
 
-def test_get_all_trades_no_filter_returns_all_newest_first(fresh_db):
-    _insert_signal("sig-1")
-    _insert_trade("t-1", "sig-1", status="open", open_time=100.0)
-    _insert_trade("t-2", "sig-1", status="closed", open_time=200.0)
-
-    trades = SimulationEngine.get_all_trades(None)
-    ids = [t["trade_id"] for t in trades]
-    assert ids == ["t-2", "t-1"]
-
-
-def test_get_all_trades_filters_by_status(fresh_db):
-    _insert_signal("sig-1")
-    _insert_trade("t-1", "sig-1", status="open")
-    _insert_trade("t-2", "sig-1", status="closed")
-
-    closed = SimulationEngine.get_all_trades(None, status="closed")
-    assert len(closed) == 1
-    assert closed[0]["trade_id"] == "t-2"
-
-
-def test_get_all_trades_respects_limit(fresh_db):
-    _insert_signal("sig-1")
-    for i in range(5):
-        _insert_trade(f"t-{i}", "sig-1", status="open", open_time=float(i))
-
-    trades = SimulationEngine.get_all_trades(None, limit=2)
-    assert len(trades) == 2
-
-
 # ── compute_performance ───────────────────────────────────────────────────────
 
 def test_compute_performance_no_trades_returns_starting_balance_baseline(fresh_db):

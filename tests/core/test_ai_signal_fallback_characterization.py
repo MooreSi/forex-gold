@@ -264,28 +264,3 @@ def test_queue_unrecognised_already_queued_is_noop(fresh_db, engine):
     m.assert_not_called()
 
 
-def test_analyse_unrecognised_message_success_updates_row(fresh_db, engine):
-    unrec_id = db.save_unrecognised_message("Chan", "tg-9", "??? what is this")
-    analysis = {"is_signal": False, "summary": "just chatter"}
-    with mock.patch.object(claude_ai, "classify_unknown_message", return_value=analysis), \
-         mock.patch("backend.src.services.telegram.alerts.send_message", new=mock.AsyncMock()):
-        asyncio.run(SimulationEngine._analyse_unrecognised_message(engine, unrec_id, "Chan", "??? what is this"))
-
-    with db.db() as conn:
-        row = conn.execute(
-            "SELECT claude_analysis FROM channel_unrecognised_messages WHERE id=?", (unrec_id,)
-        ).fetchone()
-    assert "just chatter" in row[0]
-
-
-def test_analyse_unrecognised_message_exception_still_updates_row(fresh_db, engine):
-    unrec_id = db.save_unrecognised_message("Chan", "tg-9", "??? what is this")
-    with mock.patch.object(claude_ai, "classify_unknown_message", side_effect=RuntimeError("ai down")), \
-         mock.patch("backend.src.services.telegram.alerts.send_message", new=mock.AsyncMock()):
-        asyncio.run(SimulationEngine._analyse_unrecognised_message(engine, unrec_id, "Chan", "??? what is this"))
-
-    with db.db() as conn:
-        row = conn.execute(
-            "SELECT claude_analysis FROM channel_unrecognised_messages WHERE id=?", (unrec_id,)
-        ).fetchone()
-    assert "ai down" in row[0]

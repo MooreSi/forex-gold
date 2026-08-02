@@ -12,7 +12,7 @@
       "backend/src/controllers/sync/client.py": 867,
       "backend/src/controllers/sync/server.py": 1073,
       "backend/src/db/database.py": 1251,
-      "backend/src/runtime.py": 3052,
+      "backend/src/runtime.py": 2867,
       "frontend/app.py": 1635,
       "frontend/pages/ai_trade_analysis.py": 1250,
       "frontend/pages/breakout_panel.py": 928,

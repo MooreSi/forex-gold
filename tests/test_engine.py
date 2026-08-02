@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 
 from backend.src.db import database as db_module
 from backend.src.runtime import SimulationEngine
+from backend.src.services.positions.tp_tracking import check_tp_hits
 from backend.src.utils.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
 
 db_module.init(_TEST_DB)
@@ -248,7 +249,10 @@ class TestTradeManagement(unittest.IsolatedAsyncioTestCase):
             )
         open_trade = self.engine.get_open_trades()[0]
         tp_tick = _make_tick(2365.0, 2365.30)
-        hits = await self.engine._check_tp_hits(open_trade, tp_tick)
+        # The engine's _check_tp_hits wrapper was deleted in M4 B3; the TP
+        # detection it delegated to lives in services/positions/tp_tracking
+        # and takes the same cache the engine used to hand it.
+        hits = await check_tp_hits(self.engine._tp_trigger_cache, open_trade, tp_tick)
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0][1], 1)   # TP1
 

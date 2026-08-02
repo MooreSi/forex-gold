@@ -204,42 +204,6 @@ def test_bearish_breakout_computes_mirrored_zone_stop_target(fresh_db):
 
 # ── _get_orb_target_multiple ────────────────────────────────────────────────
 
-def test_get_target_multiple_uses_cache_when_dated_today(fresh_db):
-    db.set_app_config("orb_target_multiple_date", "2026-07-20")
-    db.set_app_config("orb_target_multiple", "1.8")
-    db.set_app_config("orb_target_multiple_n", "15")
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    p = _patched_now(_FIXED_NOW)
-    try:
-        with mock.patch("backend.src.services.analytics.orb_report.backtest_orb_target_multiple", new=mock.AsyncMock()) as bt:
-            result = asyncio.run(SimulationEngine._get_orb_target_multiple(e))
-    finally:
-        p.stop()
-    assert result == {"multiple": 1.8, "n": 15, "is_default": False}
-    bt.assert_not_called()
-
-
-def test_get_target_multiple_recomputes_when_cache_stale(fresh_db):
-    db.set_app_config("orb_target_multiple_date", "2026-07-01")
-    db.set_app_config("orb_target_multiple", "1.8")
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    p = _patched_now(_FIXED_NOW)
-    try:
-        with mock.patch(
-            "backend.src.services.analytics.orb_report.backtest_orb_target_multiple",
-            new=mock.AsyncMock(return_value={"multiple": 2.2, "n": 12, "is_default": False}),
-        ) as bt:
-            result = asyncio.run(SimulationEngine._get_orb_target_multiple(e))
-    finally:
-        p.stop()
-    assert result == {"multiple": 2.2, "n": 12, "is_default": False}
-    bt.assert_called_once()
-    assert db.get_app_config("orb_target_multiple_date") == "2026-07-20"
-    assert db.get_app_config("orb_target_multiple") == "2.2"
-
-
 # ── _backtest_orb_target_multiple ───────────────────────────────────────────
 
 class _ShapedBackfillBridge:
@@ -261,30 +225,6 @@ class _ShapedBackfillBridge:
                 candles.append({"ts": t, "high": 2440.0, "low": 2360.0, "volume": 5.0})
             t += 300
         return candles
-
-
-def test_backtest_enough_clean_samples_returns_median(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _ShapedBackfillBridge("clean_bull")
-    monday = datetime(2026, 7, 27, 9, 0, 0, tzinfo=timezone.utc)
-    p = _patched_now(monday)
-    try:
-        result = asyncio.run(SimulationEngine._backtest_orb_target_multiple(e))
-    finally:
-        p.stop()
-    assert result == {"multiple": 1.5, "n": 17, "is_default": False}
-
-
-def test_backtest_no_clean_breakouts_falls_back_to_default(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _ShapedBackfillBridge("ambiguous")
-    monday = datetime(2026, 7, 27, 9, 0, 0, tzinfo=timezone.utc)
-    p = _patched_now(monday)
-    try:
-        result = asyncio.run(SimulationEngine._backtest_orb_target_multiple(e))
-    finally:
-        p.stop()
-    assert result == {"multiple": 2.0, "n": 0, "is_default": True}
 
 
 # ── _orb_auto_execute ────────────────────────────────────────────────────────
@@ -318,103 +258,3 @@ class _FakeEA:
         return self._ack
 
 
-def test_auto_execute_not_proceeding_creates_no_signal(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    fake_ea = _FakeEA()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=False), \
-         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
-    assert fake_ea.calls == []
-    with db.db() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
-    assert n == 0
-
-
-def test_auto_execute_direction_inside_creates_no_signal(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    fake_ea = _FakeEA()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, {"direction": "inside"}))
-    assert fake_ea.calls == []
-    with db.db() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
-    assert n == 0
-
-
-def test_auto_execute_ea_unhealthy_creates_no_signal(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    fake_ea = _FakeEA(healthy=False)
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
-    assert fake_ea.calls == []
-    with db.db() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
-    assert n == 0
-
-
-def test_auto_execute_bullish_places_pending_order_at_near_edge(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    fake_ea = _FakeEA()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
-
-    assert len(fake_ea.calls) == 1
-    call = fake_ea.calls[0]
-    assert call["direction"] == "BUY"
-    assert call["price"] == 2408.0  # entry_zone_high -- near edge for a BUY
-    assert call["stop_loss"] == 2400.0
-    assert call["tps"] == {1: 2450.0}
-    assert call["strategy"] == "orb_fixed"
-    assert call["close_full_on_last"] is True
-
-    with db.db() as conn:
-        sig = conn.execute(
-            "SELECT source_name, direction, entry_low, entry_high, stop_loss, tp1 "
-            "FROM vantage_signals"
-        ).fetchone()
-        assert tuple(sig) == ("ORB/IVB Report (auto)", "BUY", 2406.0, 2408.0, 2400.0, 2450.0)
-
-        po = conn.execute(
-            "SELECT direction, price, stop_loss, ea_ticket, status, strategy "
-            "FROM vantage_pending_orders"
-        ).fetchone()
-        assert tuple(po) == ("BUY", 2408.0, 2400.0, 777, "working", "orb_fixed")
-
-
-def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
-    rs = db.get_risk_settings()
-    rs["orb_lot_size"] = 0.05
-    db.update_risk_settings(rs)
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-    fake_ea = _FakeEA()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
-    assert fake_ea.calls[0]["lot_size"] == 0.05
-    with db.db() as conn:
-        lot = conn.execute("SELECT lot_size FROM vantage_signals").fetchone()[0]
-    assert lot == 0.05
-
-
-def test_auto_execute_place_pending_order_failure_does_not_raise(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
-    e._bridge = _FakeBridge()
-
-    class _RaisingEA(_FakeEA):
-        async def place_pending_order(self, *a, **kw):
-            raise ConnectionError("EA send failed")
-    fake_ea = _RaisingEA()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
-         mock.patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))  # must not raise
-    with db.db() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM vantage_signals").fetchone()[0]
-    assert n == 0

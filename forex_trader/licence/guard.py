@@ -23,7 +23,7 @@ from forex_trader.licence.verify import verify_licence_key as _verify_licence_ke
 
 def _app_port() -> int:
     """The port the real app will actually run on, once past this licence
-    gate -- must match run.py's own port (config.get("port"), default 8890
+    gate -- must match run.py's own port (config.get("port"), default 8888
     per config.py) exactly, or the activation/error screens end up serving
     on a different port than the app restarts into: the "click here to open
     FOREX Trader" link and its auto-reload poll are both relative to
@@ -31,9 +31,9 @@ def _app_port() -> int:
     dead port forever."""
     try:
         import forex_trader.config as _config
-        return int(_config.get("port", 8890))
+        return int(_config.get("port", 8888))
     except Exception:
-        return 8890
+        return 8888
 
 
 def _parse_activation_code(code: str):

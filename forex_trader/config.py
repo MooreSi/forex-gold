@@ -159,10 +159,7 @@ def load() -> dict:
         "telegram_chat_id":   _e("TELEGRAM_CHAT_ID", base.get("telegram_chat_id", "")),
 
         # App
-        # 8888 is the live app's UI port -- run.py's _free_port() kills
-        # whatever's already listening on this port before starting, so
-        # defaulting to 8888 here would kill the live app's web server.
-        "port": int(_e("PORT", base.get("port", 8890))),
+        "port": int(_e("PORT", base.get("port", 8888))),
 
         # Environment: "demo" or "live" — controls which DB file is used
         "account_env":   _e("ACCOUNT_ENV", base.get("account_env", "demo")),

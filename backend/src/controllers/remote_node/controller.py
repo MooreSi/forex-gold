@@ -30,3 +30,14 @@ def generate_sync_token() -> str:
 
 def get_sync_token() -> Optional[str]:
     return db_module.get_sync_token()
+
+
+async def restart_app(engine) -> str:
+    """Restart the app process so a headless-mode change takes effect.
+
+    The page used to reach into the engine's private _cmd_restart_app (M4 B4
+    made that leak visible). The runtime still owns the restart -- it holds
+    the bot offset that must be persisted first -- so this forwards to it
+    rather than duplicating the sequence.
+    """
+    return await engine._cmd_restart_app([])

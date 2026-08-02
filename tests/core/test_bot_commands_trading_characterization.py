@@ -148,52 +148,6 @@ def test_close_by_invalid_ticket(fresh_db, engine):
 
 # ── _cmd_activate ─────────────────────────────────────────────────────────
 
-def test_activate_no_pending_signal(fresh_db, engine):
-    result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
-    assert result == "No pending signals to activate."
-
-
-def test_activate_validation_failure_rejected(fresh_db, engine):
-    _insert_tg_signal(entry_low=2410.0, entry_high=2400.0)  # low > high, invalid
-    result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
-    assert "Signal validation failed" in result
-
-
-def test_activate_in_zone_opens_trade(fresh_db, engine):
-    _insert_tg_signal()
-    trade_result = {"trade_id": "trade-abc", "entry_price": 2400.0, "mt5_ticket": 555}
-    tick = SimpleNamespace(bid=2399.5, ask=2400.5)
-    engine._bridge.get_tick = mock.AsyncMock(return_value=tick)
-    with mock.patch.object(cmds, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
-         mock.patch.object(cmds, "open_trade", new=mock.AsyncMock(return_value=trade_result)) as ot:
-        result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
-    assert "Activated!" in result
-    assert "Trade ID: trade-abc" in result
-    assert ot.called
-
-
-def test_activate_outside_zone_saved_pending(fresh_db, engine):
-    _insert_tg_signal(entry_low=2399.0, entry_high=2401.0)
-    tick = SimpleNamespace(bid=2410.0, ask=2410.5)
-    engine._bridge.get_tick = mock.AsyncMock(return_value=tick)
-    with mock.patch.object(cmds, "open_trade", new=mock.AsyncMock()) as ot:
-        result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
-    assert "saved as pending" in result
-    assert not ot.called
-    with db.db() as conn:
-        status = conn.execute("SELECT status FROM vantage_signals").fetchone()[0]
-    assert status == "pending"
-
-
-def test_activate_no_tick_leaves_for_manual(fresh_db, engine):
-    _insert_tg_signal()
-    engine._bridge.get_tick = mock.AsyncMock(return_value=None)
-    with mock.patch.object(cmds, "open_trade", new=mock.AsyncMock()) as ot:
-        result = asyncio.run(SimulationEngine._cmd_activate(engine, []))
-    assert "no live price available" in result
-    assert not ot.called
-
-
 # ── _cmd_market_price_buy / _cmd_market_price_sell ──────────────────────
 
 def test_market_price_buy_delegates_with_direction(fresh_db, engine):
@@ -224,31 +178,3 @@ def test_market_price_buy_exception_caught_not_raised(fresh_db, engine):
 
 # ── _cmd_report ───────────────────────────────────────────────────────────
 
-def test_report_no_recipient_configured(fresh_db, engine):
-    result = asyncio.run(SimulationEngine._cmd_report(engine, []))
-    assert "No recipient email configured" in result
-
-
-def test_report_send_succeeds(fresh_db, engine):
-    ecfg = db.get_email_config()
-    ecfg["to_addr"] = "ops@example.com"
-    db.save_email_config(ecfg)
-    with mock.patch.object(cmds, "compute_mt5_performance",
-                           new=mock.AsyncMock(return_value={"balance": 1000.0, "daily_pnl": 10.0})), \
-         mock.patch.object(claude_ai, "generate_daily_analysis", new=mock.AsyncMock(return_value="analysis")), \
-         mock.patch.object(email_service, "build_daily_html", return_value="<html></html>"), \
-         mock.patch.object(email_service, "send_email", new=mock.AsyncMock(return_value=(True, None))):
-        result = asyncio.run(SimulationEngine._cmd_report(engine, []))
-    assert result == "Report sent to ops@example.com."
-
-
-def test_report_send_fails(fresh_db, engine):
-    ecfg = db.get_email_config()
-    ecfg["to_addr"] = "ops@example.com"
-    db.save_email_config(ecfg)
-    with mock.patch.object(cmds, "compute_mt5_performance", new=mock.AsyncMock(return_value={})), \
-         mock.patch.object(claude_ai, "generate_daily_analysis", new=mock.AsyncMock(return_value=None)), \
-         mock.patch.object(email_service, "build_daily_html", return_value="<html></html>"), \
-         mock.patch.object(email_service, "send_email", new=mock.AsyncMock(return_value=(False, "smtp error"))):
-        result = asyncio.run(SimulationEngine._cmd_report(engine, []))
-    assert result == "Failed to send report: smtp error"

@@ -125,7 +125,7 @@ def render(get_engine=None) -> None:
                               type="warning")
                     return
                 headless_status_lbl.text = "Restarting to apply…"
-                result = await engine._cmd_restart_app([])
+                result = await rn_controller.restart_app(engine)
                 ui.notify(result, type="info")
 
             headless_enabled.on_value_change(_toggle_headless)

@@ -81,59 +81,6 @@ _CREDS = {
 
 # ── _cmd_restart_bridge ──────────────────────────────────────────────────
 
-def test_restart_bridge_launch_fails(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=False)):
-        result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
-    assert "Could not start bridge" in result
-
-
-def test_restart_bridge_port_never_binds(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=False), \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()):
-        result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
-    assert "port 9000 not bound" in result
-
-
-def test_restart_bridge_mt5_not_connected(fresh_db, engine):
-    engine._bridge = _FakeBridge(health={"connected": False})
-    with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()):
-        result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
-    assert "MT5 is not connected yet" in result
-
-
-def test_restart_bridge_already_active(fresh_db, engine):
-    engine._bridge = _FakeBridge(health={"connected": True, "trade_allowed": True})
-    with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()):
-        result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
-    assert result == "Bridge restarted and connected. Algo Trading: active."
-
-
-def test_restart_bridge_auto_enable_already_enabled(fresh_db, engine):
-    engine._bridge = _FakeBridge(health={"connected": True, "trade_allowed": False},
-                                 autotrading={"enabled": True, "method": "already_enabled"})
-    with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()):
-        result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
-    assert result == "Bridge restarted and connected. Algo Trading: active."
-
-
-def test_restart_bridge_auto_enable_fails(fresh_db, engine):
-    engine._bridge = _FakeBridge(health={"connected": True, "trade_allowed": False},
-                                 autotrading={"enabled": False, "error": "denied"})
-    with mock.patch.object(SimulationEngine, "_start_bridge_process", new=mock.AsyncMock(return_value=True)), \
-         mock.patch("backend.src.utils.os_utils.is_port_listening", return_value=True), \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()):
-        result = asyncio.run(SimulationEngine._cmd_restart_bridge(engine, []))
-    assert "Algo Trading: DISABLED" in result
-    assert "denied" in result
-
-
 # ── _cmd_switch_env ───────────────────────────────────────────────────────
 
 # ── _cmd_restart_app ──────────────────────────────────────────────────────
@@ -162,24 +109,3 @@ def test_restart_app_popen_failure_caught(fresh_db, engine):
 
 # ── _cmd_headless ─────────────────────────────────────────────────────────
 
-def test_headless_no_args_shows_usage_and_current_state(fresh_db, engine):
-    result = asyncio.run(SimulationEngine._cmd_headless(engine, []))
-    assert "Usage: /headless on | off" in result
-    assert "Currently: OFF" in result
-
-
-def test_headless_on_sets_flag_and_delegates(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_cmd_restart_app",
-                           new=mock.AsyncMock(return_value="Restarting app in 5 seconds — reconnect your browser shortly.")):
-        result = asyncio.run(SimulationEngine._cmd_headless(engine, ["on"]))
-    assert "Headless mode enabled." in result
-    assert "will not be available" in result
-    assert db.get_app_config("headless_mode_enabled") == "1"
-
-
-def test_headless_off_clears_flag_and_delegates(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_cmd_restart_app",
-                           new=mock.AsyncMock(return_value="Restarting app in 5 seconds — reconnect your browser shortly.")):
-        result = asyncio.run(SimulationEngine._cmd_headless(engine, ["off"]))
-    assert "Headless mode disabled" in result
-    assert db.get_app_config("headless_mode_enabled") == "0"

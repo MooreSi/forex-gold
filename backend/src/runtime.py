@@ -109,32 +109,15 @@ from backend.src.services.signals.repo import (
 )
 from backend.src.services.reversal_engine.research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
 from backend.src.services.notifications.scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
-from backend.src.services.telegram.bot_readonly import (
-    cmd_help as _cmd_help_impl,
-    cmd_balance as _cmd_balance_impl,
-    cmd_daily as _cmd_daily_impl,
-    cmd_status as _cmd_status_impl,
-    cmd_trades as _cmd_trades_impl,
-    cmd_pause as _cmd_pause_impl,
-    cmd_resume as _cmd_resume_impl,
-    cmd_risk as _cmd_risk_impl,
-    cmd_strategy as _cmd_strategy_impl,
-    cmd_dpm_on as _cmd_dpm_on_impl,
-    cmd_dpm_off as _cmd_dpm_off_impl,
-    cmd_ime_on as _cmd_ime_on_impl,
-    cmd_ime_off as _cmd_ime_off_impl,
+# The bot command table lives in services/telegram/bot_dispatch.py (M4 B4);
+# the runtime only binds its collaborators and keeps the four order/process
+# commands it injects there.
+from backend.src.services.telegram.bot_dispatch import (
+    BotDeps as _BotDeps,
+    handle_bot_command as _handle_bot_command_impl,
 )
 from backend.src.services.telegram.bot_infra import (
-    cmd_restart_bridge as _cmd_restart_bridge_impl,
     cmd_restart_app as _cmd_restart_app_impl,
-    cmd_headless as _cmd_headless_impl,
-    cmd_switch_live as _cmd_switch_live_impl,
-    cmd_switch_demo as _cmd_switch_demo_impl,
-    cmd_switch_env as _cmd_switch_env_impl,
-)
-from backend.src.services.trading.bot_trading import (
-    cmd_activate as _cmd_activate_impl,
-    cmd_report as _cmd_report_impl,
 )
 from backend.src.services.broker.watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
 from backend.src.services.trading.profit_sync import (
@@ -2446,7 +2429,8 @@ class SimulationEngine:
                                 if not text or not chat_id or chat_id != allowed_chat:
                                     continue
 
-                                reply = await self._handle_bot_command(text)
+                                reply = await _handle_bot_command_impl(
+                                    text, self._make_bot_deps())
                                 if not reply:
                                     continue
 
@@ -2492,72 +2476,7 @@ class SimulationEngine:
         finally:
             await _client.aclose()
 
-    async def _handle_bot_command(self, text: str) -> str:
-        """Route an incoming message to the correct command handler."""
-        if not text.startswith("/"):
-            return ""
-        parts = text.split()
-        # Strip @BotName suffix Telegram appends in groups
-        cmd  = parts[0].lstrip("/").split("@")[0].lower()
-        args = parts[1:]
-
-        handlers = {
-            "help":              self._cmd_help,
-            "balance":           self._cmd_balance,
-            "daily":             self._cmd_daily,
-            "status":            self._cmd_status,
-            "trades":            self._cmd_trades,
-            "pause":             self._cmd_pause,
-            "resume":            self._cmd_resume,
-            "close":             self._cmd_close,
-            "strategy":          self._cmd_strategy,
-            "risk":              self._cmd_risk,
-            "marketbuy":         self._cmd_market_price_buy,
-            "marketsell":        self._cmd_market_price_sell,
-            "dpmon":             self._cmd_dpm_on,
-            "dpmoff":            self._cmd_dpm_off,
-            "imeon":             self._cmd_ime_on,
-            "imeoff":            self._cmd_ime_off,
-            "activate":          self._cmd_activate,
-            "report":            self._cmd_report,
-            "restartbridge":      self._cmd_restart_bridge,
-            "restartapp":         self._cmd_restart_app,
-            "switchlive":         self._cmd_switch_live,
-            "switchdemo":         self._cmd_switch_demo,
-            "headless":           self._cmd_headless,
-        }
-        handler = handlers.get(cmd)
-        if handler:
-            try:
-                return await handler(args)
-            except Exception as e:
-                log.warning("Bot command /%s error: %s", cmd, e)
-                return f"Error running /{cmd}: {e}"
-        return f"Unknown command `/{cmd}`. Send /help to see all available commands."
-
     # ── Command handlers ──────────────────────────────────────────────────────
-
-    async def _cmd_help(self, args: list) -> str:
-        return await _cmd_help_impl(args)
-
-    async def _cmd_balance(self, args: list) -> str:
-        return await _cmd_balance_impl(args, self._bridge)
-
-    async def _cmd_daily(self, args: list) -> str:
-        """Send a daily summary: account state, today's closed trades and open positions."""
-        return await _cmd_daily_impl(args, self._bridge)
-
-    async def _cmd_status(self, args: list) -> str:
-        return await _cmd_status_impl(args, self._bridge, self._tg_reader)
-
-    async def _cmd_trades(self, args: list) -> str:
-        return await _cmd_trades_impl(args, self._bridge)
-
-    async def _cmd_pause(self, args: list) -> str:
-        return await _cmd_pause_impl(args)
-
-    async def _cmd_resume(self, args: list) -> str:
-        return await _cmd_resume_impl(args)
 
     async def _cmd_close(self, args: list) -> str:
         open_trades = self.get_open_trades()
@@ -2604,20 +2523,6 @@ class SimulationEngine:
             f"Closed: {trade['direction']} {trade['lot_size']} lots @ ${cp:.2f}\n"
             f"P&L: {sign}${pnl:.2f}"
         )
-
-    async def _cmd_strategy(self, args: list) -> str:
-        return await _cmd_strategy_impl(args)
-
-    async def _cmd_risk(self, args: list) -> str:
-        return await _cmd_risk_impl(args, self._bridge)
-
-    async def _cmd_activate(self, args: list) -> str:
-        return await _cmd_activate_impl(
-            args, self._bridge, self._cfg.get("starting_balance", 1000.0),
-        )
-
-    async def _cmd_report(self, args: list) -> str:
-        return await _cmd_report_impl(args, self._bridge, self._cfg)
 
     # ── Bridge watchdog ───────────────────────────────────────────────────────
 
@@ -2800,31 +2705,28 @@ class SimulationEngine:
 
     # ── Bot commands ──────────────────────────────────────────────────────────
 
-    async def _cmd_restart_bridge(self, args: list) -> str:
-        """Stop and restart the MT5 bridge process, then enable AutoTrading."""
-        return await _cmd_restart_bridge_impl(args, self._bridge, self._start_bridge_process)
+    def _make_bot_deps(self) -> _BotDeps:
+        """Bind the command table's collaborators once (M4 B4).
+
+        Same idiom as _make_close_trade_ctx. The four order/process commands
+        below are injected rather than moved: their bodies stay here, so the
+        order path is untouched by the dispatcher's relocation.
+        """
+        return _BotDeps(
+            bridge=self._bridge,
+            tg_reader=self._tg_reader,
+            cfg=self._cfg,
+            bot_offset=self._bot_offset,
+            start_bridge_process=self._start_bridge_process,
+            close_cmd=self._cmd_close,
+            market_buy_cmd=self._cmd_market_price_buy,
+            market_sell_cmd=self._cmd_market_price_sell,
+            restart_app_cmd=self._cmd_restart_app,
+        )
 
     async def _cmd_restart_app(self, args: list) -> str:
         """Restart the FOREX Trader app process (5-second delay so reply can send)."""
         return await _cmd_restart_app_impl(args, self._bot_offset)
-
-    async def _cmd_headless(self, args: list) -> str:
-        """Toggle headless mode (no web UI) and restart to apply it.
-
-        The flag is only read once, at process start (run.py), before it
-        decides whether to call ui.run() at all — NiceGUI owns the event
-        loop for the whole process once started, so this can't be a live
-        hot-toggle. Reuses the exact same restart mechanism as /restartapp,
-        just with the flag flipped first, so it's one command end to end
-        rather than "set a setting, then remember to also restart."
-        """
-        return await _cmd_headless_impl(args, self._cmd_restart_app)
-
-    async def _cmd_switch_live(self, args: list) -> str:
-        return await _cmd_switch_live_impl(args, self._bridge)
-
-    async def _cmd_switch_demo(self, args: list) -> str:
-        return await _cmd_switch_demo_impl(args, self._bridge)
 
     async def _cmd_market_price_buy(self, args: list) -> str:
         try:
@@ -2854,14 +2756,3 @@ class SimulationEngine:
         except Exception as e:
             return f"Order failed: {telegram_alerts._md_esc(str(e))}"
 
-    async def _cmd_dpm_on(self, args: list) -> str:
-        return await _cmd_dpm_on_impl(args)
-
-    async def _cmd_dpm_off(self, args: list) -> str:
-        return await _cmd_dpm_off_impl(args)
-
-    async def _cmd_ime_on(self, args: list) -> str:
-        return await _cmd_ime_on_impl(args)
-
-    async def _cmd_ime_off(self, args: list) -> str:
-        return await _cmd_ime_off_impl(args)

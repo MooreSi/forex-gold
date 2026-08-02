@@ -18,6 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.src.services.positions.monitor_loop import check_sl
+
 from backend.src.db import database as db
 from backend.src.runtime import SimulationEngine
 
@@ -190,25 +192,25 @@ def test_last_closed_tp_returns_none_when_no_match(fresh_db):
 
 def test_check_sl_buy_hit(fresh_db):
     trade = {"trade_id": "t-1", "direction": "BUY", "stop_loss": 2390.0}
-    result = SimulationEngine._check_sl(None, trade, _tick(bid=2389.0, ask=2389.5))
+    result = check_sl(trade, _tick(bid=2389.0, ask=2389.5))
     assert result == ("t-1", 2390.0, "SL")
 
 
 def test_check_sl_buy_not_hit(fresh_db):
     trade = {"trade_id": "t-1", "direction": "BUY", "stop_loss": 2390.0}
-    result = SimulationEngine._check_sl(None, trade, _tick(bid=2395.0, ask=2395.5))
+    result = check_sl(trade, _tick(bid=2395.0, ask=2395.5))
     assert result is None
 
 
 def test_check_sl_sell_hit(fresh_db):
     trade = {"trade_id": "t-1", "direction": "SELL", "stop_loss": 2410.0}
-    result = SimulationEngine._check_sl(None, trade, _tick(bid=2410.5, ask=2411.0))
+    result = check_sl(trade, _tick(bid=2410.5, ask=2411.0))
     assert result == ("t-1", 2410.0, "SL")
 
 
 def test_check_sl_no_stop_set(fresh_db):
     trade = {"trade_id": "t-1", "direction": "BUY", "stop_loss": None}
-    result = SimulationEngine._check_sl(None, trade, _tick(bid=2300.0, ask=2300.5))
+    result = check_sl(trade, _tick(bid=2300.0, ask=2300.5))
     assert result is None
 
 

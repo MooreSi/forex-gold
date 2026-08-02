@@ -54,6 +54,49 @@ B3_REMOVED = [
 ]
 
 
+# B5: wrappers called from exactly one internal hub (_monitor_loop or
+# _tp_ladder_fast_loop) and nowhere else. The hub now calls the service
+# function directly with the bindings the wrapper used to supply. Every
+# strategy docstring these carried is already present, verbatim, on the
+# service function -- checked before deletion, not assumed.
+B5_REMOVED = [
+    "_check_sl",
+    "_handle_scale_out",
+    "_handle_be_runner",
+    "_handle_trail_stop",
+    "_handle_protected_scale",
+    "_handle_conservative",
+    "_handle_conservative_trial",
+    "_handle_orb_fixed",
+    "_handle_scalp_runner",
+    "_handle_no_sl_scale",
+    "_handle_signal_climber",
+    "_handle_reversal_runner",
+    "_handle_adaptive_runner",
+    "_handle_adaptive_runner_2",
+    "_handle_limit_runner",
+    "_handle_dynamic_position_management",
+    "_run_dpm_calibration",
+    "_try_activate_pending_signals",
+    "_profit_sweep",
+    "_ime_timeout_watchdog",
+]
+
+
+@pytest.mark.parametrize("name", B5_REMOVED)
+def test_batch5_hub_only_wrappers_removed(name):
+    assert not hasattr(SimulationEngine, name), (
+        f"{name} was inlined into its hub loop in M4 B5 -- the loop calls the "
+        f"service directly now."
+    )
+
+
+def test_the_hub_loops_survive_their_inlining():
+    """Negative control: inlining must not eat the loops themselves."""
+    for hub in ("_monitor_loop", "_tp_ladder_fast_loop"):
+        assert hasattr(SimulationEngine, hub), hub
+
+
 @pytest.mark.parametrize("name", B3_REMOVED)
 def test_batch3_wrappers_removed(name):
     assert not hasattr(SimulationEngine, name), (

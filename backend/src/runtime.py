@@ -603,233 +603,7 @@ class SimulationEngine:
 
     _TP_WAIT_LOG_INTERVAL = 60.0  # seconds between diagnostic log lines per trade
 
-    def _check_sl(self, trade: dict, tick: Tick) -> Optional[tuple]:
-        return _check_sl_impl(trade, tick)
-
     # ── Strategy handlers ─────────────────────────────────────────────────────
-
-    async def _handle_scale_out(self, trade: dict, tick: Tick) -> None:
-        return await _handle_scale_out_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_be_runner(self, trade: dict, tick: Tick) -> None:
-        return await _handle_be_runner_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail,
-            dpm_candles=self._dpm_candles, close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_trail_stop(self, trade: dict, tick: Tick) -> None:
-        """
-        Trailing Stop strategy.
-
-        Activation: price reaches TP1 (or sl_moved_to_be is already set from a
-        previous loop cycle — the in-memory dict lags the DB by one cycle).
-
-        On activation:
-          - SL is IMMEDIATELY moved to entry price (breakeven).  This is the critical
-            fix: previously, if bid - trail_dist < original_SL, nothing happened and
-            the trade remained at full risk despite TP1 being cleared.
-
-        Once active, every tick:
-          - BUY:  new_sl = max(bid - trail_dist, entry_price)  — floor at breakeven
-          - SELL: new_sl = min(ask + trail_dist, entry_price)  — ceiling at breakeven
-          Only ever moves in the profitable direction (no reversal).
-
-        TP2-TP5 markers are written so the TP chips in the UI reflect the actual
-        price path, even though no partial closes happen.
-        """
-        return await _handle_trail_stop_impl(trade, tick, self._bridge, self._tp_trigger_cache)
-
-    async def _handle_protected_scale(self, trade: dict, tick: Tick) -> None:
-        return await _handle_protected_scale_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_conservative(self, trade: dict, tick: Tick) -> None:
-        """
-        Conservative strategy (fixed-point levels; signal SL/TP ignored after fill):
-
-          SL   = fill ∓ 5 pts
-          TP1  = fill ± 3 pts  →  close 80 % of position
-          After TP1: trail remaining 20 % with a fixed 3-pt stop,
-                     floored at entry price (breakeven).
-        """
-        return await _handle_conservative_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_orb_fixed(self, trade: dict, tick: Tick) -> None:
-        """
-        ORB/IVB Report trades — no management beyond the reload-zone setup
-        itself. SL is already handled generically by _check_sl() in
-        _monitor_loop before any strategy handler ever runs; this handler's
-        only job is a full close (no partials, no BE-move, no trailing) the
-        instant tp1 (the report's own target) is hit. Deliberately bypasses
-        DPM even when the global DPM toggle is on — see the dispatch order in
-        _monitor_loop — since the whole point of this strategy is "exactly
-        the setup the report computed, nothing recalculated."
-        """
-        return await _handle_orb_fixed_impl(trade, tick, self._bridge, self._tp_trigger_cache)
-
-    async def _handle_scalp_runner(self, trade: dict, tick: Tick) -> None:
-        """
-        Scalp Runner strategy — three phases:
-
-          SL   = fill ∓ 10 pts
-          TP1  = fill ± 3 pts  →  close 50 % of position (SL untouched)
-          TP2  = fill ± 4 pts  →  move SL to entry (breakeven); trailing starts
-          After TP2: trail remaining 50 % with a fixed 3-pt stop,
-                     floored at entry price (breakeven).
-        """
-        return await _handle_scalp_runner_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_signal_climber(self, trade: dict, tick: Tick) -> None:
-        """
-        Signal Climber: rides the signal's own TP ladder with progressive exits.
-
-        Uses signal's SL and TP levels exactly — no fixed-offset overrides.
-        Exit fractions are determined by TP count (_CLIMBER_PCTS).
-
-          TP1: 20% close → SL → entry (BE)
-          TP2: 15% close → SL → TP1 price
-          TP3: 15% close → SL → TP2 price
-          ...each subsequent TP: SL trails to previous TP price
-          Last TP: close all remaining lots
-
-        Designed for professional multi-TP signals (GD2, GDV) where TP5/6 is
-        the intended target and dumping 80% at TP1 destroys the expected value.
-        """
-        return await _handle_signal_climber_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_reversal_runner(self, trade: dict, tick: Tick) -> None:
-        """
-        Reversal Runner: same trail-to-prior-TP ladder mechanism as Signal Climber,
-        but with a back-loaded close schedule (_GDVR_PCTS) — see
-        STRATEGY_DESCRIPTIONS[STRATEGY_REVERSAL_RUNNER] for the backtest this is
-        derived from. The SL itself is widened at open time (see
-        _rr_sl_dist()); this handler only manages TP-ladder exits and SL trail.
-
-        Unlike Signal Climber, SL does not move to breakeven at TP1 — the
-        wider entry SL is intentional (see _rr_sl_dist()) and moving to BE
-        that early would defeat it. BE happens at TP2 instead (be_at_pos=1).
-        """
-        return await _handle_reversal_runner_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_adaptive_runner(self, trade: dict, tick: Tick) -> None:
-        """
-        Adaptive Runner: same back-loaded ladder mechanism as Reversal Runner
-        (_GDVR_PCTS), but the SL widened at open time is capped at 50% of the
-        distance to the signal's own final TP (see _adaptive_sl_dist()) —
-        never wider than that, and never tightened below the signal's own
-        stated SL. See STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER] in
-        core/models.py for why Reversal Runner's flat 4x/20pt widening is wrong
-        for signals with a short TP ladder.
-
-        Unlike Reversal Runner, SL moves to breakeven at TP1 (be_at_pos=0) —
-        since the stop is already proportionate to the reachable reward,
-        there's no need to keep full risk on the table past the first target.
-
-        Called from _tp_ladder_fast_loop (sub-second polling), not
-        _monitor_loop — see that loop's docstring for why: an earlier
-        2026-07-17 attempt at genuine resting-broker-side TP orders (N
-        separate MT5 tickets per signal) was reverted the same day after
-        causing too much MT5/UI clutter for what should read as one trade.
-        """
-        return await _handle_adaptive_runner_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_adaptive_runner_2(self, trade: dict, tick: Tick) -> None:
-        """
-        Adaptive Runner 2: fixed 10pt SL (not derived from the signal at
-        all -- see _ADAPTIVE2_SL_PT in core_signal_resolution.py), the reference channel
-        Runner's back-loaded close schedule (_GDVR_PCTS), and a different
-        SL trail: breakeven at TP2 (be_at_pos=1), then from TP3 onward SL
-        steps to the midpoint of the two TPs before the one just cleared
-        instead of the single immediately-previous TP price. See
-        STRATEGY_DESCRIPTIONS[STRATEGY_ADAPTIVE_RUNNER_2] in core/models.py.
-
-        Called from _tp_ladder_fast_loop, same as the other three
-        _run_tp_ladder-shaped strategies — see _handle_adaptive_runner's
-        docstring for why (sub-second polling, not _monitor_loop).
-        """
-        return await _handle_adaptive_runner_2_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_limit_runner(self, trade: dict, tick: Tick) -> None:
-        """
-        Limit Runner: Python-side fallback ladder handler, used only if the
-        EA goes unhealthy mid-trade — every Limit Runner trade is placed as
-        a genuine EA pending order to begin with (core_limit_order_signal.py
-        only fires when the EA is connected), so this is a reclaim path, not
-        the normal case. Splits the position across however many numeric TPs
-        the originating signal actually had (varies message to message,
-        unlike every other ladder strategy's fixed 8-TP table) and, if the
-        signal carried a literal "TP OPEN" line, leaves the configured
-        reserve permanently open once the last numeric TP closes its share
-        instead of closing everything. See
-        STRATEGY_DESCRIPTIONS[STRATEGY_LIMIT_RUNNER] in core/models.py.
-
-        Called from _tp_ladder_fast_loop, same as the other ladder
-        strategies — see _handle_adaptive_runner's docstring for why
-        (sub-second polling, not _monitor_loop).
-        """
-        return await _handle_limit_runner_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_conservative_trial(self, trade: dict, tick: Tick) -> None:
-        """
-        Conservative Trial strategy:
-          All TPs and SL are set from the actual fill price at trade open —
-          signal SL/TP are ignored.
-
-          TP1  +5 pts  →  5% close (early insurance lock-in)
-          TP2 +10 pts  → 30% close; SL moves to entry (breakeven)
-          TP3 +14 pts  → 20% close
-          TP4 +20 pts  → 40% close; SL steps to TP2 level
-          TP5 +27 pts  →  5% close
-          TP6 +35 pts  → close all remaining
-        """
-        return await _handle_conservative_trial_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
-
-    async def _handle_no_sl_scale(self, trade: dict, tick: Tick) -> None:
-        """
-        Trend Ratchet strategy (formerly No-SL Scale Out):
-          Emergency SL at 1.5× signal SL distance (set at trade open; ADX>30 required at entry)
-          TP1          → 20% partial close
-          TP2          → skip (mark for UI)
-          TP3          → 20% partial close + SL → TP1 level
-          TP4          → SL → TP2 level (skip, mark for UI)
-          TP5          → SL → TP3 level (skip, mark for UI)
-          TP6          → SL → TP4 level (skip, mark for UI)
-          TP7          → SL → TP5 level (skip, mark for UI)
-          TP8 (or last TP) → close all remaining lots
-        """
-        return await _handle_no_sl_scale_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache,
-            close_full_after_tps=self._close_full_after_tps,
-        )
 
     # ── DPM helpers ──────────────────────────────────────────────────────────
 
@@ -845,33 +619,7 @@ class SimulationEngine:
         """Write close-time fields to the DPM performance record."""
         _finalize_dpm_record_impl(trade_id, close_price, exit_type, final_pnl)
 
-    async def _run_dpm_calibration(self) -> None:
-        """
-        Calibrate DPM multipliers from completed trade history.
-        Triggers when at least 5 new closed DPM trades exist since the last run,
-        with a 2-hour minimum gap to prevent back-to-back runs in busy sessions.
-        Results are stored in dpm_calibration and loaded into _dpm_calibrated.
-        """
-        return await _run_dpm_calibration_impl(self._dpm_cache)
-
     # ── Dynamic Position Management ──────────────────────────────────────────
-
-    async def _handle_dynamic_position_management(self, trade: dict, tick: Tick) -> None:
-        """
-        Adaptive DPM — all parameters computed from ATR, session, momentum and
-        structural swing levels.  No manual tuning required.
-
-        Priority order each tick:
-          1. If TP1 cleared: partial close (momentum-scaled %) → SL to entry.
-          2. If unrealised P&L >= adaptive BE trigger: SL to entry.
-          3. If SL already at entry: adaptive trailing SL (arithmetic or structural,
-             whichever locks in more profit).
-          4. Mark TP2+ chips for UI (no close — trailing handles the exit).
-        """
-        return await _handle_dynamic_position_management_impl(
-            trade, tick, self._bridge, self._tp_trigger_cache, self._dpm_cache,
-            self._dpm_candles, self._dpm_dxy_candles,
-        )
 
     # ── Pause check ───────────────────────────────────────────────────────────
 
@@ -923,35 +671,6 @@ class SimulationEngine:
 
     # ── Pending signal watcher ────────────────────────────────────────────────
 
-    async def _try_activate_pending_signals(self, tick: "Tick", rs: dict) -> bool:
-        """Activate queued signals whose entry zone has been reached.
-
-        Called every monitor-loop cycle. Signals that have not
-        filled within 2 minutes are expired — the market context will have
-        changed and the zone level is stale for a scalping strategy.
-
-        Exception: Reversal Runner's edge depends on zone signals that often
-        take well over an hour to fill (median ~101min in the backtest this
-        strategy is derived from) — signals get _GDVR_PENDING_EXPIRY_SEC (4h)
-        instead of the default whenever Reversal Runner applies to that signal,
-        either as the global Active Strategy or as a per-channel override on
-        the signal's own source channel (Channel Strategy tab) — a signal
-        from a channel overridden to reversal_runner must get the long window
-        even while some other channel is driving the global strategy, or
-        every the reference channel zone signal expires in 2 minutes before the ~101min
-        median fill time, silently starving that strategy of any fills.
-
-        Returns whether any signal was pending at the start of this cycle —
-        _monitor_loop uses this to stay on the fast (1s) poll cadence while a
-        zone-fill is being awaited, instead of dropping to the idle 5s poll
-        just because no trade happens to be open yet (see _monitor_loop).
-        """
-        return await _try_activate_pending_signals_impl(
-            tick, rs, self._bridge, self._pending_activation_retry_after, self._dpm_candles,
-            starting_balance=self._cfg.get("starting_balance", 1000.0),
-            background_open_commentary=self._background_open_commentary,
-        )
-
     # ── Monitor loop ──────────────────────────────────────────────────────────
 
     async def _monitor_loop(self) -> None:
@@ -988,7 +707,7 @@ class SimulationEngine:
                     for trade in open_trades:
                         # OOH overrides the per-trade strategy when the window is active.
                         strategy = _eff_strategy if _ooh_active else trade.get("strategy", STRATEGY_SCALE_OUT)
-                        hit = self._check_sl(trade, tick)
+                        hit = _check_sl_impl(trade, tick)
                         if hit:
                             trade_id, price, reason = hit
                             await _reconcile_sl_hit_impl(
@@ -1021,19 +740,19 @@ class SimulationEngine:
                             # into DPM just because the global DPM toggle
                             # happens to be on for everything else.
                             if strategy == STRATEGY_ORB_FIXED:
-                                await self._handle_orb_fixed(trade, tick)
+                                await _handle_orb_fixed_impl(trade, tick, self._bridge, self._tp_trigger_cache)
                             elif dpm_enabled and not _ooh_active:
-                                await self._handle_dynamic_position_management(trade, tick)
+                                await _handle_dynamic_position_management_impl(trade, tick, self._bridge, self._tp_trigger_cache, self._dpm_cache, self._dpm_candles, self._dpm_dxy_candles)
                             elif strategy == STRATEGY_BE_RUNNER:
-                                await self._handle_be_runner(trade, tick)
+                                await _handle_be_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail, dpm_candles=self._dpm_candles, close_full_after_tps=self._close_full_after_tps)
                             elif strategy == STRATEGY_TRAIL_STOP:
-                                await self._handle_trail_stop(trade, tick)
+                                await _handle_trail_stop_impl(trade, tick, self._bridge, self._tp_trigger_cache)
                             elif strategy == STRATEGY_PROTECTED_SCALE:
-                                await self._handle_protected_scale(trade, tick)
+                                await _handle_protected_scale_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                             elif strategy == STRATEGY_CONSERVATIVE:
-                                await self._handle_conservative(trade, tick)
+                                await _handle_conservative_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                             elif strategy == STRATEGY_SCALP_RUNNER:
-                                await self._handle_scalp_runner(trade, tick)
+                                await _handle_scalp_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                             elif strategy in (STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER,
                                               STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
                                               STRATEGY_LIMIT_RUNNER):
@@ -1048,18 +767,18 @@ class SimulationEngine:
                                 # _handle_scale_out below, which would be wrong.
                                 pass
                             elif strategy == STRATEGY_NO_SL_SCALE:
-                                await self._handle_no_sl_scale(trade, tick)
+                                await _handle_no_sl_scale_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                             elif strategy == STRATEGY_CONSERVATIVE_TRIAL:
-                                await self._handle_conservative_trial(trade, tick)
+                                await _handle_conservative_trial_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                             else:
-                                await self._handle_scale_out(trade, tick)
+                                await _handle_scale_out_impl(trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail, close_full_after_tps=self._close_full_after_tps)
                         except Exception as exc:
                             log.warning("Strategy handler [%s] error: %s", strategy, exc)
 
                     # ── Pending signal watcher ───────────────────────────────
                     if bool(rs.get("auto_execute_signals", 0)) and not await db_module.to_db_thread(self.is_trading_paused):
                         try:
-                            _has_pending_signals = await self._try_activate_pending_signals(tick, rs)
+                            _has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, self._bridge, self._pending_activation_retry_after, self._dpm_candles, starting_balance=self._cfg.get('starting_balance', 1000.0), background_open_commentary=self._background_open_commentary)
                         except Exception as exc:
                             log.debug("[PendingWatcher] Error: %s", exc)
                             _has_pending_signals = False
@@ -1069,7 +788,7 @@ class SimulationEngine:
                     # ── IME timeout watchdog ──────────────────────────────────
                     # Auto-assigns TP/SL to IME trades with no follow-up after 3 min
                     try:
-                        await self._ime_timeout_watchdog(tick)
+                        await _ime_timeout_watchdog_impl(tick, self._bridge)
                     except Exception as exc:
                         log.debug("[IME-timeout] Watchdog error: %s", exc)
             except Exception as exc:
@@ -1087,7 +806,7 @@ class SimulationEngine:
             if self._profit_cycle >= 24:
                 self._profit_cycle = 0
                 try:
-                    await self._profit_sweep()
+                    await _profit_sweep_impl(self._bridge)
                 except Exception as e:
                     log.debug("Profit sweep error: %s", e)
 
@@ -1102,7 +821,7 @@ class SimulationEngine:
                 try:
                     rs_cal = await db_module.to_db_thread(db_module.get_risk_settings)
                     if bool(rs_cal.get("dpm_enabled", 0)):
-                        asyncio.create_task(self._run_dpm_calibration())
+                        asyncio.create_task(_run_dpm_calibration_impl(self._dpm_cache))
                 except Exception as e:
                     log.debug("DPM calibration trigger error: %s", e)
 
@@ -1190,15 +909,15 @@ class SimulationEngine:
                                 try:
                                     strat = trade["strategy"]
                                     if strat == STRATEGY_SIGNAL_CLIMBER:
-                                        await self._handle_signal_climber(trade, tick)
+                                        await _handle_signal_climber_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                                     elif strat == STRATEGY_REVERSAL_RUNNER:
-                                        await self._handle_reversal_runner(trade, tick)
+                                        await _handle_reversal_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                                     elif strat == STRATEGY_ADAPTIVE_RUNNER_2:
-                                        await self._handle_adaptive_runner_2(trade, tick)
+                                        await _handle_adaptive_runner_2_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                                     elif strat == STRATEGY_LIMIT_RUNNER:
-                                        await self._handle_limit_runner(trade, tick)
+                                        await _handle_limit_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                                     else:
-                                        await self._handle_adaptive_runner(trade, tick)
+                                        await _handle_adaptive_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
                                 except Exception as exc:
                                     log.warning("[TP-ladder-fast] handler error trade=%s: %s",
                                                trade.get("trade_id"), exc)
@@ -1424,9 +1143,6 @@ class SimulationEngine:
 
     async def _schedule_profit_sync(self, trade_id: str, mt5_ticket: int) -> None:
         return await _schedule_profit_sync_impl(trade_id, mt5_ticket, self._bridge)
-
-    async def _profit_sweep(self) -> None:
-        return await _profit_sweep_impl(self._bridge)
 
     async def _close_full_after_tps(self, trade_id: str, mt5_ticket: Optional[int],
                                      close_price: float) -> None:
@@ -1714,24 +1430,6 @@ class SimulationEngine:
         return await _find_and_apply_instant_followup_impl(
             channel_name, direction, parsed, tg_id, self._bridge,
         )
-
-    async def _ime_timeout_watchdog(self, tick: "Tick") -> None:
-        """
-        Auto-assign SL/TP levels to IME trades that have been open for more than
-        3 minutes without receiving a follow-up signal.
-
-        When the follow-up never arrives the trade sits with no TP levels and only
-        a provisional emergency SL, making conservative strategy inoperative (no
-        partial closes, no SL-to-breakeven).  This watchdog:
-
-        1. Finds open trades with tp1=NULL and open_time > 3 minutes ago.
-        2. Assigns six standard XAUUSD TP levels (3/5/7/10/14/18 pts from entry).
-        3. If the current price has already cleared auto-TP1, moves the SL to
-           entry (breakeven) so the trade is at least protected.
-        4. Calls modify_order on MT5 so broker-side SL is updated.
-        5. Sends a Telegram alert so the operator knows auto-TPs were assigned.
-        """
-        return await _ime_timeout_watchdog_impl(tick, self._bridge)
 
     async def _scan_messages(self) -> list[dict]:
         # Centralized signal generation (Settings > Remote Node): once this

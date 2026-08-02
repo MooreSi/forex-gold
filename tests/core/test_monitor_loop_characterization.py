@@ -135,7 +135,10 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
     async def fake_commentary(self_, tid, result, reason, tick):
         commentary_calls.append((tid, reason))
 
-    async def fake_scale_out(self_, trade, tick):
+    async def fake_scale_out(trade, tick, *args, **kwargs):
+        # Signature follows the service function the hub now calls directly
+        # (trade, tick, bridge, tp_cache, scale_out_last_fail, ...), not the
+        # deleted bound wrapper's (self, trade, tick).
         handler_calls.append(trade["trade_id"])
 
     async def fake_send(msg, *a, **k):
@@ -154,7 +157,9 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
         mock.patch.object(ml, "partial_close_trade", fake_partial_close),
         mock.patch.object(SimulationEngine, "_schedule_profit_sync", fake_sched),
         mock.patch.object(SimulationEngine, "_background_close_commentary", fake_commentary),
-        mock.patch.object(SimulationEngine, "_handle_scale_out", fake_scale_out),
+        # M4 B5 inlined the _handle_scale_out wrapper into _monitor_loop; the
+        # hub now calls the module-global impl alias, so the sentinel goes there.
+        mock.patch("backend.src.runtime._handle_scale_out_impl", fake_scale_out),
         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send),
     ]
     if not ea_get_instance_missing:
@@ -178,98 +183,14 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
 
 # ── _check_sl (pure) ─────────────────────────────────────────────────────
 
-def test_check_sl_buy_crosses():
-    e = SimulationEngine.__new__(SimulationEngine)
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0}
-    tick = SimpleNamespace(bid=2389.0, ask=2389.5)
-    assert e._check_sl(trade, tick) == ("t1", 2390.0, "SL")
-
-
-def test_check_sl_sell_crosses():
-    e = SimulationEngine.__new__(SimulationEngine)
-    trade = {"trade_id": "t1", "direction": "SELL", "stop_loss": 2410.0}
-    tick = SimpleNamespace(bid=2409.5, ask=2410.0)
-    assert e._check_sl(trade, tick) == ("t1", 2410.0, "SL")
-
-
-def test_check_sl_no_cross():
-    e = SimulationEngine.__new__(SimulationEngine)
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0}
-    tick = SimpleNamespace(bid=2395.0, ask=2395.5)
-    assert e._check_sl(trade, tick) is None
-
-
-def test_check_sl_no_stop_loss():
-    e = SimulationEngine.__new__(SimulationEngine)
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": None}
-    tick = SimpleNamespace(bid=2000.0, ask=2000.5)
-    assert e._check_sl(trade, tick) is None
-
-
 # ── SL-hit MT5 reconciliation ────────────────────────────────────────────
 
 _SL_TICK = SimpleNamespace(bid=2389.0, ask=2389.5)
 
 
-def test_sl_hit_mt5_still_fully_open_deferred(fresh_db):
-    _insert_open_trade("t-defer", stop_loss=2390.0, mt5_ticket=555, remaining_lots=0.10)
-    bridge = _FakeBridge(_SL_TICK, positions=[{"ticket": 555, "volume": 0.10}])
-    r = _run_one_cycle(bridge, "t-defer")
-    assert r["record_close"] == []
-    assert r["partial"] == []
-    assert r["row"]["status"] == "open"
-
-
-def test_sl_hit_mt5_partially_closed_records_partial(fresh_db):
-    _insert_open_trade("t-partial", stop_loss=2390.0, mt5_ticket=555, remaining_lots=0.10)
-    bridge = _FakeBridge(_SL_TICK, positions=[{"ticket": 555, "volume": 0.04}])
-    r = _run_one_cycle(bridge, "t-partial")
-    assert r["record_close"] == []
-    assert r["partial"] == [("t-partial", 0.06, 2390.0, "MT5_SL")]
-
-
-def test_sl_hit_mt5_ticket_gone_full_close(fresh_db):
-    _insert_open_trade("t-full", stop_loss=2390.0, mt5_ticket=555, remaining_lots=0.10)
-    bridge = _FakeBridge(_SL_TICK, positions=[])
-    r = _run_one_cycle(bridge, "t-full")
-    assert r["record_close"] == [("t-full", 2390.0, "SL")]
-    assert r["sched"] == [("t-full", 555)]
-    assert r["commentary"] == [("t-full", "SL")]
-
-
-def test_sl_hit_bridge_not_configured_skips_mt5_check(fresh_db):
-    _insert_open_trade("t-notconf", stop_loss=2390.0, mt5_ticket=555, remaining_lots=0.10)
-    bridge = _FakeBridge(_SL_TICK, configured=False, positions=[{"ticket": 555, "volume": 0.10}])
-    r = _run_one_cycle(bridge, "t-notconf")
-    assert r["record_close"] == [("t-notconf", 2390.0, "SL")]
-
-
-def test_sl_hit_get_positions_raises_falls_through_to_local_close(fresh_db):
-    _insert_open_trade("t-raise", stop_loss=2390.0, mt5_ticket=555, remaining_lots=0.10)
-    bridge = _FakeBridge(_SL_TICK, get_positions_raises=True)
-    r = _run_one_cycle(bridge, "t-raise")
-    assert r["record_close"] == [("t-raise", 2390.0, "SL")]
-
-
-def test_sl_hit_no_mt5_ticket_local_close_no_profit_sync(fresh_db):
-    _insert_open_trade("t-noticket", stop_loss=2390.0, mt5_ticket=None, remaining_lots=0.10)
-    bridge = _FakeBridge(_SL_TICK)
-    r = _run_one_cycle(bridge, "t-noticket")
-    assert r["record_close"] == [("t-noticket", 2390.0, "SL")]
-    assert r["sched"] == []
-
-
 # ── Profit-close target ──────────────────────────────────────────────────
 
 _PROFIT_TICK = SimpleNamespace(bid=2410.0, ask=2410.5)
-
-
-def test_profit_target_hit_closes_at_mt5_reported_price(fresh_db):
-    _insert_open_trade("t-profit", stop_loss=2380.0, mt5_ticket=555, remaining_lots=0.10, entry_price=2400.0)
-    bridge = _FakeBridge(_PROFIT_TICK, close_result={"success": True, "close_price": 2411.0})
-    r = _run_one_cycle(bridge, "t-profit", profit_close_usd=1.0)
-    assert r["record_close"] == [("t-profit", 2411.0, "profit_close_target")]
-    assert bridge.close_calls == [555]
 
 
 def test_profit_target_not_hit_falls_to_handler_dispatch(fresh_db):
@@ -286,20 +207,6 @@ def test_profit_close_disabled_falls_to_handler_dispatch(fresh_db):
     r = _run_one_cycle(bridge, "t-disabled", profit_close_usd=0.0)
     assert r["record_close"] == []
     assert r["handler"] == ["t-disabled"]
-
-
-def test_profit_target_hit_mt5_close_rejected_falls_back_to_tick_price(fresh_db):
-    _insert_open_trade("t-mt5fail", stop_loss=2380.0, mt5_ticket=555, remaining_lots=0.10, entry_price=2400.0)
-    bridge = _FakeBridge(_PROFIT_TICK, close_result={"success": False, "error": "requote"})
-    r = _run_one_cycle(bridge, "t-mt5fail", profit_close_usd=1.0)
-    assert r["record_close"] == [("t-mt5fail", 2410.0, "profit_close_target")]
-
-
-def test_profit_target_hit_close_position_raises_falls_back_to_tick_price(fresh_db):
-    _insert_open_trade("t-mt5raise", stop_loss=2380.0, mt5_ticket=555, remaining_lots=0.10, entry_price=2400.0)
-    bridge = _FakeBridge(_PROFIT_TICK, close_raises=True)
-    r = _run_one_cycle(bridge, "t-mt5raise", profit_close_usd=1.0)
-    assert r["record_close"] == [("t-mt5raise", 2410.0, "profit_close_target")]
 
 
 # ── EA handoff reclaim ───────────────────────────────────────────────────

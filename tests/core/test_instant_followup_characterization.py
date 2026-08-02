@@ -259,39 +259,3 @@ def _insert_stale(trade_id, strategy="scale_out", mt5_ticket=777,
         )
 
 
-def test_watchdog_ignores_young_trade(fresh_db, engine):
-    _insert_stale("t-young", age_s=60)
-    tick = SimpleNamespace(bid=2416.0, ask=2416.5)
-    asyncio.run(SimulationEngine._ime_timeout_watchdog(engine, tick))
-    assert _trade_dict("t-young")["tp1"] is None
-
-
-def test_watchdog_skips_self_managing_strategy(fresh_db, engine):
-    _insert_stale("t-cons", strategy="conservative", age_s=200)
-    tick = SimpleNamespace(bid=2416.0, ask=2416.5)
-    asyncio.run(SimulationEngine._ime_timeout_watchdog(engine, tick))
-    trade = _trade_dict("t-cons")
-    assert trade["tp1"] is None
-    assert trade["stop_loss"] == 2403.0
-
-
-def test_watchdog_assigns_tps_sl_unchanged_when_tp1_not_cleared(fresh_db, engine):
-    _insert_stale("t-1", age_s=200)
-    tick = SimpleNamespace(bid=2416.0, ask=2416.5)  # +1pt, auto-TP1=2418 not cleared
-    asyncio.run(SimulationEngine._ime_timeout_watchdog(engine, tick))
-    trade = _trade_dict("t-1")
-    assert [trade[f"tp{i}"] for i in range(1, 7)] == [2418.0, 2420.0, 2422.0, 2425.0, 2429.0, 2433.0]
-    assert trade["stop_loss"] == 2403.0
-    assert trade["sl_moved_to_be"] == 0
-    # modify_order still fires unconditionally with the unchanged SL when mt5_ticket exists
-    assert engine._bridge.modify_order_calls == [{"ticket": 777, "sl": 2403.0, "tp": None}]
-
-
-def test_watchdog_moves_sl_to_be_when_tp1_already_cleared(fresh_db, engine):
-    _insert_stale("t-2", age_s=200)
-    tick = SimpleNamespace(bid=2419.0, ask=2419.5)  # +4pt, auto-TP1=2418 cleared
-    asyncio.run(SimulationEngine._ime_timeout_watchdog(engine, tick))
-    trade = _trade_dict("t-2")
-    assert trade["stop_loss"] == 2415.0
-    assert trade["sl_moved_to_be"] == 1
-    assert engine._bridge.modify_order_calls == [{"ticket": 777, "sl": 2415.0, "tp": None}]

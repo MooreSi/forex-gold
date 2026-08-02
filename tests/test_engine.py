@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 
 from backend.src.db import database as db_module
 from backend.src.runtime import SimulationEngine
+from backend.src.services.positions.monitor_loop import check_sl
 from backend.src.services.positions.tp_tracking import check_tp_hits
 from backend.src.utils.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
 
@@ -231,7 +232,7 @@ class TestTradeManagement(unittest.IsolatedAsyncioTestCase):
             )
         open_trade = self.engine.get_open_trades()[0]
         sl_tick = _make_tick(2329.0, 2329.30)
-        hit = self.engine._check_sl(open_trade, sl_tick)
+        hit = check_sl(open_trade, sl_tick)
         self.assertIsNotNone(hit)
         self.assertEqual(hit[2], "SL")
 

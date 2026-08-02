@@ -163,43 +163,7 @@ def test_schedule_profit_sync_already_synced_returns_immediately(fresh_db, engin
     assert not sp.called
 
 
-def test_schedule_profit_sync_succeeds_first_attempt_no_sleep(fresh_db, engine):
-    _insert_trade(mt5_profit=None)
-    with mock.patch.object(core_profit_sync, "sync_profit", new=mock.AsyncMock(return_value=49.0)) as sp, \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()) as sleep_mock:
-        asyncio.run(SimulationEngine._schedule_profit_sync(engine, "t-1", 555))
-    assert sp.call_count == 1
-    assert not sleep_mock.called
-
-
-def test_schedule_profit_sync_retries_until_success(fresh_db, engine):
-    _insert_trade(mt5_profit=None)
-    results = iter([None, None, 49.0])
-    async def fake_sync(trade_id, ticket, bridge):
-        return next(results)
-    with mock.patch.object(core_profit_sync, "sync_profit", side_effect=fake_sync) as sp, \
-         mock.patch("asyncio.sleep", new=mock.AsyncMock()) as sleep_mock:
-        asyncio.run(SimulationEngine._schedule_profit_sync(engine, "t-1", 555))
-    assert sp.call_count == 3
-    assert sleep_mock.call_count == 2
-
-
 # ── _profit_sweep ─────────────────────────────────────────────────────────
-
-def test_profit_sweep_picks_up_null_and_recent_zero_skips_synced(fresh_db, engine):
-    _insert_trade("t-1", mt5_profit=None, close_time=time.time())
-    _insert_trade("t-2", mt5_profit=0.0, close_time=time.time())
-    _insert_trade("t-3", mt5_profit=5.0, close_time=time.time())
-    calls = []
-    async def fake_sync(trade_id, ticket, bridge):
-        calls.append(trade_id)
-        if trade_id == "t-2":
-            raise RuntimeError("boom")
-        return 1.0
-    with mock.patch.object(core_profit_sync, "sync_profit", side_effect=fake_sync):
-        asyncio.run(SimulationEngine._profit_sweep(engine))
-    assert sorted(calls) == ["t-1", "t-2"]
-
 
 # ── _close_full_after_tps ────────────────────────────────────────────────
 

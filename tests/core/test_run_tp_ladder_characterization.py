@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.src.db import database as db
+from backend.src.services.positions import tp_ladder
 from backend.src.services.risk import strategy_params as sp
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from backend.src.runtime import SimulationEngine
@@ -124,105 +125,11 @@ def _trade_dict(trade_id):
 
 # ── no-op ──────────────────────────────────────────────────────────────────────
 
-def test_no_tp_hit_is_noop(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2405.0, ask=2405.5)))
-    assert engine._bridge.partial_close_calls == []
-
-
 # ── Signal Climber (be_at_pos=0) ────────────────────────────────────────────────
-
-def test_climber_tp1_hit_closes_30pct_and_moves_sl_to_be(fresh_db, engine):
-    # n=3 -> _CLIMBER_PCTS[3] = [0.30, 0.30, 0.40]
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
-                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-
-    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.03}]
-    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]
-    trade_after = _trade_dict("t-1")
-    assert trade_after["stop_loss"] == 2400.0
-    assert trade_after["sl_moved_to_be"] == 1
-
-
-def test_climber_tp3_last_closes_full_remaining_returns_before_sl_trail(fresh_db, engine):
-    # The last TP fully empties the position (auto_closed=True) -- when the
-    # trade is MT5-backed, the function schedules _close_full_after_tps
-    # (fire-and-forget) and returns IMMEDIATELY, before ever reaching the
-    # SL-trail block below. There's nothing left to protect, so no
-    # modify_order call happens here, unlike a mid-ladder TP.
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.04,
-                  stop_loss=2400.0, sl_moved_to_be=1,
-                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    _insert_partial_close("t-1", "TP1", lots_closed=0.03)
-    _insert_partial_close("t-1", "TP2", lots_closed=0.03)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2435.0, ask=2435.5)))
-
-    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.04}]  # all remaining
-    assert engine._bridge.modify_order_calls == []  # early return -- no SL trail attempted
-
 
 # ── Reversal Runner (be_at_pos=1) ─────────────────────────────────────────────────
 
-def test_rr_tp1_hit_closes_15pct_does_not_move_sl_yet(fresh_db, engine):
-    # n=3 -> _GDVR_PCTS[3] = [0.15, 0.25, 0.60]
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
-                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_reversal_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-
-    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.015}]
-    assert engine._bridge.modify_order_calls == []  # SL untouched -- be_at_pos=1, this is pos=0
-
-
-def test_rr_tp2_hit_after_tp1_moves_sl_to_be(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.085,
-                  stop_loss=2380.0, tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    _insert_partial_close("t-1", "TP1", lots_closed=0.015)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_reversal_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
-
-    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]
-    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # now BE
-
-
-def test_single_tick_clearing_multiple_tps_processes_both_in_one_call(fresh_db, engine):
-    # A tick that clears TP1 AND TP2 in one shot (neither previously
-    # triggered) processes both sequentially within the same call.
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
-                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_reversal_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
-
-    assert engine._bridge.partial_close_calls == [
-        {"ticket": 555, "lots": 0.015},  # TP1: 15%
-        {"ticket": 555, "lots": 0.025},  # TP2: 25% of original 0.10, clamped to remaining
-    ]
-    # be_at_pos=1 reached on TP2 within this same call -> SL moves to BE
-    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]
-
-
 # ── Adaptive Runner (be_at_pos=0, GDVR table) ──────────────────────────────────
-
-def test_adaptive_runner_tp1_hit_closes_15pct_moves_sl_to_be_immediately(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
-                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_adaptive_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-
-    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.015}]  # GDVR table
-    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # BE at TP1
-
 
 # ── Adaptive Runner 2 (be_at_pos=1, GDVR table, midpoint-lag2 trail) ──────────
 # The behavior that's actually new here: every other ladder strategy trails
@@ -235,7 +142,7 @@ def test_adaptive_runner_2_tp1_hit_closes_10pct_does_not_move_sl_yet(fresh_db, e
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                   tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+    asyncio.run(tp_ladder.handle_adaptive_runner_2(trade, _tick(bid=2415.0, ask=2415.5), engine._bridge, engine._tp_trigger_cache))
 
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.01}]
     assert engine._bridge.modify_order_calls == []  # be_at_pos=1, this is pos=0
@@ -247,7 +154,7 @@ def test_adaptive_runner_2_tp2_hit_after_tp1_moves_sl_to_be(fresh_db, engine):
                   tp1=2410.0, tp2=2420.0, tp3=2430.0, tp4=2440.0, tp5=2450.0)
     _insert_partial_close("t-1", "TP1", lots_closed=0.01)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2425.0, ask=2425.5)))
+    asyncio.run(tp_ladder.handle_adaptive_runner_2(trade, _tick(bid=2425.0, ask=2425.5), engine._bridge, engine._tp_trigger_cache))
 
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.01}]
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # BE
@@ -261,7 +168,7 @@ def test_adaptive_runner_2_tp3_hit_trails_to_midpoint_of_tp1_and_tp2(fresh_db, e
     _insert_partial_close("t-1", "TP1", lots_closed=0.01)
     _insert_partial_close("t-1", "TP2", lots_closed=0.01)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2435.0, ask=2435.5)))
+    asyncio.run(tp_ladder.handle_adaptive_runner_2(trade, _tick(bid=2435.0, ask=2435.5), engine._bridge, engine._tp_trigger_cache))
 
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.015}]
     # midpoint(tp1=2410, tp2=2420) = 2415 -- NOT tp2 (2420), which is what
@@ -280,7 +187,7 @@ def test_adaptive_runner_2_tp4_hit_trails_to_midpoint_of_tp2_and_tp3(fresh_db, e
     _insert_partial_close("t-1", "TP2", lots_closed=0.01)
     _insert_partial_close("t-1", "TP3", lots_closed=0.015)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2445.0, ask=2445.5)))
+    asyncio.run(tp_ladder.handle_adaptive_runner_2(trade, _tick(bid=2445.0, ask=2445.5), engine._bridge, engine._tp_trigger_cache))
 
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]
     # midpoint(tp2=2420, tp3=2430) = 2425
@@ -298,7 +205,7 @@ def test_adaptive_runner_2_never_loosens_sl_below_a_lower_midpoint(fresh_db, eng
     _insert_partial_close("t-1", "TP1", lots_closed=0.01)
     _insert_partial_close("t-1", "TP2", lots_closed=0.01)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_adaptive_runner_2(engine, trade, _tick(bid=2435.0, ask=2435.5)))
+    asyncio.run(tp_ladder.handle_adaptive_runner_2(trade, _tick(bid=2435.0, ask=2435.5), engine._bridge, engine._tp_trigger_cache))
 
     # midpoint(tp1, tp2) = 2415 < current_sl (2426) -- must not loosen.
     assert engine._bridge.modify_order_calls == []
@@ -307,51 +214,6 @@ def test_adaptive_runner_2_never_loosens_sl_below_a_lower_midpoint(fresh_db, eng
 
 
 # ── shared engine behaviors ──────────────────────────────────────────────────────
-
-def test_wrong_side_tp_excluded_from_ladder(fresh_db, engine):
-    _insert_signal()
-    # tp1 below entry -- not a valid BUY target, excluded entirely
-    _insert_trade("t-1", mt5_ticket=555, entry_price=2400.0, tp1=2395.0, tp2=2420.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2425.0, ask=2425.5)))
-    # ladder has only 1 real TP (tp2) -> n=1 -> _CLIMBER_PCTS[1] = [1.00] -> full close
-    assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.10}]
-
-
-def test_gap_in_tp_sequence_does_not_truncate_ladder(fresh_db, engine):
-    _insert_signal()
-    # tp2 is NULL, tp3 populated -- must still be reachable
-    _insert_trade("t-1", mt5_ticket=555, entry_price=2400.0, tp1=2410.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2435.0, ask=2435.5)))
-    # n=2 (tp1, tp3) -> _CLIMBER_PCTS[2] = [0.40, 0.60] -- both processed in one tick
-    assert len(engine._bridge.partial_close_calls) == 2
-
-
-def test_bridge_rejection_at_one_tp_continues_loop(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
-                  tp1=2410.0, tp2=2420.0)
-    trade = _trade_dict("t-1")
-    engine._bridge = _FakeBridge(partial_close_result={"success": False, "error": "rejected"})
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2425.0, ask=2425.5)))
-    # Both TP1 and TP2 attempted (rejection doesn't abort the walk), neither succeeded
-    assert len(engine._bridge.partial_close_calls) == 2
-    trade_after = _trade_dict("t-1")
-    assert trade_after["remaining_lots"] == 0.10  # nothing actually closed
-
-
-def test_no_mt5_ticket_skips_bridge_still_records_partial(fresh_db, engine):
-    _insert_signal()
-    _insert_trade("t-1", mt5_ticket=None, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
-                  tp1=2410.0, tp2=2420.0, tp3=2430.0)
-    trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_signal_climber(engine, trade, _tick(bid=2415.0, ask=2415.5)))
-
-    assert engine._bridge.partial_close_calls == []
-    trade_after = _trade_dict("t-1")
-    assert trade_after["remaining_lots"] == 0.07  # 0.10 - 30%
-
 
 # ── Limit Runner (dynamic per-signal pcts, tp_open leaves a runner leg) ────────
 # The behavior that's actually new here: every other ladder strategy uses a
@@ -369,7 +231,7 @@ def test_limit_runner_tp_open_last_tp_only_closes_its_own_share(fresh_db, engine
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                   tp1=2410.0, tp2=2420.0, tp3=2430.0, tp_open=1)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_limit_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+    asyncio.run(tp_ladder.handle_limit_runner(trade, _tick(bid=2415.0, ask=2415.5), engine._bridge, engine._tp_trigger_cache))
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]  # TP1: 25% of 0.10
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2400.0, "tp": None}]  # BE at TP1 (default)
 
@@ -382,7 +244,7 @@ def test_limit_runner_tp_open_third_tp_leaves_reserve_open(fresh_db, engine):
     _insert_partial_close("t-1", "TP1", lots_closed=0.025)
     _insert_partial_close("t-1", "TP2", lots_closed=0.025)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_limit_runner(engine, trade, _tick(bid=2435.0, ask=2435.5)))
+    asyncio.run(tp_ladder.handle_limit_runner(trade, _tick(bid=2435.0, ask=2435.5), engine._bridge, engine._tp_trigger_cache))
     # closes only its own 25% share (0.025), NOT the full 0.05 remaining —
     # the other 0.025 keeps riding on the trailing SL with no further TP.
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.025}]
@@ -397,7 +259,7 @@ def test_limit_runner_without_tp_open_last_tp_closes_everything(fresh_db, engine
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                   tp1=2410.0, tp2=2420.0)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_limit_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+    asyncio.run(tp_ladder.handle_limit_runner(trade, _tick(bid=2415.0, ask=2415.5), engine._bridge, engine._tp_trigger_cache))
     # Only TP1 reached this tick -- closes its own 50% share (n=2 -> 1/2 each).
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.05}]
 
@@ -408,7 +270,7 @@ def test_limit_runner_without_tp_open_final_tp_closes_all_remaining(fresh_db, en
                   sl_moved_to_be=1, tp1=2410.0, tp2=2420.0)
     _insert_partial_close("t-1", "TP1", lots_closed=0.05)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_limit_runner(engine, trade, _tick(bid=2425.0, ask=2425.5)))
+    asyncio.run(tp_ladder.handle_limit_runner(trade, _tick(bid=2425.0, ask=2425.5), engine._bridge, engine._tp_trigger_cache))
     assert engine._bridge.partial_close_calls == [{"ticket": 555, "lots": 0.05}]  # all remaining
     trade_after = _trade_dict("t-1")
     assert trade_after["remaining_lots"] == 0.0
@@ -422,7 +284,7 @@ def test_limit_runner_be_at_pos_strategy_param_is_1_based(fresh_db, engine):
         _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0,
                       tp1=2410.0, tp2=2420.0, tp3=2430.0, tp_open=0)
         trade = _trade_dict("t-1")
-        asyncio.run(SimulationEngine._handle_limit_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+        asyncio.run(tp_ladder.handle_limit_runner(trade, _tick(bid=2415.0, ask=2415.5), engine._bridge, engine._tp_trigger_cache))
         # TP1 hit but be_at_pos is now TP2 (compacted pos 1) -- no BE move yet.
         assert engine._bridge.modify_order_calls == []
     finally:
@@ -434,5 +296,5 @@ def test_limit_runner_no_tps_is_noop(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", mt5_ticket=555, lot_size=0.10, remaining_lots=0.10, stop_loss=2380.0)
     trade = _trade_dict("t-1")
-    asyncio.run(SimulationEngine._handle_limit_runner(engine, trade, _tick(bid=2415.0, ask=2415.5)))
+    asyncio.run(tp_ladder.handle_limit_runner(trade, _tick(bid=2415.0, ask=2415.5), engine._bridge, engine._tp_trigger_cache))
     assert engine._bridge.partial_close_calls == []

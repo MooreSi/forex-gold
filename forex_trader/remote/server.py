@@ -76,11 +76,17 @@ _admin_clients: dict[str, dict] = {}
 # _kg_revoke_fn(id: int) → bool  (revoke a licence by DB id)
 # _kg_reinstate_fn(id: int) → bool
 # _kg_delete_fn(id: int) → bool
+# _kg_sign_fn(machine_id: str, expiry_date: str) → str  (Ed25519-sign a licence
+#   key). The private signing key lives only in KeyGen/licence_signing.py —
+#   never imported directly into this (public, shipped-to-every-client)
+#   module, so this callback is the only way approve_registration() can ever
+#   issue a licence key.
 _kg_get_all_fn    = None
 _kg_insert_fn     = None
 _kg_revoke_fn     = None
 _kg_reinstate_fn  = None
 _kg_delete_fn     = None
+_kg_sign_fn       = None
 
 _server_task: Optional[asyncio.Task] = None
 _server_obj = None
@@ -174,18 +180,21 @@ def is_admin_machine_uuid(uuid: str) -> bool:
 
 
 def register_kg_callbacks(get_all_fn, insert_fn, revoke_fn=None,
-                          reinstate_fn=None, delete_fn=None) -> None:
-    """Register callbacks for KeyGen licence DB access.
+                          reinstate_fn=None, delete_fn=None, sign_fn=None) -> None:
+    """Register callbacks for KeyGen licence DB access and licence signing.
 
     Called by forex_admin.py on the main Mac so the server can serve and
-    persist licence records for remote admin clients.
+    persist licence records for remote admin clients, and sign new licence
+    keys without ever importing the private key module (KeyGen/licence_
+    signing.py) into this shipped-everywhere package.
     """
-    global _kg_get_all_fn, _kg_insert_fn, _kg_revoke_fn, _kg_reinstate_fn, _kg_delete_fn
+    global _kg_get_all_fn, _kg_insert_fn, _kg_revoke_fn, _kg_reinstate_fn, _kg_delete_fn, _kg_sign_fn
     _kg_get_all_fn   = get_all_fn
     _kg_insert_fn    = insert_fn
     _kg_revoke_fn    = revoke_fn
     _kg_reinstate_fn = reinstate_fn
     _kg_delete_fn    = delete_fn
+    _kg_sign_fn      = sign_fn
     log.debug("[RemoteServer] KeyGen DB callbacks registered")
 
 
@@ -210,8 +219,26 @@ async def _push_state_to_admin(ws) -> None:
             pass
 
 
-async def _notify_new_registration(hostname: str, email: str, nickname: str, ip: str) -> None:
-    """Send a Telegram alert to the admin when a new licence/registration request comes in."""
+# Duration options offered on the Telegram Approve buttons — same labels and
+# day counts as KeyGen/forex_admin.py's _SUB_TYPES / approve_registration()'s
+# sub_days mapping, just given short codes so they fit in a callback_data
+# string (Telegram's 64-byte cap; a full token is already 64 hex chars, far
+# too long, hence addressing pending requests by their 8-char token prefix
+# instead — same "short handle, not the real ID" idea as the panel's
+# per-channel slugs, see core_bot_panel.py's module docstring).
+_REG_DURATIONS = [
+    ("6m",   "6 Months"),
+    ("1y",   "1 Year"),
+    ("2y",   "2 Years"),
+    ("3y",   "3 Years"),
+    ("perp", "Perpetual"),
+]
+
+
+async def _notify_new_registration(hostname: str, email: str, nickname: str,
+                                    ip: str, token: str = "") -> None:
+    """Send a Telegram alert to the admin when a new licence/registration
+    request comes in, with inline Approve (per duration)/Reject buttons."""
     try:
         from forex_trader.core import telegram_alerts
         msg = (
@@ -221,7 +248,17 @@ async def _notify_new_registration(hostname: str, email: str, nickname: str, ip:
             f"Hostname: {hostname or '—'}\n"
             f"IP: {ip or '—'}"
         )
-        await telegram_alerts.send_message(msg)
+        reply_markup = None
+        if token:
+            from forex_trader.core.core_bot_panel import _btn
+            short = token[:8]
+            approve_row_1 = [_btn(f"✅ {lbl}", "reg_ap", short, code)
+                              for code, lbl in _REG_DURATIONS[:3]]
+            approve_row_2 = [_btn(f"✅ {lbl}", "reg_ap", short, code)
+                              for code, lbl in _REG_DURATIONS[3:]]
+            reject_row = [_btn("❌ Reject", "reg_rj", short)]
+            reply_markup = {"inline_keyboard": [approve_row_1, approve_row_2, reject_row]}
+        await telegram_alerts.send_message(msg, reply_markup=reply_markup)
     except Exception as e:
         log.warning("[RemoteServer] Registration Telegram notify failed: %s", e)
 
@@ -416,7 +453,6 @@ async def _admin_handler(websocket, uuid: str) -> None:
 def approve_registration(token: str, display_name: str, subscription_type: str = "Perpetual") -> bool:
     """Approve a pending client registration.  Returns True on success."""
     from datetime import datetime, timedelta
-    from forex_trader.licence.keygen import generate_licence_key
     if token not in _pending:
         return False
     sub_days = {"6 Months": 183, "1 Year": 365, "2 Years": 730, "3 Years": 1095}
@@ -430,8 +466,20 @@ def approve_registration(token: str, display_name: str, subscription_type: str =
     email      = pending.get("email", "")
     nickname   = pending.get("nickname", "")
 
-    # Generate the HMAC licence key for this machine + expiry combination.
-    licence_key = generate_licence_key(machine_id, expiry_date) if machine_id else ""
+    # Sign the licence key via the KeyGen-registered callback — the private
+    # Ed25519 key never lives in this module (see register_kg_callbacks).
+    licence_key = ""
+    if machine_id:
+        if _kg_sign_fn:
+            try:
+                licence_key = _kg_sign_fn(machine_id, expiry_date)
+            except Exception as exc:
+                log.error("[RemoteServer] kg_sign_fn failed for %s: %s", token[:8], exc)
+        else:
+            log.error(
+                "[RemoteServer] kg_sign_fn not registered — approving %s with no licence key",
+                token[:8],
+            )
 
     _allowed_tokens[token] = {
         "name":              display_name or pending.get("hostname", token[:8]),
@@ -745,7 +793,7 @@ async def _handler(websocket) -> None:
             asyncio.create_task(_push_pending_to_all_admins())
             asyncio.create_task(_notify_new_registration(
                 hostname=hostname, email=msg.get("email", ""),
-                nickname=msg.get("nickname", ""), ip=ip,
+                nickname=msg.get("nickname", ""), ip=ip, token=token,
             ))
         await _close_ws(websocket)
         return
@@ -825,6 +873,7 @@ async def _handler(websocket) -> None:
                         hostname=msg2.get("hostname", hostname),
                         email=msg2.get("email", ""),
                         nickname=msg2.get("nickname", ""), ip=ip,
+                        token=reg_token,
                     ))
         except asyncio.TimeoutError:
             log.info("[RemoteServer] No MSG_REGISTER from %s (%s) within 20s "

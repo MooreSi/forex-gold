@@ -1,14 +1,16 @@
 """
-Licence enforcement for the FOREX Trader app — fully offline, HMAC-SHA256.
+Licence enforcement for the FOREX Trader app — fully offline, Ed25519 signature.
 
 Algorithm:
-  key = HMAC-SHA256(secret, "{machine_id}|{expiry_date}|1.0")
-  formatted as XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX
+  signature = Ed25519_sign(private_key, "{machine_id}|{expiry_date}|2.0")
+  formatted as 16 groups of 8 uppercase hex chars (128 hex chars total)
 
-  The _SERVER_SECRET must match the value in the admin KeyGen tool.
+  Verification uses only the public key bundled in licence/verify.py — the
+  matching private signing key lives solely in the admin KeyGen tool and is
+  never shipped with the app.
 
 Activation code format (what the admin sends to the user):
-  KEY|EXPIRY_DATE  e.g.  6197CA98-...|2027-06-09  or  6197CA98-...|perpetual
+  KEY|EXPIRY_DATE  e.g.  D17BE902-...|2027-06-09  or  D17BE902-...|perpetual
 
 Call enforce() at startup before the NiceGUI server is started.
 """
@@ -16,7 +18,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-from forex_trader.licence.keygen import verify_licence_key as _verify_licence_hmac
+from forex_trader.licence.verify import verify_licence_key as _verify_licence_key
 
 
 def _parse_activation_code(code: str):
@@ -245,7 +247,7 @@ def _show_registration_page() -> None:
                     status_lbl.set_text("Verifying...")
                     status_lbl.classes(replace="text-sm text-gray-400")
 
-                    if not _verify_licence_hmac(machine_id, expiry_date, key):
+                    if not _verify_licence_key(machine_id, expiry_date, key):
                         status_lbl.set_text(
                             "Invalid licence key — this key was not issued for this machine."
                         )
@@ -343,7 +345,7 @@ def enforce() -> None:
         # Update the stored ID to the new fingerprint so future startups skip this path.
         # Security is unchanged: the HMAC is still validated; a key for machine A will
         # not pass this check on a genuinely different machine B.
-        if _verify_licence_hmac(stored_machine_id, expiry_date, licence_key):
+        if _verify_licence_key(stored_machine_id, expiry_date, licence_key):
             log.info(
                 "Fingerprint drift detected (stored %s → current %s) — "
                 "HMAC verified against original ID, updating store.",
@@ -362,7 +364,7 @@ def enforce() -> None:
             _show_error_and_exit("", allow_register=True)
             return
 
-    if not _verify_licence_hmac(stored_machine_id, expiry_date, licence_key):
+    if not _verify_licence_key(stored_machine_id, expiry_date, licence_key):
         log.warning("Licence HMAC verification failed — clearing store.")
         _store.clear()
         _show_error_and_exit("Your licence key is invalid or has been tampered with.")

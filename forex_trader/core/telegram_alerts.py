@@ -134,7 +134,8 @@ async def register_commands(token: str) -> None:
         log.warning("Failed to register bot commands: %s", e)
 
 
-async def send_message(text: str, trade_id: Optional[str] = None, event_type: str = "") -> bool:
+async def send_message(text: str, trade_id: Optional[str] = None, event_type: str = "",
+                       reply_markup: Optional[dict] = None) -> bool:
     if not text:
         # fmt_sl_moved() returns "" for a non-breakeven trail move (noise the
         # user doesn't want) — nothing to send, and not worth logging as an
@@ -146,13 +147,16 @@ async def send_message(text: str, trade_id: Optional[str] = None, event_type: st
     token   = cfg["bot_token_enc"]
     chat_id = cfg["chat_id"]
     url     = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id":    chat_id,
+        "text":       text,
+        "parse_mode": "Markdown",
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(url, json={
-                "chat_id":    chat_id,
-                "text":       text,
-                "parse_mode": "Markdown",
-            })
+            r = await client.post(url, json=payload)
             ok = r.status_code == 200
             db_module.log_telegram_event(
                 event_type, trade_id, "sent" if ok else "failed",

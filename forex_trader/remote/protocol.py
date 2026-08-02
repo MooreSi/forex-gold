@@ -22,8 +22,7 @@ MSG_REVOKE         = "revoke"         # admin revoked this token — client shou
 MSG_LICENCE        = "licence"        # admin approved: delivers the generated licence key
 MSG_PING           = "ping"
 MSG_GET_DIAG       = "get_diagnostics"
-MSG_UPDATE_BEGIN   = "update_begin"   # precedes binary update stream
-MSG_UPDATE_END     = "update_end"     # marks end of binary stream
+MSG_GIT_UPDATE     = "git_update"     # tells client to self-update via git (core_app_update.apply_update())
 MSG_VERSION_INFO   = "version_info"   # tells client the current latest version
 
 # ── Privileged admin channel ───────────────────────────────────────────────────

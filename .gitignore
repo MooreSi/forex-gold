@@ -1,5 +1,6 @@
 data/
 .venv/
+.venv
 auth_server/
 __pycache__/
 *.pyc

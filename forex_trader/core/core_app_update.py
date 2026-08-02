@@ -87,33 +87,49 @@ async def check_for_update() -> dict:
 
 
 async def apply_update() -> dict:
-    """git fetch + hard-reset to origin/<branch>, reinstall requirements.txt
-    into the venv, clear stale __pycache__ dirs -- mirrors remote/client.py's
-    admin-console push-update _apply_update() pip-install/cache-clear steps,
-    just sourced from git instead of a pushed zip.
+    """Bootstrap a git checkout if this install doesn't have one yet, then
+    fetch + force-checkout to origin/<branch>, reinstall requirements.txt
+    into the venv, and clear stale __pycache__ dirs.
 
-    Uses `reset --hard`, not `pull --ff-only`: the admin console's own zip-
-    based push (remote/client.py's _apply_update()) writes files straight to
-    disk without touching git at all, which leaves the working tree "dirty"
-    from git's point of view after every such push -- a ff-only pull then
-    refuses ("local changes would be overwritten by merge") even though none
-    of this is a real local edit worth protecting. No client machine is
-    meant to carry independent commits; each one just mirrors origin, so
-    discarding local drift here is the correct, expected outcome, not data
-    loss. Anything a client actually needs to keep -- config.yaml, the
-    licence store, .venv, the DB -- is already gitignored and untouched by
-    this.
+    This is the one code path both update entry points converge on: the
+    client's own Settings > Update button, and the admin console's Update
+    button (which now just sends MSG_GIT_UPDATE over the WS connection and
+    asks the client to run this). Bootstrapping here means it works
+    identically whichever one triggers it and however the machine was
+    originally set up -- the Setup & Start .bat/.command scripts never
+    git-clone anything, they just copy/run files, so a freshly installed
+    machine has no .git at all until its first update.
+
+    Uses `checkout -B <branch> --track origin/<branch> -f` rather than
+    `pull --ff-only`: no client machine is meant to carry independent local
+    commits, each one just mirrors origin, so forcing the working tree to
+    match origin exactly is the correct, expected outcome regardless of any
+    local drift -- not data loss. (Verified this handles both a from-empty
+    bootstrap and an already-dirty existing checkout identically, discarding
+    the dirty file and landing cleanly on origin's HEAD either way.)
+    Anything a client actually needs to keep -- config.yaml, the licence
+    store, .venv, the DB -- is already gitignored and untouched by this.
 
     Returns {"ok": bool, "error": str|None}. Does not restart -- call
     platform_utils.restart_app() after a successful result.
     """
+    if not (_REPO_ROOT / ".git").exists():
+        if not shutil.which("git"):
+            return {"ok": False, "error": "git not found on PATH — cannot bootstrap a checkout"}
+        rc, out, err = await _run_git("init")
+        if rc != 0:
+            return {"ok": False, "error": (err.strip() or out.strip() or "git init failed")[:300]}
+        rc, out, err = await _run_git("remote", "add", "origin", f"{_GITHUB_REPO_URL}.git")
+        if rc != 0:
+            return {"ok": False, "error": (err.strip() or out.strip() or "git remote add failed")[:300]}
+
     rc, out, err = await _run_git("fetch", "origin", _BRANCH)
     if rc != 0:
         return {"ok": False, "error": (err.strip() or out.strip() or "git fetch failed")[:300]}
 
-    rc, out, err = await _run_git("reset", "--hard", f"origin/{_BRANCH}")
+    rc, out, err = await _run_git("checkout", "-B", _BRANCH, "--track", f"origin/{_BRANCH}", "-f")
     if rc != 0:
-        return {"ok": False, "error": (err.strip() or out.strip() or "git reset failed")[:300]}
+        return {"ok": False, "error": (err.strip() or out.strip() or "git checkout failed")[:300]}
 
     def _pip_install() -> None:
         req_file = _REPO_ROOT / "requirements.txt"

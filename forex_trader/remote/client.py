@@ -13,8 +13,6 @@ unavailable — the only thing they can't do is receive updates.
 """
 
 import asyncio
-import hashlib
-import io
 import json
 import logging
 import os
@@ -24,7 +22,6 @@ import subprocess
 import sys
 import threading
 import time
-import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -34,7 +31,7 @@ from forex_trader.licence import store as _licence_store
 from forex_trader.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
-    MSG_PING, MSG_GET_DIAG, MSG_UPDATE_BEGIN, MSG_UPDATE_END, MSG_VERSION_INFO, make,
+    MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO, make,
 )
 from forex_trader.remote.tls import client_ssl_context, SERVER_HOST, SERVER_PORT
 
@@ -502,192 +499,26 @@ def _do_restart() -> None:
 
 # ── Update application ────────────────────────────────────────────────────────
 
-async def _apply_update(zip_data: bytes, sha256: str, version: str,
-                        manifest: list | None = None) -> None:
-    """Verify, extract and apply the update package, then restart.
+async def _apply_git_update() -> None:
+    """Handle MSG_GIT_UPDATE: run core_app_update.apply_update() (git fetch +
+    force-checkout + pip install + pycache clear) and restart on success.
 
-    If manifest is provided, any file inside forex_trader/ or any root-level
-    script (.py/.bat/.command/.exe/.sh/.txt/.toml) that is NOT in the manifest
-    is deleted — this keeps the client in sync with files removed on the server.
+    Deliberately a thin wrapper, not a second implementation -- the whole
+    point of the admin console's Update button sending this message instead
+    of streaming a zip (as it used to) is that both the admin-triggered
+    update and the client's own Settings > Update button converge on this
+    one code path, so they can never drift out of sync with each other the
+    way the old zip-based push and the git-based self-update used to (a zip
+    push wrote files straight to disk with no git awareness at all, leaving
+    the working tree "dirty" and breaking the next git-based update).
     """
-    actual_sha = hashlib.sha256(zip_data).hexdigest()
-    if actual_sha != sha256:
-        log.error("[RemoteClient] Update SHA256 mismatch — aborting")
+    from forex_trader.core import core_app_update
+
+    log.info("[RemoteClient] Git update triggered by admin — applying")
+    result = await core_app_update.apply_update()
+    if not result.get("ok"):
+        log.error("[RemoteClient] Git update failed: %s", result.get("error"))
         return
-
-    import shutil
-    app_root = Path(__file__).parent.parent.parent  # FOREX/
-    tmp_dir  = app_root / ".update_tmp"
-    tmp_dir.mkdir(exist_ok=True)
-
-    log.info("[RemoteClient] Applying update v%s (%d bytes)", version, len(zip_data))
-    try:
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-            zf.extractall(tmp_dir)
-
-        # Copy extracted files over live installation, logging each one.
-        # Per-file errors are caught individually so one locked file cannot
-        # abort the whole update and leave requirements.txt un-copied.
-        copied = 0
-        failed = 0
-        for src in tmp_dir.rglob("*"):
-            if not src.is_file():
-                continue
-            rel  = src.relative_to(tmp_dir)
-            dest = app_root / rel
-            try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(src.read_bytes())
-                copied += 1
-                log.debug("[RemoteClient] Updated %s", rel)
-            except Exception as _copy_err:
-                failed += 1
-                log.warning("[RemoteClient] Could not update %s: %s", rel, _copy_err)
-
-        log.info("[RemoteClient] %d files updated, %d skipped", copied, failed)
-
-        # Prune files deleted on the server side.
-        if manifest:
-            manifest_set = set(manifest)
-            _ROOT_MANAGED_EXTS = {".py", ".txt", ".toml", ".bat",
-                                   ".command", ".exe", ".sh"}
-            deleted = 0
-
-            # Prune within forex_trader/
-            for existing in sorted((app_root / "forex_trader").rglob("*"),
-                                   reverse=True):
-                if not existing.is_file():
-                    continue
-                rel_posix = existing.relative_to(app_root).as_posix()
-                if rel_posix not in manifest_set:
-                    try:
-                        existing.unlink()
-                        deleted += 1
-                        log.debug("[RemoteClient] Removed stale file: %s", rel_posix)
-                    except Exception as _del_err:
-                        log.warning("[RemoteClient] Could not remove %s: %s",
-                                    rel_posix, _del_err)
-
-            # Remove empty directories left behind inside forex_trader/
-            for d in sorted((app_root / "forex_trader").rglob("*"), reverse=True):
-                if d.is_dir():
-                    try:
-                        d.rmdir()  # only succeeds if empty
-                    except OSError:
-                        pass
-
-            # Prune root-level managed scripts not in manifest
-            for existing in app_root.iterdir():
-                if not existing.is_file():
-                    continue
-                if existing.suffix not in _ROOT_MANAGED_EXTS:
-                    continue
-                if existing.name not in manifest_set:
-                    try:
-                        existing.unlink()
-                        deleted += 1
-                        log.debug("[RemoteClient] Removed stale root file: %s",
-                                  existing.name)
-                    except Exception as _del_err:
-                        log.warning("[RemoteClient] Could not remove %s: %s",
-                                    existing.name, _del_err)
-
-            if deleted:
-                log.info("[RemoteClient] Removed %d stale file(s)", deleted)
-
-    except Exception as exc:
-        log.error("[RemoteClient] Update extraction failed: %s", exc)
-        return
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    # Install any new requirements using the already-copied file in app_root.
-    # Run synchronously so packages are installed before the process restarts.
-    req_file = app_root / "requirements.txt"
-    if req_file.exists():
-        if sys.platform == "win32":
-            venv_pip = app_root / ".venv" / "Scripts" / "pip.exe"
-        else:
-            venv_pip = app_root / ".venv" / "bin" / "pip"
-        if venv_pip.exists():
-            log.info("[RemoteClient] Running pip install for updated requirements")
-            try:
-                subprocess.run(
-                    [str(venv_pip), "install", "--quiet", "-r", str(req_file)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=180,
-                    check=False,
-                )
-                log.info("[RemoteClient] pip install complete")
-            except subprocess.TimeoutExpired:
-                log.warning("[RemoteClient] pip install timed out after 180 s")
-
-    # Clear compiled bytecode caches so nothing stale survives this update.
-    # The file-sync/prune logic above only touches forex_trader/ and root
-    # scripts — it never sees .venv/Lib/site-packages, so a pip-upgraded
-    # package can leave a __pycache__/*.pyc from its OLD version sitting next
-    # to the NEW source. Python's own mtime-based staleness check normally
-    # catches this, but doesn't always (confirmed live 2026-07-18: pip
-    # upgraded `anthropic`, a stale .pyc survived, and the next startup died
-    # with "ValueError: bad marshal data (unknown type code)" deep in
-    # anthropic's own import chain — every restart attempt for hours,
-    # including the external watchdog's, hit the identical crash since nothing
-    # ever cleared the cache). Deleting compiled caches is always safe — they
-    # regenerate automatically from source on next import.
-    try:
-        import shutil as _shutil
-        _cleared = 0
-        for _base in (app_root / ".venv", app_root / "forex_trader"):
-            if not _base.exists():
-                continue
-            for _pyc_dir in _base.rglob("__pycache__"):
-                _shutil.rmtree(_pyc_dir, ignore_errors=True)
-                _cleared += 1
-        log.info("[RemoteClient] Cleared %d stale __pycache__ dir(s)", _cleared)
-    except Exception as _cache_err:
-        log.warning("[RemoteClient] __pycache__ cleanup failed: %s", _cache_err)
-
-    # Bootstrap this install into a real git checkout so the Settings > Update
-    # page's GitHub self-update panel (core_app_update.py, which needs a
-    # `.git` dir to run `git fetch`/`pull`) works after this push — the zip
-    # above never contains `.git` (server.py's _build_update_zip skips it
-    # deliberately; streaming raw git internals through a file-diff/prune
-    # sync is fragile). Only runs once — skipped once `.git` already exists.
-    # Requires `git` on PATH and network access to GitHub (repo is public,
-    # so no credentials needed); either failure path just skips bootstrapping
-    # and leaves "not a git checkout" in place for that machine — never blocks
-    # the actual code update or restart below.
-    if not (app_root / ".git").exists() and not shutil.which("git"):
-        log.warning(
-            "[RemoteClient] git not found on PATH — skipping git-checkout "
-            "bootstrap; GitHub Updates panel will keep showing 'not a git "
-            "checkout' until git is installed and another update is pushed"
-        )
-    if not (app_root / ".git").exists() and shutil.which("git"):
-        _repo_url = "https://github.com/MooreSi/forex.git"  # keep in sync with core_app_update.py's _GITHUB_REPO_URL
-        _branch   = "main"
-        try:
-            def _git(*args):
-                return subprocess.run(
-                    ["git", *args], cwd=str(app_root), capture_output=True,
-                    text=True, timeout=60, check=False,
-                )
-            _git("init")
-            _git("remote", "add", "origin", _repo_url)
-            fetch = _git("fetch", "origin", _branch)
-            if fetch.returncode == 0:
-                co = _git("checkout", "-B", _branch, "--track", f"origin/{_branch}", "-f")
-                if co.returncode == 0:
-                    log.info("[RemoteClient] Bootstrapped git checkout for self-update")
-                else:
-                    log.warning("[RemoteClient] git checkout failed during bootstrap: %s",
-                                co.stderr.strip())
-            else:
-                log.warning("[RemoteClient] git fetch failed during bootstrap: %s",
-                            fetch.stderr.strip())
-        except Exception as _git_err:
-            log.warning("[RemoteClient] git bootstrap failed: %s", _git_err)
 
     log.info("[RemoteClient] Update applied — restarting")
     if sys.platform == "win32":
@@ -823,14 +654,9 @@ async def _connect_loop() -> None:
 
                 # Periodic status sender
                 last_status = 0.0
-                update_buf: bytearray = bytearray()
-                update_meta: dict = {}
-                in_update   = False
 
                 async for raw_msg in ws:
                     if isinstance(raw_msg, bytes):
-                        if in_update:
-                            update_buf.extend(raw_msg)
                         continue
 
                     try:
@@ -860,27 +686,11 @@ async def _connect_loop() -> None:
                     elif t == MSG_GET_DIAG:
                         await ws.send(json.dumps(_build_diagnostics()))
 
-                    elif t == MSG_UPDATE_BEGIN:
-                        update_meta = m
-                        update_buf  = bytearray()
-                        in_update   = True
-                        await ws.send(json.dumps(make(
-                            MSG_UPDATE_STATUS, status="receiving"
-                        )))
-
-                    elif t == MSG_UPDATE_END:
-                        in_update = False
+                    elif t == MSG_GIT_UPDATE:
                         await ws.send(json.dumps(make(
                             MSG_UPDATE_STATUS, status="applying"
                         )))
-                        asyncio.create_task(_apply_update(
-                            bytes(update_buf),
-                            update_meta.get("sha256", ""),
-                            update_meta.get("version", "?"),
-                            manifest=update_meta.get("manifest"),
-                        ))
-                        update_buf  = bytearray()
-                        update_meta = {}
+                        asyncio.create_task(_apply_git_update())
 
                     elif t == MSG_LICENCE:
                         # Admin approved and the server generated the licence key.

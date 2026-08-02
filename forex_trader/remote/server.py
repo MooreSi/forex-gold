@@ -11,14 +11,11 @@ Startup:
 """
 
 import asyncio
-import hashlib
-import io
 import json
 import logging
 import os
 import socket
 import time
-import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +23,7 @@ from forex_trader.config import USER_DATA_DIR
 from forex_trader.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
-    MSG_PING, MSG_GET_DIAG, MSG_UPDATE_BEGIN, MSG_UPDATE_END, MSG_VERSION_INFO,
+    MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO,
     MSG_ADMIN_HELLO, MSG_ADMIN_APPROVE, MSG_ADMIN_REJECT, MSG_ADMIN_ISSUE,
     MSG_ADMIN_REVOKE, MSG_ADMIN_DB_OP, MSG_ADMIN_WELCOME, MSG_PENDING_PUSH,
     MSG_CLIENTS_PUSH, MSG_LICENCES_PUSH, MSG_ADMIN_RESULT,
@@ -674,65 +671,6 @@ def _record_failure(ip: str) -> None:
     _auth_failures[ip] = lst
 
 
-# ── Update packaging ─────────────────────────────────────────────────────────
-
-def _build_update_zip() -> tuple[bytes, str, list[str]]:
-    """Package all deployable app files into a ZIP.
-    Returns (zip_bytes, sha256_hex, manifest) where manifest is the list
-    of relative POSIX paths included in the archive.  Clients use the manifest
-    to delete files that have been removed from the package."""
-    app_root = Path(__file__).parent.parent.parent  # FOREX/
-
-    # Directory or file name fragments that must never be shipped to clients.
-    # NOTE: "test_signal" is NOT test code despite the name — it's the original
-    # scalping signal engine, a hard runtime dependency of ui/app.py,
-    # breakout_signal, history.py and test_panel.py. Excluding it here used to
-    # ship a build that crashed every client on startup with
-    # ModuleNotFoundError: No module named 'forex_trader.test_signal'.
-    _SKIP_PARTS = {".venv", "__pycache__", ".git", ".update_tmp",
-                   "tests", "installer"}
-    # Extensions that are never runtime assets.
-    _SKIP_EXTS  = {".db", ".DS_Store", ".passwd", ".pem", ".crt", ".pyc",
-                   ".log", ".bak"}
-    # Extensions safe to include at the root level (launcher scripts + core).
-    _ROOT_INCLUDE_EXTS = {".py", ".txt", ".toml", ".bat", ".command",
-                          ".exe", ".sh"}
-
-    manifest: list[str] = []
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # forex_trader/ package — every file that is safe to deploy.
-        src_dir = app_root / "forex_trader"
-        for path in sorted(src_dir.rglob("*")):
-            if not path.is_file():
-                continue
-            if any(p in _SKIP_PARTS for p in path.parts):
-                continue
-            if path.suffix in _SKIP_EXTS or path.name in _SKIP_EXTS:
-                continue
-            arcname = path.relative_to(app_root).as_posix()
-            zf.write(path, arcname)
-            manifest.append(arcname)
-
-        # Root-level runtime files (.py, .txt, .bat, .command, .exe, .sh, …).
-        # Iterates only immediate children — installer/, tests/ etc. are skipped
-        # because they are directories, not files.
-        for path in sorted(app_root.iterdir()):
-            if not path.is_file():
-                continue
-            if path.suffix not in _ROOT_INCLUDE_EXTS:
-                continue
-            if path.suffix in _SKIP_EXTS or path.name in _SKIP_EXTS:
-                continue
-            arcname = path.name
-            zf.write(path, arcname)
-            manifest.append(arcname)
-
-    data = buf.getvalue()
-    sha  = hashlib.sha256(data).hexdigest()
-    return data, sha, manifest
-
-
 def _read_version() -> str:
     # version_history.py's RELEASES[0] is the single source of truth — see
     # the matching comment in remote/client.py::_app_version() for why this
@@ -1115,10 +1053,20 @@ async def _lan_beacon_loop() -> None:
         await asyncio.sleep(5)
 
 
-# ── Push update to all connected clients ──────────────────────────────────────
+# ── Push update to connected clients ────────────────────────────────────────
+# Both functions just tell the client to self-update via git
+# (core_app_update.apply_update(), the same code the client's own
+# Settings > Update button runs) rather than streaming a zip built from
+# this machine's local files. Keeping exactly one update implementation —
+# on the client — means the admin-triggered path and the client's own
+# self-service path can never drift out of sync with each other: the old
+# zip push wrote files straight to disk with no git awareness at all,
+# which left every client's working tree "dirty" and broke its own next
+# git-based update (confirmed live — see the "Fix self-update apply_update()
+# failing when the working tree has drifted" commit).
 
 async def push_update(progress_cb=None) -> dict:
-    """Package and stream the update to all connected clients.
+    """Trigger a git self-update on every connected client.
     progress_cb(msg: str) is called with status updates.
 
     Returns {"sent": N, "version": "x.y"}
@@ -1130,52 +1078,25 @@ async def push_update(progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(msg)
 
-    _update_progress("Packaging update files…")
-    try:
-        zip_data, sha256, manifest = await asyncio.get_running_loop().run_in_executor(
-            None, _build_update_zip
-        )
-    except Exception as exc:
-        _update_progress(f"Packaging failed: {exc}")
-        return {"error": str(exc)}
-
-    version   = _read_version()
-    changelog = _read_changelog()
-    chunk_sz  = 32 * 1024  # 32 KB chunks
-
-    _update_progress(
-        f"Sending {len(zip_data) / 1024:.0f} KB to "
-        f"{len(_connected)} client(s)…"
-    )
+    version = _read_version()
     sent = 0
     for token, entry in list(_connected.items()):
         ws   = entry["ws"]
         name = entry["info"].get("name", token[:8])
         try:
-            await ws.send(json.dumps(make(
-                MSG_UPDATE_BEGIN,
-                version=version,
-                size=len(zip_data),
-                sha256=sha256,
-                changelog=changelog,
-                manifest=manifest,
-            )))
-            # Stream ZIP in chunks
-            for offset in range(0, len(zip_data), chunk_sz):
-                await ws.send(zip_data[offset: offset + chunk_sz])
-            await ws.send(json.dumps(make(MSG_UPDATE_END)))
+            await ws.send(json.dumps(make(MSG_GIT_UPDATE)))
             sent += 1
-            _update_progress(f"Sent to {name}")
+            _update_progress(f"Triggered git update on {name}")
         except Exception as exc:
-            _update_progress(f"Failed sending to {name}: {exc}")
+            _update_progress(f"Failed to trigger update on {name}: {exc}")
 
     return {"sent": sent, "version": version}
 
 
 async def push_update_to_client(token: str, progress_cb=None) -> dict:
-    """Package and stream the update to a single connected client, identified
-    by its token — same packaging/protocol as push_update() but targeted, so
-    updating one machine doesn't restart every other connected client too.
+    """Trigger a git self-update on a single connected client, identified by
+    its token — same as push_update() but targeted, so updating one machine
+    doesn't restart every other connected client too.
 
     Returns {"sent": 0 or 1, "version": "x.y"} or {"error": ...}.
     """
@@ -1187,39 +1108,15 @@ async def push_update_to_client(token: str, progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(msg)
 
-    _update_progress("Packaging update files…")
-    try:
-        zip_data, sha256, manifest = await asyncio.get_running_loop().run_in_executor(
-            None, _build_update_zip
-        )
-    except Exception as exc:
-        _update_progress(f"Packaging failed: {exc}")
-        return {"error": str(exc)}
-
-    version   = _read_version()
-    changelog = _read_changelog()
-    chunk_sz  = 32 * 1024  # 32 KB chunks
-
     ws   = entry["ws"]
     name = entry["info"].get("name", token[:8])
-    _update_progress(f"Sending {len(zip_data) / 1024:.0f} KB to {name}…")
     try:
-        await ws.send(json.dumps(make(
-            MSG_UPDATE_BEGIN,
-            version=version,
-            size=len(zip_data),
-            sha256=sha256,
-            changelog=changelog,
-            manifest=manifest,
-        )))
-        for offset in range(0, len(zip_data), chunk_sz):
-            await ws.send(zip_data[offset: offset + chunk_sz])
-        await ws.send(json.dumps(make(MSG_UPDATE_END)))
-        _update_progress(f"Sent to {name}")
-        return {"sent": 1, "version": version}
+        await ws.send(json.dumps(make(MSG_GIT_UPDATE)))
+        _update_progress(f"Triggered git update on {name}")
+        return {"sent": 1, "version": _read_version()}
     except Exception as exc:
-        _update_progress(f"Failed sending to {name}: {exc}")
-        return {"sent": 0, "version": version, "error": str(exc)}
+        _update_progress(f"Failed to trigger update on {name}: {exc}")
+        return {"sent": 0, "version": _read_version(), "error": str(exc)}
 
 
 async def request_diagnostics(token: str) -> bool:

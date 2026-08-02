@@ -462,8 +462,8 @@ def run_calibration(trades: list[dict]) -> list[dict]:
     optimal be_multiplier and trail_multiplier for each
     (session, momentum_bucket) combination.
 
-    Returns a list of calibration result dicts ready to insert into
-    dpm_calibration and store in app_config.
+    Returns a list of calibration result dicts ready for the repo to write
+    to dpm_calibration and store in app_config.
 
     Requires at least _MIN_CAL_SAMPLES per group.
     """

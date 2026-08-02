@@ -35,6 +35,9 @@ from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.broker import ea_templates as _ea_templates
+from backend.src.services.broker import repo as _broker_repo
+from backend.src.services.signals import tg_repo as _tg_repo
+from backend.src.services.trading import trade_repo
 from backend.src.services.positions.monitor_loop import (
     check_sl as _check_sl_impl,
     reconcile_sl_hit as _reconcile_sl_hit_impl,
@@ -1325,7 +1328,6 @@ class SimulationEngine:
         if not self._bridge.is_configured():
             return
         def _fetch_open_trades():
-            with db_module.db() as conn:
                 # Excludes managed_by='ea' trades: the native EA already pushes
                 # its own trade_closed event the moment it detects the position
                 # gone (ea_bridge.py's _on_trade_closed), which calls the same
@@ -1357,11 +1359,7 @@ class SimulationEngine:
                 # 2-N left untracked until a SEPARATE bug (the untracked-
                 # position importer not checking vantage_ladder_legs; also
                 # fixed below) re-discovered them as phantom duplicate trades.
-                return [db_module.row_to_dict(r) for r in conn.execute(
-                    "SELECT * FROM vantage_simulated_trades WHERE status='open' AND mt5_ticket IS NOT NULL "
-                    "AND (managed_by IS NULL OR managed_by != 'ea') "
-                    "AND trade_id NOT IN (SELECT DISTINCT trade_id FROM vantage_ladder_legs)"
-                ).fetchall()]
+                return _broker_repo.fetch_python_managed_open_trades()
         open_trades = await db_module.to_db_thread(_fetch_open_trades)
         if not open_trades:
             return
@@ -1462,14 +1460,9 @@ class SimulationEngine:
                             lp_vol = round(float(lp.get("volume", 0)), 4)
                             lp_ticket = int(lp.get("ticket", 0))
                             if abs(lp_vol - new_remaining) < 0.001 and lp_ticket != ticket:
-                                def _reassign_ticket(lp_ticket=lp_ticket):
-                                    with db_module.db() as conn:
-                                        conn.execute(
-                                            "UPDATE vantage_simulated_trades "
-                                            "SET mt5_ticket=? WHERE trade_id=?",
-                                            (lp_ticket, trade["trade_id"]),
-                                        )
-                                await db_module.to_db_thread(_reassign_ticket)
+                                await db_module.to_db_thread(
+                                    _broker_repo.reassign_mt5_ticket,
+                                    trade["trade_id"], lp_ticket)
                                 log.info("MT5 sync: ticket %s → %s (partial close continues)",
                                          ticket, lp_ticket)
                                 break
@@ -1490,13 +1483,8 @@ class SimulationEngine:
                 result = await self._record_close(trade["trade_id"], float(close_price), reason)
                 await self._sync_profit(trade["trade_id"], ticket)
                 asyncio.create_task(self._schedule_profit_sync(trade["trade_id"], ticket))
-                def _fetch_closed_row():
-                    with db_module.db() as conn:
-                        return db_module.row_to_dict(conn.execute(
-                            "SELECT * FROM vantage_simulated_trades WHERE trade_id=?",
-                            (trade["trade_id"],),
-                        ).fetchone())
-                closed_row = await db_module.to_db_thread(_fetch_closed_row)
+                closed_row = await db_module.to_db_thread(
+                    _broker_repo.fetch_trade, trade["trade_id"])
                 account  = await self.get_mt5_account()
                 last_tp  = await db_module.to_db_thread(self._last_closed_tp, trade["trade_id"]) if reason == "SL" else None
                 asyncio.create_task(telegram_alerts.send_message(
@@ -1511,28 +1499,7 @@ class SimulationEngine:
         # Covers trades opened directly in MT5 and positions where a partial
         # close on a hedge account replaced the ticket with a new one.
         def _fetch_known_tickets():
-            with db_module.db() as _conn:
-                known = {
-                    int(r[0])
-                    for r in _conn.execute(
-                        "SELECT mt5_ticket FROM vantage_simulated_trades WHERE mt5_ticket IS NOT NULL"
-                    ).fetchall()
-                }
-                # Adaptive Runner ladder legs 2+ are opened via self._bridge.
-                # place_order() directly (see _open_adaptive_runner_ladder) —
-                # they never get their own vantage_simulated_trades row, only
-                # a vantage_ladder_legs row linked to the parent trade. Without
-                # this, every non-anchor leg looked "untracked" here and got
-                # re-imported as its own phantom duplicate trade (tg_source=
-                # MT5_imported) each cycle, inflating open-trade counts against
-                # max_open_trades and showing duplicate rows in the UI.
-                known |= {
-                    int(r[0])
-                    for r in _conn.execute(
-                        "SELECT mt5_ticket FROM vantage_ladder_legs WHERE mt5_ticket IS NOT NULL"
-                    ).fetchall()
-                }
-                return known
+            return _broker_repo.fetch_known_mt5_tickets()
         try:
             all_known_tickets = await db_module.to_db_thread(_fetch_known_tickets)
         except Exception:
@@ -1554,39 +1521,10 @@ class SimulationEngine:
             tp        = float(pos.get("tp") or 0) or None
             open_ts   = float(pos.get("open_time") or time.time())
             try:
-                def _import_position():
-                    with db_module.db() as conn:
-                        # vantage_simulated_trades.signal_id is NOT NULL with a
-                        # FOREIGN KEY into vantage_signals — passing "" here (as
-                        # this always has, for any directly-MT5-opened position)
-                        # can never satisfy that constraint since no row with
-                        # signal_id="" has ever existed, so this insert has never
-                        # actually succeeded; it just silently failed every
-                        # monitor cycle, forever, for any such position. Ensure
-                        # a sentinel row exists first (idempotent) instead.
-                        conn.execute(
-                            """INSERT OR IGNORE INTO vantage_signals
-                               (signal_id, source_name, direction, entry_low, entry_high,
-                                stop_loss, status, created_at)
-                               VALUES ('MT5_DIRECT', 'MT5 direct import', ?, 0, 0, 0,
-                                       'activated', ?)""",
-                            (direction, time.time()),
-                        )
-                        conn.execute(
-                            """INSERT INTO vantage_simulated_trades
-                               (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,
-                                entry_price,lot_size,remaining_lots,stop_loss,tp1,
-                                status,open_time,strategy,tg_source)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                            (
-                                trade_id, "MT5_DIRECT", ticket, direction,
-                                entry_p, entry_p, entry_p,
-                                lot_size, lot_size,
-                                sl, tp,
-                                "open", open_ts, default_strategy, "MT5_imported",
-                            ),
-                        )
-                await db_module.to_db_thread(_import_position)
+                await db_module.to_db_thread(
+                    _broker_repo.import_direct_mt5_position,
+                    trade_id, ticket, direction, entry_p, lot_size, sl, tp,
+                    open_ts, default_strategy, time.time())
                 log.info(
                     "MT5 sync: imported untracked position ticket=%s %s %.2f lots @ %.2f",
                     ticket, direction, lot_size, entry_p,
@@ -1629,12 +1567,7 @@ class SimulationEngine:
                     "reopening trade record and closing the residual.",
                     trade_id[:8], mt5_ticket, residual_vol,
                 )
-                with db_module.db() as conn:
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET status='open',close_time=NULL,"
-                        "exit_reason=NULL,remaining_lots=? WHERE trade_id=?",
-                        (residual_vol, trade_id),
-                    )
+                trade_repo.reopen_residual_trade(trade_id, residual_vol)
                 mt5_res = await self._bridge.close_position(int(mt5_ticket))
                 if mt5_res.get("success"):
                     await self._record_close(trade_id, float(mt5_res.get("close_price", close_price)),
@@ -1651,10 +1584,7 @@ class SimulationEngine:
                 return
             await self._sync_profit(trade_id, int(mt5_ticket))
             asyncio.create_task(self._schedule_profit_sync(trade_id, int(mt5_ticket)))
-        with db_module.db() as conn:
-            closed_row = db_module.row_to_dict(conn.execute(
-                "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-            ).fetchone())
+        closed_row = trade_repo.get_trade(trade_id)
         account = await self.get_mt5_account()
         asyncio.create_task(telegram_alerts.send_message(
             telegram_alerts.fmt_trade_close(
@@ -1671,19 +1601,12 @@ class SimulationEngine:
     async def _background_open_commentary(self, trade_id: str, sig: dict, tick: Tick) -> None:
         try:
             candles = await self.get_candles("M5", 20)
-            with db_module.db() as conn:
-                trade_row = db_module.row_to_dict(conn.execute(
-                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-                ).fetchone())
+            trade_row = trade_repo.get_trade(trade_id)
             commentary = await claude_ai.request_commentary(
                 "trade_open", trade_row, sig, tick, candles, self._cfg,
             )
             db_module.save_commentary(commentary, trade_id, sig.get("signal_id"))
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET claude_open=? WHERE trade_id=?",
-                    (json.dumps(commentary), trade_id),
-                )
+            trade_repo.set_open_commentary(trade_id, json.dumps(commentary))
             await telegram_alerts.send_message(
                 telegram_alerts.fmt_trade_open(trade_row, tick, commentary), trade_id, "trade_open",
             )
@@ -1697,13 +1620,8 @@ class SimulationEngine:
             # Fetch mt5_ticket and try to sync the real broker P&L before notifying.
             # This replaces the previous race-condition approach (hoping _sync_profit
             # would win the race against get_mt5_account).
-            def _fetch_ticket():
-                with db_module.db() as conn:
-                    return db_module.row_to_dict(conn.execute(
-                        "SELECT mt5_ticket FROM vantage_simulated_trades WHERE trade_id=?",
-                        (trade_id,),
-                    ).fetchone())
-            quick = await db_module.to_db_thread(_fetch_ticket)
+            quick = await db_module.to_db_thread(
+                trade_repo.get_trade_mt5_ticket, trade_id)
             mt5_ticket = (quick or {}).get("mt5_ticket")
             if mt5_ticket:
                 try:
@@ -1714,12 +1632,7 @@ class SimulationEngine:
                     log.debug("Close commentary: profit sync skipped (%s)", _e)
 
             account = await self.get_mt5_account()
-            def _fetch_row():
-                with db_module.db() as conn:
-                    return db_module.row_to_dict(conn.execute(
-                        "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-                    ).fetchone())
-            row = await db_module.to_db_thread(_fetch_row)
+            row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
             last_tp = await db_module.to_db_thread(self._last_closed_tp, trade_id) if reason == "SL" else None
             await telegram_alerts.send_message(
                 telegram_alerts.fmt_trade_close(row, result, {}, account, last_tp=last_tp),
@@ -2077,11 +1990,7 @@ class SimulationEngine:
 
             # Dedup — skip already-processed messages, but re-parse edited ones
             # if the signal hasn't been executed yet (direction correction).
-            with db_module.db() as conn:
-                _existing = conn.execute(
-                    "SELECT id, direction, status, raw_text, entry_low FROM vantage_tg_signals "
-                    "WHERE tg_message_id=?", (tg_id,)
-                ).fetchone()
+            _existing = _tg_repo.get_tg_signal_meta(tg_id)
             if _existing:
                 _ex = db_module.row_to_dict(_existing)
                 _edit_result = await _handle_signal_edit_impl(

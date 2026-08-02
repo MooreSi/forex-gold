@@ -202,3 +202,81 @@ def insert_imported_trade(signal_id: str, trade_id: str, ticket, direction: str,
             "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
             (mt5_profit,),
         )
+
+
+# ── MT5 close-reconciliation reads/writes (M4: runtime.py SQL sweep) ─────────
+# Verbatim from runtime.py's _sync_closed_mt5_positions; the reconciliation
+# LOGIC (miss-streak, partial-close detection) stays in the engine -- only
+# the statements moved.
+
+def fetch_python_managed_open_trades() -> list[dict]:
+    """Open, python-managed trades with a real ticket -- ladder legs excluded
+    (they are tracked in vantage_ladder_legs, never as their own trade row)."""
+    with db() as conn:
+        return [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM vantage_simulated_trades WHERE status='open' AND mt5_ticket IS NOT NULL "
+            "AND (managed_by IS NULL OR managed_by != 'ea') "
+            "AND trade_id NOT IN (SELECT DISTINCT trade_id FROM vantage_ladder_legs)"
+        ).fetchall()]
+
+
+def reassign_mt5_ticket(trade_id: str, new_ticket) -> None:
+    """A broker-side partial close continues the position under a new ticket."""
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades "
+            "SET mt5_ticket=? WHERE trade_id=?",
+            (new_ticket, trade_id),
+        )
+
+
+def fetch_known_mt5_tickets() -> set:
+    """Every ticket this node already tracks -- trade rows plus ladder legs
+    (legs 2+ never get their own trade row; without them every non-anchor leg
+    looked 'untracked' and was re-imported as a phantom duplicate)."""
+    with db() as conn:
+        known = {
+            int(r[0])
+            for r in conn.execute(
+                "SELECT mt5_ticket FROM vantage_simulated_trades WHERE mt5_ticket IS NOT NULL"
+            ).fetchall()
+        }
+        known |= {
+            int(r[0])
+            for r in conn.execute(
+                "SELECT mt5_ticket FROM vantage_ladder_legs WHERE mt5_ticket IS NOT NULL"
+            ).fetchall()
+        }
+        return known
+
+
+def import_direct_mt5_position(trade_id: str, ticket, direction: str,
+                               entry_p: float, lot_size: float, sl, tp,
+                               open_ts: float, strategy: str,
+                               sentinel_ts: float) -> None:
+    """Import a position opened directly in MT5. The MT5_DIRECT sentinel
+    signal row is ensured first (idempotent) -- signal_id is NOT NULL with a
+    FK, so without the sentinel this insert can never succeed."""
+    with transaction() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO vantage_signals
+               (signal_id, source_name, direction, entry_low, entry_high,
+                stop_loss, status, created_at)
+               VALUES ('MT5_DIRECT', 'MT5 direct import', ?, 0, 0, 0,
+                       'activated', ?)""",
+            (direction, sentinel_ts),
+        )
+        conn.execute(
+            """INSERT INTO vantage_simulated_trades
+               (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,
+                entry_price,lot_size,remaining_lots,stop_loss,tp1,
+                status,open_time,strategy,tg_source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                trade_id, "MT5_DIRECT", ticket, direction,
+                entry_p, entry_p, entry_p,
+                lot_size, lot_size,
+                sl, tp,
+                "open", open_ts, strategy, "MT5_imported",
+            ),
+        )

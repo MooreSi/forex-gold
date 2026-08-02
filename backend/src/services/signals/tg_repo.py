@@ -181,3 +181,13 @@ def insert_tg_signal_if_new(tg_id, group_id, channel_name: str,
 def delete_tg_signal_row(row_id) -> None:
     with db_module.db() as conn:
         conn.execute("DELETE FROM vantage_tg_signals WHERE id=?", (row_id,))
+
+
+def get_tg_signal_meta(tg_id):
+    """The scan loop's dedup probe: id/direction/status/text/entry for an
+    already-seen message, or None."""
+    with db_module.db() as conn:
+        return conn.execute(
+            "SELECT id, direction, status, raw_text, entry_low FROM vantage_tg_signals "
+            "WHERE tg_message_id=?", (tg_id,)
+        ).fetchone()

@@ -631,3 +631,32 @@ def insert_instant_tg_row(tg_id, group_id, channel_name: str, sender_name: str,
              None, None, None, None, None, None, None, None,
              status),
         )
+
+
+# ── M4: runtime.py SQL sweep ─────────────────────────────────────────────────
+
+def reopen_residual_trade(trade_id: str, residual_vol: float) -> None:
+    """all-TPs-hit found residual broker volume: flip the row back to open
+    with the real remaining lots so the close path can finish the job."""
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades SET status='open',close_time=NULL,"
+            "exit_reason=NULL,remaining_lots=? WHERE trade_id=?",
+            (residual_vol, trade_id),
+        )
+
+
+def get_trade_mt5_ticket(trade_id: str) -> dict:
+    with db() as conn:
+        return row_to_dict(conn.execute(
+            "SELECT mt5_ticket FROM vantage_simulated_trades WHERE trade_id=?",
+            (trade_id,),
+        ).fetchone())
+
+
+def set_open_commentary(trade_id: str, commentary_json: str) -> None:
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades SET claude_open=? WHERE trade_id=?",
+            (commentary_json, trade_id),
+        )

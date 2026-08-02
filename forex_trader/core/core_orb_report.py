@@ -1,32 +1,45 @@
-"""ORB/IVB (pre-London-range breakout) report + auto-execute -- extracted
-verbatim (no logic changes) from core/engine.py's SimulationEngine.
-build_orb_report/_get_orb_target_multiple/_backtest_orb_target_multiple/
-_orb_auto_execute, as part of the core/engine.py migration series. See
-docs/todo/refactor/core-orb-report-migration/020-*.md.
+"""ORB/IVB report + auto-execute -- rebuilt 2026-08-01 to the classic
+Opening-Range-Breakout methodology (see
+https://www.litefinance.org/blog/for-beginners/trading-strategies/opening-range-breakout-strategy/)
+applied to this account's session structure:
 
-orb_auto_execute() places a genuine EA pending limit order at the reload
-zone (2026-07-22) -- was previously a DB-only pending signal
-(core_signals.create_signal) later filled at market by the generic
-zone-fill watcher; see that function's own docstring for why this changed.
-No Python-bridge fallback exists for this path, same as Limit Runner
-(core_limit_order_signal.py) -- if the EA isn't connected, the setup is
-simply not captured that morning rather than falling back to the old
-simulated-fill mechanism.
+- Reference range: the WHOLE Asian session (00:00-08:00 UTC) -- restores
+  the pre-2026-07-22 full-session range this report used before a run of
+  rewrites narrowed it to just the hour before London open (see
+  FOREX-OLD's forex_trader/core/engine.py for that earlier version). Used
+  here purely as a confirmation FILTER, not the traded range itself.
+- Opening range: the first 15 minutes of the London session (08:00-08:15
+  UTC) -- the actual "opening range" the article defines, and the range
+  whose breakout is traded.
+- Direction/entry: only confirmed when price clears the London opening
+  range AND the Asian range in the SAME direction. A breakout of the
+  (narrow) opening range that's still sitting inside the (wide) Asian
+  range is reported as "unconfirmed", not a trade signal -- it isn't
+  actually a continuation past the wider overnight structure yet.
+- Stop: at the midpoint of the London opening range (the article's
+  "classic method"), which for a boundary breakout is algebraically the
+  same as "0.5x opening-range height beyond the breakout edge".
+- Target: 2x the resulting risk (the article's first partial-TP ratio,
+  2:1) -- auto-executed. A second, informational-only 3:1 level is also
+  reported (the article's second partial) but NOT auto-executed: the EA's
+  orb_fixed management (ManageOrbFixed in ForexTraderBridge.mq5) is a
+  single-TP close-all, not a partial-close ladder, and wiring a real
+  ladder would need an EA-side change this rebuild doesn't make.
 
-`_compute_volume_profile` is ported verbatim as a private, pure helper (no
-`self` in the original either). `is_active_trader_node` is taken as an
-explicit bool (the caller's already-computed answer from
-SimulationEngine._is_active_trader_node, which belongs to a separate,
-not-yet-migrated cluster) rather than recomputed here.
+The earlier rewrites' volume-profile POC/VAH/VAL and "reload zone"
+pullback-entry concept are REMOVED -- the article enters on the breakout
+itself once confirmed, not on a pullback into a value-area pocket, and a
+volume profile computed over a 15-candle opening range was a poor fit for
+that mechanism anyway. Auto-execute now places a genuine immediate MARKET
+order (core_manual_market_order.open_manual_market_order, the same call
+the manual Execute button already used) rather than a resting
+pending-limit order at a reload zone that no longer exists.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
@@ -35,106 +48,24 @@ from forex_trader.core.models import STRATEGY_ORB_FIXED
 
 log = logging.getLogger(__name__)
 
-_ORB_PENDING_EXPIRE_MINUTES = 60.0  # matches the pre-2026-07-22 zone-watcher's own ORB-specific expiry
+_ASIA_START_HOUR   = 0
+_ASIA_END_HOUR     = 8    # 00:00-08:00 UTC -- confirmation-filter range
+_LONDON_OR_MINUTES = 15   # 08:00-08:15 UTC -- the traded opening range
 
-_ORB_BUCKETS = 40           # volume-profile price buckets across the reference range
-_ORB_VALUE_AREA_PCT = 0.70  # standard 70% value-area convention
-_ORB_SL_RANGE_PCT = 0.50
-_ORB_MIN_ENTRY_STOP_BUFFER_PCT = 0.30
-
-_ORB_BACKTEST_DAYS = 25
-_ORB_BACKTEST_HORIZON_HOURS = 10   # rest of London + all of NY session
-_ORB_DEFAULT_TARGET_MULTIPLE = 2.0  # standard ORB convention, used until enough real history exists
-_ORB_MIN_SAMPLES = 8
-
-_ORB_RANGE_HOURS = 1     # reference range = the last N hours before London open
-_ORB_WINDOW_MINUTES = 15  # breakout must be evaluated within N minutes of London open
-
-
-def _compute_volume_profile(
-    candles: list[dict], range_low: float, range_high: float,
-    n_buckets: int = _ORB_BUCKETS, value_area_pct: float = _ORB_VALUE_AREA_PCT,
-) -> tuple[float, float, float]:
-    """
-    Approximate volume profile from OHLCV bars (no raw tick data available):
-    each candle's tick-volume is distributed evenly across the price buckets
-    its high-low range touches. Returns (POC, VAH, VAL) — POC is the highest-
-    volume bucket's midpoint; VAH/VAL bound the smallest contiguous band
-    around POC containing value_area_pct of total volume (the standard
-    market-profile convention), expanding to whichever neighbouring bucket
-    has more volume at each step.
-    """
-    bucket_size = max((range_high - range_low) / n_buckets, 0.01)
-    buckets = [0.0] * n_buckets
-
-    def _idx(price: float) -> int:
-        return max(0, min(int((price - range_low) / bucket_size), n_buckets - 1))
-
-    for c in candles:
-        vol = float(c.get("volume", 0) or 0)
-        if vol <= 0:
-            continue
-        i0, i1 = _idx(c["low"]), _idx(c["high"])
-        span = max(i1 - i0 + 1, 1)
-        share = vol / span
-        for i in range(i0, i1 + 1):
-            buckets[i] += share
-
-    poc_idx = max(range(n_buckets), key=lambda i: buckets[i])
-    poc = range_low + (poc_idx + 0.5) * bucket_size
-
-    total = sum(buckets) or 1.0
-    target = total * value_area_pct
-    lo_i = hi_i = poc_idx
-    covered = buckets[poc_idx]
-    while covered < target and (lo_i > 0 or hi_i < n_buckets - 1):
-        left_val = buckets[lo_i - 1] if lo_i > 0 else -1.0
-        right_val = buckets[hi_i + 1] if hi_i < n_buckets - 1 else -1.0
-        if right_val >= left_val:
-            hi_i += 1
-            covered += buckets[hi_i]
-        else:
-            lo_i -= 1
-            covered += buckets[lo_i]
-
-    val = range_low + lo_i * bucket_size
-    vah = range_low + (hi_i + 1) * bucket_size
-    return round(poc, 2), round(vah, 2), round(val, 2)
+_ORB_SL_RANGE_PCT   = 0.50  # stop = breakout edge -/+ this fraction of the OR height (== OR midpoint)
+_ORB_TARGET_R_MULT  = 2.0   # TP1 (auto-executed): 2:1 reward:risk, per the article
+_ORB_TARGET2_R_MULT = 3.0   # TP2 (informational only, not auto-executed): 3:1
 
 
 async def build_orb_report(bridge: Any) -> Optional[dict]:
     """
-    Reference range is the last _ORB_RANGE_HOURS (1h) of the Asian
-    session immediately before London opens, not the full Asian session
-    (00:00-08:00 UTC) this report used until 2026-07-22, and not a
-    freshly-forming first-hour-of-London range (used until 2026-07-17,
-    before that). Standard London-breakout convention trades the breakout
-    of the ALREADY-ESTABLISHED pre-London range the moment London opens.
-
-    The breakout itself is only evaluated inside a bounded
-    _ORB_WINDOW_MINUTES-wide (15min) window right after London opens —
-    the setup goes stale outside that window (both bounds enforced below),
-    rather than staying "live" indefinitely at whatever price happens to
-    be current whenever this is next called (e.g. hours later on a manual
-    Refresh click).
-
-    Why the earlier full-8h-Asian-range version changed again: it worked
-    (see the history below) but the last-1h window is deliberately
-    tighter — a London-open breakout is trading the most recent
-    consolidation immediately preceding the open, not the whole overnight
-    range, which can include unrelated Asian-session moves hours earlier.
-
-    Prior history (why not first-hour-of-London): the Asian range
-    averaged ~4x wider than the old London-hour range (~48pt vs ~13pt
-    over a 14-day sample, 2026-07-15). Building a volume-profile stop
-    from an already-13pt window left nowhere for VAL/VAH to spread —
-    confirmed live: all 4 real orb_fixed trades to date hit SL, 3 of
-    them with a stop under 1pt on gold (smaller than typical spread).
-    Switching to a pre-London reference range, and deriving the stop
-    from a fixed fraction of ITS height (_ORB_SL_RANGE_PCT) instead of
-    an inner volume-profile boundary, fixed both: the range itself is
-    more stable, and the stop no longer depends on how tightly volume
-    happens to cluster within it.
+    Returns None before London opens today, or if candle data isn't
+    available. Returns a "forming" report (no direction/stop/target yet)
+    during the 08:00-08:15 UTC opening-range window itself. From 08:15
+    onward, evaluates the confirmed breakout state for the rest of the
+    day -- unlike the earlier rewrites, this isn't bounded to a further
+    narrow window after London opens, since a genuine breakout can arrive
+    at any point once the opening range is established.
     """
     from zoneinfo import ZoneInfo
 
@@ -144,195 +75,127 @@ async def build_orb_report(bridge: Any) -> Optional[dict]:
 
     now_utc = datetime.now(timezone.utc)
     london_now = now_utc.astimezone(ZoneInfo("Europe/London"))
-    london_open = london_now.replace(hour=8, minute=0, second=0, microsecond=0)
-    window_start = london_open.astimezone(timezone.utc).timestamp()
-    window_end = window_start + _ORB_WINDOW_MINUTES * 60
+    london_open_local = london_now.replace(hour=8, minute=0, second=0, microsecond=0)
+    london_open_utc = london_open_local.astimezone(timezone.utc)
+    or_start = london_open_utc.timestamp()
+    or_end = or_start + _LONDON_OR_MINUTES * 60
     now_ts = now_utc.timestamp()
 
-    if now_ts < window_start:
-        return None  # London hasn't opened yet this cycle
-    if now_ts >= window_end:
-        return None  # first 15 minutes of London have already passed — setup is stale
+    if now_ts < or_start:
+        return None  # London hasn't opened yet today
 
-    asia_end = window_start
-    asia_start = asia_end - _ORB_RANGE_HOURS * 3600
+    asia_start = london_open_utc.replace(
+        hour=_ASIA_START_HOUR, minute=0, second=0, microsecond=0
+    ).timestamp()
+    asia_end = london_open_utc.replace(
+        hour=_ASIA_END_HOUR, minute=0, second=0, microsecond=0
+    ).timestamp()
     asia_candles = await bridge.get_candles_range(asia_start, asia_end, timeframe="M1")
     if not asia_candles:
         return None
-
-    range_high = max(c["high"] for c in asia_candles)
-    range_low  = min(c["low"] for c in asia_candles)
-    range_height = range_high - range_low
-    if range_height <= 0:
-        return None
-
-    poc, vah, val = _compute_volume_profile(
-        asia_candles, range_low, range_high,
-        n_buckets=_ORB_BUCKETS, value_area_pct=_ORB_VALUE_AREA_PCT,
-    )
+    asia_high = max(c["high"] for c in asia_candles)
+    asia_low = min(c["low"] for c in asia_candles)
+    asia_range = asia_high - asia_low
 
     current_price = float(tick.ask)
-    if current_price > range_high:
+
+    if now_ts < or_end:
+        return {
+            "current_price": current_price,
+            "phase": "forming",
+            "asia_high": asia_high, "asia_low": asia_low, "asia_range": asia_range,
+            "or_start": or_start, "or_end": or_end,
+            "direction": "inside",
+            "position_note": (
+                "London opening range still forming — closes at "
+                f"{datetime.fromtimestamp(or_end, tz=timezone.utc).strftime('%H:%M')} UTC"
+            ),
+        }
+
+    or_candles = await bridge.get_candles_range(or_start, or_end, timeframe="M1")
+    if not or_candles:
+        return None
+    or_high = max(c["high"] for c in or_candles)
+    or_low = min(c["low"] for c in or_candles)
+    or_range = or_high - or_low
+    if or_range <= 0:
+        return None
+
+    # Candles for the chart / breakout context: opening range through now.
+    post_or_candles = await bridge.get_candles_range(or_start, now_ts + 60, timeframe="M1")
+    all_candles = post_or_candles or or_candles
+
+    broke_up = current_price > or_high
+    broke_down = current_price < or_low
+    if broke_up and current_price > asia_high:
         direction = "bullish"
-    elif current_price < range_low:
+    elif broke_down and current_price < asia_low:
         direction = "bearish"
+    elif broke_up or broke_down:
+        direction = "unconfirmed"  # cleared the opening range but still inside the Asian range
     else:
         direction = "inside"
 
     report: dict = {
         "current_price": current_price,
-        "window_start":  asia_start,
-        "window_end":    asia_end,
-        "range_high":    range_high,
-        "range_low":     range_low,
-        "range_height":  range_height,
-        "poc":           poc,
-        "vah":           vah,
-        "val":           val,
-        "direction":     direction,
-        "candles":       asia_candles,
-        "asia_high":     range_high,
-        "asia_low":      range_low,
-        "asia_range":    range_height,
+        "phase": "active",
+        "asia_high": asia_high, "asia_low": asia_low, "asia_range": asia_range,
+        "or_high": or_high, "or_low": or_low, "or_range": or_range,
+        "or_start": or_start, "or_end": or_end,
+        "direction": direction,
+        "candles": all_candles,
+        # Kept for the ORB/IVB Report tab's existing "range_*" field names --
+        # now means the London opening range (the traded range), not the old
+        # pre-London reference range.
+        "range_low": or_low, "range_high": or_high, "range_height": or_range,
     }
 
-    if direction == "inside":
+    if direction in ("inside", "unconfirmed"):
+        if direction == "unconfirmed":
+            note = (
+                "broke the London opening range but still inside the Asian range "
+                f"(${asia_low:.2f}–${asia_high:.2f}) — not confirmed"
+            )
+        else:
+            note = (
+                f"still inside the London opening range — {current_price - or_low:.1f} pts "
+                f"above the Low, {or_high - current_price:.1f} pts below the High"
+            )
         report.update({
-            "entry_zone_low": None, "entry_zone_high": None,
-            "stop": None, "target": None, "rr": None,
-            "position_note": (
-                f"still inside the pre-London range — {current_price - range_low:.1f} pts "
-                f"above the Low, {range_high - current_price:.1f} pts below the High"
-            ),
+            "stop": None, "target": None, "target2": None, "rr": None,
+            "position_note": note,
         })
         return report
 
-    target_info = await get_orb_target_multiple(bridge)
-    breakout_edge = range_high if direction == "bullish" else range_low
-    target = (
-        breakout_edge + target_info["multiple"] * range_height if direction == "bullish"
-        else breakout_edge - target_info["multiple"] * range_height
+    breakout_edge = or_high if direction == "bullish" else or_low
+    stop = (
+        breakout_edge - _ORB_SL_RANGE_PCT * or_range if direction == "bullish"
+        else breakout_edge + _ORB_SL_RANGE_PCT * or_range
     )
-    # entry_zone (a volume-profile pullback pocket, POC-to-VAH/VAL) and
-    # stop (a fixed fraction of the breakout range) are computed from two
-    # independent reference frames — nothing otherwise guarantees the
-    # zone stays clear of the stop. Confirmed live 2026-07-17: a real
-    # report had entry_zone_low ($3989.23) sitting BELOW the stop
-    # ($3989.70) on a BUY — invalid (stop must be below entry), and a
-    # fill at the bottom of that zone would have been instantly stopped
-    # out or rejected outright. Clamp with a minimum buffer so a fill
-    # anywhere in the zone always keeps a meaningful risk distance.
-    if direction == "bullish":
-        entry_zone_low, entry_zone_high = poc, vah
-        stop = breakout_edge - _ORB_SL_RANGE_PCT * range_height
-        min_entry = stop + _ORB_MIN_ENTRY_STOP_BUFFER_PCT * range_height
-        entry_zone_low = max(entry_zone_low, min_entry)
-        entry_zone_high = max(entry_zone_high, entry_zone_low)
-    else:
-        entry_zone_low, entry_zone_high = val, poc
-        stop = breakout_edge + _ORB_SL_RANGE_PCT * range_height
-        max_entry = stop - _ORB_MIN_ENTRY_STOP_BUFFER_PCT * range_height
-        entry_zone_high = min(entry_zone_high, max_entry)
-        entry_zone_low = min(entry_zone_low, entry_zone_high)
-
-    entry_mid = (entry_zone_low + entry_zone_high) / 2
-    risk = abs(entry_mid - stop)
-    reward = abs(target - entry_mid)
+    risk = abs(breakout_edge - stop)
+    target = (
+        breakout_edge + _ORB_TARGET_R_MULT * risk if direction == "bullish"
+        else breakout_edge - _ORB_TARGET_R_MULT * risk
+    )
+    target2 = (
+        breakout_edge + _ORB_TARGET2_R_MULT * risk if direction == "bullish"
+        else breakout_edge - _ORB_TARGET2_R_MULT * risk
+    )
+    reward = abs(target - breakout_edge)
     rr = round(reward / risk, 2) if risk > 0 else None
 
     report.update({
-        "entry_zone_low":  entry_zone_low,
-        "entry_zone_high": entry_zone_high,
-        "stop":            stop,
-        "target":          target,
-        "target_multiple": target_info["multiple"],
-        "target_sample_n": target_info["n"],
-        "target_is_default": target_info["is_default"],
+        "stop": stop, "target": target, "target2": target2, "rr": rr,
+        "risk": risk, "reward": reward,
         "sl_range_pct": _ORB_SL_RANGE_PCT,
-        "entry_mid": entry_mid, "risk": risk, "reward": reward, "rr": rr,
+        "target_r_mult": _ORB_TARGET_R_MULT, "target2_r_mult": _ORB_TARGET2_R_MULT,
         "position_note": (
-            f"{direction} breakout of the pre-London range — "
-            f"{abs(current_price - breakout_edge):.1f} pts past the "
+            f"{direction} breakout of the London opening range, confirmed beyond the "
+            f"Asian range — {abs(current_price - breakout_edge):.1f} pts past the "
             f"{'High' if direction == 'bullish' else 'Low'}"
         ),
     })
     return report
-
-
-async def get_orb_target_multiple(bridge: Any) -> dict:
-    """Cached wrapper — the backtest only needs to run once per day."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cached_date = await db_module.to_db_thread(db_module.get_app_config, "orb_target_multiple_date")
-    if cached_date == today_str:
-        cached = await db_module.to_db_thread(db_module.get_app_config, "orb_target_multiple")
-        cached_n = await db_module.to_db_thread(db_module.get_app_config, "orb_target_multiple_n")
-        if cached:
-            try:
-                n = int(cached_n or 0)
-                return {"multiple": float(cached), "n": n, "is_default": n < _ORB_MIN_SAMPLES}
-            except ValueError:
-                pass
-    result = await backtest_orb_target_multiple(bridge)
-    await db_module.to_db_thread(db_module.set_app_config, "orb_target_multiple", str(result["multiple"]))
-    await db_module.to_db_thread(db_module.set_app_config, "orb_target_multiple_n", str(result["n"]))
-    await db_module.to_db_thread(db_module.set_app_config, "orb_target_multiple_date", today_str)
-    return result
-
-
-async def backtest_orb_target_multiple(bridge: Any) -> dict:
-    """
-    Genuine, disclosed analog to the video's proprietary "protection
-    level" — measures, over this account's own recent gold history, how
-    far price actually travelled past the pre-London range on days it
-    cleanly broke one side only after London open, expressed as a
-    multiple of that day's range height. Falls back to the standard
-    ORB-literature 2x default if there isn't yet enough clean-breakout
-    history.
-
-    Reference range matches build_orb_report's own basis (see that
-    function's docstring) — must stay in sync, since a mismatch here would
-    calibrate the multiplier against a different-sized unit than what
-    the live report actually multiplies it by.
-    """
-    from zoneinfo import ZoneInfo
-
-    multiples: list[float] = []
-    now_utc = datetime.now(timezone.utc)
-    for days_back in range(1, _ORB_BACKTEST_DAYS + 1):
-        day_london = now_utc.astimezone(ZoneInfo("Europe/London")) - timedelta(days=days_back)
-        if day_london.weekday() >= 5:
-            continue
-        open_local = day_london.replace(hour=8, minute=0, second=0, microsecond=0)
-        w_end = open_local.astimezone(timezone.utc).timestamp()  # London open that day
-        w_start = w_end - _ORB_RANGE_HOURS * 3600  # last hour before London open
-        horizon_end = w_end + _ORB_BACKTEST_HORIZON_HOURS * 3600
-
-        candles = await bridge.get_candles_range(w_start, horizon_end, timeframe="M1")
-        if not candles:
-            continue
-        range_c = [c for c in candles if w_start <= c["ts"] < w_end]
-        after_c = [c for c in candles if c["ts"] >= w_end]
-        if not range_c or not after_c:
-            continue
-        r_high = max(c["high"] for c in range_c)
-        r_low  = min(c["low"] for c in range_c)
-        r_height = r_high - r_low
-        if r_height <= 0:
-            continue
-
-        broke_up = any(c["high"] > r_high for c in after_c)
-        broke_down = any(c["low"] < r_low for c in after_c)
-        if broke_up and not broke_down:
-            multiples.append((max(c["high"] for c in after_c) - r_high) / r_height)
-        elif broke_down and not broke_up:
-            multiples.append((r_low - min(c["low"] for c in after_c)) / r_height)
-        # both or neither -> ambiguous/no clean breakout day, skip
-
-    if len(multiples) < _ORB_MIN_SAMPLES:
-        return {"multiple": _ORB_DEFAULT_TARGET_MULTIPLE, "n": len(multiples), "is_default": True}
-    multiples.sort()
-    median = multiples[len(multiples) // 2]
-    return {"multiple": round(median, 2), "n": len(multiples), "is_default": False}
 
 
 async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: bool) -> None:
@@ -352,10 +215,15 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     inverts: the VPS has stopped analyzing entirely
     (should_generate_signals_here() is False there), so it must defer
     even though it's the active trader — and the Mac proceeds even
-    though it *isn't* the active trader, since open_trade() (called via
-    open_manual_market_order() below) forwards the resolved trade to the
-    VPS for execution under that mode. Still exactly one node ever acts:
-    whichever one currently owns generation.
+    though it *isn't* the active trader, since open_manual_market_order()
+    below forwards nothing itself (it acts on whichever bridge it's
+    given) -- the resolved trade lands wherever this function runs. Still
+    exactly one node ever acts: whichever one currently owns generation.
+
+    2026-08-01: places a genuine immediate MARKET order (matching the
+    manual Execute button), not a resting pending-limit order -- there is
+    no reload/pullback zone in the rebuilt methodology to rest an order
+    at.
     """
     _active_here = is_active_trader_node
     try:
@@ -374,7 +242,13 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
 
     direction = report.get("direction")
     if direction not in ("bullish", "bearish"):
-        log.info("[ORB auto-execute] no breakout yet — skipping")
+        log.info("[ORB auto-execute] no confirmed breakout yet — skipping")
+        return
+
+    stop_loss = report.get("stop")
+    target = report.get("target")
+    if not stop_loss or not target:
+        log.info("[ORB auto-execute] report has no stop/target — skipping")
         return
 
     mt5_direction = "BUY" if direction == "bullish" else "SELL"
@@ -402,97 +276,43 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     if ea_templates.is_template_override(strategy):
         _tpl_name = ea_templates.template_name_from_override(strategy)
         log.info("[ORB auto-execute] channel assigned to EA Template '%s' -- not supported "
-                 "for ORB/IVB's pending zone-entry order, skipping this morning", _tpl_name)
+                 "for ORB/IVB's market entry, skipping this morning", _tpl_name)
         asyncio.create_task(telegram_alerts.send_message(
             f"*ORB/IVB Auto-Execute Skipped*\nChannel Strategy for 'ORB/IVB Report' is set to "
-            f"EA Template '{_tpl_name}', which isn't supported for ORB/IVB's pending zone-entry "
-            f"order (EA Templates only manage immediate-fill trades). Reassign it to a regular "
-            f"strategy in Trading > Strategy > Channel Strategy.",
+            f"EA Template '{_tpl_name}', which isn't supported for ORB/IVB's market entry "
+            f"(EA Templates only manage immediate-fill trades opened through the normal signal "
+            f"path, not this report). Reassign it to a regular strategy in Trading > Strategy > "
+            f"Channel Strategy.",
             None, "orb_auto_execute_skipped",
         ))
         return
-
-    from forex_trader.core import ea_bridge as _ea_mod
-    _ea = _ea_mod.get_instance()
-    if _ea is None or not _ea.is_ea_healthy():
-        log.info("[ORB auto-execute] EA not connected/healthy — setup not captured")
-        asyncio.create_task(telegram_alerts.send_message(
-            f"*ORB/IVB Auto-Execute Skipped*\nDirection: {mt5_direction}\n"
-            f"EA not connected — no Python-bridge fallback for this strategy.",
-            None, "orb_auto_execute_skipped",
-        ))
-        return
-
-    # Near edge of the reload zone (the price side reached first as the
-    # market retraces back into it after the breakout) — same convention
-    # place_pending_order()'s other callers use, see core_limit_order_signal.py.
-    price = report["entry_zone_high"] if mt5_direction == "BUY" else report["entry_zone_low"]
-    stop_loss = report["stop"]
-    target = report["target"]
 
     _lot_val = float(rs.get("orb_lot_size", 0) or 0)
-    if _lot_val > 0:
-        lot = _lot_val
-    else:
-        from forex_trader.core.core_close_trade import get_trading_balance
-        from forex_trader.core.core_fees_sizing import suggest_lot_size
-        balance = await get_trading_balance(bridge, 1000.0)
-        lot = suggest_lot_size(price, stop_loss, balance, float(rs.get("risk_per_trade_pct", 0.5)))
+    lot = _lot_val if _lot_val > 0 else None  # None -> auto-size from risk % and stop distance
 
-    trade_id = str(uuid.uuid4())[:16]
+    from forex_trader.core.core_manual_market_order import open_manual_market_order
     try:
-        ack = await _ea.place_pending_order(
-            trade_id, mt5_direction, price, lot, stop_loss,
-            {1: target}, [1.0], 0, strategy,
-            expire_minutes=_ORB_PENDING_EXPIRE_MINUTES, close_full_on_last=True,
+        result = await open_manual_market_order(
+            bridge, mt5_direction, stop_loss=stop_loss, lot_size=lot,
+            strategy=strategy, take_profit=target, source_name="ORB/IVB Report (auto)",
         )
     except Exception as e:
-        log.warning("[ORB auto-execute] place_pending_order failed: %s", e)
+        log.warning("[ORB auto-execute] open_manual_market_order failed: %s", e)
         asyncio.create_task(telegram_alerts.send_message(
             f"*ORB/IVB Auto-Execute Failed*\nDirection: {mt5_direction}\nError: {e}",
             None, "orb_auto_execute_failed",
         ))
         return
 
-    if ack.get("type") != "pending_order_placed":
-        err = ack.get("error", "unknown error")
-        log.warning("[ORB auto-execute] EA rejected pending order: %s", err)
-        asyncio.create_task(telegram_alerts.send_message(
-            f"*ORB/IVB Auto-Execute Rejected*\nDirection: {mt5_direction}\nError: {err}",
-            None, "orb_auto_execute_rejected",
-        ))
-        return
-
-    ticket = ack.get("ticket")
-    now = time.time()
-    signal_id = str(uuid.uuid4())[:16]
-    with db_module.db() as conn:
-        conn.execute(
-            """INSERT INTO vantage_signals
-               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                tp1,lot_size,notes,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (signal_id, "ORB/IVB Report (auto)", mt5_direction,
-             report["entry_zone_low"], report["entry_zone_high"], stop_loss, target, lot,
-             f"ORB/IVB pending order @ {price:.2f} (EA ticket {ticket})",
-             "pending", now),
-        )
-        conn.execute(
-            """INSERT INTO vantage_pending_orders
-               (trade_id,signal_id,tg_message_id,channel_name,direction,price,stop_loss,
-                tps_json,pcts_json,be_at_pos,tp_open,lot_size,ea_ticket,status,created_at,strategy)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (trade_id, signal_id, None, "ORB/IVB Report (auto)", mt5_direction, price, stop_loss,
-             json.dumps({1: target}), json.dumps([1.0]), 0, 0, lot, ticket,
-             "working", now, strategy),
-        )
+    entry = float(result.get("entry_price", 0) or 0)
+    ticket = result.get("mt5_ticket", "—")
     log.info(
-        "[ORB auto-execute] pending %s ticket=%s @ %.2f stop=%.2f target=%.2f lot=%.2f",
-        mt5_direction, ticket, price, stop_loss, target, lot,
+        "[ORB auto-execute] %s filled @ %.2f stop=%.2f target=%.2f ticket=%s",
+        mt5_direction, entry, stop_loss, target, ticket,
     )
     asyncio.create_task(telegram_alerts.send_message(
-        f"*ORB/IVB Limit Order Placed*\nDirection: {mt5_direction}\n"
-        f"Price: {price:.2f}\nStop: {stop_loss:.2f}\nTarget: {target:.2f}\n"
-        f"Lot: {lot:g}\nEA ticket: {ticket}",
+        f"*ORB/IVB Market Order Placed*\nDirection: {mt5_direction}\n"
+        f"Entry: {entry:.2f}\nStop: {stop_loss:.2f}\nTarget: {target:.2f}\n"
+        f"EA ticket: {ticket}",
         None, "orb_auto_execute_placed",
     ))

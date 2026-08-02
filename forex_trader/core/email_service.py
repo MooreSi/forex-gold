@@ -441,21 +441,23 @@ def build_weekly_html(
 
 _ORB_CHART_CID = "orb_chart"
 
-_DIRECTION_LABEL = {"bullish": ("Bullish breakout", _GREEN),
-                    "bearish": ("Bearish breakout", _RED),
-                    "inside":  ("Inside range — no breakout yet", _GOLD)}
+_DIRECTION_LABEL = {"bullish":     ("Bullish breakout", _GREEN),
+                    "bearish":     ("Bearish breakout", _RED),
+                    "inside":      ("Inside range — no breakout yet", _GOLD),
+                    "unconfirmed": ("Broke opening range — unconfirmed", _GOLD)}
 
 
 def build_orb_chart_image(report: dict) -> Optional[bytes]:
     """
-    Renders the opening range, volume-profile POC/value-area, and (once
-    broken) the entry/stop/target zone as a PNG for inline embedding.
-    Returns None if matplotlib isn't available or there's nothing to plot —
-    callers must handle a None return (send without the chart) rather than
-    treat it as an error, since a missing chart shouldn't block the report.
+    Renders the London opening range, the Asian range as horizontal
+    reference lines, and (once a breakout is confirmed) the stop/target
+    levels as a PNG for inline embedding. Returns None if matplotlib isn't
+    available or there's nothing to plot — callers must handle a None
+    return (send without the chart) rather than treat it as an error,
+    since a missing chart shouldn't block the report.
     """
     candles = report.get("candles") or []
-    if not candles:
+    if not candles or "or_start" not in report:
         return None
     try:
         import matplotlib
@@ -489,27 +491,25 @@ def build_orb_chart_image(report: dict) -> Optional[bytes]:
             ax.add_patch(Rectangle((xi - width / 2, body_bottom), width, body_height,
                                     facecolor=color, edgecolor=color))
 
-        r_start = date2num(_dt.fromtimestamp(report["window_start"], tz=_tz.utc))
-        r_end   = date2num(_dt.fromtimestamp(report["window_end"], tz=_tz.utc))
-        ax.add_patch(Rectangle(
-            (r_start, report["range_low"]), r_end - r_start,
-            report["range_height"], facecolor=_GOLD, alpha=0.15,
-            edgecolor=_GOLD, linewidth=1, zorder=0,
-        ))
+        or_start = date2num(_dt.fromtimestamp(report["or_start"], tz=_tz.utc))
+        or_end   = date2num(_dt.fromtimestamp(report["or_end"], tz=_tz.utc))
+        if "or_high" in report:
+            ax.add_patch(Rectangle(
+                (or_start, report["or_low"]), or_end - or_start,
+                report["or_range"], facecolor=_GOLD, alpha=0.15,
+                edgecolor=_GOLD, linewidth=1, zorder=0,
+            ))
 
-        ax.axhline(report["poc"], color="#a855f7", linewidth=1.3, linestyle="--")
-        ax.axhline(report["vah"], color=_BLUE, linewidth=0.8, linestyle=":")
-        ax.axhline(report["val"], color=_BLUE, linewidth=0.8, linestyle=":")
-        ax.text(x[-1], report["poc"], " POC", color="#a855f7", fontsize=8, va="center")
+        if "asia_high" in report:
+            ax.axhline(report["asia_high"], color=_BLUE, linewidth=0.8, linestyle=":")
+            ax.axhline(report["asia_low"], color=_BLUE, linewidth=0.8, linestyle=":")
+            ax.text(x[-1], report["asia_high"], " Asia High", color=_BLUE, fontsize=8, va="bottom")
+            ax.text(x[-1], report["asia_low"], " Asia Low", color=_BLUE, fontsize=8, va="top")
 
         direction = report.get("direction", "inside")
         label, label_color = _DIRECTION_LABEL.get(direction, ("", _SUB))
 
         if direction in ("bullish", "bearish"):
-            box_color = _GREEN if direction == "bullish" else _RED
-            ax.axhspan(report["entry_zone_low"], report["entry_zone_high"],
-                       xmin=(r_end - x[0]) / max(x[-1] - x[0], 1e-9), xmax=1,
-                       facecolor=box_color, alpha=0.12)
             ax.axhline(report["target"], color=_GREEN, linewidth=1.3)
             ax.axhline(report["stop"], color=_RED, linewidth=1.3)
             ax.text(x[-1], report["target"], f" Target ${report['target']:.2f}",
@@ -517,9 +517,9 @@ def build_orb_chart_image(report: dict) -> Optional[bytes]:
             ax.text(x[-1], report["stop"], f" Stop ${report['stop']:.2f}",
                     color=_RED, fontsize=8, va="top")
             rr = report.get("rr")
-            title = f"London ORB/IVB — {label}" + (f" — R:R {rr:.2f}:1" if rr else "")
+            title = f"London ORB — {label}" + (f" — R:R {rr:.2f}:1" if rr else "")
         else:
-            title = f"London ORB/IVB — {label}"
+            title = f"London ORB — {label}"
 
         ax.set_title(title, color=_GOLD, fontsize=11, loc="left", fontweight="bold")
         ax.xaxis_date()
@@ -543,22 +543,24 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
     date_str = date_str or datetime.now().strftime("%A, %d %B %Y")
 
     current_price = float(report.get("current_price", 0) or 0)
-    range_high   = report.get("range_high")
-    range_low    = report.get("range_low")
-    range_height = report.get("range_height")
-    poc, vah, val = report.get("poc"), report.get("vah"), report.get("val")
+    asia_high, asia_low, asia_range = (
+        report.get("asia_high"), report.get("asia_low"), report.get("asia_range")
+    )
+    or_high, or_low, or_range = (
+        report.get("or_high"), report.get("or_low"), report.get("or_range")
+    )
     direction    = report.get("direction", "inside")
     position_note = report.get("position_note", "")
 
     label, label_color = _DIRECTION_LABEL.get(direction, ("", _SUB))
 
-    range_str = (
-        f"${range_low:.2f} – ${range_high:.2f}  ({range_height:.1f} pts)"
-        if range_high is not None and range_low is not None else "not available"
+    asia_str = (
+        f"${asia_low:.2f} – ${asia_high:.2f}  ({asia_range:.1f} pts)"
+        if asia_high is not None and asia_low is not None else "not available"
     )
-    profile_str = (
-        f"POC ${poc:.2f}  ·  Value Area ${val:.2f} – ${vah:.2f}"
-        if poc is not None else "not available"
+    or_str = (
+        f"${or_low:.2f} – ${or_high:.2f}  ({or_range:.1f} pts)"
+        if or_high is not None and or_low is not None else "still forming"
     )
 
     chart_html = (
@@ -570,35 +572,36 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 
     if direction in ("bullish", "bearish"):
         rr = report.get("rr")
-        n = report.get("target_sample_n", 0)
-        is_default = report.get("target_is_default", True)
-        confidence_note = (
-            f"default 2.0x multiple — only {n} clean-breakout day(s) measured so far, "
-            f"building history daily" if is_default else
-            f"empirically measured from the last {n} clean-breakout days on this account"
-        )
+        target2 = report.get("target2")
         trade_section = f"""
   <tr><td style="background:{_BG};padding:16px 24px;">
     <h3 style="margin:0 0 12px;color:{_GOLD};font-size:13px;
-               text-transform:uppercase;letter-spacing:1px;">Reload Zone Setup</h3>
+               text-transform:uppercase;letter-spacing:1px;">Breakout Setup</h3>
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      {_stat_cell("ENTRY ZONE", f"${report['entry_zone_low']:.2f}–${report['entry_zone_high']:.2f}")}
       {_stat_cell("STOP", f"${report['stop']:.2f}", _RED)}
-      {_stat_cell("TARGET", f"${report['target']:.2f}", _GREEN)}
+      {_stat_cell("TARGET (2:1)", f"${report['target']:.2f}", _GREEN)}
+      {_stat_cell("TARGET 2 (3:1)", f"${target2:.2f}" if target2 else "—", _GREEN)}
       {_stat_cell("R:R", f"{rr:.2f}:1" if rr else "—", _GOLD)}
     </tr></table>
     <p style="margin:12px 0 0;color:{_SUB};font-size:11px;">
-      Target = breakout level ± {report.get('target_multiple', 2.0):.2f}× the Asian
-      range height ({confidence_note}).
-      Stop = breakout level ± {report.get('sl_range_pct', 0.50) * 100:.0f}% of the Asian range height.
+      Stop = midpoint of the London opening range. Target = 2x the resulting
+      risk (auto-executed); Target 2 = 3x risk, shown for reference only —
+      the automated path closes fully at Target, it does not manage a
+      partial-close ladder.
     </p>
+  </td></tr>"""
+    elif direction == "unconfirmed":
+        trade_section = f"""
+  <tr><td style="background:{_BG};padding:16px 24px;">
+    <p style="margin:0;color:{_SUB};font-size:12px;font-style:italic;">
+      {position_note}</p>
   </td></tr>"""
     else:
         trade_section = f"""
   <tr><td style="background:{_BG};padding:16px 24px;">
     <p style="margin:0;color:{_SUB};font-size:12px;font-style:italic;">
-      No breakout yet — waiting for price to clear the Asian range before a
-      reload-zone setup can be framed.</p>
+      No confirmed breakout yet — waiting for price to clear both the
+      London opening range and the Asian range in the same direction.</p>
   </td></tr>"""
 
     return f"""<!DOCTYPE html>
@@ -606,7 +609,7 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FOREX Trader — London ORB/IVB Report</title>
+  <title>FOREX Trader — London ORB Report</title>
 </head>
 <body style="margin:0;padding:20px 10px;background:{_DARK};font-family:Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0">
@@ -615,7 +618,7 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
        style="max-width:620px;width:100%;border-radius:12px;
               box-shadow:0 4px 24px rgba(0,0,0,0.5);">
 
-  {_header_html("London Open — ORB/IVB Report", date_str)}
+  {_header_html("London Open — ORB Report", date_str)}
 
   <!-- Current price + direction -->
   <tr><td style="background:{_CARD};padding:8px 16px;">
@@ -629,15 +632,17 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 
   {chart_html}
 
-  <!-- Pre-London reference range + volume profile (the last hour before
-       London open, breakout evaluated within the first 15 min of London) -->
+  <!-- Asian range (00:00-08:00 UTC, confirmation filter) + London opening
+       range (08:00-08:15 UTC, the traded range) -->
   <tr><td style="background:{_BG};padding:16px 24px;">
     <h3 style="margin:0 0 8px;color:{_GOLD};font-size:13px;
-               text-transform:uppercase;letter-spacing:1px;">Pre-London Range (last 1h before London open)</h3>
+               text-transform:uppercase;letter-spacing:1px;">Asian Range (00:00–08:00 UTC)</h3>
+    <p style="margin:0 0 12px;color:{_TEXT};font-size:16px;font-family:monospace;font-weight:bold;">
+      {asia_str}</p>
+    <h3 style="margin:0 0 8px;color:{_GOLD};font-size:13px;
+               text-transform:uppercase;letter-spacing:1px;">London Opening Range (08:00–08:15 UTC)</h3>
     <p style="margin:0 0 6px;color:{_TEXT};font-size:16px;font-family:monospace;font-weight:bold;">
-      {range_str}</p>
-    <p style="margin:0 0 6px;color:{_TEXT};font-size:13px;font-family:monospace;">
-      {profile_str}</p>
+      {or_str}</p>
     <p style="margin:0 0 6px;color:{_SUB};font-size:13px;">{position_note}</p>
   </td></tr>
 
@@ -645,11 +650,10 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 
   <tr><td style="background:{_DARK};padding:10px 24px;">
     <p style="margin:0;color:#4b5563;font-size:10px;">
-      ORB (Opening Range Breakout) + IVB (Initial Value Balance) method adapted
-      from Faber Vaale's "The Simplest Orderflow Trading Model" — opening-range
-      breakout for direction, volume-profile framing for the reload-zone entry.
-      Order-flow (footprint) confirmation is not implemented.
-      Volume is MT5 tick-volume (a broker-side proxy), not exchange volume.</p>
+      Classic Opening Range Breakout: the London session's first 15 minutes
+      set the traded range; a breakout only counts once it also clears the
+      whole Asian session's range. Stop at the opening range's midpoint,
+      target at 2x the resulting risk.</p>
   </td></tr>
 
   {_footer_html("ORB")}

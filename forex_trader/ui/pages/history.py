@@ -150,7 +150,7 @@ def render(get_engine: Callable):
             best_lbl   = _perf_card("Best Trade — Daily",   "$—",   "text-green-400")
             worst_lbl  = _perf_card("Worst Trade — Daily",  "$—",   "text-red-400")
             maxdd_lbl  = _perf_card("Max Drawdown",         "—%",   "text-orange-400")
-            maxru_lbl  = _perf_card("Max Run-Up",           "—%",   "text-teal-400")
+            roi_lbl    = _perf_card("ROI",                  "—%",   "text-teal-400")
         src_lbl = ui.label("").classes("text-xs text-gray-600")
 
     async def refresh_perf():
@@ -170,7 +170,12 @@ def render(get_engine: Callable):
                 best_lbl.text   = f"${d_best:+.2f}" if d_closed else "$—"
                 worst_lbl.text  = f"${d_worst:+.2f}" if d_closed else "$—"
                 maxdd_lbl.text  = f"{p.get('max_drawdown_pct', 0.0):.2f}%"
-                maxru_lbl.text  = f"{p.get('max_runup_pct', 0.0):.2f}%"
+                roi_pct = p.get("roi_pct", 0.0)
+                roi_lbl.text = f"{roi_pct:+.2f}%"
+                roi_lbl.classes(replace=(
+                    "text-base font-bold font-mono leading-none "
+                    + ("text-teal-400" if roi_pct >= 0 else "text-red-400")
+                ))
                 daily_lbl.text  = f"${d_pnl:+.2f}"
                 src_lbl.text    = "MT5 — Local daily"
                 # Colour daily P&L by sign

@@ -271,12 +271,28 @@ def render() -> None:
             wr_sub_lbl = ui.label("Win Rate").classes("text-xs text-gray-600")
 
     # ── Stats cards ───────────────────────────────────────────────────────────
+    # Matches breakout_panel.py's stat-tile styling (per-tile color, tooltip,
+    # fixed size) for visual consistency across the signal-generator panels.
     stat_cards: dict = {}
-    with ui.row().classes("w-full px-4 py-2 gap-3 flex-wrap"):
-        for key in ["Total", "Wins", "Losses", "B/E", "Win Rate", "Avg P&L", "Total P&L"]:
-            with ui.card().classes("bg-gray-800 px-3 py-2 rounded"):
-                ui.label(key).classes("text-xs text-gray-500")
-                stat_cards[key] = ui.label("—").classes("text-sm font-bold font-mono text-white")
+    with ui.row().classes("w-full gap-3 flex-wrap px-4 pt-3"):
+        for label, color, tip in [
+            ("Total Signals", "text-gray-200",  "Total reversal signals generated"),
+            ("Wins",          "text-green-400", "Signals that hit TP1 or better"),
+            ("Losses",        "text-red-400",   "Signals that hit stop-loss"),
+            ("B/E",           "text-yellow-400","Break-even closes (SL moved to entry)"),
+            ("Win Rate",      "text-blue-300",  "Wins as % of all closed signals"),
+            ("Pending",       "text-gray-400",  "Signals not yet triggered"),
+            ("Avg P&L ($)",   "text-gray-200",  "Average dollar P&L per closed trade"),
+            ("Total P&L ($)", "text-gray-200",  "Cumulative virtual P&L"),
+        ]:
+            with ui.card().classes(
+                "bg-gray-800 rounded-lg px-3 py-2 text-center flex-none"
+                " w-32 min-h-[4.5rem] flex flex-col items-center justify-center"
+            ):
+                val_lbl = ui.label("—").classes(f"text-lg font-bold {color}")
+                ui.label(label).classes("text-xs text-gray-500 leading-tight mt-0.5")
+                ui.tooltip(tip)
+            stat_cards[label] = val_lbl
 
     ui.separator()
 
@@ -299,26 +315,6 @@ def render() -> None:
                     ui.label("Active Positions").classes(
                         "text-sm font-bold text-yellow-300"
                     )
-                    _limit_order_val = bool(db_module.get_risk_settings().get("re_use_limit_order", 0))
-                    limit_order_sw = ui.switch(
-                        "LIMIT ORDER", value=_limit_order_val,
-                    ).classes("text-xs").props("dense color=amber")
-                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                        "ON: live-executed signals are routed via the EA as a genuine "
-                        "MT5 pending limit order at the signal's entry zone. If the EA "
-                        "is unreachable when a signal triggers, falls back to the normal "
-                        "market-fill flow automatically. OFF: acts as it does now "
-                        "(immediate market fill)."
-                    )
-
-                    def _toggle_limit_order(e):
-                        db_module.update_risk_settings({"re_use_limit_order": 1 if e.value else 0})
-                        ui.notify(
-                            f"Reversal Engine LIMIT ORDER {'enabled' if e.value else 'disabled'}",
-                            type="positive" if e.value else "info",
-                        )
-
-                    limit_order_sw.on_value_change(_toggle_limit_order)
 
                 open_container = ui.column().classes("w-full gap-2")
 
@@ -434,13 +430,20 @@ def render() -> None:
         # Stats
         try:
             stats = await db_module.to_db_thread(re_db.get_stats)
-            stat_cards["Total"].text    = str(stats["total"])
-            stat_cards["Wins"].text     = str(stats["wins"])
-            stat_cards["Losses"].text   = str(stats["losses"])
-            stat_cards["B/E"].text      = str(stats["bes"])
-            stat_cards["Win Rate"].text = f"{stats['win_rate']:.1f}%"
-            stat_cards["Avg P&L"].text  = f"${stats['avg_pnl']:+.2f}"
-            stat_cards["Total P&L"].text= f"${stats['total_pnl']:+.2f}"
+            stat_cards["Total Signals"].text = str(stats["total"])
+            stat_cards["Wins"].text          = str(stats["wins"])
+            stat_cards["Losses"].text        = str(stats["losses"])
+            stat_cards["B/E"].text           = str(stats["bes"])
+            stat_cards["Win Rate"].text      = f"{stats['win_rate']:.1f}%"
+            stat_cards["Pending"].text       = str(stats["pending"])
+            stat_cards["Avg P&L ($)"].text   = f"${stats['avg_pnl']:+.2f}"
+            stat_cards["Avg P&L ($)"].classes(
+                replace=f"text-lg font-bold {_pnl_color(stats['avg_pnl'])}"
+            )
+            stat_cards["Total P&L ($)"].text = f"${stats['total_pnl']:+.2f}"
+            stat_cards["Total P&L ($)"].classes(
+                replace=f"text-lg font-bold {_pnl_color(stats['total_pnl'])}"
+            )
             wr_lbl.text = f"{stats['win_rate']:.1f}%"
             wr_sub_lbl.text = f"Win Rate ({stats['wins']}W / {stats['losses']}L)"
         except Exception:

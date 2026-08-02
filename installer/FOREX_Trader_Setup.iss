@@ -19,7 +19,7 @@
 ;   requires. No third-party download plugin, no local prerequisite files.
 
 #define AppName      "FOREX Trader"
-#define AppVersion   "1.1.0"
+#define AppVersion   "BETA"
 #define AppPublisher "FOREX Trader"
 #define AppURL       "http://localhost:8888"
 #define AppExeName   "Setup && Start FOREX.bat"

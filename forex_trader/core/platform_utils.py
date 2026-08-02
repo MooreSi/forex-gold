@@ -253,3 +253,36 @@ def delayed_relaunch_cmd(
         args_str = " ".join(extra_args) if extra_args else ""
         args_part = f" {args_str}" if args_str else ""
         return ["bash", "-c", f"sleep {delay_secs} && '{python}' '{script}'{args_part}"]
+
+
+def restart_app(root) -> None:
+    """Spawn a detached relaunch of run.py after a delay, then shut this
+    process down -- the shared restart mechanism used by both the header
+    Power dialog and the Settings > Update "apply update" flow
+    (core_app_update.py). Caller is responsible for notifying the user and
+    for calling this from a context where `nicegui.app.shutdown()` makes
+    sense (a running NiceGUI server); this function performs the shutdown
+    itself as its final step.
+    """
+    from pathlib import Path
+    root = Path(root)
+    if sys.platform == "win32":
+        venv_python = root / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = root / ".venv" / "bin" / "python3"
+    python = str(venv_python) if venv_python.exists() else sys.executable
+
+    from forex_trader.config import USER_DATA_DIR
+    log_path = USER_DATA_DIR / "data" / "restart.log"
+    with open_restart_log(log_path) as _restart_log:
+        subprocess.Popen(
+            delayed_relaunch_cmd(python, "run.py", delay_secs=5, extra_args=["--no-browser"]),
+            cwd=str(root),
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=_restart_log,
+            stderr=_restart_log,
+        )
+
+    from nicegui import app
+    app.shutdown()

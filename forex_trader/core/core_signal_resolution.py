@@ -27,7 +27,7 @@ from forex_trader.core.core_close_trade import get_trading_balance
 from forex_trader.core.core_fees_sizing import suggest_lot_size
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
 from forex_trader.core.core_strategy_params import get_strategy_params
-from forex_trader.core.core_trading_schedule import check_trading_schedule
+from forex_trader.core.core_trading_schedule import check_trading_schedule, get_schedule_strategy_override
 from forex_trader.core.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
@@ -153,9 +153,28 @@ async def resolve_open_trade_params(
     if not _sched_ok:
         raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
 
-    # Resolve strategy: channel override > auto-Claude rec > global Active Strategy.
+    # Resolve strategy: Trading Schedule window override > channel override >
+    # auto-Claude rec > global Active Strategy.
     _ch_src_early = sig.get("source_name") or ""
     _ch_override  = db_module.get_channel_strategy_override(_ch_src_early)
+
+    # Trading Schedule per-window override (Trading > Schedule) -- when the
+    # schedule is enabled and the active window has a strategy/template
+    # assigned, it wins over this channel's own Channel Strategy pick for as
+    # long as that window is active. SOURCE_KEYS are per-engine, not
+    # per-channel -- "Reversal Engine"/"Breakout Engine" are this function's
+    # own literal source_name for those engines' signals (see
+    # reversal_engine_live_execute.py/breakout_signal_live_execute.py); every
+    # other source_name is a Telegram channel.
+    _sched_src_key = (
+        "reversal_engine" if _ch_src_early == "Reversal Engine" else
+        "breakout_engine" if _ch_src_early == "Breakout Engine" else
+        "telegram"
+    )
+    _sched_override = get_schedule_strategy_override(_sched_src_key)
+    if _sched_override:
+        _ch_override = _sched_override
+
     if _ch_override == "auto":
         _rec = db_module.get_channel_strategy_rec(_ch_src_early)
         strategy = _rec.get("strategy") or rs.get("trade_strategy", STRATEGY_SCALE_OUT)

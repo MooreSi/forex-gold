@@ -221,8 +221,6 @@ from forex_trader.core.core_template_placeholder_repair import (
 )
 from forex_trader.core.core_orb_report import (
     build_orb_report as _build_orb_report_impl,
-    get_orb_target_multiple as _get_orb_target_multiple_impl,
-    backtest_orb_target_multiple as _backtest_orb_target_multiple_impl,
     orb_auto_execute as _orb_auto_execute_impl,
 )
 from forex_trader.core.core_pending_signal_activation import (
@@ -2724,76 +2722,16 @@ class SimulationEngine:
             await asyncio.sleep(60)
 
     # ── Morning ORB / IVB report ──────────────────────────────────────────────
-    # Adapted from Faber Vaale's "The Simplest Orderflow Trading Model"
-    # (youtube.com/watch?v=cUTsoU-15Tc) — the IVB (Initial Value Balance)
-    # method: define an opening range, overlay a volume profile on it to find
-    # the POC and value area, use the value-area-edge-to-POC band as the
-    # "reload zone" entry after a breakout+retracement (tighter, better R:R
-    # than fading the whole range), and a statistically-derived target
-    # ("protection level"). The video uses the NY session's first 15/30 min;
-    # this account trades gold around the London open instead, so the same
-    # mechanics are applied to the first hour of the London session (Europe/
-    # London local time, so it's DST-correct year-round) rather than NY —
-    # widened from an initial 15-minute window after backtesting showed the
-    # first 15 minutes is dominated by fakeouts (see the scheduler comment
-    # below for the numbers). This matches Market Profile's classic "Initial
-    # Balance" definition. The video's "protection level" comes from DeepCharts' own
-    # proprietary ML model trained on data this app doesn't have access to —
-    # rather than fabricate a number, _get_orb_target_multiple() computes a
-    # genuine analog from this account's own MT5 history (see below).
-    # Order-flow confirmation (the video's "Model 2" — reading absorption/
-    # exhaustion in the footprint at the reload zone) is deliberately not
-    # implemented here; it needs genuine tick-level bid/ask data, which is a
-    # separate, larger undertaking than this report.
+    # Classic Opening-Range-Breakout methodology (rebuilt 2026-08-01) --
+    # see core_orb_report.py's module docstring for the full rationale:
+    # whole-Asian-session (00:00-08:00 UTC) range as a confirmation filter,
+    # the first 15 minutes of London (08:00-08:15 UTC) as the traded
+    # opening range, stop at the opening range's midpoint, target at 2x the
+    # resulting risk. Delegates entirely to core_orb_report.build_orb_report
+    # -- this method only exists as SimulationEngine's public entry point.
 
     async def build_orb_report(self) -> Optional[dict]:
-        """
-        Reference range is the Asian session (00:00-08:00 UTC, the same
-        calendar day) rather than a freshly-forming first-hour-of-London
-        range. Standard London-breakout convention trades the breakout of
-        the ALREADY-ESTABLISHED Asian range the moment London opens — not a
-        brand-new range built from London's own first hour, which this
-        report used until 2026-07-17.
-
-        Why: the Asian range averages ~4x wider than the old London-hour
-        range (~48pt vs ~13pt over a 14-day sample, 2026-07-15). Building a
-        volume-profile stop from an already-13pt window left nowhere for
-        VAL/VAH to spread — confirmed live: all 4 real orb_fixed trades to
-        date hit SL, 3 of them with a stop under 1pt on gold (smaller than
-        typical spread). Switching the reference range to the wider Asian
-        session, and deriving the stop from a fixed fraction of ITS height
-        (_ORB_SL_RANGE_PCT) instead of an inner volume-profile boundary,
-        fixes both: the range itself is more stable, and the stop no longer
-        depends on how tightly volume happens to cluster within it.
-
-        Also means the report is available the instant London opens rather
-        than only after waiting out a full extra hour for a new range to
-        form — the Asian range is already complete by then.
-        """
         return await _build_orb_report_impl(self._bridge)
-
-    # ── Empirical target-multiple backtest ────────────────────────────────────
-
-    async def _get_orb_target_multiple(self) -> dict:
-        """Cached wrapper — the backtest only needs to run once per day."""
-        return await _get_orb_target_multiple_impl(self._bridge)
-
-    async def _backtest_orb_target_multiple(self) -> dict:
-        """
-        Genuine, disclosed analog to the video's proprietary "protection
-        level" — measures, over this account's own recent gold history, how
-        far price actually travelled past the Asian session range on days
-        it cleanly broke one side only after London open, expressed as a
-        multiple of that day's range height. Falls back to the standard
-        ORB-literature 2x default if there isn't yet enough clean-breakout
-        history.
-
-        Reference range matches build_orb_report's own basis (see that
-        method's docstring) — must stay in sync, since a mismatch here would
-        calibrate the multiplier against a different-sized unit than what
-        the live report actually multiplies it by.
-        """
-        return await _backtest_orb_target_multiple_impl(self._bridge)
 
     # ── Email scheduler ───────────────────────────────────────────────────────
 

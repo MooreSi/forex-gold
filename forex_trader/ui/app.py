@@ -751,27 +751,9 @@ def main_page():
         async def _do_restart():
             _power_dialog.close()
             ui.notify("Restarting — browser will reconnect in ~5 seconds...", type="info")
-            # Use the venv Python directly — sys.executable resolves symlinks to
-            # the system Python which has none of the venv packages installed.
-            if sys.platform == "win32":
-                venv_python = root / ".venv" / "Scripts" / "python.exe"
-            else:
-                venv_python = root / ".venv" / "bin" / "python3"
-            python = str(venv_python) if venv_python.exists() else sys.executable
-            from forex_trader.core.platform_utils import delayed_relaunch_cmd, open_restart_log
-            from forex_trader.config import USER_DATA_DIR
-            log_path = USER_DATA_DIR / "data" / "restart.log"
-            with open_restart_log(log_path) as _restart_log:
-                subprocess.Popen(
-                    delayed_relaunch_cmd(python, "run.py", delay_secs=5, extra_args=["--no-browser"]),
-                    cwd=str(root),
-                    start_new_session=True,
-                    stdin=subprocess.DEVNULL,
-                    stdout=_restart_log,
-                    stderr=_restart_log,
-                )
+            from forex_trader.core.platform_utils import restart_app
             await asyncio.sleep(1)
-            app.shutdown()
+            restart_app(root)
 
         async def _do_stop():
             _power_dialog.close()
@@ -930,6 +912,78 @@ def main_page():
         ui.element("div").classes("w-px bg-gray-700 self-stretch mx-2")
         eq_val   = _stat_inline("EQUITY")
         eq_sub   = ui.label("").classes("text-xs pr-3 leading-none")
+
+        # ── GitHub "Update Available" badge (2026-08-01) ─────────────────────
+        # Hidden entirely when no update is available -- only ever shown once
+        # a git fetch against origin/main confirms new commits. Click opens a
+        # popup with the pending commit summary; confirming pulls, reinstalls
+        # dependencies, and restarts (core_app_update.py / platform_utils.
+        # restart_app, the same relaunch mechanism the Power dialog uses).
+        update_badge = ui.button("Update Available", icon="new_releases").props(
+            "dense unelevated color=green"
+        ).classes("text-xs shrink-0 ml-1 animate-pulse")
+        update_badge.set_visibility(False)
+        _pending_update: dict = {"commits": []}
+
+        with ui.dialog() as _update_dialog, ui.card().classes(
+            "bg-gray-800 p-5 rounded-lg min-w-96 max-w-lg"
+        ):
+            ui.label("Update Available").classes("text-base font-semibold text-white mb-1")
+            ui.label(
+                "New commits are available on github.com/MooreSi/forex."
+            ).classes("text-xs text-gray-400 mb-2")
+            _update_dialog_body = ui.column().classes(
+                "w-full gap-0.5 max-h-72 overflow-y-auto"
+            )
+            _update_dialog_status = ui.label("").classes("text-xs mt-2")
+
+            async def _do_apply_update():
+                _update_dialog_status.text = "Updating — pulling latest code, reinstalling dependencies..."
+                _update_dialog_status.classes(replace="text-xs text-orange-300 mt-2")
+                from forex_trader.core import core_app_update
+                result = await core_app_update.apply_update()
+                if not result["ok"]:
+                    _update_dialog_status.text = f"Update failed: {result['error']}"
+                    _update_dialog_status.classes(replace="text-xs text-red-400 mt-2")
+                    return
+                ui.notify("Update applied — restarting...", type="positive")
+                from forex_trader.core.platform_utils import restart_app
+                await asyncio.sleep(1)
+                restart_app(root)
+
+            with ui.row().classes("gap-2 mt-3 justify-end"):
+                ui.button("Cancel", on_click=_update_dialog.close).props("flat")
+                ui.button("Update Now", on_click=_do_apply_update).classes(
+                    "bg-green-700 text-white"
+                )
+
+        def _open_update_dialog():
+            _update_dialog_body.clear()
+            with _update_dialog_body:
+                commits = _pending_update.get("commits") or []
+                if commits:
+                    for c in commits:
+                        ui.label(f"{c['short_sha']}  {c['summary']}").classes(
+                            "text-xs font-mono text-gray-300 leading-relaxed"
+                        )
+                else:
+                    ui.label("New commits are available.").classes("text-xs text-gray-400")
+            _update_dialog_status.text = ""
+            _update_dialog.open()
+
+        update_badge.on("click", _open_update_dialog)
+
+        async def _check_github_update():
+            from forex_trader.core import core_app_update
+            try:
+                result = await core_app_update.check_for_update()
+            except Exception:
+                return
+            _pending_update["commits"] = result.get("commits", [])
+            update_badge.set_visibility(bool(result.get("available")))
+
+        ui.timer(2.0, _check_github_update, once=True)
+        ui.timer(600.0, _check_github_update)  # re-check every 10 minutes
 
         ui.space()
 

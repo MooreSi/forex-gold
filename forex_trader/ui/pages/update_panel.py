@@ -8,6 +8,7 @@ The status cards refresh every 5 seconds so the page stays accurate without
 the user having to navigate away and back.
 """
 
+import asyncio
 from pathlib import Path
 
 from nicegui import ui
@@ -25,11 +26,127 @@ def _read_changelog() -> list[str]:
     return []
 
 
+_GITHUB_REPO_URL = "https://github.com/MooreSi/forex"
+
+
+def _render_github_update_card() -> None:
+    """GitHub-based self-update (2026-08-01) -- a separate mechanism from
+    the admin-push "App Updates" card below: this one checks/pulls directly
+    from https://github.com/MooreSi/forex via git, client-initiated, rather
+    than waiting for an administrator to push a build. See
+    core_app_update.py for the git fetch/pull implementation."""
+    from forex_trader.core import core_app_update
+
+    with ui.card().classes("w-full bg-gray-800 border border-gray-700 p-4 rounded-lg"):
+        with ui.row().classes("items-center gap-2 mb-3"):
+            ui.icon("hub", color="purple-400")
+            ui.label("GitHub Updates").classes("text-base font-bold text-purple-300")
+            ui.link("MooreSi/forex", _GITHUB_REPO_URL, new_tab=True).classes(
+                "text-xs text-gray-500 ml-auto"
+            )
+
+        status_row = ui.row().classes("w-full items-center gap-3 flex-wrap")
+        commits_container = ui.column().classes("w-full gap-1 mt-2")
+        action_row = ui.row().classes("gap-2 mt-3")
+        status_lbl = ui.label("").classes("text-xs text-orange-300 mt-1")
+
+        _state = {"checking": False, "applying": False, "commits": []}
+
+        def _draw():
+            status_row.clear()
+            with status_row:
+                with ui.column().classes("gap-0"):
+                    ui.label("Local commit").classes("text-xs text-gray-500 uppercase")
+                    local_sha = _state.get("local_sha")
+                    ui.label(local_sha[:7] if local_sha else "—").classes(
+                        "text-sm font-bold font-mono text-gray-200"
+                    )
+                if _state.get("available"):
+                    ui.element("div").classes("w-px bg-gray-700 self-stretch mx-1")
+                    with ui.column().classes("gap-0"):
+                        ui.label("Latest commit").classes("text-xs text-gray-500 uppercase")
+                        remote_sha = _state.get("remote_sha") or ""
+                        ui.label(remote_sha[:7]).classes(
+                            "text-sm font-bold font-mono text-green-400"
+                        )
+                ui.element("div").classes("w-px bg-gray-700 self-stretch mx-1")
+                if _state.get("checking"):
+                    ui.badge("Checking...", color="grey").classes("text-xs")
+                elif _state.get("error"):
+                    ui.badge("Check failed", color="red").classes("text-xs")
+                elif _state.get("available"):
+                    ui.badge(f"{len(_state['commits'])} new commit(s)", color="green").classes("text-xs")
+                else:
+                    ui.badge("Up to date", color="grey").classes("text-xs")
+
+            commits_container.clear()
+            if _state.get("available") and _state["commits"]:
+                with commits_container, ui.scroll_area().style("max-height:160px"):
+                    with ui.column().classes("gap-0.5"):
+                        for c in _state["commits"]:
+                            ui.label(f"{c['short_sha']}  {c['summary']}").classes(
+                                "text-xs font-mono text-gray-300 leading-relaxed"
+                            )
+
+            action_row.clear()
+            with action_row:
+                ui.button(
+                    "Check for Updates", icon="refresh", on_click=lambda: _check(),
+                ).props("dense outline").classes("text-xs")
+                if _state.get("available"):
+                    ui.button(
+                        "Update", icon="download",
+                        on_click=lambda: _apply(),
+                    ).props("dense unelevated").classes("bg-green-700 text-white text-xs")
+
+            if _state.get("error"):
+                status_lbl.text = f"Error: {_state['error']}"
+                status_lbl.classes(replace="text-xs text-red-400 mt-1")
+            elif _state.get("applying"):
+                status_lbl.text = "Updating — pulling latest code, reinstalling dependencies..."
+                status_lbl.classes(replace="text-xs text-orange-300 mt-1")
+            else:
+                status_lbl.text = ""
+
+        async def _check():
+            _state["checking"] = True
+            _draw()
+            result = await core_app_update.check_for_update()
+            _state["checking"] = False
+            _state.update(result)
+            _draw()
+
+        async def _apply():
+            _state["applying"] = True
+            _draw()
+            result = await core_app_update.apply_update()
+            if not result["ok"]:
+                _state["applying"] = False
+                _state["error"] = result["error"]
+                _draw()
+                return
+            ui.notify("Update applied — restarting...", type="positive")
+            from forex_trader.core.platform_utils import restart_app
+            await asyncio.sleep(1)
+            restart_app(Path(__file__).parent.parent.parent.parent)
+
+        ui.label(
+            "Pulls directly from the GitHub repository above via git. "
+            "Update reinstalls dependencies and restarts the app automatically "
+            "— your browser reconnects on its own a few seconds later."
+        ).classes("text-xs text-gray-500 leading-relaxed mt-1")
+
+        _draw()
+        ui.timer(0.1, _check, once=True)
+
+
 def render():
     version = _app_version()
     token   = get_or_create_token()
 
     with ui.column().classes("w-full gap-4"):
+
+        _render_github_update_card()
 
         # ── Update available banner (dynamic) ────────────────────────────────
         banner = ui.element("div").classes("w-full")

@@ -1129,10 +1129,14 @@ def _render_market_order_form(engine):
 
 
 def _render_orb_report(engine):
-    """London open ORB/IVB report — trades the breakout of the last hour
-    before London opens, evaluated within the first 15 minutes of London,
-    volume profile, reload-zone entry setup, manual execute, and an
-    auto-execute-every-morning toggle (places a genuine EA pending order)."""
+    """London opening-range-breakout report — classic ORB methodology
+    (https://www.litefinance.org/blog/for-beginners/trading-strategies/opening-range-breakout-strategy/):
+    the whole Asian session (00:00-08:00 UTC) is a confirmation filter, the
+    first 15 minutes of London (08:00-08:15 UTC) is the traded opening
+    range, a breakout only counts once price clears BOTH in the same
+    direction. Stop at the opening range's midpoint, target at 2x the
+    resulting risk (auto-executed as a genuine market order once
+    confirmed) with an informational-only 3x level shown alongside it."""
     import base64
     from forex_trader.core import email_service
 
@@ -1153,22 +1157,23 @@ def _render_orb_report(engine):
         with container:
             if not report:
                 ui.label(
-                    "No ORB report available yet — this builds from the last hour "
-                    "before London opens and is only available during the first 15 "
-                    "minutes after London opens."
+                    "No ORB report available yet — this builds from the whole Asian "
+                    "session plus the first 15 minutes of London, and is only "
+                    "available from London open onward."
                 ).classes("text-gray-500 text-sm italic p-4")
                 return
 
             direction = report.get("direction", "inside")
             _label = {"bullish": ("BREAKOUT — BULLISH", "text-green-400"),
                       "bearish": ("BREAKOUT — BEARISH", "text-red-400"),
+                      "unconfirmed": ("BROKE OPENING RANGE — UNCONFIRMED", "text-amber-400"),
                       "inside": ("INSIDE RANGE", "text-gray-400")}
             status_txt, status_col = _label.get(direction, ("—", "text-gray-400"))
 
             with ui.card().classes("w-full max-w-3xl bg-gray-800 p-6 rounded-lg"):
                 with ui.row().classes("items-center gap-2 mb-2"):
                     ui.icon("candlestick_chart").classes("text-amber-400 text-xl")
-                    ui.label("London Open — ORB/IVB Report").classes("text-lg font-bold text-yellow-300")
+                    ui.label("London Open — ORB Report").classes("text-lg font-bold text-yellow-300")
 
                 with ui.row().classes("items-center gap-4 mb-3"):
                     ui.label(f"Current price: ${float(report.get('current_price', 0) or 0):.2f}").classes(
@@ -1176,16 +1181,27 @@ def _render_orb_report(engine):
                     )
                     ui.label(status_txt).classes(f"text-sm font-bold {status_col}")
 
-                # Pre-London reference range (last hour before London open) + volume profile
-                with ui.grid(columns=4).classes("w-full text-sm gap-2 mb-2"):
+                if report.get("phase") == "forming":
+                    ui.label(report.get("position_note", "")).classes("text-sm text-gray-400 italic mb-2")
                     _stat_cell(
-                        "PRE-LONDON RANGE",
-                        f"${report['range_low']:.2f} – ${report['range_high']:.2f}  "
-                        f"({report['range_height']:.1f} pts)",
+                        "ASIAN RANGE (00:00–08:00 UTC)",
+                        f"${report['asia_low']:.2f} – ${report['asia_high']:.2f}  "
+                        f"({report['asia_range']:.1f} pts)",
                     )
-                    _stat_cell("POC", f"${report['poc']:.2f}")
-                    _stat_cell("VALUE AREA", f"${report['val']:.2f} – ${report['vah']:.2f}")
-                    _stat_cell("WINDOW", "London open + 15min")
+                    return
+
+                # Asian range (filter) + London opening range (traded range)
+                with ui.grid(columns=2).classes("w-full text-sm gap-2 mb-2"):
+                    _stat_cell(
+                        "ASIAN RANGE (00:00–08:00 UTC)",
+                        f"${report['asia_low']:.2f} – ${report['asia_high']:.2f}  "
+                        f"({report['asia_range']:.1f} pts)",
+                    )
+                    _stat_cell(
+                        "LONDON OPENING RANGE (08:00–08:15 UTC)",
+                        f"${report['or_low']:.2f} – ${report['or_high']:.2f}  "
+                        f"({report['or_range']:.1f} pts)",
+                    )
 
                 if report.get("position_note"):
                     ui.label(report["position_note"]).classes("text-xs text-gray-500 mb-3")
@@ -1200,32 +1216,27 @@ def _render_orb_report(engine):
                     b64 = base64.b64encode(chart_png).decode()
                     ui.image(f"data:image/png;base64,{b64}").classes("w-full rounded mb-3")
 
-                # Reload-zone entry/exit setup, if a breakout has happened
+                # Breakout entry/exit setup, once confirmed
                 if direction in ("bullish", "bearish"):
                     rr = report.get("rr")
-                    n = report.get("target_sample_n", 0)
-                    is_default = report.get("target_is_default", True)
-                    confidence_note = (
-                        f"default 2.0x multiple — only {n} clean-breakout day(s) measured so far"
-                        if is_default else
-                        f"empirically measured from the last {n} clean-breakout days on this account"
-                    )
+                    target2 = report.get("target2")
 
-                    ui.label("Reload Zone Setup").classes(
+                    ui.label("Breakout Setup").classes(
                         "text-xs font-semibold text-amber-300 uppercase tracking-wide mt-2 mb-1"
                     )
                     with ui.grid(columns=4).classes("w-full text-sm gap-2 mb-1"):
-                        _stat_cell(
-                            "ENTRY ZONE",
-                            f"${report['entry_zone_low']:.2f} – ${report['entry_zone_high']:.2f}",
-                        )
                         _stat_cell("STOP", f"${report['stop']:.2f}", "text-red-400")
-                        _stat_cell("TARGET", f"${report['target']:.2f}", "text-green-400")
+                        _stat_cell("TARGET (2:1)", f"${report['target']:.2f}", "text-green-400")
+                        _stat_cell(
+                            "TARGET 2 (3:1, info only)",
+                            f"${target2:.2f}" if target2 else "—", "text-green-400",
+                        )
                         _stat_cell("R:R", f"{rr:.2f}:1" if rr else "—", "text-amber-300")
                     ui.label(
-                        f"Target = breakout level x {report.get('target_multiple', 2.0):.2f} of the "
-                        f"Asian range height ({confidence_note}). Stop = breakout level ± "
-                        f"{report.get('sl_range_pct', 0.50) * 100:.0f}% of the Asian range height."
+                        "Stop = midpoint of the London opening range. Target = 2x the "
+                        "resulting risk (auto-executed). Target 2 = 3x risk, shown for "
+                        "reference only — the automated path closes fully at Target, "
+                        "it does not manage a partial-close ladder."
                     ).classes("text-xs text-gray-500 mb-3")
 
                     mt5_direction = "BUY" if direction == "bullish" else "SELL"
@@ -1270,7 +1281,7 @@ def _render_orb_report(engine):
                             exec_btn.enable()
 
                     exec_btn = ui.button(
-                        f"Execute {mt5_direction} at Market — ORB/IVB Setup",
+                        f"Execute {mt5_direction} at Market — ORB Setup",
                         on_click=_execute_orb,
                     ).classes("bg-amber-600 hover:bg-amber-500 text-white w-full py-3 text-base font-semibold")
 
@@ -1292,10 +1303,16 @@ def _render_orb_report(engine):
                             db_module.update_risk_settings({"orb_lot_size": float(e.value or 0)})
 
                         lot_inp.on_value_change(_lot_change)
+                elif direction == "unconfirmed":
+                    ui.label(
+                        "Price broke the London opening range but is still inside the "
+                        "Asian range — not confirmed. The manual Execute button appears "
+                        "once price also clears the Asian range in the same direction."
+                    ).classes("text-xs text-gray-500 italic mb-2")
                 else:
                     ui.label(
                         "No breakout yet — the manual Execute button appears once price "
-                        "clears the Asian range."
+                        "clears both the London opening range and the Asian range."
                     ).classes("text-xs text-gray-500 italic mb-2")
 
                 # Auto-execute toggle
@@ -1587,9 +1604,12 @@ def _render_schedule():
         "profit target is met trading pauses until the next window. Each window also "
         "independently allows/blocks Telegram, Reversal Engine, and Breakout Engine -- "
         "unchecking one for a window blocks only that source's live execution there, "
-        "the others are unaffected. Signal generation and Telegram ingestion keep "
-        "running regardless -- this only blocks the final order-placement step, and "
-        "only for automated (not manual) orders."
+        "the others are unaffected. A window's Override dropdown, when set, forces "
+        "whichever sources are ticked onto that strategy/EA template for as long as "
+        "the window is active, taking priority over each channel's own Channel "
+        "Strategy pick. Signal generation and Telegram ingestion keep running "
+        "regardless -- this only blocks/redirects the final order-placement step, "
+        "and only for automated (not manual) orders."
     ).classes("text-xs text-gray-500 mb-3")
 
     with ui.row().classes("items-center gap-2 mb-3"):
@@ -1603,6 +1623,16 @@ def _render_schedule():
             "0 = disabled -- reverts to each window's own Target $ above (and if "
             "every window's target is also 0, there is no profit cap at all)."
         )
+
+    # Strategy/EA-template options for the per-window override dropdown --
+    # same combined-enumeration pattern as _render_channel_strategy_card's
+    # strat_opts, minus "Inherit Global"/"Auto (Claude)" (those describe a
+    # per-channel fallback that doesn't map onto a time window).
+    from forex_trader.core import core_ea_templates as _sched_et
+    _sched_strat_opts = {"": "— No Override —"}
+    _sched_strat_opts.update(STRATEGY_NAMES)
+    for _t in _sched_et.list_ea_templates():
+        _sched_strat_opts[_sched_et.override_for_template(_t["name"])] = f"Template: {_t['name']}"
 
     _day_widgets: dict[str, list[dict]] = {}
 
@@ -1644,9 +1674,22 @@ def _render_schedule():
                         ).props("dense").tooltip(
                             "Allow Breakout Engine live execution during this window"
                         )
+                        strat_ov = ui.select(
+                            _sched_strat_opts,
+                            value=block.get("strategy_override") or "",
+                            label="Override",
+                        ).props("dense outlined").classes("w-48").tooltip(
+                            "While this window is active and the Trading Schedule is "
+                            "enabled, force whichever of Telegram/Reversal Engine/"
+                            "Breakout Engine are ticked above onto this strategy or EA "
+                            "template, overriding each channel's own Channel Strategy "
+                            "pick for the duration of the window. No Override = normal "
+                            "per-channel resolution, unaffected by this window."
+                        )
                         _day_widgets[day].append({
                             "enabled": en, "start": start, "end": end, "target": target,
                             "telegram": tg_chk, "reversal_engine": re_chk, "breakout_engine": bo_chk,
+                            "strategy_override": strat_ov,
                         })
 
     def _save():
@@ -1659,6 +1702,9 @@ def _render_schedule():
                     end_val   = str(w["end"].value or "23:59").strip()
                     sched._parse_hm(start_val)  # validates HH:MM, raises on bad input
                     sched._parse_hm(end_val)
+                    _strat_ov_val = w["strategy_override"].value
+                    if isinstance(_strat_ov_val, dict):
+                        _strat_ov_val = _strat_ov_val.get("value")
                     blocks.append({
                         "enabled": bool(w["enabled"].value),
                         "start":   start_val,
@@ -1667,6 +1713,7 @@ def _render_schedule():
                         "telegram":         bool(w["telegram"].value),
                         "reversal_engine":  bool(w["reversal_engine"].value),
                         "breakout_engine":  bool(w["breakout_engine"].value),
+                        "strategy_override": _strat_ov_val or "",
                     })
                 new_schedule[day] = blocks
         except Exception as e:
@@ -2390,13 +2437,6 @@ def _render_ea_templates_card() -> None:
                 name_input = ui.input(
                     "Template name", value=state["name"] or "",
                 ).classes("w-56").props("dense outlined")
-                ui.button("Send to EA", on_click=lambda: _send_to_ea()) \
-                    .classes("text-xs bg-green-800 text-white").props("dense") \
-                    .tooltip(
-                        "Push these values to the running EA right now. Without "
-                        "this they still apply, but only from the next signal "
-                        "onward (a template is sent with every trade open)."
-                    )
 
             # ── Section header helper ────────────────────────────────────
             # Every major block below is its own bordered card with a
@@ -2491,7 +2531,7 @@ def _render_ea_templates_card() -> None:
                     ui.label("").classes("text-xs")
                     for n in range(1, N + 1):
                         ui.label(f"TP{n}").classes("text-xs text-center text-gray-400")
-                    ui.label("pips").classes("text-xs text-gray-500 self-center")
+                    ui.label("pips from entry").classes("text-xs text-gray-500 self-center")
                     for n in range(1, N + 1):
                         num = ui.number(
                             value=float(live[f"{prefix}{n}_pips"]), step=1.0, min=0,
@@ -2503,7 +2543,7 @@ def _render_ea_templates_card() -> None:
                             num.bind_enabled_from(
                                 tg_switch, "value", backward=lambda v: not v)
                         fields[f"{prefix}{n}_pips"] = num
-                    ui.label("%").classes("text-xs text-gray-500 self-center")
+                    ui.label("% of trade to close").classes("text-xs text-gray-500 self-center")
                     for n in range(1, N + 1):
                         fields[f"{prefix}{n}_pct"] = ui.number(
                             value=float(live[f"{prefix}{n}_pct"]), step=1.0, min=0, max=100,
@@ -2687,6 +2727,13 @@ def _render_ea_templates_card() -> None:
                     "Save Template", on_click=lambda: _save(name_input),
                 ).classes("text-xs font-semibold bg-green-700 text-white px-4") \
                     .props("dense unelevated")
+                ui.button("Send to EA", on_click=lambda: _send_to_ea()) \
+                    .classes("text-xs bg-green-800 text-white").props("dense") \
+                    .tooltip(
+                        "Push these values to the running EA right now. Without "
+                        "this they still apply, but only from the next signal "
+                        "onward (a template is sent with every trade open)."
+                    )
                 if state["name"]:
                     ui.button(
                         "Delete", on_click=lambda: _delete(state["name"]),
@@ -3032,207 +3079,14 @@ def _render_strategy(engine):
         with ui.card().classes("w-full bg-gray-800 p-2 rounded-lg"):
             _render_ea_templates_card()
 
-        # ── 3-card row ────────────────────────────────────────────────────────
-        with ui.row().classes("w-full gap-4 flex-wrap items-start"):
-
-            # ── Card 1: Active Strategy ───────────────────────────────────────
-            with ui.card().classes("bg-gray-800 p-4 rounded-lg shrink-0 w-72"):
-                ui.label("Active Strategy").classes("text-base font-bold text-yellow-300 mb-1")
-                ui.label(
-                    "Strategy is selected per-channel in Channel Strategy above. "
-                    "The settings below apply regardless of which strategy is running."
-                ).classes("text-xs text-gray-500 italic mb-3")
-
-                # ── Internal Engine Exposure ──────────────────────────────
-                from forex_trader.core import core_internal_exposure_guard as _ieg
-                ui.separator().classes("my-3")
-                with ui.row().classes("items-center gap-2 mb-1"):
-                    ui.icon("compare_arrows").classes("text-blue-400 text-base")
-                    ui.label("Internal Engine Exposure").classes(
-                        "text-sm font-semibold text-blue-300"
-                    )
-                    ui.icon("info_outline", size="xs").classes(
-                        "text-blue-400 cursor-help"
-                    ).tooltip(
-                        "Applies ONLY to the internal signal generators "
-                        "(Reversal, Breakout, Bounce). Telegram-channel trades "
-                        "are never affected by this setting."
-                    )
-                ui.label(
-                    "The internal engines have no hedge guard of their own — each engine only "
-                    "blocks a duplicate in the SAME direction at the same level, and the "
-                    "cross-engine check ignores an engine's own signals. So a BUY and a SELL "
-                    "can sit open together. This controls whether that's allowed."
-                ).classes("text-xs text-gray-500 mb-2")
-
-                hedge_mode_sel = ui.select(
-                    {
-                        _ieg.MODE_OFF:          "Off — no restriction (default)",
-                        _ieg.MODE_SELF_HEDGE:   "Self-Hedge Guard — block opposing positions",
-                        _ieg.MODE_NET_EXPOSURE: "Net Exposure Cap — limit net directional lots",
-                    },
-                    value=(rs.get("internal_hedge_mode") or _ieg.MODE_OFF),
-                    label="Mode",
-                ).classes("w-full").props("dense outlined")
-
-                net_cap_num = ui.number(
-                    "Net exposure cap (lots)",
-                    value=float(rs.get("internal_net_exposure_max_lots", 0.30) or 0.30),
-                    min=0.0, step=0.01, format="%.2f",
-                ).classes("w-full mt-1").props("dense outlined").tooltip(
-                    "Only used by Net Exposure Cap mode. Net = total BUY lots minus "
-                    "total SELL lots across all open internal-engine trades. "
-                    "0 = no cap (mode effectively disabled)."
-                )
-
-                with ui.column().classes("gap-0 mt-2"):
-                    ui.label("Off — no restriction (default)").classes(
-                        "text-xs font-semibold text-gray-300")
-                    ui.label(
-                        "Long-standing behaviour, nothing is blocked. Opposing positions are "
-                        "allowed to open freely. Worth knowing before changing this: on 86 "
-                        "closed Reversal Engine trades (21–27 Jul), overlapping opposing pairs "
-                        "were 19% of trades but produced ~80% of total profit — 7 of 8 pairs "
-                        "had both legs win, and only one pair ever cancelled out (−$15.21). "
-                        "For a mean-reversion engine, buying support while selling resistance "
-                        "in a range is the strategy working, not a fault."
-                    ).classes("text-xs text-gray-500 mb-2")
-
-                    ui.label("Self-Hedge Guard").classes(
-                        "text-xs font-semibold text-gray-300")
-                    ui.label(
-                        "Blocks a new internal-engine trade whenever ANY opposing-direction "
-                        "internal trade is already open. Strictest option: one direction at a "
-                        "time across all three engines combined. Best suited to trending "
-                        "conditions, where holding both sides tends to mean one leg is simply "
-                        "wrong. Costs you the range-play behaviour described above."
-                    ).classes("text-xs text-gray-500 mb-2")
-
-                    ui.label("Net Exposure Cap").classes(
-                        "text-xs font-semibold text-gray-300")
-                    ui.label(
-                        "Allows opposing positions but caps how far the book can lean one way. "
-                        "A hedge is always permitted because it REDUCES net exposure; what "
-                        "gets blocked is stacking further in whichever direction already "
-                        "dominates. Example at a 0.30 cap: net +0.20 long, a new 0.10 BUY "
-                        "takes it to +0.30 and is allowed; a further 0.10 BUY would reach "
-                        "+0.40 and is blocked — but a 0.10 SELL is allowed at any time, since "
-                        "it brings net back toward flat. The middle-ground option: keeps the "
-                        "range play, limits one-way pile-ups. A cap of 0 disables the check."
-                    ).classes("text-xs text-gray-500 mb-1")
-
-                ui.label(
-                    "Blocked trades are skipped for live execution only — the signal is still "
-                    "generated, tracked, and used for learning, exactly like the other "
-                    "execution gates."
-                ).classes("text-xs text-gray-600 italic mb-1")
-
-                def save_strategy():
-                    try:
-                        _hm = hedge_mode_sel.value
-                        if isinstance(_hm, dict):
-                            _hm = _hm.get("value")
-                        db_module.update_risk_settings({
-                            "internal_hedge_mode":     _hm or _ieg.MODE_OFF,
-                            "internal_net_exposure_max_lots": float(net_cap_num.value or 0.30),
-                        })
-                        ui.notify("Settings saved", type="positive")
-                    except Exception as ex:
-                        ui.notify(str(ex), type="negative")
-
-                ui.button("Save Settings", on_click=save_strategy).classes(
-                    "bg-blue-700 text-white mt-3 px-4 py-2 text-sm"
-                )
-
-                # Auto-Execution moved to Parsing > Logic Keywords tab (2026-07-23).
-
-                # ── Dynamic Position Management ───────────────────────────────
-                ui.separator().classes("my-3")
-                with ui.row().classes("items-center gap-2 mb-1"):
-                    ui.icon("psychology").classes("text-blue-400 text-base")
-                    ui.label("Dynamic Position Management").classes(
-                        "text-sm font-semibold text-blue-300"
-                    )
-                    dpm_enabled_val = bool(rs.get("dpm_enabled", 0))
-                    dpm_badge = ui.badge(
-                        "DPM ON" if dpm_enabled_val else "DPM OFF",
-                        color="blue" if dpm_enabled_val else "grey",
-                    )
-
-                dpm_chk = ui.checkbox(
-                    "Hand off to adaptive management",
-                    value=dpm_enabled_val,
-                ).classes("text-sm text-gray-200")
-
-                def _dpm_toggle(e):
-                    db_module.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
-                    dpm_badge.props(f"color={'blue' if e.value else 'grey'}")
-                    dpm_badge.text = "DPM ON" if e.value else "DPM OFF"
-                    ui.notify(
-                        "DPM enabled — strategy control handed off" if e.value
-                        else "DPM disabled — strategy selection restored",
-                        type="positive" if e.value else "info",
-                    )
-
-                dpm_chk.on_value_change(_dpm_toggle)
-
-                # ── DPM Profit Take ───────────────────────────────────────────
-                with ui.row().classes("items-end gap-2 mt-2 w-full"):
-                    with ui.column().classes("flex-1 gap-0"):
-                        with ui.row().classes("items-center gap-1"):
-                            ui.label("Profit Take ($)").classes(
-                                "text-xs text-gray-400 font-medium"
-                            )
-                            ui.icon("info_outline", size="xs").classes(
-                                "text-blue-400 cursor-help"
-                            ).tooltip(
-                                "Close the remaining position when cumulative profit — "
-                                "partial closes already taken plus unrealised P&L on "
-                                "remaining lots — reaches this amount.\n"
-                                "Example: set $150 and DPM will keep managing the trade "
-                                "through its normal TP levels until the running total "
-                                "hits $150, then close everything.\n"
-                                "0 = DPM decides entirely (no dollar cap)."
-                            )
-                        dpm_profit_inp = ui.number(
-                            value=float(rs.get("profit_close_usd", 0.0) or 0.0),
-                            min=0.0, step=5.0, format="%.2f",
-                            placeholder="0 = DPM decides",
-                        ).classes("w-full")
-
-                    def _save_dpm_profit():
-                        try:
-                            val = max(0.0, float(dpm_profit_inp.value or 0))
-                            db_module.update_risk_settings({"profit_close_usd": val})
-                            if val > 0:
-                                ui.notify(
-                                    f"Profit take set to ${val:.2f} — DPM will close when "
-                                    f"cumulative profit reaches this amount",
-                                    type="positive",
-                                )
-                            else:
-                                ui.notify(
-                                    "Profit take cleared — DPM manages profit levels entirely",
-                                    type="info",
-                                )
-                        except Exception as ex:
-                            ui.notify(str(ex), type="negative")
-
-                    ui.button("Set", on_click=_save_dpm_profit).classes(
-                        "bg-blue-700 text-white px-3 text-xs"
-                    ).style("height:30px; min-width:44px;")
-
-                ui.label(
-                    "Automatically adjusts trail distance, breakeven timing and "
-                    "partial close size using ATR, session and momentum. "
-                    "Set a Profit Take amount above to cap the cumulative target — "
-                    "otherwise DPM decides entirely."
-                ).classes("text-xs text-gray-400 mt-2 leading-relaxed")
-
-                # Immediate Market Buy/Sell moved to Parsing > Logic Keywords tab (2026-07-23).
-
-            # ── Card 1b: Risk Settings ──────────────────────────────────────────
-            render_risk_card("bg-gray-800 p-4 rounded-lg shrink-0 w-72")
+        # ── Risk Settings (full width, own internal 3+2 sub-card layout) ────────
+        # Internal Engine Exposure and DPM (formerly on an "Active Strategy" card
+        # here) moved into Risk Settings itself (2026-08-01) — strategy is
+        # selected per-channel in Channel Strategy above, so a separate "Active
+        # Strategy" card had no strategy-selection content of its own left to
+        # justify existing as a distinct tab/card. render_risk_card lays out its
+        # own five sub-cards (3 top row + 2 bottom row); no outer card here.
+        render_risk_card("w-full")
 
         # ── Quick comparison table ─────────────────────────────────────────────
         compare_container = ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-2")

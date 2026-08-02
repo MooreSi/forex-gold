@@ -1,4 +1,4 @@
-## v0.8.2 — ORB Auto-Execute Fix, R:R Tracking & Version Reporting
+## v0.42 — ORB Auto-Execute Fix, R:R Tracking & Version Reporting
 
 ### ORB/IVB report
 - Auto-execute now places a pending order that waits for price to retest the reported reload zone (60-minute expiry, Telegram alert if never retested) instead of firing an immediate market order — fixes large entry-price slippage vs. the reported plan
@@ -16,7 +16,7 @@
 ### App
 - Fixed version reporting drift — Settings > Update "Installed Version" and the admin console's per-client version display now read the same canonical version source (VERSION file, derived from version_history.py) as the rest of the app, instead of a separately-maintained file that had fallen out of sync
 
-## v0.7.1 — ML Engine Overhaul, Signal Bus & Silent Mac Launcher
+## v0.31 — ML Engine Overhaul, Signal Bus & Silent Mac Launcher
 
 ### Signal generator ML engines (all three: Bounce, Breakout, Reversal Engine)
 - Switched from binary win/loss classifier to R-multiple regressor (LightGBM/SGDRegressor)
@@ -52,7 +52,7 @@
 - Already-running detection: opens browser directly if port 8888 is listening
 - Restart loop (exit 42) handled in VBScript; first-run falls back to visible setup window
 
-## v0.6 — Remote Admin, Signal Generators & AI Analysis
+## v0.23 — Remote Admin, Signal Generators & AI Analysis
 
 - Remote admin system: WebSocket server on admin machine (port 8443, TLS encrypted)
 - Admin panel in top banner: password-protected, shows connected clients with version and diagnostics
@@ -68,7 +68,7 @@
 - Session label fix: Markets Closed shown correctly when enabled sessions are outside their hours
 - Active trade duplicate badge fix (chart page and active trades tab)
 
-## v0.5 — Bounce Generator & Real-Time Monitoring
+## v0.22 — Bounce Generator & Real-Time Monitoring
 
 - TEST tab renamed to Bounce Generator
 - Signals section added to Trading > Strategy
@@ -77,7 +77,7 @@
 - Outcome check interval reduced to 5 seconds
 - Message detection latency reduced to ~18 ms
 
-## v0.4 — Performance Improvements
+## v0.21 — Performance Improvements
 
 - MT5 bridge persistent HTTP connection (~1.5ms round-trip)
 - Adaptive monitor loop: 1-second polling when trades open
@@ -85,7 +85,7 @@
 - Telegram latency improvements (ConnectionTcpAbridged)
 - TG Learning mode for signal scoring
 
-## v0.3 — TEST Module (Claude Bounce Generator)
+## v0.2 — TEST Module (Claude Bounce Generator)
 
 - TEST tab with isolated Claude-powered signal generator
 - Virtual trading engine with 2% risk sizing
@@ -93,7 +93,7 @@
 - Post-trade learning notes and batch pattern analysis
 - Circuit breaker after 3 consecutive losses
 
-## v0.2 — Bug Fixes
+## v0.11 — Bug Fixes
 
 - Fixed MT5 broker UTC+3 timestamp offset
 - Signal parser edge cases for GD2 channel

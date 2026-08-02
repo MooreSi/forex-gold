@@ -14,7 +14,7 @@ only from the automated open_trade_from_signal() path. core_manual_market_order.
 never calls resolve_open_trade_params(), so manual orders are exempt by
 construction, with no special-casing needed here or in open_trade() itself.
 
-Per-source toggles (2026-07-24): each of the 7x3 windows also independently
+Per-source toggles (2026-07-24): each of the 7x4 windows also independently
 gates Telegram / Reversal Engine / Breakout Engine (SOURCE_KEYS) -- see
 check_trading_schedule()'s `source` parameter. Reversal Engine performs well
 overnight (Asia) but loses during London/NY, the opposite of the Telegram
@@ -22,6 +22,19 @@ channels, so a single blanket automated-order switch isn't enough; each
 engine's own live-execution path (reversal_engine_live_execute.py,
 breakout_signal_live_execute.py) now calls this with its own source key,
 alongside the four pre-existing Telegram call sites.
+
+Per-window strategy/EA-template override (2026-08-01): each window also
+carries an optional `strategy_override` -- a STRATEGY_* key or a
+"template:<name>" override string, same shape as
+core_db_channel.get_channel_strategy_override()'s return value. When the
+schedule is enabled and the current time falls inside a window with this
+set, get_schedule_strategy_override() returns it and
+core_signal_resolution.resolve_open_trade_params() substitutes it in place
+of that signal's normal per-channel override -- so a window can force every
+source enabled for it (whichever of Telegram/Reversal Engine/Breakout
+Engine are ticked) onto one strategy/template regardless of what's picked
+per-channel on the Trading page, for as long as that window is active. A
+4th window per day was added alongside this (BLOCKS_PER_DAY 3 -> 4).
 
 Storage: app_config keys "trading_schedule_enabled" (plain "1"/"0") and
 "trading_schedule" (JSON), same pattern as trading.py's hidden_strategies.
@@ -46,7 +59,8 @@ log = logging.getLogger(__name__)
 DAY_NAMES = [
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 ]
-BLOCKS_PER_DAY = 3
+BLOCKS_PER_DAY = 4
+_PRE_WINDOW4_BLOCKS_PER_DAY = 3  # schedules saved before the 4th window existed
 
 
 SOURCE_KEYS = ("telegram", "reversal_engine", "breakout_engine")
@@ -59,9 +73,12 @@ def _default_block() -> dict:
     # Per-source toggles (2026-07-24) default True -- a schedule saved before
     # this feature existed must keep allowing every source exactly as before,
     # not suddenly block Reversal Engine/Breakout Engine because a new field
-    # is missing.
+    # is missing. strategy_override (2026-08-01) defaults "" -- no override,
+    # same "fall back to normal per-channel resolution" behaviour a schedule
+    # saved before this field existed must keep getting.
     return {
         "enabled": False, "start": "00:00", "end": "23:59", "target": 0.0,
+        "strategy_override": "",
         **{k: True for k in SOURCE_KEYS},
     }
 
@@ -71,8 +88,15 @@ def _default_schedule() -> dict:
 
 
 def get_trading_schedule() -> dict:
-    """Return the full 7-day x 3-block schedule, filling in defaults for any
-    missing/malformed day so callers never need to guard against KeyError."""
+    """Return the full 7-day x 4-block schedule, filling in defaults for any
+    missing/malformed day so callers never need to guard against KeyError.
+
+    A schedule saved before the 4th window was added (2026-08-01) has exactly
+    _PRE_WINDOW4_BLOCKS_PER_DAY (3) stored blocks per day -- padded with a
+    trailing default (disabled) block rather than discarded outright, so
+    upgrading doesn't silently wipe every previously-configured window back
+    to defaults. Any OTHER wrong count is still treated as malformed data
+    and reset to full defaults for that day, exactly as before."""
     raw = db_module.get_app_config("trading_schedule")
     schedule = _default_schedule()
     if not raw:
@@ -83,7 +107,11 @@ def get_trading_schedule() -> dict:
         return schedule
     for day in DAY_NAMES:
         blocks = stored.get(day)
-        if not isinstance(blocks, list) or len(blocks) != BLOCKS_PER_DAY:
+        if not isinstance(blocks, list):
+            continue
+        if len(blocks) == _PRE_WINDOW4_BLOCKS_PER_DAY:
+            blocks = blocks + [_default_block()]
+        elif len(blocks) != BLOCKS_PER_DAY:
             continue
         merged = []
         for b in blocks:
@@ -94,6 +122,7 @@ def get_trading_schedule() -> dict:
                     "start":   str(b.get("start", "00:00")),
                     "end":     str(b.get("end", "23:59")),
                     "target":  float(b.get("target", 0) or 0),
+                    "strategy_override": str(b.get("strategy_override", "") or ""),
                     **{k: bool(b.get(k, True)) for k in SOURCE_KEYS},
                 })
             merged.append(block)
@@ -198,6 +227,27 @@ def _forward_trading_schedule_over_sync() -> None:
             _schedule_coro(srv.broadcast_trading_schedule())
     except Exception as e:
         log.debug("[Sync] trading schedule forward (server) failed: %s", e)
+
+
+def get_schedule_strategy_override(source: str) -> Optional[str]:
+    """Return the active window's strategy_override for `source` (a
+    STRATEGY_* key or a "template:<name>" override string, same shape as
+    core_db_channel.get_channel_strategy_override()'s return value), or None
+    if the schedule is off, no window is active, this window doesn't have
+    `source` enabled, or the active window has no override configured.
+
+    None means "no opinion" -- the caller should fall back to its own normal
+    (per-channel) strategy resolution exactly as before this feature
+    existed. This never blocks a trade the way check_trading_schedule's
+    profit-target gate does; it only substitutes which strategy is used."""
+    if not is_trading_schedule_enabled():
+        return None
+    now = datetime.now()
+    schedule = get_trading_schedule()
+    _idx, block = _find_active_block(schedule, now)
+    if block is None or not block.get(source, True):
+        return None
+    return block.get("strategy_override") or None
 
 
 def _parse_hm(hhmm: str) -> int:

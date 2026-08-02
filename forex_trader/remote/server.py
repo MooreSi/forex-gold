@@ -512,6 +512,55 @@ def approve_registration(token: str, display_name: str, subscription_type: str =
     return True
 
 
+def resign_all_licences() -> dict:
+    """Re-sign every approved token's licence key with the currently
+    registered sign_fn, pushing the refreshed key to anyone connected now.
+
+    Needed because switching the signing scheme (e.g. the HMAC keygen.py ->
+    Ed25519 migration) instantly invalidates every already-issued key against
+    the new verify.py — guard.py's enforce() runs before the remote-client
+    connection even starts, so an already-stuck client can't be reached by
+    any push at all; the only way to avoid stranding every existing customer
+    is to have the currently-connected ones self-heal automatically and the
+    rest pick up the corrected key the moment they next reconnect.
+
+    Ed25519 signing is deterministic (unlike the old HMAC scheme, this
+    produces identical bytes for identical inputs), so calling this
+    unconditionally on every admin-console startup is always safe: a key
+    already signed under the current scheme re-signs to the exact same
+    string (no-op, no re-push), while one signed under a retired scheme
+    changes and gets pushed. Returns {"resigned": N, "unchanged": N,
+    "skipped": N}.
+    """
+    if not _kg_sign_fn:
+        return {"resigned": 0, "unchanged": 0, "skipped": len(_allowed_tokens)}
+    resigned = unchanged = skipped = 0
+    for token, meta in _allowed_tokens.items():
+        machine_id = meta.get("machine_id", "")
+        if not machine_id:
+            skipped += 1
+            continue
+        try:
+            new_key = _kg_sign_fn(machine_id, meta.get("expiry_date", ""))
+        except Exception as exc:
+            log.warning("[RemoteServer] resign failed for %s: %s", token[:8], exc)
+            skipped += 1
+            continue
+        if new_key == meta.get("licence_key"):
+            unchanged += 1
+            continue
+        meta["licence_key"] = new_key
+        resigned += 1
+        entry = _connected.get(token)
+        if entry:
+            asyncio.create_task(_send_licence(entry["ws"], token))
+    if resigned:
+        _save_tokens()
+        log.info("[RemoteServer] Re-signed %d licence(s) with the current signing key "
+                  "(%d already current, %d skipped)", resigned, unchanged, skipped)
+    return {"resigned": resigned, "unchanged": unchanged, "skipped": skipped}
+
+
 async def _send_licence(ws, token: str) -> None:
     """Push MSG_LICENCE to a connected client."""
     tok_meta = _allowed_tokens.get(token, {})

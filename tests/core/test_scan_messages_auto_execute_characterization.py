@@ -83,6 +83,12 @@ def _make_engine(msgs, tick, group_name="TestChannel"):
     e._tg_reader = _FakeTgReader(msgs, group_name=group_name)
     e._cfg = {}
     e._bridge = _FakeBridge(tick)
+    # _make_scan_ctx binds the pipeline's collaborators eagerly, so the
+    # fixture has to set what the real __init__ always sets. The inline
+    # body read these lazily, which is why the fixture grew one
+    # attribute at a time (see _bridge above) instead of matching it.
+    e._dpm_candles = None
+    e._tg_off_warn_state = {}
     return e
 
 

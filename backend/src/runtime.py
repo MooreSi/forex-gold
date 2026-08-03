@@ -72,6 +72,18 @@ from backend.src.services.signals.scan_messages import (
     ScanCtx as _ScanCtx,
     scan_messages as _scan_messages_impl,
 )
+from backend.src.services.broker.bridge_process import (
+    start_bridge_process as _start_bridge_process_impl,
+)
+from backend.src.services.broker.position_sync import (
+    PositionSyncCtx as _PositionSyncCtx,
+    sync_closed_mt5_positions as _sync_closed_mt5_positions_impl,
+)
+from backend.src.services.positions.monitor_cycle import (
+    MonitorCtx as _MonitorCtx,
+    MonitorState as _MonitorState,
+    run_monitor_cycle as _run_monitor_cycle_impl,
+)
 from backend.src.services.positions.max_tp import (
     _tp_level_from_extreme,
     max_tp_checker_sweep as _max_tp_checker_sweep_impl,
@@ -261,9 +273,11 @@ class SimulationEngine:
         self._scanner_task: Optional[asyncio.Task] = None
         self._bot_task:     Optional[asyncio.Task] = None
         self._monitor_running = False
-        self._sync_cycle     = 0
-        self._profit_cycle   = 0
-        self._cal_cycle      = 0
+        # Cadence counters and adaptive-poll flags for the monitor loop.
+        # Were four loose attributes here; the cycle that owns them lives in
+        # services/positions/monitor_cycle.py now and mutates this object by
+        # reference, so the counts survive from one cycle to the next.
+        self._monitor_state = _MonitorState()
         self._bot_offset     = 0
         self._email_task:    Optional[asyncio.Task] = None
         # Incremented when a trade closes with gross profit > 0; UI polls to trigger sound
@@ -273,8 +287,6 @@ class SimulationEngine:
         self._active_group_names: dict[str, str] = {}   # group_id_str → name
         # Candle cache — refreshed once per monitor loop cycle, shared across all trades
         self._dpm_candles: list[dict] = []
-        # DXY candle cache — refreshed every ~60s for correlation bias
-        self._dpm_dxy_candles: list[dict] = []
         # In-memory TP trigger cache to avoid per-trade DB query every monitor cycle.
         # Maps trade_id → (set_of_triggered_tp_nums, cache_timestamp).
         # Invalidated on trade close; expires after _TP_CACHE_TTL regardless.
@@ -319,7 +331,6 @@ class SimulationEngine:
         # backoff, hammering the MT5 bridge for a failure that won't resolve
         # itself within seconds.
         self._pending_activation_retry_after: dict[str, float] = {}
-        self._dxy_cycle: int = 0
         # DPM bookkeeping in-memory state (which trade_ids have been recorded
         # this session, and the calibrated-params cache with its TTL) -- see
         # core_dpm_bookkeeping.DPMCache.
@@ -668,165 +679,47 @@ class SimulationEngine:
 
     # ── Monitor loop ──────────────────────────────────────────────────────────
 
+    def _make_monitor_ctx(self) -> _MonitorCtx:
+        """Bind one monitor cycle's collaborators.
+
+        state is passed by reference, not copied: the cycle counters and
+        the adaptive-poll flags have to survive into the next cycle.
+        dpm_candles stays on the runtime behind get/set because
+        open_trade_from_signal and the scan context read it too.
+        """
+        return _MonitorCtx(
+            state=self._monitor_state,
+            bridge=self._bridge,
+            cfg=self._cfg,
+            tp_trigger_cache=self._tp_trigger_cache,
+            dpm_cache=self._dpm_cache,
+            scale_out_last_fail=self._scale_out_last_fail,
+            pending_activation_retry_after=self._pending_activation_retry_after,
+            get_dpm_candles=lambda: self._dpm_candles,
+            set_dpm_candles=self._set_dpm_candles,
+            get_tick=self.get_tick,
+            get_open_trades=self.get_open_trades,
+            get_candles=self.get_candles,
+            is_trading_paused=self.is_trading_paused,
+            background_open_commentary=self.background_open_commentary,
+            close_full_after_tps=self._close_full_after_tps,
+            make_close_trade_ctx=self._make_close_trade_ctx,
+            sync_closed_mt5_positions=self._sync_closed_mt5_positions,
+        )
+
+    def _set_dpm_candles(self, candles: list) -> None:
+        self._dpm_candles = candles
+
     async def _monitor_loop(self) -> None:
-        _has_open_trades = False      # tracked across cycles for adaptive sleep
-        _has_pending_signals = False  # a queued zone-fill signal also needs fast polling
         while self._monitor_running:
-            try:
-                tick = await self.get_tick()
-                if tick:
-                    open_trades = await db_module.to_db_thread(self.get_open_trades)
-                    _has_open_trades = bool(open_trades)
-                    rs = await db_module.to_db_thread(db_module.get_risk_settings)
-                    profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
-                    # Refresh candle cache once per cycle (shared by all DPM trade handlers)
-                    if bool(rs.get("dpm_enabled", 0)) and open_trades:
-                        try:
-                            self._dpm_candles = await self.get_candles("M5", 30)
-                        except Exception:
-                            pass
-                        # DXY candles refreshed every ~60s (12 cycles × 5s)
-                        self._dxy_cycle += 1
-                        if self._dxy_cycle >= 12:
-                            self._dxy_cycle = 0
-                            try:
-                                dxy_sym = await db_module.to_db_thread(db_module.get_app_config, "dxy_symbol") or "USDX"
-                                fetched = await self._bridge.get_candles_for_symbol(
-                                    dxy_sym, "M5", 20
-                                )
-                                if fetched:
-                                    self._dpm_dxy_candles = fetched
-                            except Exception:
-                                pass
-                    _eff_strategy, _ooh_active = db_module.get_effective_strategy(rs)
-                    for trade in open_trades:
-                        # OOH overrides the per-trade strategy when the window is active.
-                        strategy = _eff_strategy if _ooh_active else trade.get("strategy", STRATEGY_SCALE_OUT)
-                        hit = _check_sl_impl(trade, tick)
-                        if hit:
-                            trade_id, price, reason = hit
-                            await _reconcile_sl_hit_impl(
-                                trade, tick, price, reason, self._bridge, self._make_close_trade_ctx(),
-                            )
-                            continue
-                        # Profit-close target check — cumulative (partials taken + unrealised).
-                        if await _check_profit_close_target_impl(
-                            trade, tick, profit_close_usd, self._bridge, self._make_close_trade_ctx(),
-                        ):
-                            continue
-                        # EA handoff: this trade's SL/TP/partial-close ladder is being
-                        # managed tick-by-tick inside the MT5 terminal itself, not by
-                        # the handlers below — skip them entirely while the EA is
-                        # healthy. If it's gone silent (crashed, chart removed, socket
-                        # dropped), reclaim management here rather than leaving the
-                        # trade with no one watching it — see ea_bridge.py's module
-                        # docstring for why Python must always be able to take back
-                        # over instead of just trusting the EA blindly forever.
-                        if trade.get("managed_by") == "ea":
-                            if await _reclaim_ea_managed_trade_impl(trade, strategy):
-                                continue
-
-                        dpm_enabled = bool(rs.get("dpm_enabled", 0))
-                        try:
-                            # ORB/IVB trades take priority over DPM and every
-                            # other handler — the whole point of this strategy
-                            # is "exactly the setup the report computed,
-                            # nothing recalculated," so it must never be swept
-                            # into DPM just because the global DPM toggle
-                            # happens to be on for everything else.
-                            if strategy == STRATEGY_ORB_FIXED:
-                                await _handle_orb_fixed_impl(trade, tick, self._bridge, self._tp_trigger_cache)
-                            elif dpm_enabled and not _ooh_active:
-                                await _handle_dynamic_position_management_impl(trade, tick, self._bridge, self._tp_trigger_cache, self._dpm_cache, self._dpm_candles, self._dpm_dxy_candles)
-                            elif strategy == STRATEGY_BE_RUNNER:
-                                await _handle_be_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail, dpm_candles=self._dpm_candles, close_full_after_tps=self._close_full_after_tps)
-                            elif strategy == STRATEGY_TRAIL_STOP:
-                                await _handle_trail_stop_impl(trade, tick, self._bridge, self._tp_trigger_cache)
-                            elif strategy == STRATEGY_PROTECTED_SCALE:
-                                await _handle_protected_scale_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                            elif strategy == STRATEGY_CONSERVATIVE:
-                                await _handle_conservative_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                            elif strategy == STRATEGY_SCALP_RUNNER:
-                                await _handle_scalp_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                            elif strategy in (STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER,
-                                              STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
-                                              STRATEGY_LIMIT_RUNNER):
-                                # TP-crossing detection for these five moved to
-                                # _tp_ladder_fast_loop (sub-second polling instead
-                                # of this loop's 1-5s cadence — see that method's
-                                # docstring). DPM still takes priority when
-                                # enabled (handled above, same as every other
-                                # strategy) — this branch only reached with DPM
-                                # off, where the fast loop is the sole owner.
-                                # Explicit no-op instead of falling through to
-                                # _handle_scale_out below, which would be wrong.
-                                pass
-                            elif strategy == STRATEGY_NO_SL_SCALE:
-                                await _handle_no_sl_scale_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                            elif strategy == STRATEGY_CONSERVATIVE_TRIAL:
-                                await _handle_conservative_trial_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                            else:
-                                await _handle_scale_out_impl(trade, tick, self._bridge, self._tp_trigger_cache, self._scale_out_last_fail, close_full_after_tps=self._close_full_after_tps)
-                        except Exception as exc:
-                            log.warning("Strategy handler [%s] error: %s", strategy, exc)
-
-                    # ── Pending signal watcher ───────────────────────────────
-                    if bool(rs.get("auto_execute_signals", 0)) and not await db_module.to_db_thread(self.is_trading_paused):
-                        try:
-                            _has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, self._bridge, self._pending_activation_retry_after, self._dpm_candles, starting_balance=self._cfg.get('starting_balance', 1000.0), background_open_commentary=self.background_open_commentary)
-                        except Exception as exc:
-                            log.debug("[PendingWatcher] Error: %s", exc)
-                            _has_pending_signals = False
-                    else:
-                        _has_pending_signals = False
-
-                    # ── IME timeout watchdog ──────────────────────────────────
-                    # Auto-assigns TP/SL to IME trades with no follow-up after 3 min
-                    try:
-                        await _ime_timeout_watchdog_impl(tick, self._bridge)
-                    except Exception as exc:
-                        log.debug("[IME-timeout] Watchdog error: %s", exc)
-            except Exception as exc:
-                log.warning("Monitor loop error: %s", exc)
-
-            self._sync_cycle += 1
-            if self._sync_cycle >= 6:
-                self._sync_cycle = 0
-                try:
-                    await self._sync_closed_mt5_positions()
-                except Exception as e:
-                    log.debug("MT5 sync error: %s", e)
-
-            self._profit_cycle += 1
-            if self._profit_cycle >= 24:
-                self._profit_cycle = 0
-                try:
-                    await _profit_sweep_impl(self._bridge)
-                except Exception as e:
-                    log.debug("Profit sweep error: %s", e)
-
-            # DPM self-calibration: attempt once per hour.
-            # Cal_cycle threshold adapts to the current sleep interval:
-            # 720 × 5s = 3600s idle, 3600 × 1s = 3600s active.
-            _fast_poll = _has_open_trades or _has_pending_signals
-            self._cal_cycle += 1
-            _cal_threshold = 720 if not _fast_poll else 3600
-            if self._cal_cycle >= _cal_threshold:
-                self._cal_cycle = 0
-                try:
-                    rs_cal = await db_module.to_db_thread(db_module.get_risk_settings)
-                    if bool(rs_cal.get("dpm_enabled", 0)):
-                        asyncio.create_task(_run_dpm_calibration_impl(self._dpm_cache))
-                except Exception as e:
-                    log.debug("DPM calibration trigger error: %s", e)
-
+            fast_poll = await _run_monitor_cycle_impl(self._make_monitor_ctx())
             # Fast poll (1s) when trades are open OR a queued signal is waiting
             # for its zone to be re-entered — a GD2-style queued signal with no
             # other trade open would otherwise only get checked every 5s, adding
             # up to ~5s of pure polling latency on top of everything else once
             # price actually returns to the zone. Slow poll (5s) only when
             # there is truly nothing time-sensitive to watch.
-            await asyncio.sleep(1 if _fast_poll else 5)
+            await asyncio.sleep(1 if fast_poll else 5)
 
     # ── Fast TP-ladder polling ──────────────────────────────────────────────
 
@@ -924,214 +817,26 @@ class SimulationEngine:
 
     MT5_SYNC_MISS_THRESHOLD = 2  # consecutive cycles before treating a missing ticket as a real close
 
+    def _make_position_sync_ctx(self) -> _PositionSyncCtx:
+        """Bind reconciliation's collaborators in one place.
+
+        The miss-streak dict is passed by reference, not copied: it counts
+        consecutive cycles and a copy would reset it every pass.
+        """
+        return _PositionSyncCtx(
+            bridge=self._bridge,
+            mt5_sync_missing_streak=self._mt5_sync_missing_streak,
+            miss_threshold=self.MT5_SYNC_MISS_THRESHOLD,
+            get_tick=self.get_tick,
+            partial_close_trade=self.partial_close_trade,
+            record_close=self.record_close,
+            sync_profit=self.sync_profit,
+            schedule_profit_sync=self._schedule_profit_sync,
+            get_mt5_account=self.get_mt5_account,
+        )
+
     async def _sync_closed_mt5_positions(self) -> None:
-        if not self._bridge.is_configured():
-            return
-        def _fetch_open_trades():
-                # Excludes managed_by='ea' trades: the native EA already pushes
-                # its own trade_closed event the moment it detects the position
-                # gone (ea_bridge.py's _on_trade_closed), which calls the same
-                # _record_close() + sends the same Telegram alert this function
-                # would otherwise send a second time. _record_close() has no
-                # idempotency guard, so without this exclusion both paths race
-                # to close the trade and the user gets a duplicate "Stop Loss
-                # Hit" message (confirmed live, ticket 1572181515, 2026-07-10 —
-                # single DB row, single node, no dual-node involvement at all).
-                # Non-EA-managed trades still need this poll as their only
-                # detection of an out-of-band MT5-side close.
-                # Also excludes any trade with vantage_ladder_legs rows (Adaptive
-                # Runner ladder trades): this trade's own mt5_ticket is only
-                # leg 1/the anchor, so once leg 1 closes at its own native TP
-                # this loop would see the anchor ticket vanish, compute
-                # closed_volume from JUST that leg, and — since
-                # _handle_adaptive_runner_ladder had already subtracted leg 1's
-                # lots from remaining_lots — call partial_close_trade() a
-                # SECOND time for the same lots every monitor cycle (the
-                # ticket never reappears, so the miss-streak keeps re-firing),
-                # draining remaining_lots to 0 and marking the whole parent
-                # trade closed within seconds even though legs 2-N are still
-                # genuinely open in MT5. Once the parent shows status!='open',
-                # _handle_adaptive_runner_ladder (which owns real per-leg
-                # closure detection AND survivor SL-trailing) stops being
-                # invoked at all for it, orphaning the remaining legs from
-                # all further management. Confirmed live 2026-07-17: trades
-                # b7dcacbe/bed873ca both closed within ~30s of leg 1, legs
-                # 2-N left untracked until a SEPARATE bug (the untracked-
-                # position importer not checking vantage_ladder_legs; also
-                # fixed below) re-discovered them as phantom duplicate trades.
-                return _broker_repo.fetch_python_managed_open_trades()
-        open_trades = await db_module.to_db_thread(_fetch_open_trades)
-        if not open_trades:
-            return
-        live_positions = await self._bridge.get_positions()
-
-        # get_positions() returns [] both when the bridge is offline and when
-        # there are genuinely no open positions.  Before treating an empty list
-        # as "all positions closed", confirm the bridge is actually connected.
-        # If MT5 is unreachable (terminal closed, maintenance, bridge restart)
-        # an empty list is ambiguous — skip the sync to avoid falsely closing
-        # live trades and misfiring Telegram alerts.
-        if not live_positions:
-            health = await self._bridge.get_health()
-            if not health.get("connected", False):
-                log.debug("MT5 sync: skipping — bridge not connected (live_positions empty)")
-                return
-
-        live_tickets = {int(p["ticket"]) for p in live_positions}
-        deals_by_pos: dict[int, list] = {}
-        all_deals = await self._bridge.get_deal_history(7)
-        for d in all_deals:
-            pid = d.get("position_id")
-            if pid:  # excludes None and 0
-                deals_by_pos.setdefault(int(pid), []).append(d)
-        tick = await self.get_tick()
-        for trade in open_trades:
-            ticket = int(trade["mt5_ticket"])
-            if ticket in live_tickets:
-                self._mt5_sync_missing_streak.pop(trade["trade_id"], None)
-                continue
-
-            # A ticket can be transiently absent from get_positions() (bridge
-            # lock contention, a momentary IPC hiccup) without the position
-            # actually having closed. Require MT5_SYNC_MISS_THRESHOLD
-            # consecutive misses before acting, so one bad read can't
-            # falsely mark a genuinely-open trade as closed.
-            streak = self._mt5_sync_missing_streak.get(trade["trade_id"], 0) + 1
-            self._mt5_sync_missing_streak[trade["trade_id"]] = streak
-            if streak < self.MT5_SYNC_MISS_THRESHOLD:
-                log.warning(
-                    "MT5 sync: ticket=%s missing from live positions (%d/%d) — "
-                    "not yet treating as closed",
-                    ticket, streak, self.MT5_SYNC_MISS_THRESHOLD,
-                )
-                continue
-
-            deals = await self._bridge.get_position_history(ticket)
-            if not deals:
-                deals = deals_by_pos.get(ticket, [])
-            close_price = None
-            reason = "MT5_close"
-            close_deals: list = []
-            if deals:
-                # entry 1=OUT, 2=INOUT, 3=OUT_BY (close-by-opposite on hedge accounts)
-                close_deals = [d for d in deals if d.get("entry") in (1, 2, 3)]
-                if not close_deals:
-                    open_type = 0 if trade["direction"].upper() == "BUY" else 1
-                    close_deals = [d for d in deals if d.get("type") != open_type]
-                if close_deals:
-                    best = max(close_deals, key=lambda d: d.get("time", 0))
-                    close_price = best.get("price")
-                    comment = (best.get("comment") or "").lower()
-                    if "sl" in comment or "stop" in comment:
-                        reason = "SL"
-                    elif "tp" in comment or "take" in comment:
-                        reason = "MT5_sync_TP"
-            if close_price is None:
-                close_price = (tick.bid if trade["direction"].upper() == "BUY" else tick.ask) if tick \
-                    else float(trade.get("entry_price") or 0)
-            try:
-                # ── Partial-close detection ───────────────────────────────────────
-                # If MT5 closed fewer lots than we are tracking, record a partial
-                # close and keep the trade open rather than falsely marking it done.
-                if close_deals:
-                    closed_volume = round(
-                        sum(float(d.get("volume", 0)) for d in close_deals), 4
-                    )
-                    remaining_lots = round(float(trade["remaining_lots"]), 4)
-                    if closed_volume < remaining_lots - 0.001:
-                        partial_profit = round(sum(
-                            float(d.get("profit", 0)) + float(d.get("swap", 0))
-                            + float(d.get("fee", 0))
-                            for d in close_deals
-                        ), 2)
-                        log.info(
-                            "MT5 sync: partial close trade=%s ticket=%s "
-                            "closed=%.4f remaining=%.4f profit=%.2f",
-                            trade["trade_id"], ticket, closed_volume,
-                            remaining_lots - closed_volume, partial_profit,
-                        )
-                        await self.partial_close_trade(
-                            trade["trade_id"], closed_volume,
-                            float(close_price), f"MT5_{reason}",
-                        )
-                        # Update ticket if the continuing position has a new ticket
-                        new_remaining = round(remaining_lots - closed_volume, 4)
-                        for lp in live_positions:
-                            lp_vol = round(float(lp.get("volume", 0)), 4)
-                            lp_ticket = int(lp.get("ticket", 0))
-                            if abs(lp_vol - new_remaining) < 0.001 and lp_ticket != ticket:
-                                await db_module.to_db_thread(
-                                    _broker_repo.reassign_mt5_ticket,
-                                    trade["trade_id"], lp_ticket)
-                                log.info("MT5 sync: ticket %s → %s (partial close continues)",
-                                         ticket, lp_ticket)
-                                break
-                        asyncio.create_task(telegram_alerts.send_message(
-                            telegram_alerts.fmt_mt5_partial_close(
-                                trade, closed_volume, float(close_price),
-                                new_remaining, partial_profit, reason,
-                            ),
-                            trade["trade_id"], f"mt5_partial_{reason.lower()}",
-                        ))
-                        self._mt5_sync_missing_streak.pop(trade["trade_id"], None)
-                        continue  # trade still open — do not record as full close
-
-                # ── Full close ────────────────────────────────────────────────────
-                self._mt5_sync_missing_streak.pop(trade["trade_id"], None)
-                log.info("MT5 sync: closing trade %s ticket=%s @ %.2f reason=%s",
-                         trade["trade_id"], ticket, close_price, reason)
-                result = await self.record_close(trade["trade_id"], float(close_price), reason)
-                await self.sync_profit(trade["trade_id"], ticket)
-                asyncio.create_task(self._schedule_profit_sync(trade["trade_id"], ticket))
-                closed_row = await db_module.to_db_thread(
-                    _broker_repo.fetch_trade, trade["trade_id"])
-                account  = await self.get_mt5_account()
-                last_tp  = await db_module.to_db_thread(_last_closed_tp_impl, trade["trade_id"]) if reason == "SL" else None
-                asyncio.create_task(telegram_alerts.send_message(
-                    telegram_alerts.fmt_trade_close(closed_row, result, {}, account,
-                                                    last_tp=last_tp),
-                    trade["trade_id"], f"mt5_sync_{reason}",
-                ))
-            except Exception as e:
-                log.warning("MT5 sync close failed %s: %s", trade["trade_id"], e)
-
-        # ── Import any MT5 positions the app doesn't know about ───────────────
-        # Covers trades opened directly in MT5 and positions where a partial
-        # close on a hedge account replaced the ticket with a new one.
-        def _fetch_known_tickets():
-            return _broker_repo.fetch_known_mt5_tickets()
-        try:
-            all_known_tickets = await db_module.to_db_thread(_fetch_known_tickets)
-        except Exception:
-            all_known_tickets = set()
-
-        rs = await db_module.to_db_thread(db_module.get_risk_settings)
-        default_strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT) or STRATEGY_SCALE_OUT
-
-        for pos in live_positions:
-            ticket = int(pos["ticket"])
-            if ticket in all_known_tickets:
-                continue
-            # New untracked position — import it so the engine can manage it
-            trade_id = str(uuid.uuid4())[:16]
-            direction = pos.get("type", "BUY").upper()
-            lot_size  = float(pos.get("volume", 0.01))
-            entry_p   = float(pos.get("open_price", 0))
-            sl        = float(pos.get("sl") or 0) or None
-            tp        = float(pos.get("tp") or 0) or None
-            open_ts   = float(pos.get("open_time") or time.time())
-            try:
-                await db_module.to_db_thread(
-                    _broker_repo.import_direct_mt5_position,
-                    trade_id, ticket, direction, entry_p, lot_size, sl, tp,
-                    open_ts, default_strategy, time.time())
-                log.info(
-                    "MT5 sync: imported untracked position ticket=%s %s %.2f lots @ %.2f",
-                    ticket, direction, lot_size, entry_p,
-                )
-                all_known_tickets.add(ticket)
-            except Exception as imp_err:
-                log.warning("MT5 sync: failed to import ticket %s: %s", ticket, imp_err)
+        return await _sync_closed_mt5_positions_impl(self._make_position_sync_ctx())
 
     async def sync_profit(self, trade_id: str, mt5_ticket: int) -> Optional[float]:
         return await _sync_profit_impl(trade_id, mt5_ticket, self._bridge)
@@ -1889,145 +1594,11 @@ class SimulationEngine:
     async def start_bridge_process(self) -> bool:
         """Tear down any running bridge and start a clean new one.
 
-        On Windows: kills the native mt5_bridge.py process and restarts it directly.
-        On macOS:   tears down the entire Wine session (wineserver + all children)
-                    before starting a fresh instance, to avoid duplicate MT5 windows.
-
-        With NativeMT5Bridge there's no separate process at all — recovery
-        means reconnecting the in-process MT5 session instead of killing and
-        relaunching a subprocess.
-
-        Returns True if recovery was launched (not necessarily connected yet).
+        Body lives in services/broker/bridge_process.py; the runtime keeps
+        the name because the self-healer and the bot's /restartbridge both
+        reach for it here.
         """
-        if self._using_native_bridge:
-            log.info("Bridge watchdog: reconnecting in-process MT5 session (native bridge)")
-            result = await self._bridge.reconnect()
-            ok = result.get("status") == "connected"
-            if not ok:
-                log.warning("Bridge watchdog: native reconnect failed: %s", result.get("error"))
-            return ok
-
-        import subprocess, os as _os, sys as _sys
-        from backend.src.utils import os_utils as _pu
-
-        _bridge_py = _os.path.normpath(
-            _os.path.join(_os.path.dirname(__file__), "..", "..", "mt5_bridge.py")
-        )
-        if not _os.path.isfile(_bridge_py):
-            log.warning("Bridge watchdog: mt5_bridge.py not found at %s", _bridge_py)
-            return False
-
-        # ── Windows: native Python execution (no Wine) ────────────────────────
-        if _sys.platform == "win32":
-            log.info("Bridge watchdog: stopping native bridge process")
-            _pu.kill_matching("mt5_bridge.py")
-            await asyncio.sleep(2)
-            _pu.kill_matching("mt5_bridge.py", force=True)
-            await asyncio.sleep(1)
-
-            from backend.src.config import USER_DATA_DIR, get as _cfg_get
-            from urllib.parse import urlparse as _urlparse
-            _creds = str(USER_DATA_DIR / "bridge_credentials.json")
-            _bridge_port = _urlparse(_cfg_get("mt5_bridge_url", "")).port or 9010
-            _env = {
-                **_os.environ,
-                "MT5_BRIDGE_PORT":   str(_bridge_port),
-                "BRIDGE_CREDS_PATH": _creds,
-            }
-            try:
-                subprocess.Popen(
-                    [_sys.executable, _bridge_py],
-                    env=_env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-                log.info("Bridge watchdog: Windows native bridge subprocess launched")
-                return True
-            except Exception as _e:
-                log.warning("Bridge watchdog: failed to start bridge: %s", _e)
-                return False
-
-        # ── macOS: full Wine session teardown then restart ─────────────────────
-        import signal as _signal
-
-        def _pids_of(pattern: str) -> list[int]:
-            return _pu.pids_matching(pattern)
-
-        def _kill_all(pids: list[int], sig: int) -> None:
-            for pid in pids:
-                try:
-                    _os.kill(pid, sig)
-                except (ProcessLookupError, OSError):
-                    pass
-
-        # Step 1: graceful shutdown of the entire Wine session
-        log.info("Bridge restart: stopping Wine session (wineserver + all children)")
-        _kill_all(_pids_of("wineserver"),    _signal.SIGTERM)
-        _kill_all(_pids_of("mt5_bridge.py"), _signal.SIGTERM)
-        await asyncio.sleep(3)
-
-        # Step 2: force-kill any survivors
-        for _pattern in ("wineserver", "mt5_bridge.py", "terminal64.exe", "winewrapper.exe"):
-            _kill_all(_pids_of(_pattern), _signal.SIGKILL)
-
-        await asyncio.sleep(2)
-
-        _remaining_mt5 = _pids_of("terminal64.exe")
-        if _remaining_mt5:
-            log.warning(
-                "Bridge restart: %d terminal64.exe process(es) still alive after kill — "
-                "proceeding; may result in duplicate MT5 if CrossOver re-uses it",
-                len(_remaining_mt5),
-            )
-        else:
-            log.info("Bridge restart: clean slate — no terminal64.exe or wineserver running")
-
-        try:
-            from backend.src.config import load as _cfg_load, USER_DATA_DIR
-            _cfg = _cfg_load()
-            _wine = (
-                _cfg.get("wine_bin")
-                or "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
-            )
-            _backend = _cfg.get("bridge_backend", "crossover")
-            if _backend == "crossover":
-                _bottle = _os.path.expanduser(
-                    "~/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
-                )
-                _extra_env = {"CX_BOTTLE": _bottle, "CX_NO_BROWSER": "1"}
-            else:
-                _bottle = _os.path.expanduser(
-                    _cfg.get("mt5_bottle_path") or "~/.wine_mt5"
-                )
-                _extra_env = {}
-
-            _bridge_win = "Z:" + _bridge_py.replace("/", "\\")
-            _mac_creds  = str(USER_DATA_DIR / "bridge_credentials.json")
-            _win_creds  = "Z:" + _mac_creds.replace("/", "\\")
-            from urllib.parse import urlparse as _urlparse
-            _bridge_port = _urlparse(_cfg.get("mt5_bridge_url", "")).port or 9010
-
-            _env = {
-                **_os.environ,
-                "WINEPREFIX":        _bottle,
-                "WINEDEBUG":         "-all",
-                "MT5_BRIDGE_PORT":   str(_bridge_port),
-                "BRIDGE_CREDS_PATH": _win_creds,
-                **_extra_env,
-            }
-            subprocess.Popen(
-                [_wine, "C:\\Python311\\python.exe", _bridge_win],
-                env=_env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            log.info("Bridge watchdog: macOS Wine bridge subprocess launched")
-            return True
-        except Exception as _e:
-            log.warning("Bridge watchdog: failed to start bridge subprocess: %s", _e)
-            return False
+        return await _start_bridge_process_impl(self._bridge, self._using_native_bridge)
 
     async def _bridge_watchdog_loop(self) -> None:
         """Check bridge health every 60 s. Restart automatically unless the user

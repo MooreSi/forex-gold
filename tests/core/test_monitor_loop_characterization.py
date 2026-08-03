@@ -20,6 +20,8 @@ from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.positions import monitor_loop as ml
+from backend.src.services.positions.monitor_cycle import MonitorState as _MonitorState
+from backend.src.services.dpm.bookkeeping import DPMCache as _DPMCache
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from backend.src.runtime import SimulationEngine
 
@@ -72,16 +74,21 @@ def _make_engine(bridge):
     e = SimulationEngine.__new__(SimulationEngine)
     e._monitor_running = True
     e._bridge = bridge
-    e._sync_cycle = 0
-    e._profit_cycle = 0
-    e._cal_cycle = 0
-    e._dxy_cycle = 0
+    # The four cycle counters and the DXY candle cache moved into a single
+    # MonitorState object (M4 B9d) so the monitor cycle -- which lives in
+    # services/positions/monitor_cycle.py now -- can mutate them by
+    # reference and have the counts survive between cycles.
+    e._monitor_state = _MonitorState()
     e._dpm_candles = None
-    e._dpm_dxy_candles = None
     e._cfg = {}
     e._tp_trigger_cache = _TPCache()
     e._scale_out_last_fail = {}
     e._tp_safety_net_last_alert = {}
+    # _make_monitor_ctx binds every collaborator up front, so the fixture
+    # sets what the real __init__ always sets. The inline loop reached for
+    # these lazily, on branches these tests never took.
+    e._dpm_cache = _DPMCache()
+    e._pending_activation_retry_after = {}
     return e
 
 
@@ -157,9 +164,13 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
         mock.patch.object(ml, "partial_close_trade", fake_partial_close),
         mock.patch.object(SimulationEngine, "_schedule_profit_sync", fake_sched),
         mock.patch.object(SimulationEngine, "_background_close_commentary", fake_commentary),
-        # M4 B5 inlined the _handle_scale_out wrapper into _monitor_loop; the
-        # hub now calls the module-global impl alias, so the sentinel goes there.
-        mock.patch("backend.src.runtime._handle_scale_out_impl", fake_scale_out),
+        # M4 B5 inlined the _handle_scale_out wrapper into _monitor_loop, so
+        # the sentinel moved to the hub's module-global impl alias. M4 B9d
+        # then moved the hub itself into services/positions/monitor_cycle.py,
+        # so the alias it calls now lives there. Mock-target relocation only —
+        # same function, same signature, new home.
+        mock.patch("backend.src.services.positions.monitor_cycle._handle_scale_out_impl",
+                   fake_scale_out),
         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send),
     ]
     if not ea_get_instance_missing:

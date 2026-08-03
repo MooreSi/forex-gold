@@ -27,10 +27,14 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
+from backend.src.services.risk import expert_params
 
 log = logging.getLogger(__name__)
 
-_MAX_SIGNAL_AGE_SECS = 4 * 60  # 4 minutes
+def max_signal_age_secs() -> int:
+    """Signals older than this are recorded as historical, never executed.
+    Was a 4-minute constant; now Settings > Expert Tunables."""
+    return expert_params.get("max_signal_age_s")
 
 _SESS_HUMAN = {
     "asian": "Asian Market",
@@ -59,7 +63,7 @@ async def record_staleness_or_new(
         except Exception:
             pass
 
-    is_stale = msg_age_secs is None or msg_age_secs > _MAX_SIGNAL_AGE_SECS
+    is_stale = msg_age_secs is None or msg_age_secs > max_signal_age_secs()
 
     if is_stale:
         _was_new = tg_repo.insert_tg_signal_if_new(

@@ -21,7 +21,7 @@ from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -72,7 +72,7 @@ class _NoTickBridge:
 
 
 def _make_engine(msgs):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._tg_reader = _FakeTgReader(msgs)
     e._cfg = {}
     e._bridge = _NoTickBridge()
@@ -126,8 +126,8 @@ def _run(msgs, session_allowed=(True, "london"), trading_paused=False,
         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send),
         mock.patch.object(telegram_alerts, "fmt_signal", side_effect=fake_fmt_signal),
         mock.patch.object(db, "is_session_allowed", return_value=session_allowed),
-        mock.patch.object(SimulationEngine, "is_trading_paused", return_value=trading_paused),
-        mock.patch.object(SimulationEngine, "get_open_trades", return_value=[]),
+        mock.patch.object(TradingRuntime, "is_trading_paused", return_value=trading_paused),
+        mock.patch.object(TradingRuntime, "get_open_trades", return_value=[]),
         mock.patch.object(ai_provider, "is_configured", return_value=ai_configured),
         mock.patch.object(channel_strategy_ai, "evaluate_signal_strategy", side_effect=fake_eval),
     ]

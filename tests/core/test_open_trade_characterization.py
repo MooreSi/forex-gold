@@ -19,7 +19,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER
 
 
@@ -107,7 +107,7 @@ class _FakeSyncClient:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     return e
 
@@ -134,7 +134,7 @@ def _open_kwargs(**overrides):
 
 def test_happy_path_places_order_and_inserts_trade(fresh_db, engine):
     _insert_signal()
-    result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+    result = asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
     assert result["managed_by"] == "python"
     assert result["mt5_ticket"] == 999
@@ -158,7 +158,7 @@ def test_raises_when_trading_paused(fresh_db, engine):
     _insert_signal()
     db.set_app_config("trade_pause_until", str(time.time() + 3600))
     with pytest.raises(ValueError, match="paused"):
-        asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+        asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
     assert engine._bridge.place_order_calls == []
 
 
@@ -169,7 +169,7 @@ def test_raises_when_circuit_breaker_active(fresh_db, engine):
         "circuit_breaker_active_until": time.time() + 3600,
     })
     with pytest.raises(ValueError, match="circuit breaker"):
-        asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+        asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
     assert engine._bridge.place_order_calls == []
 
 
@@ -185,7 +185,7 @@ def test_raises_when_max_open_trades_reached(fresh_db, engine):
         )
     _insert_signal("sig-1")  # max_open_trades defaults to 1
     with pytest.raises(ValueError, match="Max open trades"):
-        asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs(signal_id="sig-1")))
+        asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs(signal_id="sig-1")))
     assert engine._bridge.place_order_calls == []
 
 
@@ -193,14 +193,14 @@ def test_raises_when_no_live_tick(fresh_db, engine):
     _insert_signal()
     engine._bridge = _FakeBridge(tick=None)
     with pytest.raises(RuntimeError, match="No live price"):
-        asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+        asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
 
 def test_raises_and_inserts_nothing_when_bridge_rejects(fresh_db, engine):
     _insert_signal()
     engine._bridge = _FakeBridge(order_result={"error": "requote"})
     with pytest.raises(RuntimeError, match="rejected"):
-        asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+        asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
     with db.db() as conn:
         count = conn.execute("SELECT COUNT(*) FROM vantage_simulated_trades").fetchone()[0]
     assert count == 0
@@ -214,7 +214,7 @@ def test_ea_managed_path_used_when_healthy_and_portable(fresh_db, engine):
     fake_ea = _FakeEA(healthy=True, portable=True)
     ea_bridge.set_instance(fake_ea)
 
-    result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+    result = asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
     assert result["managed_by"] == "ea"
     assert result["mt5_ticket"] == 8001
@@ -227,7 +227,7 @@ def test_falls_through_to_python_bridge_when_no_ea_instance(fresh_db, engine):
     db.update_risk_settings({"ea_bridge_enabled": 1})
     ea_bridge.set_instance(None)  # natural default -- nothing configured
 
-    result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+    result = asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
     assert result["managed_by"] == "python"
     assert len(engine._bridge.place_order_calls) == 1
@@ -238,7 +238,7 @@ def test_falls_through_to_python_bridge_when_ea_unhealthy(fresh_db, engine):
     db.update_risk_settings({"ea_bridge_enabled": 1})
     ea_bridge.set_instance(_FakeEA(healthy=False))
 
-    result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+    result = asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
     assert result["managed_by"] == "python"
 
@@ -248,7 +248,7 @@ def test_falls_through_to_python_bridge_when_strategy_not_portable(fresh_db, eng
     db.update_risk_settings({"ea_bridge_enabled": 1})
     ea_bridge.set_instance(_FakeEA(healthy=True, portable=False))
 
-    result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+    result = asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
     assert result["managed_by"] == "python"
 
@@ -257,13 +257,13 @@ def test_falls_through_to_python_bridge_when_strategy_not_portable(fresh_db, eng
 
 def test_mt5_tp_override_used_verbatim(fresh_db, engine):
     _insert_signal()
-    asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs(mt5_tp_override=2450.0)))
+    asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs(mt5_tp_override=2450.0)))
     assert engine._bridge.place_order_calls[0]["tp"] == 2450.0
 
 
 def test_be_runner_sends_highest_populated_tp(fresh_db, engine):
     _insert_signal()
-    asyncio.run(SimulationEngine.open_trade(
+    asyncio.run(TradingRuntime.open_trade(
         engine, **_open_kwargs(strategy=STRATEGY_BE_RUNNER, tp1=2410.0, tp2=2420.0, tp3=None)
     ))
     assert engine._bridge.place_order_calls[0]["tp"] == 2420.0  # highest populated, tp2
@@ -271,7 +271,7 @@ def test_be_runner_sends_highest_populated_tp(fresh_db, engine):
 
 def test_scale_out_sends_no_broker_side_tp(fresh_db, engine):
     _insert_signal()
-    asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs(strategy=STRATEGY_SCALE_OUT, tp1=2410.0)))
+    asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs(strategy=STRATEGY_SCALE_OUT, tp1=2410.0)))
     assert engine._bridge.place_order_calls[0]["tp"] is None
 
 
@@ -282,7 +282,7 @@ def test_remote_forwarding_raises_stood_down_when_not_centralized(fresh_db, engi
     db.set_app_config("sync_remote_host", "10.0.0.5")  # non-empty -- paired with a VPS
     # active_trader defaults to "remote_vps"; centralized_signal_gen_enabled defaults to 0
     with pytest.raises(ValueError, match="stood down"):
-        asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+        asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
     assert engine._bridge.place_order_calls == []
 
 
@@ -293,7 +293,7 @@ def test_remote_forwarding_forwards_when_centralized(fresh_db, engine):
     fake_client = _FakeSyncClient()
 
     with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
-        result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+        result = asyncio.run(TradingRuntime.open_trade(engine, **_open_kwargs()))
 
     assert result["executed_remotely"] is True
     assert result["trade_id"] == "remote-1"

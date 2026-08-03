@@ -39,7 +39,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from backend.src.db import database as db_module
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.positions.monitor_loop import check_sl
 from backend.src.services.positions.tp_tracking import check_tp_hits
 from backend.src.utils.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
@@ -56,8 +56,8 @@ def _make_tick(bid=2350.00, ask=2350.30) -> Tick:
                 timestamp=time.time(), source="test")
 
 
-def _fresh_engine() -> SimulationEngine:
-    engine = SimulationEngine(_TEST_CONFIG)
+def _fresh_engine() -> TradingRuntime:
+    engine = TradingRuntime(_TEST_CONFIG)
     # Reset DB state
     with db_module.db() as conn:
         # Delete child tables before parents to satisfy FK constraints:

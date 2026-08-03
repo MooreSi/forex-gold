@@ -43,10 +43,14 @@ from backend.src.utils.models import (
     STRATEGY_ADAPTIVE_RUNNER_2,
     Tick,
 )
+from backend.src.services.risk import expert_params
 
 log = logging.getLogger(__name__)
 
-_EXPIRY = 120  # 2 minutes — cancel if zone not filled in time
+def expiry_secs() -> int:
+    """Cancel a queued signal if its zone is not refilled in time. Was a
+    2-minute constant; now Settings > Expert Tunables."""
+    return expert_params.get("pending_signal_expiry_s")
 _GDVR_PENDING_EXPIRY_SEC = 4 * 3600  # signals often take >1h to fill the entry zone
 _PENDING_ACTIVATION_BACKOFF_S = 20.0
 
@@ -117,7 +121,7 @@ async def try_activate_pending_signals(
             # retest without holding a stale zone open all day.
             _expiry = 60 * 60
         else:
-            _expiry = _EXPIRY
+            _expiry = expiry_secs()
         age = now - float(sig.get("created_at") or now)
         if age > _expiry:
             signals_repo.expire_signal(sig["signal_id"])

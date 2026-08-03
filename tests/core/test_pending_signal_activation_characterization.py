@@ -18,7 +18,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.signals import pending_activation as psa
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -55,7 +55,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._pending_activation_retry_after = {}
     e._dpm_candles = []
     e._bridge = _FakeBridge()
@@ -87,6 +87,6 @@ def _signal_status(sig_id="sig-1"):
 
 def _run(engine, tick=_TICK, rs=None):
     with mock.patch.object(psa, "get_open_trades", return_value=[]):
-        return asyncio.run(SimulationEngine._try_activate_pending_signals(engine, tick, rs or _RS))
+        return asyncio.run(TradingRuntime._try_activate_pending_signals(engine, tick, rs or _RS))
 
 

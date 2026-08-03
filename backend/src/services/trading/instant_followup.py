@@ -25,6 +25,15 @@ from backend.src.services.trading.update_signal import update_signal
 from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_BE_RUNNER, Tick,
 )
+from backend.src.services.risk import expert_params
+
+
+def ime_timeout_secs() -> int:
+    """How long an instant trade waits for its SL/TP follow-up before the
+    watchdog assigns them. Was a 3-minute constant; now Settings > Expert
+    Tunables."""
+    return expert_params.get("ime_followup_timeout_s")
+
 
 log = logging.getLogger(__name__)
 
@@ -310,7 +319,7 @@ async def ime_timeout_watchdog(tick: "Tick", bridge: Any) -> None:
     4. Calls modify_order on MT5 so broker-side SL is updated.
     5. Sends a Telegram alert so the operator knows auto-TPs were assigned.
     """
-    _IME_TIMEOUT_SEC   = 180          # 3 minutes
+    _IME_TIMEOUT_SEC   = ime_timeout_secs()
     _TP_OFFSETS        = [3.0, 5.0, 7.0, 10.0, 14.0, 18.0]  # pts from entry
 
     now = time.time()

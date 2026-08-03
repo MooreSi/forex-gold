@@ -18,7 +18,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -66,7 +66,7 @@ class _FakeTgReader:
 
 
 def _make_engine(msgs):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._tg_reader = _FakeTgReader(msgs)
     e._cfg = {}
     e._bridge = mock.Mock()  # Logic Keywords' RISK FREE/BE trigger check needs this attribute to exist
@@ -147,9 +147,9 @@ def _run(msgs, ai_fallback_return="__unset__", close_trade_fake=None,
 
     patches = [
         mock.patch.object(db, "should_generate_signals_here", return_value=True),
-        mock.patch.object(SimulationEngine, "_try_ai_signal_fallback", fake_ai),
-        mock.patch.object(SimulationEngine, "_find_and_apply_instant_followup", followup_fake or fake_followup),
-        mock.patch.object(SimulationEngine, "close_trade", close_trade_fake or _default_close),
+        mock.patch.object(TradingRuntime, "_try_ai_signal_fallback", fake_ai),
+        mock.patch.object(TradingRuntime, "_find_and_apply_instant_followup", followup_fake or fake_followup),
+        mock.patch.object(TradingRuntime, "close_trade", close_trade_fake or _default_close),
         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send),
     ]
     for p in patches:

@@ -22,7 +22,7 @@ from unittest import mock
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -103,29 +103,29 @@ def test_no_tick_returns_none(fresh_db):
     class _NoTickBridge(_FakeBridge):
         async def get_tick(self):
             return None
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _NoTickBridge()
-    assert asyncio.run(SimulationEngine.build_orb_report(e)) is None
+    assert asyncio.run(TradingRuntime.build_orb_report(e)) is None
 
 
 def test_before_london_open_returns_none(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     early_now = datetime(2026, 7, 20, 6, 0, 0, tzinfo=timezone.utc)
     p = _patched_now(early_now)
     try:
-        assert asyncio.run(SimulationEngine.build_orb_report(e)) is None
+        assert asyncio.run(TradingRuntime.build_orb_report(e)) is None
     finally:
         p.stop()
 
 
 def test_after_london_window_closes_returns_none(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     late_now = datetime(2026, 7, 20, 7, 20, 0, tzinfo=timezone.utc)  # 20 min after open — past the 15-min window
     p = _patched_now(late_now)
     try:
-        assert asyncio.run(SimulationEngine.build_orb_report(e)) is None
+        assert asyncio.run(TradingRuntime.build_orb_report(e)) is None
     finally:
         p.stop()
 
@@ -134,21 +134,21 @@ def test_no_candles_returns_none(fresh_db):
     class _NoCandlesBridge(_FakeBridge):
         async def get_candles_range(self, start, end, timeframe="M1"):
             return []
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _NoCandlesBridge()
     p = _patched_now(_FIXED_NOW)
     try:
-        assert asyncio.run(SimulationEngine.build_orb_report(e)) is None
+        assert asyncio.run(TradingRuntime.build_orb_report(e)) is None
     finally:
         p.stop()
 
 
 def test_price_inside_range_reports_inside_direction(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2399.5, ask=2400.0))
     p = _patched_now(_FIXED_NOW)
     try:
-        report = asyncio.run(SimulationEngine.build_orb_report(e))
+        report = asyncio.run(TradingRuntime.build_orb_report(e))
     finally:
         p.stop()
     assert report["direction"] == "inside"
@@ -159,13 +159,13 @@ def test_price_inside_range_reports_inside_direction(fresh_db):
 
 
 def test_bullish_breakout_computes_zone_stop_target(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2414.5, ask=2415.0))
     p = _patched_now(_FIXED_NOW)
     try:
         with mock.patch("backend.src.services.analytics.orb_report.get_orb_target_multiple",
                         new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
-            report = asyncio.run(SimulationEngine.build_orb_report(e))
+            report = asyncio.run(TradingRuntime.build_orb_report(e))
     finally:
         p.stop()
 
@@ -184,13 +184,13 @@ def test_bullish_breakout_computes_zone_stop_target(fresh_db):
 
 
 def test_bearish_breakout_computes_mirrored_zone_stop_target(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge(tick=SimpleNamespace(bid=2385.0, ask=2385.5))
     p = _patched_now(_FIXED_NOW)
     try:
         with mock.patch("backend.src.services.analytics.orb_report.get_orb_target_multiple",
                         new=mock.AsyncMock(return_value={"multiple": 2.0, "n": 10, "is_default": False})):
-            report = asyncio.run(SimulationEngine.build_orb_report(e))
+            report = asyncio.run(TradingRuntime.build_orb_report(e))
     finally:
         p.stop()
 

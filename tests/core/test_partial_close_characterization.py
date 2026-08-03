@@ -15,7 +15,7 @@ import time
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -48,7 +48,7 @@ def fresh_db():
 
 @pytest.fixture
 def engine(fresh_db):
-    return SimulationEngine.__new__(SimulationEngine)
+    return TradingRuntime.__new__(TradingRuntime)
 
 
 def _insert_signal(sig_id="sig-1", direction="BUY"):
@@ -81,20 +81,20 @@ def _get_trade(trade_id):
 
 def test_raises_on_unknown_trade(fresh_db, engine):
     with pytest.raises(ValueError):
-        asyncio.run(SimulationEngine.partial_close_trade(engine, "does-not-exist", 0.05, 2410.0))
+        asyncio.run(TradingRuntime.partial_close_trade(engine, "does-not-exist", 0.05, 2410.0))
 
 
 def test_raises_when_trade_not_open(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", status="closed")
     with pytest.raises(ValueError):
-        asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.05, 2410.0))
+        asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.05, 2410.0))
 
 
 def test_normal_partial_close_updates_trade_and_inserts_row(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.10)
-    result = asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
+    result = asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
 
     assert result["lots_closed"] == 0.04
     assert result["remaining_lots"] == 0.06
@@ -112,7 +112,7 @@ def test_normal_partial_close_updates_trade_and_inserts_row(fresh_db, engine):
 def test_updates_sim_balance(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.10)
-    result = asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
+    result = asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
 
     with db.db() as conn:
         balance = conn.execute("SELECT balance FROM vantage_simulation_account WHERE id=1").fetchone()[0]
@@ -122,7 +122,7 @@ def test_updates_sim_balance(fresh_db, engine):
 def test_clamps_lots_to_close_to_remaining(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.05)
-    result = asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 10.0, 2410.0, reason="TP1"))
+    result = asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 10.0, 2410.0, reason="TP1"))
     assert result["lots_closed"] == 0.05
     assert result["remaining_lots"] == 0.0
     assert result["auto_closed"] is True
@@ -131,7 +131,7 @@ def test_clamps_lots_to_close_to_remaining(fresh_db, engine):
 def test_moves_sl_to_be_on_tp1_when_enabled_and_not_already_moved(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.10, stop_loss=2390.0, sl_moved_to_be=0)
-    asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
+    asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
 
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2400.0  # moved to entry_price
@@ -141,7 +141,7 @@ def test_moves_sl_to_be_on_tp1_when_enabled_and_not_already_moved(fresh_db, engi
 def test_does_not_move_sl_twice(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.10, stop_loss=2405.0, sl_moved_to_be=1)
-    asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
+    asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
 
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2405.0  # untouched -- already at BE
@@ -150,7 +150,7 @@ def test_does_not_move_sl_twice(fresh_db, engine):
 def test_does_not_move_sl_for_non_tp1_reason(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.10, stop_loss=2390.0, sl_moved_to_be=0)
-    asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP2"))
+    asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP2"))
 
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2390.0
@@ -161,7 +161,7 @@ def test_does_not_move_sl_when_setting_disabled(fresh_db, engine):
     db.update_risk_settings({"move_sl_to_be_after_tp1": 0})
     _insert_signal()
     _insert_trade("t-1", remaining_lots=0.10, stop_loss=2390.0, sl_moved_to_be=0)
-    asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
+    asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.04, 2410.0, reason="TP1"))
 
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2390.0
@@ -170,7 +170,7 @@ def test_does_not_move_sl_when_setting_disabled(fresh_db, engine):
 def test_auto_closes_and_cascades_signal_status(fresh_db, engine):
     _insert_signal("sig-1")
     _insert_trade("t-1", "sig-1", remaining_lots=0.05)
-    result = asyncio.run(SimulationEngine.partial_close_trade(engine, "t-1", 0.05, 2410.0, reason="TP8"))
+    result = asyncio.run(TradingRuntime.partial_close_trade(engine, "t-1", 0.05, 2410.0, reason="TP8"))
 
     assert result["auto_closed"] is True
     trade = _get_trade("t-1")

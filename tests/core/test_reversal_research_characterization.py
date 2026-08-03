@@ -15,7 +15,7 @@ from unittest import mock
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -57,7 +57,7 @@ def _patched_now(fixed_dt):
 
 
 def _make_engine():
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._monitor_running = True
     return e
 

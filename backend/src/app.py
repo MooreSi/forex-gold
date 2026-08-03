@@ -20,7 +20,7 @@ from typing import Optional
 
 import backend.src.config as cfg_module
 from backend.src.db import database as db_module
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.telegram.reader import TelegramReader
 
 import backend.src.services.test_signal.test_signal_service as _test_engine_module
@@ -104,11 +104,11 @@ ADMIN_AVAILABLE = admin_open_fn is not None
 
 # ── App-wide singletons ──────────────────────────────────────────────────────
 
-_engine:    Optional[SimulationEngine] = None
+_engine:    Optional[TradingRuntime] = None
 _tg_reader: Optional[TelegramReader]   = None
 
 
-def get_engine() -> SimulationEngine:
+def get_engine() -> TradingRuntime:
     assert _engine is not None, "Engine not initialised"
     return _engine
 
@@ -167,7 +167,7 @@ async def startup() -> None:
     env = config.get("account_env", "demo")
     db_module.sync_bridge_credentials_file(env)
 
-    _engine    = SimulationEngine(config)
+    _engine    = TradingRuntime(config)
     _tg_reader = TelegramReader(config)
     _engine.set_telegram_reader(_tg_reader)
 
@@ -211,7 +211,7 @@ async def startup() -> None:
     try:
         await _engine.startup()
     except Exception as _e:
-        log.error("[startup] SimulationEngine startup failed: %s", _e)
+        log.error("[startup] TradingRuntime startup failed: %s", _e)
 
     te = _test_engine_module.get_instance()
     te.set_main_engine(_engine)

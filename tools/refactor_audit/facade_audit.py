@@ -25,14 +25,34 @@ import sys
 from pathlib import Path
 
 from tools.refactor_audit import orphan_detector as od
-from tools.refactor_audit.delegation_checker import is_wrapper
+# Inherited from delegation_checker, which this module replaced. That
+# checker went vacuous when forex_trader/core/ was dissolved -- its glob
+# pointed at a directory that no longer existed, so it reported success
+# while enforcing nothing -- and was deleted in M4 B10. This is the one
+# piece of it worth keeping.
+WRAPPER_STATEMENT_LIMIT = 2
+
+
+def is_wrapper(method: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True when the body is just a delegating call, with no logic of its own."""
+    body = method.body
+    if body and isinstance(body[0], ast.Expr) and \
+            isinstance(body[0].value, ast.Constant) and \
+            isinstance(body[0].value.value, str):
+        body = body[1:]
+    if len(body) > WRAPPER_STATEMENT_LIMIT:
+        return False
+    return all(
+        isinstance(stmt, (ast.Return, ast.Expr, ast.Pass))
+        for stmt in body
+    )
 
 RUNTIME_PATH   = od.REPO_ROOT / "backend" / "src" / "runtime.py"
 BASELINE_PATH  = Path(__file__).parent / "facade_baseline.json"
 ALLOWLIST_PATH = Path(__file__).parent / "facade_allowlist.json"
 
 # One constant so the SimulationEngine -> TradingRuntime rename is one edit.
-CLASS_NAME = "SimulationEngine"
+CLASS_NAME = "TradingRuntime"
 
 
 def census(source: str) -> dict[str, dict]:

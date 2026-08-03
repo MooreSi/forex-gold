@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_BE_RUNNER
 
 
@@ -58,7 +58,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     return e
 
@@ -116,7 +116,7 @@ def test_self_managed_no_mismatch_acknowledged_only(fresh_db, engine):
     _insert_trade(strategy="conservative")
     _insert_tg("tg-1")
     trade = _trade_dict("trade-abc")
-    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
+    asyncio.run(TradingRuntime.apply_followup_to_instant_trade(
         engine, trade, _PARSED_2TP, "tg-1", "Chan", "Chan",
     ))
     trade_after = _trade_dict("trade-abc")
@@ -129,7 +129,7 @@ def test_self_managed_channel_override_mismatch_corrects_and_applies(fresh_db, e
     _insert_tg("tg-2")
     db.set_channel_strategy_override("Chan", "reversal_runner")
     trade = _trade_dict("trade-abc")
-    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
+    asyncio.run(TradingRuntime.apply_followup_to_instant_trade(
         engine, trade, _PARSED_2TP, "tg-2", "Chan", "Chan",
     ))
     trade_after = _trade_dict("trade-abc")
@@ -143,7 +143,7 @@ def test_two_valid_tps_applied_as_parsed(fresh_db, engine):
     _insert_trade(strategy="scale_out")
     _insert_tg("tg-3")
     trade = _trade_dict("trade-abc")
-    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
+    asyncio.run(TradingRuntime.apply_followup_to_instant_trade(
         engine, trade, _PARSED_2TP, "tg-3", "Chan", "Chan",
     ))
     trade_after = _trade_dict("trade-abc")
@@ -156,7 +156,7 @@ def test_fewer_than_two_valid_tps_auto_spaces_from_fill(fresh_db, engine):
     _insert_trade(strategy="scale_out")
     _insert_tg("tg-4")
     trade = _trade_dict("trade-abc")
-    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
+    asyncio.run(TradingRuntime.apply_followup_to_instant_trade(
         engine, trade, _PARSED_1TP, "tg-4", "Chan", "Chan",
     ))
     trade_after = _trade_dict("trade-abc")
@@ -181,7 +181,7 @@ def test_no_signal_id_fallback_direct_db_update_and_modify_order(fresh_db, engin
         )
     _insert_tg("tg-6")
     trade = _trade_dict("trade-so")
-    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
+    asyncio.run(TradingRuntime.apply_followup_to_instant_trade(
         engine, trade, {"stop_loss": 2400.0, "entry_low": 2415.0, "entry_high": 2415.0,
                         "tp1": 2418.0, "tp2": 2422.0, "tp3": 2430.0},
         "tg-6", "Chan", "Chan",
@@ -205,7 +205,7 @@ def test_no_signal_id_be_runner_uses_highest_profitable_tp(fresh_db, engine):
         )
     _insert_tg("tg-5")
     trade = _trade_dict("trade-be")
-    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
+    asyncio.run(TradingRuntime.apply_followup_to_instant_trade(
         engine, trade, {"stop_loss": 2400.0, "entry_low": 2415.0, "entry_high": 2415.0,
                         "tp1": 2418.0, "tp2": 2422.0, "tp3": 2430.0},
         "tg-5", "Chan", "Chan",
@@ -216,7 +216,7 @@ def test_no_signal_id_be_runner_uses_highest_profitable_tp(fresh_db, engine):
 # ── _find_and_apply_instant_followup ────────────────────────────────────────
 
 def test_find_followup_no_match_returns_false(fresh_db, engine):
-    result = asyncio.run(SimulationEngine._find_and_apply_instant_followup(
+    result = asyncio.run(TradingRuntime._find_and_apply_instant_followup(
         engine, "Chan", "BUY", _PARSED_2TP, "tg-1",
     ))
     assert result is False
@@ -224,7 +224,7 @@ def test_find_followup_no_match_returns_false(fresh_db, engine):
 
 def test_find_followup_direction_mismatch_returns_false(fresh_db, engine):
     _insert_trade(direction="SELL", stop_loss=2420.0, tg_source="Chan")
-    result = asyncio.run(SimulationEngine._find_and_apply_instant_followup(
+    result = asyncio.run(TradingRuntime._find_and_apply_instant_followup(
         engine, "Chan", "BUY", _PARSED_2TP, "tg-2",
     ))
     assert result is False
@@ -233,7 +233,7 @@ def test_find_followup_direction_mismatch_returns_false(fresh_db, engine):
 def test_find_followup_match_found_applies_and_returns_true(fresh_db, engine):
     _insert_trade(tg_source="Chan")
     _insert_tg("tg-3")
-    result = asyncio.run(SimulationEngine._find_and_apply_instant_followup(
+    result = asyncio.run(TradingRuntime._find_and_apply_instant_followup(
         engine, "Chan", "BUY", _PARSED_2TP, "tg-3",
     ))
     assert result is True

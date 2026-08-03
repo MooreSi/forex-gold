@@ -21,7 +21,7 @@ def census_of(src: str) -> dict:
 
 
 _SYNTHETIC = '''
-class SimulationEngine:
+class TradingRuntime:
     def __init__(self):
         self.x = 1
 

@@ -14,7 +14,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_BE_RUNNER,
@@ -74,7 +74,7 @@ class _FakeEA:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     return e
 
@@ -120,13 +120,13 @@ def _get_signal(signal_id):
 
 def test_no_allowed_fields_returns_no_changes(fresh_db, engine):
     _insert_signal()
-    result = asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"bogus_field": 1}))
+    result = asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"bogus_field": 1}))
     assert result == {"status": "no_changes"}
 
 
 def test_disallowed_keys_dropped_allowed_keys_written(fresh_db, engine):
     _insert_signal()
-    result = asyncio.run(SimulationEngine.update_signal(
+    result = asyncio.run(TradingRuntime.update_signal(
         engine, "sig-1", {"stop_loss": 2385.0, "bogus_field": 1}))
     assert result["fields_updated"] == ["stop_loss"]
     sig = _get_signal("sig-1")
@@ -137,7 +137,7 @@ def test_disallowed_keys_dropped_allowed_keys_written(fresh_db, engine):
 
 def test_no_linked_open_trade(fresh_db, engine):
     _insert_signal()
-    result = asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2385.0}))
+    result = asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2385.0}))
     assert result["trade_updated"] is False
     assert result["trade_id"] is None
 
@@ -150,7 +150,7 @@ def test_no_linked_open_trade(fresh_db, engine):
 def test_no_propagate_strategies_leave_trade_untouched(fresh_db, engine, strategy):
     _insert_signal()
     _insert_trade("t-1", strategy=strategy, stop_loss=2395.0, tp1=2403.0)
-    result = asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2380.0}))
+    result = asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2380.0}))
     assert result["trade_updated"] is False
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2395.0  # untouched, still the fixed-point value
@@ -161,7 +161,7 @@ def test_no_propagate_strategies_leave_trade_untouched(fresh_db, engine, strateg
 def test_propagates_to_sim_trade_without_bridge_call(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", strategy=STRATEGY_SCALE_OUT, mt5_ticket=None)
-    result = asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2380.0}))
+    result = asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2380.0}))
     assert result["trade_updated"] is True
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2380.0
@@ -174,7 +174,7 @@ def test_new_sl_on_correct_side_sent_to_mt5(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", direction="BUY", strategy=STRATEGY_SCALE_OUT,
                   mt5_ticket=555, entry_price=2400.0)
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2385.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2385.0}))
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2385.0, "tp": None}]
 
 
@@ -183,7 +183,7 @@ def test_new_sl_on_wrong_side_dropped_from_mt5_but_db_still_written(fresh_db, en
     _insert_trade("t-1", direction="BUY", strategy=STRATEGY_SCALE_OUT,
                   mt5_ticket=555, entry_price=2400.0)
     # BUY SL must be below entry(2400) -- 2405 is on the wrong side
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2405.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2405.0}))
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": None, "tp": None}]
     trade = _get_trade("t-1")
     assert trade["stop_loss"] == 2405.0  # DB still has the raw value
@@ -193,7 +193,7 @@ def test_tp_sent_to_mt5_only_for_be_runner(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", direction="BUY", strategy=STRATEGY_BE_RUNNER,
                   mt5_ticket=555, entry_price=2400.0)
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"tp1": 2420.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"tp1": 2420.0}))
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": None, "tp": 2420.0}]
 
 
@@ -201,7 +201,7 @@ def test_tp_not_sent_to_mt5_for_non_be_runner(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", direction="BUY", strategy=STRATEGY_SCALE_OUT,
                   mt5_ticket=555, entry_price=2400.0)
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"tp1": 2420.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"tp1": 2420.0}))
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": None, "tp": None}]
 
 
@@ -214,7 +214,7 @@ def test_ea_managed_healthy_skips_modify_order_calls_update_trade(fresh_db, engi
     fake_ea = _FakeEA(healthy=True)
     ea_bridge.set_instance(fake_ea)
 
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2385.0, "tp1": 2420.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2385.0, "tp1": 2420.0}))
 
     assert engine._bridge.modify_order_calls == []
     assert fake_ea.update_trade_calls == [{"trade_id": "t-1", "tps": {1: 2420.0}}]
@@ -227,7 +227,7 @@ def test_ea_managed_unhealthy_falls_through_to_modify_order_but_still_updates_ea
     fake_ea = _FakeEA(healthy=False)
     ea_bridge.set_instance(fake_ea)
 
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2385.0, "tp1": 2420.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2385.0, "tp1": 2420.0}))
 
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2385.0, "tp": None}]
     assert fake_ea.update_trade_calls == [{"trade_id": "t-1", "tps": {1: 2420.0}}]
@@ -240,7 +240,7 @@ def test_python_managed_never_calls_ea_update_trade(fresh_db, engine):
     fake_ea = _FakeEA(healthy=True)
     ea_bridge.set_instance(fake_ea)  # configured, but trade isn't EA-managed
 
-    asyncio.run(SimulationEngine.update_signal(engine, "sig-1", {"stop_loss": 2385.0}))
+    asyncio.run(TradingRuntime.update_signal(engine, "sig-1", {"stop_loss": 2385.0}))
 
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2385.0, "tp": None}]
     assert fake_ea.update_trade_calls == []

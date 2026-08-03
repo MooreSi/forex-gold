@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,17 +51,17 @@ PROMOTED = {
 
 @pytest.mark.parametrize("old,new", sorted(PROMOTED.items()))
 def test_promoted_names_exist_and_privates_gone(old, new):
-    assert hasattr(SimulationEngine, new), (
+    assert hasattr(TradingRuntime, new), (
         f"{new} is the promoted name for {old} -- external callers bind to it."
     )
-    assert not hasattr(SimulationEngine, old), (
+    assert not hasattr(TradingRuntime, old), (
         f"{old} was promoted to {new} in M4 B8; the private alias must not "
         f"survive, or callers keep reaching through it."
     )
 
 
 def _runtime_privates() -> set[str]:
-    return {n for n in vars(SimulationEngine)
+    return {n for n in vars(TradingRuntime)
             if n.startswith("_") and not n.startswith("__")}
 
 
@@ -167,6 +167,6 @@ def test_the_ea_bridge_closes_through_the_public_name():
 
 def test_the_close_path_bindings_are_untouched():
     """Negative control: promotion is a rename, not a reshaping."""
-    assert hasattr(SimulationEngine, "_make_close_trade_ctx")
-    assert hasattr(SimulationEngine, "close_trade")
-    assert hasattr(SimulationEngine, "_schedule_profit_sync")
+    assert hasattr(TradingRuntime, "_make_close_trade_ctx")
+    assert hasattr(TradingRuntime, "close_trade")
+    assert hasattr(TradingRuntime, "_schedule_profit_sync")

@@ -23,12 +23,12 @@ from unittest import mock
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.signals import scan_messages as sm
 
 
 def _engine():
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = object()
     e._tg_reader = object()
     e._cfg = {"starting_balance": 1000.0}

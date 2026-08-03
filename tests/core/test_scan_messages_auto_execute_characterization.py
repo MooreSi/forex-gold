@@ -19,7 +19,7 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.telegram import alerts as telegram_alerts
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -79,7 +79,7 @@ class _FakeBridge:
 
 
 def _make_engine(msgs, tick, group_name="TestChannel"):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._tg_reader = _FakeTgReader(msgs, group_name=group_name)
     e._cfg = {}
     e._bridge = _FakeBridge(tick)
@@ -129,10 +129,10 @@ def _run(msgs, tick, open_trade_fn=None, open_trades=None, filter_err=None,
     with mock.patch.object(db, "should_generate_signals_here", return_value=True), \
          mock.patch.object(telegram_alerts, "send_message",
                            side_effect=fake_send if capture_alerts else mock.AsyncMock()), \
-         mock.patch.object(SimulationEngine, "open_trade", open_trade_fn or _default_open_trade), \
-         mock.patch.object(SimulationEngine, "get_open_trades", return_value=open_trades or []), \
-         mock.patch.object(SimulationEngine, "_check_pre_trade_filters", return_value=filter_err), \
-         mock.patch.object(SimulationEngine, "_find_and_apply_instant_followup",
+         mock.patch.object(TradingRuntime, "open_trade", open_trade_fn or _default_open_trade), \
+         mock.patch.object(TradingRuntime, "get_open_trades", return_value=open_trades or []), \
+         mock.patch.object(TradingRuntime, "_check_pre_trade_filters", return_value=filter_err), \
+         mock.patch.object(TradingRuntime, "_find_and_apply_instant_followup",
                            new=mock.AsyncMock(return_value=followup_matched)):
         result = asyncio.run(e._scan_messages())
     return result, list(_default_open_trade.calls), alerts, e._bridge

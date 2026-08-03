@@ -17,7 +17,7 @@ import pytest
 from backend.src.services.trading import profit_sync as core_profit_sync
 from backend.src.db import database as db
 from backend.src.services.trading.sim_account import get_sim_account
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -75,7 +75,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     return e
 
@@ -109,7 +109,7 @@ def _trade_dict(trade_id="t-1"):
 def test_sync_profit_no_deals_returns_none(fresh_db, engine):
     _insert_trade(mt5_profit=None)
     engine._bridge = _FakeBridge(position_history=[])
-    result = asyncio.run(SimulationEngine.sync_profit(engine, "t-1", 555))
+    result = asyncio.run(TradingRuntime.sync_profit(engine, "t-1", 555))
     assert result is None
     assert _trade_dict()["mt5_profit"] is None
 
@@ -117,7 +117,7 @@ def test_sync_profit_no_deals_returns_none(fresh_db, engine):
 def test_sync_profit_no_closing_entries_returns_none(fresh_db, engine):
     _insert_trade(mt5_profit=None)
     engine._bridge = _FakeBridge(position_history=[{"entry": 0, "profit": 0.0}])
-    result = asyncio.run(SimulationEngine.sync_profit(engine, "t-1", 555))
+    result = asyncio.run(TradingRuntime.sync_profit(engine, "t-1", 555))
     assert result is None
 
 
@@ -125,7 +125,7 @@ def test_sync_profit_first_time_corrects_balance(fresh_db, engine):
     _insert_trade(mt5_profit=None, net_pnl=40.0)
     starting_balance = get_sim_account()["balance"]
     engine._bridge = _FakeBridge(position_history=[{"entry": 1, "profit": 50.0, "swap": -1.0, "fee": 0.0}])
-    result = asyncio.run(SimulationEngine.sync_profit(engine, "t-1", 555))
+    result = asyncio.run(TradingRuntime.sync_profit(engine, "t-1", 555))
     assert result == 49.0
     assert get_sim_account()["balance"] == starting_balance + 9.0
     trade = _trade_dict()
@@ -137,7 +137,7 @@ def test_sync_profit_already_synced_skips_balance_correction(fresh_db, engine):
     _insert_trade(mt5_profit=30.0, net_pnl=40.0)
     starting_balance = get_sim_account()["balance"]
     engine._bridge = _FakeBridge(position_history=[{"entry": 1, "profit": 50.0, "swap": 0.0, "fee": 0.0}])
-    result = asyncio.run(SimulationEngine.sync_profit(engine, "t-1", 555))
+    result = asyncio.run(TradingRuntime.sync_profit(engine, "t-1", 555))
     assert result == 50.0
     assert get_sim_account()["balance"] == starting_balance
     assert _trade_dict()["mt5_profit"] == 50.0  # still refreshed, just no balance correction
@@ -150,7 +150,7 @@ def test_sync_profit_falls_back_to_deal_history_filtered_by_ticket(fresh_db, eng
         {"position_id": "999", "entry": 1, "profit": 5.0},
     ]
     engine._bridge = _FakeBridge(position_history=[], deal_history=all_deals)
-    result = asyncio.run(SimulationEngine.sync_profit(engine, "t-1", 555))
+    result = asyncio.run(TradingRuntime.sync_profit(engine, "t-1", 555))
     assert result == 19.0
 
 
@@ -159,7 +159,7 @@ def test_sync_profit_falls_back_to_deal_history_filtered_by_ticket(fresh_db, eng
 def test_schedule_profit_sync_already_synced_returns_immediately(fresh_db, engine):
     _insert_trade(mt5_profit=49.0)
     with mock.patch.object(core_profit_sync, "sync_profit", new=mock.AsyncMock()) as sp:
-        asyncio.run(SimulationEngine._schedule_profit_sync(engine, "t-1", 555))
+        asyncio.run(TradingRuntime._schedule_profit_sync(engine, "t-1", 555))
     assert not sp.called
 
 
@@ -170,9 +170,9 @@ def test_schedule_profit_sync_already_synced_returns_immediately(fresh_db, engin
 def test_close_full_no_residual_syncs_and_alerts(fresh_db, engine):
     _insert_trade(mt5_ticket=555, remaining_lots=0.0)
     engine._bridge = _FakeBridge(positions=[])
-    with mock.patch.object(SimulationEngine, "sync_profit", new=mock.AsyncMock(return_value=10.0)) as sp, \
-         mock.patch.object(SimulationEngine, "_schedule_profit_sync", new=mock.AsyncMock()) as ssp:
-        asyncio.run(SimulationEngine._close_full_after_tps(engine, "t-1", 555, 2420.0))
+    with mock.patch.object(TradingRuntime, "sync_profit", new=mock.AsyncMock(return_value=10.0)) as sp, \
+         mock.patch.object(TradingRuntime, "_schedule_profit_sync", new=mock.AsyncMock()) as ssp:
+        asyncio.run(TradingRuntime._close_full_after_tps(engine, "t-1", 555, 2420.0))
     assert sp.called
     assert ssp.called
     assert _trade_dict()["status"] == "closed"
@@ -184,8 +184,8 @@ def test_close_full_residual_reopens_and_closes(fresh_db, engine):
         positions=[{"ticket": 555, "volume": 0.02}],
         close_result={"success": True, "close_price": 2419.0},
     )
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
-        asyncio.run(SimulationEngine._close_full_after_tps(engine, "t-1", 555, 2420.0))
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock()) as rc:
+        asyncio.run(TradingRuntime._close_full_after_tps(engine, "t-1", 555, 2420.0))
     trade = _trade_dict()
     assert trade["status"] == "open"
     assert trade["remaining_lots"] == 0.02
@@ -198,8 +198,8 @@ def test_close_full_residual_close_fails_stays_reopened(fresh_db, engine):
         positions=[{"ticket": 555, "volume": 0.02}],
         close_result={"success": False, "error": "reject"},
     )
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
-        asyncio.run(SimulationEngine._close_full_after_tps(engine, "t-1", 555, 2420.0))
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock()) as rc:
+        asyncio.run(TradingRuntime._close_full_after_tps(engine, "t-1", 555, 2420.0))
     trade = _trade_dict()
     assert trade["status"] == "open"
     assert trade["remaining_lots"] == 0.02
@@ -208,6 +208,6 @@ def test_close_full_residual_close_fails_stays_reopened(fresh_db, engine):
 
 def test_close_full_no_ticket_skips_profit_sync(fresh_db, engine):
     _insert_trade(mt5_ticket=None, remaining_lots=0.0)
-    with mock.patch.object(SimulationEngine, "sync_profit", new=mock.AsyncMock()) as sp:
-        asyncio.run(SimulationEngine._close_full_after_tps(engine, "t-1", None, 2420.0))
+    with mock.patch.object(TradingRuntime, "sync_profit", new=mock.AsyncMock()) as sp:
+        asyncio.run(TradingRuntime._close_full_after_tps(engine, "t-1", None, 2420.0))
     assert not sp.called

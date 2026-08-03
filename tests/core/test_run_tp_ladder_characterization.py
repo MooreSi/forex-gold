@@ -19,7 +19,7 @@ from backend.src.db import database as db
 from backend.src.services.positions import tp_ladder
 from backend.src.services.risk import strategy_params as sp
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
 
 
@@ -73,7 +73,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._tp_trigger_cache = _TPCache()
     return e

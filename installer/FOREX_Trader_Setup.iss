@@ -45,14 +45,14 @@ Compression              = lzma2/ultra64
 SolidCompression         = yes
 WizardStyle              = modern
 ; WizardImageFile uses the built-in default (compiler: prefix fails under Wine)
-UninstallDisplayIcon     = {app}\forex_trader\ui\static\gold_bag.ico
+UninstallDisplayIcon     = {app}\frontend\static\gold_bag.ico
 ArchitecturesInstallIn64BitMode = x64compatible
 MinVersion               = 10.0.17763
 ; Windows 10 1809+ required (needed for Python 3.11 + modern TLS)
 VersionInfoVersion       = 1.1.0.0
 VersionInfoCompany       = {#AppPublisher}
 VersionInfoDescription   = {#AppName} Installer
-SetupIconFile            = ..\forex_trader\ui\static\gold_bag.ico
+SetupIconFile            = ..\frontend\static\gold_bag.ico
 DisableProgramGroupPage  = yes
 
 [Languages]
@@ -69,7 +69,12 @@ Name: "{userappdata}\ForexTrader\data\sessions"
 [Files]
 ; ── Application source files ──────────────────────────────────────────────────
 ; Exclude Mac-only scripts, macOS-specific Wine setup, and build artefacts
-Source: "..\forex_trader\*";       DestDir: "{app}\forex_trader";       Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
+; backend/ and frontend/ replaced forex_trader/ in the 2026 restructure.
+; Packaging the old path made this script fail at COMPILE time (Inno errors
+; on a [Files] entry that matches nothing), so the installer had been
+; unbuildable since then -- see tests/refactor/test_installer_packages_the_real_tree.py.
+Source: "..\backend\*";           DestDir: "{app}\backend";           Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
+Source: "..\frontend\*";          DestDir: "{app}\frontend";          Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
 Source: "..\run.py";               DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\mt5_bridge.py";        DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\requirements.txt";     DestDir: "{app}";                    Flags: ignoreversion
@@ -77,6 +82,10 @@ Source: "..\pyproject.toml";       DestDir: "{app}";                    Flags: i
 Source: "..\config.yaml.example";  DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\Setup & Start FOREX.bat"; DestDir: "{app}";                Flags: ignoreversion
 Source: "..\Stop FOREX.bat";       DestDir: "{app}";                    Flags: ignoreversion
+; The in-app updater reads both of these at runtime; without them the
+; Update tab reports no version and an empty changelog.
+Source: "..\VERSION";              DestDir: "{app}";                    Flags: ignoreversion
+Source: "..\CHANGELOG.md";         DestDir: "{app}";                    Flags: ignoreversion
 
 ; ── install_deps.py only -- the embedded Python runtime + get-pip.py are no
 ; longer bundled here; CurStepChanged (below) downloads both fresh into
@@ -84,10 +93,10 @@ Source: "..\Stop FOREX.bat";       DestDir: "{app}";                    Flags: i
 Source: "install_deps.py"; DestDir: "{app}\installer";  Flags: ignoreversion
 
 [Icons]
-Name: "{group}\FOREX Trader";          Filename: "{app}\Setup & Start FOREX.bat"; WorkingDir: "{app}"; IconFilename: "{app}\forex_trader\ui\static\gold_bag.ico"
+Name: "{group}\FOREX Trader";          Filename: "{app}\Setup & Start FOREX.bat"; WorkingDir: "{app}"; IconFilename: "{app}\frontend\static\gold_bag.ico"
 Name: "{group}\Stop FOREX Trader";     Filename: "{app}\Stop FOREX.bat";           WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\FOREX Trader";    Filename: "{app}\Setup & Start FOREX.bat"; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\forex_trader\ui\static\gold_bag.ico"
+Name: "{autodesktop}\FOREX Trader";    Filename: "{app}\Setup & Start FOREX.bat"; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\frontend\static\gold_bag.ico"
 
 [Run]
 ; ── Step 1: Bootstrap pip into the embedded Python ────────────────────────────

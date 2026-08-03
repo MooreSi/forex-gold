@@ -18,7 +18,7 @@ import pytest
 from backend.src.services.positions import safety_net as core_tp_safety_net
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -69,7 +69,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._tp_safety_net_last_alert = {}
     return e
@@ -121,5 +121,5 @@ def test_sweep_continues_past_per_trade_exception(fresh_db, engine):
     with mock.patch.object(core_tp_safety_net, "get_open_trades",
                            return_value=[{"trade_id": "bad"}, {"trade_id": "good"}]), \
          mock.patch.object(core_tp_safety_net, "tp_safety_net_check_trade", side_effect=fake_check):
-        asyncio.run(SimulationEngine._tp_safety_net_sweep(engine))
+        asyncio.run(TradingRuntime._tp_safety_net_sweep(engine))
     assert calls == ["bad", "good"]

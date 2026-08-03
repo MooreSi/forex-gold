@@ -23,7 +23,7 @@ from backend.src.services.positions import monitor_loop as ml
 from backend.src.services.positions.monitor_cycle import MonitorState as _MonitorState
 from backend.src.services.dpm.bookkeeping import DPMCache as _DPMCache
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -71,7 +71,7 @@ def _insert_open_trade(trade_id, direction="BUY", stop_loss=2380.0, mt5_ticket=5
 
 
 def _make_engine(bridge):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._monitor_running = True
     e._bridge = bridge
     # The four cycle counters and the DXY candle cache moved into a single
@@ -162,8 +162,8 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
         mock.patch("asyncio.sleep", new=mock.AsyncMock(side_effect=stop_sleep)),
         mock.patch.object(ml, "record_close", fake_record_close),
         mock.patch.object(ml, "partial_close_trade", fake_partial_close),
-        mock.patch.object(SimulationEngine, "_schedule_profit_sync", fake_sched),
-        mock.patch.object(SimulationEngine, "_background_close_commentary", fake_commentary),
+        mock.patch.object(TradingRuntime, "_schedule_profit_sync", fake_sched),
+        mock.patch.object(TradingRuntime, "_background_close_commentary", fake_commentary),
         # M4 B5 inlined the _handle_scale_out wrapper into _monitor_loop, so
         # the sentinel moved to the hub's module-global impl alias. M4 B9d
         # then moved the hub itself into services/positions/monitor_cycle.py,

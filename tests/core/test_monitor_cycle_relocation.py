@@ -34,12 +34,12 @@ from unittest import mock
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.positions import monitor_cycle as mc
 
 
 def _engine():
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._monitor_running = True
     e._bridge = object()
     e._cfg = {"starting_balance": 1000.0}
@@ -194,6 +194,6 @@ def test_the_relocated_function_is_the_real_one():
 
 
 def test_the_close_path_is_untouched_by_this_batch():
-    assert hasattr(SimulationEngine, "_make_close_trade_ctx")
-    assert hasattr(SimulationEngine, "close_trade")
-    assert hasattr(SimulationEngine, "record_close")
+    assert hasattr(TradingRuntime, "_make_close_trade_ctx")
+    assert hasattr(TradingRuntime, "close_trade")
+    assert hasattr(TradingRuntime, "record_close")

@@ -23,12 +23,12 @@ from unittest import mock
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.broker import position_sync as ps
 
 
 def _engine():
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = object()
     e._mt5_sync_missing_streak = {}
     return e
@@ -93,7 +93,7 @@ def test_the_miss_threshold_value_is_carried_not_reinvented():
     silently changed it would make the app either believe closes too
     eagerly or never at all."""
     ctx = _engine()._make_position_sync_ctx()
-    assert ctx.miss_threshold == SimulationEngine.MT5_SYNC_MISS_THRESHOLD == 2
+    assert ctx.miss_threshold == TradingRuntime.MT5_SYNC_MISS_THRESHOLD == 2
 
 
 def test_the_relocated_function_is_the_real_one():
@@ -104,7 +104,7 @@ def test_the_relocated_function_is_the_real_one():
 
 def test_the_close_path_is_untouched_by_this_batch():
     """The demo gate, restated where this batch can trip it."""
-    assert hasattr(SimulationEngine, "_make_close_trade_ctx")
-    assert hasattr(SimulationEngine, "close_trade")
-    assert hasattr(SimulationEngine, "record_close")
-    assert hasattr(SimulationEngine, "_schedule_profit_sync")
+    assert hasattr(TradingRuntime, "_make_close_trade_ctx")
+    assert hasattr(TradingRuntime, "close_trade")
+    assert hasattr(TradingRuntime, "record_close")
+    assert hasattr(TradingRuntime, "_schedule_profit_sync")

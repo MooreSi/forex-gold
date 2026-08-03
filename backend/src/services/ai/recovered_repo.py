@@ -22,6 +22,10 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+# Alias of db(); the outermost block is the commit boundary. Spelled
+# this way so a multi-write function declares that its writes land
+# together -- see backend/src/db/__init__.py.
+from backend.src.db.database import db as transaction
 
 
 # ── AI-recovered signal review (Telegram > Reader Logic > AI tab) ─────────────
@@ -39,7 +43,7 @@ def save_ai_recovered_signal(
     overwriting it here would make the review-tab row lie about what was
     actually approved."""
     try:
-        with db() as conn:
+        with transaction() as conn:
             existing = conn.execute(
                 "SELECT id, approved, rule_generated FROM ai_recovered_signals "
                 "WHERE tg_message_id=?", (tg_message_id,),
@@ -85,7 +89,7 @@ def save_ai_recovered_sl_adjustment(
     only new_stop_loss populated (no direction/entry/TP fields, since this
     isn't a new entry)."""
     try:
-        with db() as conn:
+        with transaction() as conn:
             existing = conn.execute(
                 "SELECT id, approved, rule_generated FROM ai_recovered_signals "
                 "WHERE tg_message_id=?", (tg_message_id,),
@@ -257,7 +261,7 @@ def mark_ai_recovered_signal_rule_result_by_tg_id(
     """Mirrors the boolean/note outcome only — not the numeric rule_id, which
     is meaningless across nodes (each side generates and stores its own rule
     row via the separate MSG_LEARNED_RULE_SYNC channel, with its own id)."""
-    with db() as conn:
+    with transaction() as conn:
         conn.execute(
             "UPDATE ai_recovered_signals SET rule_generated=? WHERE tg_message_id=?",
             (1 if rule_generated else 0, tg_message_id),

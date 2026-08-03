@@ -24,7 +24,7 @@ from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.trading import ai_signal_fallback as core_ai_signal_fallback
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -71,7 +71,7 @@ class _RaisingBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._cfg = {}
     return e
@@ -96,9 +96,9 @@ def _insert_open_trade(trade_id="t-1", tg_source="GD VIP", mt5_ticket=555, stop_
 # ── _try_ai_signal_fallback ─────────────────────────────────────────────────
 
 def test_not_active_trader_node_returns_none_no_dedup_recorded(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=False), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=False), \
          mock.patch.object(ai_signal_extractor, "classify_message") as clf:
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
     assert result is None
     clf.assert_not_called()
     assert db.has_ai_fallback_check("tg-1", "hello") is False
@@ -106,17 +106,17 @@ def test_not_active_trader_node_returns_none_no_dedup_recorded(fresh_db, engine)
 
 def test_already_dedup_checked_returns_none_no_ai_call(fresh_db, engine):
     db.record_ai_fallback_check("tg-1", "hello")
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=True), \
          mock.patch.object(ai_signal_extractor, "classify_message") as clf:
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
     assert result is None
     clf.assert_not_called()
 
 
 def test_non_xauusd_currency_returns_none_no_ai_call(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=True), \
          mock.patch.object(ai_signal_extractor, "classify_message") as clf:
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(
             engine, "Currency: EURUSD entering now", "Chan", "tg-1",
         ))
     assert result is None
@@ -124,17 +124,17 @@ def test_non_xauusd_currency_returns_none_no_ai_call(fresh_db, engine):
 
 
 def test_ai_call_raises_returns_none_dedup_not_recorded(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=True), \
          mock.patch.object(ai_signal_extractor, "classify_message", side_effect=RuntimeError("boom")):
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
     assert result is None
     assert db.has_ai_fallback_check("tg-1", "hello") is False
 
 
 def test_ai_call_returns_none_dedup_is_recorded(fresh_db, engine):
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=True), \
          mock.patch.object(ai_signal_extractor, "classify_message", return_value=None):
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(engine, "hello", "Chan", "tg-1"))
     assert result is None
     assert db.has_ai_fallback_check("tg-1", "hello") is True
 
@@ -145,9 +145,9 @@ def test_ai_call_sl_adjustment_applies_and_returns_none(fresh_db, engine):
         "kind": "sl_adjustment", "new_stop_loss": 2395.0,
         "_ai_confidence": 0.9, "_ai_reasoning": "moved SL per message",
     }
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=True), \
          mock.patch.object(ai_signal_extractor, "classify_message", return_value=ai_result):
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(engine, "adjust sl to 2395", "Chan", "tg-1"))
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(engine, "adjust sl to 2395", "Chan", "tg-1"))
 
     assert result is None
     assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2395.0, "tp": None}]
@@ -167,9 +167,9 @@ def test_ai_call_ordinary_signal_returns_result_dict(fresh_db, engine):
         "direction": "BUY", "entry_low": 2399.0, "entry_high": 2401.0, "stop_loss": 2390.0,
         "tp1": 2405.0, "_ai_confidence": 0.85, "_ai_reasoning": "recovered from chatter",
     }
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), \
+    with mock.patch.object(TradingRuntime, "_is_active_trader_node", return_value=True), \
          mock.patch.object(ai_signal_extractor, "classify_message", return_value=ai_result):
-        result = asyncio.run(SimulationEngine._try_ai_signal_fallback(engine, "buy gold now", "Chan", "tg-2"))
+        result = asyncio.run(TradingRuntime._try_ai_signal_fallback(engine, "buy gold now", "Chan", "tg-2"))
 
     assert result == ai_result
     with db.db() as conn:
@@ -186,7 +186,7 @@ def test_ai_call_ordinary_signal_returns_result_dict(fresh_db, engine):
 async def _call_queue_unrecognised(engine, tg_id, channel_name, text):
     with mock.patch.object(core_ai_signal_fallback, "analyse_unrecognised_message",
                            new=mock.AsyncMock()) as m:
-        SimulationEngine._queue_unrecognised(engine, tg_id, channel_name, text)
+        TradingRuntime._queue_unrecognised(engine, tg_id, channel_name, text)
         await asyncio.sleep(0)  # let the scheduled task (if any) get created
         return m
 

@@ -102,3 +102,51 @@ def switch_environment_db(db_path: str) -> None:
 def fetch_realised_pnl_last_24h(cutoff: float) -> float:
     from backend.src.services.analytics import read_repo
     return read_repo.fetch_realised_pnl_last_24h(cutoff)
+
+
+# ── Expert Tunables (M7) ──────────────────────────────────────────────────
+# The page renders whatever this hands back and interprets none of it, so a
+# new tunable appears in the UI by being added to the catalogue -- no
+# bespoke widget, ever. Rows are plain dicts so the page never needs to
+# import the service to read a field.
+
+def get_expert_param_catalogue() -> dict:
+    """{domain: [row, ...]} where each row carries the spec plus the live
+    value. Both value and default are included because every row offers a
+    reset control and has to know whether it is currently overridden."""
+    from backend.src.services.risk import expert_params
+    values = expert_params.all_values()
+    return {
+        domain: [
+            {
+                "key":     param.key,
+                "label":   param.label,
+                "value":   values[param.key],
+                "default": param.default,
+                "min":     param.min,
+                "max":     param.max,
+                "unit":    param.unit,
+                "desc":    param.desc,
+                "integer": param.integer,
+            }
+            for param in params
+        ]
+        for domain, params in expert_params.specs_by_domain().items()
+    }
+
+
+def save_expert_params(values: dict) -> dict:
+    """Clamping and unknown-key rejection happen in the service, not here:
+    a stale page or a direct call must not be able to bypass them."""
+    from backend.src.services.risk import expert_params
+    return expert_params.set_params(values)
+
+
+def reset_expert_param(key: str) -> dict:
+    from backend.src.services.risk import expert_params
+    return expert_params.reset(key)
+
+
+def reset_all_expert_params() -> dict:
+    from backend.src.services.risk import expert_params
+    return expert_params.reset_all()

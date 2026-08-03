@@ -30,13 +30,17 @@ from backend.src.services.signals.parser import (
     is_gd2_message, is_format_ab_signal, parse_with_learned_rules, _CURRENCY_RE,
     parse_limit_order_signal,
 )
+from backend.src.services.risk import expert_params
 
 log = logging.getLogger(__name__)
 
 AIFallbackFn = Callable[[str, str, str], Awaitable[Optional[dict]]]
 QueueUnrecognisedFn = Callable[[str, str, str], None]
 
-_RECENT_DUP_WINDOW = 15 * 60
+def recent_dup_window() -> int:
+    """Duplicate-signal suppression window. Was a 15-minute constant; now
+    Settings > Expert Tunables."""
+    return expert_params.get("duplicate_window_s")
 
 
 async def classify_and_parse(
@@ -117,7 +121,7 @@ async def classify_and_parse(
             _was_new, _recent_rows = tg_repo.record_unsupported_currency(
                 tg_id, group_id, channel_name,
                 msg.get("sender_name", ""), msg_ts_str, text,
-                _dir, _RECENT_DUP_WINDOW,
+                _dir, recent_dup_window(),
             )
             _norm_currency = currency.replace("/", "").replace("-", "")
             for (_prior_text,) in _recent_rows:

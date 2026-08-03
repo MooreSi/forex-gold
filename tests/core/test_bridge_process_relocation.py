@@ -30,7 +30,7 @@ from unittest import mock
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.broker import bridge_process as bp
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -86,7 +86,7 @@ def test_native_bridge_reports_a_failed_reconnect():
 # ── wiring ───────────────────────────────────────────────────────────────
 
 def test_the_runtime_delegates_with_both_collaborators():
-    engine = SimulationEngine.__new__(SimulationEngine)
+    engine = TradingRuntime.__new__(TradingRuntime)
     engine._bridge = object()
     engine._using_native_bridge = True
 

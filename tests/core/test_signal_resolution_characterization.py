@@ -25,7 +25,7 @@ from unittest.mock import patch
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE,
     STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP,
@@ -95,7 +95,7 @@ def _default_tick():
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._dpm_candles = None
     e._cfg = {}
@@ -128,13 +128,13 @@ def _set_channel_perf(source, lot_mult=1.0, paused=0):
 
 def test_raises_when_signal_not_found(fresh_db, engine):
     with pytest.raises(ValueError, match="not found"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "does-not-exist"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "does-not-exist"))
 
 
 def test_raises_when_signal_wrong_status(fresh_db, engine):
     _insert_signal(status="closed")
     with pytest.raises(ValueError, match="cannot open"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
 
 def test_raises_when_circuit_breaker_active(fresh_db, engine):
@@ -144,7 +144,7 @@ def test_raises_when_circuit_breaker_active(fresh_db, engine):
         "circuit_breaker_active_until": time.time() + 3600,
     })
     with pytest.raises(ValueError, match="Circuit breaker"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -154,7 +154,7 @@ def test_raises_when_session_not_allowed(fresh_db, engine):
         "session_asia_enabled": 0, "session_london_enabled": 0, "session_ny_enabled": 0,
     })
     with pytest.raises(ValueError, match="Trading session"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -162,7 +162,7 @@ def test_raises_when_pretrade_filter_blocks_bad_rr(fresh_db, engine):
     # TP1 1pt from mid vs SL 10pt from mid -> 0.1:1, below the 0.75 min
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2401.0)
     with pytest.raises(ValueError, match="R:R"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -170,7 +170,7 @@ def test_raises_when_price_outside_entry_zone(fresh_db, engine):
     _insert_signal(direction="BUY", entry_low=2399.0, entry_high=2401.0)
     engine._bridge = _FakeBridge(tick=SimpleNamespace(bid=2404.8, ask=2405.2, spread_points=4.0))
     with pytest.raises(ValueError, match="entry zone"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -179,7 +179,7 @@ def test_raises_when_spread_too_wide(fresh_db, engine):
     db.update_fee_settings({"max_allowed_spread_points": 2.0})
     engine._bridge = _FakeBridge(tick=SimpleNamespace(bid=2399.8, ask=2400.2, spread_points=4.0))
     with pytest.raises(ValueError, match="Spread too wide"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -187,7 +187,7 @@ def test_raises_when_channel_paused(fresh_db, engine):
     _insert_signal(source_name="PausedChannel")
     _set_channel_perf("PausedChannel", paused=1)
     with pytest.raises(ValueError, match="paused"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -196,7 +196,7 @@ def test_raises_when_channel_paused(fresh_db, engine):
 def test_strategy_resolution_uses_channel_override(fresh_db, engine):
     _insert_signal(source_name="OverrideChannel")
     db.set_channel_strategy_override("OverrideChannel", STRATEGY_TRAIL_STOP)
-    result = asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    result = asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert result["strategy"] == STRATEGY_TRAIL_STOP
 
 
@@ -204,14 +204,14 @@ def test_strategy_resolution_uses_auto_rec(fresh_db, engine):
     _insert_signal(source_name="AutoChannel")
     db.set_channel_strategy_override("AutoChannel", None, auto=True)
     db.set_channel_strategy_rec("AutoChannel", STRATEGY_SIGNAL_CLIMBER, "reasoning", 0.9)
-    result = asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    result = asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert result["strategy"] == STRATEGY_SIGNAL_CLIMBER
 
 
 def test_strategy_resolution_falls_back_to_global_default(fresh_db, engine):
     _insert_signal(source_name="PlainChannel")
     db.update_risk_settings({"trade_strategy": STRATEGY_SCALE_OUT})
-    result = asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    result = asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert result["strategy"] == STRATEGY_SCALE_OUT
 
 
@@ -219,19 +219,19 @@ def test_strategy_resolution_falls_back_to_global_default(fresh_db, engine):
 
 def test_lot_size_override_used_verbatim(fresh_db, engine):
     _insert_signal()
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1", lot_size_override=0.25))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1", lot_size_override=0.25))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.25
 
 
 def test_lot_size_from_signal_when_no_override(fresh_db, engine):
     _insert_signal(lot_size=0.33)
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.33
 
 
 def test_lot_size_risk_based_when_neither_set(fresh_db, engine):
     _insert_signal()  # no lot_size, entry-SL distance 10pt
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     lots = engine._bridge.place_order_calls[0]["lots"]
     assert lots > 0
 
@@ -239,33 +239,33 @@ def test_lot_size_risk_based_when_neither_set(fresh_db, engine):
 def test_lot_size_channel_multiplier_applied(fresh_db, engine):
     _insert_signal(source_name="BoostedChannel", lot_size=0.10)
     _set_channel_perf("BoostedChannel", lot_mult=2.0)
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.20
 
 
 def test_lot_size_channel_multiplier_skipped_for_manual_override(fresh_db, engine):
     _insert_signal(source_name="BoostedChannel")
     _set_channel_perf("BoostedChannel", lot_mult=2.0)
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1", lot_size_override=0.10))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1", lot_size_override=0.10))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.10
 
 
 def test_strategy_fixed_lot_wins_over_everything(fresh_db, engine):
     _insert_signal(lot_size=0.10)
     db.update_risk_settings({"strategy_lot_size": 0.77})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1", lot_size_override=0.10))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1", lot_size_override=0.10))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.77
 
 
 def test_age_lot_mult_decay_applied(fresh_db, engine):
     _insert_signal(lot_size=0.10)
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1", age_lot_mult=0.5))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1", age_lot_mult=0.5))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.05
 
 
 def test_age_lot_mult_skipped_for_manual_override(fresh_db, engine):
     _insert_signal()
-    asyncio.run(SimulationEngine.open_trade_from_signal(
+    asyncio.run(TradingRuntime.open_trade_from_signal(
         engine, "sig-1", lot_size_override=0.10, age_lot_mult=0.5))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.10
 
@@ -275,7 +275,7 @@ def test_age_lot_mult_skipped_for_manual_override(fresh_db, engine):
 def test_scale_out_uses_signal_sl_unchanged(fresh_db, engine):
     _insert_signal(stop_loss=2390.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_SCALE_OUT})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2390.0
 
 
@@ -283,7 +283,7 @@ def test_no_sl_scale_widens_sl_without_dpm_candles(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0)  # 10pt from mid
     db.update_risk_settings({"trade_strategy": STRATEGY_NO_SL_SCALE})
     engine._dpm_candles = None  # ADX gate skipped entirely
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     sl = engine._bridge.place_order_calls[0]["sl"]
     assert sl == 2385.0  # mid(2400) - 10*1.5
 
@@ -294,7 +294,7 @@ def test_no_sl_scale_blocks_when_adx_below_30(fresh_db, engine):
     engine._dpm_candles = [{"h": 1, "l": 1, "c": 1}]  # non-empty -- ADX gate active
     with patch("backend.src.services.dpm.engine.compute_adx", return_value=15.0):
         with pytest.raises(ValueError, match="ADX"):
-            asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+            asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -303,28 +303,28 @@ def test_no_sl_scale_allows_when_adx_above_30(fresh_db, engine):
     db.update_risk_settings({"trade_strategy": STRATEGY_NO_SL_SCALE})
     engine._dpm_candles = [{"h": 1, "l": 1, "c": 1}]
     with patch("backend.src.services.dpm.engine.compute_adx", return_value=35.0):
-        result = asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        result = asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert result["strategy"] == STRATEGY_NO_SL_SCALE
 
 
 def test_conservative_uses_fixed_proxy_sl(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0)  # mid=2400
     db.update_risk_settings({"trade_strategy": STRATEGY_CONSERVATIVE})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2395.0  # mid - 5pt
 
 
 def test_scalp_runner_uses_fixed_proxy_sl(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_SCALP_RUNNER})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2390.0  # mid - 10pt
 
 
 def test_conservative_trial_uses_lot_derived_proxy_sl(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, lot_size=0.10)
     db.update_risk_settings({"trade_strategy": STRATEGY_CONSERVATIVE_TRIAL})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     sl = engine._bridge.place_order_calls[0]["sl"]
     assert sl == 2390.0  # mid - round(100/(0.10*100),1) = mid - 10.0
 
@@ -332,14 +332,14 @@ def test_conservative_trial_uses_lot_derived_proxy_sl(fresh_db, engine):
 def test_trail_stop_uses_configured_sl_pts(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_TRAIL_STOP, "trail_stop_sl_pts": 6.0})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2394.0  # mid - 6pt
 
 
 def test_signal_climber_uses_signal_sl_exactly(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2385.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_SIGNAL_CLIMBER})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2385.0
 
 
@@ -347,7 +347,7 @@ def test_reversal_runner_widens_sl(fresh_db, engine):
     # stated dist 5pt -> widened to min(5*4, 20) = 20pt
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
     db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2380.0  # mid(2400) - 20pt
 
 
@@ -356,7 +356,7 @@ def test_adaptive_runner_widens_and_caps_sl(fresh_db, engine):
     # max(stated=5, min(widened=20, cap=5)) = max(5, 5) = 5
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=2410.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["sl"] == 2395.0  # mid(2400) - 5pt
 
 
@@ -370,7 +370,7 @@ def test_risk_governor_blocks_when_enabled_and_unsafe(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2350.0, tp1=2440.0)
     db.update_risk_settings({"risk_governor_enabled": 1})
     with pytest.raises(ValueError, match="Risk Governor blocked"):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -384,7 +384,7 @@ def test_risk_governor_overrides_lot_size_when_allowed(fresh_db, engine):
         "risk_governor_enabled": 1, "risk_per_trade_pct": 5.0, "max_risk_per_trade_pct": 5.0,
         "max_lot_size": 0.02,
     })
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     lots = engine._bridge.place_order_calls[0]["lots"]
     assert lots == 0.02  # RG's own max_lot_size cap, not the signal's 0.10
 
@@ -395,5 +395,5 @@ def test_risk_governor_yields_to_strategy_fixed_lot(fresh_db, engine):
         "risk_governor_enabled": 1, "risk_per_trade_pct": 5.0, "max_risk_per_trade_pct": 5.0,
         "max_lot_size": 0.02, "strategy_lot_size": 0.15,
     })
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls[0]["lots"] == 0.15

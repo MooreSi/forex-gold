@@ -15,7 +15,7 @@ import time
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.services.dpm.bookkeeping import DPMCache
 from backend.src.utils.models import CONTRACT_SIZE
 
@@ -84,14 +84,14 @@ def _insert_dpm_row(trade_id, entry_price=2400.0, original_sl=2390.0, lot_size=0
 
 def test_load_dpm_calibrated_empty_when_no_rows(fresh_db):
     engine = _FakeEngine()
-    cal = SimulationEngine._load_dpm_calibrated(engine)
+    cal = TradingRuntime._load_dpm_calibrated(engine)
     assert cal == {}
 
 
 def test_load_dpm_calibrated_keys_by_session_and_bucket(fresh_db):
     _insert_calibration(session="London", bucket="strong", be_mult=1.5)
     engine = _FakeEngine()
-    cal = SimulationEngine._load_dpm_calibrated(engine)
+    cal = TradingRuntime._load_dpm_calibrated(engine)
     assert "London_strong" in cal
     assert cal["London_strong"]["be_multiplier"] == 1.5
 
@@ -100,29 +100,29 @@ def test_load_dpm_calibrated_uses_latest_batch_only(fresh_db):
     _insert_calibration(session="London", bucket="strong", be_mult=1.0, calibrated_at=100.0)
     _insert_calibration(session="London", bucket="strong", be_mult=2.0, calibrated_at=200.0)
     engine = _FakeEngine()
-    cal = SimulationEngine._load_dpm_calibrated(engine)
+    cal = TradingRuntime._load_dpm_calibrated(engine)
     assert cal["London_strong"]["be_multiplier"] == 2.0
 
 
 def test_load_dpm_calibrated_ttl_cache_returns_stale_within_600s(fresh_db):
     _insert_calibration(session="London", bucket="strong", be_mult=1.0)
     engine = _FakeEngine()
-    first = SimulationEngine._load_dpm_calibrated(engine)
+    first = TradingRuntime._load_dpm_calibrated(engine)
     assert first["London_strong"]["be_multiplier"] == 1.0
 
     _insert_calibration(session="London", bucket="strong", be_mult=9.0, calibrated_at=time.time() + 1)
-    second = SimulationEngine._load_dpm_calibrated(engine)
+    second = TradingRuntime._load_dpm_calibrated(engine)
     assert second["London_strong"]["be_multiplier"] == 1.0  # still stale -- within TTL
 
 
 def test_load_dpm_calibrated_reloads_after_ttl_expiry(fresh_db):
     _insert_calibration(session="London", bucket="strong", be_mult=1.0)
     engine = _FakeEngine()
-    SimulationEngine._load_dpm_calibrated(engine)
+    TradingRuntime._load_dpm_calibrated(engine)
 
     _insert_calibration(session="London", bucket="strong", be_mult=9.0, calibrated_at=time.time() + 1)
     engine._dpm_cache.loaded_at = time.time() - 601  # force TTL expiry
-    reloaded = SimulationEngine._load_dpm_calibrated(engine)
+    reloaded = TradingRuntime._load_dpm_calibrated(engine)
     assert reloaded["London_strong"]["be_multiplier"] == 9.0
 
 
@@ -137,7 +137,7 @@ def test_load_dpm_calibrated_reloads_after_ttl_expiry(fresh_db):
 def test_finalize_dpm_record_computes_r_multiple(fresh_db):
     _insert_dpm_row("t-1", entry_price=2400.0, original_sl=2390.0, lot_size=0.10)
     # initial_risk = |2400-2390| * 0.10 * CONTRACT_SIZE = 10 * 0.10 * 100 = 100
-    SimulationEngine._finalize_dpm_record(None, "t-1", close_price=2420.0,
+    TradingRuntime._finalize_dpm_record(None, "t-1", close_price=2420.0,
                                           exit_type="TP", final_pnl=200.0)
 
     with db.db() as conn:
@@ -154,7 +154,7 @@ def test_finalize_dpm_record_computes_r_multiple(fresh_db):
 
 def test_finalize_dpm_record_guards_zero_initial_risk(fresh_db):
     _insert_dpm_row("t-1", entry_price=2400.0, original_sl=2400.0, lot_size=0.10)  # SL == entry
-    SimulationEngine._finalize_dpm_record(None, "t-1", close_price=2420.0,
+    TradingRuntime._finalize_dpm_record(None, "t-1", close_price=2420.0,
                                           exit_type="TP", final_pnl=200.0)
 
     with db.db() as conn:
@@ -164,5 +164,5 @@ def test_finalize_dpm_record_guards_zero_initial_risk(fresh_db):
 
 def test_finalize_dpm_record_is_noop_for_unknown_trade(fresh_db):
     # Should not raise even though no row exists for this trade_id.
-    SimulationEngine._finalize_dpm_record(None, "does-not-exist", close_price=2420.0,
+    TradingRuntime._finalize_dpm_record(None, "does-not-exist", close_price=2420.0,
                                           exit_type="TP", final_pnl=200.0)

@@ -13,7 +13,7 @@ import tempfile
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -43,7 +43,7 @@ def fresh_db():
 # ── create_signal ─────────────────────────────────────────────────────────────
 
 def test_create_signal_happy_path(fresh_db):
-    result = SimulationEngine.create_signal(
+    result = TradingRuntime.create_signal(
         None, source_name="Manual", direction="buy",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
     )
@@ -63,7 +63,7 @@ def test_create_signal_happy_path(fresh_db):
 
 def test_create_signal_raises_on_validation_error(fresh_db):
     with pytest.raises(ValueError):
-        SimulationEngine.create_signal(
+        TradingRuntime.create_signal(
             None, source_name="Manual", direction="BUY",
             entry_low=2401.0, entry_high=2399.0,  # low > high -- invalid
             stop_loss=2390.0, tp1=2410.0,
@@ -73,7 +73,7 @@ def test_create_signal_raises_on_validation_error(fresh_db):
 def test_create_signal_requires_tp1_when_setting_enabled(fresh_db):
     # require_at_least_tp1 defaults to 1 (enabled)
     with pytest.raises(ValueError, match="TP1"):
-        SimulationEngine.create_signal(
+        TradingRuntime.create_signal(
             None, source_name="Manual", direction="BUY",
             entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=None,
         )
@@ -81,7 +81,7 @@ def test_create_signal_requires_tp1_when_setting_enabled(fresh_db):
 
 def test_create_signal_allows_missing_tp1_when_setting_disabled(fresh_db):
     db.update_risk_settings({"require_at_least_tp1": 0})
-    result = SimulationEngine.create_signal(
+    result = TradingRuntime.create_signal(
         None, source_name="Manual", direction="BUY",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=None,
     )
@@ -91,22 +91,22 @@ def test_create_signal_allows_missing_tp1_when_setting_disabled(fresh_db):
 # ── get_signals ───────────────────────────────────────────────────────────────
 
 def test_get_signals_returns_all_newest_first(fresh_db):
-    r1 = SimulationEngine.create_signal(
+    r1 = TradingRuntime.create_signal(
         None, source_name="A", direction="BUY",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
     )
-    r2 = SimulationEngine.create_signal(
+    r2 = TradingRuntime.create_signal(
         None, source_name="B", direction="SELL",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2410.0, tp1=2390.0,
     )
-    signals = SimulationEngine.get_signals(None)
+    signals = TradingRuntime.get_signals(None)
     ids = [s["signal_id"] for s in signals]
     assert ids[0] == r2["signal_id"]  # newest first
     assert ids[1] == r1["signal_id"]
 
 
 def test_get_signals_parses_claude_commentary_json(fresh_db):
-    r1 = SimulationEngine.create_signal(
+    r1 = TradingRuntime.create_signal(
         None, source_name="A", direction="BUY",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
     )
@@ -115,13 +115,13 @@ def test_get_signals_parses_claude_commentary_json(fresh_db):
             "UPDATE vantage_signals SET claude_commentary=? WHERE signal_id=?",
             (json.dumps({"take": "bullish"}), r1["signal_id"]),
         )
-    signals = SimulationEngine.get_signals(None)
+    signals = TradingRuntime.get_signals(None)
     match = next(s for s in signals if s["signal_id"] == r1["signal_id"])
     assert match["claude_commentary"] == {"take": "bullish"}
 
 
 def test_get_signals_leaves_bad_json_commentary_alone(fresh_db):
-    r1 = SimulationEngine.create_signal(
+    r1 = TradingRuntime.create_signal(
         None, source_name="A", direction="BUY",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
     )
@@ -130,7 +130,7 @@ def test_get_signals_leaves_bad_json_commentary_alone(fresh_db):
             "UPDATE vantage_signals SET claude_commentary=? WHERE signal_id=?",
             ("not valid json", r1["signal_id"]),
         )
-    signals = SimulationEngine.get_signals(None)
+    signals = TradingRuntime.get_signals(None)
     match = next(s for s in signals if s["signal_id"] == r1["signal_id"])
     assert match["claude_commentary"] == "not valid json"
 
@@ -140,11 +140,11 @@ def test_get_signals_leaves_bad_json_commentary_alone(fresh_db):
 # ── cancel_signal ─────────────────────────────────────────────────────────────
 
 def test_cancel_signal_sets_cancelled_status(fresh_db):
-    r1 = SimulationEngine.create_signal(
+    r1 = TradingRuntime.create_signal(
         None, source_name="A", direction="BUY",
         entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
     )
-    SimulationEngine.cancel_signal(None, r1["signal_id"])
+    TradingRuntime.cancel_signal(None, r1["signal_id"])
     with db.db() as conn:
         row = db.row_to_dict(
             conn.execute("SELECT * FROM vantage_signals WHERE signal_id=?",

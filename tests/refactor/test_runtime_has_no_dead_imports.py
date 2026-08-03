@@ -110,6 +110,6 @@ def test_the_reexport_scan_finds_the_known_reexports():
     three names were deleted as unused because nothing inside runtime.py
     referenced them, and a test that imported them from runtime broke."""
     reexported = _reexported_names()
-    assert "SimulationEngine" in reexported
+    assert "TradingRuntime" in reexported
     for name in ("_apply_fee", "_platform_fee_rate", "_tp_level_from_extreme"):
         assert name in reexported, f"{name} is imported from runtime elsewhere"

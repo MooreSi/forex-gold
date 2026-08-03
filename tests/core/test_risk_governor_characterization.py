@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -41,7 +41,7 @@ def fresh_db():
 
 @pytest.fixture
 def engine(fresh_db):
-    return SimulationEngine.__new__(SimulationEngine)
+    return TradingRuntime.__new__(TradingRuntime)
 
 
 def _tick(bid: float, ask: float):

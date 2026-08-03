@@ -20,7 +20,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_REVERSAL_RUNNER,
@@ -111,7 +111,7 @@ class _FakeEA:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._dpm_candles = None
     e._cfg = {}
@@ -163,7 +163,7 @@ def test_atomic_claim_blocks_concurrent_duplicate(fresh_db, engine):
 
     with patch("backend.src.db.database.get_circuit_breaker_state", side_effect=_steal_claim):
         with pytest.raises(ValueError, match="duplicate suppressed"):
-            asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+            asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert engine._bridge.place_order_calls == []
 
 
@@ -171,7 +171,7 @@ def test_restores_pending_on_open_trade_failure(fresh_db, engine):
     _insert_signal()
     engine._bridge = _FakeBridge(order_result={"error": "requote"})
     with pytest.raises(RuntimeError):
-        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+        asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     with db.db() as conn:
         status = conn.execute(
             "SELECT status FROM vantage_signals WHERE signal_id=?", ("sig-1",)
@@ -185,7 +185,7 @@ def test_conservative_post_fill_override(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_CONSERVATIVE})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     assert trade["stop_loss"] == 2395.5   # fill - 5
@@ -201,7 +201,7 @@ def test_conservative_ea_managed_calls_update_trade(fresh_db, engine):
     ea_bridge.set_instance(fake_ea)
     engine._bridge = _FakeBridge()
 
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     assert fake_ea.update_trade_calls == [
         {"trade_id": _get_trade_by_signal("sig-1")["trade_id"], "tps": {1: 2403.5}}
@@ -214,7 +214,7 @@ def test_conservative_python_managed_never_calls_ea_update_trade(fresh_db, engin
     ea_bridge.set_instance(None)  # nothing configured -- python bridge path
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
 
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     # no exception, no EA touched -- ea_bridge.get_instance() naturally None
 
 
@@ -222,7 +222,7 @@ def test_scalp_runner_post_fill_override(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_SCALP_RUNNER})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     assert trade["stop_loss"] == 2390.5   # fill - 10
@@ -238,7 +238,7 @@ def test_scalp_runner_ea_managed_calls_update_trade_with_both_tps(fresh_db, engi
     ea_bridge.set_instance(fake_ea)
     engine._bridge = _FakeBridge()
 
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     assert fake_ea.update_trade_calls == [
         {"trade_id": _get_trade_by_signal("sig-1")["trade_id"], "tps": {1: 2403.5, 2: 2404.5}}
@@ -249,7 +249,7 @@ def test_conservative_trial_post_fill_override(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, lot_size=0.10)
     db.update_risk_settings({"trade_strategy": STRATEGY_CONSERVATIVE_TRIAL})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     assert trade["stop_loss"] == 2390.5   # fill - 10.0 (100/(0.10*100))
@@ -262,7 +262,7 @@ def test_reversal_runner_post_fill_override_leaves_tps_untouched(fresh_db, engin
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=None)
     db.update_risk_settings({"trade_strategy": STRATEGY_REVERSAL_RUNNER})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     # stated dist 5pt -> widened to min(5*4,20)=20pt from fill
@@ -274,7 +274,7 @@ def test_adaptive_runner_post_fill_override(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2395.0, tp1=2410.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_ADAPTIVE_RUNNER})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     # stated dist 5pt -> widened 20pt, capped at 50% of final TP dist from fill (2410-2400.5=9.5 -> cap 4.75)
@@ -289,7 +289,7 @@ def test_trail_stop_post_fill_override(fresh_db, engine):
         "trailing_stop_distance": 3.0,
     })
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     assert trade["stop_loss"] == 2394.5   # fill - 6
@@ -301,7 +301,7 @@ def test_scale_out_has_no_post_fill_override(fresh_db, engine):
     _insert_signal(entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0)
     db.update_risk_settings({"trade_strategy": STRATEGY_SCALE_OUT})
     engine._bridge = _FakeBridge(order_result={"ticket": 555, "fill_price": 2400.5})
-    asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
 
     trade = _get_trade_by_signal("sig-1")
     assert trade["stop_loss"] == 2390.0  # untouched, from open_trade's placement
@@ -316,5 +316,5 @@ def test_background_commentary_scheduled_for_local_trade(fresh_db, engine):
     engine._bridge = _FakeBridge()
     # Just confirm the call completes without raising -- _background_open_commentary
     # is itself out of scope (deferred), fire-and-forget via asyncio.create_task.
-    result = asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
+    result = asyncio.run(TradingRuntime.open_trade_from_signal(engine, "sig-1"))
     assert result.get("trade_id")

@@ -19,7 +19,7 @@ import pytest
 
 from backend.src.services.trading import instant_entry as core_instant_entry
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -62,7 +62,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._dpm_candles = []
     e._cfg = {}
@@ -99,7 +99,7 @@ def _tg_status(tg_id):
 
 
 def _run(engine, msg, tg_id, direction, price, rs, auto_execute, text="XAU Buy Now"):
-    return asyncio.run(SimulationEngine._process_instant_entry(
+    return asyncio.run(TradingRuntime._process_instant_entry(
         engine, msg, tg_id, "grp-1", "Chan", text, direction, price, rs, auto_execute,
     ))
 

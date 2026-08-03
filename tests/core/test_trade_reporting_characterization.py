@@ -15,7 +15,7 @@ import time
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -77,7 +77,7 @@ def test_get_open_trades_returns_only_open_newest_first(fresh_db):
     _insert_trade("t-2", "sig-1", status="open", open_time=200.0)
     _insert_trade("t-3", "sig-1", status="closed", open_time=300.0)
 
-    trades = SimulationEngine.get_open_trades(None)
+    trades = TradingRuntime.get_open_trades(None)
     ids = [t["trade_id"] for t in trades]
     assert ids == ["t-2", "t-1"]
 
@@ -86,7 +86,7 @@ def test_get_open_trades_backfills_tg_source_from_signal(fresh_db):
     _insert_signal("sig-1", source_name="Gold Diggers VIP")
     _insert_trade("t-1", "sig-1", status="open", tg_source=None)
 
-    trades = SimulationEngine.get_open_trades(None)
+    trades = TradingRuntime.get_open_trades(None)
     assert trades[0]["tg_source"] == "Gold Diggers VIP"
 
 
@@ -94,7 +94,7 @@ def test_get_open_trades_does_not_overwrite_existing_tg_source(fresh_db):
     _insert_signal("sig-1", source_name="Gold Diggers VIP")
     _insert_trade("t-1", "sig-1", status="open", tg_source="Manual Override")
 
-    trades = SimulationEngine.get_open_trades(None)
+    trades = TradingRuntime.get_open_trades(None)
     assert trades[0]["tg_source"] == "Manual Override"
 
 
@@ -103,7 +103,7 @@ def test_get_open_trades_parses_claude_json_columns(fresh_db):
     _insert_trade("t-1", "sig-1", status="open",
                   claude_open=json.dumps({"take": "bullish"}))
 
-    trades = SimulationEngine.get_open_trades(None)
+    trades = TradingRuntime.get_open_trades(None)
     assert trades[0]["claude_open"] == {"take": "bullish"}
 
 
@@ -111,7 +111,7 @@ def test_get_open_trades_leaves_bad_json_alone(fresh_db):
     _insert_signal("sig-1")
     _insert_trade("t-1", "sig-1", status="open", claude_open="not json")
 
-    trades = SimulationEngine.get_open_trades(None)
+    trades = TradingRuntime.get_open_trades(None)
     assert trades[0]["claude_open"] == "not json"
 
 
@@ -121,7 +121,7 @@ def test_get_open_trades_leaves_bad_json_alone(fresh_db):
 
 def test_compute_performance_no_trades_returns_starting_balance_baseline(fresh_db):
     engine = _FakeEngine(starting_balance=1000.0)
-    perf = SimulationEngine.compute_performance(engine)
+    perf = TradingRuntime.compute_performance(engine)
     assert perf["starting_balance"] == 1000.0
     assert perf["current_balance"] == 1000.0
     assert perf["closed_trades"] == 0
@@ -135,7 +135,7 @@ def test_compute_performance_win_rate_and_profit_factor(fresh_db):
     _insert_trade("t-2", "sig-1", status="closed", open_time=100.0, close_time=200.0, net_pnl=-50.0)
 
     engine = _FakeEngine(starting_balance=1000.0)
-    perf = SimulationEngine.compute_performance(engine)
+    perf = TradingRuntime.compute_performance(engine)
     assert perf["closed_trades"] == 2
     assert perf["win_rate_pct"] == 50.0
     assert perf["avg_win"] == 100.0
@@ -150,7 +150,7 @@ def test_compute_performance_counts_open_trades(fresh_db):
     _insert_trade("t-2", "sig-1", status="open")
 
     engine = _FakeEngine(starting_balance=1000.0)
-    perf = SimulationEngine.compute_performance(engine)
+    perf = TradingRuntime.compute_performance(engine)
     assert perf["open_trades"] == 2
 
 
@@ -158,19 +158,19 @@ def test_compute_performance_uses_live_sim_account_balance(fresh_db):
     with db.db() as conn:
         conn.execute("UPDATE vantage_simulation_account SET balance=? WHERE id=1", (1234.5,))
     engine = _FakeEngine(starting_balance=1000.0)
-    perf = SimulationEngine.compute_performance(engine)
+    perf = TradingRuntime.compute_performance(engine)
     assert perf["current_balance"] == 1234.5
     assert perf["equity"] == 1234.5
 
 
 def test_compute_performance_peak_balance_falls_back_to_current_when_unset(fresh_db):
     engine = _FakeEngine(starting_balance=1000.0)
-    perf = SimulationEngine.compute_performance(engine)
+    perf = TradingRuntime.compute_performance(engine)
     assert perf["peak_balance"] == perf["current_balance"]
 
 
 def test_compute_performance_peak_balance_reads_app_config_when_set(fresh_db):
     db.set_app_config("peak_balance", "2000.0")
     engine = _FakeEngine(starting_balance=1000.0)
-    perf = SimulationEngine.compute_performance(engine)
+    perf = TradingRuntime.compute_performance(engine)
     assert perf["peak_balance"] == 2000.0

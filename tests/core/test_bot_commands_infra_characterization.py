@@ -16,7 +16,7 @@ import pytest
 
 import backend.src.config as cfg_mod
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -67,7 +67,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._bot_offset = 0
     return e
@@ -92,7 +92,7 @@ def test_restart_app_success(fresh_db, engine):
          mock.patch("backend.src.utils.os_utils.delayed_relaunch_cmd", return_value=["fakecmd"]):
         log_mock.return_value.__enter__ = mock.Mock(return_value=mock.Mock())
         log_mock.return_value.__exit__ = mock.Mock(return_value=False)
-        result = asyncio.run(SimulationEngine.restart_app(engine, []))
+        result = asyncio.run(TradingRuntime.restart_app(engine, []))
     assert "Restarting app in 5 seconds" in result
     assert db.get_app_config("bot_update_offset") == "12345"
     assert popen_mock.called
@@ -103,7 +103,7 @@ def test_restart_app_popen_failure_caught(fresh_db, engine):
          mock.patch("backend.src.utils.os_utils.open_restart_log") as log_mock:
         log_mock.return_value.__enter__ = mock.Mock(return_value=mock.Mock())
         log_mock.return_value.__exit__ = mock.Mock(return_value=False)
-        result = asyncio.run(SimulationEngine.restart_app(engine, []))
+        result = asyncio.run(TradingRuntime.restart_app(engine, []))
     assert "Restart failed: spawn failed" in result
 
 

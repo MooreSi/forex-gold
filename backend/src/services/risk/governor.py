@@ -28,6 +28,7 @@ from typing import Optional
 
 from backend.src.db import database as db_module
 from backend.src.services.risk import repo as risk_repo
+from backend.src.services.risk import expert_params
 from backend.src.utils.models import (
     CONTRACT_SIZE, Tick,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
@@ -47,8 +48,17 @@ RR_BYPASS_SOURCES: frozenset = frozenset({
 # 0.30 only rejects badly-inverted setups (TP1 closer than 1/3 of the stop).
 # A 1:1 floor was tested but blocks the breakeven-mechanism winners that the
 # scale-out/conservative strategies rely on, so sizing does the heavy lifting.
-RG_MIN_TP1_RR   = 1.00  # minimum TP1 reward:risk required to open (1:1 floor)
-RG_MAX_STOP_ATR = 1.5   # reject scalps whose stop is wider than this x ATR
+# Live values, defaulting to the constants these replaced (1.00 / 1.5) --
+# see services/risk/expert_params.py. Read through functions rather than
+# bound at import so a change takes effect without a restart.
+def rg_min_tp1_rr() -> float:
+    """Minimum TP1 reward:risk required to open (1:1 floor by default)."""
+    return expert_params.get("rg_min_tp1_rr")
+
+
+def rg_max_stop_atr() -> float:
+    """Reject scalps whose stop is wider than this x ATR."""
+    return expert_params.get("rg_max_stop_atr")
 
 
 def is_trading_paused() -> bool:
@@ -106,7 +116,7 @@ def check_pre_trade_filters(
     direction = direction.upper()
 
     # ── Filter 1: Minimum TP1 R:R ─────────────────────────────────────────
-    _MIN_RR = 0.75
+    _MIN_RR = expert_params.get("min_tp1_rr")
     _src_lower    = source_name.lower()
     _rr_bypassed  = any(ch in _src_lower for ch in RR_BYPASS_SOURCES)
     if tp1 is not None and not _rr_bypassed:
@@ -123,7 +133,7 @@ def check_pre_trade_filters(
             )
 
     # ── Filter 2: Directional cap ──────────────────────────────────────────
-    _MAX_UNPROTECTED = 2
+    _MAX_UNPROTECTED = expert_params.get("max_unprotected_trades")
     same_dir_unprotected = risk_repo.count_unprotected_same_direction(direction)
     if same_dir_unprotected >= _MAX_UNPROTECTED:
         return (
@@ -152,10 +162,11 @@ def rg_size_and_check(*, direction: str, ref_price: float,
         return None, "stop distance is zero"
 
     # (E) Stop-width cap — keep scalps tight. Skipped when ATR is unavailable.
-    if atr > 0 and stop_dist > atr * RG_MAX_STOP_ATR:
+    _rg_max_stop_atr = rg_max_stop_atr()
+    if atr > 0 and stop_dist > atr * _rg_max_stop_atr:
         return None, (
-            f"stop {stop_dist:.1f} pts exceeds {RG_MAX_STOP_ATR:.1f}x ATR "
-            f"({atr * RG_MAX_STOP_ATR:.1f} pts) — too wide for a scalp"
+            f"stop {stop_dist:.1f} pts exceeds {_rg_max_stop_atr:.1f}x ATR "
+            f"({atr * _rg_max_stop_atr:.1f} pts) — too wide for a scalp"
         )
 
     # (A) Risk-based position size from risk_per_trade_pct.
@@ -186,10 +197,11 @@ def rg_size_and_check(*, direction: str, ref_price: float,
         STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     ):
         tp1_dist = abs(float(tp1) - float(ref_price))
-        if tp1_dist / stop_dist < RG_MIN_TP1_RR:
+        _rg_min_rr = rg_min_tp1_rr()
+        if tp1_dist / stop_dist < _rg_min_rr:
             return None, (
                 f"TP1 R:R {tp1_dist / stop_dist:.2f}:1 below the "
-                f"{RG_MIN_TP1_RR:.2f}:1 minimum"
+                f"{_rg_min_rr:.2f}:1 minimum"
             )
 
     # (E) Directional cap — at most 2 unprotected same-direction trades.

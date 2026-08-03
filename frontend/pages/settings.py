@@ -58,6 +58,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         t_diag   = ui.tab("Diagnostics")
         t_reg    = ui.tab("Registration")
         t_upd    = ui.tab("Update")
+        t_expert = ui.tab("Expert Tunables")
         t_theme  = ui.tab("Theme")
 
     with ui.tab_panels(stabs, value=t_mt5).classes("bg-gray-900 p-4"):
@@ -79,6 +80,9 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         with ui.tab_panel(t_upd):
             from frontend.pages.update_panel import render as _render_update
             _render_update()
+        with ui.tab_panel(t_expert):
+            from frontend.pages.expert_tunables import render as _render_expert_tunables
+            _render_expert_tunables()
         with ui.tab_panel(t_theme):
             _render_theme()
 

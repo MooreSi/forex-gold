@@ -66,6 +66,7 @@ from backend.src.services.reversal_engine.research_loop import (
 # which treats an external `from backend.src.runtime import X` as a use.
 from backend.src.services.broker.mt5_performance import _apply_fee, _platform_fee_rate
 from backend.src.services.positions.max_tp import _tp_level_from_extreme
+from backend.src.services.risk import expert_params as _expert_params
 from backend.src.services.cluster.node_roles import (
     is_active_trader_node as _is_active_trader_node_impl,
     is_bot_command_authority as _is_bot_command_authority_impl,
@@ -178,7 +179,7 @@ def _make_bridge(config: dict):
     return MT5BridgeClient(config.get("mt5_bridge_url", ""))
 
 
-class SimulationEngine:
+class TradingRuntime:
     def __init__(self, config: dict):
         import time as _time_mod
         self._started_at = _time_mod.monotonic()
@@ -308,7 +309,7 @@ class SimulationEngine:
             _ea_mod.set_instance(self._ea_bridge)
         except Exception as _ea_e:
             log.warning("[EA] bridge failed to start: %s", _ea_e)
-        log.info("SimulationEngine started")
+        log.info("TradingRuntime started")
 
     async def shutdown(self) -> None:
         self._monitor_running = False
@@ -325,7 +326,7 @@ class SimulationEngine:
         if hasattr(self, "_ea_bridge"):
             await self._ea_bridge.stop()
         await self._bridge.shutdown()
-        log.info("SimulationEngine stopped")
+        log.info("TradingRuntime stopped")
 
     # ── Market data ───────────────────────────────────────────────────────────
 
@@ -670,7 +671,9 @@ class SimulationEngine:
 
     # ── MT5 position sync ─────────────────────────────────────────────────────
 
-    MT5_SYNC_MISS_THRESHOLD = 2  # consecutive cycles before treating a missing ticket as a real close
+    # Kept for callers that read it off the class; the live value comes
+    # from Settings > Expert Tunables via _make_position_sync_ctx.
+    MT5_SYNC_MISS_THRESHOLD = 2
 
     def _make_position_sync_ctx(self) -> _PositionSyncCtx:
         """Bind reconciliation's collaborators in one place.
@@ -681,7 +684,7 @@ class SimulationEngine:
         return _PositionSyncCtx(
             bridge=self._bridge,
             mt5_sync_missing_streak=self._mt5_sync_missing_streak,
-            miss_threshold=self.MT5_SYNC_MISS_THRESHOLD,
+            miss_threshold=_expert_params.get("mt5_sync_miss_threshold"),
             get_tick=self.get_tick,
             partial_close_trade=self.partial_close_trade,
             record_close=self.record_close,
@@ -1299,3 +1302,9 @@ class SimulationEngine:
         except Exception as e:
             return f"Order failed: {telegram_alerts._md_esc(str(e))}"
 
+
+# Compatibility alias. The class was SimulationEngine until M4's final step;
+# the name predated the app doing real broker work and had stopped being
+# true. This keeps any caller that still imports the old name pointing at
+# the same object, so the rename cannot half-apply.
+SimulationEngine = TradingRuntime

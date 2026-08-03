@@ -124,17 +124,17 @@ def test_every_command_the_engine_dispatched_is_still_routable():
 
 
 def test_runtime_no_longer_owns_the_dispatcher_or_the_delegating_commands():
-    from backend.src.runtime import SimulationEngine
+    from backend.src.runtime import TradingRuntime
 
-    assert not hasattr(SimulationEngine, "_handle_bot_command")
+    assert not hasattr(TradingRuntime, "_handle_bot_command")
     for gone in ("_cmd_help", "_cmd_balance", "_cmd_daily", "_cmd_status",
                  "_cmd_trades", "_cmd_pause", "_cmd_resume", "_cmd_strategy",
                  "_cmd_risk", "_cmd_activate", "_cmd_report",
                  "_cmd_restart_bridge", "_cmd_headless", "_cmd_switch_live",
                  "_cmd_switch_demo", "_cmd_dpm_on", "_cmd_dpm_off",
                  "_cmd_ime_on", "_cmd_ime_off"):
-        assert not hasattr(SimulationEngine, gone), gone
+        assert not hasattr(TradingRuntime, gone), gone
     # The order-placing handlers stay on the runtime, injected into the table.
     for kept in ("_cmd_close", "_cmd_market_price_buy",
                  "_cmd_market_price_sell", "restart_app"):
-        assert hasattr(SimulationEngine, kept), kept
+        assert hasattr(TradingRuntime, kept), kept

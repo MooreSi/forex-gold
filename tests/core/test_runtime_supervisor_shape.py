@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 RUNTIME = Path(__file__).resolve().parents[2] / "backend" / "src" / "runtime.py"
 
@@ -29,7 +29,7 @@ RUNTIME = Path(__file__).resolve().parents[2] / "backend" / "src" / "runtime.py"
 def _methods() -> dict[str, ast.AST]:
     tree = ast.parse(RUNTIME.read_text())
     cls = next(n for n in tree.body
-               if isinstance(n, ast.ClassDef) and n.name == "SimulationEngine")
+               if isinstance(n, ast.ClassDef) and n.name == "TradingRuntime")
     return {n.name: n for n in cls.body
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
@@ -73,9 +73,9 @@ def test_the_static_node_role_checks_still_answer_from_the_class():
     """Both are patched by name on the class in several characterization
     packs, so they must remain class attributes that take no self."""
     for name in ("_is_active_trader_node", "_is_bot_command_authority"):
-        attr = SimulationEngine.__dict__[name]
+        attr = TradingRuntime.__dict__[name]
         assert isinstance(attr, staticmethod), f"{name} must stay a staticmethod"
-        assert isinstance(getattr(SimulationEngine, name)(), bool)
+        assert isinstance(getattr(TradingRuntime, name)(), bool)
 
 
 def test_the_loop_shells_are_still_coroutines():
@@ -83,7 +83,7 @@ def test_the_loop_shells_are_still_coroutines():
     for name in ("_monitor_loop", "_bot_command_loop", "_tp_ladder_fast_loop",
                  "_bridge_watchdog_loop", "_ai_model_refresh_loop",
                  "_reversal_engine_research_loop"):
-        assert asyncio.iscoroutinefunction(getattr(SimulationEngine, name)), name
+        assert asyncio.iscoroutinefunction(getattr(TradingRuntime, name)), name
 
 
 def test_the_facade_and_the_state_are_deliberately_still_here():
@@ -98,4 +98,4 @@ def test_the_facade_and_the_state_are_deliberately_still_here():
                      "_make_close_trade_ctx", "_make_scan_ctx",
                      "_make_monitor_ctx", "_make_position_sync_ctx",
                      "_make_bot_deps", "close_trade", "open_trade", "get_tick"):
-        assert survivor in _methods() or hasattr(SimulationEngine, survivor), survivor
+        assert survivor in _methods() or hasattr(TradingRuntime, survivor), survivor

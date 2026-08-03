@@ -19,7 +19,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -83,7 +83,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._mt5_sync_missing_streak = {}
     return e
@@ -115,14 +115,14 @@ def _trade_dict(trade_id="t-1"):
 
 def test_bridge_not_configured_returns_immediately(fresh_db, engine):
     engine._bridge = _FakeBridge(configured=False)
-    asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))  # must not raise
+    asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))  # must not raise
 
 
 def test_no_open_trades_skips_import_pass_too(fresh_db, engine):
     engine._bridge = _FakeBridge(positions=[
         {"ticket": 777, "type": "BUY", "volume": 0.05, "open_price": 2400.0},
     ])
-    asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     with db.db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM vantage_simulated_trades").fetchone()[0]
     assert n == 0  # untracked position never imported -- no open_trades to reach that pass
@@ -132,23 +132,23 @@ def test_ticket_still_live_clears_streak(fresh_db, engine):
     _insert_trade(mt5_ticket=555)
     engine._bridge = _FakeBridge(positions=[{"ticket": 555, "volume": 0.10}])
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     assert "t-1" not in engine._mt5_sync_missing_streak
 
 
 def test_disconnected_bridge_empty_positions_skips_whole_sync(fresh_db, engine):
     _insert_trade(mt5_ticket=555)
     engine._bridge = _FakeBridge(positions=[], health={"connected": False})
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock()) as rc:
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     assert not rc.called
 
 
 def test_miss_streak_below_threshold_not_yet_closed(fresh_db, engine):
     _insert_trade(mt5_ticket=555)
     engine._bridge = _FakeBridge(positions=[])
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock()) as rc:
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     assert not rc.called
     assert engine._mt5_sync_missing_streak["t-1"] == 1
 
@@ -157,12 +157,12 @@ def test_miss_streak_reaches_threshold_full_close_fallback_price(fresh_db, engin
     _insert_trade(mt5_ticket=555, remaining_lots=0.10)
     engine._bridge = _FakeBridge(positions=[], deal_history=[], position_history=[])
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock(return_value={"net_pnl": 0})) as rc, \
-         mock.patch.object(SimulationEngine, "sync_profit", new=mock.AsyncMock()), \
-         mock.patch.object(SimulationEngine, "_schedule_profit_sync", new=mock.AsyncMock()), \
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock(return_value={"net_pnl": 0})) as rc, \
+         mock.patch.object(TradingRuntime, "sync_profit", new=mock.AsyncMock()), \
+         mock.patch.object(TradingRuntime, "_schedule_profit_sync", new=mock.AsyncMock()), \
          mock.patch.object(telegram_alerts, "fmt_trade_close", return_value="msg"), \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     rc.assert_called_once_with("t-1", 2400.0, "MT5_close")
 
 
@@ -172,12 +172,12 @@ def test_full_close_infers_sl_reason_from_comment(fresh_db, engine):
              "comment": "sl 2390", "volume": 0.10, "profit": -10.0}]
     engine._bridge = _FakeBridge(positions=[], deal_history=[], position_history=deals)
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock(return_value={"net_pnl": -10})) as rc, \
-         mock.patch.object(SimulationEngine, "sync_profit", new=mock.AsyncMock()), \
-         mock.patch.object(SimulationEngine, "_schedule_profit_sync", new=mock.AsyncMock()), \
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock(return_value={"net_pnl": -10})) as rc, \
+         mock.patch.object(TradingRuntime, "sync_profit", new=mock.AsyncMock()), \
+         mock.patch.object(TradingRuntime, "_schedule_profit_sync", new=mock.AsyncMock()), \
          mock.patch.object(telegram_alerts, "fmt_trade_close", return_value="msg"), \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     rc.assert_called_once_with("t-1", 2390.0, "SL")
 
 
@@ -188,11 +188,11 @@ def test_partial_close_detected_no_full_close_double_prefixed_reason(fresh_db, e
     engine._bridge = _FakeBridge(positions=[{"ticket": 999, "volume": 0.05}],
                                  deal_history=[], position_history=partial_deals)
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    with mock.patch.object(SimulationEngine, "partial_close_trade",
+    with mock.patch.object(TradingRuntime, "partial_close_trade",
                            new=mock.AsyncMock(return_value={"partial_pnl": 5.0})) as pc, \
-         mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc, \
+         mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock()) as rc, \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     pc.assert_called_once_with("t-1", 0.05, 2405.0, "MT5_MT5_sync_TP")
     assert not rc.called
     assert "t-1" not in engine._mt5_sync_missing_streak
@@ -205,10 +205,10 @@ def test_partial_close_reassigns_ticket_when_continuing_position_found(fresh_db,
     engine._bridge = _FakeBridge(positions=[{"ticket": 999, "volume": 0.05}],
                                  deal_history=[], position_history=partial_deals)
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    with mock.patch.object(SimulationEngine, "partial_close_trade",
+    with mock.patch.object(TradingRuntime, "partial_close_trade",
                            new=mock.AsyncMock(return_value={"partial_pnl": 5.0})), \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     assert _trade_dict()["mt5_ticket"] == 999
 
 
@@ -232,8 +232,8 @@ def test_ladder_leg_trade_excluded_from_close_detection(fresh_db, engine):
             ("trade-parent", 1, 1, 2410.0, 0.05, 888, "open"),
         )
     engine._bridge = _FakeBridge(positions=[{"ticket": 888, "volume": 0.05}])
-    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
-        asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    with mock.patch.object(TradingRuntime, "record_close", new=mock.AsyncMock()) as rc:
+        asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     assert not rc.called
     with db.db() as conn:
         status = conn.execute(
@@ -249,7 +249,7 @@ def test_untracked_position_imported_when_other_trade_tracked(fresh_db, engine):
         {"ticket": 777, "type": "BUY", "volume": 0.05, "open_price": 2400.0,
          "sl": 2390.0, "tp": 2410.0, "open_time": time.time()},
     ])
-    asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     with db.db() as conn:
         row = db.row_to_dict(
             conn.execute("SELECT * FROM vantage_simulated_trades WHERE mt5_ticket=?", (777,)).fetchone()
@@ -286,7 +286,7 @@ def test_known_ladder_leg_ticket_not_reimported(fresh_db, engine):
         {"ticket": 555, "volume": 0.10},
         {"ticket": 888, "type": "BUY", "volume": 0.05, "open_price": 2400.0},
     ])
-    asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
+    asyncio.run(TradingRuntime._sync_closed_mt5_positions(engine))
     with db.db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM vantage_simulated_trades WHERE mt5_ticket=?", (888,)).fetchone()[0]
     assert n == 0

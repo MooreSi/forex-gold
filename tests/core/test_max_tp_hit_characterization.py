@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine, _tp_level_from_extreme
+from backend.src.runtime import TradingRuntime, _tp_level_from_extreme
 
 
 def _reset_thread_local_connection():
@@ -56,7 +56,7 @@ class _FakeBridge:
 
 
 def _make_engine(bridge):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = bridge
     e._monitor_running = True
     return e

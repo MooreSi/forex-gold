@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 # B3: wrappers with no production caller and no internal caller -- reachable
 # only from old characterization tests, or from nothing at all.
@@ -118,7 +118,7 @@ B8_REMOVED = [
 
 @pytest.mark.parametrize("name", B8_REMOVED)
 def test_batch8_uncalled_facade_methods_removed(name):
-    assert not hasattr(SimulationEngine, name), (
+    assert not hasattr(TradingRuntime, name), (
         f"{name} was a public facade method with zero callers, deleted in "
         f"M4 B8. Call the service function directly if something needs it."
     )
@@ -126,22 +126,22 @@ def test_batch8_uncalled_facade_methods_removed(name):
 
 @pytest.mark.parametrize("name", B6_REMOVED)
 def test_batch6_scan_hub_wrappers_removed(name):
-    assert not hasattr(SimulationEngine, name), (
+    assert not hasattr(TradingRuntime, name), (
         f"{name} was inlined into its hub in M4 B6."
     )
 
 
 def test_the_close_context_builder_is_untouched():
     """The demo gate: M4 must not reshape the close path in any batch."""
-    assert hasattr(SimulationEngine, "_make_close_trade_ctx")
-    assert hasattr(SimulationEngine, "close_trade")
-    assert hasattr(SimulationEngine, "record_close")
-    assert hasattr(SimulationEngine, "_schedule_profit_sync")
+    assert hasattr(TradingRuntime, "_make_close_trade_ctx")
+    assert hasattr(TradingRuntime, "close_trade")
+    assert hasattr(TradingRuntime, "record_close")
+    assert hasattr(TradingRuntime, "_schedule_profit_sync")
 
 
 @pytest.mark.parametrize("name", B5_REMOVED)
 def test_batch5_hub_only_wrappers_removed(name):
-    assert not hasattr(SimulationEngine, name), (
+    assert not hasattr(TradingRuntime, name), (
         f"{name} was inlined into its hub loop in M4 B5 -- the loop calls the "
         f"service directly now."
     )
@@ -150,12 +150,12 @@ def test_batch5_hub_only_wrappers_removed(name):
 def test_the_hub_loops_survive_their_inlining():
     """Negative control: inlining must not eat the loops themselves."""
     for hub in ("_monitor_loop", "_tp_ladder_fast_loop"):
-        assert hasattr(SimulationEngine, hub), hub
+        assert hasattr(TradingRuntime, hub), hub
 
 
 @pytest.mark.parametrize("name", B3_REMOVED)
 def test_batch3_wrappers_removed(name):
-    assert not hasattr(SimulationEngine, name), (
+    assert not hasattr(TradingRuntime, name), (
         f"{name} was deleted in M4 B3 -- its logic lives in a service and is "
         f"tested there. If something needs it again, call the service."
     )
@@ -165,4 +165,4 @@ def test_the_survivors_are_still_here():
     """Negative control: the dissolution must not take the facade with it."""
     for survivor in ("startup", "shutdown", "close_trade", "open_trade",
                      "get_tick", "get_open_trades", "_make_close_trade_ctx"):
-        assert hasattr(SimulationEngine, survivor), survivor
+        assert hasattr(TradingRuntime, survivor), survivor

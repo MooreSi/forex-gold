@@ -114,10 +114,10 @@ def make_engine():
         def test_x(make_engine):
             engine = make_engine(_bridge=FakeBridge(), _tp_cache={})
     """
-    from backend.src.runtime import SimulationEngine
+    from backend.src.runtime import TradingRuntime
 
     def _build(**attrs):
-        engine = SimulationEngine.__new__(SimulationEngine)
+        engine = TradingRuntime.__new__(TradingRuntime)
         for name, value in attrs.items():
             setattr(engine, name, value)
         return engine

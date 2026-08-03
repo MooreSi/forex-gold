@@ -33,6 +33,19 @@ from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, Tick,
 )
+from backend.src.services.risk import expert_params
+
+
+def ime_sl_bounds() -> tuple[float, float, float]:
+    """(min pts, max pts, ATR multiplier) for the provisional stop an
+    instant entry opens with. Were the constants 8.0 / 25.0 / 1.2; now
+    Settings > Expert Tunables."""
+    return (
+        expert_params.get("ime_sl_min_pts"),
+        expert_params.get("ime_sl_max_pts"),
+        expert_params.get("ime_sl_atr_mult"),
+    )
+
 
 log = logging.getLogger(__name__)
 
@@ -168,7 +181,8 @@ async def process_instant_entry(
                 _rg_atr_ime = dpm_engine.compute_atr(dpm_candles) or 0.0
             except Exception:
                 _rg_atr_ime = 0.0
-        _IME_SL_DIST = max(8.0, min(round(_rg_atr_ime * 1.2 if _rg_atr_ime > 0 else 12.0, 2), 25.0))
+        _lo, _hi, _mult = ime_sl_bounds()
+        _IME_SL_DIST = max(_lo, min(round(_rg_atr_ime * _mult if _rg_atr_ime > 0 else 12.0, 2), _hi))
         if strategy_lot > 0:
             lot = strategy_lot
         else:
@@ -193,7 +207,8 @@ async def process_instant_entry(
         lot = strategy_lot
         _IME_MAX_RISK_USD = 150.0
         _ime_pts_from_risk = _IME_MAX_RISK_USD / (lot * 100.0)
-        _IME_SL_DIST = max(8.0, min(round(_ime_pts_from_risk, 2), 25.0))
+        _lo, _hi, _mult = ime_sl_bounds()
+        _IME_SL_DIST = max(_lo, min(round(_ime_pts_from_risk, 2), _hi))
         provisional_sl = round(
             entry_px - _IME_SL_DIST if direction == "BUY" else entry_px + _IME_SL_DIST, 2
         )
@@ -207,7 +222,8 @@ async def process_instant_entry(
                 _ime_atr_rp = dpm_engine.compute_atr(dpm_candles) or 0.0
             except Exception:
                 _ime_atr_rp = 0.0
-        _IME_SL_DIST = max(8.0, min(round(_ime_atr_rp * 1.2 if _ime_atr_rp > 0 else 12.0, 2), 25.0))
+        _lo, _hi, _mult = ime_sl_bounds()
+        _IME_SL_DIST = max(_lo, min(round(_ime_atr_rp * _mult if _ime_atr_rp > 0 else 12.0, 2), _hi))
         _ime_bal_rp  = await get_trading_balance(bridge, starting_balance)
         _ime_risk_rp = float(rs.get("risk_per_trade_pct", 0.5) or 0.5)
         lot = round((_ime_bal_rp * _ime_risk_rp / 100.0) / (_IME_SL_DIST * 100.0), 2)

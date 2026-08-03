@@ -16,7 +16,7 @@ import time
 import pytest
 
 from backend.src.db import database as db
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -58,7 +58,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     return e
 
@@ -85,19 +85,19 @@ def _insert_trade(trade_id, mt5_ticket, sig_id="sig-1", direction="BUY", status=
 
 def test_returns_empty_when_bridge_not_configured(fresh_db, engine):
     engine._bridge = _FakeBridge(configured=False, positions=[{"ticket": 1}])
-    result = asyncio.run(SimulationEngine.get_untracked_mt5_positions(engine))
+    result = asyncio.run(TradingRuntime.get_untracked_mt5_positions(engine))
     assert result == []
 
 
 def test_returns_empty_when_get_positions_raises(fresh_db, engine):
     engine._bridge = _FakeBridge(configured=True, raises=True)
-    result = asyncio.run(SimulationEngine.get_untracked_mt5_positions(engine))
+    result = asyncio.run(TradingRuntime.get_untracked_mt5_positions(engine))
     assert result == []
 
 
 def test_returns_empty_when_no_live_positions(fresh_db, engine):
     engine._bridge = _FakeBridge(configured=True, positions=[])
-    result = asyncio.run(SimulationEngine.get_untracked_mt5_positions(engine))
+    result = asyncio.run(TradingRuntime.get_untracked_mt5_positions(engine))
     assert result == []
 
 
@@ -105,7 +105,7 @@ def test_returns_untracked_positions_tagged(fresh_db, engine):
     engine._bridge = _FakeBridge(configured=True, positions=[
         {"ticket": 111, "symbol": "XAUUSD"},
     ])
-    result = asyncio.run(SimulationEngine.get_untracked_mt5_positions(engine))
+    result = asyncio.run(TradingRuntime.get_untracked_mt5_positions(engine))
     assert len(result) == 1
     assert result[0]["ticket"] == 111
     assert result[0]["_untracked"] is True
@@ -118,6 +118,6 @@ def test_excludes_positions_matching_a_tracked_trade(fresh_db, engine):
         {"ticket": 111, "symbol": "XAUUSD"},
         {"ticket": 222, "symbol": "XAUUSD"},
     ])
-    result = asyncio.run(SimulationEngine.get_untracked_mt5_positions(engine))
+    result = asyncio.run(TradingRuntime.get_untracked_mt5_positions(engine))
     tickets = [p["ticket"] for p in result]
     assert tickets == [222]

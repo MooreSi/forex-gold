@@ -22,7 +22,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -78,7 +78,7 @@ def _tick(bid: float, ask: float):
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._cfg = {"starting_balance": 1000.0}
     e._tp_trigger_cache = _TPCache()
@@ -130,7 +130,7 @@ def _get_trade(trade_id):
 
 def test_get_trading_balance_prefers_live_mt5_balance(fresh_db, engine):
     engine._bridge = _FakeBridge(account={"balance": 1234.5})
-    balance = asyncio.run(SimulationEngine._get_trading_balance(engine))
+    balance = asyncio.run(TradingRuntime._get_trading_balance(engine))
     assert balance == 1234.5
 
 
@@ -138,7 +138,7 @@ def test_get_trading_balance_falls_back_to_sim_account(fresh_db, engine):
     engine._bridge = _FakeBridge(account={"balance": 0})
     with db.db() as conn:
         conn.execute("UPDATE vantage_simulation_account SET balance=? WHERE id=1", (777.0,))
-    balance = asyncio.run(SimulationEngine._get_trading_balance(engine))
+    balance = asyncio.run(TradingRuntime._get_trading_balance(engine))
     assert balance == 777.0
 
 
@@ -148,14 +148,14 @@ def test_close_trade_raises_when_not_open(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", status="closed")
     with pytest.raises(ValueError):
-        asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+        asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
 
 
 def test_close_trade_uses_tick_bid_for_buy_close_price(fresh_db, engine):
     _insert_signal()
     _insert_trade("t-1", direction="BUY", mt5_ticket=None)
     engine._bridge = _FakeBridge(tick=_tick(bid=2415.0, ask=2415.5))
-    result = asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+    result = asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
     assert result["close_price"] == 2415.0
 
 
@@ -163,7 +163,7 @@ def test_close_trade_falls_back_to_entry_price_with_no_tick_no_ticket(fresh_db, 
     _insert_signal()
     _insert_trade("t-1", direction="BUY", mt5_ticket=None)
     engine._bridge = _FakeBridge(tick=None)
-    result = asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+    result = asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
     assert result["close_price"] == 2400.0  # entry_price
 
 
@@ -175,7 +175,7 @@ def test_close_trade_calls_bridge_close_position_for_mt5_ticket(fresh_db, engine
         close_results={555: {"success": True, "close_price": 2416.0}},
     )
     engine._bridge = bridge
-    result = asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+    result = asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
     assert bridge.close_position_calls == [555]
     assert result["close_price"] == 2416.0
 
@@ -188,7 +188,7 @@ def test_close_trade_raises_on_bridge_error(fresh_db, engine):
         close_results={555: {"error": "no such ticket"}},
     )
     with pytest.raises(RuntimeError):
-        asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+        asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
 
 
 def test_close_trade_raises_on_bridge_success_false(fresh_db, engine):
@@ -199,7 +199,7 @@ def test_close_trade_raises_on_bridge_success_false(fresh_db, engine):
         close_results={555: {"success": False}},
     )
     with pytest.raises(RuntimeError):
-        asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+        asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
 
 
 def test_close_trade_routes_to_ladder_legs_when_any_leg_open(fresh_db, engine):
@@ -212,7 +212,7 @@ def test_close_trade_routes_to_ladder_legs_when_any_leg_open(fresh_db, engine):
         close_results={101: {"success": True, "close_price": 2412.0}},
     )
     engine._bridge = bridge
-    result = asyncio.run(SimulationEngine.close_trade(engine, "t-1"))
+    result = asyncio.run(TradingRuntime.close_trade(engine, "t-1"))
     # Only the still-open leg (101) gets closed via the bridge -- not the
     # anchor ticket 100 (the normal single-ticket path is skipped entirely).
     assert bridge.close_position_calls == [101]
@@ -226,7 +226,7 @@ def test_record_close_updates_balance_and_cascades_signal(fresh_db, engine):
     _insert_signal("sig-1")
     _insert_trade("t-1", "sig-1", direction="BUY", mt5_ticket=None)
     engine._bridge = _FakeBridge(tick=None)
-    result = asyncio.run(SimulationEngine.record_close(engine, "t-1", 2410.0, "manual_close"))
+    result = asyncio.run(TradingRuntime.record_close(engine, "t-1", 2410.0, "manual_close"))
 
     with db.db() as conn:
         balance = conn.execute("SELECT balance FROM vantage_simulation_account WHERE id=1").fetchone()[0]
@@ -245,7 +245,7 @@ def test_record_close_invalidates_caches(fresh_db, engine):
     engine._scale_out_last_fail[("t-1", 1)] = time.time()
     engine._tp_safety_net_last_alert["t-1"] = time.time()
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2410.0, "manual_close"))
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2410.0, "manual_close"))
 
     assert "t-1" not in engine._tp_trigger_cache.triggered
     assert ("t-1", 1) not in engine._scale_out_last_fail
@@ -258,7 +258,7 @@ def test_record_close_updates_peak_balance_when_higher(fresh_db, engine):
     engine._bridge = _FakeBridge(tick=None, account={"balance": 5000.0})
     db.set_app_config("peak_balance", "1000.0")
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2410.0, "manual_close"))
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2410.0, "manual_close"))
 
     assert float(db.get_app_config("peak_balance")) == 5000.0
 
@@ -269,7 +269,7 @@ def test_record_close_does_not_lower_peak_balance(fresh_db, engine):
     engine._bridge = _FakeBridge(tick=None, account={"balance": 100.0})
     db.set_app_config("peak_balance", "9000.0")
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2410.0, "manual_close"))
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2410.0, "manual_close"))
 
     assert float(db.get_app_config("peak_balance")) == 9000.0
 
@@ -281,7 +281,7 @@ def test_record_close_skips_risk_governor_when_disabled(fresh_db, engine):
     db.update_risk_settings({"risk_governor_enabled": 0})
     db.set_app_config("trade_pause_until", "")  # sentinel: should stay untouched/empty
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2410.0, "manual_close"))
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2410.0, "manual_close"))
 
     assert db.get_app_config("trade_pause_until") in (None, "")
 
@@ -296,7 +296,7 @@ def test_record_close_runs_risk_governor_when_enabled(fresh_db, engine):
     })
     db.set_app_config("peak_balance", "10000.0")  # huge drawdown from this peak
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2410.0, "manual_close"))
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2410.0, "manual_close"))
 
     assert db.get_app_config("trade_pause_until") is not None
 
@@ -307,7 +307,7 @@ def test_record_close_skips_circuit_breaker_for_non_mt5_trade(fresh_db, engine):
     engine._bridge = _FakeBridge(tick=None)
     db.update_risk_settings({"circuit_breaker_enabled": 1, "circuit_breaker_losses": 1})
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2380.0, "SL"))  # a loss
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2380.0, "SL"))  # a loss
 
     rs = db.get_risk_settings()
     assert int(rs.get("circuit_breaker_consec_losses", 0)) == 0  # never recorded
@@ -319,7 +319,7 @@ def test_record_close_records_circuit_breaker_for_mt5_trade(fresh_db, engine):
     engine._bridge = _FakeBridge(tick=None)
     db.update_risk_settings({"circuit_breaker_enabled": 1, "circuit_breaker_losses": 5})
 
-    asyncio.run(SimulationEngine.record_close(engine, "t-1", 2380.0, "SL"))  # a loss
+    asyncio.run(TradingRuntime.record_close(engine, "t-1", 2380.0, "SL"))  # a loss
 
     rs = db.get_risk_settings()
     assert int(rs.get("circuit_breaker_consec_losses", 0)) == 1

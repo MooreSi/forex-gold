@@ -21,7 +21,7 @@ from backend.src.db import database as db
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from backend.src.services.dpm.bookkeeping import DPMCache as _DPMCache
-from backend.src.runtime import SimulationEngine
+from backend.src.runtime import TradingRuntime
 
 
 def _reset_thread_local_connection():
@@ -74,7 +74,7 @@ class _FakeBridge:
 
 @pytest.fixture
 def engine(fresh_db):
-    e = SimulationEngine.__new__(SimulationEngine)
+    e = TradingRuntime.__new__(TradingRuntime)
     e._bridge = _FakeBridge()
     e._tp_trigger_cache = _TPCache()
     e._dpm_cache = _DPMCache()
@@ -151,7 +151,7 @@ def _partial_close_reasons(trade_id):
 
 def _run_handler(engine, trade, tick, params):
     with mock.patch.object(dpm_engine, "compute_adaptive_params", return_value=params):
-        asyncio.run(SimulationEngine._handle_dynamic_position_management(engine, trade, tick))
+        asyncio.run(TradingRuntime._handle_dynamic_position_management(engine, trade, tick))
 
 
 # ── _handle_dynamic_position_management ──────────────────────────────────────

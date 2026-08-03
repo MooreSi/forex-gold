@@ -16,6 +16,7 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.runtime import TradingRuntime
+from backend.src.services.broker import watchdog as watchdog_mod
 
 
 def _reset_thread_local_connection():
@@ -61,6 +62,11 @@ class _FakeBridge:
         return self._autotrading
 
 
+# Comfortably above RESTART_COOLDOWN (180) so the first restart attempt is
+# allowed, exactly as it was on a long-running machine.
+_MONOTONIC_BASE = 10_000.0
+
+
 def _make_engine(bridge, inhibit=False):
     e = TradingRuntime.__new__(TradingRuntime)
     e._monitor_running = True
@@ -87,8 +93,15 @@ def _run(engine, n_sleeps, start_bridge_launched=True):
     async def fake_start_bridge(self_):
         return start_bridge_launched
 
+    # Pin the watchdog's clock. The restart cooldown compares now against
+    # last_restart_at, so with the real clock these cases only passed when
+    # time.monotonic() already exceeded RESTART_COOLDOWN -- a property of how
+    # long the machine had been up, not of this code, which made the suite
+    # fail intermittently depending on test order and container age.
+    clock = iter(_MONOTONIC_BASE + i for i in range(n_sleeps + 10))
     with mock.patch("asyncio.sleep", side_effect=_logging_sleep(engine, sleep_calls, n_sleeps)), \
          mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send), \
+         mock.patch.object(watchdog_mod, "monotonic", lambda: next(clock)), \
          mock.patch.object(TradingRuntime, "start_bridge_process", fake_start_bridge):
         asyncio.run(engine._bridge_watchdog_loop())
     return sleep_calls, alerts

@@ -63,6 +63,11 @@ class _FakeBridge:
         return self._autotrading
 
 
+# Comfortably above RESTART_COOLDOWN (180) so the first restart attempt is
+# allowed, exactly as it was on a long-running machine.
+_MONOTONIC_BASE = 10_000.0
+
+
 def _fresh_state():
     return {"last_restart_at": 0.0, "was_connected": True, "consecutive_fails": 0}
 
@@ -77,7 +82,17 @@ async def _run_cycles(bridge, state, n, inhibit=False, start_bridge_launched=Tru
         return start_bridge_launched
 
     waits = []
-    with mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send):
+    # Pin the clock. The restart cooldown compares now against
+    # last_restart_at, so with the real clock these cases only passed when
+    # time.monotonic() already exceeded RESTART_COOLDOWN -- i.e. when the
+    # machine happened to have been up for more than three minutes. That is
+    # a property of the container, not of the code, and it made the suite
+    # fail intermittently. Starting well above the cooldown and advancing a
+    # second per cycle reproduces the intended sequence exactly: the first
+    # restart is allowed, the immediate retry is inside the cooldown.
+    clock = iter(_MONOTONIC_BASE + i for i in range(n + 5))
+    with mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send), \
+         mock.patch.object(watchdog, "monotonic", lambda: next(clock)):
         for _ in range(n):
             waits.append(await watchdog.bridge_watchdog_check(
                 bridge, state, inhibit, fake_start_bridge))

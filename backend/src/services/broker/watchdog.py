@@ -26,6 +26,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+# Imported by name so tests can pin it without patching the global time
+# module (which the event loop also reads). The restart cooldown compares
+# against this, so a test that used the real clock only passed on a machine
+# that had been up longer than RESTART_COOLDOWN -- an intermittent CI
+# failure that depended on container age, not on this code.
+from time import monotonic
 from typing import Any, Callable, Awaitable, Optional
 
 from backend.src.services.telegram import alerts as telegram_alerts
@@ -104,7 +110,7 @@ async def bridge_watchdog_check(
             )
 
     if not bridge_inhibit_reconnect:
-        now = now_monotonic if now_monotonic is not None else time.monotonic()
+        now = now_monotonic if now_monotonic is not None else monotonic()
         if now - state["last_restart_at"] >= RESTART_COOLDOWN:
             log.info("Bridge watchdog: restarting bridge process")
             state["last_restart_at"] = now

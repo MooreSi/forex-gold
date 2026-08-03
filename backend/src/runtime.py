@@ -598,9 +598,6 @@ class SimulationEngine:
     async def _get_triggered_tps(self, trade_id: str) -> set[int]:
         return await _get_triggered_tps_impl(self._tp_trigger_cache, trade_id)
 
-    def _last_closed_tp(self, trade_id: str) -> Optional[int]:
-        return _last_closed_tp_impl(trade_id)
-
     _TP_WAIT_LOG_INTERVAL = 60.0  # seconds between diagnostic log lines per trade
 
     # ── Strategy handlers ─────────────────────────────────────────────────────
@@ -1091,7 +1088,7 @@ class SimulationEngine:
                 closed_row = await db_module.to_db_thread(
                     _broker_repo.fetch_trade, trade["trade_id"])
                 account  = await self.get_mt5_account()
-                last_tp  = await db_module.to_db_thread(self._last_closed_tp, trade["trade_id"]) if reason == "SL" else None
+                last_tp  = await db_module.to_db_thread(_last_closed_tp_impl, trade["trade_id"]) if reason == "SL" else None
                 asyncio.create_task(telegram_alerts.send_message(
                     telegram_alerts.fmt_trade_close(closed_row, result, {}, account,
                                                     last_tp=last_tp),
@@ -1235,7 +1232,7 @@ class SimulationEngine:
 
             account = await self.get_mt5_account()
             row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
-            last_tp = await db_module.to_db_thread(self._last_closed_tp, trade_id) if reason == "SL" else None
+            last_tp = await db_module.to_db_thread(_last_closed_tp_impl, trade_id) if reason == "SL" else None
             await telegram_alerts.send_message(
                 telegram_alerts.fmt_trade_close(row, result, {}, account, last_tp=last_tp),
                 trade_id, reason,
@@ -1327,33 +1324,6 @@ class SimulationEngine:
             self._is_active_trader_node(), self._bridge,
         )
 
-    async def _apply_sl_adjustment(
-        self, new_sl: float, channel_name: str, tg_id: str, via: str,
-    ) -> None:
-        """Apply a recognised "Adjust SL to X" instruction to whichever open
-        trade this channel most recently produced. via is "learned_rule"
-        (fast, deterministic match — see signal_parser.check_sl_adjustment_rules)
-        or "ai_fallback" (first time this channel's wording is seen; also
-        queued for review in Telegram > Reader Logic > AI so a rule gets
-        generated for next time).
-
-        Safe no-op if this node has no matching open trade locally — e.g. it's
-        the stood-down side of a Local/Remote pair and never executed the
-        position in the first place (see open_trade()'s active_trader gate).
-        Modifying an *already open* trade's SL, unlike opening a new one, is
-        safe to attempt redundantly from either node since MT5 itself is the
-        single source of truth for the real position — both nodes reaching
-        the same target SL from the same message is harmless, not a race.
-
-        Deduplicated on tg_id via db_module.try_claim_sl_adjustment() — the
-        Telegram reader's message buffer (get_buffer_messages) is re-scanned
-        every ~1s regardless of whether a message was already handled, and
-        without this a matched learned rule kept re-firing on the same
-        message every cycle for as long as it stayed buffered, each time
-        sending a fresh "SL adjusted" alert (found live 2026-07-08 — same
-        message re-triggered roughly once a minute for over half an hour)."""
-        return await _apply_sl_adjustment_impl(new_sl, channel_name, tg_id, via, self._bridge)
-
     def _queue_unrecognised(self, tg_id: str, channel_name: str, text: str) -> None:
         return _queue_unrecognised_impl(tg_id, channel_name, text, self._cfg)
 
@@ -1375,24 +1345,6 @@ class SimulationEngine:
                     await asyncio.sleep(1)
             else:
                 await asyncio.sleep(1)
-
-    async def _process_instant_entry(
-        self,
-        msg: dict,
-        tg_id: str,
-        group_id: str,
-        channel_name: str,
-        text: str,
-        direction: str,
-        price: Optional[float],
-        rs: dict,
-        auto_execute: bool,
-    ) -> None:
-        """Open an immediate market order for a bare 'XAU Buy/Sell Now' message."""
-        return await _process_instant_entry_impl(
-            msg, tg_id, group_id, channel_name, text, direction, price, rs, auto_execute,
-            self._bridge, self._dpm_candles, self._cfg.get("starting_balance", 1000.0),
-        )
 
     async def _apply_followup_to_instant_trade(
         self,
@@ -1570,10 +1522,7 @@ class SimulationEngine:
                     _instant = parse_instant_entry(text)
                 if _instant:
                     _instant_dir, _instant_px = _instant
-                    await self._process_instant_entry(
-                        msg, tg_id, group_id, channel_name, text,
-                        _instant_dir, _instant_px, rs, auto_execute,
-                    )
+                    await _process_instant_entry_impl(msg, tg_id, group_id, channel_name, text, _instant_dir, _instant_px, rs, auto_execute, self._bridge, self._dpm_candles, self._cfg.get('starting_balance', 1000.0))
                     continue
 
             # ── SL-adjustment fast path (learned rule only — no AI call) ────
@@ -1587,7 +1536,7 @@ class SimulationEngine:
             # so it never needs another AI call for this channel's wording).
             _sl_adj = check_sl_adjustment_rules(text, channel_name)
             if _sl_adj is not None:
-                await self._apply_sl_adjustment(_sl_adj, channel_name, tg_id, via="learned_rule")
+                await _apply_sl_adjustment_impl(_sl_adj, channel_name, tg_id, 'learned_rule', self._bridge)
                 continue
 
             # ── Logic Keywords: exclusion pre-check ──────────────────────────

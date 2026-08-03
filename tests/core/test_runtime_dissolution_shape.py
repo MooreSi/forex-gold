@@ -83,6 +83,41 @@ B5_REMOVED = [
 ]
 
 
+# B6: the remaining wrappers that are CALLED (not injected as callbacks)
+# from exactly one internal hub. The five that _scan_messages injects as
+# callbacks -- _try_ai_signal_fallback, _find_and_apply_instant_followup,
+# _get_trading_balance, _check_pre_trade_filters, _queue_unrecognised -- are
+# deliberately NOT here: they exist to bind state into a callback, and B9
+# turns them into fields on the scan context. Replacing them with inline
+# lambdas now would be churn B9 immediately rewrites.
+#
+# _sync_closed_mt5_positions' wrappers are also absent by design: every one
+# of them is either on the facade (get_tick, get_mt5_account,
+# partial_close_trade, record_close, _sync_profit) or part of the
+# demo-gated close context (_schedule_profit_sync). The close path is not
+# reshaped by M4.
+B6_REMOVED = [
+    "_process_instant_entry",
+    "_apply_sl_adjustment",
+    "_last_closed_tp",
+]
+
+
+@pytest.mark.parametrize("name", B6_REMOVED)
+def test_batch6_scan_hub_wrappers_removed(name):
+    assert not hasattr(SimulationEngine, name), (
+        f"{name} was inlined into its hub in M4 B6."
+    )
+
+
+def test_the_close_context_builder_is_untouched():
+    """The demo gate: M4 must not reshape the close path in any batch."""
+    assert hasattr(SimulationEngine, "_make_close_trade_ctx")
+    assert hasattr(SimulationEngine, "close_trade")
+    assert hasattr(SimulationEngine, "_record_close")
+    assert hasattr(SimulationEngine, "_schedule_profit_sync")
+
+
 @pytest.mark.parametrize("name", B5_REMOVED)
 def test_batch5_hub_only_wrappers_removed(name):
     assert not hasattr(SimulationEngine, name), (

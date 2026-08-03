@@ -159,33 +159,6 @@ def test_get_triggered_tps_reloads_after_ttl_expiry(fresh_db, engine):
 
 # ── _last_closed_tp ────────────────────────────────────────────────────────────
 
-def test_last_closed_tp_returns_most_recent(fresh_db):
-    _insert_signal()
-    _insert_trade("t-1")
-    _insert_partial_close("t-1", "TP1", ts=100.0)
-    _insert_partial_close("t-1", "TP2", ts=200.0)
-
-    result = SimulationEngine._last_closed_tp(None, "t-1")
-    assert result == 2
-
-
-def test_last_closed_tp_ignores_zero_lot_rows(fresh_db):
-    _insert_signal()
-    _insert_trade("t-1")
-    _insert_partial_close("t-1", "TP2", lots_closed=0.05, ts=100.0)
-    _insert_partial_close("t-1", "TP3", lots_closed=0.0, ts=200.0)  # marker/skip row
-
-    result = SimulationEngine._last_closed_tp(None, "t-1")
-    assert result == 2
-
-
-def test_last_closed_tp_returns_none_when_no_match(fresh_db):
-    _insert_signal()
-    _insert_trade("t-1")
-    result = SimulationEngine._last_closed_tp(None, "t-1")
-    assert result is None
-
-
 # ── _log_tp_wait_diagnostic ────────────────────────────────────────────────────
 
 # ── _check_sl ──────────────────────────────────────────────────────────────────

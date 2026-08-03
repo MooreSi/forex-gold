@@ -181,58 +181,6 @@ def test_ai_call_ordinary_signal_returns_result_dict(fresh_db, engine):
 
 # ── _apply_sl_adjustment ──────────────────────────────────────────────────────
 
-def test_apply_sl_adjustment_no_matching_trade_is_noop(fresh_db, engine):
-    asyncio.run(SimulationEngine._apply_sl_adjustment(engine, 2395.0, "Chan", "tg-1", "ai_fallback"))
-    assert engine._bridge.modify_order_calls == []
-
-
-def test_apply_sl_adjustment_already_matches_current_sl_is_noop(fresh_db, engine):
-    _insert_open_trade(tg_source="Chan", stop_loss=2395.005)
-    asyncio.run(SimulationEngine._apply_sl_adjustment(engine, 2395.0, "Chan", "tg-1", "ai_fallback"))
-    assert engine._bridge.modify_order_calls == []
-
-
-def test_apply_sl_adjustment_applies_cleanly(fresh_db, engine):
-    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
-    asyncio.run(SimulationEngine._apply_sl_adjustment(engine, 2395.0, "Chan", "tg-1", "ai_fallback"))
-
-    assert engine._bridge.modify_order_calls == [{"ticket": 555, "sl": 2395.0, "tp": None}]
-    with db.db() as conn:
-        row = conn.execute("SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",)).fetchone()
-    assert row[0] == 2395.0
-
-
-def test_apply_sl_adjustment_no_ticket_updates_db_skips_bridge(fresh_db, engine):
-    _insert_open_trade(tg_source="Chan", mt5_ticket=None, stop_loss=2390.0)
-    asyncio.run(SimulationEngine._apply_sl_adjustment(engine, 2395.0, "Chan", "tg-1", "ai_fallback"))
-
-    assert engine._bridge.modify_order_calls == []
-    with db.db() as conn:
-        row = conn.execute("SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",)).fetchone()
-    assert row[0] == 2395.0
-
-
-def test_apply_sl_adjustment_dedup_already_claimed_is_noop(fresh_db, engine):
-    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
-    db.try_claim_sl_adjustment("tg-1", "Chan", 2395.0)  # pre-claim
-    asyncio.run(SimulationEngine._apply_sl_adjustment(engine, 2395.0, "Chan", "tg-1", "ai_fallback"))
-
-    assert engine._bridge.modify_order_calls == []
-    with db.db() as conn:
-        row = conn.execute("SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",)).fetchone()
-    assert row[0] == 2390.0
-
-
-def test_apply_sl_adjustment_bridge_raises_no_db_write(fresh_db, engine):
-    _insert_open_trade(tg_source="Chan", mt5_ticket=555, stop_loss=2390.0)
-    engine._bridge = _RaisingBridge()
-    asyncio.run(SimulationEngine._apply_sl_adjustment(engine, 2395.0, "Chan", "tg-1", "ai_fallback"))
-
-    with db.db() as conn:
-        row = conn.execute("SELECT stop_loss FROM vantage_simulated_trades WHERE trade_id=?", ("t-1",)).fetchone()
-    assert row[0] == 2390.0  # unchanged -- DB write happens after the bridge call
-
-
 # ── _queue_unrecognised / _analyse_unrecognised_message ──────────────────────
 
 async def _call_queue_unrecognised(engine, tg_id, channel_name, text):

@@ -7,67 +7,27 @@ Callers invoke methods directly; no HTTP indirection.
 import asyncio
 import json
 import logging
-import math
 import re
 import time
-import uuid
-from datetime import datetime, timezone, timedelta
 from typing import Optional, TYPE_CHECKING
 
 from backend.src.db import database as db_module
 from backend.src.utils.models import (
-    Tick, CONTRACT_SIZE, POINT_SIZE,
-    STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP, STRATEGY_PROTECTED_SCALE,
-    STRATEGY_CONSERVATIVE, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE_TRIAL,
-    STRATEGY_SCALP_RUNNER, STRATEGY_SIGNAL_CLIMBER,
-    STRATEGY_REVERSAL_RUNNER, STRATEGY_ORB_FIXED, STRATEGY_ADAPTIVE_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
-    STRATEGY_NAMES, MAX_TP,
+    Tick,
+    STRATEGY_SCALE_OUT,
+    STRATEGY_SIGNAL_CLIMBER,
+    STRATEGY_REVERSAL_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_LIMIT_RUNNER,
 )
 from backend.src.services.broker.mt5_client import MT5BridgeClient
 from backend.src.services.broker.mt5_native import NativeMT5Bridge, is_available as _native_bridge_available
-from backend.src.services.signals.parser import (
-    parse_instant_entry, parse_gd2_instant_entry, is_gd2_message,
-    SIGNAL_PREFIX, check_sl_adjustment_rules,
-)
+from backend.src.services.signals.parser import is_gd2_message
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.ai import provider as ai_provider
-from backend.src.services.dpm import engine as dpm_engine
-from backend.src.services.broker import ea_templates as _ea_templates
-from backend.src.services.broker import repo as _broker_repo
-from backend.src.services.signals import tg_repo as _tg_repo
 from backend.src.services.trading import trade_repo
-from backend.src.services.positions.monitor_loop import (
-    check_sl as _check_sl_impl,
-    reconcile_sl_hit as _reconcile_sl_hit_impl,
-    check_profit_close_target as _check_profit_close_target_impl,
-    reclaim_ea_managed_trade as _reclaim_ea_managed_trade_impl,
-)
-from backend.src.services.trading.scan_auto_execute import (
-    price_in_entry_range as _price_in_entry_range_impl,
-    execute_auto_signal as _execute_auto_signal_impl,
-)
-from backend.src.services.trading.limit_order_signal import (
-    handle_limit_order_signal as _handle_limit_order_signal_impl,
-)
-from backend.src.services.telegram.keyword_triggers import (
-    should_skip_media_or_forwarded,
-    should_skip_for_exclusion,
-    try_handle_close_all_trigger,
-    try_handle_risk_free_be_trigger,
-    try_handle_tp_hit_trigger,
-)
-from backend.src.services.signals.scan_edit_reparse import (
-    handle_signal_edit as _handle_signal_edit_impl,
-)
-from backend.src.services.signals.scan_parse_classify import (
-    classify_and_parse as _classify_and_parse_impl,
-)
-from backend.src.services.signals.scan_staleness import (
-    record_staleness_or_new as _record_staleness_or_new_impl,
-    resolve_strategy_and_skip_reason as _resolve_strategy_and_skip_reason_impl,
-)
 from backend.src.services.signals.scan_messages import (
     ScanCtx as _ScanCtx,
     scan_messages as _scan_messages_impl,
@@ -84,22 +44,40 @@ from backend.src.services.positions.monitor_cycle import (
     MonitorState as _MonitorState,
     run_monitor_cycle as _run_monitor_cycle_impl,
 )
-from backend.src.services.positions.max_tp import (
-    _tp_level_from_extreme,
-    max_tp_checker_sweep as _max_tp_checker_sweep_impl,
-    backfill_max_tp_hit_corrected as _backfill_max_tp_hit_corrected_impl,
+from backend.src.services.telegram.bot_loop import (
+    BotLoopCtx as _BotLoopCtx,
+    bot_command_loop as _bot_command_loop_impl,
 )
+from backend.src.services.positions.tp_ladder_loop import (
+    TPLadderCtx as _TPLadderCtx,
+    tp_ladder_fast_loop as _tp_ladder_fast_loop_impl,
+)
+from backend.src.services.ai.model_refresh_loop import (
+    ai_model_refresh_loop as _ai_model_refresh_loop_impl,
+)
+from backend.src.services.broker.watchdog_loop import (
+    bridge_watchdog_loop as _bridge_watchdog_loop_impl,
+)
+from backend.src.services.reversal_engine.research_loop import (
+    reversal_engine_research_loop as _reversal_engine_research_loop_impl,
+)
+# Re-exported for callers that import them from here rather than from the
+# service that owns them -- see tests/refactor/test_runtime_has_no_dead_imports.py,
+# which treats an external `from backend.src.runtime import X` as a use.
+from backend.src.services.broker.mt5_performance import _apply_fee, _platform_fee_rate
+from backend.src.services.positions.max_tp import _tp_level_from_extreme
+from backend.src.services.cluster.node_roles import (
+    is_active_trader_node as _is_active_trader_node_impl,
+    is_bot_command_authority as _is_bot_command_authority_impl,
+)
+from backend.src.services.positions.max_tp import max_tp_checker_sweep as _max_tp_checker_sweep_impl
 from backend.src.services.trading.fees_sizing import (
     pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl,
     calculate_fees as _calculate_fees_impl)
-from backend.src.services.broker.mt5_performance import (
-    compute_mt5_performance as _compute_mt5_performance_impl,
-    _platform_fee_rate, _apply_fee,
-)
+from backend.src.services.broker.mt5_performance import compute_mt5_performance as _compute_mt5_performance_impl
 from backend.src.services.broker.deposits import get_total_deposits as _get_total_deposits_impl
 from backend.src.services.analytics.reporting import (
     get_open_trades as _get_open_trades_impl,
-    get_all_trades as _get_all_trades_impl,
     compute_performance as _compute_performance_impl,
 )
 from backend.src.services.broker.history_import import import_mt5_history as _import_mt5_history_impl
@@ -108,90 +86,41 @@ from backend.src.services.positions.tp_tracking import (
     TPCache as _TPCache,
     get_triggered_tps as _get_triggered_tps_impl,
     last_closed_tp as _last_closed_tp_impl,
-    log_tp_wait_diagnostic as _log_tp_wait_diagnostic_impl,
-    check_tp_hits as _check_tp_hits_impl,
-    get_remaining_lots as _get_remaining_lots_impl,
 )
 from backend.src.services.signals.repo import (
     create_signal as _create_signal_impl,
     get_signals as _get_signals_impl,
-    activate_signal as _activate_signal_impl,
     cancel_signal as _cancel_signal_impl,
 )
-from backend.src.services.reversal_engine.research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
 from backend.src.services.notifications.scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
 # The bot command table lives in services/telegram/bot_dispatch.py (M4 B4);
 # the runtime only binds its collaborators and keeps the four order/process
 # commands it injects there.
-from backend.src.services.telegram.bot_dispatch import (
-    BotDeps as _BotDeps,
-    handle_bot_command as _handle_bot_command_impl,
-)
+from backend.src.services.telegram.bot_dispatch import BotDeps as _BotDeps
 from backend.src.services.telegram.bot_infra import (
     cmd_restart_app as _cmd_restart_app_impl,
 )
-from backend.src.services.broker.watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
 from backend.src.services.trading.profit_sync import (
     sync_profit as _sync_profit_impl,
     schedule_profit_sync as _schedule_profit_sync_impl,
-    profit_sweep as _profit_sweep_impl,
 )
 from backend.src.services.trading.update_signal import update_signal as _update_signal_impl
 from backend.src.services.risk.governor import (
     is_trading_paused as _is_trading_paused_impl,
     check_pre_trade_filters as _check_pre_trade_filters_impl,
-    rg_day_start_ts as _rg_day_start_ts_impl,
-    rg_size_and_check as _rg_size_and_check_impl,
-    rg_check_halt as _rg_check_halt_impl,
     rg_apply_halts_on_close as _rg_apply_halts_on_close_impl,
 )
-from backend.src.services.positions.safety_net import (
-    tp_safety_net_sweep as _tp_safety_net_sweep_impl,
-    tp_safety_net_check_trade as _tp_safety_net_check_trade_impl,
-    compute_be_cost_pts as _compute_be_cost_pts_impl,
-)
+from backend.src.services.positions.safety_net import tp_safety_net_sweep as _tp_safety_net_sweep_impl
 from backend.src.services.broker.untracked import (
     get_untracked_mt5_positions as _get_untracked_mt5_positions_impl,
 )
 from backend.src.services.trading.ai_signal_fallback import (
     try_ai_signal_fallback as _try_ai_signal_fallback_impl,
-    push_ai_recovered_created as _push_ai_recovered_created_impl,
-    apply_sl_adjustment as _apply_sl_adjustment_impl,
     queue_unrecognised as _queue_unrecognised_impl,
-    analyse_unrecognised_message as _analyse_unrecognised_message_impl,
 )
 from backend.src.services.trading.instant_followup import (
     apply_followup_to_instant_trade as _apply_followup_to_instant_trade_impl,
     find_and_apply_instant_followup as _find_and_apply_instant_followup_impl,
-    ime_timeout_watchdog as _ime_timeout_watchdog_impl,
-)
-from backend.src.services.trading.instant_entry import (
-    process_instant_entry as _process_instant_entry_impl,
-)
-from backend.src.services.positions.tp_ladder import (
-    run_tp_ladder as _run_tp_ladder_impl,
-    handle_signal_climber as _handle_signal_climber_impl,
-    handle_reversal_runner as _handle_reversal_runner_impl,
-    handle_adaptive_runner as _handle_adaptive_runner_impl,
-    handle_adaptive_runner_2 as _handle_adaptive_runner_2_impl,
-    handle_limit_runner as _handle_limit_runner_impl,
-)
-from backend.src.services.positions.handle_scale_out import handle_scale_out as _handle_scale_out_impl
-from backend.src.services.positions.handle_be_runner import handle_be_runner as _handle_be_runner_impl
-from backend.src.services.positions.handle_trail_stop import handle_trail_stop as _handle_trail_stop_impl
-from backend.src.services.positions.handle_protected_scale import (
-    handle_protected_scale as _handle_protected_scale_impl,
-)
-from backend.src.services.positions.handle_no_sl_scale import handle_no_sl_scale as _handle_no_sl_scale_impl
-from backend.src.services.positions.handle_conservative import handle_conservative as _handle_conservative_impl
-from backend.src.services.positions.handle_conservative_trial import (
-    handle_conservative_trial as _handle_conservative_trial_impl,
-)
-from backend.src.services.positions.handle_scalp_runner import handle_scalp_runner as _handle_scalp_runner_impl
-from backend.src.services.positions.handle_orb_fixed import handle_orb_fixed as _handle_orb_fixed_impl
-from backend.src.services.dpm.handler import (
-    run_dpm_calibration as _run_dpm_calibration_impl,
-    handle_dynamic_position_management as _handle_dynamic_position_management_impl,
 )
 from backend.src.services.trading.partial_close import partial_close_trade as _partial_close_trade_impl
 from backend.src.services.trading.open_trade import open_trade as _open_trade_impl
@@ -209,22 +138,11 @@ from backend.src.services.trading.close_trade import (
     get_trading_balance as _get_trading_balance_impl,
     close_trade as _close_trade_impl,
     record_close as _record_close_impl,
-    close_all_ladder_legs as _close_all_ladder_legs_impl,
 )
-from backend.src.services.analytics.orb_report import (
-    build_orb_report as _build_orb_report_impl,
-    get_orb_target_multiple as _get_orb_target_multiple_impl,
-    backtest_orb_target_multiple as _backtest_orb_target_multiple_impl)
-from backend.src.services.trading.orb_execute import orb_auto_execute as _orb_auto_execute_impl
-from backend.src.services.signals.pending_activation import (
-    try_activate_pending_signals as _try_activate_pending_signals_impl,
-)
+from backend.src.services.analytics.orb_report import build_orb_report as _build_orb_report_impl
 from backend.src.services.dpm.bookkeeping import (
     DPMCache as _DPMCache,
     load_dpm_calibrated as _load_dpm_calibrated_impl,
-    record_dpm_entry as _record_dpm_entry_impl,
-    update_dpm_peak as _update_dpm_peak_impl,
-    set_dpm_milestone as _set_dpm_milestone_impl,
     finalize_dpm_record as _finalize_dpm_record_impl,
 )
 
@@ -737,81 +655,18 @@ class SimulationEngine:
     _TP_LADDER_POLL_INTERVAL = 0.05  # seconds
 
     async def _tp_ladder_fast_loop(self) -> None:
-        """
-        Sub-second polling for the three strategies that manage a signal's
-        TP1-TPn levels as sequential partial closes on ONE MT5 ticket
-        (_run_tp_ladder), rather than resting broker-side TP orders on N
-        separate tickets. _monitor_loop's own ~1-5s cadence (and
-        get_tick()'s 1s TICK_CACHE_TTL) is too coarse for this: gold TP
-        levels are sometimes only ~1pt apart, and a fast spike-and-reverse
-        can cross several tiers and fall back below all of them between two
-        samples, banking nothing despite price genuinely touching TP5-TP8
-        (confirmed via M1-candle-derived max_tp_hit vs. actual banked P&L,
-        2026-07-17: ~$1,847 missed over 2 days on a 50-trade sample). This
-        loop exists to close that gap without the N-tickets-per-signal
-        design tried and reverted the same day (too much MT5/UI clutter
-        for one logical trade) — same underlying detection problem, faster
-        sampling instead of broker-side execution as the fix.
-
-        Sole owner of TP-ladder crossing detection for these three
-        strategies when DPM is off — _monitor_loop explicitly no-ops for
-        them in that case (see its own dispatch) so the two loops never
-        race on the same trade. DPM still takes priority over everything
-        but ORB_FIXED when enabled (checked here too, so both loops agree
-        on who owns a given trade at any moment).
-
-        Fetches one fresh tick per cycle and checks every eligible open
-        trade against it, rather than a tick-per-trade, so load on the
-        shared bridge call lock (NativeMT5Bridge._call serializes every
-        MT5 IPC call app-wide) scales with polling frequency, not with
-        open-trade count.
-        """
-        while self._monitor_running:
-            try:
-                rs = await db_module.to_db_thread(db_module.get_risk_settings)
-                if not bool(rs.get("dpm_enabled", 0)):
-                    open_trades = await db_module.to_db_thread(self.get_open_trades)
-                    ladder_trades = [t for t in open_trades
-                                     if t.get("strategy") in self._TP_LADDER_STRATEGIES]
-                    # EA handoff: skip any trade the EA currently owns and is
-                    # still healthy for — same reclaim logic as _monitor_loop's
-                    # own dispatch (see its comment). Missing this let this
-                    # loop potentially double-manage a trade already being
-                    # handled natively inside MT5 by the EA — caught before it
-                    # ever fired in practice (all adaptive_runner trades today
-                    # happened to be Python-managed already), but a real gap
-                    # regardless once EA handoff is working for these strategies.
-                    if ladder_trades:
-                        try:
-                            from backend.src.services.broker import ea_bridge as _ea_mod
-                            _ea = _ea_mod.get_instance()
-                            _ea_healthy = _ea is not None and _ea.is_ea_healthy()
-                        except ImportError:
-                            _ea_healthy = False
-                        if _ea_healthy:
-                            ladder_trades = [t for t in ladder_trades if t.get("managed_by") != "ea"]
-                    if ladder_trades:
-                        tick = await self.get_fresh_tick()
-                        if tick:
-                            for trade in ladder_trades:
-                                try:
-                                    strat = trade["strategy"]
-                                    if strat == STRATEGY_SIGNAL_CLIMBER:
-                                        await _handle_signal_climber_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                                    elif strat == STRATEGY_REVERSAL_RUNNER:
-                                        await _handle_reversal_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                                    elif strat == STRATEGY_ADAPTIVE_RUNNER_2:
-                                        await _handle_adaptive_runner_2_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                                    elif strat == STRATEGY_LIMIT_RUNNER:
-                                        await _handle_limit_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                                    else:
-                                        await _handle_adaptive_runner_impl(trade, tick, self._bridge, self._tp_trigger_cache, close_full_after_tps=self._close_full_after_tps)
-                                except Exception as exc:
-                                    log.warning("[TP-ladder-fast] handler error trade=%s: %s",
-                                               trade.get("trade_id"), exc)
-            except Exception as exc:
-                log.warning("[TP-ladder-fast] loop error: %s", exc)
-            await asyncio.sleep(self._TP_LADDER_POLL_INTERVAL)
+        """Owns the task; one pass lives in
+        services/positions/tp_ladder_loop.py."""
+        await _tp_ladder_fast_loop_impl(_TPLadderCtx(
+            is_running=lambda: self._monitor_running,
+            poll_interval=self._TP_LADDER_POLL_INTERVAL,
+            ladder_strategies=self._TP_LADDER_STRATEGIES,
+            bridge=self._bridge,
+            tp_trigger_cache=self._tp_trigger_cache,
+            get_fresh_tick=self.get_fresh_tick,
+            get_open_trades=self.get_open_trades,
+            close_full_after_tps=self._close_full_after_tps,
+        ))
 
     # ── MT5 position sync ─────────────────────────────────────────────────────
 
@@ -947,40 +802,10 @@ class SimulationEngine:
 
     @staticmethod
     def _is_active_trader_node() -> bool:
-        """Whether THIS node is the one currently allowed to execute real
-        trades — mirrors open_trade()'s two-sided mutual-exclusion gate
-        (server/VPS role via sync.server.is_standing_down(), client/Mac role
-        via get_active_trader() == TRADER_REMOTE_VPS). Fails open (True) on
-        any error or unpaired/standalone install, same as those gates.
-
-        Used to decide whether this node should spend paid AI credits on
-        Telegram-signal recovery — see _try_ai_signal_fallback. Both sides of
-        a paired Mac/VPS run separate Telethon sessions on the same account
-        and parse every message independently regardless of which one is
-        active (confirmed live 2026-07-09: both nodes independently invoked
-        the AI fallback on the same unrecognised messages, doubling AI cost
-        and splitting the Reader Logic > AI review queue across two node-
-        local DBs with no way to see or clear the other node's entries from
-        either UI). Only the paid AI call is gated here — deterministic
-        parsing/signal creation keeps running on both nodes exactly as
-        before, so a promoted standby still has everything it needs.
-        """
-        try:
-            from backend.src.controllers.sync import server as _sync_srv_mod
-            _srv = _sync_srv_mod.get_instance()
-            if _srv is not None and _srv.is_standing_down():
-                return False
-        except ImportError:
-            pass
-        try:
-            from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
-            from backend.src.controllers.sync.client import SyncClient
-            _host, _, _ = SyncClient.load_config()
-            if _host and db_module.get_active_trader() == TRADER_REMOTE_VPS:
-                return False
-        except ImportError:
-            pass
-        return True
+        """Whether THIS node may execute real trades. See
+        services/cluster/node_roles.py. Kept as a staticmethod on the class
+        because several characterization packs patch it by name here."""
+        return _is_active_trader_node_impl()
 
     async def _try_ai_signal_fallback(self, text: str, channel_name: str, tg_id: str) -> Optional[dict]:
         """Last-resort AI extraction for a message the deterministic
@@ -1217,41 +1042,9 @@ class SimulationEngine:
             await asyncio.sleep(1800)
 
     async def _ai_model_refresh_loop(self) -> None:
-        """
-        Daily refresh of the Claude and DeepSeek model catalogues shown in
-        Settings > AI's dropdowns. Both providers' available models change
-        over time, so the dropdown is backed by a cached list (refreshed here
-        and via the on-demand "Refresh Models" button) rather than a
-        hardcoded array that only updates when someone edits the source.
-        """
-        await asyncio.sleep(60)  # let the app settle before the first refresh
-        _INTERVAL = 86400
-        while self._monitor_running:
-            try:
-                updates: dict = {}
-                if self._cfg.get("anthropic_api_key"):
-                    models = await ai_provider.fetch_available_models(
-                        "claude", self._cfg["anthropic_api_key"]
-                    )
-                    updates["claude_models_cache"] = models
-                    self._cfg["claude_models_cache"] = models
-                if self._cfg.get("deepseek_api_key"):
-                    models = await ai_provider.fetch_available_models(
-                        "deepseek", self._cfg["deepseek_api_key"]
-                    )
-                    updates["deepseek_models_cache"] = models
-                    self._cfg["deepseek_models_cache"] = models
-                if updates:
-                    updates["ai_models_last_refreshed"] = time.time()
-                    self._cfg["ai_models_last_refreshed"] = updates["ai_models_last_refreshed"]
-                    import backend.src.config as _cfg_mod
-                    await db_module.to_db_thread(lambda: _cfg_mod.save_to_yaml(updates))
-                    log.info("[AI] model catalogue refreshed: %s", list(updates.keys()))
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log.debug("_ai_model_refresh_loop error: %s", e)
-            await asyncio.sleep(_INTERVAL)
+        """Owns the task; the refresh itself lives in
+        services/ai/model_refresh_loop.py."""
+        await _ai_model_refresh_loop_impl(self._cfg, lambda: self._monitor_running)
 
     async def _tp_safety_net_sweep(self) -> None:
         return await _tp_safety_net_sweep_impl(self._bridge, self._tp_safety_net_last_alert)
@@ -1292,36 +1085,9 @@ class SimulationEngine:
             await asyncio.sleep(86400)  # once a day
 
     async def _reversal_engine_research_loop(self) -> None:
-        """Once a day at 22:00 Europe/London, read the day's Gold Diggers
-        REF + GD2 Telegram messages (text + chart images) and have Claude
-        synthesise the real trader's risk-management/entry-logic behaviour
-        into two scores that feed Reversal Engine's ML model (ml_engine.py's
-        ref_discipline_score / ref_aggression_score features), force an
-        immediate retrain, and email a summary. See
-        reversal_engine/telegram_research.py for the full pipeline. Checked
-        every minute like the ORB report job above — zoneinfo handles the
-        BST/GMT switch automatically. Dedup'd by date via app_config so a
-        restart near 22:00 can't fire it twice the same day.
-
-        Gated to the physical local node only (is_remote_node(), same gate
-        Reversal Engine's own signal generator uses) — NOT _is_active_trader_node().
-        The ML model this enriches/retrains (re_ml_batch.pkl/re_ml_online.pkl)
-        is a per-node file, never auto-synced between Mac and VPS, and GD
-        Copy's signal generation is now local-node-only regardless of which
-        side executes trades — so this must follow generation, not execution,
-        or it retrains a model nothing is using. Both nodes still only ever
-        run this once (is_remote_node() is unconditional, unlike the old
-        active-trader check which could migrate), so no duplicate email risk.
-        """
-        await asyncio.sleep(90)  # let the app settle before the first check
-        while self._monitor_running:
-            try:
-                await _reversal_engine_research_sweep_impl(self)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log.warning("_reversal_engine_research_loop error: %s", e)
-            await asyncio.sleep(60)
+        """Owns the task; the sweep lives in
+        services/reversal_engine/research_loop.py."""
+        await _reversal_engine_research_loop_impl(self, lambda: self._monitor_running)
 
     # ── Morning ORB / IVB report ──────────────────────────────────────────────
     # Adapted from Faber Vaale's "The Simplest Orderflow Trading Model"
@@ -1392,154 +1158,23 @@ class SimulationEngine:
 
     @staticmethod
     def _is_bot_command_authority() -> bool:
-        """Whether THIS node should own Telegram getUpdates polling right now.
-
-        Only one process may long-poll a given bot token at a time — a second
-        concurrent poller gets 409 Conflict from Telegram. When this Mac/VPS
-        pair is connected, both sides' engines run this loop unconditionally,
-        so without this gate they fight over the same token forever (each
-        side's 409-triggered deleteWebhook kicks the other, which then kicks
-        back — the recurring conflict cycle seen in the logs). The standing-
-        down side is already a view-only dashboard (see Settings > Remote
-        Node), so it has nothing to execute commands against anyway — this
-        just extends that same mutual-exclusion to Telegram control.
-        An unpaired, standalone install has no counterpart to conflict with,
-        so it always polls.
-        """
-        try:
-            from backend.src.controllers.sync.protocol import TRADER_LOCAL, TRADER_REMOTE_VPS
-            if db_module.get_app_config("sync_server_enabled") == "1":
-                return db_module.get_active_trader() == TRADER_REMOTE_VPS
-            from backend.src.controllers.sync.client import SyncClient
-            host, _port, _token = SyncClient.load_config()
-            if not host:
-                return True  # standalone install, no counterpart to conflict with
-            return db_module.get_active_trader() == TRADER_LOCAL
-        except Exception:
-            return True  # fail open rather than silently killing bot control
+        """Whether THIS node owns Telegram getUpdates polling. See
+        services/cluster/node_roles.py."""
+        return _is_bot_command_authority_impl()
 
     async def _bot_command_loop(self) -> None:
-        import httpx
-        await asyncio.sleep(15)
+        """Owns the task; the polling lives in
+        services/telegram/bot_loop.py."""
+        await _bot_command_loop_impl(_BotLoopCtx(
+            is_running=lambda: self._monitor_running,
+            is_bot_command_authority=self._is_bot_command_authority,
+            make_bot_deps=self._make_bot_deps,
+            get_bot_offset=lambda: self._bot_offset,
+            set_bot_offset=self._set_bot_offset,
+        ))
 
-        # Restore the update offset persisted from the previous run so we never
-        # re-process commands (e.g. /restartapp) that were already handled before
-        # the app shut down.
-        try:
-            saved = db_module.get_app_config("bot_update_offset")
-            if saved:
-                self._bot_offset = int(saved)
-                log.info("Bot: restored update offset %d from DB", self._bot_offset)
-        except Exception:
-            pass
-
-        # One persistent, connection-pooled client for this loop's whole
-        # lifetime instead of a fresh httpx.AsyncClient (new TLS handshake)
-        # on every ~1s getUpdates poll — that churn was the single most
-        # frequently implicated coroutine in LoopMonitor's asyncio-debug
-        # slow-callback trace (confirmed live 2026-07-09: thousands of
-        # "SimulationEngine._bot_command_loop ... took 0.4-1.5s" entries,
-        # far more than any other task). Reusing one client lets httpx keep
-        # the connection to api.telegram.org warm across polls.
-        _client = httpx.AsyncClient(timeout=12)
-        try:
-            # Register slash commands and clear any active webhook / conflicting getUpdates
-            # session before we start polling. A 409 Conflict on getUpdates always means
-            # either a webhook is set or another polling session is still open — deleteWebhook
-            # removes both causes in one call. Skipped entirely if this node isn't the
-            # current bot-command authority — calling deleteWebhook here would otherwise
-            # interrupt the OTHER node's live polling session on every restart of this one.
-            if await db_module.to_db_thread(self._is_bot_command_authority):
-                cfg = db_module.get_telegram_config()
-                if cfg.get("enabled") and cfg.get("bot_token_enc"):
-                    try:
-                        await _client.post(
-                            f"https://api.telegram.org/bot{cfg['bot_token_enc']}/deleteWebhook",
-                            params={"drop_pending_updates": "false"},
-                            timeout=10,
-                        )
-                    except Exception:
-                        pass
-                    await telegram_alerts.register_commands(cfg["bot_token_enc"])
-
-            _saved_offset = self._bot_offset  # track last-persisted value
-
-            while self._monitor_running:
-                try:
-                    if not await db_module.to_db_thread(self._is_bot_command_authority):
-                        await asyncio.sleep(5)
-                        continue
-
-                    cfg          = await db_module.to_db_thread(db_module.get_telegram_config)
-                    token        = cfg.get("bot_token_enc", "")
-                    allowed_chat = str(cfg.get("chat_id", ""))
-
-                    if cfg.get("enabled") and token:
-                        r = await _client.get(
-                            f"https://api.telegram.org/bot{token}/getUpdates",
-                            params={"offset": self._bot_offset, "timeout": 10},
-                            timeout=12,
-                        )
-                        if r.status_code == 200:
-                            for update in r.json().get("result", []):
-                                uid = update.get("update_id", 0)
-                                if uid >= self._bot_offset:
-                                    self._bot_offset = uid + 1
-
-                                msg     = update.get("message") or {}
-                                chat_id = str(msg.get("chat", {}).get("id", ""))
-                                text    = (msg.get("text") or "").strip()
-
-                                # Security: only respond to the configured chat
-                                if not text or not chat_id or chat_id != allowed_chat:
-                                    continue
-
-                                reply = await _handle_bot_command_impl(
-                                    text, self._make_bot_deps())
-                                if not reply:
-                                    continue
-
-                                await _client.post(
-                                    f"https://api.telegram.org/bot{token}/sendMessage",
-                                    json={
-                                        "chat_id":    chat_id,
-                                        "text":       reply,
-                                        "parse_mode": "Markdown",
-                                    },
-                                    timeout=8,
-                                )
-
-                            # Persist offset after each successful poll so restarts
-                            # resume from the correct position.
-                            if self._bot_offset != _saved_offset:
-                                await db_module.to_db_thread(
-                                    db_module.set_app_config, "bot_update_offset",
-                                    str(self._bot_offset),
-                                )
-                                _saved_offset = self._bot_offset
-
-                        elif r.status_code == 409:
-                            # Another session is polling — back off and retry deleteWebhook
-                            log.warning("Bot polling 409 Conflict — clearing webhook and backing off 60s")
-                            try:
-                                await _client.post(
-                                    f"https://api.telegram.org/bot{token}/deleteWebhook",
-                                    params={"drop_pending_updates": "false"},
-                                    timeout=10,
-                                )
-                            except Exception:
-                                pass
-                            await asyncio.sleep(60)
-                            continue
-                except httpx.TransportError as e:
-                    # Connection dropped/reset — the pooled client recovers on
-                    # its own next call; just avoid a busy-loop on repeated failures.
-                    log.debug("Bot command loop transport error: %s", e)
-                except Exception as e:
-                    log.debug("Bot command loop error: %s", e)
-                await asyncio.sleep(1)
-        finally:
-            await _client.aclose()
+    def _set_bot_offset(self, offset: int) -> None:
+        self._bot_offset = offset
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
@@ -1601,38 +1236,15 @@ class SimulationEngine:
         return await _start_bridge_process_impl(self._bridge, self._using_native_bridge)
 
     async def _bridge_watchdog_loop(self) -> None:
-        """Check bridge health every 60 s. Restart automatically unless the user
-        explicitly stopped it via the Stop Bridge button (inhibit flag set).
-
-        Requires CONSECUTIVE_FAIL_THRESHOLD failed checks in a row before
-        restarting — a single failed /health call is not trusted on its own.
-        The bridge's HTTP server processes one request at a time; under the
-        concurrent polling load from four engines (main + breakout + bounce +
-        reversal_engine all hitting /tick, /candles, /positions, /account on their own
-        schedules) a slow request ahead of a health check in the queue can
-        make that check exceed its 4s timeout with MT5 itself perfectly fine.
-        That false positive triggered a real, disruptive bridge restart —
-        actually causing the "frequent disconnect/reconnect" it was meant to
-        prevent. Two failures 60s apart is no longer explainable by one queued
-        request; only then is a real problem plausible enough to act on.
-        """
-        # 180s, not 30s: a full VPS/OS reboot needs MT5 terminal to cold-start
-        # and log into the broker before the bridge can serve ticks — observed
-        # taking up to ~150s in practice. With the old 30s wait plus two 60s-
-        # apart checks (~90s total patience), every full reboot would cross
-        # the failure threshold and trigger a false "bridge offline" restart
-        # and alert while MT5 was simply still logging in. This only delays
-        # the watchdog's first check; a genuine mid-session outage still gets
-        # caught by the normal 60s-interval / 2-consecutive-failure logic
-        # below once this initial window has passed.
-        await asyncio.sleep(180)
-
-        state = {"last_restart_at": 0.0, "was_connected": True, "consecutive_fails": 0}
-        while self._monitor_running:
-            sleep_for = await _bridge_watchdog_check_impl(
-                self._bridge, state, self._bridge_inhibit_reconnect, self.start_bridge_process,
-            )
-            await asyncio.sleep(sleep_for)
+        """Owns the task; the health check lives in
+        services/broker/watchdog_loop.py. Both flags are passed as callables
+        so the loop sees shutdown and Stop Bridge while it is awaiting."""
+        await _bridge_watchdog_loop_impl(
+            self._bridge,
+            lambda: self._monitor_running,
+            lambda: self._bridge_inhibit_reconnect,
+            self.start_bridge_process,
+        )
 
     # ── Bot commands ──────────────────────────────────────────────────────────
 

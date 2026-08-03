@@ -94,13 +94,45 @@ If step 1 is missing, step 1 *is* the task. Say so instead of splitting.
 
 6. **Run the full suite after each commit.** Not at the end.
 
+## What the trading split actually cost
+
+The first real split (`frontend/pages/trading.py`, 3,254 lines → nine
+modules) hit four problems worth knowing about in advance. None were about
+the code being moved.
+
+**Module-level assignments do not follow their functions.** A section
+calling `log.warning(...)` in an exception handler while
+`log = logging.getLogger(__name__)` stayed in `__init__.py` imports
+cleanly, renders cleanly, and raises `NameError` the first time that error
+path runs — replacing the real error with a confusing one.
+`tests/frontend/test_page_packages_are_wired.py` now catches this
+statically, across branches no test executes.
+
+**Bare references are references.** A dependency scan matching `name(` misses
+a function used as a dict value or passed as a callback. The comparison-table
+cells were exactly that.
+
+**Circular imports appear from mis-assignment, not from bad design.** Two
+helpers landed in `_schedule` while their only caller was `_strategy`, and
+`_schedule` already needed something from `_strategy`. The fix is to move the
+function to its caller, not to add a lazy import.
+
+**Prune imports last.** Pruning a module and then moving more code into it
+re-creates the need for imports you just removed.
+
+**Splitting can move a metric without moving reality.** The import-contract
+count rose from 99 to 103 purely because the same imports were spread over
+more files. The contract now counts distinct (source unit → module) edges,
+with a split page package counting as one unit, so a split is metric-neutral.
+That was a flaw in the metric, and it was fixed rather than baselined around.
+
 ---
 
 ## Current status
 
 | File | Lines | Plan |
 |---|---|---|
-| `frontend/pages/trading.py` | 3,254 | package split |
+| ~~`frontend/pages/trading.py`~~ | ~~3,254~~ | ✅ **split** into 10 modules, largest 561 |
 | `frontend/pages/settings.py` | 3,193 | package split |
 | `frontend/app.py` | 1,635 | package split |
 | `frontend/pages/history.py` | 1,416 | package split |
@@ -119,3 +151,8 @@ If step 1 is missing, step 1 *is* the task. Say so instead of splitting.
 
 The LOC gate is shrink-only: `structure_gates --check` fails if the count of
 oversized files rises, or any listed file grows.
+
+Also blocked on tests: `controllers/remote/server.py` and `client.py`. The
+auth *decisions* are now covered (`tests/controllers/test_remote_server_auth.py`,
+`test_remote_admin_password.py`), but the websocket handler and TLS setup are
+not, and those are the bulk of both files.

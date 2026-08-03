@@ -151,6 +151,21 @@ def _matches(module: str, prefixes: tuple[str, ...]) -> bool:
     return False
 
 
+def _source_unit(path: str) -> str:
+    """The unit a violation is attributed to.
+
+    A page split into a package is ONE source unit, not one per section.
+    Counting raw import statements made the metric move when a file was
+    split into a directory -- the same frontend package importing the same
+    backend modules scored worse purely because the statements were spread
+    over more files. Coupling did not change, so the number should not.
+    """
+    parts = path.split("/")
+    if len(parts) > 3 and parts[0] == "frontend" and parts[1] == "pages":
+        return "/".join(parts[:3])
+    return path
+
+
 def violations_for(contract: Contract) -> list[Violation]:
     found: list[Violation] = []
     for package in contract.source_packages:
@@ -194,12 +209,18 @@ def _baseline() -> dict[str, int]:
     return json.loads(BASELINE_PATH.read_text())
 
 
+def coupling_edges(contract: Contract) -> set[tuple[str, str]]:
+    """Distinct (source unit -> imported module) pairs. This is what the
+    contracts are counted on -- see _source_unit."""
+    return {(_source_unit(v.path), v.module) for v in violations_for(contract)}
+
+
 def check() -> Report:
     baseline = _baseline()
     report = Report()
     for contract in CONTRACTS:
         found = violations_for(contract)
-        report.counts[contract.name] = len(found)
+        report.counts[contract.name] = len(coupling_edges(contract))
         report.details[contract.name] = found
         if contract.enforced_at_zero:
             if found:
@@ -208,12 +229,13 @@ def check() -> Report:
                     f"-- e.g. {found[0]}"
                 )
             continue
+        measured = report.counts[contract.name]
         allowed = baseline.get(contract.name)
         if allowed is None:
             report.regressions.append(f"{contract.name}: no baseline recorded")
-        elif len(found) > allowed:
+        elif measured > allowed:
             report.regressions.append(
-                f"{contract.name}: {len(found)} > baseline {allowed} "
+                f"{contract.name}: {measured} > baseline {allowed} "
                 f"-- e.g. {found[0]}"
             )
     return report
@@ -221,7 +243,7 @@ def check() -> Report:
 
 def update_baseline() -> dict[str, int]:
     new = {
-        c.name: len(violations_for(c))
+        c.name: len(coupling_edges(c))
         for c in CONTRACTS
         if not c.enforced_at_zero
     }

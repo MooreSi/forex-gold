@@ -1,5 +1,5 @@
 {
-  "frontend-reaches-the-backend-through-controllers": 99,
-  "no-nicegui-in-the-backend": 3,
-  "utils-and-config-depend-on-nothing-above-them": 12
+  "frontend-reaches-the-backend-through-controllers": 60,
+  "no-nicegui-in-the-backend": 2,
+  "utils-and-config-depend-on-nothing-above-them": 10
 }

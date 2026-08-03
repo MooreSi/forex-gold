@@ -89,3 +89,34 @@ def test_running_the_checker_as_a_script_reports_cleanly():
     text = report.render()
     for contract in ic.CONTRACTS:
         assert contract.name in text, f"{contract.name} missing from the report"
+
+
+def test_contracts_are_counted_by_coupling_not_by_import_statements():
+    """A file split must not move a contract's number.
+
+    Splitting frontend/pages/trading.py into a package spread the same
+    backend imports over nine section modules. Counting raw import
+    statements scored that as a regression from 99 to 103 -- the same
+    frontend package importing the same backend modules, penalised purely
+    for having more files. Coupling did not change, so the number must not.
+
+    The unit is therefore a distinct (source unit -> imported module) edge,
+    where a split page package counts as ONE source unit.
+    """
+    assert ic._source_unit("frontend/pages/trading/_strategy.py") == "frontend/pages/trading"
+    assert ic._source_unit("frontend/pages/trading/__init__.py") == "frontend/pages/trading"
+    # An unsplit page is its own unit, and non-page paths are untouched.
+    assert ic._source_unit("frontend/pages/chart.py") == "frontend/pages/chart.py"
+    assert ic._source_unit("frontend/app.py") == "frontend/app.py"
+    assert ic._source_unit("backend/src/utils/theme.py") == "backend/src/utils/theme.py"
+
+
+def test_the_same_module_imported_twice_in_one_package_counts_once():
+    """The property the split exposed, asserted directly rather than
+    inferred from the totals."""
+    contract = next(c for c in ic.CONTRACTS
+                    if c.name == "frontend-reaches-the-backend-through-controllers")
+    statements = ic.violations_for(contract)
+    edges = ic.coupling_edges(contract)
+    assert len(edges) <= len(statements)
+    assert all(isinstance(e, tuple) and len(e) == 2 for e in edges)

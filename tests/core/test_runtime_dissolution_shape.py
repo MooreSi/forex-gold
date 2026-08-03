@@ -103,6 +103,27 @@ B6_REMOVED = [
 ]
 
 
+# B8: two PUBLIC facade methods with no caller anywhere -- not in the
+# frontend, not in a controller, not in a service, not in a test. Found by
+# auditing facade_allowlist.json entry by entry while locking it to the
+# curated set: an allowlist is a contract, and a contract nobody signs is
+# just dead weight the ratchet was protecting. The service functions they
+# delegated to stay put -- sim_account.get_sim_account is called directly
+# by bot_readonly, which is how a caller that actually exists reaches it.
+B8_REMOVED = [
+    "get_sim_account",
+    "reset_simulation",
+]
+
+
+@pytest.mark.parametrize("name", B8_REMOVED)
+def test_batch8_uncalled_facade_methods_removed(name):
+    assert not hasattr(SimulationEngine, name), (
+        f"{name} was a public facade method with zero callers, deleted in "
+        f"M4 B8. Call the service function directly if something needs it."
+    )
+
+
 @pytest.mark.parametrize("name", B6_REMOVED)
 def test_batch6_scan_hub_wrappers_removed(name):
     assert not hasattr(SimulationEngine, name), (
@@ -114,7 +135,7 @@ def test_the_close_context_builder_is_untouched():
     """The demo gate: M4 must not reshape the close path in any batch."""
     assert hasattr(SimulationEngine, "_make_close_trade_ctx")
     assert hasattr(SimulationEngine, "close_trade")
-    assert hasattr(SimulationEngine, "_record_close")
+    assert hasattr(SimulationEngine, "record_close")
     assert hasattr(SimulationEngine, "_schedule_profit_sync")
 
 

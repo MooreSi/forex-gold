@@ -4,7 +4,7 @@ _check_sl/_check_tp_hits/_get_remaining_lots on SimulationEngine
 docs/todo/refactor/core-tp-trigger-tracking-migration/010-*.md.
 
 _get_triggered_tps and _log_tp_wait_diagnostic read/write self._tp_cache/
-self._tp_wait_log_ts. _check_tp_hits also calls self._get_triggered_tps
+self._tp_wait_log_ts. _check_tp_hits also calls self.get_triggered_tps
 internally, so a bare stand-in object won't do -- these need a real
 SimulationEngine instance (SimulationEngine.__new__(SimulationEngine), same
 as pack 1's Risk Governor tests) with _tp_cache/_tp_wait_log_ts set manually
@@ -62,7 +62,7 @@ def fresh_db():
 @pytest.fixture
 def engine(fresh_db):
     """A real SimulationEngine instance (correct method binding for
-    self._get_triggered_tps calls inside _check_tp_hits) without running
+    self.get_triggered_tps calls inside _check_tp_hits) without running
     __init__ (which would construct a live MT5 bridge) -- same pattern as
     pack 1's Risk Governor tests. __init__ never runs, so instance state
     normally set there (_tp_trigger_cache, a core_tp_trigger_tracking.TPCache
@@ -117,7 +117,7 @@ def test_get_triggered_tps_parses_reason_strings(fresh_db, engine):
     _insert_partial_close("t-1", "TP1")
     _insert_partial_close("t-1", "TP3")
 
-    triggered = asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
+    triggered = asyncio.run(SimulationEngine.get_triggered_tps(engine, "t-1"))
     assert triggered == {1, 3}
 
 
@@ -126,7 +126,7 @@ def test_get_triggered_tps_ignores_non_matching_reasons(fresh_db, engine):
     _insert_trade("t-1")
     _insert_partial_close("t-1", "manual_close")
 
-    triggered = asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
+    triggered = asyncio.run(SimulationEngine.get_triggered_tps(engine, "t-1"))
     assert triggered == set()
 
 
@@ -135,11 +135,11 @@ def test_get_triggered_tps_ttl_cache_returns_stale_within_window(fresh_db, engin
     _insert_trade("t-1")
     _insert_partial_close("t-1", "TP1")
 
-    first = asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
+    first = asyncio.run(SimulationEngine.get_triggered_tps(engine, "t-1"))
     assert first == {1}
 
     _insert_partial_close("t-1", "TP2")
-    second = asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
+    second = asyncio.run(SimulationEngine.get_triggered_tps(engine, "t-1"))
     assert second == {1}  # still cached, TP2 not yet visible
 
 
@@ -148,12 +148,12 @@ def test_get_triggered_tps_reloads_after_ttl_expiry(fresh_db, engine):
     _insert_trade("t-1")
     _insert_partial_close("t-1", "TP1")
 
-    asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
+    asyncio.run(SimulationEngine.get_triggered_tps(engine, "t-1"))
 
     _insert_partial_close("t-1", "TP2")
     cached_set, _ = engine._tp_trigger_cache.triggered["t-1"]
     engine._tp_trigger_cache.triggered["t-1"] = (cached_set, time.time() - 10)  # force TTL expiry (TTL is 2.5s)
-    reloaded = asyncio.run(SimulationEngine._get_triggered_tps(engine, "t-1"))
+    reloaded = asyncio.run(SimulationEngine.get_triggered_tps(engine, "t-1"))
     assert reloaded == {1, 2}
 
 

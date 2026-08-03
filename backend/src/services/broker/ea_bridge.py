@@ -535,7 +535,7 @@ class EABridge:
             if not trade:
                 log.warning("[EABridge] trade_closed for unknown trade_id=%s", trade_id)
                 return
-            result = await self._engine._record_close(trade_id, close_price, reason)
+            result = await self._engine.record_close(trade_id, close_price, reason)
             account = await self._engine.get_mt5_account()
             from backend.src.services.telegram import alerts as telegram_alerts
             closed_row = await self._fetch_trade(trade_id)

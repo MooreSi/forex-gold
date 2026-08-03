@@ -236,7 +236,7 @@ class SelfHealer:
     async def _heal(self, condition: str) -> None:
         if condition == "bridge_offline":
             try:
-                launched = await self._engine._start_bridge_process()
+                launched = await self._engine.start_bridge_process()
                 if launched:
                     action = "Bridge process restarted."
                 else:

@@ -372,7 +372,7 @@ def _render_active_trades(engine):
                         float(t["remaining_lots"]),
                     )
 
-                triggered = await engine._get_triggered_tps(trade_id)
+                triggered = await engine.get_triggered_tps(trade_id)
 
                 # ── Single full-width trade card ──────────────────────────────
                 with ui.card().classes(
@@ -542,7 +542,7 @@ def _render_active_trades(engine):
                                         None,
                                     )
                                     if trow and trow.get("mt5_ticket"):
-                                        await engine._sync_profit(tid, int(trow["mt5_ticket"]))
+                                        await engine.sync_profit(tid, int(trow["mt5_ticket"]))
                                         ui.notify("Synced with MT5", type="positive")
                                         await refresh()
                                 except Exception as e:

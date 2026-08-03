@@ -139,7 +139,7 @@ def test_ticket_still_live_clears_streak(fresh_db, engine):
 def test_disconnected_bridge_empty_positions_skips_whole_sync(fresh_db, engine):
     _insert_trade(mt5_ticket=555)
     engine._bridge = _FakeBridge(positions=[], health={"connected": False})
-    with mock.patch.object(SimulationEngine, "_record_close", new=mock.AsyncMock()) as rc:
+    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
         asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
     assert not rc.called
 
@@ -147,7 +147,7 @@ def test_disconnected_bridge_empty_positions_skips_whole_sync(fresh_db, engine):
 def test_miss_streak_below_threshold_not_yet_closed(fresh_db, engine):
     _insert_trade(mt5_ticket=555)
     engine._bridge = _FakeBridge(positions=[])
-    with mock.patch.object(SimulationEngine, "_record_close", new=mock.AsyncMock()) as rc:
+    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
         asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
     assert not rc.called
     assert engine._mt5_sync_missing_streak["t-1"] == 1
@@ -157,8 +157,8 @@ def test_miss_streak_reaches_threshold_full_close_fallback_price(fresh_db, engin
     _insert_trade(mt5_ticket=555, remaining_lots=0.10)
     engine._bridge = _FakeBridge(positions=[], deal_history=[], position_history=[])
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    with mock.patch.object(SimulationEngine, "_record_close", new=mock.AsyncMock(return_value={"net_pnl": 0})) as rc, \
-         mock.patch.object(SimulationEngine, "_sync_profit", new=mock.AsyncMock()), \
+    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock(return_value={"net_pnl": 0})) as rc, \
+         mock.patch.object(SimulationEngine, "sync_profit", new=mock.AsyncMock()), \
          mock.patch.object(SimulationEngine, "_schedule_profit_sync", new=mock.AsyncMock()), \
          mock.patch.object(telegram_alerts, "fmt_trade_close", return_value="msg"), \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
@@ -172,8 +172,8 @@ def test_full_close_infers_sl_reason_from_comment(fresh_db, engine):
              "comment": "sl 2390", "volume": 0.10, "profit": -10.0}]
     engine._bridge = _FakeBridge(positions=[], deal_history=[], position_history=deals)
     engine._mt5_sync_missing_streak = {"t-1": 1}
-    with mock.patch.object(SimulationEngine, "_record_close", new=mock.AsyncMock(return_value={"net_pnl": -10})) as rc, \
-         mock.patch.object(SimulationEngine, "_sync_profit", new=mock.AsyncMock()), \
+    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock(return_value={"net_pnl": -10})) as rc, \
+         mock.patch.object(SimulationEngine, "sync_profit", new=mock.AsyncMock()), \
          mock.patch.object(SimulationEngine, "_schedule_profit_sync", new=mock.AsyncMock()), \
          mock.patch.object(telegram_alerts, "fmt_trade_close", return_value="msg"), \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
@@ -190,7 +190,7 @@ def test_partial_close_detected_no_full_close_double_prefixed_reason(fresh_db, e
     engine._mt5_sync_missing_streak = {"t-1": 1}
     with mock.patch.object(SimulationEngine, "partial_close_trade",
                            new=mock.AsyncMock(return_value={"partial_pnl": 5.0})) as pc, \
-         mock.patch.object(SimulationEngine, "_record_close", new=mock.AsyncMock()) as rc, \
+         mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc, \
          mock.patch.object(telegram_alerts, "send_message", new=mock.AsyncMock()):
         asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
     pc.assert_called_once_with("t-1", 0.05, 2405.0, "MT5_MT5_sync_TP")
@@ -232,7 +232,7 @@ def test_ladder_leg_trade_excluded_from_close_detection(fresh_db, engine):
             ("trade-parent", 1, 1, 2410.0, 0.05, 888, "open"),
         )
     engine._bridge = _FakeBridge(positions=[{"ticket": 888, "volume": 0.05}])
-    with mock.patch.object(SimulationEngine, "_record_close", new=mock.AsyncMock()) as rc:
+    with mock.patch.object(SimulationEngine, "record_close", new=mock.AsyncMock()) as rc:
         asyncio.run(SimulationEngine._sync_closed_mt5_positions(engine))
     assert not rc.called
     with db.db() as conn:

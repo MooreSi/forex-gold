@@ -468,7 +468,7 @@ class SyncServer:
             try:
                 tick = await self._main_engine.get_fresh_tick()
                 import asyncio as _asyncio
-                _asyncio.create_task(self._main_engine._background_open_commentary(
+                _asyncio.create_task(self._main_engine.background_open_commentary(
                     result["trade_id"],
                     {"signal_id": signal_id, "direction": kwargs["direction"],
                      "entry_low": kwargs["entry_low"], "entry_high": kwargs["entry_high"],
@@ -506,7 +506,7 @@ class SyncServer:
             if not _instant or _instant.get("direction", "").upper() != direction:
                 await ws.send(json.dumps(make(MSG_SIGNAL_FOLLOWUP_ACK, matched=False)))
                 return
-            await self._main_engine._apply_followup_to_instant_trade(
+            await self._main_engine.apply_followup_to_instant_trade(
                 _instant, updates, tg_id, channel_name, channel_name,
             )
             await ws.send(json.dumps(make(MSG_SIGNAL_FOLLOWUP_ACK, matched=True)))
@@ -849,7 +849,7 @@ class SyncServer:
         open_positions = []
         for p in positions:
             try:
-                triggered = sorted(await eng._get_triggered_tps(p["trade_id"]))
+                triggered = sorted(await eng.get_triggered_tps(p["trade_id"]))
             except Exception:
                 triggered = []
             row = {

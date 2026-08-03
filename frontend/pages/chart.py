@@ -629,7 +629,7 @@ def render(get_engine: Callable):
                 except Exception:
                     pass
 
-                triggered = await engine._get_triggered_tps(t["trade_id"])
+                triggered = await engine.get_triggered_tps(t["trade_id"])
                 dir_col   = _BULL_COL if direction == "BUY" else _BEAR_COL
                 p_col     = _pnl_col(unreal)
 

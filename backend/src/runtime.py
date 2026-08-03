@@ -81,11 +81,6 @@ from backend.src.services.broker.mt5_performance import (
     _platform_fee_rate, _apply_fee,
 )
 from backend.src.services.broker.deposits import get_total_deposits as _get_total_deposits_impl
-from backend.src.services.trading.sim_account import (
-    get_sim_account as _get_sim_account_impl,
-    update_sim_balance as _update_sim_balance_impl,
-    reset_simulation as _reset_simulation_impl,
-)
 from backend.src.services.analytics.reporting import (
     get_open_trades as _get_open_trades_impl,
     get_all_trades as _get_all_trades_impl,
@@ -440,13 +435,6 @@ class SimulationEngine:
 
     # ── Account ───────────────────────────────────────────────────────────────
 
-    def get_sim_account(self) -> dict:
-        return _get_sim_account_impl()
-
-    def reset_simulation(self) -> None:
-        starting = float(self._cfg.get("starting_balance", 1000.0))
-        _reset_simulation_impl(starting)
-
     # ── Signals ───────────────────────────────────────────────────────────────
 
     def create_signal(self, source_name: str, direction: str, entry_low: float,
@@ -509,7 +497,7 @@ class SimulationEngine:
             self._bridge, signal_id, lot_size_override=lot_size_override, tick=tick,
             age_lot_mult=age_lot_mult, dpm_candles=self._dpm_candles,
             starting_balance=self._cfg.get("starting_balance", 1000.0),
-            background_open_commentary=self._background_open_commentary,
+            background_open_commentary=self.background_open_commentary,
         )
 
     async def open_manual_market_order(
@@ -541,7 +529,7 @@ class SimulationEngine:
             self._bridge, direction, stop_loss=stop_loss, lot_size=lot_size,
             strategy=strategy, take_profit=take_profit, source_name=source_name,
             starting_balance=self._cfg.get("starting_balance", 1000.0),
-            background_open_commentary=self._background_open_commentary,
+            background_open_commentary=self.background_open_commentary,
         )
 
     async def open_manual_limit_order(
@@ -569,7 +557,7 @@ class SimulationEngine:
     async def close_trade(self, trade_id: str, reason: str = "manual_close") -> dict:
         return await _close_trade_impl(trade_id, reason, self._make_close_trade_ctx())
 
-    async def _record_close(self, trade_id: str, close_price: float, reason: str) -> dict:
+    async def record_close(self, trade_id: str, close_price: float, reason: str) -> dict:
         return await _record_close_impl(trade_id, close_price, reason, self._make_close_trade_ctx())
 
     async def partial_close_trade(self, trade_id: str, lots_to_close: float,
@@ -595,7 +583,7 @@ class SimulationEngine:
 
     # ── TP trigger tracking ───────────────────────────────────────────────────
 
-    async def _get_triggered_tps(self, trade_id: str) -> set[int]:
+    async def get_triggered_tps(self, trade_id: str) -> set[int]:
         return await _get_triggered_tps_impl(self._tp_trigger_cache, trade_id)
 
     _TP_WAIT_LOG_INTERVAL = 60.0  # seconds between diagnostic log lines per trade
@@ -775,7 +763,7 @@ class SimulationEngine:
                     # ── Pending signal watcher ───────────────────────────────
                     if bool(rs.get("auto_execute_signals", 0)) and not await db_module.to_db_thread(self.is_trading_paused):
                         try:
-                            _has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, self._bridge, self._pending_activation_retry_after, self._dpm_candles, starting_balance=self._cfg.get('starting_balance', 1000.0), background_open_commentary=self._background_open_commentary)
+                            _has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, self._bridge, self._pending_activation_retry_after, self._dpm_candles, starting_balance=self._cfg.get('starting_balance', 1000.0), background_open_commentary=self.background_open_commentary)
                         except Exception as exc:
                             log.debug("[PendingWatcher] Error: %s", exc)
                             _has_pending_signals = False
@@ -1082,8 +1070,8 @@ class SimulationEngine:
                 self._mt5_sync_missing_streak.pop(trade["trade_id"], None)
                 log.info("MT5 sync: closing trade %s ticket=%s @ %.2f reason=%s",
                          trade["trade_id"], ticket, close_price, reason)
-                result = await self._record_close(trade["trade_id"], float(close_price), reason)
-                await self._sync_profit(trade["trade_id"], ticket)
+                result = await self.record_close(trade["trade_id"], float(close_price), reason)
+                await self.sync_profit(trade["trade_id"], ticket)
                 asyncio.create_task(self._schedule_profit_sync(trade["trade_id"], ticket))
                 closed_row = await db_module.to_db_thread(
                     _broker_repo.fetch_trade, trade["trade_id"])
@@ -1135,7 +1123,7 @@ class SimulationEngine:
             except Exception as imp_err:
                 log.warning("MT5 sync: failed to import ticket %s: %s", ticket, imp_err)
 
-    async def _sync_profit(self, trade_id: str, mt5_ticket: int) -> Optional[float]:
+    async def sync_profit(self, trade_id: str, mt5_ticket: int) -> Optional[float]:
         return await _sync_profit_impl(trade_id, mt5_ticket, self._bridge)
 
     async def _schedule_profit_sync(self, trade_id: str, mt5_ticket: int) -> None:
@@ -1169,8 +1157,8 @@ class SimulationEngine:
                 trade_repo.reopen_residual_trade(trade_id, residual_vol)
                 mt5_res = await self._bridge.close_position(int(mt5_ticket))
                 if mt5_res.get("success"):
-                    await self._record_close(trade_id, float(mt5_res.get("close_price", close_price)),
-                                              "all_tps_hit_residual")
+                    await self.record_close(trade_id, float(mt5_res.get("close_price", close_price)),
+                                            "all_tps_hit_residual")
                 else:
                     asyncio.create_task(telegram_alerts.send_message(
                         f"*TP Close Residual Left Open*\n"
@@ -1181,7 +1169,7 @@ class SimulationEngine:
                         trade_id, "tp_close_residual",
                     ))
                 return
-            await self._sync_profit(trade_id, int(mt5_ticket))
+            await self.sync_profit(trade_id, int(mt5_ticket))
             asyncio.create_task(self._schedule_profit_sync(trade_id, int(mt5_ticket)))
         closed_row = trade_repo.get_trade(trade_id)
         account = await self.get_mt5_account()
@@ -1197,7 +1185,7 @@ class SimulationEngine:
 
     # ── Background commentary ─────────────────────────────────────────────────
 
-    async def _background_open_commentary(self, trade_id: str, sig: dict, tick: Tick) -> None:
+    async def background_open_commentary(self, trade_id: str, sig: dict, tick: Tick) -> None:
         try:
             candles = await self.get_candles("M5", 20)
             trade_row = trade_repo.get_trade(trade_id)
@@ -1225,7 +1213,7 @@ class SimulationEngine:
             if mt5_ticket:
                 try:
                     await asyncio.wait_for(
-                        self._sync_profit(trade_id, int(mt5_ticket)), timeout=8.0
+                        self.sync_profit(trade_id, int(mt5_ticket)), timeout=8.0
                     )
                 except (asyncio.TimeoutError, Exception) as _e:
                     log.debug("Close commentary: profit sync skipped (%s)", _e)
@@ -1346,7 +1334,7 @@ class SimulationEngine:
             else:
                 await asyncio.sleep(1)
 
-    async def _apply_followup_to_instant_trade(
+    async def apply_followup_to_instant_trade(
         self,
         instant_trade: dict,
         parsed: dict,
@@ -2173,7 +2161,7 @@ class SimulationEngine:
 
     # ── Bridge watchdog ───────────────────────────────────────────────────────
 
-    async def _start_bridge_process(self) -> bool:
+    async def start_bridge_process(self) -> bool:
         """Tear down any running bridge and start a clean new one.
 
         On Windows: kills the native mt5_bridge.py process and restarts it directly.
@@ -2346,7 +2334,7 @@ class SimulationEngine:
         state = {"last_restart_at": 0.0, "was_connected": True, "consecutive_fails": 0}
         while self._monitor_running:
             sleep_for = await _bridge_watchdog_check_impl(
-                self._bridge, state, self._bridge_inhibit_reconnect, self._start_bridge_process,
+                self._bridge, state, self._bridge_inhibit_reconnect, self.start_bridge_process,
             )
             await asyncio.sleep(sleep_for)
 
@@ -2364,14 +2352,14 @@ class SimulationEngine:
             tg_reader=self._tg_reader,
             cfg=self._cfg,
             bot_offset=self._bot_offset,
-            start_bridge_process=self._start_bridge_process,
+            start_bridge_process=self.start_bridge_process,
             close_cmd=self._cmd_close,
             market_buy_cmd=self._cmd_market_price_buy,
             market_sell_cmd=self._cmd_market_price_sell,
-            restart_app_cmd=self._cmd_restart_app,
+            restart_app_cmd=self.restart_app,
         )
 
-    async def _cmd_restart_app(self, args: list) -> str:
+    async def restart_app(self, args: list) -> str:
         """Restart the FOREX Trader app process (5-second delay so reply can send)."""
         return await _cmd_restart_app_impl(args, self._bot_offset)
 

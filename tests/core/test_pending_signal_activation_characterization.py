@@ -60,7 +60,7 @@ def engine(fresh_db):
     e._dpm_candles = []
     e._bridge = _FakeBridge()
     e._cfg = {}
-    e._background_open_commentary = None
+    e.background_open_commentary = None
     return e
 
 

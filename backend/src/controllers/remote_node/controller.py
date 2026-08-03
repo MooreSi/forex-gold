@@ -40,4 +40,4 @@ async def restart_app(engine) -> str:
     the bot offset that must be persisted first -- so this forwards to it
     rather than duplicating the sequence.
     """
-    return await engine._cmd_restart_app([])
+    return await engine.restart_app([])

@@ -89,7 +89,7 @@ def _run(engine, n_sleeps, start_bridge_launched=True):
 
     with mock.patch("asyncio.sleep", side_effect=_logging_sleep(engine, sleep_calls, n_sleeps)), \
          mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send), \
-         mock.patch.object(SimulationEngine, "_start_bridge_process", fake_start_bridge):
+         mock.patch.object(SimulationEngine, "start_bridge_process", fake_start_bridge):
         asyncio.run(engine._bridge_watchdog_loop())
     return sleep_calls, alerts
 

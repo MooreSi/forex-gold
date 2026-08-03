@@ -136,5 +136,5 @@ def test_runtime_no_longer_owns_the_dispatcher_or_the_delegating_commands():
         assert not hasattr(SimulationEngine, gone), gone
     # The order-placing handlers stay on the runtime, injected into the table.
     for kept in ("_cmd_close", "_cmd_market_price_buy",
-                 "_cmd_market_price_sell", "_cmd_restart_app"):
+                 "_cmd_market_price_sell", "restart_app"):
         assert hasattr(SimulationEngine, kept), kept

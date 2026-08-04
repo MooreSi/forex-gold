@@ -116,7 +116,7 @@ async def process_instant_entry(
     # which this fully-automated path never calls; confirmed live 2026-07-23 that
     # a hit profit target did not stop new IME trades. Same check, same place in
     # the flow as the session gate just above.
-    _ime_sched_ok, _ime_sched_reason = check_trading_schedule(source="telegram")
+    _ime_sched_ok, _ime_sched_reason = check_trading_schedule(source=channel_name)
     if not _ime_sched_ok:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_sched_reason)
         return

@@ -205,7 +205,7 @@ def test_strategy_resolution_falls_back_to_global_default(fresh_db):
 
 # ── EA Templates ─────────────────────────────────────────────────────────────
 
-def test_template_override_resolves_as_template_unmodified_sl(fresh_db):
+def test_template_override_resolves_as_template_authoritative_sl(fresh_db):
     from forex_trader.core import core_ea_templates as et
     et.save_ea_template("Grid Stealth", {"mode": "grid", "tpsl_mode": "stealth"})
     _insert_signal(source_name="TplChannel", stop_loss=2390.0)
@@ -216,9 +216,12 @@ def test_template_override_resolves_as_template_unmodified_sl(fresh_db):
     assert result["strategy"] == "template:Grid Stealth"
     assert result["template"]["mode"] == "grid"
     assert result["template"]["tpsl_mode"] == "stealth"
-    # Templates skip every strategy-specific SL override -- the raw signal
-    # SL passes through untouched (the EA computes its own management).
-    assert result["stop_loss_to_use"] == 2390.0
+    # A template's own sl_pips (DEFAULTS: 50.0, unset here) is as
+    # authoritative as its TP ladder -- it replaces the signal's own SL
+    # rather than deferring to it, same convention as tp{n}_pips. BUY,
+    # default tick ask=2400.2, sl_pips=50 -> 2400.2 - 5.0 = 2395.2. The
+    # signal's own stop_loss (2390.0) is NOT used.
+    assert result["stop_loss_to_use"] == 2395.2
 
 
 def test_template_missing_raises(fresh_db):

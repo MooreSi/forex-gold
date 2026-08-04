@@ -1,15 +1,17 @@
-"""A grid's anchor leg is a MARKET order -- it may only be placed while price
-is at (or better than) the signal's own zone.
+"""A grid's anchor leg is a MARKET order. Until 2026-08-03 it was only
+placed while price was at (or better than) the signal's own zone --
+otherwise the whole anchor count was zeroed and only the resting legs
+staged, added after six queued Reversal Engine signals on 2026-07-30 all
+took a market anchor at ~4095 within seconds of each other, several in
+opposite directions at the same price, none at a price their own signal
+named.
 
-That used to be guaranteed: a grid was dispatched only once price had reached
-the zone. Placing on arrival removed the guarantee, and on 2026-07-30 six
-queued Reversal Engine signals with zones from 4084 to 4121 each took a market
-anchor at ~4095 within seconds of each other -- four BUYs and two SELLs, none
-at a price its own signal named, several in opposite directions at the same
-price.
-
-The resting legs are unaffected: they sit AT the zone by construction and are
-the entire reason for staging early.
+2026-08-04 (explicit trading-policy directive): that guard is deliberately
+removed. Every EA template now always fires its anchor leg(s) at market the
+instant the signal triggers, regardless of the signal's own zone -- missing
+the market move is treated as worse than entering somewhat outside the
+zone. The resting legs are unaffected either way: they sit AT the zone by
+construction and are the entire reason for staging early.
 """
 import asyncio
 import os
@@ -117,18 +119,18 @@ def _open(monkeypatch, ea, tick, template="Grid", direction="BUY",
     ))
 
 
-def test_anchor_is_dropped_when_price_is_past_the_zone(monkeypatch, fresh_db):
-    """The regression itself: a BUY zone of 4084-4088 must not take a market
-    anchor at 4095."""
+def test_anchor_still_fires_when_price_is_past_the_zone(monkeypatch, fresh_db):
+    """A BUY zone of 4084-4088 takes its market anchor at 4095 -- the
+    always-fire policy, not the old regression it replaced."""
     ea = _RecordingEA()
     _open(monkeypatch, ea, _TickAboveZone())
     assert ea.calls == 1
-    assert ea.template["anchors"] == 0
+    assert ea.template["anchors"] == 1
 
 
-def test_resting_legs_are_still_staged_when_the_anchor_is_dropped(monkeypatch, fresh_db):
-    """Dropping the anchor must not mean placing nothing -- the resting legs
-    at the zone are the whole point of staging early."""
+def test_resting_legs_are_still_staged_alongside_the_anchor(monkeypatch, fresh_db):
+    """The resting legs at the zone are staged the same way regardless of
+    whether the anchor also fires."""
     ea = _RecordingEA()
     _open(monkeypatch, ea, _TickAboveZone())
     assert ea.template["pendings"] == 3
@@ -153,8 +155,9 @@ def test_anchor_is_kept_on_the_better_side_of_a_buy_zone(monkeypatch, fresh_db):
     assert ea.template["anchors"] == 1
 
 
-def test_sell_zone_uses_its_own_side(monkeypatch, fresh_db):
-    """A SELL chased below its zone must lose the anchor the same way."""
+def test_sell_anchor_still_fires_chased_below_its_zone(monkeypatch, fresh_db):
+    """A SELL chased below its zone still takes the anchor -- direction
+    doesn't change the always-fire policy."""
     class _BelowSellZone:
         ask = 4070.2
         bid = 4070.0
@@ -163,21 +166,22 @@ def test_sell_zone_uses_its_own_side(monkeypatch, fresh_db):
     ea = _RecordingEA()
     _open(monkeypatch, ea, _BelowSellZone(), direction="SELL",
           low=4084.0, high=4088.0, sl=4093.0)
-    assert ea.template["anchors"] == 0
+    assert ea.template["anchors"] == 1
 
 
-def test_anchor_only_template_refuses_rather_than_filling_at_market(monkeypatch, fresh_db):
-    """With no resting legs to fall back on there is nothing to stage, so the
-    open must fail and leave the signal pending -- never quietly become the
-    market entry the guard exists to prevent."""
+def test_anchor_only_template_fires_at_market_even_with_no_resting_legs(monkeypatch, fresh_db):
+    """No resting legs to fall back on is no longer a reason to refuse --
+    the anchor itself is the whole trade here, and it must still fire."""
     ea = _RecordingEA()
-    with pytest.raises(RuntimeError, match="refusing a market anchor"):
-        _open(monkeypatch, ea, _TickAboveZone(), template="AnchorOnly")
-    assert ea.calls == 0
+    _open(monkeypatch, ea, _TickAboveZone(), template="AnchorOnly")
+    assert ea.calls == 1
+    assert ea.template["anchors"] == 1
+    assert ea.template["pendings"] == 0
 
 
 def test_the_stored_template_is_not_mutated(monkeypatch, fresh_db):
-    """Only the copy on the wire loses its anchors -- the saved template must
-    still say 1 for the next signal that arrives in its zone."""
+    """The wire copy no longer diverges from the saved template at all (it
+    used to lose its anchors outside the zone) -- the saved template must
+    still say 1 for the next signal that arrives."""
     _open(monkeypatch, _RecordingEA(), _TickAboveZone())
     assert et.get_ea_template("Grid")["anchors"] == 1

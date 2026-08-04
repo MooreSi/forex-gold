@@ -639,6 +639,7 @@ def get_all_clients() -> list[dict]:
                 "nickname":          meta.get("nickname", ""),
                 "online":            False,
                 "version":           "unknown",
+                "commit_sha":        meta.get("commit_sha", ""),
                 "platform":          meta.get("platform", "unknown"),
                 "hostname":          meta.get("hostname", "unknown"),
                 "last_seen":         meta.get("last_seen", 0),
@@ -710,10 +711,11 @@ async def _handler(websocket) -> None:
     except Exception:
         return
 
-    token    = msg.get("token", "")
-    hostname = msg.get("hostname", "?")
-    platform = msg.get("platform", "?")
-    version  = msg.get("version", "?")
+    token      = msg.get("token", "")
+    hostname   = msg.get("hostname", "?")
+    platform   = msg.get("platform", "?")
+    version    = msg.get("version", "?")
+    commit_sha = msg.get("commit_sha", "")
 
     # ── Remote admin connection ───────────────────────────────────────────────
     if msg.get("type") == MSG_ADMIN_HELLO:
@@ -906,6 +908,7 @@ async def _handler(websocket) -> None:
         "hostname":     hostname,
         "platform":     platform,
         "version":      version,
+        "commit_sha":   commit_sha,
         "ip":           ip,
         "online":       True,
         "machine_uuid": machine_uuid,
@@ -950,6 +953,7 @@ async def _handler(websocket) -> None:
                 if conn_entry:
                     conn_entry["info"].update({
                         "version":          m.get("version", version),
+                        "commit_sha":       m.get("commit_sha", commit_sha),
                         "uptime_s":         m.get("uptime_s", 0),
                         "trades_open":      m.get("trades_open", 0),
                         "bridge_connected": m.get("bridge_connected", False),

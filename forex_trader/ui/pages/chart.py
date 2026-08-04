@@ -18,6 +18,7 @@ from nicegui import ui
 
 from forex_trader.core.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 from forex_trader.core import database as db_module
+from forex_trader.core.core_trade_reporting import is_stuck_placeholder
 from forex_trader.sync import client as sync_client
 from forex_trader.ui.pages.trading import trade_source_label, trade_channel_label
 
@@ -800,6 +801,7 @@ def render(get_engine: Callable):
         try:
             tick       = await engine.get_tick()
             trades     = await db_module.to_db_thread(engine.get_open_trades)
+            trades     = [t for t in trades if not is_stuck_placeholder(t)]
             untracked  = await engine.get_untracked_mt5_positions()
             _state["tick"] = tick
 

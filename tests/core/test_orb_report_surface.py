@@ -296,11 +296,22 @@ def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
     assert m.call_args.kwargs["lot_size"] == 0.05
 
 
-def test_auto_execute_zero_lot_size_passes_none_for_auto_sizing(fresh_db):
+def test_auto_execute_zero_lot_size_computes_risk_based_lot(fresh_db):
+    # orb_lot_size=0 (unset, the default) used to pass lot_size=None straight
+    # through to open_manual_market_order -- whose own fallback ladder tries
+    # the unrelated global strategy_lot_size BEFORE ever reaching real
+    # risk-based sizing, so "0 = auto-size from Risk %" (the ORB panel's own
+    # documented behaviour) never actually happened. orb_auto_execute now
+    # computes the risk-based lot itself and passes a concrete value instead
+    # of None, so it can't fall through to that unrelated setting. This
+    # report has no current_price (unlike a real build_orb_report() result),
+    # so entry falls back to the report's own stop -- a degenerate
+    # zero-distance risk calc that suggest_lot_size clamps to the 0.01
+    # minimum, which is what's asserted here.
     patcher, m = _patch_open_market()
     with patcher:
         asyncio.run(orb.orb_auto_execute(_BULLISH_REPORT, _FakeBridge(), True))
-    assert m.call_args.kwargs["lot_size"] is None
+    assert m.call_args.kwargs["lot_size"] == 0.01
 
 
 def test_auto_execute_market_order_failure_does_not_raise(fresh_db):

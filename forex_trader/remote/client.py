@@ -237,6 +237,14 @@ def _app_version() -> str:
     return "unknown"
 
 
+def _commit_sha() -> str:
+    try:
+        from forex_trader.core.core_app_update import get_local_commit_sha
+        return get_local_commit_sha()
+    except Exception:
+        return ""
+
+
 def _build_hello() -> dict:
     import platform
     from forex_trader.remote.ip_check import get_machine_uuid
@@ -244,6 +252,7 @@ def _build_hello() -> dict:
         MSG_HELLO,
         token=get_or_create_token(),
         version=_app_version(),
+        commit_sha=_commit_sha(),
         platform=sys.platform,
         hostname=platform.node(),
         machine_uuid=get_machine_uuid(),
@@ -325,6 +334,7 @@ def _build_status() -> dict:
     return make(
         MSG_STATUS,
         version=_app_version(),
+        commit_sha=_commit_sha(),
         uptime_s=uptime,
         trades_open=trades_open,
         bridge_connected=bridge_ok,
@@ -470,10 +480,20 @@ def _do_restart() -> None:
         venv_python = app_root / ".venv" / "Scripts" / "python.exe"
         python = str(venv_python) if venv_python.exists() else sys.executable
         with open_restart_log(log_path) as _log:
+            # CREATE_BREAKAWAY_FROM_JOB is required: Task Scheduler puts this
+            # process (and every child it spawns) in a Job Object with
+            # kill-on-close semantics, so without breakaway this relaunch
+            # child dies together with this process before its delay timer
+            # even elapses -- confirmed empirically, see the matching comment
+            # in platform_utils.restart_app().
             subprocess.Popen(
                 delayed_relaunch_cmd(python, "run.py", delay_secs=3, extra_args=["--no-browser"]),
                 cwd=str(app_root),
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=(
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.CREATE_BREAKAWAY_FROM_JOB
+                ),
                 stdin=subprocess.DEVNULL,
                 stdout=_log,
                 stderr=_log,

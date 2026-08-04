@@ -251,6 +251,41 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
         log.info("[ORB auto-execute] report has no stop/target — skipping")
         return
 
+    # Stop/target are fixed the moment the opening range closes (breakout
+    # edge ± a multiple of that range's own risk) and never move again --
+    # correct for the methodology, but this function can run anywhere from
+    # 08:15 to _ORB_AUTO_EXEC_END_HOUR, and only fires on whichever minute
+    # first sees a confirmed direction (e.g. after this node's own engine
+    # restarted mid-morning and only just started evaluating the report).
+    # If price has already reached or passed the target by the time that
+    # happens, the 2:1 reward this trade is supposed to be chasing has
+    # already played out with no position open -- entering now would open
+    # a trade whose own "target" sits behind the entry, not ahead of it
+    # (confirmed live 2026-08-03: a SELL filled at $4038.12 against a
+    # target of $4053.94, ~15pts on the wrong side of its own objective).
+    # Skip rather than take a trade with no reward left.
+    current_price = report.get("current_price")
+    if current_price is not None:
+        target_already_passed = (
+            (direction == "bullish" and current_price >= target)
+            or (direction == "bearish" and current_price <= target)
+        )
+        if target_already_passed:
+            log.info(
+                "[ORB auto-execute] price %.2f has already reached/passed the %s target "
+                "%.2f — breakout is too stale to trade, skipping",
+                current_price, direction, target,
+            )
+            asyncio.create_task(telegram_alerts.send_message(
+                f"*ORB/IVB Auto-Execute Skipped*\nDirection: "
+                f"{'BUY' if direction == 'bullish' else 'SELL'}\n"
+                f"Price (${current_price:.2f}) has already reached/passed the target "
+                f"(${target:.2f}) before the trade could be placed — the breakout is too "
+                f"stale, no reward left to take.",
+                None, "orb_auto_execute_skipped",
+            ))
+            return
+
     mt5_direction = "BUY" if direction == "bullish" else "SELL"
     rs = await db_module.to_db_thread(db_module.get_risk_settings)
 
@@ -287,8 +322,27 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
         ))
         return
 
+    # 0 (unset) is documented (Trading > ORB/IVB Report tab) as "auto-size
+    # from your Risk % and the stop distance". Passing lot_size=None down
+    # to open_manual_market_order does NOT do that, though -- its own
+    # fallback ladder tries the GENERIC strategy_lot_size setting first and
+    # only reaches real risk-based sizing if that is also 0, so an ORB
+    # install that never set orb_lot_size (e.g. a fresh reinstall, which
+    # doesn't carry over per-node settings) silently traded whatever the
+    # unrelated global strategy_lot_size happened to be instead of sizing
+    # to this trade's own stop distance. Compute the risk-based lot here so
+    # ORB's documented behaviour actually holds regardless of what the
+    # generic strategy lot is set to.
     _lot_val = float(rs.get("orb_lot_size", 0) or 0)
-    lot = _lot_val if _lot_val > 0 else None  # None -> auto-size from risk % and stop distance
+    if _lot_val > 0:
+        lot = _lot_val
+    else:
+        from forex_trader.core.core_close_trade import get_trading_balance
+        from forex_trader.core.core_fees_sizing import suggest_lot_size
+        _entry_approx = float(report.get("current_price") or 0) or stop_loss
+        _risk_pct = float(rs.get("risk_per_trade_pct", 0.5))
+        _balance = await get_trading_balance(bridge, 1000.0)
+        lot = suggest_lot_size(_entry_approx, stop_loss, _balance, _risk_pct)
 
     from forex_trader.core.core_manual_market_order import open_manual_market_order
     try:

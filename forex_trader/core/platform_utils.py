@@ -274,15 +274,40 @@ def restart_app(root) -> None:
 
     from forex_trader.config import USER_DATA_DIR
     log_path = USER_DATA_DIR / "data" / "restart.log"
+    cmd = delayed_relaunch_cmd(python, "run.py", delay_secs=5, extra_args=["--no-browser"])
     with open_restart_log(log_path) as _restart_log:
-        subprocess.Popen(
-            delayed_relaunch_cmd(python, "run.py", delay_secs=5, extra_args=["--no-browser"]),
-            cwd=str(root),
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=_restart_log,
-            stderr=_restart_log,
-        )
+        if sys.platform == "win32":
+            # CREATE_BREAKAWAY_FROM_JOB is required, not optional: this app is
+            # normally launched by Task Scheduler, which places it (and every
+            # child it spawns) in a Job Object with kill-on-close semantics.
+            # DETACHED_PROCESS/CREATE_NEW_PROCESS_GROUP alone only detach the
+            # console/signal group, not job membership -- without breakaway,
+            # this relaunch child dies the instant this process exits below,
+            # before its delay timer even elapses (confirmed empirically: the
+            # child never survived without this flag). See _do_restart() in
+            # remote/client.py for the same fix on the licence-activation and
+            # revocation restart paths.
+            subprocess.Popen(
+                cmd,
+                cwd=str(root),
+                creationflags=(
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.CREATE_BREAKAWAY_FROM_JOB
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=_restart_log,
+                stderr=_restart_log,
+            )
+        else:
+            subprocess.Popen(
+                cmd,
+                cwd=str(root),
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=_restart_log,
+                stderr=_restart_log,
+            )
 
     from nicegui import app
     app.shutdown()

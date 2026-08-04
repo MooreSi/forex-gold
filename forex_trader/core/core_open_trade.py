@@ -389,6 +389,16 @@ async def open_trade(
     # Stays None for every non-template strategy, which keeps writing the
     # signal levels exactly as before.
     _resolved_tps: Optional[dict] = None
+    # How many legs a grid-mode template ack says it actually placed (the
+    # EA's own "legs_placed" field on its trade_opened ack) -- recorded on
+    # the placeholder row as grid_legs_total so ea_bridge._on_grid_leg_
+    # cancelled can tell every leg has now cancelled unfilled apart from
+    # "one sibling of several, others may still fill" and close the row
+    # instead of leaving it open at $0 forever. None for every non-grid
+    # strategy, and also None (deliberately) for the ack-timeout placeholder
+    # below, since that synthetic ack never carries a real leg count and
+    # guessing one risks closing a trade that actually did fill.
+    _grid_legs_total: Optional[int] = None
     _is_template = ea_templates.is_template_override(strategy)
     ea_rs = await db_module.to_db_thread(db_module.get_risk_settings)
     if bool(ea_rs.get("ea_bridge_enabled", 0)) and mt5_tp_override is None:
@@ -471,46 +481,30 @@ async def open_trade(
                     if _grid_lot > 0:
                         _ea_lot = _grid_lot
 
-                    # ── Anchor legs require price to BE at the zone ──────
-                    # A grid's anchor is a MARKET order (HandleOpenTemplateGrid
-                    # calls trade.Buy/trade.Sell for it). That is only an entry
-                    # the signal asked for while price is at or better than its
-                    # zone -- which used to be guaranteed, because a grid was
-                    # only ever dispatched once price had reached the zone.
-                    # Placing on arrival removed that guarantee, and on
-                    # 2026-07-30 six queued Reversal Engine signals with zones
-                    # from 4084 to 4121 each took a market anchor at ~4095:
-                    # four BUYs and two SELLs filled within seconds of each
-                    # other, none at a price its own signal named.
+                    # ── Anchor legs: always take the market entry immediately ──
+                    # 2026-08-03 (explicit trading-policy directive): every EA
+                    # template fires its anchor leg(s) at market the instant
+                    # the signal triggers, regardless of whether price is
+                    # still inside the signal's own zone -- missing the
+                    # market move is worse than entering somewhat outside the
+                    # zone. The resting leg(s) below still take the better
+                    # fill inside the zone if price retraces there.
                     #
-                    # Outside the zone, only the resting legs are placed --
-                    # those sit AT the zone by construction and are the whole
-                    # reason for staging early. The anchor's own purpose
-                    # ("take part of the position now so a signal that never
-                    # retraces is not missed entirely") is exactly what must
-                    # not happen when price is already past the level.
+                    # Until 2026-08-03 this zeroed the anchor count whenever
+                    # price was outside the zone, added after six queued
+                    # signals on 2026-07-30 all took a market anchor at the
+                    # same clustered price the moment they were dispatched.
+                    # That guard is deliberately removed now per explicit
+                    # direction to never miss the market opportunity --
+                    # entries firing close together when multiple signals
+                    # cluster is an accepted tradeoff of this policy.
                     if not price_in_entry_range(direction, entry_low, entry_high, tick):
-                        _pendings = int(_ea_template.get("pendings", 0) or 0) or \
-                                    int(_ea_template.get("grid_legs", 0) or 0)
-                        if _pendings <= 0:
-                            # Nothing left to place: anchors-only template with
-                            # price away from the zone. Refuse rather than fall
-                            # through to a market fill -- the signal stays
-                            # pending and is retried while its window lasts.
-                            raise RuntimeError(
-                                f"Grid template '{_ea_template.get('name', '?')}' has no pending "
-                                f"legs and price is outside the {direction} zone "
-                                f"{entry_low:.2f}-{entry_high:.2f} — refusing a market anchor "
-                                f"at a price this signal never named"
-                            )
                         _px = tick.ask if direction.upper() == "BUY" else tick.bid
                         log.info(
-                            "[EA] grid staged without anchors: price %.2f is outside the %s "
-                            "zone %.2f-%.2f — %d resting leg(s) only",
-                            _px, direction, entry_low, entry_high, _pendings,
+                            "[EA] grid anchor taken outside the %s zone %.2f-%.2f "
+                            "(price %.2f) — market entry per always-fire policy",
+                            direction, entry_low, entry_high, _px,
                         )
-                        _ea_template = dict(_ea_template)
-                        _ea_template["anchors"] = 0
                 # A template's ack is only sent once the EA has staged EVERY
                 # leg (HandleOpenTemplateGrid's closing SendJson), and each
                 # leg is its own synchronous broker round trip -- so the flat
@@ -565,6 +559,26 @@ async def open_trade(
                     mt5_ticket  = ea_ack.get("ticket")
                     entry_price = float(ea_ack.get("fill_price", 0))
                     managed_by  = "ea"
+                    if ea_ack.get("legs_placed") is not None:
+                        _grid_legs_total = int(ea_ack["legs_placed"])
+                        if _grid_legs_total == 0:
+                            # A grid ack's type is ALWAYS "trade_opened", win or
+                            # lose -- unlike the single-order path, a total
+                            # failure (every anchor/pending leg rejected by the
+                            # broker) still looks like success here unless
+                            # checked explicitly. Raise before the INSERT below
+                            # so no $0-entry placeholder row is ever written for
+                            # a grid that placed nothing -- there is no broker
+                            # leg for core_template_placeholder_repair to ever
+                            # adopt/close later, so a row like this was a
+                            # permanent ghost in Active Trades (confirmed live
+                            # 2026-08-04: 5 "template:Asian - Grid" rows stuck
+                            # open for hours at a fabricated P&L).
+                            raise RuntimeError(
+                                "EA Template grid placed 0 of its legs — every "
+                                "anchor/pending leg was rejected by the broker; "
+                                "no trade opened"
+                            )
                     log.info("[EA] order placed: ticket=%s dir=%s lots=%s @ %s (strategy=%s)",
                              mt5_ticket, direction, _ea_lot, entry_price, strategy)
                 elif _is_template:
@@ -625,13 +639,13 @@ async def open_trade(
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                 lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                 status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,tg_source,
-                managed_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                managed_by,grid_legs_total)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, mt5_ticket, direction.upper(), entry_low, entry_high, entry_price,
              lot_size, lot_size, stop_loss, *_row_tps,
              "open", now,
              0.0, 0.0, 0.0, 0.0,
-             strategy, tg_source, managed_by),
+             strategy, tg_source, managed_by, _grid_legs_total),
         )
         conn.execute(
             "UPDATE vantage_signals SET status='active' WHERE signal_id=?", (signal_id,)

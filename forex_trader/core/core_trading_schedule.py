@@ -30,11 +30,26 @@ core_db_channel.get_channel_strategy_override()'s return value. When the
 schedule is enabled and the current time falls inside a window with this
 set, get_schedule_strategy_override() returns it and
 core_signal_resolution.resolve_open_trade_params() substitutes it in place
-of that signal's normal per-channel override -- so a window can force every
-source enabled for it (whichever of Telegram/Reversal Engine/Breakout
-Engine are ticked) onto one strategy/template regardless of what's picked
-per-channel on the Trading page, for as long as that window is active. A
-4th window per day was added alongside this (BLOCKS_PER_DAY 3 -> 4).
+of that signal's normal per-channel override -- so a window can force
+Reversal Engine and/or Breakout Engine (whichever are ticked) onto one
+strategy/template regardless of what's picked per-channel on the Trading
+page, for as long as that window is active. A 4th window per day was added
+alongside this (BLOCKS_PER_DAY 3 -> 4).
+
+Per-channel Telegram toggle+override (2026-08-03): the single "telegram"
+switch above was too coarse for anyone running multiple Telegram channels
+with different personalities (e.g. one scalps London, one only performs
+overnight) -- each window now carries `telegram_channels`, a
+{channel_name: {"enabled", "strategy_override"}} map keyed by the same
+canonical channel name core_db_channel.get_channel_strategy_override() uses,
+so channel A can run Strategy X and channel B can run Strategy Y within the
+same window. A channel never explicitly added to a window's map (including
+every channel, for a schedule saved before this feature existed) falls back
+to that window's `telegram_default_enabled` bool with no override -- see
+_migrate_telegram_field()'s docstring for the exact migration from the old
+flat "telegram" bool. Reversal Engine/Breakout Engine are unaffected --
+neither has a live Telegram identity to split by, so they keep the single
+window-level strategy_override above.
 
 Storage: app_config keys "trading_schedule_enabled" (plain "1"/"0") and
 "trading_schedule" (JSON), same pattern as trading.py's hidden_strategies.
@@ -63,9 +78,16 @@ BLOCKS_PER_DAY = 4
 _PRE_WINDOW4_BLOCKS_PER_DAY = 3  # schedules saved before the 4th window existed
 
 
-SOURCE_KEYS = ("telegram", "reversal_engine", "breakout_engine")
+# "telegram" was a SOURCE_KEYS member (one flat bool for every Telegram
+# channel combined) until 2026-08-03, when it split into per-channel
+# toggles+overrides (telegram_channels/telegram_default_enabled below) so a
+# window can run a different strategy per channel. ENGINE_SOURCE_KEYS keeps
+# the two internal engines' simple single-toggle behaviour unchanged --
+# neither has a live Telegram identity to split by.
+ENGINE_SOURCE_KEYS = ("reversal_engine", "breakout_engine")
+SOURCE_KEYS = ENGINE_SOURCE_KEYS  # back-compat alias -- "telegram" no longer applies here
 _SOURCE_LABELS = {
-    "telegram": "Telegram", "reversal_engine": "Reversal Engine", "breakout_engine": "Breakout Engine",
+    "reversal_engine": "Reversal Engine", "breakout_engine": "Breakout Engine",
 }
 
 
@@ -75,11 +97,24 @@ def _default_block() -> dict:
     # not suddenly block Reversal Engine/Breakout Engine because a new field
     # is missing. strategy_override (2026-08-01) defaults "" -- no override,
     # same "fall back to normal per-channel resolution" behaviour a schedule
-    # saved before this field existed must keep getting.
+    # saved before this field existed must keep getting. telegram_channels/
+    # telegram_default_enabled (2026-08-03) replace the old flat "telegram"
+    # bool -- an empty telegram_channels dict + default_enabled=True means
+    # every channel is allowed with no override, the same as the old
+    # "telegram": True default. reversal_engine_override/breakout_engine_
+    # override (2026-08-03) replace the single shared strategy_override for
+    # engines -- kept in the dict (always "") only so a block that predates
+    # this split still round-trips through save/load without a stray key
+    # error; _migrate_engine_overrides() is what actually carries an old
+    # shared value forward into both new fields on first load.
     return {
         "enabled": False, "start": "00:00", "end": "23:59", "target": 0.0,
         "strategy_override": "",
-        **{k: True for k in SOURCE_KEYS},
+        "reversal_engine_override": "",
+        "breakout_engine_override": "",
+        "telegram_channels": {},
+        "telegram_default_enabled": True,
+        **{k: True for k in ENGINE_SOURCE_KEYS},
     }
 
 
@@ -123,11 +158,55 @@ def get_trading_schedule() -> dict:
                     "end":     str(b.get("end", "23:59")),
                     "target":  float(b.get("target", 0) or 0),
                     "strategy_override": str(b.get("strategy_override", "") or ""),
-                    **{k: bool(b.get(k, True)) for k in SOURCE_KEYS},
+                    **{k: bool(b.get(k, True)) for k in ENGINE_SOURCE_KEYS},
                 })
+                block["telegram_channels"], block["telegram_default_enabled"] = (
+                    _migrate_telegram_field(b)
+                )
+                block["reversal_engine_override"], block["breakout_engine_override"] = (
+                    _migrate_engine_overrides(b)
+                )
             merged.append(block)
         schedule[day] = merged
     return schedule
+
+
+def _migrate_engine_overrides(b: dict) -> tuple[str, str]:
+    """Read a stored block's per-engine strategy overrides, migrating the
+    pre-2026-08-03 single shared "strategy_override" (one dropdown for
+    whichever of Reversal/Breakout Engine were ticked) into two independent
+    fields the first time it's loaded -- so an existing override keeps
+    applying to both engines exactly as before until the user deliberately
+    picks a different one for either."""
+    legacy = str(b.get("strategy_override", "") or "")
+    re_ov = str(b.get("reversal_engine_override", "") or "") or legacy
+    bo_ov = str(b.get("breakout_engine_override", "") or "") or legacy
+    return re_ov, bo_ov
+
+
+def _migrate_telegram_field(b: dict) -> tuple[dict, bool]:
+    """Read a stored block's per-channel Telegram settings, migrating the
+    pre-2026-08-03 flat "telegram" bool (one switch for every channel) into
+    the new {channel: {"enabled", "strategy_override"}} shape the first time
+    it's loaded. A block with no explicit per-channel entry for a given
+    channel falls back to telegram_default_enabled -- so migrating an old
+    "telegram": False block blocks every channel exactly as before, and a
+    channel added later (never explicitly configured) inherits whatever the
+    window's default already is rather than silently going unblocked."""
+    raw_channels = b.get("telegram_channels")
+    if isinstance(raw_channels, dict):
+        channels = {}
+        for name, cfg in raw_channels.items():
+            if not isinstance(cfg, dict):
+                continue
+            channels[str(name)] = {
+                "enabled": bool(cfg.get("enabled", True)),
+                "strategy_override": str(cfg.get("strategy_override", "") or ""),
+            }
+        default_enabled = bool(b.get("telegram_default_enabled", True))
+        return channels, default_enabled
+    # Old format: a flat "telegram" bool, no per-channel breakdown yet.
+    return {}, bool(b.get("telegram", True))
 
 
 def set_trading_schedule(schedule: dict, _from_sync: bool = False) -> None:
@@ -229,6 +308,27 @@ def _forward_trading_schedule_over_sync() -> None:
         log.debug("[Sync] trading schedule forward (server) failed: %s", e)
 
 
+def _resolve_source_gate(block: dict, source: str) -> tuple[bool, Optional[str]]:
+    """Return (enabled, strategy_override) for `source` within `block`.
+
+    `source` is either an ENGINE_SOURCE_KEYS member (its own toggle + its
+    own "<source>_engine_override" -- e.g. reversal_engine_override -- since
+    each internal engine can run a different strategy) or a Telegram channel
+    name -- canonicalised the same way core_db_channel.get_channel_strategy_
+    override() does, then looked up in telegram_channels. A channel with no
+    explicit entry yet (never configured, or migrated from the old flat
+    "telegram" bool) falls back to telegram_default_enabled with no
+    override, exactly matching pre-split behaviour."""
+    if source in ENGINE_SOURCE_KEYS:
+        return bool(block.get(source, True)), (block.get(f"{source}_override") or None)
+    from forex_trader.core.core_db_channel import canonical_channel_name
+    canon = canonical_channel_name(source)
+    cfg = block.get("telegram_channels", {}).get(canon)
+    if cfg is not None:
+        return bool(cfg.get("enabled", True)), (cfg.get("strategy_override") or None)
+    return bool(block.get("telegram_default_enabled", True)), None
+
+
 def get_schedule_strategy_override(source: str) -> Optional[str]:
     """Return the active window's strategy_override for `source` (a
     STRATEGY_* key or a "template:<name>" override string, same shape as
@@ -245,9 +345,12 @@ def get_schedule_strategy_override(source: str) -> Optional[str]:
     now = datetime.now()
     schedule = get_trading_schedule()
     _idx, block = _find_active_block(schedule, now)
-    if block is None or not block.get(source, True):
+    if block is None:
         return None
-    return block.get("strategy_override") or None
+    enabled, override = _resolve_source_gate(block, source)
+    if not enabled:
+        return None
+    return override
 
 
 def _parse_hm(hhmm: str) -> int:
@@ -309,13 +412,16 @@ def check_trading_schedule(
     """Return (allowed, reason). `now` is injectable for tests; defaults to
     local wall-clock time, matching the plain HH:MM inputs in the UI.
 
-    `source` (2026-07-24) is one of SOURCE_KEYS -- Reversal Engine performs
-    well overnight (Asia) but loses during London/NY, while Telegram signals
-    are the opposite, so each of the 7x3 windows independently gates each
-    source rather than one blanket automated-order switch. Defaults to
-    "telegram" for the four pre-existing call sites (core_signal_resolution.py,
-    ea_bridge.py x2, core_instant_entry.py), all of which are Telegram-signal
-    paths."""
+    `source` (2026-07-24) is either an ENGINE_SOURCE_KEYS member -- Reversal
+    Engine performs well overnight (Asia) but loses during London/NY, while
+    Telegram signals are the opposite, so each of the 7x4 windows
+    independently gates each engine -- or (2026-08-03) the actual Telegram
+    channel name a signal came from, gated per-channel within the window.
+    The four pre-existing Telegram call sites (core_signal_resolution.py,
+    ea_bridge.py x2, core_instant_entry.py) each pass their signal's own
+    channel name, not the literal "telegram" default below (which only
+    exists so a caller that can't determine a channel falls back to that
+    window's telegram_default_enabled rather than erroring)."""
     if not is_trading_schedule_enabled():
         return True, ""
     now = now or datetime.now()
@@ -339,7 +445,8 @@ def check_trading_schedule(
     idx, block = _find_active_block(schedule, now)
     if block is None:
         return False, f"outside today's trading schedule ({DAY_NAMES[now.weekday()].title()})"
-    if not block.get(source, True):
+    src_enabled, _src_override = _resolve_source_gate(block, source)
+    if not src_enabled:
         label = _SOURCE_LABELS.get(source, source)
         return False, f"{label} disabled for this window (Trading > Schedule)"
     target = float(block.get("target", 0) or 0)

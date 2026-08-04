@@ -988,7 +988,7 @@ class EABridge:
             # risk once the target is hit. The fill already happened -- an
             # immediate real close is the only protective action left.
             if row["strategy"] != "orb_fixed":
-                _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
+                _sched_ok, _sched_reason = check_trading_schedule(source=row["channel_name"])
                 if not _sched_ok and self._engine is not None:
                     try:
                         await self._engine.close_trade(trade_id, "trading_schedule_blocked")
@@ -1165,7 +1165,7 @@ class EABridge:
             # allow it by fill time, and the only protective action left is
             # an immediate real close. Only meaningful for the promoted row
             # -- a later leg has no DB-tracked ticket this app could close.
-            _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
+            _sched_ok, _sched_reason = check_trading_schedule(source=row.get("tg_source") or "")
             if not _sched_ok and self._engine is not None:
                 try:
                     await self._engine.close_trade(original_id, "trading_schedule_blocked")
@@ -1200,13 +1200,23 @@ class EABridge:
 
     async def _on_grid_leg_cancelled(self, leg_trade_id: str, reason: str) -> None:
         """Counterpart to _promote_leg_fill for a leg that never fills.
-        Python has no record of how many legs a grid opened with or how many
-        are still resting (only the EA's own g_pending[] knows that), so this
-        can't safely decide "the whole grid is dead" from a single leg's
-        cancellation -- another leg may still fill later and promote the row
-        exactly as today. What it CAN do is stop the event dead-ending
-        silently: surface it so a leg that never fills doesn't sit invisible
-        in Active Trades until someone stumbles on it by hand."""
+
+        grid_legs_total (2026-08-03, core_open_trade.py -- the EA's own
+        trade_opened ack now carries legs_placed) is the one piece of grid
+        shape Python can actually know here; without it, this used to have
+        no way to tell "one sibling of several cancelled, others may still
+        fill" apart from "every leg this grid ever had is now gone with none
+        filled" and always assumed the former -- confirmed live 2026-08-03:
+        two single-leg grids (no anchor, price outside the zone at signal
+        time) each had their only resting leg expire unfilled and sat in
+        Active Trades for 5+ hours at a fabricated ~$16,132 unrealised P&L
+        (the (current - 0) * lots arithmetic every $0-entry row produces).
+
+        grid_legs_total is None for a row from a synthetic ack-timeout
+        placeholder (core_open_trade.py never guesses a leg count there,
+        since the EA may genuinely have placed legs Python never heard
+        about) -- this still can't safely close in that case, so it falls
+        back to the old surface-and-wait behaviour."""
         from forex_trader.core import telegram_alerts
         original_id = split_leg_trade_id(leg_trade_id)[0]
         row = await self._fetch_trade(original_id)
@@ -1221,11 +1231,81 @@ class EABridge:
             return
         log.warning("[EABridge] grid leg %s cancelled (%s) — trade=%s still has no filled "
                     "leg (mt5_ticket=0)", leg_trade_id, reason, original_id[:8])
+
+        total = row.get("grid_legs_total")
+        cancelled = await self._incr_grid_leg_cancelled(original_id)
+        # `total == 0` is a confirmed "this grid placed nothing" -- not the
+        # same as `total is None` ("unknown, don't touch"). `if total and`
+        # treated both identically, which mattered in practice: with
+        # core_open_trade.py now refusing to insert a row at all when the
+        # EA's ack reports 0 legs placed, this branch of 0 should be
+        # unreachable going forward, but keep the check correct regardless.
+        if total is not None and cancelled >= int(total):
+            row = await self._fetch_trade(original_id)  # re-check post-increment
+            if row and row["status"] == "open" and int(row["mt5_ticket"] or 0) == 0:
+                await self._close_dead_grid_placeholder(row, reason)
+            return
+
         asyncio.create_task(telegram_alerts.send_message(
             f"EA Template grid leg not filled — {row['direction']} {row.get('tg_source', '')} "
             f"({reason}). Other legs may still be resting; this trade stays open at $0 until "
             f"one fills or you close it manually.",
             original_id, "template_grid_leg_cancelled",
+        ))
+
+    async def _incr_grid_leg_cancelled(self, trade_id: str) -> int:
+        """Atomically bump grid_legs_cancelled and return the new count."""
+        from forex_trader.core import database as db_module
+
+        def _apply():
+            with db_module.db() as conn:
+                conn.execute(
+                    "UPDATE vantage_simulated_trades SET grid_legs_cancelled=grid_legs_cancelled+1 "
+                    "WHERE trade_id=?",
+                    (trade_id,),
+                )
+                row = conn.execute(
+                    "SELECT grid_legs_cancelled FROM vantage_simulated_trades WHERE trade_id=?",
+                    (trade_id,),
+                ).fetchone()
+                return int(row[0]) if row else 0
+        return await db_module.to_db_thread(_apply)
+
+    async def _close_dead_grid_placeholder(self, row: dict, reason: str) -> None:
+        """Every leg this grid ever placed has now cancelled unfilled -- no
+        broker position was ever opened, so close the $0-entry placeholder
+        via record_close() rather than leaving it a permanent ghost in
+        Active Trades. record_close's own entry_price==0 guard (see
+        core_close_trade.py) already stops this from fabricating a P&L
+        figure from a zero entry, same as core_template_placeholder_repair
+        relies on for its own close path."""
+        from forex_trader.core import telegram_alerts
+        from forex_trader.core.core_close_trade import CloseTradeContext, record_close
+
+        trade_id = row["trade_id"]
+        bridge = getattr(self._engine, "_bridge", None) if self._engine is not None else None
+        if bridge is None:
+            log.warning("[EABridge] grid trade=%s has no filled leg left to wait for, but no "
+                        "trading bridge is available to close it via — leaving it open",
+                        trade_id[:8])
+            return
+        try:
+            ctx = CloseTradeContext(bridge)
+            await record_close(trade_id, 0.0, "no_fill_expired", ctx)
+        except Exception as e:
+            log.warning("[EABridge] failed to close dead grid placeholder trade=%s: %s",
+                        trade_id[:8], e)
+            return
+        log.warning(
+            "[EABridge] grid trade=%s closed — every leg (%s total) cancelled (%s) with none "
+            "filled, no broker position was ever opened",
+            trade_id[:8], row.get("grid_legs_total"), reason,
+        )
+        asyncio.create_task(telegram_alerts.send_message(
+            f"EA Template grid — every leg for {row['direction']} {row.get('tg_source', '')} "
+            f"expired/cancelled with none filled. Closing the placeholder (no position was "
+            f"ever opened, no P&L).",
+            trade_id, "template_grid_no_fill",
         ))
 
     async def _on_pending_order_cancelled(self, msg: dict) -> None:

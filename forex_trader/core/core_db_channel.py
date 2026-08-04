@@ -420,6 +420,21 @@ def _canonical(source: str) -> str:
     return CANONICAL_CHANNELS.get(source, source)
 
 
+def canonical_channel_name(source: str) -> str:
+    """Public wrapper around _canonical() for cross-module use (e.g. by
+    core_trading_schedule.py to key its per-channel window settings the same
+    way get_channel_strategy_override() already does)."""
+    return _canonical(source)
+
+
+def get_telegram_channel_names() -> list[str]:
+    """The dynamic channel list (see _dynamic_channel_bucket_order()) minus
+    the fixed internal engines -- i.e. actual Telegram channels only, for
+    UIs/gates that need to enumerate them separately from Reversal Engine /
+    Breakout Engine (which already have their own dedicated toggles)."""
+    return [c for c in _dynamic_channel_bucket_order() if c not in _FIXED_ENGINE_CHANNELS]
+
+
 def _dynamic_channel_bucket_order() -> list[str]:
     """The Channel Strategy tab's channel list, built fresh every call instead
     of from a hardcoded, in-memory (restart-resetting) array.

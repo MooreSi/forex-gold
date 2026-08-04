@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,23 @@ async def _run_git(*args: str, timeout: float = 30.0) -> tuple[int, str, str]:
         )
         return proc.returncode, proc.stdout, proc.stderr
     return await asyncio.to_thread(_sync)
+
+
+def get_local_commit_sha(short: bool = True) -> str:
+    """This checkout's current HEAD commit, synchronously and without any
+    network call (unlike check_for_update(), which does a `git fetch`) --
+    safe to call cheaply and often, e.g. on every remote-client heartbeat.
+    Empty string if this isn't a git checkout at all or the command fails."""
+    if not (_REPO_ROOT / ".git").exists():
+        return ""
+    try:
+        args = ["git", "rev-parse", "--short", "HEAD"] if short else ["git", "rev-parse", "HEAD"]
+        proc = subprocess.run(
+            args, cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=5,
+        )
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+    except Exception:
+        return ""
 
 
 async def check_for_update() -> dict:
@@ -84,6 +102,33 @@ async def check_for_update() -> dict:
         "available": True, "local_sha": local_sha, "remote_sha": remote_sha,
         "commits": commits, "error": None,
     }
+
+
+async def commit_summary(sha: str) -> str:
+    """One-line commit message for `sha` in this checkout, "" on any failure
+    (unknown sha, not a git checkout, etc). Used by the admin console's
+    Versions tab to show what a commit SHA actually is, not just its hash."""
+    if not sha:
+        return ""
+    rc, out, _ = await _run_git("log", "-1", "--pretty=%s", sha)
+    return out.strip() if rc == 0 else ""
+
+
+async def commits_behind(sha: str) -> Optional[int]:
+    """How many commits `sha` is behind origin/<branch> in this checkout.
+    None (not 0) if `sha` can't be resolved at all -- a client on a fork/
+    stale ref this checkout has never fetched, not a client that's merely
+    caught up. Caller should already have fetched (check_for_update() does
+    this) so origin/<branch> is current; this does not fetch on its own."""
+    if not sha:
+        return None
+    rc, out, _ = await _run_git("rev-list", "--count", f"{sha}..origin/{_BRANCH}")
+    if rc != 0:
+        return None
+    try:
+        return int(out.strip())
+    except ValueError:
+        return None
 
 
 async def apply_update() -> dict:

@@ -12,6 +12,7 @@ from nicegui import ui
 
 from forex_trader.core import ai_provider
 from forex_trader.core import database as db_module
+from forex_trader.core.core_trade_reporting import is_stuck_placeholder
 from forex_trader.core.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
@@ -314,6 +315,7 @@ def _render_active_trades(engine):
         try:
             tick       = await engine.get_tick()
             trades     = await db_module.to_db_thread(engine.get_open_trades)
+            trades     = [t for t in trades if not is_stuck_placeholder(t)]
             untracked  = await engine.get_untracked_mt5_positions()
         except Exception:
             trades, tick, untracked = [], None, []
@@ -1601,15 +1603,16 @@ def _render_schedule():
         )
     ui.label(
         "Caps automated order execution per day and per time window, once a window's "
-        "profit target is met trading pauses until the next window. Each window also "
-        "independently allows/blocks Telegram, Reversal Engine, and Breakout Engine -- "
-        "unchecking one for a window blocks only that source's live execution there, "
-        "the others are unaffected. A window's Override dropdown, when set, forces "
-        "whichever sources are ticked onto that strategy/EA template for as long as "
-        "the window is active, taking priority over each channel's own Channel "
-        "Strategy pick. Signal generation and Telegram ingestion keep running "
-        "regardless -- this only blocks/redirects the final order-placement step, "
-        "and only for automated (not manual) orders."
+        "profit target is met trading pauses until the next window. Open a window's "
+        "Channels panel to independently allow/block each Telegram channel plus "
+        "Reversal Engine and Breakout Engine -- unchecking one blocks only that "
+        "source's live execution for this window, the others are unaffected. Every "
+        "item in the panel has its own Override dropdown, so different channels (or "
+        "the two engines) can each run a different strategy or EA template within "
+        "the same window, taking priority over that source's own Channel Strategy "
+        "pick for as long as the window is active. Signal generation and Telegram "
+        "ingestion keep running regardless -- this only blocks/redirects the final "
+        "order-placement step, and only for automated (not manual) orders."
     ).classes("text-xs text-gray-500 mb-3")
 
     with ui.row().classes("items-center gap-2 mb-3"):
@@ -1624,72 +1627,181 @@ def _render_schedule():
             "every window's target is also 0, there is no profit cap at all)."
         )
 
-    # Strategy/EA-template options for the per-window override dropdown --
-    # same combined-enumeration pattern as _render_channel_strategy_card's
-    # strat_opts, minus "Inherit Global"/"Auto (Claude)" (those describe a
-    # per-channel fallback that doesn't map onto a time window).
+    # Strategy/EA-template options for the per-window / per-channel override
+    # dropdowns -- same combined-enumeration pattern as
+    # _render_channel_strategy_card's strat_opts, minus "Inherit Global"/
+    # "Auto (Claude)" (those describe a per-channel fallback that doesn't
+    # map onto a time window).
     from forex_trader.core import core_ea_templates as _sched_et
+    from forex_trader.core.core_db_channel import get_telegram_channel_names
     _sched_strat_opts = {"": "— No Override —"}
     _sched_strat_opts.update(STRATEGY_NAMES)
     for _t in _sched_et.list_ea_templates():
         _sched_strat_opts[_sched_et.override_for_template(_t["name"])] = f"Template: {_t['name']}"
 
+    _sched_channels = get_telegram_channel_names()
+    _ENGINE_LABELS = {"reversal_engine": "Reversal Engine", "breakout_engine": "Breakout Engine"}
+
     _day_widgets: dict[str, list[dict]] = {}
+
+    def _copy_monday_to_all():
+        monday_rows = _day_widgets.get("monday", [])
+        if not monday_rows:
+            return
+        copied = 0
+        for day, rows in _day_widgets.items():
+            if day == "monday":
+                continue
+            for src, dst in zip(monday_rows, rows):
+                for key in (
+                    "enabled", "start", "end", "target",
+                    "reversal_engine", "breakout_engine",
+                    "reversal_engine_override", "breakout_engine_override",
+                    "telegram_default_enabled",
+                ):
+                    dst[key].value = src[key].value
+                for ch, src_cw in src["telegram_channels"].items():
+                    dst_cw = dst["telegram_channels"].get(ch)
+                    if dst_cw is None:
+                        continue
+                    dst_cw["enabled"].value = src_cw["enabled"].value
+                    dst_cw["strategy_override"].value = src_cw["strategy_override"].value
+            copied += 1
+        ui.notify(
+            f"Copied Monday's schedule to {copied} other days — click Save Schedule to persist",
+            type="positive",
+        )
 
     with ui.column().classes("w-full gap-2"):
         for day in sched.DAY_NAMES:
             with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):
-                ui.label(day.title()).classes("font-bold text-yellow-300 text-sm mb-1")
+                with ui.row().classes("items-center gap-2 mb-1"):
+                    ui.label(day.title()).classes("font-bold text-yellow-300 text-sm")
+                    if day == "monday":
+                        ui.button(
+                            "Copy to All", icon="content_copy", on_click=_copy_monday_to_all,
+                        ).props("dense flat color=blue size=sm").classes("text-xs").tooltip(
+                            "Copy every one of Monday's windows (times, targets, engines, "
+                            "channels) to the other 6 days"
+                        )
                 blocks = schedule[day]
                 _day_widgets[day] = []
                 for i, block in enumerate(blocks):
-                    with ui.row().classes("items-center gap-2 flex-wrap"):
-                        en = ui.checkbox("", value=block["enabled"]).props("dense")
-                        ui.label(f"Window {i + 1}").classes("text-xs text-gray-400 w-16")
-                        start = ui.input("Start", value=block["start"]).props(
-                            "dense outlined"
-                        ).classes("w-24").tooltip("24-hour HH:MM")
-                        ui.label("to").classes("text-xs text-gray-500")
-                        end = ui.input("End", value=block["end"]).props(
-                            "dense outlined"
-                        ).classes("w-24").tooltip("24-hour HH:MM")
-                        target = ui.number(
-                            "Target $", value=block["target"], min=0, step=1.0
-                        ).props("dense outlined").classes("w-28").tooltip(
-                            "0 = no profit cap, only the time window applies"
+                    with ui.column().classes(
+                        "w-full gap-1 pb-2 mb-1 border-b border-gray-700"
+                    ):
+                        with ui.row().classes("items-center gap-2 flex-wrap"):
+                            en = ui.checkbox("", value=block["enabled"]).props("dense")
+                            ui.label(f"Window {i + 1}").classes("text-xs text-gray-400 w-16")
+                            start = ui.input("Start", value=block["start"]).props(
+                                "dense outlined"
+                            ).classes("w-24").tooltip("24-hour HH:MM")
+                            ui.label("to").classes("text-xs text-gray-500")
+                            end = ui.input("End", value=block["end"]).props(
+                                "dense outlined"
+                            ).classes("w-24").tooltip("24-hour HH:MM")
+                            target = ui.number(
+                                "Target $", value=block["target"], min=0, step=1.0
+                            ).props("dense outlined").classes("w-28").tooltip(
+                                "0 = no profit cap, only the time window applies"
+                            )
+
+                        # ── Channels panel: Telegram channels + the two ────
+                        # internal engines, each with its own enable toggle
+                        # and its own strategy Override.
+                        _tg_cfg = block.get("telegram_channels", {})
+                        _tg_default = block.get("telegram_default_enabled", True)
+                        _tg_on = sum(
+                            1 for ch in _sched_channels
+                            if _tg_cfg.get(ch, {}).get("enabled", _tg_default)
                         )
-                        ui.label("|").classes("text-gray-600")
-                        tg_chk = ui.checkbox("Telegram", value=block["telegram"]).classes(
-                            "text-xs"
-                        ).props("dense").tooltip(
-                            "Allow automated Telegram-signal trades during this window"
-                        )
-                        re_chk = ui.checkbox("Reversal Engine", value=block["reversal_engine"]).classes(
-                            "text-xs"
-                        ).props("dense").tooltip(
-                            "Allow Reversal Engine live execution during this window"
-                        )
-                        bo_chk = ui.checkbox("Breakout Engine", value=block["breakout_engine"]).classes(
-                            "text-xs"
-                        ).props("dense").tooltip(
-                            "Allow Breakout Engine live execution during this window"
-                        )
-                        strat_ov = ui.select(
-                            _sched_strat_opts,
-                            value=block.get("strategy_override") or "",
-                            label="Override",
-                        ).props("dense outlined").classes("w-48").tooltip(
-                            "While this window is active and the Trading Schedule is "
-                            "enabled, force whichever of Telegram/Reversal Engine/"
-                            "Breakout Engine are ticked above onto this strategy or EA "
-                            "template, overriding each channel's own Channel Strategy "
-                            "pick for the duration of the window. No Override = normal "
-                            "per-channel resolution, unaffected by this window."
-                        )
+                        _engine_on = sum(1 for k in _ENGINE_LABELS if block.get(k, True))
+                        _total_on = _tg_on + _engine_on
+                        _total_items = len(_sched_channels) + len(_ENGINE_LABELS)
+                        _exp_label = f"Channels ({_total_on}/{_total_items} enabled)"
+                        with ui.expansion(_exp_label, icon="tune").classes(
+                            "w-full text-xs text-gray-400 bg-gray-900 rounded"
+                        ).props("dense"):
+                            _chan_widgets: dict[str, dict] = {}
+                            with ui.column().classes("w-full gap-1 pl-2 pt-1 pb-1"):
+                                default_chk = ui.checkbox(
+                                    "New/unlisted channels default to enabled",
+                                    value=_tg_default,
+                                ).props("dense").classes("text-xs text-gray-500").tooltip(
+                                    "Applies to any Telegram channel not explicitly set "
+                                    "below -- including one added after this schedule "
+                                    "was saved."
+                                )
+                                if _sched_channels:
+                                    ui.separator().classes("my-1 bg-gray-700")
+                                for ch in _sched_channels:
+                                    _ch_cfg = _tg_cfg.get(ch, {})
+                                    with ui.row().classes("items-center gap-2 flex-wrap w-full"):
+                                        c_chk = ui.checkbox(
+                                            ch, value=bool(_ch_cfg.get("enabled", _tg_default)),
+                                        ).props("dense").classes("text-xs w-56").tooltip(
+                                            f"Allow automated trades from {ch} during this window"
+                                        )
+                                        c_sel = ui.select(
+                                            _sched_strat_opts,
+                                            value=_ch_cfg.get("strategy_override") or "",
+                                            label="Override",
+                                        ).props("dense outlined").classes("w-48").tooltip(
+                                            f"Force {ch} onto this strategy or EA template "
+                                            "while this window is active, overriding its "
+                                            "own Channel Strategy pick. No Override = "
+                                            "normal per-channel resolution."
+                                        )
+                                    _chan_widgets[ch] = {"enabled": c_chk, "strategy_override": c_sel}
+
+                                # Internal signal generators -- same row shape
+                                # as a channel, each with its own Override so
+                                # Reversal Engine and Breakout Engine can run
+                                # different strategies in the same window.
+                                ui.separator().classes("my-1 bg-gray-700")
+                                ui.label("Internal Signal Generators").classes(
+                                    "text-xs text-gray-500 uppercase tracking-wide"
+                                )
+                                with ui.row().classes("items-center gap-2 flex-wrap w-full"):
+                                    re_chk = ui.checkbox(
+                                        "Reversal Engine", value=block["reversal_engine"],
+                                    ).props("dense").classes("text-xs w-56").tooltip(
+                                        "Allow Reversal Engine live execution during this window"
+                                    )
+                                    re_ov = ui.select(
+                                        _sched_strat_opts,
+                                        value=block.get("reversal_engine_override") or "",
+                                        label="Override",
+                                    ).props("dense outlined").classes("w-48").tooltip(
+                                        "Force Reversal Engine onto this strategy or EA "
+                                        "template while this window is active, overriding "
+                                        "its own Channel Strategy pick. No Override = "
+                                        "normal resolution."
+                                    )
+                                with ui.row().classes("items-center gap-2 flex-wrap w-full"):
+                                    bo_chk = ui.checkbox(
+                                        "Breakout Engine", value=block["breakout_engine"],
+                                    ).props("dense").classes("text-xs w-56").tooltip(
+                                        "Allow Breakout Engine live execution during this window"
+                                    )
+                                    bo_ov = ui.select(
+                                        _sched_strat_opts,
+                                        value=block.get("breakout_engine_override") or "",
+                                        label="Override",
+                                    ).props("dense outlined").classes("w-48").tooltip(
+                                        "Force Breakout Engine onto this strategy or EA "
+                                        "template while this window is active, overriding "
+                                        "its own Channel Strategy pick. No Override = "
+                                        "normal resolution."
+                                    )
+
                         _day_widgets[day].append({
                             "enabled": en, "start": start, "end": end, "target": target,
-                            "telegram": tg_chk, "reversal_engine": re_chk, "breakout_engine": bo_chk,
-                            "strategy_override": strat_ov,
+                            "reversal_engine": re_chk, "breakout_engine": bo_chk,
+                            "reversal_engine_override": re_ov,
+                            "breakout_engine_override": bo_ov,
+                            "telegram_default_enabled": default_chk,
+                            "telegram_channels": _chan_widgets,
                         })
 
     def _save():
@@ -1702,18 +1814,28 @@ def _render_schedule():
                     end_val   = str(w["end"].value or "23:59").strip()
                     sched._parse_hm(start_val)  # validates HH:MM, raises on bad input
                     sched._parse_hm(end_val)
-                    _strat_ov_val = w["strategy_override"].value
-                    if isinstance(_strat_ov_val, dict):
-                        _strat_ov_val = _strat_ov_val.get("value")
+
+                    def _sel_val(widget):
+                        v = widget.value
+                        return v.get("value") if isinstance(v, dict) else v
+
+                    _tg_channels = {}
+                    for ch, cw in w["telegram_channels"].items():
+                        _tg_channels[ch] = {
+                            "enabled": bool(cw["enabled"].value),
+                            "strategy_override": _sel_val(cw["strategy_override"]) or "",
+                        }
                     blocks.append({
                         "enabled": bool(w["enabled"].value),
                         "start":   start_val,
                         "end":     end_val,
                         "target":  float(w["target"].value or 0),
-                        "telegram":         bool(w["telegram"].value),
                         "reversal_engine":  bool(w["reversal_engine"].value),
                         "breakout_engine":  bool(w["breakout_engine"].value),
-                        "strategy_override": _strat_ov_val or "",
+                        "reversal_engine_override": _sel_val(w["reversal_engine_override"]) or "",
+                        "breakout_engine_override": _sel_val(w["breakout_engine_override"]) or "",
+                        "telegram_default_enabled": bool(w["telegram_default_enabled"].value),
+                        "telegram_channels": _tg_channels,
                     })
                 new_schedule[day] = blocks
         except Exception as e:
@@ -2519,7 +2641,8 @@ def _render_ea_templates_card() -> None:
                         f"Telegram message's own TP prices, and the pips row "
                         f"below is ignored. The message sets how many levels "
                         f"there are; the % row still decides how much closes "
-                        f"at each, and the last level closes the remainder.\n\n"
+                        f"at each, and (when Close Full On Last TP above is "
+                        f"on) the last level closes the remainder.\n\n"
                         f"Internal signals (Reversal, Breakout, Bounce, ORB) "
                         f"have no message, so they keep using the pips row "
                         f"regardless. A Telegram signal that states no TPs "
@@ -2612,6 +2735,20 @@ def _render_ea_templates_card() -> None:
                             "individual TP levels.")
                     fields["harvest_enabled"] = ui.switch(
                         "", value=bool(live["harvest_enabled"])).classes("text-xs")
+                with ui.card().classes("bg-gray-900 p-2 rounded-lg"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Close Full On Last TP").classes("text-xs text-gray-300")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "ON (default): the last CONFIGURED Anchor TP level "
+                            "closes whatever remains outright, regardless of "
+                            "its own %. OFF: that level closes only its own %, "
+                            "leaving the remainder open to run under Trail/BE "
+                            "below -- for a ladder whose %s add up to well "
+                            "under 100 and is meant to leave a genuine runner "
+                            "instead of being flattened at the last level.")
+                    fields["close_full_on_last"] = ui.switch(
+                        "", value=bool(live["close_full_on_last"])).classes("text-xs")
                 _toggle("mode", "Mode", {"grid": "GRID", "single": "SINGLE"},
                         "GRID stages anchor + pending legs across the signal's "
                         "zone. SINGLE opens one position.")
@@ -2638,7 +2775,9 @@ def _render_ea_templates_card() -> None:
                      "Stop distance behind price for STEP trailing, in pips.")
                 _num("trail_activation", "Trail Activate", 1.0,
                      "Hold the stop still until the trade is this many pips in "
-                     "profit. 0 = trail from the start.")
+                     "profit. 0 = trail from the start. Independent of Trail "
+                     "Trigger below (Triggers section) -- trailing arms as soon "
+                     "as EITHER condition is met, whichever comes first.")
                 _num("trail_step", "Trail Step", 1.0,
                      "Minimum move before the stop is adjusted again.")
                 _num("harvest_threshold", "Harvest $", 1.0,
@@ -2671,6 +2810,24 @@ def _render_ea_templates_card() -> None:
                     fields["be_trigger"] = ui.select(
                         {n: f"TP{n}" for n in range(1, N + 1)},
                         value=int(live["be_trigger"]),
+                    ).classes("w-32").props("dense outlined")
+                with ui.column().classes("gap-0"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Trail Trigger").classes("text-xs text-gray-400")
+                        ui.icon("info_outline", size="14px").classes(
+                            "text-blue-400 cursor-help").tooltip(
+                            "Which TP level arms trailing, instead of (or "
+                            "alongside) Trail Activate's raw pip distance above "
+                            "-- whichever condition is met first. OFF leaves "
+                            "Trail Activate as the only arm condition. Confirmed "
+                            "live on Asian - Grid: Trail Activate's default (100 "
+                            "pips) sat deeper than the template's own last "
+                            "defined TP (50 pips), so the runner never armed at "
+                            "all and every winning trade capped at the same "
+                            "~$43 regardless of how far price actually ran.")
+                    fields["tp1_trigger_level"] = ui.select(
+                        {0: "OFF", **{n: f"TP{n}" for n in range(1, N + 1)}},
+                        value=int(live["tp1_trigger_level"]),
                     ).classes("w-32").props("dense outlined")
                 with ui.column().classes("gap-0"):
                     with ui.row().classes("items-center gap-1"):

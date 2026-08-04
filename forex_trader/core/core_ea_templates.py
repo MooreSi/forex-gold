@@ -87,6 +87,14 @@ DEFAULTS: dict = {
     "auto_sl":           True,
     # Partial closes at each TP; False = single close at the final level.
     "partials":          True,
+    # When true (default -- matches every template saved before this field
+    # existed), the last CONFIGURED Anchor TP level closes whatever remains
+    # of the position outright, regardless of that level's own tp{n}_pct.
+    # Set false to have the last level close only its own pct and leave the
+    # remainder open, managed from there by Trail/BE -- e.g. a ladder whose
+    # tp{n}_pct sum well under 100 and is meant to leave a genuine runner
+    # rather than being flattened the moment the last defined level clears.
+    "close_full_on_last": True,
     # Which TP level cancels still-resting siblings. 0 = never. Supersedes
     # the older boolean `cancel_pending` (kept for existing rows), which
     # could only say "on the first fill".
@@ -205,7 +213,7 @@ _PENDING_TP_FIELDS = (
 # ApplyGroupTpAction. No effect in single mode (no siblings to act on).
 _BOOL_FIELDS  = (
     "tg_cmd_enabled", "harvest_enabled", "cancel_pending", "group_tp_action",
-    "sig_guard", "anc_shave", "auto_sl", "partials",
+    "sig_guard", "anc_shave", "auto_sl", "partials", "close_full_on_last",
     "use_dynamic_atr", "use_emergency_sl", "gold_half_pip_anchor",
     "tp_from_telegram", "tp_pen_from_telegram",
 )

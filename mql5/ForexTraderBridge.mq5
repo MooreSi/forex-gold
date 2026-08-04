@@ -128,6 +128,9 @@ struct ManagedTrade
    bool     tplGroupActionDone;
    bool     tplHarvestEnabled;
    double   tplHarvestThreshold;
+   double   tplOrigSlDist;      // |entry - the SL actually sent at open|, for
+                                 // use_emergency_sl's backstop distance
+   bool     tplCancelLevelDone; // cancel_pending_level's cancel already fired once
 
    // Raw open_trade payload, kept verbatim so ANY tpl_* key can be read
    // later without a struct member or a parse line of its own.
@@ -249,6 +252,7 @@ struct PendingOrder
    bool     tplGroupTpAction;  // see ApplyGroupTpAction
    bool     tplHarvestEnabled;
    double   tplHarvestThreshold;
+   double   tplOrigSlDist;   // see ManagedTrade.tplOrigSlDist
    string   tplCfg;          // raw payload -- see ManagedTrade.tplCfg
 };
 
@@ -669,6 +673,14 @@ void HandleOpenTrade(const string json)
    }
 
    trade.SetExpertMagicNumber(InpMagic);
+   // slippage (2026-08-04 -- existed as a template field with no
+   // implementation): CTrade's own default deviation applied unconditionally
+   // otherwise. 0/absent leaves that default untouched.
+   if(isTemplate)
+   {
+      int _tplSlip = (int)JsonGetLong(json, "tpl_slippage", 0);
+      if(_tplSlip > 0) trade.SetDeviationInPoints(_tplSlip);
+   }
    bool ok;
    double price;
    MqlTick tick;
@@ -709,14 +721,41 @@ void HandleOpenTrade(const string json)
    for(int i = 0; i < MAX_TPS; i++)
    {
       string key = "tp" + (string)(i + 1);
-      mt.hasTp[i] = JsonHasKey(json, key);
-      mt.tp[i] = mt.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+      // A template's absolute tp{n} was computed by Python from price at
+      // signal time, which can be stale by the time this order actually
+      // fills (the whole ack round-trip, or -- for a signal staged ahead
+      // of price reaching it -- much longer). Recomputing from THIS
+      // trade's own fillPrice when the template sent pips keeps the
+      // target genuinely N pips of reward from the real entry instead of
+      // from whatever price Python happened to see earlier -- the same
+      // principle the grid's pending legs already use via their own
+      // legPrice. Non-template callers (isTemplate false, no
+      // tpl_tp{n}_pips on the wire) are unaffected: they fall straight
+      // through to the absolute value, unchanged.
+      double _anchorPips = isTemplate ? JsonGetDouble(json, "tpl_tp" + (string)(i + 1) + "_pips", 0.0) : 0.0;
+      if(_anchorPips > 0.0)
+      {
+         double _off = PipsToPrice(_anchorPips);
+         mt.hasTp[i] = true;
+         mt.tp[i] = (direction == "BUY") ? fillPrice + _off : fillPrice - _off;
+      }
+      else
+      {
+         mt.hasTp[i] = JsonHasKey(json, key);
+         mt.tp[i] = mt.hasTp[i] ? JsonGetDouble(json, key) : 0.0;
+      }
       mt.triggered[i] = false;
       mt.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
    }
    mt.beAtPos = JsonHasKey(json, "be_at_pos") ? (int)JsonGetLong(json, "be_at_pos") : -1;
    mt.trailMode = JsonHasKey(json, "trail_mode") ? JsonGetString(json, "trail_mode") : "";
-   mt.closeFullOnLast = true; // every open_trade() caller wants the original behaviour
+   // Every non-template open_trade() caller wants the original (always
+   // close everything on the last level) behaviour. A template can opt out
+   // via tpl_close_full_on_last=0 -- core_ea_templates.py's
+   // close_full_on_last -- to leave a runner past its last defined TP
+   // level instead of ManageTemplate() flattening it there.
+   mt.closeFullOnLast = isTemplate
+      ? (JsonGetLong(json, "tpl_close_full_on_last", 1) != 0) : true;
 
    mt.isTemplate = isTemplate;
    mt.tplTpslMode = isTemplate ? JsonGetString(json, "tpl_tpsl_mode", "on") : "";
@@ -733,8 +772,10 @@ void HandleOpenTrade(const string json)
    mt.tplGridGroup = -1; // single-mode template trades are never part of a grid group
    mt.tplGroupTpAction = isTemplate && JsonGetLong(json, "tpl_group_tp_action", 0) != 0;
    mt.tplGroupActionDone = false;
+   mt.tplCancelLevelDone = false;
    mt.tplHarvestEnabled = isTemplate && JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
    mt.tplHarvestThreshold = isTemplate ? JsonGetDouble(json, "tpl_harvest_threshold", 50.0) : 0.0;
+   mt.tplOrigSlDist = isTemplate ? MathAbs(fillPrice - sl) : 0.0;
    // Keep the whole payload so any tpl_* key the named fields above don't
    // cover can still be read later via TplS/TplD/TplI/TplB.
    mt.tplCfg = isTemplate ? json : "";
@@ -1020,6 +1061,9 @@ void HandleOpenTemplateGrid(const string json)
    double minDist = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
 
    trade.SetExpertMagicNumber(InpMagic);
+   // slippage -- see HandleOpenTrade's own copy of this for the full note.
+   int _tplGridSlip = (int)JsonGetLong(json, "tpl_slippage", 0);
+   if(_tplGridSlip > 0) trade.SetDeviationInPoints(_tplGridSlip);
    int groupId = g_nextGridGroup++;
    int placed = 0;
    // 60min, not the old 240 -- these resting legs have no fill-time
@@ -1067,14 +1111,37 @@ void HandleOpenTemplateGrid(const string json)
       for(int i = 0; i < MAX_TPS; i++)
       {
          string k = "tp" + (string)(i + 1);
-         am.hasTp[i] = JsonHasKey(json, k);
-         am.tp[i] = am.hasTp[i] ? JsonGetDouble(json, k) : 0.0;
+         // "distributed" mode's whole point is a leg's own fill price
+         // deciding its own target -- the pending legs below already do
+         // this via legPrice. The anchor never did: it always trusted
+         // Python's absolute tp{n}, computed from price at signal
+         // creation, which for a grid staged ahead of price reaching the
+         // zone can be well stale by the time this market fill actually
+         // happens. Confirmed live 2026-08-04, ticket 1701202501: a SELL
+         // anchor filled 4062.48 against a wired "TP1" of 4065.30 --
+         // above entry, an instant loss the moment price nominally
+         // "hit" it. Recompute from aFill instead whenever the template
+         // sent pips; "unified" mode (or no pips sent, e.g. the
+         // Telegram-anchor-ladder path) keeps the absolute wire value
+         // unchanged, same as before.
+         double _anchorPips = JsonGetDouble(json, "tpl_tp" + (string)(i + 1) + "_pips", 0.0);
+         if(tplAnchorMode == "distributed" && _anchorPips > 0.0)
+         {
+            double _off = PipsToPrice(_anchorPips);
+            am.hasTp[i] = true;
+            am.tp[i] = (direction == "BUY") ? aFill + _off : aFill - _off;
+         }
+         else
+         {
+            am.hasTp[i] = JsonHasKey(json, k);
+            am.tp[i] = am.hasTp[i] ? JsonGetDouble(json, k) : 0.0;
+         }
          am.triggered[i] = false;
          am.pcts[i] = JsonGetDouble(json, "pct" + (string)(i + 1), 0.0);
       }
       am.beAtPos = -1;
       am.trailMode = "";
-      am.closeFullOnLast = true;
+      am.closeFullOnLast = (JsonGetLong(json, "tpl_close_full_on_last", 1) != 0);
       am.isTemplate = true;
       am.tplTpslMode = JsonGetString(json, "tpl_tpsl_mode", "on");
       am.tplAnchor = JsonGetString(json, "tpl_anchor", "unified");
@@ -1088,8 +1155,10 @@ void HandleOpenTemplateGrid(const string json)
       am.tplGridGroup = groupId;
       am.tplGroupTpAction = (JsonGetLong(json, "tpl_group_tp_action", 0) != 0);
       am.tplGroupActionDone = false;
+      am.tplCancelLevelDone = false;
       am.tplHarvestEnabled = (JsonGetLong(json, "tpl_harvest_enabled", 0) != 0);
       am.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
+      am.tplOrigSlDist = MathAbs(aFill - sl);
       am.tplCfg = json;
 
       int sz = ArraySize(g_trades);
@@ -1125,6 +1194,14 @@ void HandleOpenTemplateGrid(const string json)
             ? basePrice - stepPrice * leg
             : basePrice + stepPrice * leg;
       }
+      // gold_half_pip_anchor (2026-08-04 -- existed as a template field with
+      // no implementation): some gold feeds quote at half-pip granularity
+      // (0.05 here, half of the 0.10 pip this EA otherwise uses -- see
+      // PipsToPrice's own note on the pip/point convention); anchor a
+      // staged leg's price to that grid instead of the raw computed value
+      // when the template asks for it.
+      if(JsonGetLong(json, "tpl_gold_half_pip_anchor", 0) != 0)
+         legPrice = MathRound(legPrice / (5.0 * _Point)) * (5.0 * _Point);
       legPrice = NormalizeDouble(legPrice, _Digits);
 
       // Skip rather than let the broker reject: price may already be partway
@@ -1198,7 +1275,7 @@ void HandleOpenTemplateGrid(const string json)
       }
       p.beAtPos = -1;
       p.trailMode = "";
-      p.closeFullOnLast = true;
+      p.closeFullOnLast = (JsonGetLong(json, "tpl_close_full_on_last", 1) != 0);
       p.isTemplate = true;
       p.tplTpslMode = JsonGetString(json, "tpl_tpsl_mode", "on");
       // Anchor (2026-07-28) -- "unified": every leg's breakeven target is
@@ -1220,6 +1297,7 @@ void HandleOpenTemplateGrid(const string json)
       p.tplGroupTpAction = JsonGetLong(json, "tpl_group_tp_action", 0) != 0;
       p.tplHarvestEnabled = JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
       p.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
+      p.tplOrigSlDist = MathAbs(legPrice - sl);
       p.tplCfg = json;
 
       int n = ArraySize(g_pending);
@@ -1244,8 +1322,19 @@ void HandleOpenTemplateGrid(const string json)
    // not created by Python at all for grid mode -- the EA is the sole
    // source of truth for grid trades, matching "the EA should manage the
    // trade" for templates.
+   //
+   // legs_placed (2026-08-03): how many legs actually went out (anchors +
+   // pending, after the wrong-side/beyond-SL skips above) -- the ONE piece
+   // of grid-shape Python otherwise has no way to learn (only this EA's own
+   // g_pending[]/g_trades[] know it). Stored on the placeholder row as
+   // grid_legs_total so ea_bridge._on_grid_leg_cancelled can tell "one
+   // sibling of several cancelled, others may still fill" apart from "every
+   // leg this grid ever had is now gone with none filled" -- without this,
+   // that second case left the row open at $0 forever. See
+   // core_template_placeholder_repair.py's docstring for the adopt/close
+   // paths this complements.
    SendJson("{\"type\":\"trade_opened\",\"trade_id\":\"" + JsonEsc(trade_id) +
-            "\",\"ticket\":0,\"fill_price\":0}");
+            "\",\"ticket\":0,\"fill_price\":0,\"legs_placed\":" + (string)placed + "}");
    Print("[EABridge] grid placed ", placed, "/", legs, " legs group=", groupId,
          " dir=", direction, " step=", stepPts, "pt");
 }
@@ -1357,8 +1446,42 @@ bool DoCloseAll(ManagedTrade &t, const int tpIdx)
    return true;
 }
 
-bool MoveSl(ManagedTrade &t, const double newSl, const string reason, const int tpIdx = -1)
+bool MoveSl(ManagedTrade &t, const double newSl_in, const string reason, const int tpIdx = -1)
 {
+   double newSl = newSl_in;
+
+   // Guard/safety clamp (2026-08-04). guard_pips/safety_cap_pips have
+   // existed on every template since their schema fields were added, but
+   // nothing ever read them -- an SL move landing too close to price is
+   // rejected outright by the broker as an invalid stop, the failure
+   // documented against ticket 1663956102 (-$100, a rejected breakeven
+   // move). guard_pips is the configured safety margin; the broker's own
+   // SYMBOL_TRADE_STOPS_LEVEL is the hard minimum regardless of what's
+   // configured, so it always applies even when guard_pips is 0.
+   // safety_cap_pips is a second, independent floor the EA will never
+   // tighten inside even if trailing math computes something closer --
+   // kept separate rather than folded into guard_pips since a template may
+   // want a looser day-to-day margin but a hard floor that never narrows
+   // further no matter what. Empty tplCfg (non-template trades) reads 0
+   // for both, so only the broker's own minimum applies there, unchanged
+   // from before this existed.
+   double guardPips = TplD(t.tplCfg, "guard_pips", 0.0);
+   double capPips    = TplD(t.tplCfg, "safety_cap_pips", 0.0);
+   double brokerMinDist = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+   double minDist = MathMax(brokerMinDist, MathMax(PipsToPrice(guardPips), PipsToPrice(capPips)));
+   if(minDist > 0.0)
+   {
+      MqlTick gtick;
+      if(SymbolInfoTick(_Symbol, gtick))
+      {
+         double refPx = (t.direction == "BUY") ? gtick.bid : gtick.ask;
+         if(t.direction == "BUY" && newSl > refPx - minDist)
+            newSl = refPx - minDist;
+         else if(t.direction == "SELL" && newSl < refPx + minDist)
+            newSl = refPx + minDist;
+      }
+   }
+
    double curSl = 0.0;
    if(PositionSelectByTicket(t.ticket)) curSl = PositionGetDouble(POSITION_SL);
    bool better = (t.direction == "BUY") ? (newSl > curSl) : (newSl < curSl);
@@ -1859,15 +1982,49 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
 {
    if(!PositionSelectByTicket(t.ticket)) return; // closed already this tick
 
+   // ── Emergency SL backstop ────────────────────────────────────────────
+   // "in case the primary stop is rejected or removed" -- use_emergency_sl/
+   // emergency_sl_mult existed as template fields with no implementation
+   // until 2026-08-04. Checked every tick: if the broker-side SL on this
+   // position is missing entirely (0.0) or has drifted wider than
+   // emergency_sl_mult x the trade's own original SL distance, force it
+   // back to that emergency distance from entry. Runs ahead of every other
+   // management branch below so a missing stop never survives a full tick
+   // unprotected. Ordinary MoveSl() calls elsewhere are always tighter
+   // than this (BE/trailing only ever move a stop closer), so this never
+   // fights them -- it only ever fires when something has gone wrong.
+   if(TplB(t.tplCfg, "use_emergency_sl", false) && t.tplOrigSlDist > 0.0)
+   {
+      double _emMult = TplD(t.tplCfg, "emergency_sl_mult", 2.0);
+      double _emDist = t.tplOrigSlDist * MathMax(1.0, _emMult);
+      double _emSl = (t.direction == "BUY") ? t.entry_price - _emDist : t.entry_price + _emDist;
+      double _liveSl = PositionGetDouble(POSITION_SL);
+      bool _missing = (_liveSl == 0.0);
+      bool _tooWide = (t.direction == "BUY") ? (_liveSl < _emSl) : (_liveSl > _emSl);
+      if(_missing || _tooWide)
+      {
+         if(trade.PositionModify(t.ticket, _emSl, PositionGetDouble(POSITION_TP)))
+            Print("[EABridge] emergency SL applied ticket=", t.ticket,
+                  " sl=", DoubleToString(_emSl, _Digits), " (was ", DoubleToString(_liveSl, _Digits), ")");
+      }
+   }
+
    // ── Anchor TP: partial closes at each cleared level, full close on the
-   // last defined level -- same mechanism ManageLadder() uses for the
-   // built-in ladder strategies (t.pcts[]/t.closeFullOnLast), so a
-   // template's own Anchor TP %-close ladder (core_ea_templates.py's
-   // tp{n}_pct fields) actually takes effect instead of being silently
-   // ignored (2026-07-24 -- ManageTemplate() never read t.pcts[] at all
-   // before this). Runs for "on"/"stealth" only, never "off" -- "off" means
-   // no TP tracking whatsoever (SL/harvest/trail-only), unchanged from
-   // before. For "stealth" this replaces the old last-TP-only check: when
+   // last defined level WHEN t.closeFullOnLast is set (the default, and the
+   // only behaviour before that field became template-configurable -- see
+   // core_ea_templates.py's close_full_on_last) -- same mechanism
+   // ManageLadder() uses for the built-in ladder strategies (t.pcts[]/
+   // t.closeFullOnLast), so a template's own Anchor TP %-close ladder
+   // (core_ea_templates.py's tp{n}_pct fields) actually takes effect
+   // instead of being silently ignored (2026-07-24 -- ManageTemplate()
+   // never read t.pcts[] at all before this). A template with
+   // close_full_on_last=false instead partial-closes the last level's own
+   // pct too and leaves whatever remains open, managed from there by
+   // Trail/BE -- for a ladder whose pct sum well under 100 and is meant to
+   // leave a genuine runner. Runs for "on"/"stealth" only, never "off" --
+   // "off" means no TP tracking whatsoever (SL/harvest/trail-only),
+   // unchanged from before. For "stealth" this replaces the old
+   // last-TP-only check: when
    // every pct is 0 (a template with no Anchor TP % configured, the case
    // for every template saved before this feature existed) DoPartialClose's
    // own 0-lots guard makes every non-last level a safe no-op, so only the
@@ -1894,13 +2051,41 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
                t.tplGroupActionDone = true;
             }
 
+            // cancel_pending_level (2026-08-04 -- existed as a template
+            // field with no implementation, meant to supersede the older
+            // cancel_pending boolean's "only on first fill" limitation):
+            // cancel every still-resting sibling once THIS specific TP
+            // level clears, on any leg. 0 = never (default, matches every
+            // template saved before this existed). Independent of Group TP
+            // Action above -- that also moves live siblings to breakeven;
+            // this only cancels resting ones, and at a level the template
+            // chooses rather than always the first.
+            int tplCancelLevel = TplI(t.tplCfg, "cancel_pending_level", 0);
+            if(tplCancelLevel > 0 && !t.tplCancelLevelDone && t.tplGridGroup >= 0
+               && (tplIdx + 1) == tplCancelLevel)
+            {
+               CancelGridSiblings(t.tplGridGroup, t.ticket);
+               t.tplCancelLevelDone = true;
+            }
+
             double tplRemaining = RemainingLots(t.ticket);
             if(tplRemaining <= 0) break;
             bool tplIsLast = (tplCompactPos == tplN - 1);
 
+            // partials=false (2026-08-04 -- existed as a template field with
+            // no implementation): skip every partial close at a non-last
+            // level entirely, so nothing closes until the final defined TP,
+            // which then closes the position outright -- "False = single
+            // close at the final level" per core_ea_templates.py's own
+            // comment for this field.
+            bool tplPartialsOn = TplB(t.tplCfg, "partials", true);
             bool tplClosedAll = false;
-            if(tplIsLast && t.closeFullOnLast) tplClosedAll = DoCloseAll(t, tplIdx);
-            else                               DoPartialClose(t, tplIdx, t.pcts[tplCompactPos]);
+            if(tplIsLast && (t.closeFullOnLast || !tplPartialsOn))
+               tplClosedAll = DoCloseAll(t, tplIdx);
+            else if(tplPartialsOn)
+               DoPartialClose(t, tplIdx, t.pcts[tplCompactPos]);
+            else
+               break; // partials off, not the last level yet -- wait
 
             if(tplClosedAll) return; // position gone -- CheckForClosures reports it
             tplCompactPos++;
@@ -1912,11 +2097,21 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
    if(t.tplHarvestEnabled)
    {
       double profit = PositionGetDouble(POSITION_PROFIT);
-      if(profit >= t.tplHarvestThreshold)
+      // harvest_pips (2026-08-04 -- existed as a template field with no
+      // implementation): a second, independent trigger alongside the
+      // dollar-based harvest_threshold above -- "distinct from
+      // harvest_threshold, which is in account currency" per its own
+      // comment. 0 = off, matches every template saved before this
+      // existed.
+      double harvestPips = TplD(t.tplCfg, "harvest_pips", 0.0);
+      double favMove = (t.direction == "BUY") ? (tick.bid - t.entry_price)
+                                               : (t.entry_price - tick.ask);
+      bool pipsHarvest = (harvestPips > 0.0) && (favMove >= PipsToPrice(harvestPips));
+      if(profit >= t.tplHarvestThreshold || pipsHarvest)
       {
          trade.PositionClose(t.ticket);
-         Print("[EABridge] template harvest threshold reached ($", profit,
-               " >= $", t.tplHarvestThreshold, "), closing ticket=", t.ticket);
+         Print("[EABridge] template harvest triggered ($", profit,
+               (pipsHarvest ? ", pips-move" : ""), "), closing ticket=", t.ticket);
          return;
       }
    }
@@ -1963,6 +2158,22 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
       double inProfit = (t.direction == "BUY") ? (tick.bid - t.entry_price)
                                                : (t.entry_price - tick.ask);
       trailArmed = (inProfit >= trailAct);
+   }
+   // tp1_trigger_level (2026-08-04 -- existed as a template field with no
+   // implementation): an alternate, TP-level-based arm condition, OR'd
+   // with the pip-based trail_activation above -- whichever comes first.
+   // Lets trailing start once a specific rung of the ladder clears instead
+   // of only after a flat pip distance that can sit well beyond every
+   // defined TP -- confirmed live on "Asian - Grid": trail_activation's
+   // default (100 pips) is deeper than its own last defined TP (50 pips),
+   // so the runner never armed at all and just sat at its breakeven stop,
+   // capping every winning trade at the same ~$43 regardless of how far
+   // price actually ran.
+   if(!trailArmed)
+   {
+      int tplTrigLevel = TplI(t.tplCfg, "tp1_trigger_level", 0);
+      if(tplTrigLevel > 0 && tplTrigLevel <= MAX_TPS)
+         trailArmed = t.triggered[tplTrigLevel - 1];
    }
 
    if(t.tplTrailMode == "step" && trailArmed)
@@ -2187,8 +2398,10 @@ void CheckPendingOrders()
          mt.tplGridGroup = g_pending[i].tplGridGroup;
          mt.tplGroupTpAction = g_pending[i].tplGroupTpAction;
          mt.tplGroupActionDone = false;
+         mt.tplCancelLevelDone = false;
          mt.tplHarvestEnabled = g_pending[i].tplHarvestEnabled;
          mt.tplHarvestThreshold = g_pending[i].tplHarvestThreshold;
+         mt.tplOrigSlDist = g_pending[i].tplOrigSlDist;
 
          int n = ArraySize(g_trades);
          ArrayResize(g_trades, n + 1);

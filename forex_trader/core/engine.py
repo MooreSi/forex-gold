@@ -219,6 +219,7 @@ from forex_trader.core.core_close_trade import (
 from forex_trader.core.core_template_placeholder_repair import (
     repair_template_placeholders as _repair_template_placeholders,
 )
+from forex_trader.core.core_equity_protect import check_equity_protect as _check_equity_protect_impl
 from forex_trader.core.core_orb_report import (
     build_orb_report as _build_orb_report_impl,
     orb_auto_execute as _orb_auto_execute_impl,
@@ -1111,6 +1112,11 @@ class SimulationEngine:
                 if tick:
                     open_trades = await db_module.to_db_thread(self.get_open_trades)
                     _has_open_trades = bool(open_trades)
+                    if open_trades:
+                        try:
+                            await _check_equity_protect_impl(open_trades, self._bridge, self.close_trade)
+                        except Exception:
+                            log.debug("Equity Protect check failed", exc_info=True)
                     rs = await db_module.to_db_thread(db_module.get_risk_settings)
                     profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
                     # Refresh candle cache once per cycle (shared by all DPM trade handlers)

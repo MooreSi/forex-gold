@@ -1033,6 +1033,39 @@ def _apply_schema() -> None:
             # _resolve_template_tps for the resolution order.
             "ALTER TABLE ea_trade_templates ADD COLUMN tp_from_telegram INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ea_trade_templates ADD COLUMN tp_pen_from_telegram INTEGER NOT NULL DEFAULT 0",
+        ] + [
+            # close_full_on_last (2026-08-03): whether the last CONFIGURED
+            # Anchor TP level closes the whole remaining position outright
+            # instead of just its own tp{n}_pct. Defaults to 1 so every
+            # existing template keeps its current (only) behaviour; a
+            # template can now set this to 0 to leave a genuine runner past
+            # its last defined TP level, managed by Trail/BE from there. See
+            # core_ea_templates.DEFAULTS and ForexTraderBridge.mq5's
+            # ManageTemplate.
+            "ALTER TABLE ea_trade_templates ADD COLUMN close_full_on_last INTEGER NOT NULL DEFAULT 1",
+        ] + [
+            # Grid-leg fill accounting (2026-08-03) -- an EA Template grid
+            # trade's placeholder row (mt5_ticket=0, entry_price=0 -- see
+            # core_template_placeholder_repair.py) previously had no record
+            # of how many legs HandleOpenTemplateGrid actually placed, so
+            # ea_bridge._on_grid_leg_cancelled could never tell "one sibling
+            # leg cancelled, others may still fill" apart from "every leg
+            # this grid ever had has now cancelled with none filled" -- it
+            # always assumed the former and left the row open at $0 forever.
+            # Confirmed live 2026-08-03: two single-pending-leg grids (no
+            # anchor -- price was outside the zone at signal time) each had
+            # their one resting leg expire unfilled, and both placeholder
+            # rows sat in Active Trades for 5+ hours showing a fabricated
+            # ~$16,132 unrealised P&L (the (current - 0) * lots arithmetic
+            # every $0-entry row produces). grid_legs_total is set once, from
+            # the EA's own trade_opened ack (HandleOpenTemplateGrid's
+            # legs_placed field); grid_legs_cancelled increments on every
+            # confirmed cancellation, and _on_grid_leg_cancelled closes the
+            # row via record_close (its existing zero-entry guard keeps this
+            # from fabricating P&L) once cancelled reaches total. NULL/0 for
+            # every non-grid trade, which never touches either column.
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN grid_legs_total INTEGER",
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN grid_legs_cancelled INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(stmt)

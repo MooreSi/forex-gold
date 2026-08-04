@@ -602,28 +602,74 @@ void HandleSetTemplate(const string json)
    Print("[EABridge] set_template '", name, "' applied to ", updated, " live item(s)");
 }
 
+// An exact-match lookup (FindManagedByTradeId) silently found nothing for
+// any grid leg, because a leg's OWN trade_id is the signal's base id plus
+// "-a<n>"/"-g<n>" (HandleOpenTemplateGrid) -- Python's own follow-up
+// correction (core_instant_followup.py's IME flow, update_trade) sends
+// only the base id, since a signal can have several legs and the
+// correction applies to all of them. Confirmed live 2026-08-04, trade
+// 8fc78ea9 ("GD VIP - Grid"): the anchor filled on a provisional
+// open with no real TP ladder yet, the real TP1-7 arrived a minute later
+// via update_trade, and FindManagedByTradeId("8fc78ea9-...") never matched
+// "8fc78ea9-...-a1" -- so the EA kept managing the position with
+// essentially nothing to check, meaning TP2/TP3 clearing did nothing even
+// though price actually reached them.
+bool TradeIdMatchesBase(const string full, const string base)
+{
+   if(full == base) return true;
+   int blen = StringLen(base);
+   if(StringLen(full) <= blen + 2) return false;
+   if(StringSubstr(full, 0, blen) != base) return false;
+   string sep = StringSubstr(full, blen, 2);
+   return (sep == "-a" || sep == "-g");
+}
+
 void HandleUpdateTrade(const string json)
 {
    string trade_id = JsonGetString(json, "trade_id");
-   int idx = FindManagedByTradeId(trade_id);
-   if(idx < 0)
+   int matched = 0;
+
+   for(int idx = 0; idx < ArraySize(g_trades); idx++)
    {
-      Print("[EABridge] update_trade: unknown/untracked trade_id=", trade_id);
-      return;
-   }
-   int updated = 0;
-   for(int i = 0; i < MAX_TPS; i++)
-   {
-      string key = "tp" + (string)(i + 1);
-      if(JsonHasKey(json, key))
+      if(!TradeIdMatchesBase(g_trades[idx].trade_id, trade_id)) continue;
+      matched++;
+      int updated = 0;
+      for(int i = 0; i < MAX_TPS; i++)
       {
-         g_trades[idx].tp[i]    = JsonGetDouble(json, key);
-         g_trades[idx].hasTp[i] = true;
-         updated++;
+         string key = "tp" + (string)(i + 1);
+         if(JsonHasKey(json, key))
+         {
+            g_trades[idx].tp[i]    = JsonGetDouble(json, key);
+            g_trades[idx].hasTp[i] = true;
+            updated++;
+         }
       }
+      Print("[EABridge] update_trade applied: trade_id=", g_trades[idx].trade_id,
+            " ticket=", g_trades[idx].ticket, " fields_updated=", updated);
    }
-   Print("[EABridge] update_trade applied: trade_id=", trade_id,
-         " ticket=", g_trades[idx].ticket, " fields_updated=", updated);
+
+   // A resting (not yet filled) grid leg has no ticket/price to manage yet,
+   // but should still fill with the corrected TP ladder rather than the
+   // stale one it was staged with.
+   for(int pidx = 0; pidx < ArraySize(g_pending); pidx++)
+   {
+      if(!TradeIdMatchesBase(g_pending[pidx].trade_id, trade_id)) continue;
+      matched++;
+      for(int i = 0; i < MAX_TPS; i++)
+      {
+         string key = "tp" + (string)(i + 1);
+         if(JsonHasKey(json, key))
+         {
+            g_pending[pidx].tp[i]    = JsonGetDouble(json, key);
+            g_pending[pidx].hasTp[i] = true;
+         }
+      }
+      Print("[EABridge] update_trade applied to resting leg: trade_id=", g_pending[pidx].trade_id,
+            " ticket=", g_pending[pidx].ticket);
+   }
+
+   if(matched == 0)
+      Print("[EABridge] update_trade: unknown/untracked trade_id=", trade_id);
 }
 
 void HandleOpenTrade(const string json)
@@ -653,14 +699,35 @@ void HandleOpenTrade(const string json)
    // for tpsl_mode=="on" (full visible TP) but NOT for "off" (no target) or
    // "stealth" (target tracked internally in tp[], deliberately never
    // written to the broker order — see ManageTemplate()).
+   //
+   // tpl_close_full_on_last=false is the exception: that flag exists
+   // specifically so the last defined level closes only its OWN pct and
+   // leaves a genuine runner (see ManageTemplate()'s own partial-close
+   // loop) -- but a native broker TP sitting at that exact price defeats
+   // the whole point. A resting broker order executes the instant price
+   // touches it, server-side; the EA's own tick-based partial close can
+   // only react on its next OnTick, after the broker has already gone --
+   // so the native "backstop" doesn't just backstop, it always wins the
+   // race and flattens the entire remaining position right there, same as
+   // if close_full_on_last had been left on. Confirmed live 2026-08-04,
+   // ticket 1702805808 ("Conservative Trial", close_full_on_last off,
+   // tp4_pct=20%): TP1-TP3 closed correctly via the EA's own partial-close
+   // (blank-comment deals), but the whole remaining 0.05 lot closed in one
+   // shot at TP4 with broker comment "[tp 4064.19]" -- the native order,
+   // not the intended 20% partial. Templates with close_full_on_last=false
+   // skip the native TP entirely here and rely purely on ManageTemplate()
+   // for every level including the last, same as "stealth" mode already
+   // does for a different reason.
    double brokerTp = 0.0;
    string tplTpslModeEarly = isTemplate ? JsonGetString(json, "tpl_tpsl_mode", "on") : "";
+   bool tplCloseFullOnLastEarly = isTemplate
+      ? (JsonGetLong(json, "tpl_close_full_on_last", 1) != 0) : true;
    // fixed_rr joins be_runner in getting a genuine broker TP -- it is the
    // one strategy that is deliberately NOT managed after open at all, so
    // MT5 must hold both the stop and the target itself. Python sends the
    // computed target as tp1 (core_open_trade.py).
    if(strategy == "be_runner" || strategy == "fixed_rr" ||
-      (isTemplate && tplTpslModeEarly == "on"))
+      (isTemplate && tplTpslModeEarly == "on" && tplCloseFullOnLastEarly))
    {
       for(int i = MAX_TPS - 1; i >= 0; i--)
       {
@@ -2180,7 +2247,24 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
    {
       double dist = trailDist + trailPad;
       double newSl = (t.direction == "BUY") ? tick.bid - dist : tick.ask + dist;
-      MoveSl(t, newSl, "template_trail_step");
+      // trail_step (2026-08-04 -- existed as a template field with no
+      // implementation; trail_distance is what actually sets the trailing
+      // gap, confirmed unused anywhere else in this file). Standard
+      // "Trailing Step" semantics: don't move the stop until it would
+      // improve by at least this many pips over where it already sits, so
+      // a smoothly-rising price doesn't send a PositionModify on every
+      // single tick. 0 (default before this existed) keeps the previous
+      // always-on-any-improvement behaviour -- MoveSl's own `better` check
+      // already rejects a non-improving move regardless.
+      double trailStepPips = TplD(t.tplCfg, "trail_step", 0.0);
+      bool stepOk = true;
+      if(trailStepPips > 0.0)
+      {
+         double curStepSl = PositionSelectByTicket(t.ticket) ? PositionGetDouble(POSITION_SL) : 0.0;
+         double moveAmt = (t.direction == "BUY") ? (newSl - curStepSl) : (curStepSl - newSl);
+         stepOk = (curStepSl == 0.0) || (moveAmt >= PipsToPrice(trailStepPips));
+      }
+      if(stepOk) MoveSl(t, newSl, "template_trail_step");
    }
    else if(t.tplTrailMode == "candle" && trailArmed)
    {

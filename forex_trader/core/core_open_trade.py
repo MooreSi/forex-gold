@@ -121,7 +121,8 @@ def is_telegram_source(tg_source: Optional[str]) -> bool:
 
 
 def resolve_template_tps(template: dict, direction: str, tick: Any,
-                          signal_tps: list, tg_source: Optional[str]) -> tuple:
+                          signal_tps: list, tg_source: Optional[str],
+                          atr: Optional[float] = None) -> tuple:
     """Work out the TP levels an EA Template trade actually opens with.
 
     Returns (tps, pcts, pending_pips):
@@ -140,6 +141,15 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
     column. Internal generators never take the Telegram branch -- they have
     no message -- which is exactly why the pips columns stay editable while
     the flag is on.
+
+    `atr`: current ATR (price units, not pips), when the caller has one and
+    the template has use_dynamic_atr on -- overrides level 1's pips-derived
+    price with entry ± atr * atr_tp1_mult, same convention
+    core_signal_resolution.py's SL override already uses. Ignored on the
+    Telegram-anchor branch (a stated message price is authoritative, ATR
+    sizing has nothing to size there) and when atr is None/0 (no candle
+    data available, or use_dynamic_atr off) -- falls through to tp1_pips
+    unchanged in both cases.
     """
     sign  = 1 if direction.upper() == "BUY" else -1
     ref   = tick.ask if direction.upper() == "BUY" else tick.bid
@@ -170,6 +180,13 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
                enumerate(msg_tps[:ea_templates.MAX_TP_LEVELS], start=1)}
     else:
         tps = _pips_ladder("tp")
+        # atr_tp1_mult (2026-08-04 -- existed as a template field with no
+        # implementation; atr_sl_mult's SL equivalent was fixed already).
+        # Only level 1 -- "Dynamic ATR sizing of SL/TP1", the template's own
+        # documented scope, not the whole ladder.
+        if atr and atr > 0 and bool(template.get("use_dynamic_atr")):
+            atr_mult = float(template.get("atr_tp1_mult") or 1.5)
+            tps[1] = ref + sign * (atr * atr_mult)
 
     pcts = None
     if tps:
@@ -458,9 +475,20 @@ async def open_trade(
                         # resolve_template_tps, which owns the whole
                         # resolution and is what the DB row is written from
                         # below so the record matches what the EA runs.
+                        _tpl_atr = None
+                        if bool(_ea_template.get("use_dynamic_atr")):
+                            try:
+                                _atr_period = int(_ea_template.get("atr_period") or 14)
+                                _atr_candles = await bridge.get_candles("M5", max(_atr_period + 5, 20))
+                                if _atr_candles:
+                                    from forex_trader.core.dpm_engine import compute_atr
+                                    _tpl_atr = compute_atr(_atr_candles, period=_atr_period)
+                            except Exception:
+                                _tpl_atr = None
                         _tps, _ea_pcts, _pen_pips = resolve_template_tps(
                             _ea_template, direction, tick,
                             [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8], tg_source,
+                            atr=_tpl_atr,
                         )
                         _resolved_tps = dict(_tps)
                         if _pen_pips is not None:

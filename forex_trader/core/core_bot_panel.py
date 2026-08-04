@@ -567,6 +567,20 @@ def _channel_open_trades(chan: dict) -> list[dict]:
     return [db_module.row_to_dict(r) for r in rows]
 
 
+def _trade_push_sl_pips(t: dict) -> float:
+    """manual_sl_push_pips for this trade's template, or 0 if it isn't a
+    template trade, the template has bot commands off (tg_cmd_enabled), or
+    no push amount is configured -- any of which hides the Push SL button
+    rather than showing one that would just refuse when tapped."""
+    strategy = t.get("strategy") or ""
+    if not ea_templates.is_template_override(strategy):
+        return 0.0
+    tpl = ea_templates.get_ea_template(ea_templates.template_name_from_override(strategy))
+    if not tpl or not tpl.get("tg_cmd_enabled"):
+        return 0.0
+    return float(tpl.get("manual_sl_push_pips") or 0)
+
+
 def trade_list_screen(slug: str) -> Screen:
     chan = _channel(slug)
     if not chan:
@@ -583,7 +597,11 @@ def trade_list_screen(slug: str) -> Screen:
         label = (f"❌ {t.get('direction', '?')} {t.get('lot_size', '?')} @ "
                  f"{entry:.2f}" if entry else
                  f"❌ {t.get('direction', '?')} {t.get('lot_size', '?')} (pending)")
-        rows.append([_btn(label, "tc", tid[:16])])
+        row = [_btn(label, "tc", tid[:16])]
+        push_pips = _trade_push_sl_pips(t)
+        if push_pips > 0 and ticket:
+            row.append(_btn(f"\U0001f527 Push SL +{push_pips:.0f}p", "ps", tid[:16]))
+        rows.append(row)
         lines.append(f"• `{ticket or 'pending'}` {t.get('direction')} "
                      f"{t.get('lot_size')} @ {entry or '—'}")
     rows.append([_btn("← Back", "ct", slug)])
@@ -732,6 +750,8 @@ async def _dispatch(action: str, args: list, ctx: Any) -> Screen:
         return await _close_all(ctx)
     if action == "tc":
         return await _close_one(args[0], ctx)
+    if action == "ps":
+        return await _push_sl_one(args[0], ctx)
     if action == "cur":
         return _current_settings(args[0])
     return Screen(mode="noop")
@@ -1157,3 +1177,63 @@ async def _close_one(trade_prefix: str, ctx: Any) -> Screen:
     return Screen(f"*Closed* {row.get('direction')} {row.get('lot_size')} @ "
                   f"{float(res.get('close_price', 0)):.2f}\n"
                   f"P&L: {'+' if pnl >= 0 else ''}${pnl:.2f}", mode="send")
+
+
+async def _push_sl_one(trade_prefix: str, ctx: Any) -> Screen:
+    """manual_sl_push_pips / tg_cmd_enabled (2026-08-04 -- existed as
+    template fields with no bot-command infrastructure to wire into at all;
+    the old typed /commands were retired in favour of this button panel, so
+    this is that panel's version rather than a new typed command). Nudges
+    an EA Template trade's live broker SL by the template's own configured
+    pip amount, same direct-modify pattern _risk_free above already uses
+    for its own manual SL move, gated on tg_cmd_enabled per template."""
+    with db_module.db() as conn:
+        row = db_module.row_to_dict(conn.execute(
+            "SELECT * FROM vantage_simulated_trades WHERE trade_id LIKE ? AND status='open'",
+            (trade_prefix + "%",),
+        ).fetchone())
+    if not row:
+        return Screen(toast="That trade is no longer open.", mode="noop")
+
+    push_pips = _trade_push_sl_pips(row)
+    if push_pips <= 0:
+        return Screen(toast="Push SL isn't available for this trade.", mode="noop")
+
+    ticket = int(row.get("mt5_ticket") or 0)
+    if not ticket:
+        return Screen(toast="That leg hasn't filled yet.", mode="noop")
+
+    positions = await ctx._bridge.get_positions()
+    pos = next((p for p in positions if int(p.get("ticket") or 0) == ticket), None)
+    if not pos:
+        return Screen(toast="Couldn't read this position from the broker.", mode="noop")
+
+    from forex_trader.core.core_pips import PIPS_TO_PRICE_XAUUSD
+    direction  = row.get("direction", "BUY")
+    cur_sl     = float(pos.get("sl") or 0)
+    cur_price  = float(pos.get("current_price") or 0)
+    push_dist  = push_pips * PIPS_TO_PRICE_XAUUSD
+    new_sl     = (cur_sl + push_dist) if direction == "BUY" else (cur_sl - push_dist)
+
+    # A push that would land at or past current price is an invalid stop,
+    # not a tighter one -- refuse rather than send a request the broker
+    # would reject anyway (or, worse, one it fills as an instant close).
+    landed_past_price = (
+        (direction == "BUY" and new_sl >= cur_price) or
+        (direction == "SELL" and new_sl <= cur_price)
+    )
+    if cur_sl <= 0 or landed_past_price:
+        return Screen(toast="Push SL would land at/past current price — refused.", mode="noop")
+
+    try:
+        res = await ctx._bridge.modify_order(ticket, round(new_sl, 2), None)
+        if res.get("error"):
+            return Screen(f"Push SL failed: {res['error']}", mode="send")
+    except Exception as e:
+        return Screen(f"Push SL failed: {e}", mode="send")
+
+    with db_module.db() as conn:
+        conn.execute("UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
+                     (round(new_sl, 2), row["trade_id"]))
+    return Screen(f"*SL pushed* {row.get('direction')} {row.get('lot_size')} — "
+                  f"new SL ${new_sl:.2f} (+{push_pips:.1f} pips)", mode="send")

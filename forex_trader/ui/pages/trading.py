@@ -2613,9 +2613,9 @@ def _render_ea_templates_card() -> None:
                          "its own SL. 10 pips = 1.00 of gold price, so 50 = $5.00 per "
                          "0.01 lot. The signal's own SL always wins when present.")
                     _num("grid_step_pts", "Ladder Step", 1.0,
-                         "Spacing between pending legs when the signal states no "
-                         "entry zone. When it does state one, legs span that zone "
-                         "instead and this is ignored.")
+                         "Spacing between pending legs, in pips. Always used in "
+                         "STEP pending mode; in ZONE mode it only applies when the "
+                         "signal states no entry zone of its own.")
                     _num("risk_pct", "Risk % (0=OFF)", 0.1,
                          "Size legs from account risk instead of the fixed lots "
                          "above. 0 = use the fixed lots.")
@@ -2752,6 +2752,15 @@ def _render_ea_templates_card() -> None:
                 _toggle("mode", "Mode", {"grid": "GRID", "single": "SINGLE"},
                         "GRID stages anchor + pending legs across the signal's "
                         "zone. SINGLE opens one position.")
+                _toggle("pending_mode", "Pending",
+                        {"zone": "ZONE", "step": "STEP"},
+                        "Where GRID rests its pending legs. ZONE spreads them "
+                        "across the signal's own stated entry zone, honouring the "
+                        "levels the signal named -- but a leg lands on the wrong "
+                        "side of the market and is skipped if price has already "
+                        "left that zone. STEP places them Ladder Step pips from "
+                        "the anchor instead, which is what the reference copier "
+                        "does and can never be skipped for being wrong-side.")
                 _toggle("tpsl_mode", "TP/SL",
                         {"off": "OFF", "on": "ON", "stealth": "STEALTH"},
                         "ON puts real SL/TP on the broker order. STEALTH keeps "
@@ -2846,9 +2855,17 @@ def _render_ea_templates_card() -> None:
                         ui.icon("info_outline", size="14px").classes(
                             "text-blue-400 cursor-help").tooltip(
                             "Block a new trade on this channel while one is "
-                            "already open in the same direction.")
+                            "already open in the same direction. Use the pips "
+                            "box beside this to only block when the open trade "
+                            "is that close to the new one.")
                     fields["sig_guard"] = ui.switch(
                         "", value=bool(live["sig_guard"])).classes("text-xs")
+                _num("sig_guard_pips", "Sig Guard pips", 1.0,
+                     "0 = block on ANY open same-direction trade for this channel. "
+                     "Above 0, only an open trade whose entry is within this many "
+                     "pips blocks, so a genuinely separate setup further down the "
+                     "chart can still trade. The reference copier shows this as "
+                     "\"SIG GUARD: 20p\".")
                 with ui.column().classes("gap-0"):
                     with ui.row().classes("items-center gap-1"):
                         ui.label("Group TP Action").classes("text-xs text-gray-400")

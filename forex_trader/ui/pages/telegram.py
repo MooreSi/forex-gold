@@ -41,7 +41,9 @@ _PARSING_CATEGORIES: list[tuple[str, str, list[tuple[str, str, str, int]]]] = [
          "When OFF, TP levels are stripped before execution.", 1),
         ("lk_enable_sl_parsing", "Enable SL Parsing",
          "Use this signal's own stated Stop Loss when a new entry parses. "
-         "When OFF, Stop Loss is stripped before execution.", 1),
+         "When OFF, it is replaced by the channel template's SL Pips, or the "
+         "Fallback SL Distance below. Applies to new entries only — the "
+         "RISK FREE / BE and CLOSE ALL triggers are separate.", 1),
         ("lk_enable_second_message_tp_sl", "TP/SL in Second Message",
          "Hold a signal that arrives with a direction and entry but no levels, "
          "and complete it from a follow-up message sent within the match window "
@@ -162,6 +164,30 @@ def _render_parsing_settings_section() -> None:
                 db_module.update_risk_settings({"lk_second_message_match_window_sec": val})
                 ui.notify(f"Match window set to {val}s", type="positive")
             window_in.on_value_change(_on_window)
+
+        # ── Fallback SL distance (Enable SL Parsing OFF) ───────────────────
+        with ui.row().classes("items-center gap-2 mt-3"):
+            ui.label("Fallback SL distance:").classes("text-xs text-gray-400")
+            fb_sl_in = ui.number(
+                value=float(rs.get("lk_fallback_sl_pips", 50.0)),
+                min=1, max=1000, step=5, format="%.0f",
+            ).classes("w-24").props("outlined dense")
+            ui.label("pips").classes("text-xs text-gray-400")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Stop distance used in place of the signal's own when Enable "
+                "SL Parsing is OFF, measured from the far edge of the entry "
+                "zone. A channel with an EA Template uses that template's own "
+                "SL Pips instead. Ignored entirely while SL Parsing is ON."
+            )
+
+            def _on_fb_sl(e):
+                try:
+                    val = max(1.0, min(1000.0, float(e.value)))
+                except (TypeError, ValueError):
+                    return
+                db_module.update_risk_settings({"lk_fallback_sl_pips": val})
+                ui.notify(f"Fallback SL distance set to {val:.0f} pips", type="positive")
+            fb_sl_in.on_value_change(_on_fb_sl)
 
         # ── Lexicon boxes ──────────────────────────────────────────────────
         with ui.row().classes("items-center gap-2 mt-5 mb-2"):

@@ -173,7 +173,26 @@ async def execute_auto_signal(
                     log.info("[%s] Signal rejected — zone breached: %s", source_label, skip_reason)
                 else:
                     rr_ref_px = live_px if in_zone else zone_mid
-                    if strategy in _PRE_TRADE_FILTER_BYPASS_STRATEGIES:
+                    # EA Templates join the bypass list (2026-08-05). Every
+                    # other execution path already exempts them -- see
+                    # core_signal_resolution.resolve_open_trade_params
+                    # ("not _is_template") and core_pending_signal_activation
+                    # (_grid_tpl) -- for the reason spelled out there: a
+                    # template replaces the signal's own SL/TPs with its own
+                    # sl_pips/tp*_pips, so scoring the signal's TP1 against a
+                    # stop the trade will never use declines trades on numbers
+                    # the EA never sees. This path was the only one still
+                    # missing it, and `strategy` here is the raw override
+                    # string ("template:<name>"), which can never appear in
+                    # _PRE_TRADE_FILTER_BYPASS_STRATEGIES (built from built-in
+                    # strategy keys) -- so the check silently never matched.
+                    # Confirmed live: a GOLD DIGGERS INSTITUTIONAL "BUY LIMITS
+                    # ... AREA" signal was rejected at 0.53:1, measured against
+                    # a 4229 stop the template itself had just derived from its
+                    # 60 sl_pips, and never reached the grid-placement branch
+                    # below that would have staged the resting legs.
+                    if (strategy in _PRE_TRADE_FILTER_BYPASS_STRATEGIES
+                            or ea_templates.is_template_override(strategy)):
                         filter_err = None
                     else:
                         filter_err = check_pre_trade_filters_fn(

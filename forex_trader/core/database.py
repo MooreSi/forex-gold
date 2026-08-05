@@ -439,6 +439,53 @@ CREATE TABLE IF NOT EXISTS strategy_param_templates (
     created_at  REAL NOT NULL
 );
 
+-- Market snapshot at the instant a reference-channel signal arrived
+-- (2026-08-04). One row per signal EVENT, not per signal: Gold Diggers VIP
+-- fires a bare market call and then sends the zone/SL/TPs ~40s later, and
+-- the difference between those two moments is likely where their
+-- market-vs-limit decision actually lives, so each stage is captured
+-- separately (see `stage`).
+--
+-- Purpose is to learn their entry logic from evidence rather than
+-- assumption, and ultimately to feed the Reversal Engine's ML features.
+-- Deliberately a wide, flat, append-only table: this is a research log, so
+-- it favours "record everything at capture time" over normalisation, and
+-- nothing reads it on the trading path.
+CREATE TABLE IF NOT EXISTS tg_signal_snapshots (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_message_id  TEXT NOT NULL,
+    stage          TEXT NOT NULL,          -- market_call | levels | complete
+    group_name     TEXT,
+    direction      TEXT,
+    signal_ts      REAL,                   -- when the message was parsed
+    captured_at    REAL NOT NULL,          -- when this snapshot was taken
+    capture_lag_s  REAL,                   -- captured_at - signal_ts, kept so
+                                           -- staleness is auditable, not hidden
+    -- stated levels (absent on a bare market call)
+    entry_low      REAL,
+    entry_high     REAL,
+    stop_loss      REAL,
+    tp1            REAL,
+    -- market at capture
+    bid            REAL,
+    ask            REAL,
+    spread_points  REAL,
+    price          REAL,
+    -- where price sat relative to what they asked for
+    dist_to_entry_mid   REAL,
+    price_inside_zone   INTEGER,
+    session        TEXT,
+    regime_score   REAL,
+    -- per-timeframe indicators, JSON {"M1": {...}, "M5": {...}, "M15": {...}}
+    -- JSON rather than 3x N columns: the set of indicators will change as
+    -- this research develops, and a schema migration per idea would stall it.
+    indicators_json TEXT,
+    fvg_json        TEXT,
+    raw_text        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tg_snap_msg ON tg_signal_snapshots(tg_message_id, stage);
+CREATE INDEX IF NOT EXISTS idx_tg_snap_ts  ON tg_signal_snapshots(captured_at);
+
 -- EA-native trade-management templates (2026-07-23) -- see
 -- core_ea_templates.py. Unlike strategy_param_templates above (a named
 -- preset of ONE existing Python strategy's numeric knobs), a row here is a
@@ -1044,6 +1091,19 @@ def _apply_schema() -> None:
             # ManageTemplate.
             "ALTER TABLE ea_trade_templates ADD COLUMN close_full_on_last INTEGER NOT NULL DEFAULT 1",
         ] + [
+            # Grid pending-leg placement model (2026-08-04). 'zone' is the
+            # behaviour every existing template already has (span the
+            # signal's own entry zone), so it is the default and nothing
+            # changes on upgrade. 'step' steps grid_step_pts away from the
+            # anchor's base price instead, matching the reference copier's
+            # LADDER STEP -- and, unlike zone mode, can never place a leg on
+            # the wrong side of the market and have it silently skipped.
+            # See core_ea_templates.PENDING_MODE_CHOICES.
+            "ALTER TABLE ea_trade_templates ADD COLUMN pending_mode TEXT NOT NULL DEFAULT 'zone'",
+            # Sig Guard pip distance (the copier shows this as "SIG GUARD:
+            # 20p"). 0 keeps the existing all-or-nothing guard.
+            "ALTER TABLE ea_trade_templates ADD COLUMN sig_guard_pips REAL NOT NULL DEFAULT 0.0",
+        ] + [
             # Grid-leg fill accounting (2026-08-03) -- an EA Template grid
             # trade's placeholder row (mt5_ticket=0, entry_price=0 -- see
             # core_template_placeholder_repair.py) previously had no record
@@ -1066,6 +1126,14 @@ def _apply_schema() -> None:
             # every non-grid trade, which never touches either column.
             "ALTER TABLE vantage_simulated_trades ADD COLUMN grid_legs_total INTEGER",
             "ALTER TABLE vantage_simulated_trades ADD COLUMN grid_legs_cancelled INTEGER NOT NULL DEFAULT 0",
+        ] + [
+            # Fallback SL Distance (2026-08-05) -- the stop substituted for a
+            # signal's own when Enable SL Parsing is OFF. Only ever consulted
+            # by that path (core_logic_keyword_triggers.apply_sl_parsing_
+            # override); a channel with an EA Template uses the template's own
+            # sl_pips ahead of it. 50 pips matches ea_trade_templates.sl_pips'
+            # own default.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN lk_fallback_sl_pips REAL NOT NULL DEFAULT 50.0",
         ]:
             try:
                 conn.execute(stmt)

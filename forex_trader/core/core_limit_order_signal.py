@@ -220,6 +220,14 @@ async def handle_limit_order_signal(
     direction  = parsed["direction"].upper()
     entry_low  = float(parsed["entry_low"])
     entry_high = float(parsed["entry_high"])
+    # A pending order needs a real stop -- it sizes the lot (suggest_lot_size
+    # below) and is sent to the EA with the order. Reported rather than
+    # raised: float(None) used to throw TypeError out of the caller's scan
+    # loop (2026-08-05). Nothing should reach here without one now (see
+    # core_logic_keyword_triggers.apply_sl_parsing_override), but a signal
+    # replayed from the closed-market queue can predate that.
+    if parsed.get("stop_loss") is None:
+        return {"skip_reason": "Limit order skipped — signal has no Stop Loss."}
     stop_loss  = float(parsed["stop_loss"])
     tps = {n: float(parsed[f"tp{n}"]) for n in range(1, MAX_TP + 1) if parsed.get(f"tp{n}") is not None}
     if not tps:

@@ -30,6 +30,7 @@ from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_logic_keywords import claim_trigger, get_lexicon, text_matches_any
+from forex_trader.core.core_pips import PIPS_TO_PRICE_XAUUSD
 
 log = logging.getLogger(__name__)
 
@@ -171,6 +172,79 @@ def apply_mirror_copy(parsed: dict, rs: dict) -> Optional[str]:
         if key in parsed:
             parsed[key] = _reflect(parsed[key])
     return f"{direction} -> {parsed['direction']} mirrored through {pivot:.2f}"
+
+
+# Last-resort stop distance for apply_sl_parsing_override, used when neither
+# the channel's template nor the risk setting supplies a usable one. Never
+# 0/None: every consumer past the parser (validate_signal, handle_limit_
+# order_signal, suggest_lot_size, resolve_signal) types stop_loss as a real
+# float, so a missing stop is not a state this app can represent.
+_FALLBACK_SL_PIPS = 50.0
+
+
+def apply_sl_parsing_override(parsed: dict, rs: dict, channel_name: str) -> Optional[str]:
+    """Enable SL Parsing OFF (2026-08-05) -- replaces the signal's own stated
+    Stop Loss with one derived from configuration, in place on `parsed`.
+    Returns a short description of what changed (for the log), or None if the
+    toggle is on and the signal keeps its own stop.
+
+    This used to set parsed["stop_loss"] = None outright, on the reasoning
+    that downstream consumers would then see the same "missing field" shape
+    they already handle for a signal that never had one. They don't: the
+    field is typed as a required float everywhere past the parser, so a None
+    raised TypeError out of validate_signal (`None >= entry_low`) and
+    handle_limit_order_signal (`float(None)`) instead. With the engine's
+    scanner catch being per-cycle at the time, one such signal aborted the
+    whole scan pass -- confirmed live 2026-08-05: seven aborted cycles in
+    100 minutes, nothing executed at all while the toggle was off.
+
+    Distance, first usable one wins:
+      1. the channel's assigned EA Template `sl_pips` (a template is a
+         self-contained per-channel definition and already outranks the
+         signal's own stop in core_signal_resolution -- so it must win here
+         too, or the toggle would hand this channel a different stop than
+         the template it is configured with),
+      2. Fallback SL Distance (Parsing page),
+      3. _FALLBACK_SL_PIPS.
+
+    Anchored to the far edge of the entry zone (BUY: entry_low, SELL:
+    entry_high) so the result is below/above the whole zone by construction
+    and passes validate_signal's own direction checks no matter where in
+    the zone the fill lands."""
+    if bool(rs.get("lk_enable_sl_parsing", 1)):
+        return None
+    direction = str(parsed.get("direction") or "").upper()
+    entry_low, entry_high = parsed.get("entry_low"), parsed.get("entry_high")
+    if direction not in ("BUY", "SELL") or entry_low is None or entry_high is None:
+        # Can't derive a stop without a direction and a zone. Leaving the
+        # signal's own stated stop in place disregards the toggle, but it is
+        # a real float -- and nothing downstream survives the alternative.
+        log.warning("[LogicKeywords] SL Parsing OFF but signal has no direction/entry zone "
+                    "— keeping its stated stop (%s)", parsed.get("stop_loss"))
+        return None
+
+    pips = 0.0
+    src = ""
+    _ch_ov = db_module.get_channel_strategy_override(channel_name)
+    if ea_templates.is_template_override(_ch_ov):
+        _tpl = ea_templates.get_ea_template(ea_templates.template_name_from_override(_ch_ov))
+        if _tpl:
+            pips = float(_tpl.get("sl_pips") or 0)
+            src = f"template '{_tpl['name']}' sl_pips"
+    if pips <= 0:
+        pips = float(rs.get("lk_fallback_sl_pips", _FALLBACK_SL_PIPS) or 0)
+        src = "Fallback SL Distance"
+    if pips <= 0:
+        pips = _FALLBACK_SL_PIPS
+        src = "built-in default"
+
+    dist  = pips * PIPS_TO_PRICE_XAUUSD
+    stated = parsed.get("stop_loss")
+    parsed["stop_loss"] = round(
+        float(entry_low) - dist if direction == "BUY" else float(entry_high) + dist, 2,
+    )
+    return (f"SL Parsing OFF — stated stop {stated} replaced with "
+            f"{parsed['stop_loss']:.2f} ({pips:.0f} pips from zone, via {src})")
 
 
 async def try_handle_close_all_trigger(

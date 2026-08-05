@@ -32,6 +32,22 @@ TPSL_MODE_CHOICES   = ("off", "on", "stealth")
 ANCHOR_CHOICES      = ("unified", "distributed")
 TRAIL_MODE_CHOICES  = ("off", "candle", "step", "fractal", "tp")
 BE_MODE_CHOICES     = ("entry", "entry_buffer")
+# How grid mode places its resting legs (2026-08-04).
+#   "zone" -- span the SIGNAL's own stated entry zone (zone_low/zone_high),
+#             the behaviour since 2026-07-28 and the default so no existing
+#             template changes on upgrade.
+#   "step" -- ignore the zone; step grid_step_pts away from the anchor's own
+#             base price, which is what the reference "sniper" copier does
+#             (its panel calls this LADDER STEP).
+# Why this is a choice rather than a fix: zone-spanning honours the levels
+# the signal actually named, but it silently loses legs. A leg landing on
+# the wrong side of the market is skipped by HandleOpenTemplateGrid, and
+# since the anchor now always fires at market regardless of the zone
+# (2026-08-03 always-fire directive), price has frequently already run past
+# the zone by then -- so the anchor fills and the resting leg quietly never
+# appears. Step mode is immune by construction: it is always measured away
+# from current price, so it can never land on the wrong side.
+PENDING_MODE_CHOICES = ("zone", "step")
 
 # TP ladder depth. Briefly raised to 10 (2026-07-29) to match the copier
 # EA's own InpC{n}_TP1..TP10 / Pct1..Pct10 inputs, then reverted back to 8
@@ -56,6 +72,16 @@ DEFAULTS: dict = {
     "cancel_pending":    False,
     "group_tp_action":   False,
     "sig_guard":         False,
+    # Sig Guard distance, in pips. The reference copier's panel shows this
+    # as part of the guard itself ("SIG GUARD: 20p"), where ours was a bare
+    # on/off. 0 keeps the original all-or-nothing behaviour (any open trade
+    # on this channel in the same direction blocks); >0 narrows it to "only
+    # block when the existing trade's entry is within this many pips", so a
+    # genuinely separate setup further down the chart can still trade.
+    "sig_guard_pips":    0.0,
+    # See PENDING_MODE_CHOICES. "zone" preserves the behaviour of every
+    # template saved before this field existed.
+    "pending_mode":      "zone",
 
     # ── Entries & lots (2026-07-29) ──────────────────────────────────
     # The copier splits what this module previously collapsed into a
@@ -220,7 +246,8 @@ _BOOL_FIELDS  = (
 _FLOAT_FIELDS = (
     "harvest_threshold", "grid_step_pts", "be_buffer_pts",
     "lot_anchor", "lot_pending", "sl_pips", "risk_pct", "equity_protect",
-    "late_guard_pips", "trail_distance", "trail_step", "trail_activation",
+    "late_guard_pips", "sig_guard_pips",
+    "trail_distance", "trail_step", "trail_activation",
     "trail_padding", "max_spread_pips", "harvest_pips",
     "atr_sl_mult", "atr_tp1_mult", "guard_pips", "safety_cap_pips",
     "emergency_sl_mult", "signal_rr_ratio", "manual_sl_push_pips",
@@ -230,12 +257,13 @@ _INT_FIELDS   = (
     "cancel_pending_level", "slippage", "signal_max_age_sec",
     "atr_period", "tp1_trigger_level",
 )
-_STR_FIELDS   = ("mode", "tpsl_mode", "anchor", "trail_mode", "be_mode")
+_STR_FIELDS   = ("mode", "tpsl_mode", "anchor", "trail_mode", "be_mode",
+                 "pending_mode")
 
 _CHOICES = {
     "mode": MODE_CHOICES, "tpsl_mode": TPSL_MODE_CHOICES,
     "anchor": ANCHOR_CHOICES, "trail_mode": TRAIL_MODE_CHOICES,
-    "be_mode": BE_MODE_CHOICES,
+    "be_mode": BE_MODE_CHOICES, "pending_mode": PENDING_MODE_CHOICES,
 }
 
 
@@ -313,6 +341,7 @@ def _clean_fields(fields: dict) -> dict:
     for f in ("lot_anchor", "lot_pending"):
         merged[f] = max(0.0, merged[f])
     for f in ("sl_pips", "risk_pct", "equity_protect", "late_guard_pips",
+              "sig_guard_pips",
               "trail_distance", "trail_step", "trail_activation",
               "trail_padding", "max_spread_pips", "harvest_pips",
               "atr_sl_mult", "atr_tp1_mult", "guard_pips",

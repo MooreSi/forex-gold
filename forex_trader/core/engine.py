@@ -56,6 +56,7 @@ from forex_trader.core.core_logic_keyword_triggers import (
     try_handle_risk_free_be_trigger,
     try_handle_tp_hit_trigger,
     apply_mirror_copy,
+    apply_sl_parsing_override,
 )
 from forex_trader.core.core_closed_market_queue import flush_queued_limits
 from forex_trader.core.core_ref_signal_backfill import backfill_ref_signals
@@ -220,6 +221,13 @@ from forex_trader.core.core_template_placeholder_repair import (
     repair_template_placeholders as _repair_template_placeholders,
 )
 from forex_trader.core.core_equity_protect import check_equity_protect as _check_equity_protect_impl
+from forex_trader.core.core_signal_snapshot import (
+    capture_pending_snapshots as _capture_signal_snapshots_impl,
+    capture_background_snapshot as _capture_background_snapshot_impl,
+)
+from forex_trader.core.core_orphan_reconcile import (
+    reconcile_orphaned_trades as _reconcile_orphaned_trades_impl,
+)
 from forex_trader.core.core_orb_report import (
     build_orb_report as _build_orb_report_impl,
     orb_auto_execute as _orb_auto_execute_impl,
@@ -377,6 +385,7 @@ class SimulationEngine:
         self._scanner_task        = asyncio.create_task(self._signal_scanner_loop())
         self._bot_task            = asyncio.create_task(self._bot_command_loop())
         self._email_task          = asyncio.create_task(self._email_scheduler_loop())
+        self._sigsnap_task        = asyncio.create_task(self._signal_snapshot_loop())
         self._bridge_watchdog_task = asyncio.create_task(self._bridge_watchdog_loop())
         self._max_tp_task         = asyncio.create_task(self._max_tp_checker_loop())
         self._signal_bus_prune_task = asyncio.create_task(self._signal_bus_prune_loop())
@@ -1117,6 +1126,18 @@ class SimulationEngine:
                             await _check_equity_protect_impl(open_trades, self._bridge, self.close_trade)
                         except Exception:
                             log.debug("Equity Protect check failed", exc_info=True)
+                        # Repair rows the broker has already closed but the
+                        # app never heard about (see core_orphan_reconcile).
+                        # Every 60s, not every cycle: it costs a /positions
+                        # read plus a history lookup per suspect row, and a
+                        # stranded row has usually been stranded for hours.
+                        _now_orph = time.time()
+                        if _now_orph - getattr(self, "_last_orphan_sweep", 0.0) > 60.0:
+                            self._last_orphan_sweep = _now_orph
+                            try:
+                                await _reconcile_orphaned_trades_impl(self._bridge, self.close_trade)
+                            except Exception:
+                                log.debug("Orphan reconcile failed", exc_info=True)
                     rs = await db_module.to_db_thread(db_module.get_risk_settings)
                     profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
                     # Refresh candle cache once per cycle (shared by all DPM trade handlers)
@@ -2147,311 +2168,333 @@ class SimulationEngine:
         exclude_high_risk = bool(rs.get("exclude_high_risk", 0))
 
         for msg in msgs:
-            tg_id    = str(msg.get("id") or "")
-            group_id = str(msg.get("group_id") or "")
-            text     = (msg.get("text") or "").strip()
-            if not tg_id or not text:
-                continue
-            from forex_trader.core import latency_trace as _lt_scan
-            _lt_scan.mark(tg_id, "t6_scanning")
-            if slot_groups and group_id and group_id not in slot_groups:
-                continue
-
-            if exclude_high_risk and "high risk" in text.lower():
-                log.info("[engine] Skipping high-risk signal tg_id=%s", tg_id)
-                continue
-
-            slot         = slot_groups.get(group_id, 1)
-            channel_name = self._tg_reader.get_group_name(group_id) or f"Channel {slot}"
-
-            # Resolve channel parser config — auto-bootstrap on first sight
-            ch_cfg = db_module.get_channel_parser_config(channel_name)
-            if ch_cfg is None:
-                _default_fmt    = 'format_ab' if slot == 1 else 'gd2'
-                _default_prefix = SIGNAL_PREFIX if _default_fmt == 'format_ab' else ''
-                _default_ime    = 1  # enabled for both format_ab and gd2
-                db_module.save_channel_parser_config(
-                    channel_name, _default_fmt, _default_prefix,
-                    bool(_default_ime), True,
-                    f'Auto-configured from slot {slot}',
-                )
-                ch_cfg = db_module.get_channel_parser_config(channel_name) or {}
-            parser_fmt  = ch_cfg.get('parser_format', 'auto')
-            sig_prefix  = ch_cfg.get('signal_prefix') or SIGNAL_PREFIX
-            # Default ime_enabled to True for both known formats; only False when
-            # the user has explicitly set it to 0 in the channel config.
-            _ime_default = 1 if parser_fmt in ('format_ab', 'gd2') else 0
-            ime_enabled  = bool(ch_cfg.get('instant_entry_enabled', _ime_default))
-
-            if parser_fmt == 'none' or not bool(ch_cfg.get('enabled', 1)):
-                continue
-
-            # ── Logic Keywords (Parsing page) ────────────────────────────────
-            # Global, user-editable phrase lexicons -- checked ahead of
-            # everything else below since Ignore Media/Forwarded and the
-            # CLOSE ALL/RISK FREE-BE/TP HIT triggers are orthogonal to normal
-            # signal parsing (a "CLOSE ALL" message, say, would never parse as
-            # a signal anyway, but skipping it here avoids it falling through
-            # to the unrecognised-message queue). See core_logic_keyword_triggers.py.
-            _lk_skip = should_skip_media_or_forwarded(msg, rs)
-            if _lk_skip:
-                log.debug("[LogicKeywords] tg_id=%s skipped — %s", tg_id, _lk_skip)
-                continue
-            if await try_handle_close_all_trigger(
-                text, channel_name, tg_id, rs, close_trade_fn=self.close_trade,
-            ):
-                continue
-            if await try_handle_risk_free_be_trigger(
-                text, channel_name, tg_id, rs, bridge=self._bridge,
-            ):
-                continue
-            if await try_handle_tp_hit_trigger(text, channel_name, tg_id, rs):
-                continue
-
-            # Dedup — skip already-processed messages, but re-parse edited ones
-            # if the signal hasn't been executed yet (direction correction).
-            with db_module.db() as conn:
-                _existing = conn.execute(
-                    "SELECT id, direction, status, raw_text, entry_low FROM vantage_tg_signals "
-                    "WHERE tg_message_id=?", (tg_id,)
-                ).fetchone()
-            if _existing:
-                _ex = db_module.row_to_dict(_existing)
-                _edit_result = await _handle_signal_edit_impl(
-                    tg_id, group_id, channel_name, text, parser_fmt, _ex,
-                    ai_fallback_fn=self._try_ai_signal_fallback,
-                    find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
-                    close_trade_fn=self.close_trade,
-                )
-                if _edit_result is None:
+            # Per-message, not per-cycle: the scanner loop below is the only
+            # thing that turns a buffered Telegram message into a trade, and
+            # an unhandled error anywhere in it used to propagate to the
+            # caller's catch (see _signal_scanner_loop), abandoning every
+            # message still queued behind this one. Confirmed live
+            # 2026-08-05: a single missing stop loss (TypeError out of
+            # validate_signal) aborted seven whole scan passes in 100
+            # minutes -- every other channel's signals in those passes were
+            # silently dropped too, with only one warning line to show for
+            # it. Now one bad message is skipped and the rest of the batch
+            # still executes.
+            try:
+                tg_id    = str(msg.get("id") or "")
+                group_id = str(msg.get("group_id") or "")
+                text     = (msg.get("text") or "").strip()
+                if not tg_id or not text:
                     continue
-                # A pending_followup signal just received its SL/TP via this
-                # edit — fall through to the normal Instant-Market-Entry /
-                # SL-adjustment / classify-and-parse pipeline below exactly
-                # like a brand-new message would (the edited raw_text now
-                # parses as a full signal on its own); _edit_result itself is
-                # deliberately unused past this point, matching the original
-                # inline code's behavior of re-deriving `parsed` from scratch
-                # rather than reusing the edit-time reparse.
-
-            # ── Instant Market Entry ────────────────────────────────────────
-            # format_ab: fires on "XAUUSD Buy Now" / "XAU Sell Now" (requires NOW).
-            # gd2: fires on "XAU USD BUY [NOW]" / "XAU USD SELL [NOW]" with or
-            #      without "NOW", or the newer "Buy/Sell Zone Now" bare trigger
-            #      (see is_gd2_message — a plain "XAU" substring check missed
-            #      this format entirely, since none of its messages mention
-            #      XAU anywhere, silently disabling IME for GD2 on 2026-07-06
-            #      even with the setting on and correctly synced).  GD2
-            #      messages that already carry SL/TP are excluded (they go
-            #      through parse_gd2_signal as full signals).
-            _ime_gate = is_gd2_message(text) if parser_fmt == 'gd2' else "XAU" in text.upper()
-            if bool(rs.get("immediate_market_entry", 0)) and _ime_gate and ime_enabled:
-                if parser_fmt == 'gd2':
-                    _instant = parse_gd2_instant_entry(text)
-                else:
-                    _instant = parse_instant_entry(text)
-                if _instant:
-                    _instant_dir, _instant_px = _instant
-                    await self._process_instant_entry(
-                        msg, tg_id, group_id, channel_name, text,
-                        _instant_dir, _instant_px, rs, auto_execute,
-                    )
+                from forex_trader.core import latency_trace as _lt_scan
+                _lt_scan.mark(tg_id, "t6_scanning")
+                if slot_groups and group_id and group_id not in slot_groups:
                     continue
 
-            # ── SL-adjustment fast path (learned rule only — no AI call) ────
-            # Checked before any entry-signal parsing since it's an orthogonal
-            # message category (a follow-up to an EXISTING trade, e.g. "Adjust
-            # SL to 4060", not a new entry) — see signal_parser.
-            # check_sl_adjustment_rules and _apply_sl_adjustment above. A
-            # message with no matching rule yet still reaches the entry-signal
-            # gates below and, if those also fail, the AI fallback classifies
-            # it there instead (first-time cost; a rule gets built on approval
-            # so it never needs another AI call for this channel's wording).
-            _sl_adj = check_sl_adjustment_rules(text, channel_name)
-            if _sl_adj is not None:
-                await self._apply_sl_adjustment(_sl_adj, channel_name, tg_id, via="learned_rule")
-                continue
+                if exclude_high_risk and "high risk" in text.lower():
+                    log.info("[engine] Skipping high-risk signal tg_id=%s", tg_id)
+                    continue
 
-            # ── Logic Keywords: exclusion pre-check ──────────────────────────
-            # Gates only the new-signal-parsing path below (unlike the
-            # triggers above, which run regardless) -- see
-            # should_skip_for_exclusion's own docstring for why this doesn't
-            # also gate on symbol_tokens.
-            _lk_parse_skip = should_skip_for_exclusion(text, rs)
-            if _lk_parse_skip:
-                log.debug("[LogicKeywords] tg_id=%s skipped — %s", tg_id, _lk_parse_skip)
-                continue
+                slot         = slot_groups.get(group_id, 1)
+                channel_name = self._tg_reader.get_group_name(group_id) or f"Channel {slot}"
 
-            # ── Channel-name-based signal parsing ────────────────────────────
-            source_label = channel_name
-            parsed = await _classify_and_parse_impl(
-                tg_id, group_id, channel_name, text, msg, parser_fmt, sig_prefix,
-                ai_fallback_fn=self._try_ai_signal_fallback,
-                queue_unrecognised_fn=self._queue_unrecognised,
-                rs=rs,
-            )
-            if parsed is None:
-                continue
-
-            # ── Logic Keywords: Enable TP/SL Parsing toggles ─────────────────
-            # OFF means "don't use this signal's own stated TP/SL levels" --
-            # strips the field(s) right after parsing so every downstream
-            # consumer (validation, strategy resolution, execution) sees
-            # exactly the same "missing field" shape it already handles for
-            # a signal that never had one, rather than a new code path.
-            if not bool(rs.get("lk_enable_tp_parsing", 1)):
-                for _tp_i in range(1, 9):
-                    parsed[f"tp{_tp_i}"] = None
-            if not bool(rs.get("lk_enable_sl_parsing", 1)):
-                parsed["stop_loss"] = None
-
-            # ── Parsing Settings: Reverse / Mirror Copy ──────────────────────
-            # Must run before _record_staleness_or_new_impl below, which
-            # writes `parsed` verbatim into vantage_tg_signals -- that row is
-            # what the UI, the "signal detected" Telegram alert and the audit
-            # trail all read back, so mirroring after it would leave the
-            # recorded signal facing the opposite way to the trade actually
-            # placed from it.
-            _mirror = apply_mirror_copy(parsed, rs)
-            if _mirror:
-                log.info("[ParsingSettings] Mirror Copy tg_id=%s — %s", tg_id, _mirror)
-
-            # Staleness guard — signals are scalps: an entry zone is only valid for
-            # minutes. Anything older than 4 minutes at processing time is recorded
-            # as historical and never executed. The previous 2-hour window let a
-            # 22-minute-old the reference channel signal execute at market after a downtime
-            # (2026-07-03: toggle-off gap → backfilled signal filled 22min late at
-            # a worse price → straight to SL). 4 min covers Telegram delivery
-            # latency plus one scan cycle, nothing more.
-            _is_fresh = await _record_staleness_or_new_impl(
-                tg_id, group_id, channel_name, msg, parsed, source_label,
-            )
-            if not _is_fresh:
-                continue
-
-            from forex_trader.core import latency_trace as _lt_dec
-            _lt_dec.mark(tg_id, "t7_decided")
-
-            if parsed.get("_ai_extracted"):
-                # The deterministic parser missed this message (format drift) —
-                # log it for the review tab; the Telegram notification is
-                # merged into the fmt_signal() call below (single message
-                # instead of two separate ones hitting the user's phone).
-                log.info(
-                    "[AI-Fallback] tg_id=%s executing an AI-recovered signal "
-                    "(confidence=%.2f)", tg_id, parsed.get("_ai_confidence", 0),
-                )
-
-            executed             = False
-            exec_lot             = None
-            exec_price           = None
-            trade_result         = None
-            _gap_note            = ""  # only set below if gap-adjusted execution fires
-
-            # Channel override > auto-Claude rec > global Active Strategy,
-            # plus the per-signal "High Risk" override, session gate, and
-            # trading-paused check.
-            _strat_result = await _resolve_strategy_and_skip_reason_impl(
-                rs, channel_name, text, parsed, auto_execute,
-                getattr(self, "_cfg", {}), self,
-                is_trading_paused_fn=lambda: db_module.to_db_thread(self.is_trading_paused),
-            )
-            strategy             = _strat_result["strategy"]
-            strategy_name        = _strat_result["strategy_name"]
-            skip_reason          = _strat_result["skip_reason"]
-            _sess_ok             = _strat_result["sess_ok"]
-            _per_signal_skip     = _strat_result["per_signal_skip"]
-            _per_signal_skip_rsn = _strat_result["per_signal_skip_reason"]
-
-            if auto_execute:
-                # Limit Runner: a genuine EA pending order, not a market-fill
-                # signal — parse_limit_order_signal's `tp_open` marker (always
-                # present, True or False, only on its own return dicts) means
-                # this signal would default to Limit Runner regardless of
-                # whatever channel-override/active-strategy _resolve_strategy_
-                # and_skip_reason_impl above just computed, since the strategy
-                # here is format-triggered, not channel-configured — EXCEPT
-                # when the channel has an EA Template assigned (Trading >
-                # Strategy > Channel Strategy > "Template: <name>"): a
-                # template fully replaces strategy dispatch by design (see
-                # core_ea_templates.py's module docstring), so it must win
-                # over the format-triggered default too, not just over the
-                # built-in strategies. Fixed 2026-07-24 — a template-assigned
-                # channel's "[LIMITS]"-formatted signals were silently always
-                # executing as Limit Runner instead, so a configured Grid
-                # template never actually ran for them.
-                if parsed.get("tp_open") is not None and not _ea_templates.is_template_override(strategy):
-                    strategy      = STRATEGY_LIMIT_RUNNER
-                    strategy_name = STRATEGY_NAMES[STRATEGY_LIMIT_RUNNER]
-                    _exec_result = await _handle_limit_order_signal_impl(
-                        parsed, tg_id, channel_name, source_label, rs,
-                        _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
-                        get_trading_balance_fn=self._get_trading_balance,
-                        suggest_lot_size_fn=self.suggest_lot_size,
-                        bridge=self._bridge,
+                # Resolve channel parser config — auto-bootstrap on first sight
+                ch_cfg = db_module.get_channel_parser_config(channel_name)
+                if ch_cfg is None:
+                    _default_fmt    = 'format_ab' if slot == 1 else 'gd2'
+                    _default_prefix = SIGNAL_PREFIX if _default_fmt == 'format_ab' else ''
+                    _default_ime    = 1  # enabled for both format_ab and gd2
+                    db_module.save_channel_parser_config(
+                        channel_name, _default_fmt, _default_prefix,
+                        bool(_default_ime), True,
+                        f'Auto-configured from slot {slot}',
                     )
-                    executed     = False
-                    exec_lot     = None
-                    exec_price   = None
-                    trade_result = None
-                    skip_reason  = _exec_result["skip_reason"]
-                    # The resting order itself is always Limit Runner's entry
-                    # mechanic, but a channel with an explicit strategy
-                    # override manages the resulting position under that
-                    # override instead (see core_limit_order_signal.py's
-                    # _resolve_management). Report what will actually manage
-                    # the trade, so the Telegram alert and the recorded
-                    # signal don't keep claiming "Limit Runner" for a
-                    # position the EA will run as e.g. Signal Climber.
-                    _manage = _exec_result.get("manage_strategy")
-                    if _manage and _manage != STRATEGY_LIMIT_RUNNER:
-                        strategy      = _manage
-                        strategy_name = STRATEGY_NAMES.get(_manage, _manage)
-                else:
-                    _exec_result = await _execute_auto_signal_impl(
-                        parsed, tg_id, channel_name, source_label, strategy, rs,
-                        _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
-                        self._bridge,
-                        get_open_trades_fn=self.get_open_trades,
+                    ch_cfg = db_module.get_channel_parser_config(channel_name) or {}
+                parser_fmt  = ch_cfg.get('parser_format', 'auto')
+                sig_prefix  = ch_cfg.get('signal_prefix') or SIGNAL_PREFIX
+                # Default ime_enabled to True for both known formats; only False when
+                # the user has explicitly set it to 0 in the channel config.
+                _ime_default = 1 if parser_fmt in ('format_ab', 'gd2') else 0
+                ime_enabled  = bool(ch_cfg.get('instant_entry_enabled', _ime_default))
+
+                if parser_fmt == 'none' or not bool(ch_cfg.get('enabled', 1)):
+                    continue
+
+                # ── Logic Keywords (Parsing page) ────────────────────────────────
+                # Global, user-editable phrase lexicons -- checked ahead of
+                # everything else below since Ignore Media/Forwarded and the
+                # CLOSE ALL/RISK FREE-BE/TP HIT triggers are orthogonal to normal
+                # signal parsing (a "CLOSE ALL" message, say, would never parse as
+                # a signal anyway, but skipping it here avoids it falling through
+                # to the unrecognised-message queue). See core_logic_keyword_triggers.py.
+                _lk_skip = should_skip_media_or_forwarded(msg, rs)
+                if _lk_skip:
+                    log.debug("[LogicKeywords] tg_id=%s skipped — %s", tg_id, _lk_skip)
+                    continue
+                if await try_handle_close_all_trigger(
+                    text, channel_name, tg_id, rs, close_trade_fn=self.close_trade,
+                ):
+                    continue
+                if await try_handle_risk_free_be_trigger(
+                    text, channel_name, tg_id, rs, bridge=self._bridge,
+                ):
+                    continue
+                if await try_handle_tp_hit_trigger(text, channel_name, tg_id, rs):
+                    continue
+
+                # Dedup — skip already-processed messages, but re-parse edited ones
+                # if the signal hasn't been executed yet (direction correction).
+                with db_module.db() as conn:
+                    _existing = conn.execute(
+                        "SELECT id, direction, status, raw_text, entry_low FROM vantage_tg_signals "
+                        "WHERE tg_message_id=?", (tg_id,)
+                    ).fetchone()
+                if _existing:
+                    _ex = db_module.row_to_dict(_existing)
+                    _edit_result = await _handle_signal_edit_impl(
+                        tg_id, group_id, channel_name, text, parser_fmt, _ex,
+                        ai_fallback_fn=self._try_ai_signal_fallback,
                         find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
-                        check_pre_trade_filters_fn=self._check_pre_trade_filters,
-                        suggest_lot_size_fn=self.suggest_lot_size,
-                        get_trading_balance_fn=self._get_trading_balance,
-                        open_trade_fn=self.open_trade,
+                        close_trade_fn=self.close_trade,
                     )
-                    executed     = _exec_result["executed"]
-                    exec_lot     = _exec_result["exec_lot"]
-                    exec_price   = _exec_result["exec_price"]
-                    trade_result = _exec_result["trade_result"]
-                    skip_reason  = _exec_result["skip_reason"]
-                    _gap_note    = _exec_result["gap_note"]
-                    if _exec_result.get("followup_matched") or _exec_result.get("deferred_stood_down"):
-                        new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
-                                                     "source_label": source_label})
+                    if _edit_result is None:
+                        continue
+                    # A pending_followup signal just received its SL/TP via this
+                    # edit — fall through to the normal Instant-Market-Entry /
+                    # SL-adjustment / classify-and-parse pipeline below exactly
+                    # like a brand-new message would (the edited raw_text now
+                    # parses as a full signal on its own); _edit_result itself is
+                    # deliberately unused past this point, matching the original
+                    # inline code's behavior of re-deriving `parsed` from scratch
+                    # rather than reusing the edit-time reparse.
+
+                # ── Instant Market Entry ────────────────────────────────────────
+                # format_ab: fires on "XAUUSD Buy Now" / "XAU Sell Now" (requires NOW).
+                # gd2: fires on "XAU USD BUY [NOW]" / "XAU USD SELL [NOW]" with or
+                #      without "NOW", or the newer "Buy/Sell Zone Now" bare trigger
+                #      (see is_gd2_message — a plain "XAU" substring check missed
+                #      this format entirely, since none of its messages mention
+                #      XAU anywhere, silently disabling IME for GD2 on 2026-07-06
+                #      even with the setting on and correctly synced).  GD2
+                #      messages that already carry SL/TP are excluded (they go
+                #      through parse_gd2_signal as full signals).
+                _ime_gate = is_gd2_message(text) if parser_fmt == 'gd2' else "XAU" in text.upper()
+                if bool(rs.get("immediate_market_entry", 0)) and _ime_gate and ime_enabled:
+                    if parser_fmt == 'gd2':
+                        _instant = parse_gd2_instant_entry(text)
+                    else:
+                        _instant = parse_instant_entry(text)
+                    if _instant:
+                        _instant_dir, _instant_px = _instant
+                        await self._process_instant_entry(
+                            msg, tg_id, group_id, channel_name, text,
+                            _instant_dir, _instant_px, rs, auto_execute,
+                        )
                         continue
 
-            # Forwarded trade (centralized signal generation): the VPS actually
-            # placed it — trade_id/mt5_ticket belong to its DB, not this node's
-            # — and its own _handle_signal_order already schedules the correct
-            # "Node: Remote" notification via _background_open_commentary. This
-            # node sending its own fmt_signal alert here as well would always
-            # read "Node: Local" (_node_label() reflects this machine, not
-            # which one executed the trade) — a duplicate, misleading alert
-            # claiming local execution for a trade the VPS handled.
-            if not (trade_result and trade_result.get("executed_remotely")):
-                _alert_strategy = (
-                    f"{strategy_name} | {_gap_note}" if _gap_note else strategy_name
+                # ── SL-adjustment fast path (learned rule only — no AI call) ────
+                # Checked before any entry-signal parsing since it's an orthogonal
+                # message category (a follow-up to an EXISTING trade, e.g. "Adjust
+                # SL to 4060", not a new entry) — see signal_parser.
+                # check_sl_adjustment_rules and _apply_sl_adjustment above. A
+                # message with no matching rule yet still reaches the entry-signal
+                # gates below and, if those also fail, the AI fallback classifies
+                # it there instead (first-time cost; a rule gets built on approval
+                # so it never needs another AI call for this channel's wording).
+                _sl_adj = check_sl_adjustment_rules(text, channel_name)
+                if _sl_adj is not None:
+                    await self._apply_sl_adjustment(_sl_adj, channel_name, tg_id, via="learned_rule")
+                    continue
+
+                # ── Logic Keywords: exclusion pre-check ──────────────────────────
+                # Gates only the new-signal-parsing path below (unlike the
+                # triggers above, which run regardless) -- see
+                # should_skip_for_exclusion's own docstring for why this doesn't
+                # also gate on symbol_tokens.
+                _lk_parse_skip = should_skip_for_exclusion(text, rs)
+                if _lk_parse_skip:
+                    log.debug("[LogicKeywords] tg_id=%s skipped — %s", tg_id, _lk_parse_skip)
+                    continue
+
+                # ── Channel-name-based signal parsing ────────────────────────────
+                source_label = channel_name
+                parsed = await _classify_and_parse_impl(
+                    tg_id, group_id, channel_name, text, msg, parser_fmt, sig_prefix,
+                    ai_fallback_fn=self._try_ai_signal_fallback,
+                    queue_unrecognised_fn=self._queue_unrecognised,
+                    rs=rs,
                 )
-                alert = telegram_alerts.fmt_signal(
-                    parsed, channel_name, executed,
-                    exec_lot, exec_price, skip_reason, _alert_strategy,
-                    ai_confidence=parsed.get("_ai_confidence") if parsed.get("_ai_extracted") else None,
-                    ai_reasoning=parsed.get("_ai_reasoning", "") if parsed.get("_ai_extracted") else "",
-                    mt5_ticket=(trade_result or {}).get("mt5_ticket"),
+                if parsed is None:
+                    continue
+
+                # ── Logic Keywords: Enable TP/SL Parsing toggles ─────────────────
+                # OFF means "don't use this signal's own stated TP/SL levels".
+                # TP levels are stripped outright: every consumer past the parser
+                # already handles a signal that states none (they're Optional
+                # throughout, and validate_signal skips a None TP).
+                #
+                # A stop is NOT optional in the same way, so SL Parsing OFF
+                # substitutes a configured distance instead of stripping the
+                # field -- see apply_sl_parsing_override for the resolution order
+                # and for the live crash that stripping caused.
+                if not bool(rs.get("lk_enable_tp_parsing", 1)):
+                    for _tp_i in range(1, 9):
+                        parsed[f"tp{_tp_i}"] = None
+                _sl_sub = apply_sl_parsing_override(parsed, rs, channel_name)
+                if _sl_sub:
+                    log.info("[LogicKeywords] tg_id=%s — %s", tg_id, _sl_sub)
+
+                # ── Parsing Settings: Reverse / Mirror Copy ──────────────────────
+                # Must run before _record_staleness_or_new_impl below, which
+                # writes `parsed` verbatim into vantage_tg_signals -- that row is
+                # what the UI, the "signal detected" Telegram alert and the audit
+                # trail all read back, so mirroring after it would leave the
+                # recorded signal facing the opposite way to the trade actually
+                # placed from it.
+                _mirror = apply_mirror_copy(parsed, rs)
+                if _mirror:
+                    log.info("[ParsingSettings] Mirror Copy tg_id=%s — %s", tg_id, _mirror)
+
+                # Staleness guard — signals are scalps: an entry zone is only valid for
+                # minutes. Anything older than 4 minutes at processing time is recorded
+                # as historical and never executed. The previous 2-hour window let a
+                # 22-minute-old the reference channel signal execute at market after a downtime
+                # (2026-07-03: toggle-off gap → backfilled signal filled 22min late at
+                # a worse price → straight to SL). 4 min covers Telegram delivery
+                # latency plus one scan cycle, nothing more.
+                _is_fresh = await _record_staleness_or_new_impl(
+                    tg_id, group_id, channel_name, msg, parsed, source_label,
                 )
-                asyncio.create_task(telegram_alerts.send_message(alert, event_type="tg_signal_detected"))
-            new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
-                                         "source_label": source_label})
+                if not _is_fresh:
+                    continue
+
+                from forex_trader.core import latency_trace as _lt_dec
+                _lt_dec.mark(tg_id, "t7_decided")
+
+                if parsed.get("_ai_extracted"):
+                    # The deterministic parser missed this message (format drift) —
+                    # log it for the review tab; the Telegram notification is
+                    # merged into the fmt_signal() call below (single message
+                    # instead of two separate ones hitting the user's phone).
+                    log.info(
+                        "[AI-Fallback] tg_id=%s executing an AI-recovered signal "
+                        "(confidence=%.2f)", tg_id, parsed.get("_ai_confidence", 0),
+                    )
+
+                executed             = False
+                exec_lot             = None
+                exec_price           = None
+                trade_result         = None
+                _gap_note            = ""  # only set below if gap-adjusted execution fires
+
+                # Channel override > auto-Claude rec > global Active Strategy,
+                # plus the per-signal "High Risk" override, session gate, and
+                # trading-paused check.
+                _strat_result = await _resolve_strategy_and_skip_reason_impl(
+                    rs, channel_name, text, parsed, auto_execute,
+                    getattr(self, "_cfg", {}), self,
+                    is_trading_paused_fn=lambda: db_module.to_db_thread(self.is_trading_paused),
+                )
+                strategy             = _strat_result["strategy"]
+                strategy_name        = _strat_result["strategy_name"]
+                skip_reason          = _strat_result["skip_reason"]
+                _sess_ok             = _strat_result["sess_ok"]
+                _per_signal_skip     = _strat_result["per_signal_skip"]
+                _per_signal_skip_rsn = _strat_result["per_signal_skip_reason"]
+
+                if auto_execute:
+                    # Limit Runner: a genuine EA pending order, not a market-fill
+                    # signal — parse_limit_order_signal's `tp_open` marker (always
+                    # present, True or False, only on its own return dicts) means
+                    # this signal would default to Limit Runner regardless of
+                    # whatever channel-override/active-strategy _resolve_strategy_
+                    # and_skip_reason_impl above just computed, since the strategy
+                    # here is format-triggered, not channel-configured — EXCEPT
+                    # when the channel has an EA Template assigned (Trading >
+                    # Strategy > Channel Strategy > "Template: <name>"): a
+                    # template fully replaces strategy dispatch by design (see
+                    # core_ea_templates.py's module docstring), so it must win
+                    # over the format-triggered default too, not just over the
+                    # built-in strategies. Fixed 2026-07-24 — a template-assigned
+                    # channel's "[LIMITS]"-formatted signals were silently always
+                    # executing as Limit Runner instead, so a configured Grid
+                    # template never actually ran for them.
+                    if parsed.get("tp_open") is not None and not _ea_templates.is_template_override(strategy):
+                        strategy      = STRATEGY_LIMIT_RUNNER
+                        strategy_name = STRATEGY_NAMES[STRATEGY_LIMIT_RUNNER]
+                        _exec_result = await _handle_limit_order_signal_impl(
+                            parsed, tg_id, channel_name, source_label, rs,
+                            _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
+                            get_trading_balance_fn=self._get_trading_balance,
+                            suggest_lot_size_fn=self.suggest_lot_size,
+                            bridge=self._bridge,
+                        )
+                        executed     = False
+                        exec_lot     = None
+                        exec_price   = None
+                        trade_result = None
+                        skip_reason  = _exec_result["skip_reason"]
+                        # The resting order itself is always Limit Runner's entry
+                        # mechanic, but a channel with an explicit strategy
+                        # override manages the resulting position under that
+                        # override instead (see core_limit_order_signal.py's
+                        # _resolve_management). Report what will actually manage
+                        # the trade, so the Telegram alert and the recorded
+                        # signal don't keep claiming "Limit Runner" for a
+                        # position the EA will run as e.g. Signal Climber.
+                        _manage = _exec_result.get("manage_strategy")
+                        if _manage and _manage != STRATEGY_LIMIT_RUNNER:
+                            strategy      = _manage
+                            strategy_name = STRATEGY_NAMES.get(_manage, _manage)
+                    else:
+                        _exec_result = await _execute_auto_signal_impl(
+                            parsed, tg_id, channel_name, source_label, strategy, rs,
+                            _sess_ok, _per_signal_skip, _per_signal_skip_rsn, skip_reason,
+                            self._bridge,
+                            get_open_trades_fn=self.get_open_trades,
+                            find_and_apply_instant_followup_fn=self._find_and_apply_instant_followup,
+                            check_pre_trade_filters_fn=self._check_pre_trade_filters,
+                            suggest_lot_size_fn=self.suggest_lot_size,
+                            get_trading_balance_fn=self._get_trading_balance,
+                            open_trade_fn=self.open_trade,
+                        )
+                        executed     = _exec_result["executed"]
+                        exec_lot     = _exec_result["exec_lot"]
+                        exec_price   = _exec_result["exec_price"]
+                        trade_result = _exec_result["trade_result"]
+                        skip_reason  = _exec_result["skip_reason"]
+                        _gap_note    = _exec_result["gap_note"]
+                        if _exec_result.get("followup_matched") or _exec_result.get("deferred_stood_down"):
+                            new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
+                                                         "source_label": source_label})
+                            continue
+
+                # Forwarded trade (centralized signal generation): the VPS actually
+                # placed it — trade_id/mt5_ticket belong to its DB, not this node's
+                # — and its own _handle_signal_order already schedules the correct
+                # "Node: Remote" notification via _background_open_commentary. This
+                # node sending its own fmt_signal alert here as well would always
+                # read "Node: Local" (_node_label() reflects this machine, not
+                # which one executed the trade) — a duplicate, misleading alert
+                # claiming local execution for a trade the VPS handled.
+                if not (trade_result and trade_result.get("executed_remotely")):
+                    _alert_strategy = (
+                        f"{strategy_name} | {_gap_note}" if _gap_note else strategy_name
+                    )
+                    alert = telegram_alerts.fmt_signal(
+                        parsed, channel_name, executed,
+                        exec_lot, exec_price, skip_reason, _alert_strategy,
+                        ai_confidence=parsed.get("_ai_confidence") if parsed.get("_ai_extracted") else None,
+                        ai_reasoning=parsed.get("_ai_reasoning", "") if parsed.get("_ai_extracted") else "",
+                        mt5_ticket=(trade_result or {}).get("mt5_ticket"),
+                    )
+                    asyncio.create_task(telegram_alerts.send_message(alert, event_type="tg_signal_detected"))
+                new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
+                                             "source_label": source_label})
+            except Exception as _msg_exc:
+                log.exception("Signal scan failed for tg_id=%s (channel=%s) — "
+                              "skipping this message, continuing the batch: %s",
+                              msg.get("id"), msg.get("group_id"), _msg_exc)
+                continue
 
         return new_signals
 
@@ -2740,6 +2783,34 @@ class SimulationEngine:
         return await _build_orb_report_impl(self._bridge)
 
     # ── Email scheduler ───────────────────────────────────────────────────────
+
+    async def _signal_snapshot_loop(self) -> None:
+        """Log a full market snapshot for every Gold Diggers VIP / Institutional
+        signal, so their entry logic can be studied from evidence rather than
+        inferred from screenshots. See core_signal_snapshot.
+
+        Polls rather than hooking the parser: vantage_tg_signals has seven
+        separate INSERT sites, and a research log must not be able to break
+        signal processing. 5s keeps capture lag small enough that the
+        candle-derived indicators are effectively contemporaneous.
+        """
+        await asyncio.sleep(20)   # let the bridge settle after startup
+        while self._monitor_running:
+            try:
+                await _capture_signal_snapshots_impl(self._bridge)
+            except Exception:
+                log.debug("Signal snapshot capture failed", exc_info=True)
+            # Background negatives every 15 min -- see
+            # core_signal_snapshot.capture_background_snapshot for why the
+            # study is unusable without them.
+            _now_bg = time.time()
+            if _now_bg - getattr(self, "_last_bg_snapshot", 0.0) > 900.0:
+                self._last_bg_snapshot = _now_bg
+                try:
+                    await _capture_background_snapshot_impl(self._bridge)
+                except Exception:
+                    log.debug("Background snapshot failed", exc_info=True)
+            await asyncio.sleep(5)
 
     async def _email_scheduler_loop(self) -> None:
         await asyncio.sleep(60)  # initial startup delay

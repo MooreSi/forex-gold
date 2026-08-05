@@ -46,7 +46,7 @@ _labeled_count = 0
 # -5.75R, stops slipping well past sl_dist) and wins +0.39R, a true payoff of
 # 0.32:1 versus the 0.54:1 the model was being told. Retrained from scratch
 # because a model fitted on the old label is calibrated to the wrong scale.
-_version = "re_ml_v5"
+_version = "re_ml_v7"
 
 # Dollars per point for a virtual signal. Mirrors reversal_engine_manage.py's
 # `gross = pnl_pts * _VIRTUAL_LOT * 100` -- duplicated as a constant rather
@@ -185,7 +185,56 @@ FEATURE_NAMES = [
     "concurrent_agreement",     # +1 same-dir signal from another engine in last 15min, -1 opposite, 0 none
     "ref_discipline_score",     # 0-1, AI-derived nightly: how closely the reference channel/GD2 stuck to stated SL/sizing that day
     "ref_aggression_score",     # 0-1, AI-derived nightly: how aggressively they scaled in/chased entries that day
+    # ── FVG context (v6, 2026-08-04) — see ict_patterns.fvg_context ──────
+    "fvg_confluence",           # 1.0 entry inside an aligned unfilled FVG, 0.5 inside any, 0 none
+    "fvg_dist_norm",            # distance to nearest aligned FVG in ATR units, clamped [0,5]; 5 = none
+    "fvg_fresh",                # nearest aligned FVG: 1.0 untested, 0.5 filled, 0.0 inverted; 0.5 = none
+    "fvg_size_norm",            # its height in ATR units, clamped [0,3]; 0 = none
+    # ── Reference-channel entry structure (v7, 2026-08-05) ───────────────
+    # How this moment compares with conditions the professional channels
+    # actually fire in, per direction. See reversal_engine/pro_profile.py --
+    # these stay at 0.0 until that module judges its sample trustworthy, so
+    # early rows carry no information rather than a regime artifact.
+    "pro_rsi_delta",            # (rsi - their median) / their sd, clamped [-3,3]
+    "pro_adx_delta",            # same for ADX
+    "pro_fvg_delta",            # our FVG confluence minus theirs
+    "pro_profile_ready",        # 1.0 when the profile is live, else 0.0
 ]
+
+# Neutral value for every feature, used to back-fill rows labeled under an
+# earlier _version so a feature addition does not throw away training
+# history. Keyed by name rather than position so it cannot silently drift.
+#
+# THIS IS WHY NEW FEATURES MUST ONLY EVER BE APPENDED to FEATURE_NAMES,
+# never inserted mid-list: padding a short old vector on the right is only
+# correct if the existing positions still mean what they meant when that
+# row was written.
+_FEATURE_NEUTRAL = {
+    "fvg_confluence": 0.0, "fvg_dist_norm": 5.0,
+    "fvg_fresh": 0.5, "fvg_size_norm": 0.0,
+    "pro_rsi_delta": 0.0, "pro_adx_delta": 0.0,
+    "pro_fvg_delta": 0.0, "pro_profile_ready": 0.0,
+}
+
+
+def _pro_features(signal_data: dict) -> list[float]:
+    """The four pro-profile values, in FEATURE_NAMES order. Never raises:
+    this is enrichment, and a failure here must not stop a signal being
+    scored at all."""
+    try:
+        from forex_trader.reversal_engine.pro_profile import profile_features
+        f = profile_features(
+            signal_data.get("direction", "BUY"),
+            signal_data.get("rsi14"),
+            signal_data.get("adx"),
+            signal_data.get("fvg_confluence"),
+        )
+    except Exception:
+        f = {}
+    return [float(f.get("pro_rsi_delta") or 0.0),
+            float(f.get("pro_adx_delta") or 0.0),
+            float(f.get("pro_fvg_delta") or 0.0),
+            float(f.get("pro_profile_ready") or 0.0)]
 
 
 def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optional[list[float]]:
@@ -262,6 +311,19 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
             float(signal_data.get("concurrent_agreement")or 0.0),   # concurrent_agreement
             float(signal_data.get("ref_discipline_score") or 0.5),  # ref_discipline_score
             float(signal_data.get("ref_aggression_score") or 0.5),  # ref_aggression_score
+            # FVG context. Supplied by the caller (reversal_engine_service
+            # builds it from ict_patterns.fvg_context on the M15 candles it
+            # already has). Absent -> the documented "no gap found"
+            # neutrals, so a signal generated without FVG context is never
+            # mistaken for one sitting in a fresh gap.
+            float(signal_data.get("fvg_confluence") or 0.0),
+            float(signal_data.get("fvg_dist_norm", 5.0) or 5.0),
+            float(signal_data.get("fvg_fresh", 0.5) if signal_data.get("fvg_fresh") is not None else 0.5),
+            float(signal_data.get("fvg_size_norm") or 0.0),
+            # Reference-channel structure. Computed here rather than by the
+            # caller so every path gets it automatically, and so a missing
+            # profile degrades to the documented neutrals.
+            *_pro_features(signal_data),
         ]
     except Exception as exc:
         _log.debug("[RE-ML] extract_features error: %s", exc)
@@ -326,11 +388,23 @@ def _get_training_data():
                 f = json.loads(feats)
             except Exception:
                 continue
-            # Guards against a ragged X array when older rows were labeled
-            # under a previous _version with a different feature count (e.g.
-            # pre-v4 rows missing ref_discipline_score/ref_aggression_score).
-            if len(f) != len(FEATURE_NAMES):
+            # Older rows were labeled under a previous _version with fewer
+            # features. Discarding them (the pre-v6 behaviour) meant every
+            # feature addition silently threw the entire training history
+            # away -- at v6 that would have been all 752 labeled signals,
+            # leaving the model with nothing until months of new ones
+            # accumulated. Pad them with the documented neutral for each
+            # missing feature instead, which is truthful: those rows really
+            # do have no FVG context recorded. Only right-padding is valid,
+            # and only because features are append-only (see
+            # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
+            # from a newer build and still can't be interpreted, so it is
+            # still skipped.
+            if len(f) > len(FEATURE_NAMES):
                 continue
+            if len(f) < len(FEATURE_NAMES):
+                f = f + [_FEATURE_NEUTRAL.get(n, 0.0)
+                         for n in FEATURE_NAMES[len(f):]]
             outcome = r.get("outcome", "")
             if outcome not in ("win", "loss", "be"):
                 continue

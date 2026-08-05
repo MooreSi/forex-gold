@@ -94,6 +94,138 @@ def detect_fvgs(candles: list[dict], min_gap_pts: float = 0.5) -> list[dict]:
     return out
 
 
+def atr(candles: list[dict], period: int = 14) -> float:
+    """Simple ATR over the last `period` bars. Used to size FVG thresholds
+    relative to how much the instrument is actually moving."""
+    if len(candles) < 2:
+        return 0.0
+    trs = []
+    for prev, cur in zip(candles[-(period + 1):-1], candles[-period:]):
+        pc = _cl(prev)
+        trs.append(max(_hi(cur) - _lo(cur), abs(_hi(cur) - pc), abs(_lo(cur) - pc)))
+    return sum(trs) / len(trs) if trs else 0.0
+
+
+def select_display_fvgs(candles: list[dict], fvgs: Optional[list[dict]] = None,
+                        max_zones: int = 6, min_atr_frac: float = 0.25,
+                        recent_bars: int = 300, show_inverted: bool = False) -> list[dict]:
+    """Reduce raw `detect_fvgs` output to the few gaps a trader would actually
+    have drawn on their chart.
+
+    `detect_fvgs` is deliberately exhaustive because the ML features want
+    every imbalance. A chart does not: on 300 bars of XAUUSD M15 it returns
+    ~61 gaps, of which ~46 have already been closed clean through, and
+    drawing all of them buries the price action under horizontal bands.
+
+    Three rules, in the order they actually bite:
+      - a zone dies when price CLOSES clean through its far edge (the
+        `inverted` flag). A wick back into the gap is a test, not a death --
+        that is exactly the retracement the zone exists to predict, so a
+        tested-but-not-broken gap stays drawn. This is the dominant filter by
+        a wide margin (61 -> 15 on the M15 sample below) and is deliberately
+        NOT relaxed: an inverted FVG has flipped meaning, so still drawing it
+        as a live zone in its original direction would be wrong, not merely
+        cluttered;
+      - size floor of `min_atr_frac` x ATR, so a 1pt gap in a 9pt-ATR market
+        is not promoted to a level;
+      - only the last `recent_bars` bars.
+
+    Returns at most `max_zones`, most recent kept, in chart order. Returning
+    nothing is a valid answer: sometimes there is no live gap worth drawing,
+    and inventing one by relaxing the floor would defeat the point.
+
+    RETUNED 2026-08-05 (was max_zones=4, min_atr_frac=0.50, recent_bars=120).
+    The old numbers were calibrated against a reference screenshot carrying
+    two zones over ~100 M15 bars; a later screenshot of the same reference
+    chart showed five over a much longer span, so the target itself had
+    moved. Measured on 300 bars of live XAUUSD (ATR 9.48 M15, 16.60 H1), the
+    old constants were wrong in a specific way: the 0.50xATR floor sat ABOVE
+    the median live-zone height (0.33xATR on M15), so it was discarding more
+    than half of the zones that had survived the inversion rule -- 15 live
+    gaps cut to 4. 0.25xATR sits below the median and keeps 9.
+
+    recent_bars was doing almost nothing and now does nothing by design: at
+    the old 0.50 floor every surviving zone was already inside the last 120
+    bars, so the window never actually bound. Raising it to 300 matches the
+    chart's own fetch depth (chart.py's _refresh_fvgs), which makes the fetch
+    the single place the age horizon is set instead of having a second,
+    tighter bound hidden here. An unmitigated gap does not expire just
+    because price has been away from it for a while.
+
+    Only the chart overlay calls this. The ML features go through
+    `fvg_context`/`detect_fvgs` directly, so these numbers are display-only
+    and changing them cannot move a trading decision.
+    """
+    if fvgs is None:
+        fvgs = detect_fvgs(candles)
+    if not fvgs:
+        return []
+
+    floor  = min_atr_frac * atr(candles)
+    cutoff = len(candles) - recent_bars
+    live = [f for f in fvgs
+            if (show_inverted or not f["inverted"])
+            and (f["top"] - f["bottom"]) >= floor
+            and f["idx"] >= cutoff]
+
+    picked = sorted(live, key=lambda f: f["idx"], reverse=True)[:max_zones]
+    return sorted(picked, key=lambda f: f["idx"])
+
+
+def fvg_context(candles: list[dict], entry: float, direction: str,
+                atr: float = 5.0) -> dict:
+    """Summarise the FVG picture around a proposed entry, as ML features.
+
+    Added 2026-08-04. The reference channel visibly sets up from FVGs (their
+    own chart screenshots run TradingView's FVG/iFVG indicator), so whether
+    OUR reversal level coincides with an imbalance -- and whether that
+    imbalance is still untested -- is exactly the kind of context the model
+    had no way to see before.
+
+    "Aligned" means the FVG points the same way as the trade: a BUY wants a
+    bullish gap beneath it (unfilled demand), a SELL a bearish one above.
+
+    Every value is normalised and has a defined meaning when NO gap is
+    found, so a signal with no FVG nearby is never confused with one sitting
+    in a fresh gap:
+      fvg_confluence  1.0 entry inside an aligned gap, 0.5 inside an
+                      opposing gap, 0.0 not inside any
+      fvg_dist_norm   distance to the nearest aligned gap in ATR units,
+                      clamped [0,5]; 5.0 (max = "far away") when none
+      fvg_fresh       of that nearest aligned gap: 1.0 untested, 0.5 filled,
+                      0.0 inverted; 0.5 (neutral) when none
+      fvg_size_norm   its height in ATR units, clamped [0,3]; 0.0 when none
+    """
+    out = {"fvg_confluence": 0.0, "fvg_dist_norm": 5.0,
+           "fvg_fresh": 0.5, "fvg_size_norm": 0.0}
+    if not candles or entry <= 0:
+        return out
+    atr = max(float(atr or 0), 0.1)
+    try:
+        fvgs = detect_fvgs(candles)
+    except Exception:
+        return out
+    if not fvgs:
+        return out
+
+    want = "bullish" if str(direction).upper() == "BUY" else "bearish"
+
+    inside_aligned = any(f["bottom"] <= entry <= f["top"] and f["direction"] == want
+                         and not f["inverted"] for f in fvgs)
+    inside_any = any(f["bottom"] <= entry <= f["top"] for f in fvgs)
+    out["fvg_confluence"] = 1.0 if inside_aligned else (0.5 if inside_any else 0.0)
+
+    aligned = [f for f in fvgs if f["direction"] == want]
+    if aligned:
+        nearest = min(aligned, key=lambda f: abs(f["mid"] - entry))
+        out["fvg_dist_norm"] = round(min(abs(nearest["mid"] - entry) / atr, 5.0), 4)
+        out["fvg_fresh"] = (0.0 if nearest["inverted"]
+                            else 0.5 if nearest["filled"] else 1.0)
+        out["fvg_size_norm"] = round(
+            min((nearest["top"] - nearest["bottom"]) / atr, 3.0), 4)
+    return out
+
+
 def _track_fill_and_inversion(fvg: dict, candles: list[dict], start_idx: int) -> None:
     top, bottom = fvg["top"], fvg["bottom"]
     for c in candles[start_idx:]:

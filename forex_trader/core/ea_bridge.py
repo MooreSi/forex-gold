@@ -25,6 +25,8 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from forex_trader.core.core_trading_schedule import check_trading_schedule
@@ -49,6 +51,41 @@ EA_PORTABLE_STRATEGIES = frozenset({
 _HEARTBEAT_TIMEOUT_S = 8.0   # no EA ping/message within this -> treat as unhealthy
 _HOST = "127.0.0.1"
 
+# ── EA version handshake (2026-08-05) ────────────────────────────────────────
+# The repo's mql5/ForexTraderBridge.mq5 and the terminal's compiled .ex5 are
+# two unlinked files; nothing in MetaTrader reports that the build it is
+# running predates the source. tools/deploy_ea.sh catches that on disk, but
+# only for the terminals on the machine you happen to run it on, and only if
+# you remember to run it. This catches it from the other end: the EA states
+# its own version on every connection and we check it against the source we
+# were shipped with, so a stale build is a log line instead of a day of
+# fixes that were never loaded.
+_EA_SOURCE = Path(__file__).resolve().parents[2] / "mql5" / "ForexTraderBridge.mq5"
+_EA_VERSION_RE = re.compile(r'^\s*#define\s+EA_VERSION\s+"([^"]+)"', re.M)
+# MetaEditor stamps __DATETIME__ in local time, and this compares it to a
+# local mtime -- sound only because the EA and this process always share a
+# machine (see module docstring).
+_EA_COMPILED_FMT = "%Y.%m.%d %H:%M:%S"
+# The .ex5 is written when you press F7, the .mq5 when you save. Saving a
+# file a second or two after the compile that read it is normal and means
+# nothing; treat only a clear gap as evidence of an uncompiled edit.
+_EA_COMPILE_SLACK_S = 120.0
+
+
+def _expected_ea_version() -> Optional[str]:
+    """EA_VERSION as declared by the repo copy of the EA source, or None if
+    that source isn't present -- a packaged/frozen install ships the .ex5
+    without the .mq5, and has nothing to compare against. Deliberately
+    uncached: the source changes under a long-running dev process far more
+    often than an EA reconnects, and reading ~100KB once per connection
+    costs nothing.
+    """
+    try:
+        m = _EA_VERSION_RE.search(_EA_SOURCE.read_text(errors="replace"))
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
 # How long a leg fill waits for open_trade()'s INSERT to appear before giving
 # up and leaving the row to core_template_placeholder_repair. The row only
 # lands once the EA's parent ack returns, which core_open_trade allows up to
@@ -72,6 +109,15 @@ _LEG_ROW_WAIT_S = 75.0
 _LEG_ID_RE = re.compile(r"^(?P<base>.+)-(?P<kind>[ag])(?P<num>\d+)$")
 
 _LEG_KIND_LABELS = {"a": "Anchor Leg", "g": "Grid Leg"}
+
+# panel_action values that place or pull real orders, as opposed to editing a
+# template field. Listed explicitly so a typo in an action name can never fall
+# through to the generic template-field path and quietly write garbage into a
+# saved template.
+_ORDER_ACTIONS = frozenset({
+    "market_buy", "market_sell", "limit_buy", "limit_sell",
+    "close_all", "cancel_limits",
+})
 
 
 def split_leg_trade_id(trade_id: str) -> tuple[str, Optional[str], str]:
@@ -182,6 +228,21 @@ class EABridge:
         # trade_id -> {"ticket": int} for Limit Runner orders currently
         # resting on the broker (placed, not yet filled/cancelled/expired).
         self._pending_orders: dict[str, dict] = {}
+        # What the connected EA said about itself in "hello" -- see
+        # _check_ea_version(). None until an EA connects; an EA old enough to
+        # predate the handshake leaves ea_version None while still connecting
+        # normally, which is itself the strongest possible staleness signal.
+        self.ea_version: Optional[str] = None
+        self.ea_compiled: Optional[str] = None
+        self.ea_version_ok: Optional[bool] = None
+        # On-chart panel: which CH tab the terminal has selected (0-based,
+        # indexes TelegramReader's own slots) and the periodic push task that
+        # feeds the panel's right-hand dashboard. The slot lives here rather
+        # than on the EA because a panel_action arrives with only a template
+        # name, and after an EA reload the terminal has forgotten which tab
+        # it was on -- this is what lets the reconnect push restore it.
+        self._panel_slot: int = 0
+        self._panel_task: Optional[asyncio.Task] = None
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -190,6 +251,9 @@ class EABridge:
         log.info("[EABridge] listening on %s:%d", _HOST, _PORT)
 
     async def stop(self) -> None:
+        if self._panel_task is not None:
+            self._panel_task.cancel()
+            self._panel_task = None
         if self._writer is not None:
             try:
                 self._writer.close()
@@ -244,6 +308,13 @@ class EABridge:
         finally:
             if self._writer is writer:
                 self._writer = None
+                # Only clear the reported version if this really was the live
+                # connection. A replaced-by-reconnect writer arrives here
+                # AFTER its replacement already ran _check_ea_version, and
+                # must not wipe the new EA's identity.
+                self.ea_version = None
+                self.ea_compiled = None
+                self.ea_version_ok = None
             try:
                 writer.close()
             except Exception:
@@ -486,21 +557,32 @@ class EABridge:
         Observed immediately after the first panel deploy (2026-07-29):
         three button presses all rejected.
 
-        Picks whichever template is actually assigned to a channel, since
-        that is the one whose behaviour is live; falls back to the most
-        recently edited template when no channel has one assigned, so the
-        panel is still usable while a template is being set up.
+        Picks the template assigned to the panel's currently selected
+        channel, since that is the one whose behaviour is live; falls back
+        to any channel-assigned template, then to the most recently edited
+        one, so the panel is still usable while a template is being set up.
+
+        Also sends the channel roster (panel_context) so the CH tabs and the
+        TELEGRAM / TG CMD lamps have something to show immediately, rather
+        than only after the first template trade opens.
         """
         from forex_trader.core import core_ea_templates as _et
         from forex_trader.core import database as db_module
         try:
             def _pick() -> Optional[dict]:
                 assigned = db_module.get_all_channel_strategy_overrides() or {}
-                names = {
-                    _et.template_name_from_override(v.get("strategy_override") or "")
-                    for v in assigned.values()
-                    if _et.is_template_override(v.get("strategy_override") or "")
-                }
+                # get_all_channel_strategy_overrides returns {"strategy",
+                # "auto"}; get_all_channel_strategy_settings returns
+                # {"strategy_override", ...}. Read both keys so this cannot
+                # silently match nothing again if the caller is ever swapped
+                # -- it was written against the wrong key originally, which
+                # made this branch dead and sent the most-recently-edited
+                # template every time regardless of what was assigned.
+                names = set()
+                for v in assigned.values():
+                    ov = v.get("strategy") or v.get("strategy_override") or ""
+                    if _et.is_template_override(ov):
+                        names.add(_et.template_name_from_override(ov))
                 rows = _et.list_ea_templates()
                 if not rows:
                     return None
@@ -509,11 +591,129 @@ class EABridge:
                         return r
                 return max(rows, key=lambda r: r.get("updated_at") or 0)
 
-            tpl = await db_module.to_db_thread(_pick)
+            sel = await self._template_for_selected_slot()
+            tpl = sel or await db_module.to_db_thread(_pick)
             if tpl:
                 await self.push_template(tpl["name"], tpl)
+            await self.push_panel_context()
         except Exception as e:
             log.debug("[EABridge] panel context push skipped: %s", e)
+
+    # ── On-chart panel feeds ─────────────────────────────────────────────────
+    #
+    # The panel is a view plus a remote control, never an authority (see
+    # _on_panel_action). These three pushes are the "view" half:
+    #
+    #   set_template   the left column -- every editable field, already sent
+    #                  generically as tpl_<key>, so a field added to
+    #                  core_ea_templates.DEFAULTS reaches the panel with no
+    #                  protocol change and no EA recompile.
+    #   panel_context  the CH tabs and link lamps (core_panel_context).
+    #   panel_signal   the right column's ICT criteria and confidence score
+    #                  (core_panel_signal). The EA computes the rest of that
+    #                  column -- bid/ask/spread/P&L, the M5-D1 trend row, ATR,
+    #                  session countdown, VWAP -- locally, because those need
+    #                  a ticking clock and the chart's own series.
+    #
+    # All three are best-effort and silent when the EA is away: nothing here
+    # is on a trading path, and a blank panel must never be able to raise
+    # into the reader loop.
+
+    async def _template_for_selected_slot(self) -> Optional[dict]:
+        """The saved template assigned to the panel's selected CH tab, or
+        None when that tab has no channel or its channel has no template."""
+        from forex_trader.core import core_ea_templates as _et
+        from forex_trader.core import core_panel_context as _pc
+        from forex_trader.core import database as db_module
+        try:
+            reader = getattr(self._engine, "_tg_reader", None)
+            name = await db_module.to_db_thread(
+                _pc.template_for_slot, reader, self._panel_slot)
+            if not name:
+                return None
+            return await db_module.to_db_thread(_et.get_ea_template, name)
+        except Exception as e:
+            log.debug("[EABridge] slot template lookup failed: %s", e)
+            return None
+
+    async def push_panel_context(self) -> bool:
+        from forex_trader.core import core_panel_context as _pc
+        from forex_trader.core import database as db_module
+        if not self.is_ea_healthy():
+            return False
+        try:
+            reader = getattr(self._engine, "_tg_reader", None)
+            msg = await db_module.to_db_thread(
+                _pc.build_context, reader, self._panel_slot)
+        except Exception as e:
+            log.debug("[EABridge] panel_context build failed: %s", e)
+            return False
+        return await self._send(msg)
+
+    async def push_panel_signal(self) -> bool:
+        from forex_trader.core import core_panel_signal as _ps
+        if not self.is_ea_healthy():
+            return False
+        bridge = getattr(self._engine, "_bridge", None)
+        if bridge is None:
+            return False
+        payload = await _ps.build_payload(bridge)
+        msg: dict = {"type": "panel_signal"}
+        for k, v in payload.items():
+            if k == "levels":
+                continue
+            msg[k] = (1 if v else 0) if isinstance(v, bool) else v
+        # Levels are flattened rather than nested: the EA's JSON reader is a
+        # flat key scanner by design (see ForexTraderBridge.mq5's JsonGet*),
+        # and giving it an array to parse would mean a real parser for one
+        # optional display tab.
+        for i, lv in enumerate(payload.get("levels") or [], start=1):
+            msg[f"lvl{i}_price"] = lv.get("price")
+            msg[f"lvl{i}_kind"]  = lv.get("kind")
+            msg[f"lvl{i}_dir"]   = lv.get("dir")
+        msg["level_count"] = len(payload.get("levels") or [])
+        return await self._send(msg)
+
+    async def push_panel_log(self, text: str) -> bool:
+        """Append one line to the panel's RECENT SYSTEM LOGS strip.
+
+        Fire-and-forget commentary for things that happen app-side and would
+        otherwise be invisible at the terminal (a signal rejected, a template
+        pushed). The EA keeps its own ring buffer and interleaves its own
+        lines with these.
+        """
+        if not self.is_ea_healthy():
+            return False
+        return await self._send({"type": "panel_log", "text": str(text)[:120]})
+
+    async def _panel_loop(self) -> None:
+        """Keep the panel's read-only halves current while an EA is connected.
+
+        Cadence is deliberately unequal. The signal payload is candle-derived
+        and the mt5 bridge caches candles anyway, so 3s costs almost nothing
+        and keeps the criteria row honest. The channel roster only changes
+        when someone edits config, so 30s is generous.
+        """
+        ctx_every = 10          # every 10th signal push -> ~30s
+        n = 0
+        try:
+            while True:
+                await asyncio.sleep(3.0)
+                if not self.is_ea_healthy():
+                    continue
+                try:
+                    await self.push_panel_signal()
+                    if n % ctx_every == 0:
+                        await self.push_panel_context()
+                except Exception as e:
+                    log.debug("[EABridge] panel push failed: %s", e)
+                n += 1
+        except asyncio.CancelledError:
+            raise
+
+    def _ensure_panel_loop(self) -> None:
+        if self._panel_task is None or self._panel_task.done():
+            self._panel_task = asyncio.create_task(self._panel_loop())
 
     async def _on_panel_action(self, msg: dict) -> None:
         """A button was pressed on the EA's on-chart panel.
@@ -527,6 +727,19 @@ class EABridge:
 
         A "refresh" action carries no change and simply re-pushes, which is
         also how the panel repopulates after an EA reload.
+
+        Three kinds of action arrive here:
+
+          * a template FIELD name (anchors, lot_anchor, sl_pips, tp3_pips,
+            trail_mode, ...) -- the generic path below, which works for any
+            key in core_ea_templates.DEFAULTS with no code here per field.
+          * select_channel -- moves the CH tab, which only changes WHICH
+            template the panel edits.
+          * an order action -- routed to the same app-side functions the UI
+            and the Telegram bot use, so a trade started from the chart is
+            risk-checked, tracked and logged identically to every other
+            trade. The EA does the pip arithmetic (it owns _Point) and sends
+            finished prices; this never re-derives them.
         """
         # Local imports: this module is pulled in early by the engine, and
         # importing database/templates at module scope reintroduces the
@@ -536,6 +749,22 @@ class EABridge:
         action = (msg.get("action") or "").strip()
         value  = (msg.get("value") or "").strip()
         name   = (msg.get("template") or "").strip()
+
+        if action == "select_channel":
+            try:
+                self._panel_slot = max(0, int(float(value)))
+            except (TypeError, ValueError):
+                return
+            tpl = await self._template_for_selected_slot()
+            if tpl:
+                await self.push_template(tpl["name"], tpl)
+            await self.push_panel_context()
+            return
+
+        if action in _ORDER_ACTIONS:
+            await self._on_panel_order(action, msg, name)
+            return
+
         if not name:
             log.info("[EABridge] panel_action %r ignored -- no template in context", action)
             return
@@ -563,6 +792,125 @@ class EABridge:
             await self.push_template(name, tpl)
         except Exception as e:
             log.warning("[EABridge] panel_action %r failed: %s", action, e)
+
+    async def _on_panel_order(self, action: str, msg: dict, template: str) -> None:
+        """Entry Management buttons: SELL / BUY / SELL LIMIT / BUY LIMIT /
+        CANCEL LIMITS / CLOSE ALL.
+
+        Every one of these goes through the app's normal order paths rather
+        than being sent by the EA itself. The EA could place them in two
+        lines -- it has CTrade right there -- but a trade that appears at the
+        broker with no app-side row is invisible to the risk governor, to the
+        monitor loop, to reporting, and to the fallback watchdog. The chart
+        is a remote control for the app, not a second trader.
+
+        The EA supplies finished prices (price/sl/tp1..tp5/lots), computed
+        with its own _Point and the selected template's pip fields. Deriving
+        them again here would mean a second pip convention to keep in step --
+        see PipsToPrice()'s note in the EA about how easily that goes wrong.
+
+        Outcomes are reported back as panel_log lines, since the terminal has
+        no other way to learn that an order it asked for was refused.
+        """
+        engine = self._engine
+        bridge = getattr(engine, "_bridge", None)
+        if bridge is None:
+            await self.push_panel_log("ORDER REFUSED: no MT5 bridge")
+            return
+        cfg = getattr(engine, "_cfg", {}) or {}
+        starting = float(cfg.get("starting_balance", 1000.0))
+
+        def _f(key: str) -> Optional[float]:
+            v = msg.get(key)
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return f if f > 0 else None
+
+        try:
+            if action in ("market_buy", "market_sell"):
+                from forex_trader.core.core_manual_market_order import (
+                    open_manual_market_order)
+                direction = "BUY" if action == "market_buy" else "SELL"
+                res = await open_manual_market_order(
+                    bridge, direction,
+                    stop_loss=_f("sl"), lot_size=_f("lots"),
+                    take_profit=_f("tp1"),
+                    source_name="panel_manual",
+                    starting_balance=starting,
+                )
+                await self.push_panel_log(
+                    f"{direction} {res.get('lot_size', '')} @ "
+                    f"{float(res.get('entry_price', 0) or 0):.2f}")
+
+            elif action in ("limit_buy", "limit_sell"):
+                from forex_trader.core.core_manual_limit_order import (
+                    open_manual_limit_order)
+                direction = "BUY" if action == "limit_buy" else "SELL"
+                price = _f("price")
+                sl    = _f("sl")
+                if price is None or sl is None:
+                    await self.push_panel_log("LIMIT REFUSED: needs price and SL")
+                    return
+                tps = [_f(f"tp{n}") for n in range(1, 6)]
+                if not any(t is not None for t in tps):
+                    await self.push_panel_log("LIMIT REFUSED: template has no TP1")
+                    return
+                res = await open_manual_limit_order(
+                    bridge, direction,
+                    entry_low=price, entry_high=price, stop_loss=sl,
+                    tp1=tps[0], tp2=tps[1], tp3=tps[2], tp4=tps[3], tp5=tps[4],
+                    lot_size=_f("lots"),
+                    notes=f"chart panel ({template or 'no template'})",
+                    starting_balance=starting,
+                )
+                await self.push_panel_log(
+                    f"{direction} LIMIT {res.get('lot_size', '')} @ {price:.2f}")
+
+            elif action == "close_all":
+                from forex_trader.core.core_bot_commands_trading import cmd_close
+                out = await cmd_close(["all"], bridge, starting)
+                await self.push_panel_log(out.splitlines()[-1] if out else "CLOSE ALL done")
+
+            elif action == "cancel_limits":
+                n = await self._cancel_all_working_pendings()
+                await self.push_panel_log(f"CANCELLED {n} PENDING")
+        except Exception as e:
+            log.warning("[EABridge] panel order %s failed: %s", action, e)
+            await self.push_panel_log(f"{action.upper()} FAILED: {e}")
+
+    async def _cancel_all_working_pendings(self) -> int:
+        """Pull every still-working pending order this app knows about.
+
+        Deliberately driven off vantage_pending_orders rather than off
+        OrdersTotal() in the terminal: the app's rows are the ones that would
+        otherwise be left marked 'working' forever, and cancelling by trade_id
+        routes through cancel_pending_order so the row is closed out properly.
+        Orders placed outside this app are not ours to delete.
+        """
+        from forex_trader.core import database as db_module
+
+        def _rows() -> list[dict]:
+            with db_module.db() as conn:
+                return [db_module.row_to_dict(r) for r in conn.execute(
+                    "SELECT * FROM vantage_pending_orders WHERE status='working'"
+                ).fetchall()]
+
+        rows = await db_module.to_db_thread(_rows)
+        done = 0
+        for row in rows:
+            try:
+                # ea_ticket, not mt5_ticket -- that is the column name on
+                # vantage_pending_orders (see database.py's schema).
+                if await self.cancel_pending_order(
+                        row["trade_id"], int(row.get("ea_ticket") or 0),
+                        "panel_cancel_limits"):
+                    done += 1
+            except Exception as e:
+                log.warning("[EABridge] panel cancel %s failed: %s",
+                            row.get("trade_id"), e)
+        return done
 
     async def push_template(self, name: str, template: dict) -> bool:
         """Push a template's values to the EA immediately, outside of any
@@ -655,7 +1003,106 @@ class EABridge:
                 log.warning("[EABridge] restore_pending_order failed for trade_id=%s: %s",
                             row.get("trade_id"), e)
 
-    async def update_trade(self, trade_id: str, tps: dict[int, float]) -> bool:
+    async def restore_trade(self, row: dict) -> None:
+        """Push one still-open EA-managed POSITION back to the EA after it
+        reconnects.
+
+        g_trades[] has exactly the same no-persistence problem
+        restore_pending_order() documents for g_pending[], but for live
+        positions rather than resting orders, and it went unclosed until
+        2026-08-04. Any EA restart (recompile, terminal restart, dropped
+        socket re-triggering OnInit) silently forgot every open position:
+        no partial closes, no breakeven, no trailing, and -- because the
+        app learns a trade closed from the EA's own trade_closed message --
+        no close notification either, so the row stayed 'open' in
+        vantage_simulated_trades forever.
+
+        Confirmed live 2026-08-04, ticket 1704757612: a recompile at 15:30
+        orphaned it, it closed at the broker at 16:13 for +$35, and the
+        trades table still read status='open' remaining_lots=0.1 net_pnl=0
+        afterwards. That combination got worse, not better, once
+        close_full_on_last=false legitimately started leaving positions with
+        NO broker-side TP -- an orphan then has nothing at all to close it.
+
+        Sends the template payload fresh from the DB rather than anything
+        cached, so a restored trade is managed by the template's CURRENT
+        settings, same as set_template already does for live ones.
+        """
+        from forex_trader.core import core_ea_templates as ea_templates
+        from forex_trader.core.core_open_trade import (
+            _EA_LADDER_PCTS, _EA_LADDER_BE_AT_POS, _EA_LADDER_TRAIL_MODE,
+        )
+
+        strategy = row.get("strategy") or ""
+        msg = {
+            "type": "restore_trade",
+            "trade_id": row["trade_id"],
+            "ticket": int(row["mt5_ticket"]),
+            "direction": (row.get("direction") or "").upper(),
+            "entry_price": float(row.get("entry_price") or 0),
+            "orig_lots": float(row.get("lot_size") or 0),
+            # What is left NOW. The EA uses this to work out how much of the
+            # ladder already fired, so restoring cannot re-run a partial
+            # close that has already happened.
+            "remaining_lots": float(row.get("remaining_lots") or 0),
+            "stop_loss": float(row.get("stop_loss") or 0),
+            "strategy": strategy,
+        }
+        for n in range(1, 9):
+            v = row.get(f"tp{n}")
+            if v:
+                msg[f"tp{n}"] = float(v)
+
+        if ea_templates.is_template_override(strategy):
+            tpl = ea_templates.get_ea_template(
+                ea_templates.template_name_from_override(strategy))
+            if tpl:
+                for k, v in tpl.items():
+                    if k in ("name", "created_at", "updated_at"):
+                        continue
+                    msg[f"tpl_{k}"] = (1 if v else 0) if isinstance(v, bool) else v
+                pcts = [float(tpl.get(f"tp{n}_pct", 0) or 0) / 100.0 for n in range(1, 9)]
+                for i, p in enumerate(pcts, start=1):
+                    msg[f"pct{i}"] = p
+        elif strategy in _EA_LADDER_PCTS:
+            _table = _EA_LADDER_PCTS[strategy]
+            _n_tps = sum(1 for n in range(1, 9) if row.get(f"tp{n}"))
+            for i, p in enumerate(_table.get(_n_tps, _table[max(_table)]), start=1):
+                msg[f"pct{i}"] = p
+            msg["be_at_pos"] = _EA_LADDER_BE_AT_POS[strategy]
+            if _EA_LADDER_TRAIL_MODE.get(strategy):
+                msg["trail_mode"] = _EA_LADDER_TRAIL_MODE[strategy]
+
+        await self._send(msg)
+
+    async def _restore_open_trades(self) -> None:
+        """Called once per EA connection (on "hello"), alongside
+        _restore_pending_orders. See restore_trade()."""
+        from forex_trader.core import database as db_module
+
+        def _fetch():
+            with db_module.db() as conn:
+                return [
+                    db_module.row_to_dict(r) for r in conn.execute(
+                        "SELECT * FROM vantage_simulated_trades "
+                        "WHERE status='open' AND managed_by='ea' "
+                        "AND mt5_ticket IS NOT NULL AND mt5_ticket > 0"
+                    ).fetchall()
+                ]
+        rows = await db_module.to_db_thread(_fetch)
+        if not rows:
+            return
+        for row in rows:
+            try:
+                await self.restore_trade(row)
+            except Exception as e:
+                log.warning("[EABridge] restore_trade failed for trade_id=%s: %s",
+                            row.get("trade_id"), e)
+        log.info("[EABridge] pushed %d open position(s) back to the EA after reconnect",
+                 len(rows))
+
+    async def update_trade(self, trade_id: str, tps: dict[int, float],
+                           stop_loss: float | None = None) -> bool:
         """Push corrected TP levels to a trade the EA is already managing.
 
         The EA captures tp[]/hasTp[] once, from the open_trade message, and
@@ -676,6 +1123,14 @@ class EABridge:
         for n in range(1, 9):
             if n in tps:
                 msg[f"tp{n}"] = tps[n]
+        # stop_loss (2026-08-04): the EA is the only writer of this order
+        # while it is healthy (core_update_signal deliberately skips its own
+        # modify_order to avoid racing the EA's SL progression), so a
+        # corrected stop has to travel this way or it never leaves Python's
+        # DB. See core_update_signal's call site for the live case that
+        # exposed it.
+        if stop_loss:
+            msg["stop_loss"] = float(stop_loss)
         return await self._send(msg)
 
     async def cancel_pending_order(self, trade_id: str, ticket: int, reason: str) -> bool:
@@ -720,14 +1175,87 @@ class EABridge:
 
     # ── Inbound events from the EA ────────────────────────────────────────────
 
+    def _check_ea_version(self, msg: dict) -> None:
+        """Compare the connecting EA's self-reported build against the EA
+        source this app was shipped with, and say so loudly when they differ.
+
+        ea_version_ok tracks the version comparison alone: True/False when
+        there is a source version to compare, None when there isn't. The
+        source-newer-than-binary check below is advisory and deliberately
+        does NOT flip it false -- it fires on any unsaved-then-saved edit,
+        including ones that never reach a terminal, so it is worth a warning
+        but not worth anything downstream branching on.
+
+        Only ever logs. A stale EA is still a working EA -- it manages trades
+        with whatever rules it was compiled with -- so refusing to talk to it
+        would turn "some fixes aren't live" into "nothing is managed", which
+        is strictly worse. The point is that the mismatch stops being silent.
+        """
+        self.ea_version = msg.get("ea_version") or None
+        self.ea_compiled = msg.get("compiled") or None
+        expected = _expected_ea_version()
+
+        if self.ea_version is None:
+            self.ea_version_ok = False
+            log.warning(
+                "[EABridge] EA sent no version in hello -- it predates the "
+                "version handshake (expected v%s). Deploy and recompile: "
+                "tools/deploy_ea.sh", expected or "?")
+            return
+
+        if expected is None:
+            # Packaged install with no .mq5 alongside. Record what connected
+            # so it still shows up in logs, but there's nothing to check.
+            self.ea_version_ok = None
+            log.info("[EABridge] EA v%s (compiled %s); no EA source present "
+                     "to check it against", self.ea_version, self.ea_compiled)
+            return
+
+        self.ea_version_ok = (self.ea_version == expected)
+        if not self.ea_version_ok:
+            log.warning(
+                "[EABridge] EA VERSION MISMATCH: terminal is running v%s "
+                "(compiled %s) but this app ships EA source v%s. The .ex5 is "
+                "stale -- run tools/deploy_ea.sh, then compile (F7).",
+                self.ea_version, self.ea_compiled, expected)
+            return
+
+        # Versions agree, so check the weaker signal too: an edit made after
+        # the last compile that didn't move EA_VERSION is invisible to the
+        # comparison above, but does show up as source newer than binary.
+        try:
+            compiled_at = datetime.strptime(self.ea_compiled or "", _EA_COMPILED_FMT)
+            src_mtime = datetime.fromtimestamp(_EA_SOURCE.stat().st_mtime)
+        except (ValueError, OSError):
+            compiled_at = src_mtime = None
+        if compiled_at is not None and src_mtime is not None:
+            drift = (src_mtime - compiled_at).total_seconds()
+            if drift > _EA_COMPILE_SLACK_S:
+                log.warning(
+                    "[EABridge] EA v%s matches, but the source was modified "
+                    "%.0f min after this build was compiled (%s) -- there are "
+                    "edits the running EA does not have. Recompile (F7).",
+                    self.ea_version, drift / 60.0, self.ea_compiled)
+                return
+
+        log.info("[EABridge] EA v%s (compiled %s, MQL build %s, terminal "
+                 "build %s)", self.ea_version, self.ea_compiled,
+                 msg.get("mql_build"), msg.get("terminal_build"))
+
     async def _dispatch(self, msg: dict) -> None:
         t = msg.get("type")
         if t == "hello":
             log.info("[EABridge] EA hello: account=%s symbol=%s",
                      msg.get("account"), msg.get("symbol"))
+            self._check_ea_version(msg)
             asyncio.create_task(self.push_global_config())
             asyncio.create_task(self._restore_pending_orders())
+            # Re-adopt live positions too, not just resting orders -- see
+            # restore_trade(). Without this every EA reload orphaned every
+            # open template trade.
+            asyncio.create_task(self._restore_open_trades())
             asyncio.create_task(self._push_panel_context())
+            self._ensure_panel_loop()
         elif t == "ping":
             await self._send({"type": "pong"})
         elif t == "panel_action":
@@ -764,6 +1292,26 @@ class EABridge:
             await self._on_pending_order_filled(msg)
         elif t == "pending_order_cancelled":
             await self._on_pending_order_cancelled(msg)
+        elif t == "grid_leg_skipped":
+            # The EA declined to place one of a grid's resting legs. Until
+            # 2026-08-04 this only reached the terminal's own Experts log,
+            # so a grid that placed its anchor and quietly lost its pending
+            # leg was indistinguishable from one configured with no legs at
+            # all -- the symptom that hid zone-mode's wrong-side skip.
+            # WARNING rather than info: a leg the template asked for did
+            # not reach the broker, which is always worth seeing.
+            log.warning(
+                "[EABridge] grid leg %s/%s NOT placed for trade=%s: %s "
+                "(leg price %.2f vs base %.2f). wrong_side in zone mode now "
+                "means price has left the zone ENTIRELY (a leg merely inside "
+                "it is pulled back to the market side instead of skipped); "
+                "beyond_sl means the template's grid_step_pts is wider than "
+                "the signal's own entry-to-SL distance -- these are raw price "
+                "deltas, so 20.0 on gold is $20.",
+                msg.get("leg"), msg.get("of"), str(msg.get("trade_id", ""))[:8],
+                msg.get("reason"), float(msg.get("price", 0) or 0),
+                float(msg.get("base", 0) or 0),
+            )
         else:
             log.debug("[EABridge] unhandled message type: %s", t)
 

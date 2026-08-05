@@ -410,6 +410,21 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("reversal_engine", direction)
             except Exception:
                 feat_input["concurrent_agreement"] = 0.0
+            # FVG context (2026-08-04). Measured against THIS level, on the
+            # M15 candles already fetched above, so it costs no extra bridge
+            # call. Silence here would be wrong -- extract_features' own
+            # "no gap found" neutrals are the correct fallback and are
+            # applied automatically when these keys are absent.
+            try:
+                from forex_trader.reversal_engine.ict_patterns import fvg_context
+                feat_input.update(fvg_context(
+                    m15_candles or h1_candles,
+                    float(level.get("price") or 0),
+                    direction,
+                    atr,
+                ))
+            except Exception:
+                pass
 
             feats = re_ml.extract_features(feat_input, win_rate)
             prob  = re_ml.predict(feats) if feats else None

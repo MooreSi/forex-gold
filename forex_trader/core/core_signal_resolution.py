@@ -91,16 +91,40 @@ def _adaptive_final_tp_dist(sig: dict, entry_mid: float, is_buy: bool) -> float:
     return max(dists, default=0.0)
 
 
-def _sig_guard_blocks(channel_name: str, direction: str) -> bool:
+def _sig_guard_blocks(channel_name: str, direction: str,
+                      guard_pips: float = 0.0,
+                      new_entry: Optional[float] = None) -> bool:
     """True if a template-managed trade is already open for this channel +
-    direction -- Sig Guard blocks a new one from opening alongside it."""
+    direction -- Sig Guard blocks a new one from opening alongside it.
+
+    guard_pips (2026-08-04, the reference copier's "SIG GUARD: 20p"): when
+    >0, only an existing trade whose entry is within this many pips of the
+    new one blocks. That is the difference between "never stack on this
+    channel at all" (0, the original behaviour and still the default) and
+    "don't stack on top of the SAME level, but a genuinely separate setup
+    further down the chart is fine" -- which is what the copier does, and
+    what makes a 20p vs 25p distinction meaningful. Falls back to the
+    all-or-nothing check when no entry price is available to measure from.
+    """
     with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM vantage_simulated_trades WHERE status='open' "
-            "AND tg_source=? AND direction=? AND strategy LIKE ? LIMIT 1",
+        rows = conn.execute(
+            "SELECT entry_price FROM vantage_simulated_trades WHERE status='open' "
+            "AND tg_source=? AND direction=? AND strategy LIKE ?",
             (channel_name, direction.upper(), f"{ea_templates.TEMPLATE_OVERRIDE_PREFIX}%"),
-        ).fetchone()
-    return row is not None
+        ).fetchall()
+    if not rows:
+        return False
+    if guard_pips <= 0 or new_entry is None:
+        return True
+    for r in rows:
+        existing = float(r[0] or 0)
+        # A placeholder row that has not filled yet (entry 0) has no price
+        # to compare, so treat it as blocking rather than waving it through.
+        if existing <= 0:
+            return True
+        if abs(existing - new_entry) <= guard_pips * PIPS_TO_PRICE_XAUUSD:
+            return True
+    return False
 
 
 async def resolve_open_trade_params(
@@ -199,11 +223,16 @@ async def resolve_open_trade_params(
         _template = ea_templates.get_ea_template(_tpl_name)
         if _template is None:
             raise ValueError(f"Template '{_tpl_name}' no longer exists — reassign this channel")
-        if _template["sig_guard"] and _sig_guard_blocks(_ch_src_early, sig["direction"]):
-            raise ValueError(
-                f"Sig Guard: a template-managed trade is already open for "
-                f"'{_ch_src_early}' {sig['direction']}"
-            )
+        if _template["sig_guard"]:
+            _sg_pips = float(_template.get("sig_guard_pips") or 0)
+            _sg_entry = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+            if _sig_guard_blocks(_ch_src_early, sig["direction"], _sg_pips, _sg_entry):
+                _sg_where = (f" within {_sg_pips:.0f} pips of ${_sg_entry:.2f}"
+                             if _sg_pips > 0 else "")
+                raise ValueError(
+                    f"Sig Guard: a template-managed trade is already open for "
+                    f"'{_ch_src_early}' {sig['direction']}{_sg_where}"
+                )
 
     # Pre-trade filters: R:R and directional cap.
     # Conservative, Conservative Trial, Trail Stop, Signal Climber, and

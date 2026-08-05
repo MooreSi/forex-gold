@@ -716,6 +716,12 @@ def validate_signal(direction: str, entry_low: float, entry_high: float,
     """
     Returns list of validation error strings. Empty = valid.
     Accepts up to 8 TP values as positional args (tp1 … tp8); extras beyond 8 are ignored.
+
+    A None stop_loss is reported as an error, not raised on: this is a
+    validator, and every caller already handles the returned list by
+    skipping the signal with a readable reason. It used to compare None
+    against a float and raise TypeError straight out of the caller's own
+    scan loop instead (2026-08-05).
     """
     errors    = []
     direction = direction.upper()
@@ -725,14 +731,17 @@ def validate_signal(direction: str, entry_low: float, entry_high: float,
     # Normalise TP args — positional, up to 8
     tp_list = list(tp_args[:8])  # tp1..tp8
 
+    if stop_loss is None:
+        errors.append("Stop Loss is required")
+
     if direction == "BUY":
-        if stop_loss >= entry_low:
+        if stop_loss is not None and stop_loss >= entry_low:
             errors.append("Stop Loss must be below entry range for BUY")
         for i, tp in enumerate(tp_list, 1):
             if tp is not None and tp <= entry_high:
                 errors.append(f"TP{i} must be above entry range for BUY")
     elif direction == "SELL":
-        if stop_loss <= entry_high:
+        if stop_loss is not None and stop_loss <= entry_high:
             errors.append("Stop Loss must be above entry range for SELL")
         for i, tp in enumerate(tp_list, 1):
             if tp is not None and tp >= entry_low:

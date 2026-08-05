@@ -186,6 +186,42 @@ def test_pre_trade_filter_fails_skips(fresh_db):
     assert calls == []
 
 
+def test_ea_template_bypasses_pre_trade_filter(fresh_db):
+    # 2026-08-05: `strategy` here is the raw "template:<name>" override
+    # string, which can never be a member of the built-in-key
+    # _PRE_TRADE_FILTER_BYPASS_STRATEGIES set -- so a template channel was
+    # the only execution path still scoring the signal's own TP1/SL, levels
+    # the template replaces with its own sl_pips/tp*_pips before the trade
+    # ever opens. Both other paths (core_signal_resolution's `not
+    # _is_template`, core_pending_signal_activation's `_grid_tpl`) already
+    # exempt templates. A filter verdict that WOULD block must not.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Surface Single", {"mode": "single", "sl_pips": 60.0})
+    result, calls, bridge = _call(
+        strategy="template:Surface Single", filter_err="R:R too low",
+    )
+    assert result["executed"] is True
+    assert len(calls) == 1
+    assert calls[0]["strategy"] == "template:Surface Single"
+
+
+def test_grid_template_reaches_immediate_placement_despite_filter(fresh_db):
+    # The grid branch that stages the resting legs sits BELOW the filter
+    # check, so a blocking verdict used to stop a grid template from ever
+    # placing a pending order at all -- the failure that made a "BUY LIMITS
+    # ... AREA" signal on a template channel place nothing.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Surface Grid", {"mode": "grid", "pendings": 1, "anchors": 0})
+    result, calls, bridge = _call(
+        strategy="template:Surface Grid", filter_err="R:R too low",
+    )
+    assert result["executed"] is True
+    assert len(calls) == 1
+    # The grid branch marks the signal active immediately rather than
+    # queueing it to wait for price to re-enter the zone.
+    assert _get_last_signal()["status"] == "active"
+
+
 def test_validate_signal_fails_skips(fresh_db):
     bad_parsed = dict(_PARSED, tp1=4520.0)  # wrong side of entry for a BUY
     result, calls, bridge = _call(parsed=bad_parsed)

@@ -2568,6 +2568,92 @@ def _render_ea_templates_card() -> None:
         except Exception as exc:
             ui.notify(f"Send failed: {exc}", type="negative")
 
+    def _export_templates() -> None:
+        """Save every saved template to a shareable file.
+
+        Exports what is in the Load drop-down (i.e. the saved templates),
+        NOT the unsaved values currently in the form -- an edit has to be
+        saved before it can be exported, same as it has to be saved before
+        a channel can use it."""
+        try:
+            saved = et.list_ea_templates()
+            if not saved:
+                ui.notify("No saved templates to export", type="warning")
+                return
+            ui.download.content(
+                et.export_templates(), et.export_filename(),
+                media_type="application/json",
+            )
+            ui.notify(f"Exporting {len(saved)} template(s)", type="positive")
+        except Exception as exc:
+            ui.notify(f"Export failed: {exc}", type="negative")
+
+    def _build_import_dialog():
+        """Build the Import popup once, as a sibling of `body`.
+
+        Deliberately NOT built inside `body`: the import handler ends with
+        a _draw_body(), which clears `body` -- a dialog living in there
+        would be destroyed out from under its own running handler."""
+        with ui.dialog() as dlg, ui.card().classes(
+            "bg-gray-900 border border-gray-700 p-4 gap-2 min-w-96"
+        ):
+            ui.label("Import Templates").classes(
+                "text-sm font-bold text-yellow-300")
+            ui.label(
+                f"Choose a template file ({et.EXPORT_EXTENSION} or .json) exported "
+                "from another install. Its templates are added to your Load list."
+            ).classes("text-xs text-gray-400")
+            overwrite = ui.checkbox("Overwrite templates with the same name") \
+                .classes("text-xs").tooltip(
+                    "Off: a template whose name you already use is skipped and "
+                    "your own version is kept. On: the file's version replaces yours."
+                )
+
+            def _handle(e) -> None:
+                try:
+                    res = et.import_templates(
+                        e.content.read(), overwrite=bool(overwrite.value))
+                except Exception as exc:
+                    ui.notify(f"Import failed: {exc}", type="negative")
+                    return
+                dlg.close()
+                parts = []
+                for label, key in (("added", "added"), ("replaced", "replaced"),
+                                   ("skipped", "skipped")):
+                    if res[key]:
+                        parts.append(f"{len(res[key])} {label}")
+                if not parts:
+                    ui.notify("File contained no templates", type="warning")
+                    return
+                ui.notify(
+                    f"Imported from {e.name}: " + ", ".join(parts),
+                    type="positive" if (res["added"] or res["replaced"]) else "warning",
+                )
+                if res["skipped"]:
+                    ui.notify(
+                        "Kept your existing: " + ", ".join(res["skipped"])
+                        + " — re-import with Overwrite ticked to replace them.",
+                        type="info",
+                    )
+                _draw_body()
+
+            uploader = ui.upload(
+                on_upload=_handle, auto_upload=True, max_files=1,
+                max_file_size=8 * 1024 * 1024, label="Select template file",
+            ).classes("w-full").props('accept=".json,.eatpl" flat dense')
+            with ui.row().classes("w-full justify-end"):
+                ui.button("Cancel", on_click=dlg.close) \
+                    .classes("text-xs").props("dense flat")
+        return dlg, uploader
+
+    _import_dialog, _import_uploader = _build_import_dialog()
+
+    def _open_import_dialog() -> None:
+        # Clear any previous run's file chip so a second import starts
+        # from an empty picker rather than the last file's name.
+        _import_uploader.reset()
+        _import_dialog.open()
+
     def _draw_body() -> None:
         body.clear()
         live = (et.get_ea_template(state["name"]) if state["name"] else None) or dict(et.DEFAULTS)
@@ -2589,6 +2675,27 @@ def _render_ea_templates_card() -> None:
                 name_input = ui.input(
                     "Template name", value=state["name"] or "",
                 ).classes("w-56").props("dense outlined")
+                # Import/Export (2026-08-06) -- move templates between
+                # installs/users. Both open the browser's own file
+                # dialog: Import via the upload picker in the dialog
+                # below, Export via a download (Save As).
+                ui.button(
+                    "Import Templates", icon="upload_file",
+                    on_click=_open_import_dialog,
+                ).classes("text-xs bg-blue-800 text-white px-3") \
+                    .props("dense unelevated").tooltip(
+                        "Load templates from a template file shared by another "
+                        "user. Existing templates of the same name are kept "
+                        "unless you tick Overwrite."
+                    )
+                ui.button(
+                    "Export Templates", icon="download",
+                    on_click=_export_templates,
+                ).classes("text-xs bg-blue-900 text-white px-3") \
+                    .props("dense unelevated").tooltip(
+                        "Save every template in the Load list to a "
+                        f"{et.EXPORT_EXTENSION} file you can share or keep as a backup."
+                    )
 
             # ── Section header helper ────────────────────────────────────
             # Every major block below is its own bordered card with a

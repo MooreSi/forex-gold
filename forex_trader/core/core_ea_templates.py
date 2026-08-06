@@ -18,6 +18,7 @@ dispatch entirely once assigned to a channel.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -384,3 +385,112 @@ def delete_ea_template(name: str) -> None:
     with db_module.db() as conn:
         conn.execute("DELETE FROM ea_trade_templates WHERE name=?", (name,))
     log.info("[EATemplates] deleted template %r", name)
+
+
+# ── Import / export (2026-08-06) ─────────────────────────────────────────
+# Templates are the one piece of app state worth moving between installs
+# (and between users -- a working ladder/trail/guard combination is the
+# result of a lot of live tuning). The file is plain JSON so it stays
+# diffable and hand-editable, wrapped in an envelope so an import can tell
+# a real template file from any other .json a file browser offers.
+#
+# Only `name` plus the DEFAULTS keys travel: created_at/updated_at are
+# local bookkeeping, and every unknown key is dropped on the way in by
+# _clean_fields, so a file written by an older or newer build imports
+# cleanly -- missing fields fall back to DEFAULTS rather than failing.
+EXPORT_FORMAT   = "forex_trader.ea_templates"
+EXPORT_VERSION  = 1
+EXPORT_EXTENSION = ".eatpl.json"
+
+
+def export_filename(prefix: str = "ea_templates") -> str:
+    """Default save-as name, timestamped so repeated exports don't collide."""
+    return f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}{EXPORT_EXTENSION}"
+
+
+def export_templates(names: list[str] | None = None) -> str:
+    """Serialise templates to the JSON export envelope.
+
+    `names=None` exports every saved template (what the panel's Export
+    button does -- "all of the EA templates"); pass a list to export a
+    subset.
+    """
+    rows = list_ea_templates()
+    if names is not None:
+        wanted = {n.strip() for n in names}
+        rows = [r for r in rows if r["name"] in wanted]
+    payload = {
+        "format":      EXPORT_FORMAT,
+        "version":     EXPORT_VERSION,
+        "exported_at": time.time(),
+        "templates":   [
+            {"name": r["name"], **{k: r.get(k, DEFAULTS[k]) for k in DEFAULTS}}
+            for r in rows
+        ],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _parse_export(payload: bytes | str) -> list[dict]:
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8-sig")
+    try:
+        data = json.loads(payload)
+    except Exception as exc:
+        raise ValueError(f"Not a valid template file (bad JSON): {exc}") from exc
+    # Tolerate a bare list of templates as well as the envelope -- that is
+    # what someone hand-assembling a file is most likely to produce.
+    if isinstance(data, list):
+        templates = data
+    elif isinstance(data, dict):
+        if data.get("format") not in (None, EXPORT_FORMAT):
+            raise ValueError(f"Unrecognised file format: {data.get('format')!r}")
+        templates = data.get("templates")
+        if templates is None:
+            raise ValueError("File contains no 'templates' section")
+    else:
+        raise ValueError("Not a valid template file")
+    if not isinstance(templates, list):
+        raise ValueError("'templates' must be a list")
+    out = []
+    for t in templates:
+        if not isinstance(t, dict):
+            raise ValueError("Each template must be an object")
+        name = str(t.get("name") or "").strip()
+        if not name:
+            raise ValueError("A template in the file has no name")
+        out.append({**t, "name": name})
+    return out
+
+
+def import_templates(payload: bytes | str, *, overwrite: bool = False) -> dict:
+    """Add the file's templates to this install.
+
+    Returns {"added": [...], "replaced": [...], "skipped": [...]}. A name
+    that already exists is left alone unless `overwrite` is set, so a
+    shared file can never silently clobber a locally tuned template.
+    Validation of every template happens before anything is written, so a
+    file with one bad entry imports nothing rather than half of itself.
+    """
+    incoming = _parse_export(payload)
+    cleaned: list[tuple[str, dict]] = []
+    for t in incoming:
+        try:
+            cleaned.append((t["name"], _clean_fields(t)))
+        except ValueError as exc:
+            raise ValueError(f"Template {t['name']!r}: {exc}") from exc
+
+    existing = {t["name"] for t in list_ea_templates()}
+    result: dict[str, list[str]] = {"added": [], "replaced": [], "skipped": []}
+    for name, clean in cleaned:
+        if name in existing:
+            if not overwrite:
+                result["skipped"].append(name)
+                continue
+            result["replaced"].append(name)
+        else:
+            result["added"].append(name)
+        save_ea_template(name, clean)
+    log.info("[EATemplates] import: %d added, %d replaced, %d skipped",
+             len(result["added"]), len(result["replaced"]), len(result["skipped"]))
+    return result

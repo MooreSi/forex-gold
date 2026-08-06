@@ -441,6 +441,115 @@ def _template_group_map(leg_comments: dict) -> dict[str, tuple[str, int]]:
     return result
 
 
+# The reference GoldSnipers copier EA stamps its own per-channel comment on
+# every position it opens: "C<slot>_<sigcode>_<ANC|PEN>" (see
+# core_ea_templates.py and ForexTraderBridge.mq5, both of which quote observed
+# live examples like "C2_LDBD_25202_ANC"). Those positions are NOT this app's
+# trades -- they have no vantage_simulated_trades row and never will -- so no
+# channel can honestly be attributed to them. They were previously
+# indistinguishable from a genuine attribution failure: blank ("—") in the
+# Closed Trades table and "Unknown" in the calendar day detail. Naming the
+# copier says what actually happened instead. The slot number is the copier's
+# own per-channel input block (InpC{n}_*), not a Telegram channel name this
+# app knows, so it is shown as-is rather than guessed at.
+_COPIER_COMMENT_RE = _re.compile(r"^C(\d+)_[A-Z0-9]+_\d+_(?:ANC|PEN)$", _re.IGNORECASE)
+
+
+def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict]:
+    """Return ({ticket: channel}, {ticket: strategy}) recovered from the
+    broker's own opening-deal comment, for broker positions that have no
+    vantage_simulated_trades row of their own.
+
+    `leg_comments` is {ticket: entry_deal_comment}, taken from the broker's
+    deal history by the caller. Three comment shapes are recognised, all of
+    them written by something that leaves no local row behind:
+
+    "ea:<trade_id[:10]><a|g><N>" -- an EA Template leg. A template trade opens
+        one broker position per Anchor/Grid leg, but Python keeps a SINGLE
+        vantage_simulated_trades row per trade, so every leg except the one
+        that promoted that row has no local row and no ticket lookup can find
+        it. The EA's comment is the link back (see ea_bridge.
+        trade_id_prefix_from_comment) -- the same mechanism
+        core_template_placeholder_repair uses to adopt an orphaned row. Over
+        two days of live history only 59 of 294 broker positions had a local
+        row, and 160 of the remaining 235 were template legs.
+
+    "sig:<signal_id[:8]>" -- this app's own non-template order comment (see
+        core_open_trade.py). A position carrying it IS ours; reaching here
+        means the trade row lost its mt5_ticket link, so recover the channel
+        through signal_id instead.
+
+    "C<n>_..._ANC|_PEN" -- the third-party copier EA. See
+        _COPIER_COMMENT_RE above.
+
+    Module-level so both the Closed Trades table and the calendar's
+    day-detail view attribute a ticket identically -- the calendar had no
+    comment-based fallback at all, so every template leg (and every copier
+    position) showed "Unknown" there while the table beside it resolved the
+    same ticket correctly.
+    """
+    from forex_trader.core.ea_bridge import trade_id_prefix_from_comment
+
+    src: dict[str, str] = {}
+    strat: dict[str, str] = {}
+
+    by_prefix: dict[str, list] = {}
+    by_signal: dict[str, list] = {}
+    for ticket, comment in (leg_comments or {}).items():
+        comment = comment or ""
+        prefix = trade_id_prefix_from_comment(comment)
+        if prefix:
+            by_prefix.setdefault(prefix, []).append(str(ticket))
+            continue
+        if comment.startswith("sig:"):
+            sig_prefix = comment[len("sig:"):].strip()
+            if sig_prefix:
+                by_signal.setdefault(sig_prefix, []).append(str(ticket))
+            continue
+        m = _COPIER_COMMENT_RE.match(comment)
+        if m:
+            src[str(ticket)] = f"Copier EA (C{int(m.group(1))})"
+            strat[str(ticket)] = "External"
+
+    if not by_prefix and not by_signal:
+        return src, strat
+
+    _SQL_BY_TRADE_ID = ("SELECT tg_source, strategy FROM vantage_simulated_trades "
+                        "WHERE trade_id LIKE ? LIMIT 1")
+    _SQL_BY_SIGNAL_ID = ("SELECT tg_source, strategy FROM vantage_simulated_trades "
+                         "WHERE signal_id LIKE ? LIMIT 1")
+    try:
+        with db_module.db() as conn:
+            for sql, groups in ((_SQL_BY_TRADE_ID, by_prefix),
+                                (_SQL_BY_SIGNAL_ID, by_signal)):
+                for prefix, tickets in groups.items():
+                    row = conn.execute(sql, (prefix + "%",)).fetchone()
+                    if not row:
+                        continue
+                    tg_source, strategy = row[0], row[1]
+                    ch = trade_channel_label(tg_source or "")
+                    label = ch if ch else trade_source_label(tg_source or "")
+                    for ticket in tickets:
+                        src[ticket] = label
+                        strat[ticket] = _strategy_display_label(strategy or "")
+    except Exception:
+        pass
+    return src, strat
+
+
+def _entry_deal_comments(by_pos: dict) -> dict:
+    """{ticket_str: opening-deal comment} for every position that has one --
+    the input _comment_attribution_maps works from. `by_pos` is
+    {position_id: [deal, ...]} as both callers already build it."""
+    out: dict[str, str] = {}
+    for _pid, _ds in (by_pos or {}).items():
+        for _d in _ds:
+            if _d.get("entry") == 0 and (_d.get("comment") or ""):
+                out[str(_pid)] = _d.get("comment")
+                break
+    return out
+
+
 def _render_trade_table(engine):
     def _ticket_source_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: channel_or_source_label}.
@@ -500,56 +609,6 @@ def _render_trade_table(engine):
         except Exception:
             pass
         return result
-
-    def _template_leg_maps(leg_comments: dict) -> tuple:
-        """Return ({ticket: channel}, {ticket: strategy}) for EA Template legs.
-
-        A template trade opens one broker position per Anchor/Grid leg, but
-        Python keeps a SINGLE vantage_simulated_trades row per trade -- so
-        every leg except the one that promoted that row has no local row, and
-        _ticket_source_map's ticket lookup finds nothing for it. Those legs
-        rendered with a blank channel and strategy even though they are the
-        bulk of a grid trade: over two days of live history only 59 of 294
-        broker positions had a local row, and 160 of the remaining 235 were
-        template legs.
-
-        The EA's own order comment is the link back (see ea_bridge.
-        trade_id_prefix_from_comment) -- the same mechanism
-        core_template_placeholder_repair uses to adopt an orphaned row.
-        `leg_comments` is {ticket: entry_deal_comment}, taken from the
-        broker's deal history by the caller.
-        """
-        from forex_trader.core.ea_bridge import trade_id_prefix_from_comment
-
-        by_prefix: dict[str, list] = {}
-        for ticket, comment in (leg_comments or {}).items():
-            prefix = trade_id_prefix_from_comment(comment)
-            if prefix:
-                by_prefix.setdefault(prefix, []).append(str(ticket))
-        if not by_prefix:
-            return {}, {}
-
-        src: dict[str, str] = {}
-        strat: dict[str, str] = {}
-        try:
-            with db_module.db() as conn:
-                for prefix, tickets in by_prefix.items():
-                    row = conn.execute(
-                        "SELECT tg_source, strategy FROM vantage_simulated_trades "
-                        "WHERE trade_id LIKE ? LIMIT 1",
-                        (prefix + "%",),
-                    ).fetchone()
-                    if not row:
-                        continue
-                    tg_source, strategy = row[0], row[1]
-                    ch = trade_channel_label(tg_source or "")
-                    label = ch if ch else trade_source_label(tg_source or "")
-                    for ticket in tickets:
-                        src[ticket] = label
-                        strat[ticket] = _strategy_display_label(strategy or "")
-        except Exception:
-            pass
-        return src, strat
 
     def _ticket_strategy_map(days: int) -> dict[str, str]:
         """Return {mt5_ticket_str: strategy_display}.
@@ -832,19 +891,16 @@ def _render_trade_table(engine):
                         if pid:  # excludes None and 0 (balance/deposit ops)
                             by_pos.setdefault(int(pid), []).append(d)
 
-                    # EA Template legs: attribute the sibling legs that have no
-                    # local trade row of their own back to their trade, via the
-                    # comment the EA stamped on the opening deal. setdefault, so
-                    # a real local row always wins over a comment inference.
-                    _leg_comments = {}
-                    for _pid, _ds in by_pos.items():
-                        for _d in _ds:
-                            if _d.get("entry") == 0 and (_d.get("comment") or ""):
-                                _leg_comments[str(_pid)] = _d.get("comment")
-                                break
+                    # Positions with no local trade row of their own: attribute
+                    # them from the comment the opening order carried (EA
+                    # Template sibling legs, orphaned "sig:" rows, and the
+                    # third-party copier EA) -- see
+                    # _comment_attribution_maps. setdefault, so a real local
+                    # row always wins over a comment inference.
+                    _leg_comments = _entry_deal_comments(by_pos)
                     if _leg_comments:
                         _leg_src, _leg_strat = await db_module.to_db_thread(
-                            _template_leg_maps, _leg_comments)
+                            _comment_attribution_maps, _leg_comments)
                         for _t, _v in _leg_src.items():
                             src_map.setdefault(_t, _v)
                         for _t, _v in _leg_strat.items():
@@ -1236,10 +1292,12 @@ def _render_calendar(engine):
     async def _build_day_map(year: int, month: int) -> tuple[dict, dict, str]:
         """Build day-level P&L map exclusively from MT5 deal history."""
         trade_map: dict[int, tuple[date, float]] = {}  # ticket → (date, pnl)
+        _dir_by_ticket: dict[str, str] = {}   # from the broker's own opening deal
         _detail_store.clear()
         # Offloaded — both are synchronous DB reads.
         _tinfo    = await db_module.to_db_thread(_ticket_info)
         comm_rate = await db_module.to_db_thread(_platform_fee_rate)
+        _leg_comments: dict = {}
 
         try:
             today_d   = datetime.now(_UK_TZ).date()
@@ -1253,6 +1311,8 @@ def _render_calendar(engine):
                     pid = d.get("position_id")
                     if pid:  # excludes None and 0 (balance/deposit ops)
                         by_pos.setdefault(int(pid), []).append(d)
+
+                _leg_comments = _entry_deal_comments(by_pos)
 
                 for ticket, pos_deals in by_pos.items():
                     _cd = [d for d in pos_deals if d.get("entry") in (1, 2, 3)]
@@ -1273,8 +1333,24 @@ def _render_calendar(engine):
                     open_lots = float(open_deal.get("volume", 0)) if open_deal else float(close_deal.get("volume", 0))
                     pnl, _fees = _apply_fee(pos_deals, open_lots, comm_rate)
                     trade_map[ticket] = (d_date, pnl)
+                    if open_deal is not None:
+                        _dir_by_ticket[str(ticket)] = (
+                            "BUY" if int(open_deal.get("type", 0)) == 0 else "SELL"
+                        )
         except Exception:
             pass
+
+        # Same comment-based attribution the Closed Trades table performs --
+        # without it every EA Template sibling leg (the bulk of a grid trade's
+        # broker positions) showed "Unknown" here while the table beside it
+        # named the channel correctly. Only fills tickets the DB maps above
+        # could not resolve, so a real local row always wins.
+        if _leg_comments:
+            _c_src, _c_strat = await db_module.to_db_thread(
+                _comment_attribution_maps, _leg_comments)
+            for _t, _v in _c_src.items():
+                if _t not in _tinfo:
+                    _tinfo[_t] = (_v, _c_strat.get(_t, "—"), _dir_by_ticket.get(_t, ""))
 
         day_map: dict[date, dict] = {}
         for _ticket, (d, pnl) in trade_map.items():
@@ -1284,7 +1360,8 @@ def _render_calendar(engine):
             day_map[d]["trades"] += 1
             if pnl > 0:
                 day_map[d]["wins"] += 1
-            src, strat, dir_ = _tinfo.get(str(_ticket), ("Unknown", "—", ""))
+            src, strat, dir_ = _tinfo.get(
+                str(_ticket), ("Unknown", "—", _dir_by_ticket.get(str(_ticket), "")))
             _detail_store.setdefault(d, []).append({
                 "ticket": _ticket, "source": src, "strategy": strat,
                 "direction": dir_, "pnl": pnl,

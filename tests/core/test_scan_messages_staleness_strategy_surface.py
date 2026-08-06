@@ -200,3 +200,98 @@ def test_trading_paused_skip_reason(fresh_db):
 def test_default_skip_reason(fresh_db):
     result = _resolve()
     assert result["skip_reason"] == "Auto-execution is OFF — activate manually in the dashboard."
+
+
+# ── Trading Schedule per-window override (2026-08-06) ────────────────────
+# core_signal_resolution has honoured the active window's own strategy/
+# template pick since the feature landed; this path never did, so a template
+# assigned per schedule window was silently ignored for every Telegram signal
+# arriving through the scan loop.
+
+def _schedule_today(override="", channel="TestChannel", channel_enabled=True):
+    from datetime import datetime
+    from forex_trader.core import core_trading_schedule as sched
+    schedule = sched._default_schedule()
+    day = sched.DAY_NAMES[datetime.now().weekday()]
+    schedule[day][0] = {
+        "enabled": True, "start": "00:00", "end": "23:59", "target": 0.0,
+        "telegram_default_enabled": True,
+        "telegram_channels": {
+            db._canonical(channel): {
+                "enabled": channel_enabled, "strategy_override": override,
+            },
+        },
+    }
+    return schedule
+
+
+def _enable_schedule(**kw):
+    from forex_trader.core import core_trading_schedule as sched
+    sched.set_trading_schedule_enabled(True)
+    sched.set_trading_schedule(_schedule_today(**kw))
+
+
+def test_schedule_window_template_beats_the_channel_strategy(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Sched Tpl", {"mode": "grid"})
+    db.set_channel_strategy_override("TestChannel", "trail_stop")
+    _enable_schedule(override="template:Sched Tpl")
+    result = _resolve()
+    assert result["strategy"] == "template:Sched Tpl"
+    assert result["strategy_name"] == "Template: Sched Tpl"
+
+
+def test_schedule_window_template_beats_a_different_channel_template(fresh_db):
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Channel Tpl", {"mode": "single"})
+    et.save_ea_template("Window Tpl", {"mode": "grid"})
+    db.set_channel_strategy_override("TestChannel", "template:Channel Tpl")
+    _enable_schedule(override="template:Window Tpl")
+    assert _resolve()["strategy"] == "template:Window Tpl"
+
+
+def test_schedule_window_plain_strategy_override_also_applies(fresh_db):
+    db.set_channel_strategy_override("TestChannel", "trail_stop")
+    _enable_schedule(override="conservative")
+    assert _resolve()["strategy"] == "conservative"
+
+
+def test_window_with_no_override_leaves_the_channel_pick_alone(fresh_db):
+    db.set_channel_strategy_override("TestChannel", "trail_stop")
+    _enable_schedule(override="")
+    assert _resolve()["strategy"] == "trail_stop"
+
+
+def test_schedule_disabled_leaves_the_channel_pick_alone(fresh_db):
+    from forex_trader.core import core_trading_schedule as sched
+    db.set_channel_strategy_override("TestChannel", "trail_stop")
+    sched.set_trading_schedule(_schedule_today(override="conservative"))
+    sched.set_trading_schedule_enabled(False)
+    assert _resolve()["strategy"] == "trail_stop"
+
+
+def test_channel_disabled_in_the_window_leaves_the_channel_pick_alone(fresh_db):
+    # get_schedule_strategy_override returns None for a source the window has
+    # switched off -- "no opinion", not "use this". Blocking is a separate gate.
+    db.set_channel_strategy_override("TestChannel", "trail_stop")
+    _enable_schedule(override="conservative", channel_enabled=False)
+    assert _resolve()["strategy"] == "trail_stop"
+
+
+def test_a_schedule_assigned_template_survives_the_high_risk_clobber(fresh_db):
+    # "HIGH RISK TRADE" is channel-wide boilerplate on GOLD DIGGERS
+    # INSTITUTIONAL, and the guard that stops it overriding a template reads
+    # the already-resolved strategy -- so the schedule override has to land
+    # before it, not after.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Sched Tpl", {"mode": "grid"})
+    _enable_schedule(override="template:Sched Tpl")
+    result = _resolve(text="HIGH RISK TRADE — XAU USD BUY NOW")
+    assert result["strategy"] == "template:Sched Tpl"
+
+
+def test_high_risk_still_clobbers_a_schedule_assigned_plain_strategy(fresh_db):
+    # Unchanged behaviour for non-template overrides.
+    _enable_schedule(override="trail_stop")
+    result = _resolve(text="HIGH RISK TRADE — XAU USD BUY NOW")
+    assert result["strategy"] == "conservative"

@@ -43,6 +43,52 @@ RR_BYPASS_SOURCES: frozenset = frozenset({
     "gold diggers 2.0",
 })
 
+
+def rr_filter_bypassed(source_name: str) -> bool:
+    """True when `source_name`'s TP/SL should be taken as-is, unscored.
+
+    Two ways to qualify:
+
+      * the channel is in RR_BYPASS_SOURCES above, or
+      * Immediate Market Entry is live for it (the global risk-settings
+        toggle AND the channel's own instant_entry_enabled flag, defaulting
+        by parser format exactly as core_scan_messages_auto_execute.
+        ime_enabled_for_channel and engine.py's own inline gate do).
+
+    The IME arm was added to the scan/auto-execute path on 2026-08-06 by
+    explicit user directive -- IME means the user has opted into taking this
+    channel's fill at market the moment the signal lands, which an R:R gate
+    measured against the live price contradicts by construction. It belongs
+    here rather than only at that one call site: the pending-activation
+    watcher (core_pending_signal_activation) and resolve_open_trade_params
+    (core_signal_resolution) run the same filter over the same signals, so a
+    channel exempted on one path was still declined on the others.
+
+    Found live 2026-08-06: every GOLD DIGGERS INSTITUTIONAL signal since
+    08-05 12:47 was rejected here (TP1 4-6pt against an 8-9pt stop, 0.47-0.67
+    :1 against the 0.75:1 floor) even though the channel has IME on, so the
+    app opened no GDI trade at all in that window while its sibling channel
+    Gold Diggers VIP -- which only differs by being in the static set above
+    -- kept trading.
+    """
+    _src_lower = (source_name or "").lower()
+    if any(ch in _src_lower for ch in RR_BYPASS_SOURCES):
+        return True
+    if not source_name:
+        return False
+    try:
+        rs = db_module.get_risk_settings() or {}
+        if not bool(rs.get("immediate_market_entry", 0)):
+            return False
+        ch_cfg = db_module.get_channel_parser_config(source_name) or {}
+        if not ch_cfg:
+            return False
+        _default = 1 if ch_cfg.get("parser_format") in ("format_ab", "gd2") else 0
+        return bool(ch_cfg.get("instant_entry_enabled", _default))
+    except Exception:
+        return False
+
+
 # 0.30 only rejects badly-inverted setups (TP1 closer than 1/3 of the stop).
 # A 1:1 floor was tested but blocks the breakeven-mechanism winners that the
 # scale-out/conservative strategies rely on, so sizing does the heavy lifting.
@@ -93,8 +139,9 @@ def check_pre_trade_filters(
 
     Filter 1 -- Minimum R:R on TP1 (0.75 : 1)
         Compares TP1 distance against SL distance from the reference price.
-        Skipped for channels in RR_BYPASS_SOURCES that supply their own
-        TP/SL levels from a signal provider service.
+        Skipped for channels that supply their own TP/SL levels from a
+        signal provider service, or that are running Immediate Market Entry
+        -- see rr_filter_bypassed.
 
     Filter 2 -- Directional cap (max 2 unprotected same-direction trades)
         Blocks a new trade when 2 or more currently-open trades in the same
@@ -106,9 +153,7 @@ def check_pre_trade_filters(
 
     # ── Filter 1: Minimum TP1 R:R ─────────────────────────────────────────
     _MIN_RR = 0.75
-    _src_lower    = source_name.lower()
-    _rr_bypassed  = any(ch in _src_lower for ch in RR_BYPASS_SOURCES)
-    if tp1 is not None and not _rr_bypassed:
+    if tp1 is not None and not rr_filter_bypassed(source_name):
         ref_price = float(actual_price) if actual_price is not None \
                     else (entry_low + entry_high) / 2.0
         sl_dist   = abs(ref_price - float(stop_loss))

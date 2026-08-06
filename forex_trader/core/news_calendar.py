@@ -1,38 +1,341 @@
 """
-Economic news calendar — provides "minutes to next high-impact event" as an ML feature.
+Economic news calendar — the single source of truth for calendar events.
 
-Sources (in priority order):
-  1. MT5 bridge calendar query (no external dependency, most reliable)
-  2. Finnhub API (free tier, requires FINNHUB_API_KEY in config.yaml)
-  3. ForexFactory scrape (fallback, no key needed but fragile)
+Source: the ForexFactory weekly JSON feed published by faireconomy
+(https://nfs.faireconomy.media/ff_calendar_thisweek.json). No API key, no rate
+limit, impact already rated per event. Only the current week is published —
+`ff_calendar_nextweek.json` and friends return 404 — so the horizon is however
+much of the current Mon–Sun window is left.
 
-The primary consumer is the signal ML engines, which use news_proximity_norm:
-  0.0 = high-impact event imminent (< 5 min) — very risky to enter
-  0.5 = event in ~60 min — moderate caution
-  1.0 = no event in the next 120+ min — safe window
+Feed schema (verified against the live feed):
+    {"title": str, "country": str, "date": ISO-8601 with offset,
+     "impact": "High"|"Medium"|"Low"|"Holiday", "forecast": str, "previous": str}
 
-Cache TTL: 10 minutes (events don't change that quickly).
+Note `country`, not `currency` — it carries currency codes ("USD", "EUR") but
+the key is named `country`. Reading it as `currency` yields None for every
+event, which silently disables anything built on top; that was the state of
+this module and of test_signal/news_filter.py before this was fixed.
+
+Two consumers:
+  * ML engines, via get_news_proximity_norm() — minutes to the next relevant
+    high-impact event, normalised to [0,1]. 0=imminent, 1=safe/far.
+  * The signal generators' news blackout, via is_high_impact_window(), and the
+    News tab, via get_events().
+
+Fetch failures are never fatal: get_events() serves the last good payload, and
+the blackout falls back to a hardcoded schedule of the routine gold movers.
 """
 from __future__ import annotations
 
 import logging
+import ssl
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 
-# ── Cache ─────────────────────────────────────────────────────────────────────
-_cache_ts:           float = 0.0
-_cache_next_mins:    Optional[float] = None   # minutes to next high-impact event
-_CACHE_TTL:          float = 600.0            # 10 minutes
+_FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
-# Currencies that affect XAUUSD meaningfully
-_IMPACT_CURRENCIES = {"USD", "XAU", "US", "EUR", "GBP"}
-_HIGH_IMPACT       = {"high", "3", "red"}     # Finnhub uses "3"; FF uses "red"/"high"
+# macOS Python bundles its own SSL without system roots — build a context that
+# trusts certifi's bundle so the HTTPS call succeeds off a stock python.org build.
+try:
+    import certifi
+    _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    _SSL_CTX = ssl.create_default_context()
 
+# ── Fetch cache ───────────────────────────────────────────────────────────────
+# _next_fetch_ts is tracked explicitly rather than derived from the last success,
+# so a failure can schedule its own retry. The feed answers 429 under repeated
+# calls, and without a backoff a cold cache would re-request on every single
+# get_events() — several engines poll this per cycle.
+_cache_events:  Optional[list[dict]] = None
+_next_fetch_ts: float = 0.0
+_CACHE_TTL:     float = 1800.0   # 30 min; the feed is a weekly publish
+_RETRY_AFTER:   float = 300.0    # 5 min backoff after a failed fetch
+
+# ── Gold relevance ────────────────────────────────────────────────────────────
+# XAUUSD is priced in dollars, so USD events dominate. The majors move gold via
+# the dollar index and via risk sentiment, and get a fractional weight; the rest
+# are kept in the feed for display but score near zero.
+_CURRENCY_WEIGHT: dict[str, float] = {
+    "USD": 1.0, "XAU": 1.0, "ALL": 0.6,
+    "EUR": 0.5, "GBP": 0.4, "CNY": 0.4,
+    "JPY": 0.3, "CHF": 0.25,
+    "CAD": 0.15, "AUD": 0.15, "NZD": 0.1,
+}
+_DEFAULT_CURRENCY_WEIGHT = 0.1
+
+# Events that historically move gold harder than their impact rating implies.
+_KEYWORD_BOOST: tuple[tuple[str, float], ...] = (
+    ("fomc", 1.0), ("federal funds", 1.0), ("rate decision", 0.9),
+    ("powell", 0.8), ("fed chair", 0.8), ("press conference", 0.6),
+    ("non-farm", 0.9), ("nonfarm", 0.9), ("unemployment rate", 0.6),
+    ("cpi", 0.8), ("core pce", 0.8), ("ppi", 0.5),
+    ("gdp", 0.5), ("ism", 0.5), ("retail sales", 0.5),
+    ("unemployment claims", 0.4), ("jolts", 0.3),
+)
+
+_IMPACT_RANK: dict[str, int] = {"high": 3, "medium": 2, "low": 1, "holiday": 0}
+
+# Impact sets the blackout may be configured against.
+_IMPACT_SETS: dict[str, frozenset[str]] = {
+    "high":        frozenset({"high"}),
+    "high_medium": frozenset({"high", "medium"}),
+}
+
+# Blackout defaults — used when the key is absent from config.yaml.
+_DEF_BLACKOUT_ENABLED = True
+_DEF_BLACKOUT_IMPACT  = "high"
+_DEF_MINUTES_BEFORE   = 30
+_DEF_MINUTES_AFTER    = 30
+
+# FOMC 2026 announcement dates (UTC), rate decision ~19:00, presser ~19:30.
+# Last-resort fallback used only while the feed is unreachable.
+_FOMC_DATES_2026: set[tuple[int, int]] = {
+    (1, 29), (3, 19), (5, 7), (6, 18),
+    (7, 29), (9, 17), (11, 5), (12, 16),
+}
+
+
+# ── Fetch + normalise ─────────────────────────────────────────────────────────
+
+def _fetch_raw() -> list[dict]:
+    """Fetch the weekly feed, cached. Returns [] only if we have never succeeded."""
+    global _cache_events, _next_fetch_ts
+    now = time.time()
+    if now < _next_fetch_ts:
+        return _cache_events or []
+
+    try:
+        import json
+        import urllib.request
+        req = urllib.request.Request(_FEED_URL, headers={"User-Agent": "ForexTrader/0.5"})
+        with urllib.request.urlopen(req, timeout=8, context=_SSL_CTX) as resp:
+            data = json.loads(resp.read().decode())
+        if not isinstance(data, list):
+            raise ValueError(f"feed returned {type(data).__name__}, expected list")
+        _cache_events  = data
+        _next_fetch_ts = now + _CACHE_TTL
+        _log.info("[NewsCalendar] Loaded %d events from ForexFactory", len(data))
+    except Exception as e:
+        # Keep serving the last good payload rather than going blind mid-week.
+        _next_fetch_ts = now + _RETRY_AFTER
+        _log.warning("[NewsCalendar] Feed fetch failed (%s) — serving cached payload", e)
+    return _cache_events or []
+
+
+def _currency_of(raw: dict) -> str:
+    """The feed names this field `country`, but it carries a currency code."""
+    return str(raw.get("country") or "").strip().upper()
+
+
+def _gold_score(currency: str, impact: str, title: str) -> float:
+    """Relative importance to XAUUSD. Higher is more likely to move gold."""
+    rank = _IMPACT_RANK.get(impact, 0)
+    if rank == 0:
+        return 0.0
+    weight = _CURRENCY_WEIGHT.get(currency, _DEFAULT_CURRENCY_WEIGHT)
+    lowered = title.lower()
+    boost = max((b for kw, b in _KEYWORD_BOOST if kw in lowered), default=0.0)
+    return round(rank * weight + boost * weight, 4)
+
+
+def _normalise(raw: dict) -> Optional[dict]:
+    """Feed row -> internal event dict, or None if unparseable."""
+    date_str = raw.get("date")
+    if not date_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    title    = str(raw.get("title") or "Untitled event")
+    currency = _currency_of(raw)
+    impact   = str(raw.get("impact") or "").strip().lower()
+    return {
+        "title":    title,
+        "currency": currency,
+        "impact":   impact,
+        "ts":       dt.timestamp(),
+        "dt":       dt.astimezone(timezone.utc),
+        "forecast": str(raw.get("forecast") or ""),
+        "previous": str(raw.get("previous") or ""),
+        "score":    _gold_score(currency, impact, title),
+    }
+
+
+def get_events(
+    impacts: Optional[set[str]] = None,
+    currencies: Optional[set[str]] = None,
+    upcoming_only: bool = False,
+) -> list[dict]:
+    """
+    All events in the current week, normalised and sorted by time.
+
+    impacts     — lowercase impact names to keep ("high", "medium", ...). None = all.
+    currencies  — currency codes to keep. None = all.
+    upcoming_only — drop events whose scheduled time has already passed.
+    """
+    now_ts = time.time()
+    out: list[dict] = []
+    for raw in _fetch_raw():
+        ev = _normalise(raw)
+        if ev is None:
+            continue
+        if impacts is not None and ev["impact"] not in impacts:
+            continue
+        if currencies is not None and ev["currency"] not in currencies:
+            continue
+        if upcoming_only and ev["ts"] < now_ts:
+            continue
+        out.append(ev)
+    out.sort(key=lambda e: e["ts"])
+    return out
+
+
+# ── Blackout configuration ────────────────────────────────────────────────────
+
+def get_blackout_settings() -> dict:
+    """Blackout settings from config.yaml, with defaults applied and clamped."""
+    try:
+        from forex_trader import config as cfg
+        enabled = bool(cfg.get("news_blackout_enabled", _DEF_BLACKOUT_ENABLED))
+        impact  = str(cfg.get("news_blackout_impact", _DEF_BLACKOUT_IMPACT)).lower()
+        before  = int(cfg.get("news_blackout_minutes_before", _DEF_MINUTES_BEFORE))
+        after   = int(cfg.get("news_blackout_minutes_after", _DEF_MINUTES_AFTER))
+    except Exception:
+        enabled, impact = _DEF_BLACKOUT_ENABLED, _DEF_BLACKOUT_IMPACT
+        before, after = _DEF_MINUTES_BEFORE, _DEF_MINUTES_AFTER
+
+    if impact not in _IMPACT_SETS:
+        impact = _DEF_BLACKOUT_IMPACT
+    return {
+        "enabled": enabled,
+        "impact":  impact,
+        "impacts": _IMPACT_SETS[impact],
+        # 0 is a legitimate "no pre/post padding"; the cap stops a typo from
+        # blacking out the whole week.
+        "minutes_before": max(0, min(240, before)),
+        "minutes_after":  max(0, min(240, after)),
+    }
+
+
+# ── Current-event query (drives the blackout and the top-bar badge) ────────────
+
+def get_current_event(
+    minutes_before: Optional[int] = None,
+    minutes_after: Optional[int] = None,
+    impacts: Optional[set[str]] = None,
+) -> Optional[dict]:
+    """
+    The blackout-relevant event we are currently inside, or None.
+
+    Adds to the event dict: window_start, window_end, mins_to_event (negative
+    once the event has passed), mins_remaining. When several windows overlap,
+    returns the one that ends last — that is the one the caller must wait out.
+
+    Arguments default to the configured blackout settings.
+    """
+    settings = get_blackout_settings()
+    if minutes_before is None:
+        minutes_before = settings["minutes_before"]
+    if minutes_after is None:
+        minutes_after = settings["minutes_after"]
+    if impacts is None:
+        impacts = settings["impacts"]
+
+    now_ts = time.time()
+    # Gold-relevant currencies only: a high-impact NZD print is not a reason to
+    # stop trading XAUUSD.
+    events = get_events(impacts=impacts, currencies={"USD", "XAU"})
+
+    best: Optional[dict] = None
+    for ev in events:
+        window_start = ev["ts"] - minutes_before * 60
+        window_end   = ev["ts"] + minutes_after * 60
+        if not (window_start <= now_ts <= window_end):
+            continue
+        candidate = dict(ev)
+        candidate.update({
+            "event_ts":       ev["ts"],
+            "window_start":   window_start,
+            "window_end":     window_end,
+            "mins_to_event":  round((ev["ts"] - now_ts) / 60, 1),
+            "mins_remaining": round((window_end - now_ts) / 60, 1),
+        })
+        if best is None or candidate["window_end"] > best["window_end"]:
+            best = candidate
+    return best
+
+
+def is_high_impact_window(
+    minutes_before: Optional[int] = None,
+    minutes_after: Optional[int] = None,
+) -> bool:
+    """
+    True when new entries should be suppressed for news.
+
+    Returns False immediately when the blackout is switched off. While the feed
+    is unreachable and nothing has ever been cached, falls back to a hardcoded
+    schedule of the routine gold movers.
+    """
+    settings = get_blackout_settings()
+    if not settings["enabled"]:
+        return False
+
+    if _fetch_raw():
+        return get_current_event(minutes_before, minutes_after) is not None
+    return _hardcoded_fallback(datetime.now(timezone.utc))
+
+
+def check_news_blackout() -> tuple[bool, str]:
+    """
+    Return (allowed, reason) — the same contract as
+    core_trading_schedule.check_trading_schedule, so the entry-path call sites
+    that already gate on the schedule can gate on news in the same two lines.
+
+    `reason` is empty when allowed, and human-readable when not (it reaches the
+    user through skip_reason strings and Telegram alerts).
+    """
+    if not get_blackout_settings()["enabled"]:
+        return True, ""
+
+    ev = get_current_event()
+    if ev is None:
+        # Feed down and never cached: fall back to the hardcoded schedule.
+        if not _fetch_raw() and _hardcoded_fallback(datetime.now(timezone.utc)):
+            return False, "News blackout — scheduled high-impact window (calendar unavailable)"
+        return True, ""
+
+    return False, (
+        f"News blackout — {ev['title']} ({ev['currency']}), "
+        f"resumes in {int(round(ev['mins_remaining']))} min"
+    )
+
+
+def _hardcoded_fallback(now: datetime) -> bool:
+    """Feed-free approximation: FOMC days, NFP Friday, CPI Tuesday, top of hour."""
+    m, h, dow = now.minute, now.hour, now.weekday()
+    if (now.month, now.day) in _FOMC_DATES_2026 and 12 <= h < 22:
+        return True
+    if dow == 4 and now.day <= 7 and 12 <= h < 16:
+        return True
+    if dow == 1 and 8 <= now.day <= 22 and ((h == 13 and m >= 15) or (h == 14 and m <= 30)):
+        return True
+    if h in (7, 8, 13, 14, 15, 16) and m < 5:
+        return True
+    return False
+
+
+# ── ML feature ────────────────────────────────────────────────────────────────
 
 def _mins_to_norm(minutes: Optional[float], window: float = 120.0) -> float:
-    """Convert minutes-to-event to a [0,1] norm. 0=imminent, 1=far/safe."""
+    """Minutes-to-event -> [0,1]. 0=imminent, 1=far/safe."""
     if minutes is None:
         return 1.0
     return round(min(1.0, max(0.0, float(minutes) / window)), 4)
@@ -40,174 +343,27 @@ def _mins_to_norm(minutes: Optional[float], window: float = 120.0) -> float:
 
 def get_news_proximity_norm(window_minutes: float = 120.0) -> float:
     """
-    Return news_proximity_norm [0,1].
-    Cached for 10 minutes. Always returns 1.0 (safe) on any error — better to
-    trade on unclear calendar than to block all signals from a broken feed.
+    news_proximity_norm in [0,1] — minutes to the next high-impact USD/gold
+    event over `window_minutes`, clamped. Returns 1.0 (safe) when the calendar
+    is unavailable: better to trade on an unclear calendar than to have a broken
+    feed quietly poison a model input.
     """
-    global _cache_ts, _cache_next_mins
-    now = time.time()
-    if _cache_next_mins is not None and (now - _cache_ts) < _CACHE_TTL:
-        return _mins_to_norm(_cache_next_mins, window_minutes)
-
-    mins = _fetch_next_event_minutes()
-    _cache_next_mins = mins
-    _cache_ts = now
-    return _mins_to_norm(mins, window_minutes)
-
-
-def _fetch_next_event_minutes() -> Optional[float]:
-    """Try each source in order, return minutes to next high-impact event or None."""
-    mins = _from_mt5()
-    if mins is not None:
-        return mins
-
-    mins = _from_finnhub()
-    if mins is not None:
-        return mins
-
-    mins = _from_forexfactory()
-    if mins is not None:
-        return mins
-
-    _log.debug("[NewsCalendar] All sources failed — assuming no imminent event")
-    return None
-
-
-# ── Source 1: MT5 Bridge ──────────────────────────────────────────────────────
-
-def _from_mt5() -> Optional[float]:
-    """Query MT5 economic calendar via the bridge. Returns minutes or None."""
     try:
-        from forex_trader.core import mt5_bridge as bridge
-        if not bridge.is_connected():
-            return None
-
-        import datetime as _dt
-        now_ts  = time.time()
-        end_ts  = now_ts + 7200  # look 2 hours ahead
-        now_dt  = _dt.datetime.fromtimestamp(now_ts)
-        end_dt  = _dt.datetime.fromtimestamp(end_ts)
-
-        # MT5 Python API: MetaTrader5.calendar_query(from, to)
-        import MetaTrader5 as _mt5
-        events = _mt5.calendar_query(now_dt, end_dt) or []
-
-        min_delta = None
-        for ev in events:
-            # event is a namedtuple; currency and importance accessible as attributes
-            currency   = getattr(ev, "currency", "") or ""
-            importance = str(getattr(ev, "importance", "")).lower()
-            ev_ts      = getattr(ev, "time", None)
-            if not ev_ts:
-                continue
-            if importance not in {"2", "3", "high", "medium-high"}:
-                continue
-            if currency.upper() not in _IMPACT_CURRENCIES:
-                continue
-            delta_secs = float(ev_ts.timestamp() if hasattr(ev_ts, "timestamp") else ev_ts) - now_ts
-            if 0 <= delta_secs:
-                delta_mins = delta_secs / 60.0
-                if min_delta is None or delta_mins < min_delta:
-                    min_delta = delta_mins
-
-        if min_delta is not None:
-            _log.debug("[NewsCalendar] MT5: next high-impact in %.1f min", min_delta)
-        return min_delta
-
-    except Exception as e:
-        _log.debug("[NewsCalendar] MT5 source error: %s", e)
-        return None
-
-
-# ── Source 2: Finnhub ─────────────────────────────────────────────────────────
-
-def _from_finnhub() -> Optional[float]:
-    """Query Finnhub economic calendar. Requires FINNHUB_API_KEY in config."""
-    try:
-        from forex_trader.config import get as cfg_get
-        api_key = cfg_get("finnhub_api_key", "")
-        if not api_key:
-            return None
-
-        import urllib.request, json as _json, datetime as _dt
-        now    = time.time()
-        today  = _dt.date.fromtimestamp(now).isoformat()
-        end_d  = _dt.date.fromtimestamp(now + 7200).isoformat()
-        url    = (
-            f"https://finnhub.io/api/v1/calendar/economic"
-            f"?from={today}&to={end_d}&token={api_key}"
+        now_ts = time.time()
+        upcoming = get_events(
+            impacts={"high"},
+            currencies={"USD", "XAU"},
+            upcoming_only=True,
         )
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            data = _json.loads(resp.read())
-
-        events = data.get("economicCalendar") or []
-        min_delta = None
-        for ev in events:
-            if str(ev.get("impact", "")).lower() not in _HIGH_IMPACT:
-                continue
-            if (ev.get("country", "") or "").upper() not in {"US", "EU", "GB", "XAU"}:
-                continue
-            ev_ts = ev.get("time")
-            if not ev_ts:
-                continue
-            import dateutil.parser as _dp
-            ev_epoch = _dp.parse(ev_ts).timestamp()
-            delta_mins = (ev_epoch - now) / 60.0
-            if 0 <= delta_mins:
-                if min_delta is None or delta_mins < min_delta:
-                    min_delta = delta_mins
-
-        return min_delta
-
+        if not upcoming:
+            return 1.0
+        return _mins_to_norm((upcoming[0]["ts"] - now_ts) / 60.0, window_minutes)
     except Exception as e:
-        _log.debug("[NewsCalendar] Finnhub source error: %s", e)
-        return None
+        _log.debug("[NewsCalendar] proximity calc failed: %s", e)
+        return 1.0
 
-
-# ── Source 3: ForexFactory scrape ─────────────────────────────────────────────
-
-def _from_forexfactory() -> Optional[float]:
-    """
-    Minimal ForexFactory calendar scrape.
-    Only runs when both MT5 and Finnhub are unavailable.
-    Uses the JSON feed that FF exposes for their mobile apps.
-    """
-    try:
-        import urllib.request, json as _json, datetime as _dt
-        now    = time.time()
-        url    = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-        req    = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            events = _json.loads(resp.read())
-
-        min_delta = None
-        for ev in events:
-            if (ev.get("impact", "") or "").lower() not in {"high", "red"}:
-                continue
-            if (ev.get("currency", "") or "").upper() not in _IMPACT_CURRENCIES:
-                continue
-            date_str = ev.get("date")
-            if not date_str:
-                continue
-            try:
-                import dateutil.parser as _dp
-                ev_epoch = _dp.parse(date_str).timestamp()
-            except Exception:
-                continue
-            delta_mins = (ev_epoch - now) / 60.0
-            if 0 <= delta_mins <= 120:
-                if min_delta is None or delta_mins < min_delta:
-                    min_delta = delta_mins
-
-        return min_delta
-
-    except Exception as e:
-        _log.debug("[NewsCalendar] ForexFactory source error: %s", e)
-        return None
-
-
-# ── Forced-refresh helper (call after a known news event passes) ──────────────
 
 def invalidate_cache() -> None:
-    global _cache_ts
-    _cache_ts = 0.0
+    """Force the next call to re-fetch the feed, bypassing any active backoff."""
+    global _next_fetch_ts
+    _next_fetch_ts = 0.0

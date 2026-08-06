@@ -336,3 +336,24 @@ def test_circuit_breaker_exception_same_cleanup_as_generic(fresh_db):
 
     assert _signals_count() == 0
     assert _tg_status("tg-19") == "instant_failed"
+
+
+def test_news_blackout_blocks_no_signal(fresh_db):
+    """IME needs its own news check for the same reason it needs its own
+    schedule check: it never calls resolve_open_trade_params(), where the
+    shared gate lives. It is also the fastest path to a live order in the
+    app, so an unguarded IME would fire straight into an NFP print."""
+    with mock.patch.object(
+        ime, "check_news_blackout",
+        return_value=(False, "News blackout — Non-Farm Employment Change (USD), resumes in 40 min"),
+    ):
+        _run(_FakeBridge(), {"timestamp": _FRESH_TS}, "tg-4c", "BUY", None, _rs(), True)
+    assert _signals_count() == 0
+
+
+def test_news_blackout_clear_still_opens(fresh_db):
+    """Positive control: guards against the gate being wired inverted or
+    left always-on, which would silently stop IME entirely."""
+    with mock.patch.object(ime, "check_news_blackout", return_value=(True, "")):
+        ot = _run_open_trade_path(_rs(), tg_id="tg-4d")
+    assert ot.called

@@ -29,6 +29,7 @@ from forex_trader.core.core_pips import PIPS_TO_PRICE_XAUUSD
 from forex_trader.core.core_risk_governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
 from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_trading_schedule import check_trading_schedule, get_schedule_strategy_override
+from forex_trader.core.news_calendar import check_news_blackout
 from forex_trader.core.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
@@ -188,6 +189,16 @@ async def resolve_open_trade_params(
     _sched_ok, _sched_reason = check_trading_schedule(source=_sched_src_key)
     if not _sched_ok:
         raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
+
+    # News blackout (Trading > News) -- same automated-only reach as the
+    # schedule gate above, so it covers Telegram-copied signals and both
+    # engines' signals from this one place. The engines also check it earlier
+    # in their own flows, where they can record a per-signal skip status
+    # instead of raising; this is the backstop for everything that reaches
+    # here by another route.
+    _news_ok, _news_reason = check_news_blackout()
+    if not _news_ok:
+        raise ValueError(f"{_news_reason} (Trading > News)")
 
     # Resolve strategy: Trading Schedule window override > channel override >
     # auto-Claude rec > global Active Strategy.

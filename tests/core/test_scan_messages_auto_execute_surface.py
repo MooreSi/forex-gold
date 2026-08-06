@@ -548,3 +548,30 @@ def test_schedule_block_beats_a_template_override(fresh_db):
     result, calls, bridge = _call(strategy="template:Sched Blocked")
     assert result["executed"] is False
     assert calls == []
+
+
+# ── news blackout ─────────────────────────────────────────────────────────────
+# Same structural gap as the Trading Schedule block above: a fresh Telegram
+# signal executed from here never reaches resolve_open_trade_params, so this
+# path needs its own copy of the news gate or Telegram copies would keep
+# firing straight into high-impact prints while every other route was held.
+
+def test_news_blackout_blocks_execution(fresh_db):
+    from forex_trader.core import core_scan_messages_auto_execute as ax
+    with mock.patch.object(
+        ax, "check_news_blackout",
+        return_value=(False, "News blackout — Non-Farm Employment Change (USD), resumes in 40 min"),
+    ):
+        result, calls, bridge = _call()
+    assert result["executed"] is False
+    assert calls == []
+    assert "News blackout" in result["skip_reason"]
+    assert "Non-Farm Employment Change" in result["skip_reason"]
+
+
+def test_no_active_news_window_leaves_execution_untouched(fresh_db):
+    from forex_trader.core import core_scan_messages_auto_execute as ax
+    with mock.patch.object(ax, "check_news_blackout", return_value=(True, "")):
+        result, calls, bridge = _call()
+    assert result["executed"] is True
+    assert len(calls) == 1

@@ -38,5 +38,14 @@ telegram_signal_group_id: ''
 telegram_bot_token: ''
 telegram_chat_id: ''
 
+# ── Economic news blackout ────────────────────────────────────────────────────
+# Suppresses new entries from the Signal Generator and Breakout engines around
+# calendar events. Editable in-app on the News tab. Events come from the
+# ForexFactory weekly feed — no API key needed.
+news_blackout_enabled: true
+news_blackout_impact: high        # "high" or "high_medium"
+news_blackout_minutes_before: 30
+news_blackout_minutes_after: 30
+
 # ── App ───────────────────────────────────────────────────────────────────────
 port: 8888

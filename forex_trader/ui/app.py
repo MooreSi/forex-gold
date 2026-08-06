@@ -63,6 +63,7 @@ import forex_trader.config as cfg_module
 from forex_trader import __version__ as _APP_VERSION
 from forex_trader.core import database as db_module
 from forex_trader.ui.pages import backtest as backtest_page
+from forex_trader.ui.pages import news as news_page
 
 log = logging.getLogger(__name__)
 
@@ -1567,6 +1568,7 @@ def main_page():
             tab_backtest = ui.tab("Backtest",    icon="bar_chart")
             tab_history  = ui.tab("Analysis",    icon="history")
             tab_settings = ui.tab("Settings",    icon="settings")
+            tab_news     = ui.tab("News",        icon="newspaper")
             tab_about    = ui.tab("About",       icon="info")
 
         # ── Circuit breaker — global, live-trades-only indicator ────────────
@@ -1686,6 +1688,8 @@ def main_page():
             settings_page.render(get_engine, get_tg_reader)
         with ui.tab_panel(tab_backtest):
             backtest_page.render(get_engine)
+        with ui.tab_panel(tab_news):
+            news_page.render()
         with ui.tab_panel(tab_about):
             _render_about()
         with ui.tab_panel(tab_test):

@@ -30,6 +30,7 @@ from forex_trader.core.core_open_trade import open_trade
 from forex_trader.core.core_signal_resolution import _sig_guard_blocks
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.core_trading_schedule import check_trading_schedule
+from forex_trader.core.news_calendar import check_news_blackout
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, Tick,
@@ -119,6 +120,16 @@ async def process_instant_entry(
     _ime_sched_ok, _ime_sched_reason = check_trading_schedule(source=channel_name)
     if not _ime_sched_ok:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_sched_reason)
+        return
+
+    # News blackout (Trading > News) — needs its own copy here for the same
+    # reason the schedule gate above does: this path never calls
+    # resolve_open_trade_params(), where the shared gate lives. IME is the
+    # fastest path to a live order in the app, which makes it the one that
+    # most needs the check.
+    _ime_news_ok, _ime_news_reason = check_news_blackout()
+    if not _ime_news_ok:
+        log.info("[IME] Instant %s blocked — %s", direction, _ime_news_reason)
         return
 
     tick = await bridge.get_tick()

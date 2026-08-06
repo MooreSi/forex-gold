@@ -689,3 +689,24 @@ def test_single_mode_template_still_enforces_entry_zone(fresh_db):
     bridge = _FakeBridge(tick=SimpleNamespace(bid=2450.0, ask=2450.4, spread_points=4.0))
     with pytest.raises(ValueError, match="entry zone"):
         asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+
+
+def test_news_blackout_blocks_resolution(fresh_db):
+    """The shared gate: everything automated that reaches this function --
+    Telegram channels and both engines -- is held during a news window."""
+    _insert_signal()
+    bridge = _FakeBridge()
+    with patch.object(
+        sr, "check_news_blackout",
+        return_value=(False, "News blackout — Non-Farm Employment Change (USD), resumes in 40 min"),
+    ):
+        with pytest.raises(ValueError, match="News blackout"):
+            asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+
+
+def test_no_news_window_resolves_normally(fresh_db):
+    _insert_signal()
+    bridge = _FakeBridge()
+    with patch.object(sr, "check_news_blackout", return_value=(True, "")):
+        result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["strategy"]

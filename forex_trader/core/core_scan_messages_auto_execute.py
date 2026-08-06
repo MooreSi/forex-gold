@@ -41,6 +41,7 @@ from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_open_trade import open_trade as _real_open_trade
 from forex_trader.core.core_strategy_params import get_strategy_params
 from forex_trader.core.core_trading_schedule import check_trading_schedule
+from forex_trader.core.news_calendar import check_news_blackout
 from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
@@ -160,6 +161,12 @@ async def execute_auto_signal(
     # and blocking it would strand that position on its provisional stop --
     # strictly worse than letting it complete.
     _sched_ok, _sched_reason = check_trading_schedule(source=channel_name)
+    # News blackout (Trading > News) -- placed alongside the schedule gate for
+    # the same reason and with the same reach, and deliberately also BELOW the
+    # IME follow-up block above: a follow-up only applies SL/TP to an
+    # already-open trade, and blocking it would strand that position on its
+    # provisional stop going into the news event -- the opposite of protective.
+    _news_ok, _news_reason = check_news_blackout()
     open_count = len(get_open_trades_fn())
     max_trades = int(rs.get("max_open_trades", 1))
     if not sess_ok:
@@ -168,6 +175,10 @@ async def execute_auto_signal(
         skip_reason = f"Auto-execution skipped — Trading Schedule: {_sched_reason}"
         log.info("[%s] Signal blocked by Trading Schedule: %s",
                  source_label, _sched_reason)
+    elif not _news_ok:
+        skip_reason = f"Auto-execution skipped — {_news_reason}"
+        log.info("[%s] Signal blocked by news blackout: %s",
+                 source_label, _news_reason)
     elif per_signal_skip:
         skip_reason = f"Auto-eval declined signal: {per_signal_skip_reason}"
     elif open_count >= max_trades:

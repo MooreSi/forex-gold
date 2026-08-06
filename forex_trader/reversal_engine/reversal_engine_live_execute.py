@@ -55,6 +55,20 @@ class _LiveExecuteMixin:
                           sig.get("signal_ref"), _sched_reason)
                 return
 
+            # News blackout (Trading > News). Checked here rather than at
+            # signal creation for the same reason as the REF gate below: a
+            # signal sits pending for up to 2h waiting for price to enter its
+            # zone, so the window that matters is the one at fill time, not the
+            # one when the level was first spotted. Virtual tracking continues,
+            # so the ML still learns from what this skipped.
+            from forex_trader.core.news_calendar import check_news_blackout
+            _news_ok, _news_reason = check_news_blackout()
+            if not _news_ok:
+                re_db.update_live_exec(sig["id"], status="skipped:news")
+                _log.info("[RE-Engine] news blackout blocked live exec %s -- %s",
+                          sig.get("signal_ref"), _news_reason)
+                return
+
             # Internal Engine Exposure guard (Trading > Strategy) -- OFF by
             # default, in which case this is a no-op. See
             # core_internal_exposure_guard.py for the modes and for the

@@ -1991,7 +1991,37 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     from forex_trader.core import database as _csdb
     from forex_trader.core import channel_strategy_ai as _csai
     from forex_trader.core import core_ea_templates as _et
+    from forex_trader.core import core_trading_schedule as _csched
     from forex_trader.core.models import STRATEGY_NAMES
+
+    # Schedule Override banner (2026-08-06). While the Trading Schedule is
+    # enabled, the active window's own per-channel strategy/template pick
+    # wins over everything selected on this card, for as long as that window
+    # is active -- see core_trading_schedule.get_schedule_strategy_override
+    # and the two sites that honour it (core_signal_resolution.py and
+    # core_scan_messages_staleness_strategy.py). Without this the card reads
+    # as authoritative when it may not be, which is exactly the confusion
+    # that made a schedule-assigned template look like it was being ignored.
+    # Shown purely on the schedule's enabled flag, not on whether a window
+    # happens to be active right now: this renders once on page load and
+    # would otherwise go stale the moment a window boundary passed.
+    if _csched.is_trading_schedule_enabled():
+        with ui.row().classes(
+            "w-full items-center gap-2 mb-2 px-2 py-1 rounded "
+            "bg-amber-900 border-l-4 border-amber-500"
+        ):
+            ui.icon("event_available", size="xs").classes("text-amber-300")
+            ui.label("Schedule Override").classes(
+                "text-xs font-bold text-amber-200"
+            )
+            ui.icon("info_outline", size="xs").classes(
+                "text-amber-300 cursor-help"
+            ).tooltip(
+                "The Trading Schedule is on. Where the active window sets a "
+                "strategy or template for a channel, that wins over the pick "
+                "below for as long as the window is active. Windows with no "
+                "override configured leave the selection below in effect."
+            )
 
     with ui.row().classes("items-center gap-2 mb-1"):
         ui.label("Channel Strategy").classes("text-base font-bold text-yellow-300")

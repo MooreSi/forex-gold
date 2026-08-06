@@ -160,6 +160,18 @@ class _LiveExecuteMixin:
                     fresh_sig["adx"]      = fresh_adx
                     fresh_sig["atr"]      = fresh_atr
                     fresh_sig["session"]  = fresh_session
+                    # Same M15 RSI the creation path now supplies, recomputed
+                    # against current candles -- without it pro_rsi_delta and
+                    # pro_likeness would both fall back to neutral here and
+                    # this "same feature set" re-score would quietly differ
+                    # from the one it is meant to reproduce.
+                    try:
+                        from forex_trader.core.core_indicators import rsi_last
+                        fresh_sig["rsi14"] = rsi_last(
+                            [float(c.get("close", 0) or 0)
+                             for c in (m15_candles or h1_candles or [])])
+                    except Exception:
+                        pass
                     try:
                         from forex_trader.core.news_calendar import get_news_proximity_norm as _get_news
                         fresh_sig["news_proximity_norm"] = _get_news()

@@ -261,6 +261,16 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         # Market context
         atr     = self._calc_atr(m15_candles or h1_candles)
         adx     = self._calc_adx(h1_candles)
+        # M15 RSI. Both pro_profile (pro_rsi_delta) and pro_model read this,
+        # and until 2026-08-06 nothing on this path supplied it -- so
+        # pro_rsi_delta was pinned at its 0.0 neutral for every signal ever
+        # scored, silently, while the profile itself was live.
+        try:
+            from forex_trader.core.core_indicators import rsi_last
+            rsi14 = rsi_last([float(c.get("close", 0) or 0)
+                              for c in (m15_candles or h1_candles or [])])
+        except Exception:
+            rsi14 = None
         htf     = ld.get_htf_bias(h1_candles, h4_candles)
         session = ld.get_session(utc_hour)
 
@@ -398,6 +408,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # of these through it raises "no such column" and silently
             # kills every signal-creation cycle.
             feat_input = dict(sig_data)
+            feat_input["rsi14"]                  = rsi14
             feat_input["news_proximity_norm"]    = news_proximity_norm
             feat_input["regime_score"]           = regime_score
             feat_input["equity_drawdown_pct"]    = equity_drawdown_pct

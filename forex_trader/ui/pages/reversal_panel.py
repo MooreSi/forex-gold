@@ -217,6 +217,70 @@ def render() -> None:
         ui.button("Stop Engine",    icon="stop",         on_click=_stop).classes("text-xs")
         ui.button("Run Now",        icon="refresh",      on_click=_run_now).classes("text-xs")
 
+    # ── Learn From Pro Signals ────────────────────────────────────────────────
+    # The toggle described in reversal_engine/pro_model.py: every captured
+    # Gold Diggers signal refits that classifier, and its verdict enters this
+    # engine's feature vector as `pro_likeness`. Deliberately sits with the
+    # engine controls rather than in Settings -- it changes what this engine
+    # learns from, so it belongs where its effect is visible.
+    with ui.row().classes("px-4 py-1 gap-3 items-center flex-wrap"):
+        def _learn_on() -> bool:
+            try:
+                return bool(db_module.get_risk_settings().get("re_learn_from_ref_signals", 0))
+            except Exception:
+                return False
+
+        learn_status_lbl = ui.label("").classes("text-xs font-mono text-gray-500")
+
+        def _refresh_learn_status() -> None:
+            if not _learn_on():
+                learn_status_lbl.set_text("off — pro_likeness held at neutral")
+                learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
+                return
+            try:
+                from forex_trader.reversal_engine import pro_model
+                st = pro_model.status()
+                c = st.get("corpus") or {}
+                base = (f"corpus {c.get('pos', 0)} pro / {c.get('neg', 0)} background · "
+                        f"outcomes {c.get('wins', 0)}W-{c.get('losses', 0)}L "
+                        f"({c.get('pending', 0)} unresolved)")
+                if st.get("ready"):
+                    learn_status_lbl.set_text(f"live · AUC {st['auc']:.3f} on n={st['n']} · {base}")
+                    learn_status_lbl.classes(replace="text-xs font-mono text-green-400")
+                else:
+                    learn_status_lbl.set_text(f"collecting — {st.get('reason')} · {base}")
+                    learn_status_lbl.classes(replace="text-xs font-mono text-yellow-500")
+            except Exception as e:
+                learn_status_lbl.set_text(f"unavailable: {e}")
+                learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
+
+        def _toggle_learn(e) -> None:
+            db_module.update_risk_settings(
+                {"re_learn_from_ref_signals": 1 if e.value else 0})
+            if e.value:
+                try:
+                    from forex_trader.reversal_engine import pro_model
+                    pro_model.fit(force=True)
+                except Exception:
+                    pass
+            ui.notify("Learning from professional signals "
+                      f"{'enabled' if e.value else 'disabled'}",
+                      type="positive" if e.value else "info")
+            _refresh_learn_status()
+
+        ui.switch("Learn From Pro Signals", value=_learn_on(),
+                  on_change=_toggle_learn).props("dense").classes("text-xs")
+        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+            "Learns from every Gold Diggers VIP / INSTITUTIONAL signal received: "
+            "what the market looked like when they fired, weighted by whether "
+            "that call then reached TP1 before its stop. Enters this engine's ML "
+            "model as one feature (pro_likeness), never as training rows of its "
+            "own. Stays neutral until the corpus is large enough to be honest "
+            "and the model beats chance out of sample."
+        )
+        _refresh_learn_status()
+        ui.timer(30.0, _refresh_learn_status)
+
     ui.separator()
 
     # ── Balance banner ────────────────────────────────────────────────────────

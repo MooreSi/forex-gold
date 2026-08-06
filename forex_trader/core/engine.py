@@ -2810,6 +2810,17 @@ class SimulationEngine:
                     await _capture_background_snapshot_impl(self._bridge)
                 except Exception:
                     log.debug("Background snapshot failed", exc_info=True)
+            # Walk captured reference signals forward against their own stated
+            # levels, so the corpus records whether each call actually worked
+            # -- see reversal_engine/pro_outcome.py. Every 60s: it resolves
+            # from a cursor, so a slower cadence costs nothing but latency.
+            if _now_bg - getattr(self, "_last_pro_resolve", 0.0) > 60.0:
+                self._last_pro_resolve = _now_bg
+                try:
+                    from forex_trader.reversal_engine import pro_outcome as _pro_out
+                    await _pro_out.resolve_pending(self._bridge)
+                except Exception:
+                    log.debug("Pro outcome resolve failed", exc_info=True)
             await asyncio.sleep(5)
 
     async def _email_scheduler_loop(self) -> None:

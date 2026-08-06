@@ -9,7 +9,8 @@ evidence.
 
 HOW
 ---
-tg_signal_snapshots holds two kinds of row:
+pro_corpus.pro_snapshots (was the core db's tg_signal_snapshots until
+2026-08-06) holds two kinds of row:
   stage != 'background'  a moment one of them actually fired  (positive)
   stage == 'background'  the market on a timer, no signal      (negative)
 
@@ -19,6 +20,14 @@ makes "why then" learnable, which is why background sampling exists.
 Features are emitted as signed, normalised deltas rather than a single
 verdict, so LightGBM can weigh each dimension itself instead of trusting a
 score this module invented.
+
+SUPERSEDED, NOT REPLACED (2026-08-06)
+-------------------------------------
+pro_model.py now learns the same question properly -- a classifier over the
+same corpus, weighted by how each of their calls actually resolved. These
+per-dimension deltas remain because the feature list is append-only and rows
+were labelled with them, but pro_likeness is the feature meant to carry the
+signal now.
 
 WHY THIS REFUSES TO SPEAK TOO EARLY
 -----------------------------------
@@ -61,12 +70,12 @@ _cache: dict = {"ts": 0.0, "profile": None}
 _CACHE_TTL = 600.0
 
 
-def _rows(conn, background: bool):
-    op = "=" if background else "!="
-    return conn.execute(
-        f"SELECT direction, indicators_json, fvg_json FROM tg_signal_snapshots "
-        f"WHERE stage {op} 'background'"
-    ).fetchall()
+def _rows(background: bool):
+    """Corpus rows from the Reversal Engine's shared database. Moved off the
+    per-environment core db on 2026-08-06 -- see pro_corpus.py's docstring."""
+    from forex_trader.reversal_engine import pro_corpus
+    return [(r.get("direction"), r.get("indicators_json"), r.get("fvg_json"))
+            for r in pro_corpus.rows(background=background)]
 
 
 def _extract(rows) -> dict:
@@ -100,10 +109,8 @@ def build_profile(force: bool = False) -> Optional[dict]:
         return _cache["profile"]
 
     try:
-        from forex_trader.core import database as db_module
-        with db_module.db() as conn:
-            pos = _extract(_rows(conn, background=False))
-            neg = _extract(_rows(conn, background=True))
+        pos = _extract(_rows(background=False))
+        neg = _extract(_rows(background=True))
     except Exception as e:
         log.debug("[ProProfile] read failed: %s", e)
         return None
@@ -174,10 +181,8 @@ def profile_features(direction: str, rsi: Optional[float], adx: Optional[float],
 def status() -> str:
     """Human-readable readiness, for the report tool."""
     try:
-        from forex_trader.core import database as db_module
-        with db_module.db() as conn:
-            pos = _extract(_rows(conn, background=False))
-            neg = _extract(_rows(conn, background=True))
+        pos = _extract(_rows(background=False))
+        neg = _extract(_rows(background=True))
     except Exception as e:
         return f"unavailable: {e}"
     n_pos = sum(len(v["rsi"]) for v in pos.values())

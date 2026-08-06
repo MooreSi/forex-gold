@@ -191,6 +191,15 @@ async def startup() -> None:
         _old_re_db.rename(_new_re_db)
     from forex_trader.reversal_engine import reversal_engine_repo as _re_repo
     _re_repo.init(str(_new_re_db))
+    # Reference-channel learning corpus. Lives in the RE db (one shared file)
+    # rather than the per-env core db, and imports whatever the core db of
+    # THIS environment already collected -- so demo and live train on the
+    # same history. See reversal_engine/pro_corpus.py.
+    try:
+        from forex_trader.reversal_engine import pro_corpus as _pro_corpus
+        _pro_corpus.init()
+    except Exception as _e:
+        log.error("[startup] Pro corpus init failed: %s", _e)
     from forex_trader.reversal_engine import ml_engine as _re_ml
     _re_ml.init(str(_DATA_DIR))
     _re_engine_module.init(_engine._bridge)

@@ -28,6 +28,12 @@ for bid/ask, so those are labelled as at-capture, not at-signal.
 
 Nothing here is on the trading path and every failure is swallowed: a
 research log must never be able to stop a trade.
+
+WHERE THE ROWS GO (changed 2026-08-06)
+--------------------------------------
+Into reversal_engine.db via pro_corpus.py, not the core database. The core
+db is per-environment, so the original design quietly split this corpus in
+two the moment the app switched between demo and live. See pro_corpus.py.
 """
 from __future__ import annotations
 
@@ -162,27 +168,43 @@ async def capture_snapshot(bridge: Any, row: dict,
     if el and eh:
         inside = 1 if float(el) <= price <= float(eh) else 0
 
+    # Written to the Reversal Engine's own database, which is one shared file
+    # across demo and live -- NOT the per-environment core db this module used
+    # to write to. See pro_corpus.py's docstring: a corpus that splits when
+    # the account environment changes is a corpus the model silently loses.
+    record = {
+        "tg_message_id": row.get("tg_message_id"), "stage": stage,
+        "group_name": row.get("group_name"), "direction": row.get("direction"),
+        "signal_ts": signal_ts, "captured_at": now,
+        "capture_lag_s": round(now - signal_ts, 2) if signal_ts else None,
+        "entry_low": el, "entry_high": eh,
+        "stop_loss": row.get("stop_loss"), "tp1": row.get("tp1"),
+        "bid": bid, "ask": ask,
+        "spread_points": float(getattr(tick, "spread_points", 0) or 0),
+        "price": price,
+        "dist_to_entry_mid": round(price - entry_mid, 2) if (el and eh) else None,
+        "price_inside_zone": inside, "session": session, "regime_score": regime,
+        "indicators_json": json.dumps(inds), "fvg_json": json.dumps(fvg),
+        "raw_text": (row.get("raw_text") or "")[:2000],
+    }
+
     def _write():
-        with db_module.db() as conn:
-            conn.execute(
-                """INSERT INTO tg_signal_snapshots
-                   (tg_message_id, stage, group_name, direction, signal_ts,
-                    captured_at, capture_lag_s, entry_low, entry_high, stop_loss, tp1,
-                    bid, ask, spread_points, price, dist_to_entry_mid,
-                    price_inside_zone, session, regime_score,
-                    indicators_json, fvg_json, raw_text)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (row.get("tg_message_id"), stage, row.get("group_name"),
-                 row.get("direction"), signal_ts, now,
-                 round(now - signal_ts, 2) if signal_ts else None,
-                 el, eh, row.get("stop_loss"), row.get("tp1"),
-                 bid, ask, float(getattr(tick, "spread_points", 0) or 0), price,
-                 round(price - entry_mid, 2) if (el and eh) else None,
-                 inside, session, regime,
-                 json.dumps(inds), json.dumps(fvg),
-                 (row.get("raw_text") or "")[:2000]),
-            )
-    await db_module.to_db_thread(_write)
+        from forex_trader.reversal_engine import pro_corpus
+        return pro_corpus.insert(record)
+
+    if not await db_module.to_db_thread(_write):
+        return False
+
+    # One refit per captured signal -- the Learn From Pro Signals toggle. Off
+    # by default, and a no-op when the corpus hasn't actually grown.
+    if stage != "background":
+        try:
+            from forex_trader.reversal_engine import ml_engine as _re_ml
+            if _re_ml.learning_from_ref_enabled():
+                from forex_trader.reversal_engine import pro_model
+                await db_module.to_db_thread(pro_model.on_new_signal)
+        except Exception as exc:
+            log.debug("[SigSnap] pro-model refit skipped: %s", exc)
     log.info("[SigSnap] captured %s stage=%s %s lag=%.1fs",
              row.get("group_name"), stage, row.get("direction"),
              (now - signal_ts) if signal_ts else -1)
@@ -245,11 +267,8 @@ async def capture_pending_snapshots(bridge: Any, max_age_s: float = 900.0) -> in
             ]
 
     def _already(msg_id, stage):
-        with db_module.db() as conn:
-            return conn.execute(
-                "SELECT 1 FROM tg_signal_snapshots WHERE tg_message_id=? AND stage=? LIMIT 1",
-                (msg_id, stage),
-            ).fetchone() is not None
+        from forex_trader.reversal_engine import pro_corpus
+        return pro_corpus.exists(msg_id, stage)
 
     try:
         rows = await db_module.to_db_thread(_fetch)

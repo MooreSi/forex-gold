@@ -46,7 +46,15 @@ _labeled_count = 0
 # -5.75R, stops slipping well past sl_dist) and wins +0.39R, a true payoff of
 # 0.32:1 versus the 0.54:1 the model was being told. Retrained from scratch
 # because a model fitted on the old label is calibrated to the wrong scale.
-_version = "re_ml_v7"
+# v8 (2026-08-06) appends `pro_likeness` -- the output of pro_model.py, a
+# classifier trained on "a reference channel fired here" vs "background", so
+# what the professionals do enters this model as ONE weighted opinion rather
+# than as training rows of its own (their signals have no realised R of ours
+# to regress against, and pooling them would answer a different question with
+# the same weights). Same discard-and-retrain handling as v3-v7: the stored
+# vectors are back-filled to the new width by _FEATURE_NEUTRAL, so the
+# training history survives even though the fitted models do not.
+_version = "re_ml_v8"
 
 # Dollars per point for a virtual signal. Mirrors reversal_engine_manage.py's
 # `gross = pnl_pts * _VIRTUAL_LOT * 100` -- duplicated as a constant rather
@@ -199,6 +207,14 @@ FEATURE_NAMES = [
     "pro_adx_delta",            # same for ADX
     "pro_fvg_delta",            # our FVG confluence minus theirs
     "pro_profile_ready",        # 1.0 when the profile is live, else 0.0
+    # ── Pro-likeness (v8, 2026-08-06) — see reversal_engine/pro_model.py ──
+    # P(a reference channel would fire in this moment), from a classifier
+    # trained on their captured entries against background samples. 0.5 --
+    # indistinguishable from "exactly average" -- whenever the learning
+    # toggle is off, the corpus gates are unmet, or the model cannot beat a
+    # coin out of sample. All three mean the same thing to a model: no
+    # information, so they must produce the same number.
+    "pro_likeness",
 ]
 
 # Neutral value for every feature, used to back-fill rows labeled under an
@@ -214,7 +230,45 @@ _FEATURE_NEUTRAL = {
     "fvg_fresh": 0.5, "fvg_size_norm": 0.0,
     "pro_rsi_delta": 0.0, "pro_adx_delta": 0.0,
     "pro_fvg_delta": 0.0, "pro_profile_ready": 0.0,
+    "pro_likeness": 0.5,
 }
+
+
+def learning_from_ref_enabled() -> bool:
+    """The Signal Generator > Reversal toggle. Off (the default) means the
+    Reversal Engine ignores the pro-likeness model entirely -- the feature
+    stays at its neutral, and nothing refits on an incoming signal."""
+    try:
+        from forex_trader.core import database as _cdb
+        return bool(_cdb.get_risk_settings().get("re_learn_from_ref_signals", 0))
+    except Exception:
+        return False
+
+
+def _pro_likeness_feature(signal_data: dict) -> float:
+    """pro_model's verdict for this moment, or the neutral when the toggle is
+    off or the model is not trustworthy. Never raises -- a research model
+    must not be able to stop a signal being scored."""
+    if not learning_from_ref_enabled():
+        return 0.5
+    try:
+        from forex_trader.reversal_engine import pro_model
+        return pro_model.pro_likeness(
+            signal_data.get("direction", "BUY"),
+            signal_data.get("rsi14"),
+            signal_data.get("adx"),
+            signal_data.get("atr"),
+            signal_data.get("regime_score"),
+            {
+                "fvg_confluence": signal_data.get("fvg_confluence"),
+                "fvg_dist_norm":  signal_data.get("fvg_dist_norm"),
+                "fvg_fresh":      signal_data.get("fvg_fresh"),
+                "fvg_size_norm":  signal_data.get("fvg_size_norm"),
+            },
+        )
+    except Exception as exc:
+        _log.debug("[RE-ML] pro_likeness error: %s", exc)
+        return 0.5
 
 
 def _pro_features(signal_data: dict) -> list[float]:
@@ -324,6 +378,7 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
             # caller so every path gets it automatically, and so a missing
             # profile degrades to the documented neutrals.
             *_pro_features(signal_data),
+            _pro_likeness_feature(signal_data),
         ]
     except Exception as exc:
         _log.debug("[RE-ML] extract_features error: %s", exc)

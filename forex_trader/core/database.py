@@ -994,6 +994,12 @@ def _apply_schema() -> None:
             # behind the 60-minute default and for why it isn't on by default.
             "ALTER TABLE vantage_risk_settings ADD COLUMN re_require_ref_confirmation INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE vantage_risk_settings ADD COLUMN re_ref_confirmation_window_min INTEGER NOT NULL DEFAULT 60",
+            # Learn From Pro Signals (2026-08-06) -- off by default. When on,
+            # every captured reference-channel signal refits pro_model.py and
+            # its verdict enters the Reversal Engine's feature vector as
+            # `pro_likeness`. Off leaves that feature at its neutral, so the
+            # model behaves exactly as it did before this existed.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN re_learn_from_ref_signals INTEGER NOT NULL DEFAULT 0",
         ] + [
             # EA Templates > Group TP Action (2026-07-28) -- grid mode only:
             # the first TP any leg of the group clears cancels every other

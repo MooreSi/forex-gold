@@ -463,3 +463,88 @@ def test_ime_bypass_does_not_disturb_a_passing_filter(fresh_db):
     result, calls, bridge = _call(rs={"immediate_market_entry": 1})
     assert result["executed"] is True
     assert len(calls) == 1
+
+
+# ── Trading Schedule gate (2026-08-06) ───────────────────────────────────
+# This path opens via core_open_trade.open_trade directly and never calls
+# resolve_open_trade_params, where the schedule gate lives for every other
+# route -- so a fresh Telegram signal executed regardless of the schedule
+# while queued zone-fills, pending fills, IME trades and the internal
+# engines were all correctly blocked. Live case: ticket 1720148940 (Gold
+# Diggers VIP) opened 12:25 local against a schedule ending at 12:00.
+
+def _sched_block(start, end, channel="TestChannel", channel_enabled=True):
+    from datetime import datetime
+    from forex_trader.core import core_trading_schedule as sched
+    schedule = sched._default_schedule()
+    day = sched.DAY_NAMES[datetime.now().weekday()]
+    schedule[day][0] = {
+        "enabled": True, "start": start, "end": end, "target": 0.0,
+        "telegram_default_enabled": True,
+        "telegram_channels": {
+            db._canonical(channel): {
+                "enabled": channel_enabled, "strategy_override": "",
+            },
+        },
+    }
+    sched.set_trading_schedule(schedule)
+    sched.set_trading_schedule_enabled(True)
+
+
+def test_outside_every_schedule_window_blocks_execution(fresh_db):
+    # A window that ended before now -- the exact live shape (last window
+    # closed at midday, signal arrived after).
+    _sched_block("00:00", "00:01")
+    result, calls, bridge = _call()
+    assert result["executed"] is False
+    assert calls == []
+    assert "Trading Schedule" in result["skip_reason"]
+    assert "outside today's trading schedule" in result["skip_reason"]
+
+
+def test_inside_an_active_window_still_executes(fresh_db):
+    _sched_block("00:00", "23:59")
+    result, calls, bridge = _call()
+    assert result["executed"] is True
+    assert len(calls) == 1
+
+
+def test_schedule_disabled_leaves_execution_untouched(fresh_db):
+    from forex_trader.core import core_trading_schedule as sched
+    _sched_block("00:00", "00:01")
+    sched.set_trading_schedule_enabled(False)
+    result, calls, bridge = _call()
+    assert result["executed"] is True
+    assert len(calls) == 1
+
+
+def test_channel_disabled_in_the_active_window_blocks(fresh_db):
+    # The window is open, but this specific channel is switched off in it.
+    _sched_block("00:00", "23:59", channel_enabled=False)
+    result, calls, bridge = _call()
+    assert result["executed"] is False
+    assert calls == []
+    assert "Trading Schedule" in result["skip_reason"]
+
+
+def test_ime_followup_still_applies_outside_the_schedule(fresh_db):
+    # Deliberate ordering: a follow-up applies SL/TP to an ALREADY-OPEN
+    # trade rather than opening anything. Blocking it would strand that
+    # position on its provisional stop -- strictly worse than completing.
+    _sched_block("00:00", "00:01")
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, followup_matched=True,
+    )
+    assert result["followup_matched"] is True
+    assert result["executed"] is True
+    assert calls == []
+
+
+def test_schedule_block_beats_a_template_override(fresh_db):
+    # Templates bypass the R:R filter, but nothing bypasses the schedule.
+    from forex_trader.core import core_ea_templates as et
+    et.save_ea_template("Sched Blocked", {"mode": "single", "sl_pips": 60.0})
+    _sched_block("00:00", "00:01")
+    result, calls, bridge = _call(strategy="template:Sched Blocked")
+    assert result["executed"] is False
+    assert calls == []

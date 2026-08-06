@@ -40,6 +40,7 @@ from forex_trader.core import ea_bridge
 from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_open_trade import open_trade as _real_open_trade
 from forex_trader.core.core_strategy_params import get_strategy_params
+from forex_trader.core.core_trading_schedule import check_trading_schedule
 from forex_trader.core.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
@@ -141,10 +142,32 @@ async def execute_auto_signal(
                     "followup_matched": True}
 
     # ── Normal open-new-trade flow ───────────────────────────────
+    # Trading Schedule gate (2026-08-06). This path opens via
+    # core_open_trade.open_trade directly and never calls
+    # resolve_open_trade_params, which is where the schedule gate lives for
+    # every other route -- so a fresh Telegram signal executed regardless of
+    # the schedule, while queued zone-fills, pending-order fills, IME trades
+    # and the internal engines were all correctly blocked. Confirmed live
+    # 2026-08-06: ticket 1720148940 (Gold Diggers VIP) opened at 12:25 local
+    # against a schedule whose last window that day ended at 12:00.
+    #
+    # Same check, same `source=<channel>` form, and the same position in the
+    # flow as core_instant_entry.py's own copy -- that path had this exact
+    # gap patched for it in 2026-07-23 and this one was simply missed.
+    #
+    # Deliberately placed BELOW the IME follow-up block above: a follow-up
+    # applies SL/TP to an ALREADY-OPEN trade rather than opening anything,
+    # and blocking it would strand that position on its provisional stop --
+    # strictly worse than letting it complete.
+    _sched_ok, _sched_reason = check_trading_schedule(source=channel_name)
     open_count = len(get_open_trades_fn())
     max_trades = int(rs.get("max_open_trades", 1))
     if not sess_ok:
         pass  # skip_reason already set by the caller
+    elif not _sched_ok:
+        skip_reason = f"Auto-execution skipped — Trading Schedule: {_sched_reason}"
+        log.info("[%s] Signal blocked by Trading Schedule: %s",
+                 source_label, _sched_reason)
     elif per_signal_skip:
         skip_reason = f"Auto-eval declined signal: {per_signal_skip_reason}"
     elif open_count >= max_trades:

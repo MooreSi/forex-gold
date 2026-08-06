@@ -70,6 +70,24 @@ def price_in_entry_range(direction: str, entry_low: float, entry_high: float, ti
         return tick.bid >= entry_low
 
 
+def ime_enabled_for_channel(rs: dict, channel_name: str) -> bool:
+    """True when Immediate Market Entry is live for `channel_name`.
+
+    Mirrors engine.py's own IME gate exactly: the global risk-settings
+    toggle AND the per-channel instant_entry_enabled flag, whose default
+    depends on the channel's parser format (format_ab/gd2 default ON,
+    everything else OFF) -- so a channel that has never been configured
+    reads the same here as it does there. engine.py keeps its own inline
+    copy because it already has `ch_cfg` loaded in that loop; this one
+    exists for callers that only have the channel name.
+    """
+    if not bool(rs.get("immediate_market_entry", 0)):
+        return False
+    ch_cfg = db_module.get_channel_parser_config(channel_name) or {}
+    _default = 1 if ch_cfg.get("parser_format") in ("format_ab", "gd2") else 0
+    return bool(ch_cfg.get("instant_entry_enabled", _default))
+
+
 async def execute_auto_signal(
     parsed: dict,
     tg_id: str,
@@ -191,8 +209,21 @@ async def execute_auto_signal(
                     # a 4229 stop the template itself had just derived from its
                     # 60 sl_pips, and never reached the grid-placement branch
                     # below that would have staged the resting legs.
+                    #
+                    # Immediate Market Entry joins the bypass too (2026-08-06,
+                    # explicit user directive). IME means the user has opted
+                    # into taking this channel's fill at market the moment the
+                    # signal lands; an R:R gate measured against the live price
+                    # contradicts that directly, since by construction IME
+                    # fires when price is already wherever it is rather than
+                    # waiting for a better point in the zone. Confirmed live:
+                    # a GOLD DIGGERS INSTITUTIONAL SELL 4258-4263 (SL 4269,
+                    # TP1 4256) was declined at 0.33:1 measured from a live bid
+                    # of 4259.30 -- inside its own zone, but at the end of it
+                    # that leaves almost no room to TP1.
                     if (strategy in _PRE_TRADE_FILTER_BYPASS_STRATEGIES
-                            or ea_templates.is_template_override(strategy)):
+                            or ea_templates.is_template_override(strategy)
+                            or ime_enabled_for_channel(rs, channel_name)):
                         filter_err = None
                     else:
                         filter_err = check_pre_trade_filters_fn(

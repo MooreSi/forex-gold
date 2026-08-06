@@ -48,6 +48,18 @@ from forex_trader.core.models import (
 log = logging.getLogger(__name__)
 
 _EXPIRY = 120  # 2 minutes — cancel if zone not filled in time
+# Immediate Market Entry OFF (2026-08-06, explicit user directive). With IME
+# on, a signal is taken at market the moment it lands and never reaches this
+# queue at all. With it off, the signal's whole premise is that price comes
+# back to the zone before entering -- so the wait is the feature, and 2
+# minutes is short enough that a normal retracement misses it. 3 minutes is
+# the directive's own figure. Deliberately applied only where the 120s
+# default would otherwise apply: every longer window below (template, the
+# runner strategies, gd2, ORB) exists for a documented reason and must not
+# be shortened to 3 minutes by this. Limit-format signals are excluded --
+# their resting broker order IS the wait, on its own 60min TTL (see
+# core_limit_order_signal._DEFAULT_EXPIRE_MINUTES).
+_IME_OFF_EXPIRY = 180
 _GDVR_PENDING_EXPIRY_SEC = 4 * 3600  # signals often take >1h to fill the entry zone
 _PENDING_ACTIVATION_BACKOFF_S = 20.0
 # EA Templates (2026-07-28) -- matches the 60min TTL a resting Limit Runner
@@ -78,23 +90,119 @@ _MAX_ACTIVATION_ATTEMPTS = 3
 _ACTIVATION_FAILURES: dict[str, int] = {}
 
 
-def _channel_parser_format(source_name: str | None) -> str:
-    """The configured parser_format for whichever channel `source_name`
-    belongs to, or "" if unknown. source_name on a stored signal is the
-    decorated form ("Telegram Auto (<channel>)"), and channel_parser_config
-    is keyed by the bare channel name, so the wrapper has to come off before
-    the lookup -- and the result is resolved through the canonical-channel
-    map so a renamed channel still finds its own row."""
+def _bare_channel(source_name: str | None) -> str:
+    """The bare channel name behind a stored signal's decorated source_name
+    ("Telegram Auto (<channel>)"). channel_parser_config is keyed by the
+    bare name, so the wrapper has to come off before any lookup."""
     src = (source_name or "").strip()
-    if not src:
-        return ""
     if src.lower().startswith("telegram auto (") and src.endswith(")"):
         src = src[len("Telegram Auto ("):-1]
+    return src
+
+
+def _channel_parser_format(source_name: str | None) -> str:
+    """The configured parser_format for whichever channel `source_name`
+    belongs to, or "" if unknown. The result is resolved through the
+    canonical-channel map so a renamed channel still finds its own row."""
+    src = _bare_channel(source_name)
+    if not src:
+        return ""
     try:
         cfg = db_module.get_channel_parser_config(db_module._canonical(src))
         return (cfg or {}).get("parser_format", "") or ""
     except Exception:
         return ""
+
+
+def _ime_enabled_for_source(rs: dict, source_name: str | None) -> bool:
+    """Whether Immediate Market Entry is live for the channel behind a
+    stored signal's decorated source_name. Same gate the Telegram scan path
+    applies (see core_scan_messages_auto_execute.ime_enabled_for_channel):
+    the global toggle AND the per-channel flag, whose default depends on
+    parser format."""
+    src = _bare_channel(source_name)
+    if not src:
+        return False
+    try:
+        from forex_trader.core.core_scan_messages_auto_execute import (
+            ime_enabled_for_channel,
+        )
+        return ime_enabled_for_channel(rs, db_module._canonical(src))
+    except Exception:
+        return False
+
+
+def _is_limit_signal(signal_id: str | None) -> bool:
+    """True when this signal was placed as a genuine broker-side pending
+    order (Limit Runner / "[LIMITS] ... AREA" format). Tested by the
+    existence of its vantage_pending_orders row rather than its status, so
+    a placed order that has since been cancelled or expired still counts --
+    the point is what KIND of signal it is, not where it got to."""
+    if not signal_id:
+        return False
+    try:
+        with db_module.db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM vantage_pending_orders WHERE signal_id=? LIMIT 1",
+                (signal_id,),
+            ).fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+def _resolve_expiry_sec(sig: dict, rs: dict, effective_strategy: str) -> float:
+    """How long this queued signal is allowed to wait for its zone.
+
+    Extracted from try_activate_pending_signals' loop (2026-08-06) so the
+    ladder is directly testable -- it was previously reachable only by
+    driving the whole activation coroutine. Behaviour is unchanged apart
+    from the _IME_OFF_EXPIRY branch added at the same time.
+
+    GD2 signals are published after the provider enters, so price typically
+    needs time to pull back to the zone: 15 min instead of 2. Reversal
+    Runner, Adaptive Runner and Adaptive Runner 2 keep the 4h window -- any
+    of them can end up on the same slow-to-fill zone signals if a channel is
+    overridden to it, and the wider window is harmless for faster-filling
+    signals (they still fire the moment price re-enters the zone; this only
+    raises how long they're allowed to wait).
+    """
+    _src = (sig.get("source_name") or "").lower()
+    # Was `"gold diggers 2.0" in _src` -- a hardcoded PRE-RENAME channel
+    # name. That group's Telegram title changed to "GOLD DIGGERS
+    # INSTITUTIONAL" (same group_id), so the test silently became dead
+    # code and every one of its zone signals dropped to the 120s default
+    # instead of the 15 minutes this branch exists to give them. Same
+    # class of bug as the orphaned channel_performance row fixed the same
+    # day. Resolved through the channel's configured parser_format
+    # instead of its display name, so no future rename can break it again
+    # -- "gd2" IS the format these pullback-style zone signals arrive in,
+    # which is what the window was actually about.
+    _is_gd2_src = _channel_parser_format(sig.get("source_name")) == "gd2"
+    _is_orb_src = "orb/ivb report" in _src
+    if ea_templates.is_template_override(effective_strategy):
+        return _TEMPLATE_PENDING_EXPIRY_SEC
+    if effective_strategy in (STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+                              STRATEGY_ADAPTIVE_RUNNER_2):
+        return _GDVR_PENDING_EXPIRY_SEC
+    if _is_gd2_src:
+        return 15 * 60  # 15 minutes — GD2 limit orders often need a pullback
+    if _is_orb_src:
+        # The "reload zone" reference (POC-to-VAH/VAL of the opening
+        # hour) stays meaningful for a while after the breakout — a
+        # genuine pullback-and-retest can take a while to show up —
+        # but unlike GD VIP's 4h window, this zone is tied to a single
+        # morning's opening range specifically, not something worth
+        # still trading hours later. 60 minutes covers a normal
+        # retest without holding a stale zone open all day.
+        return 60 * 60
+    # See _IME_OFF_EXPIRY. Last branch before the default on purpose, so it
+    # only ever widens the 120s case and never shortens one of the longer
+    # windows above.
+    if (not _is_limit_signal(sig.get("signal_id"))
+            and not _ime_enabled_for_source(rs, sig.get("source_name"))):
+        return _IME_OFF_EXPIRY
+    return _EXPIRY
 
 
 async def try_activate_pending_signals(
@@ -166,19 +274,6 @@ async def try_activate_pending_signals(
         # slow-to-fill zone signals if a channel is overridden to it, and the wider
         # window is harmless for faster-filling signals (they still fire the moment
         # price re-enters the zone; this only raises how long they're allowed to wait).
-        _src = (sig.get("source_name") or "").lower()
-        # Was `"gold diggers 2.0" in _src` -- a hardcoded PRE-RENAME channel
-        # name. That group's Telegram title changed to "GOLD DIGGERS
-        # INSTITUTIONAL" (same group_id), so the test silently became dead
-        # code and every one of its zone signals dropped to the 120s default
-        # instead of the 15 minutes this branch exists to give them. Same
-        # class of bug as the orphaned channel_performance row fixed the same
-        # day. Resolved through the channel's configured parser_format
-        # instead of its display name, so no future rename can break it again
-        # -- "gd2" IS the format these pullback-style zone signals arrive in,
-        # which is what the window was actually about.
-        _is_gd2_src = _channel_parser_format(sig.get("source_name")) == "gd2"
-        _is_orb_src = "orb/ivb report" in _src
         # Grid templates place on arrival rather than on zone re-entry -- the
         # EA's own resting legs are the wait (see core_grid_template_dispatch).
         # A signal that reached this queue at all (manual add, sync push, bot
@@ -186,24 +281,11 @@ async def try_activate_pending_signals(
         # equivalent branch, so without this it sat here until price came back
         # and then opened at market -- exactly what a grid exists to avoid.
         _grid_tpl = grid_template(effective_strategy)
-        if ea_templates.is_template_override(effective_strategy):
-            _expiry = _TEMPLATE_PENDING_EXPIRY_SEC
-        elif effective_strategy in (STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
-                                   STRATEGY_ADAPTIVE_RUNNER_2):
-            _expiry = _GDVR_PENDING_EXPIRY_SEC
-        elif _is_gd2_src:
-            _expiry = 15 * 60  # 15 minutes — GD2 limit orders often need a pullback
-        elif _is_orb_src:
-            # The "reload zone" reference (POC-to-VAH/VAL of the opening
-            # hour) stays meaningful for a while after the breakout — a
-            # genuine pullback-and-retest can take a while to show up —
-            # but unlike GD VIP's 4h window, this zone is tied to a single
-            # morning's opening range specifically, not something worth
-            # still trading hours later. 60 minutes covers a normal
-            # retest without holding a stale zone open all day.
-            _expiry = 60 * 60
-        else:
-            _expiry = _EXPIRY
+        # Also drives the ORB-specific "zone never filled" alert below, which
+        # is why it stays here rather than living only inside the expiry
+        # ladder that _resolve_expiry_sec now owns.
+        _is_orb_src = "orb/ivb report" in (sig.get("source_name") or "").lower()
+        _expiry = _resolve_expiry_sec(sig, rs, effective_strategy)
         age = now - float(sig.get("created_at") or now)
         if age > _expiry:
             with db_module.db() as conn:

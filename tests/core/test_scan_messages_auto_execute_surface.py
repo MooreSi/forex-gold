@@ -418,3 +418,48 @@ def test_unknown_template_name_falls_back_to_queueing(fresh_db):
     result, calls, bridge = _call(tick=_OUT_OF_ZONE_TICK, strategy=strategy)
     assert result["executed"] is False
     assert calls == []
+
+
+# ── IME bypasses the R:R filter (2026-08-06) ─────────────────────────────
+# Immediate Market Entry means the user has opted into taking this channel's
+# fill at market the moment the signal lands. An R:R gate scored against the
+# live price contradicts that by construction, since IME fires wherever price
+# already is rather than waiting for a better point in the zone. Live case: a
+# GOLD DIGGERS INSTITUTIONAL SELL 4258-4263 (SL 4269, TP1 4256) declined at
+# 0.33:1 from a live bid of 4259.30 -- inside its own zone, at the wrong end.
+
+def test_ime_on_bypasses_pre_trade_filter(fresh_db):
+    db.save_channel_parser_config("TestChannel", "auto", "", True, True, "t")
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, filter_err="R:R too low",
+    )
+    assert result["executed"] is True
+    assert len(calls) == 1
+
+
+def test_ime_off_still_honours_pre_trade_filter(fresh_db):
+    # The per-channel flag is off, so IME is not live here and the filter
+    # must still block exactly as before.
+    db.save_channel_parser_config("TestChannel", "auto", "", False, True, "t")
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, filter_err="R:R too low",
+    )
+    assert result["executed"] is False
+    assert calls == []
+
+
+def test_global_ime_off_still_honours_pre_trade_filter(fresh_db):
+    # Channel flag on, global toggle off -- IME needs both.
+    db.save_channel_parser_config("TestChannel", "auto", "", True, True, "t")
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 0}, filter_err="R:R too low",
+    )
+    assert result["executed"] is False
+    assert calls == []
+
+
+def test_ime_bypass_does_not_disturb_a_passing_filter(fresh_db):
+    db.save_channel_parser_config("TestChannel", "auto", "", True, True, "t")
+    result, calls, bridge = _call(rs={"immediate_market_entry": 1})
+    assert result["executed"] is True
+    assert len(calls) == 1

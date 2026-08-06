@@ -99,3 +99,92 @@ def test_a_template_override_is_recognised_as_such(fresh_db):
     override = et.override_for_template("T1")
     assert et.is_template_override(override)
     assert not et.is_template_override("limit_runner")
+
+
+# ── IME-off window (2026-08-06) ──────────────────────────────────────────
+# With Immediate Market Entry ON, a signal is taken at market the moment it
+# lands and never reaches this queue. With it OFF, waiting for price to come
+# back to the zone IS the behaviour, and 120s was too short for a normal
+# retracement -- these cover the 3-minute window that replaces it, and the
+# guarantee that it never shortens one of the longer windows above.
+
+def _sig(signal_id="s1", source="Telegram Auto (Some Channel)"):
+    return {"signal_id": signal_id, "source_name": source}
+
+
+def _ime(on: bool) -> dict:
+    return {"immediate_market_entry": 1 if on else 0,
+            "trade_strategy": "scale_out"}
+
+
+def _insert_pending_order(signal_id: str, status: str = "working"):
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_pending_orders "
+            "(trade_id,signal_id,tg_message_id,channel_name,direction,price,"
+            " stop_loss,tps_json,pcts_json,be_at_pos,tp_open,lot_size,status,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("t-" + signal_id, signal_id, "1", "Some Channel", "BUY", 4000.0,
+             3990.0, "{}", "[]", 1, 0, 0.01, status, 0.0),
+        )
+
+
+def test_ime_off_widens_the_default_window_to_three_minutes(fresh_db):
+    db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
+    assert psa._resolve_expiry_sec(_sig(), _ime(False), "scale_out") == 180
+
+
+def test_ime_on_keeps_the_original_two_minute_default(fresh_db):
+    # Per-channel flag on AND global on -- the signal would normally have been
+    # taken at market, so nothing about its queued lifetime should change.
+    db.save_channel_parser_config("Some Channel", "auto", "", True, True, "t")
+    assert psa._resolve_expiry_sec(_sig(), _ime(True), "scale_out") == psa._EXPIRY
+
+
+def test_global_ime_on_but_channel_flag_off_still_gets_three_minutes(fresh_db):
+    # IME is only live when BOTH toggles agree, so this channel is IME-off.
+    db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
+    assert psa._resolve_expiry_sec(_sig(), _ime(True), "scale_out") == 180
+
+
+def test_limit_format_signals_are_excluded(fresh_db):
+    # Their resting broker order is the wait, on its own 60min TTL.
+    db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
+    _insert_pending_order("s1")
+    assert psa._resolve_expiry_sec(_sig(), _ime(False), "scale_out") == psa._EXPIRY
+
+
+def test_limit_signal_exclusion_survives_the_order_being_cancelled(fresh_db):
+    # Tested by existence, not status -- what matters is the KIND of signal.
+    db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
+    _insert_pending_order("s1", status="cancelled")
+    assert psa._resolve_expiry_sec(_sig(), _ime(False), "scale_out") == psa._EXPIRY
+
+
+def test_ime_off_never_shortens_the_template_window(fresh_db):
+    db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
+    et.save_ea_template("T2", {"mode": "grid"})
+    override = et.override_for_template("T2")
+    assert psa._resolve_expiry_sec(_sig(), _ime(False), override) == 3600
+
+
+def test_ime_off_never_shortens_the_runner_window(fresh_db):
+    db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
+    assert psa._resolve_expiry_sec(
+        _sig(), _ime(False), "reversal_runner") == psa._GDVR_PENDING_EXPIRY_SEC
+
+
+def test_ime_off_never_shortens_the_gd2_window(fresh_db):
+    db.save_channel_parser_config("GOLD DIGGERS INSTITUTIONAL", "gd2", "", False, True, "t")
+    sig = _sig(source="Telegram Auto (GOLD DIGGERS INSTITUTIONAL)")
+    assert psa._resolve_expiry_sec(sig, _ime(False), "scale_out") == 15 * 60
+
+
+def test_ime_off_never_shortens_the_orb_window(fresh_db):
+    sig = _sig(source="ORB/IVB Report (auto)")
+    assert psa._resolve_expiry_sec(sig, _ime(False), "scale_out") == 60 * 60
+
+
+def test_the_new_window_is_longer_than_the_default_but_still_short(fresh_db):
+    assert psa._IME_OFF_EXPIRY == 180
+    assert psa._EXPIRY < psa._IME_OFF_EXPIRY < 15 * 60

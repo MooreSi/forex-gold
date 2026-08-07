@@ -36,13 +36,62 @@ guided install. Either sets up a Python virtual environment, installs dependenci
 the app.
 
 **macOS** — double-click `FOREX Start.command`. First run creates a virtual environment,
-installs dependencies, and installs `libomp`/`git` via Homebrew if available.
+installs dependencies, and installs `libomp`/`git` via Homebrew if available. If macOS refuses
+to open the file, see
+[macOS: "was blocked to protect your Mac"](#macos-was-blocked-to-protect-your-mac) below.
 
 On first launch, a default `config.yaml` is created from `config.yaml.example` in your user data
 directory (`%APPDATA%\ForexTrader` on Windows, `~/Library/Application Support/ForexTrader` on
 macOS) — enter your MT5/broker and Telegram credentials from the app's Settings page.
 
 To stop the app, use `Stop FOREX.bat` / `FOREX Stop.command`, or the in-app Power dialog.
+
+### macOS: "was blocked to protect your Mac"
+
+The first time you double-click `FOREX Start.command`, macOS may refuse to run it:
+
+> "FOREX Start.command" was blocked to protect your Mac.
+> Apple could not verify "FOREX Start.command" is free of malware that may harm your Mac or
+> compromise your privacy.
+
+This is Gatekeeper, not a fault with the download. The app is not signed with a paid Apple
+Developer ID, and your browser tags every downloaded file with a quarantine flag, so macOS has
+no signature to check. macOS applies the block to each `.command` file separately, but you only
+have to deal with `FOREX Start.command`: once it runs, it clears the flag from the other
+launchers in the folder (`FOREX Stop`, `Start MT5 Bridge`, `Mac Uninstall`) for you.
+
+**Best: never get the flag in the first place.** The quarantine flag is applied by the app that
+downloads the files. `git`, `curl` and `tar` do not apply it, so installing from a clone leaves
+nothing to unblock, and keeps the app on the git checkout that Settings > Update needs anyway:
+
+```bash
+git clone <repo-url> ~/FOREX && open ~/FOREX
+```
+
+If you were sent a `.zip`, note that unpacking it in Finder marks every file inside it. A
+`.tar.gz` unpacked with `tar -xzf` in Terminal does not.
+
+**Already downloaded through a browser?** Clear the flag for the whole folder in one go. Open
+Terminal, type `xattr -dr com.apple.quarantine ` (with the trailing space), drag the FOREX
+folder onto the Terminal window to fill in its path, then press Return:
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/FOREX
+```
+
+**Prefer not to use Terminal?** Approve the file through System Settings instead:
+
+1. Double-click `FOREX Start.command` and dismiss the warning.
+2. Open System Settings > Privacy & Security and scroll down to the Security section.
+3. Next to "FOREX Start.command" was blocked, click **Open Anyway**, then authenticate with
+   Touch ID or your password and confirm.
+
+You only need to do this for `FOREX Start.command`. On a successful start it clears the flag
+from the other launchers in the folder, so Stop, the MT5 bridge and the uninstaller open
+normally from then on.
+
+On macOS 15 (Sequoia) and later, Ctrl-clicking the file and choosing Open no longer bypasses
+this. System Settings is the only route without Terminal.
 
 ## Uninstalling
 

@@ -12,6 +12,19 @@ LIBOMP_NOTICE="$VENV_DIR/.libomp_notice_shown"
 GIT_NOTICE="$VENV_DIR/.git_notice_shown"
 USER_DATA="$HOME/Library/Application Support/ForexTrader"
 
+# ── Clear Gatekeeper quarantine from the sibling launchers ───────────────────
+# Files downloaded through a browser carry com.apple.quarantine, and macOS
+# blocks each one separately the first time it is double-clicked. Getting here
+# means the user already cleared that hurdle for this script, so lift it from
+# the other launchers too rather than making them repeat the System Settings >
+# Privacy & Security approval for Stop, the bridge, and the uninstaller.
+# Only this folder's own scripts are touched, so it stays instant — recursing
+# into .venv would mean thousands of files on every launch for no benefit.
+for f in "$SCRIPT_DIR"/*.command "$SCRIPT_DIR"/*.sh; do
+    [ -f "$f" ] && xattr -d com.apple.quarantine "$f" 2>/dev/null
+done
+xattr -d com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 reqs_hash() {

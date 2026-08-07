@@ -200,6 +200,95 @@ async def check_for_update() -> dict:
     }
 
 
+# ── Plain-English summary of a pending update ────────────────────────────────
+# The header's "Update Available" popup used to show nothing but the raw commit
+# subjects (and "New commits are available." when even those were missing),
+# which says very little to whoever is actually running the app. These two
+# functions turn HEAD..origin/<branch> into a short "here's what changes for
+# you" blurb via the configured AI provider (Settings > AI), with the commit
+# subjects kept as the fallback whenever no provider is configured or the call
+# fails -- the update itself must never depend on an LLM being reachable.
+
+_DIGEST_MAX_CHARS = 12000  # roughly 3k tokens; plenty for a normal update
+
+_SUMMARY_SYSTEM = (
+    "You explain a pending software update to the trader who runs this app on "
+    "their own machine. You are given the git commit log for the update. "
+    "Reply with 3-6 single-line bullet points, each starting with '- ', and "
+    "nothing else: no preamble, no closing line, no headings, no commit "
+    "hashes, no file names. Group related commits into one bullet. Say what "
+    "each change means in practice for someone using the app. Fold purely "
+    "internal work (tests, refactoring, logging, docs) into a single final "
+    "bullet rather than one bullet each."
+)
+
+
+async def changes_digest(local_sha: str, remote_sha: str, max_commits: int = 40) -> str:
+    """Commit messages plus a file-level diffstat for local_sha..remote_sha,
+    trimmed to _DIGEST_MAX_CHARS -- the raw material summarise_changes() feeds
+    to the LLM. "" if the range can't be read (not a checkout, unknown SHA)."""
+    if not local_sha or not remote_sha:
+        return ""
+
+    rc, log_out, _ = await _run_git(
+        "log", f"{local_sha}..{remote_sha}", "--no-merges",
+        f"-n{max_commits}", "--pretty=format:* %s%n%b",
+    )
+    if rc != 0 or not log_out.strip():
+        return ""
+
+    parts = ["Commits in this update (newest first):", log_out.strip()]
+    rc, stat_out, _ = await _run_git("diff", "--stat", f"{local_sha}..{remote_sha}")
+    if rc == 0 and stat_out.strip():
+        parts += ["", "Files changed:", stat_out.strip()]
+
+    digest = "\n".join(parts)
+    if len(digest) > _DIGEST_MAX_CHARS:
+        digest = digest[:_DIGEST_MAX_CHARS] + "\n[... truncated ...]"
+    return digest
+
+
+async def summarise_changes(
+    local_sha: str, remote_sha: str, cfg: Optional[dict] = None, timeout: int = 45,
+) -> tuple[list[str], str]:
+    """(bullets, error) describing what the pending update changes.
+
+    `bullets` is a list of plain-English one-liners with no leading marker.
+    On any failure it comes back empty and `error` says why, so the caller can
+    fall back to the raw commit subjects -- callers must treat a summary as a
+    nicety, never as a precondition for updating.
+    """
+    from forex_trader.core import ai_provider
+
+    if cfg is None:
+        import forex_trader.config as cfg_module
+        cfg = cfg_module.load()
+
+    if not ai_provider.is_configured(cfg):
+        return [], "no AI provider configured (Settings > AI)"
+
+    digest = await changes_digest(local_sha, remote_sha)
+    if not digest:
+        return [], "no commit details available"
+
+    try:
+        text = await ai_provider.complete(
+            cfg, _SUMMARY_SYSTEM, digest, max_tokens=700, timeout=timeout,
+        )
+    except Exception as e:
+        log.debug("[Update] change summary failed: %s", e)
+        return [], f"{type(e).__name__}: {e}"[:200]
+
+    bullets = []
+    for line in text.splitlines():
+        line = line.strip().lstrip("-*•").strip()
+        if line:
+            bullets.append(line)
+    if not bullets:
+        return [], "empty summary from AI provider"
+    return bullets, ""
+
+
 async def commit_summary(sha: str) -> str:
     """One-line commit message for `sha` in this checkout, "" on any failure
     (unknown sha, not a git checkout, etc). Used by the admin console's

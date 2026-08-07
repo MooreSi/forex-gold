@@ -917,25 +917,36 @@ def main_page():
         # ── GitHub "Update Available" badge (2026-08-01) ─────────────────────
         # Hidden entirely when no update is available -- only ever shown once
         # a git fetch against origin/main confirms new commits. Click opens a
-        # popup with the pending commit summary; confirming pulls, reinstalls
-        # dependencies, and restarts (core_app_update.py / platform_utils.
-        # restart_app, the same relaunch mechanism the Power dialog uses).
+        # popup that says in plain English what the update changes (core_app_
+        # update.summarise_changes, falling back to the commit subjects when
+        # no AI provider is configured or the call fails), with the raw commit
+        # list collapsed underneath; confirming pulls, reinstalls dependencies,
+        # and restarts (core_app_update.py / platform_utils.restart_app, the
+        # same relaunch mechanism the Power dialog uses).
         update_badge = ui.button("Update Available", icon="new_releases").props(
             "dense unelevated color=green"
         ).classes("text-xs shrink-0 ml-1 animate-pulse")
         update_badge.set_visibility(False)
         _pending_update: dict = {"commits": []}
+        # Cached AI summary, keyed by the remote SHA it describes, so reopening
+        # the popup doesn't pay for another LLM call for the same update.
+        _update_summary_cache: dict = {"sha": "", "bullets": [], "error": ""}
+        _update_summary_seq = [0]  # guards against a stale in-flight summary
 
         with ui.dialog() as _update_dialog, ui.card().classes(
             "bg-gray-800 p-5 rounded-lg min-w-96 max-w-lg"
         ):
             ui.label("Update Available").classes("text-base font-semibold text-white mb-1")
-            ui.label(
-                "New commits are available on github.com/MooreSi/forex."
-            ).classes("text-xs text-gray-400 mb-2")
-            _update_dialog_body = ui.column().classes(
-                "w-full gap-0.5 max-h-72 overflow-y-auto"
-            )
+            _update_dialog_sub = ui.label("").classes("text-xs text-gray-400 mb-2")
+            # What's in the update, in plain English (core_app_update.
+            # summarise_changes). The raw commit list lives below it, collapsed.
+            _update_summary_body = ui.column().classes("w-full gap-1")
+            with ui.expansion("Commit list").props("dense").classes(
+                "w-full text-xs text-gray-400 mt-2"
+            ):
+                _update_dialog_body = ui.column().classes(
+                    "w-full gap-0.5 max-h-72 overflow-y-auto"
+                )
             _update_dialog_status = ui.label("").classes("text-xs mt-2")
 
             async def _do_apply_update():
@@ -958,19 +969,84 @@ def main_page():
                     "bg-green-700 text-white"
                 )
 
-        def _open_update_dialog():
+        def _update_summary_target() -> str:
+            return _pending_update.get("remote_sha", "") or ""
+
+        def _draw_update_summary(bullets: list[str], error: str) -> None:
+            """Fill the summary section: the AI bullets when we have them,
+            otherwise the commit subjects, which are still a truer answer to
+            "what changed?" than a bare "an update is available"."""
+            _update_summary_body.clear()
+            commits = _pending_update.get("commits") or []
+            with _update_summary_body:
+                if bullets:
+                    for b in bullets:
+                        with ui.row().classes("items-start gap-2 no-wrap"):
+                            ui.label("•").classes("text-xs text-green-400 leading-relaxed")
+                            ui.label(b).classes("text-xs text-gray-200 leading-relaxed")
+                    return
+                for c in commits:
+                    with ui.row().classes("items-start gap-2 no-wrap"):
+                        ui.label("•").classes("text-xs text-green-400 leading-relaxed")
+                        ui.label(c["summary"]).classes("text-xs text-gray-200 leading-relaxed")
+                if not commits:
+                    ui.label(
+                        "The commit list for this update could not be read."
+                    ).classes("text-xs text-gray-400")
+                if error:
+                    ui.label(f"Plain-English summary unavailable — {error}").classes(
+                        "text-xs text-gray-500 italic mt-1"
+                    )
+
+        async def _load_update_summary():
+            remote_sha = _update_summary_target()
+            _update_summary_seq[0] += 1
+            seq = _update_summary_seq[0]
+            from forex_trader.core import core_app_update
+            try:
+                bullets, error = await core_app_update.summarise_changes(
+                    _pending_update.get("local_sha", ""), remote_sha,
+                )
+            except Exception as e:  # summarising must never block updating
+                bullets, error = [], f"{type(e).__name__}: {e}"
+            if seq != _update_summary_seq[0]:
+                return  # a newer open/check superseded this one
+            _update_summary_cache.update(
+                {"sha": remote_sha, "bullets": bullets, "error": error}
+            )
+            _draw_update_summary(bullets, error)
+
+        async def _open_update_dialog():
+            commits = _pending_update.get("commits") or []
+            _update_dialog_sub.text = (
+                f"{len(commits)} new commit(s) from github.com/MooreSi/forex."
+                if commits else "An update is ready from github.com/MooreSi/forex."
+            )
+
             _update_dialog_body.clear()
             with _update_dialog_body:
-                commits = _pending_update.get("commits") or []
-                if commits:
-                    for c in commits:
-                        ui.label(f"{c['short_sha']}  {c['summary']}").classes(
-                            "text-xs font-mono text-gray-300 leading-relaxed"
-                        )
-                else:
-                    ui.label("New commits are available.").classes("text-xs text-gray-400")
+                for c in commits:
+                    ui.label(f"{c['short_sha']}  {c['summary']}").classes(
+                        "text-xs font-mono text-gray-300 leading-relaxed"
+                    )
+
+            remote_sha = _update_summary_target()
+            cached = bool(remote_sha) and _update_summary_cache["sha"] == remote_sha
+            if cached:
+                _draw_update_summary(
+                    _update_summary_cache["bullets"], _update_summary_cache["error"]
+                )
+            else:
+                _update_summary_body.clear()
+                with _update_summary_body:
+                    ui.label("Summarising what's changed...").classes(
+                        "text-xs text-gray-400 italic"
+                    )
+
             _update_dialog_status.text = ""
             _update_dialog.open()
+            if not cached:
+                await _load_update_summary()
 
         update_badge.on("click", _open_update_dialog)
 
@@ -980,7 +1056,9 @@ def main_page():
                 result = await core_app_update.check_for_update()
             except Exception:
                 return
-            _pending_update["commits"] = result.get("commits", [])
+            _pending_update["commits"]   = result.get("commits", [])
+            _pending_update["local_sha"] = result.get("local_sha", "")
+            _pending_update["remote_sha"] = result.get("remote_sha", "")
             update_badge.set_visibility(bool(result.get("available")))
 
         ui.timer(2.0, _check_github_update, once=True)

@@ -160,6 +160,16 @@ def get_trades_pending_max_tp(cutoff_ts: float) -> list[dict]:
     push_trade_closed() call so the consolidated-ledger upsert (the one that
     finally lets the OTHER node's History view show this trade's Max TP Hit)
     doesn't have to clobber those fields with placeholder values.
+
+    Rows with no TP ladder at all (neither the trade's own tp1..tp8 nor the
+    signal's) are returned too, as of 2026-08-07. They used to be filtered out
+    here by "AND (t.tp1 IS NOT NULL OR s.tp1 IS NOT NULL)", which meant nothing
+    ever wrote them a value and History showed them a permanent "..." labelled
+    "Updating in 30 min" — an update that was never coming, since this query
+    was the only thing that could have produced it. There were 11 such rows on
+    the demo account: EA-template trades whose targets live in the template
+    rather than on the signal, plus trailing-stop strategies that carry no TPs
+    by design. The caller resolves them to "n/a" without a candle fetch.
     """
     with db() as conn:
         rows = conn.execute(
@@ -172,8 +182,7 @@ def get_trades_pending_max_tp(cutoff_ts: float) -> list[dict]:
             "FROM vantage_simulated_trades t "
             "LEFT JOIN vantage_signals s ON s.signal_id = t.signal_id "
             "WHERE t.status='closed' AND t.max_tp_hit IS NULL "
-            "  AND t.close_time > 0 AND t.close_time <= ? "
-            "  AND (t.tp1 IS NOT NULL OR s.tp1 IS NOT NULL)",
+            "  AND t.close_time > 0 AND t.close_time <= ?",
             (cutoff_ts,),
         ).fetchall()
     return [dict(r) for r in rows]

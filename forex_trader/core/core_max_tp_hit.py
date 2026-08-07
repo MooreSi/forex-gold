@@ -25,13 +25,22 @@ from forex_trader.core import database as db_module
 log = logging.getLogger(__name__)
 
 
+# Written to max_tp_hit when the question cannot be asked of this trade at
+# all, as opposed to NOT_REACHED which is the real answer "price never got to
+# TP1". History renders it as a plain dash; without it these rows sat on
+# "..." / "Updating in 30 min" forever, which is what made Max TP look missing
+# across most of the Closed Trades table (2026-08-07).
+NOT_APPLICABLE = "n/a"
+NOT_REACHED = "none"
+
+
 def _tp_level_from_extreme(direction: str, extreme: float, tp_source_fn) -> str:
     """Highest TP level (TP1..TP8) crossed by `extreme` in the trade's
     favourable direction. `tp_source_fn(i)` returns the TP price for level i
     (1-indexed) or None. Continues past a None mid-sequence rather than
     stopping, since a gap (e.g. tp2 NULL but tp3-tp8 populated) must not hide
     every level beyond it."""
-    hit = "none"
+    hit = NOT_REACHED
     for i in range(1, 9):
         tp = tp_source_fn(i)
         if tp is None:
@@ -44,6 +53,17 @@ def _tp_level_from_extreme(direction: str, extreme: float, tp_source_fn) -> str:
     return hit
 
 
+def _has_tp_ladder(t: dict) -> bool:
+    """Whether this trade has any TP level to measure an extreme against --
+    either its own or its originating signal's. Trades run purely on a
+    trailing stop, and EA-template trades whose targets live in the template,
+    have neither."""
+    return any(
+        t.get(f"sig_tp{i}") is not None or t.get(f"tp{i}") is not None
+        for i in range(1, 9)
+    )
+
+
 async def max_tp_checker_sweep(bridge: Any) -> None:
     cutoff = time.time() - 1800  # 30 minutes ago
     pending = db_module.get_trades_pending_max_tp(cutoff)
@@ -53,7 +73,23 @@ async def max_tp_checker_sweep(bridge: Any) -> None:
             to_ts = float(t.get("close_time") or 0)
             direction = (t.get("direction") or "").upper()
             if not from_ts or not to_ts or not direction:
-                db_module.save_max_tp_hit(t["trade_id"], "none")
+                # Left as NOT_REACHED rather than NOT_APPLICABLE: both render
+                # as a dash, and this path is characterized behaviour the
+                # engine.py extraction suites still lock in.
+                db_module.save_max_tp_hit(t["trade_id"], NOT_REACHED)
+                continue
+
+            if not _has_tp_ladder(t):
+                db_module.save_max_tp_hit(t["trade_id"], NOT_APPLICABLE)
+                continue
+
+            # An open_time at or after close_time makes get_candles_range an
+            # empty (backwards) query, which read as "bridge offline, retry
+            # next cycle" and so retried every 5 minutes forever. Seen on
+            # adopted MT5_DIRECT positions whose open_time was recorded from
+            # the wrong deal; nothing recoverable is left to measure.
+            if from_ts >= to_ts:
+                db_module.save_max_tp_hit(t["trade_id"], NOT_APPLICABLE)
                 continue
 
             candles = await bridge.get_candles_range(from_ts, to_ts, "M1")

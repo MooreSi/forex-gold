@@ -455,10 +455,10 @@ def _template_group_map(leg_comments: dict) -> dict[str, tuple[str, int]]:
 _COPIER_COMMENT_RE = _re.compile(r"^C(\d+)_[A-Z0-9]+_\d+_(?:ANC|PEN)$", _re.IGNORECASE)
 
 
-def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict]:
-    """Return ({ticket: channel}, {ticket: strategy}) recovered from the
-    broker's own opening-deal comment, for broker positions that have no
-    vantage_simulated_trades row of their own.
+def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict, dict]:
+    """Return ({ticket: channel}, {ticket: strategy}, {ticket: max_tp_hit})
+    recovered from the broker's own opening-deal comment, for broker positions
+    that have no vantage_simulated_trades row of their own.
 
     `leg_comments` is {ticket: entry_deal_comment}, taken from the broker's
     deal history by the caller. Three comment shapes are recognised, all of
@@ -487,11 +487,24 @@ def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict]:
     comment-based fallback at all, so every template leg (and every copier
     position) showed "Unknown" there while the table beside it resolved the
     same ticket correctly.
+
+    Max TP Hit (2026-08-07) travels the same route for the same reason: it is
+    only ever computed against a vantage_simulated_trades row, so a leg with
+    no row of its own showed a permanent "..." ("updating in 30 min") that no
+    sweep was ever going to replace. Measured on this account: of 2498 broker
+    positions the Closed Trades table has rendered, only 585 could resolve a
+    Max TP -- 77% of the table stuck on "...". Every leg of a template trade
+    belongs to ONE signal and is measured against that signal's TP ladder, so
+    the parent row's value is the answer for the whole trade, legs included.
+    Copier-EA positions are not ours and have no ladder to measure against at
+    all, so they get the "n/a" sentinel -- rendered as a plain dash rather
+    than a promise of an update that will never come.
     """
     from forex_trader.core.ea_bridge import trade_id_prefix_from_comment
 
     src: dict[str, str] = {}
     strat: dict[str, str] = {}
+    max_tp: dict[str, str] = {}
 
     by_prefix: dict[str, list] = {}
     by_signal: dict[str, list] = {}
@@ -510,14 +523,21 @@ def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict]:
         if m:
             src[str(ticket)] = f"Copier EA (C{int(m.group(1))})"
             strat[str(ticket)] = "External"
+            max_tp[str(ticket)] = "n/a"
 
     if not by_prefix and not by_signal:
-        return src, strat
+        return src, strat, max_tp
 
-    _SQL_BY_TRADE_ID = ("SELECT tg_source, strategy FROM vantage_simulated_trades "
-                        "WHERE trade_id LIKE ? LIMIT 1")
-    _SQL_BY_SIGNAL_ID = ("SELECT tg_source, strategy FROM vantage_simulated_trades "
-                         "WHERE signal_id LIKE ? LIMIT 1")
+    # Prefer a row that actually has max_tp_hit: a template trade can leave
+    # more than one row sharing a trade_id/signal_id prefix, and picking an
+    # arbitrary one would blank the column for legs whose sibling row was
+    # already computed.
+    _SQL_BY_TRADE_ID = ("SELECT tg_source, strategy, max_tp_hit "
+                        "FROM vantage_simulated_trades WHERE trade_id LIKE ? "
+                        "ORDER BY max_tp_hit IS NULL LIMIT 1")
+    _SQL_BY_SIGNAL_ID = ("SELECT tg_source, strategy, max_tp_hit "
+                         "FROM vantage_simulated_trades WHERE signal_id LIKE ? "
+                         "ORDER BY max_tp_hit IS NULL LIMIT 1")
     try:
         with db_module.db() as conn:
             for sql, groups in ((_SQL_BY_TRADE_ID, by_prefix),
@@ -526,15 +546,20 @@ def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict]:
                     row = conn.execute(sql, (prefix + "%",)).fetchone()
                     if not row:
                         continue
-                    tg_source, strategy = row[0], row[1]
+                    tg_source, strategy, parent_max_tp = row[0], row[1], row[2]
                     ch = trade_channel_label(tg_source or "")
                     label = ch if ch else trade_source_label(tg_source or "")
                     for ticket in tickets:
                         src[ticket] = label
                         strat[ticket] = _strategy_display_label(strategy or "")
+                        # Left unset when the parent hasn't been computed yet,
+                        # so the leg keeps showing "..." and picks the real
+                        # value up on a later refresh.
+                        if parent_max_tp:
+                            max_tp[ticket] = parent_max_tp
     except Exception:
         pass
-    return src, strat
+    return src, strat, max_tp
 
 
 def _entry_deal_comments(by_pos: dict) -> dict:
@@ -860,6 +885,8 @@ def _render_trade_table(engine):
                       style="color:#6b7280;font-size:11px;" title="Updating in 30 min">...</span>
                 <span v-else-if="props.value === 'none'"
                       style="color:#6b7280;">—</span>
+                <span v-else-if="props.value === 'n/a'" style="color:#4b5563;"
+                      title="No TP ladder to measure this position against">—</span>
                 <q-badge v-else-if="props.value"
                          :label="props.value"
                          :color="props.value === 'TP1' ? 'teal' : props.value === 'TP2' ? 'green' : 'purple'"
@@ -899,12 +926,14 @@ def _render_trade_table(engine):
                     # row always wins over a comment inference.
                     _leg_comments = _entry_deal_comments(by_pos)
                     if _leg_comments:
-                        _leg_src, _leg_strat = await db_module.to_db_thread(
+                        _leg_src, _leg_strat, _leg_max_tp = await db_module.to_db_thread(
                             _comment_attribution_maps, _leg_comments)
                         for _t, _v in _leg_src.items():
                             src_map.setdefault(_t, _v)
                         for _t, _v in _leg_strat.items():
                             strat_map.setdefault(_t, _v)
+                        for _t, _v in _leg_max_tp.items():
+                            max_tp_map.setdefault(_t, _v)
 
                     # Spread paid at entry is a historical fact — it never changes once
                     # computed, so cache it permanently and only ask MT5 for tickets
@@ -1346,7 +1375,7 @@ def _render_calendar(engine):
         # named the channel correctly. Only fills tickets the DB maps above
         # could not resolve, so a real local row always wins.
         if _leg_comments:
-            _c_src, _c_strat = await db_module.to_db_thread(
+            _c_src, _c_strat, _ = await db_module.to_db_thread(
                 _comment_attribution_maps, _leg_comments)
             for _t, _v in _c_src.items():
                 if _t not in _tinfo:

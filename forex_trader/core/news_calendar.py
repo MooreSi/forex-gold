@@ -2,8 +2,11 @@
 Economic news calendar — the single source of truth for calendar events.
 
 Source: the ForexFactory weekly JSON feed published by faireconomy
-(https://nfs.faireconomy.media/ff_calendar_thisweek.json). No API key, no rate
-limit, impact already rated per event. Only the current week is published —
+(https://nfs.faireconomy.media/ff_calendar_thisweek.json). No API key, and
+impact is already rated per event. It DOES rate-limit: repeated calls earn a
+429 (confirmed live 2026-08-07), which is why _fetch_raw() caches to disk as
+well as in memory, backs off progressively, honours Retry-After, and asks
+conditionally. Only the current week is published —
 `ff_calendar_nextweek.json` and friends return 404 — so the horizon is however
 much of the current Mon–Sun window is left.
 
@@ -53,7 +56,26 @@ except Exception:
 _cache_events:  Optional[list[dict]] = None
 _next_fetch_ts: float = 0.0
 _CACHE_TTL:     float = 1800.0   # 30 min; the feed is a weekly publish
-_RETRY_AFTER:   float = 300.0    # 5 min backoff after a failed fetch
+_RETRY_AFTER:   float = 300.0    # 5 min backoff after the first failed fetch
+_RETRY_MAX:     float = 3600.0   # ceiling for the doubling below
+
+# Consecutive failures, for backoff. A flat 5-minute retry is what turns a
+# transient 429 into a sustained one: the feed says "slow down" and the client
+# keeps asking at the same rate until it relents. Doubling from _RETRY_AFTER
+# means the first failure still retries in 5 min (unchanged) and a feed that
+# stays angry is left alone.
+_fail_streak: int = 0
+
+# ETag / Last-Modified from the last successful fetch, replayed as a
+# conditional request. A 304 costs the server almost nothing and keeps us
+# inside whatever budget the 429 was defending.
+_validators: dict[str, str] = {}
+
+# The payload also lives on disk. In memory alone it dies with the process,
+# and this app restarts often -- licence activation, self-update, the
+# self-healer -- so every restart was a fresh request against a feed that
+# publishes weekly. Disk cache collapses a restart storm to one fetch.
+_disk_loaded: bool = False
 
 # ── Gold relevance ────────────────────────────────────────────────────────────
 # XAUUSD is priced in dollars, so USD events dominate. The majors move gold via
@@ -101,28 +123,145 @@ _FOMC_DATES_2026: set[tuple[int, int]] = {
 
 # ── Fetch + normalise ─────────────────────────────────────────────────────────
 
+def _disk_cache_file():
+    """Where the last good payload is kept between runs, or None if unknown."""
+    try:
+        from pathlib import Path
+        from forex_trader.config import USER_DATA_DIR
+        return Path(USER_DATA_DIR) / "data" / "news_calendar_cache.json"
+    except Exception:
+        return None
+
+
+def _load_disk_cache() -> None:
+    """Seed the in-memory cache from disk, once per process."""
+    global _cache_events, _next_fetch_ts, _validators, _disk_loaded
+    _disk_loaded = True
+    path = _disk_cache_file()
+    if path is None:
+        return
+    try:
+        if not path.exists():
+            return
+        import json
+        blob = json.loads(path.read_text(encoding="utf-8"))
+        events = blob.get("events")
+        if not isinstance(events, list) or not events:
+            return
+        _cache_events = events
+        vals = blob.get("validators")
+        if isinstance(vals, dict):
+            _validators = {k: v for k, v in vals.items() if isinstance(v, str)}
+        # Whatever TTL is left from when it was written. Already expired is
+        # fine and normal: the events are served immediately while the refresh
+        # happens, which is the whole point of keeping them.
+        _next_fetch_ts = float(blob.get("fetched_at") or 0.0) + _CACHE_TTL
+        _log.info("[NewsCalendar] Loaded %d events from the on-disk cache", len(events))
+    except Exception as e:
+        _log.debug("[NewsCalendar] Could not read the on-disk cache: %s", e)
+
+
+def _save_disk_cache(events: list[dict]) -> None:
+    path = _disk_cache_file()
+    if path is None:
+        return
+    try:
+        import json
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "fetched_at": time.time(),
+            "validators": _validators,
+            "events":     events,
+        }), encoding="utf-8")
+    except Exception as e:
+        _log.debug("[NewsCalendar] Could not write the on-disk cache: %s", e)
+
+
+def _retry_delay() -> float:
+    """Backoff for the current failure streak — 5 min, 10, 20, capped at 1 h."""
+    if _fail_streak <= 1:
+        return _RETRY_AFTER
+    return min(_RETRY_AFTER * (2 ** (_fail_streak - 1)), _RETRY_MAX)
+
+
+def _retry_after_header(err) -> Optional[float]:
+    """Seconds requested by a 429/503 Retry-After header, if it gave one.
+
+    Honouring the server's own number is the difference between backing off
+    and guessing. Accepts the delta-seconds form; an HTTP-date is ignored in
+    favour of our own backoff rather than parsed, since the feed sends
+    seconds. Clamped so a hostile or mistaken value cannot park the calendar
+    for a week -- being blind to news is a trading risk, not just a nuisance.
+    """
+    try:
+        value = err.headers.get("Retry-After")
+    except Exception:
+        return None
+    if not value:
+        return None
+    try:
+        return max(_RETRY_AFTER, min(float(str(value).strip()), _RETRY_MAX))
+    except (TypeError, ValueError):
+        return None
+
+
 def _fetch_raw() -> list[dict]:
     """Fetch the weekly feed, cached. Returns [] only if we have never succeeded."""
-    global _cache_events, _next_fetch_ts
+    global _cache_events, _next_fetch_ts, _fail_streak, _validators
+    if not _disk_loaded and _cache_events is None:
+        _load_disk_cache()
+
     now = time.time()
     if now < _next_fetch_ts:
         return _cache_events or []
 
     try:
         import json
+        import urllib.error
         import urllib.request
-        req = urllib.request.Request(_FEED_URL, headers={"User-Agent": "ForexTrader/0.5"})
-        with urllib.request.urlopen(req, timeout=8, context=_SSL_CTX) as resp:
-            data = json.loads(resp.read().decode())
+        headers = {"User-Agent": "ForexTrader/0.5"}
+        # Only worth asking "has it changed?" when we still hold the answer.
+        if _cache_events:
+            if _validators.get("etag"):
+                headers["If-None-Match"] = _validators["etag"]
+            if _validators.get("last_modified"):
+                headers["If-Modified-Since"] = _validators["last_modified"]
+        req = urllib.request.Request(_FEED_URL, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=8, context=_SSL_CTX) as resp:
+                body = resp.read().decode()
+                new_validators = {}
+                if resp.headers.get("ETag"):
+                    new_validators["etag"] = resp.headers["ETag"]
+                if resp.headers.get("Last-Modified"):
+                    new_validators["last_modified"] = resp.headers["Last-Modified"]
+        except urllib.error.HTTPError as http_err:
+            if http_err.code == 304:
+                # Unchanged since last time — the cheap path, and a success.
+                _fail_streak   = 0
+                _next_fetch_ts = now + _CACHE_TTL
+                _log.debug("[NewsCalendar] Feed unchanged (304) — cache still current")
+                return _cache_events or []
+            raise
+
+        data = json.loads(body)
         if not isinstance(data, list):
             raise ValueError(f"feed returned {type(data).__name__}, expected list")
         _cache_events  = data
+        _validators    = new_validators
+        _fail_streak   = 0
         _next_fetch_ts = now + _CACHE_TTL
+        _save_disk_cache(data)
         _log.info("[NewsCalendar] Loaded %d events from ForexFactory", len(data))
     except Exception as e:
         # Keep serving the last good payload rather than going blind mid-week.
-        _next_fetch_ts = now + _RETRY_AFTER
-        _log.warning("[NewsCalendar] Feed fetch failed (%s) — serving cached payload", e)
+        _fail_streak += 1
+        delay = _retry_after_header(e) or _retry_delay()
+        _next_fetch_ts = now + delay
+        _log.warning(
+            "[NewsCalendar] Feed fetch failed (%s) — serving cached payload, "
+            "retrying in %.0fs (failure %d)", e, delay, _fail_streak,
+        )
     return _cache_events or []
 
 

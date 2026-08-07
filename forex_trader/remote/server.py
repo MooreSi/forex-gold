@@ -612,6 +612,31 @@ async def _close_ws(ws, send_revoke: bool = False) -> None:
         pass
 
 
+def _remember_build(token: str, version: str, commit_sha: str, commit_note: str) -> None:
+    """Persist the build a client last reported onto its token record, so the
+    admin console can still show it once that client goes offline.
+
+    Without this the offline half of get_all_clients() had nothing to read:
+    every disconnected client showed "unknown" version and no commit, because
+    version/commit_sha only ever lived in the in-memory _connected entry that
+    the disconnect throws away. In-memory only -- the callers that matter
+    (HELLO, and the heartbeat's uptime accumulator) already _save_tokens()
+    right after, so this doesn't add a disk write per heartbeat.
+    """
+    meta = _allowed_tokens.get(token)
+    if meta is None:
+        return
+    if version and version != "?":
+        meta["version"] = version
+    # Only overwrite a known SHA with another known SHA -- a transient blank
+    # (e.g. git briefly unreadable) shouldn't erase the last good answer.
+    if commit_sha:
+        meta["commit_sha"] = commit_sha
+        meta["commit_note"] = ""
+    elif commit_note:
+        meta["commit_note"] = commit_note
+
+
 def get_all_clients() -> list[dict]:
     """Return a combined list of connected + known-offline clients."""
     seen = set()
@@ -638,8 +663,12 @@ def get_all_clients() -> list[dict]:
                 "email":             meta.get("email", ""),
                 "nickname":          meta.get("nickname", ""),
                 "online":            False,
-                "version":           "unknown",
+                # Last build this client reported while it was connected
+                # (_remember_build), not "unknown" -- an offline machine still
+                # has a known version until it says otherwise.
+                "version":           meta.get("version", "unknown"),
                 "commit_sha":        meta.get("commit_sha", ""),
+                "commit_note":       meta.get("commit_note", ""),
                 "platform":          meta.get("platform", "unknown"),
                 "hostname":          meta.get("hostname", "unknown"),
                 "last_seen":         meta.get("last_seen", 0),
@@ -711,11 +740,12 @@ async def _handler(websocket) -> None:
     except Exception:
         return
 
-    token      = msg.get("token", "")
-    hostname   = msg.get("hostname", "?")
-    platform   = msg.get("platform", "?")
-    version    = msg.get("version", "?")
-    commit_sha = msg.get("commit_sha", "")
+    token       = msg.get("token", "")
+    hostname    = msg.get("hostname", "?")
+    platform    = msg.get("platform", "?")
+    version     = msg.get("version", "?")
+    commit_sha  = msg.get("commit_sha", "")
+    commit_note = msg.get("commit_note", "")
 
     # ── Remote admin connection ───────────────────────────────────────────────
     if msg.get("type") == MSG_ADMIN_HELLO:
@@ -909,6 +939,7 @@ async def _handler(websocket) -> None:
         "platform":     platform,
         "version":      version,
         "commit_sha":   commit_sha,
+        "commit_note":  commit_note,
         "ip":           ip,
         "online":       True,
         "machine_uuid": machine_uuid,
@@ -920,6 +951,7 @@ async def _handler(websocket) -> None:
         "diagnostics": {},
     }
     _allowed_tokens[token]["last_seen"] = time.time()
+    _remember_build(token, version, commit_sha, commit_note)
     _save_tokens()
     # Remote admin consoles only see client online/offline state via this push —
     # unlike the main server's own admin UI, which reads _connected live on every
@@ -954,10 +986,19 @@ async def _handler(websocket) -> None:
                     conn_entry["info"].update({
                         "version":          m.get("version", version),
                         "commit_sha":       m.get("commit_sha", commit_sha),
+                        "commit_note":      m.get("commit_note", commit_note),
                         "uptime_s":         m.get("uptime_s", 0),
                         "trades_open":      m.get("trades_open", 0),
                         "bridge_connected": m.get("bridge_connected", False),
                     })
+                    # A client that updates itself mid-session reports the new
+                    # build on its next heartbeat, not on a fresh HELLO.
+                    _remember_build(
+                        token,
+                        conn_entry["info"]["version"],
+                        conn_entry["info"]["commit_sha"],
+                        conn_entry["info"]["commit_note"],
+                    )
                     # Accumulate total time-online across sessions. Status
                     # heartbeats arrive every ~60s while connected; we add the
                     # gap between consecutive heartbeats (capped so a missed

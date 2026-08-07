@@ -275,22 +275,30 @@ def _app_version() -> str:
     return "unknown"
 
 
-def _commit_sha() -> str:
+def _commit_report() -> tuple[str, str]:
+    """(sha, reason) for the code this instance is running -- see
+    core_app_update.get_commit_report(). The reason travels with the
+    heartbeat so the admin console can distinguish a machine that has simply
+    never self-updated (no .git yet) from one whose checkout is broken,
+    instead of showing the same blank "no commit" for both."""
     try:
-        from forex_trader.core.core_app_update import get_local_commit_sha
-        return get_local_commit_sha()
-    except Exception:
-        return ""
+        from forex_trader.core.core_app_update import get_commit_report
+        return get_commit_report()
+    except Exception as e:
+        log.debug("[RemoteClient] commit report unavailable: %s", e)
+        return "", "unavailable"
 
 
 def _build_hello() -> dict:
     import platform
     from forex_trader.remote.ip_check import get_machine_uuid
+    commit_sha, commit_note = _commit_report()
     return make(
         MSG_HELLO,
         token=get_or_create_token(),
         version=_app_version(),
-        commit_sha=_commit_sha(),
+        commit_sha=commit_sha,
+        commit_note=commit_note,
         platform=sys.platform,
         hostname=platform.node(),
         machine_uuid=get_machine_uuid(),
@@ -369,10 +377,12 @@ def _build_status() -> dict:
                 bridge_ok = True
         except Exception:
             bridge_ok = False
+    commit_sha, commit_note = _commit_report()
     return make(
         MSG_STATUS,
         version=_app_version(),
-        commit_sha=_commit_sha(),
+        commit_sha=commit_sha,
+        commit_note=commit_note,
         uptime_s=uptime,
         trades_open=trades_open,
         bridge_connected=bridge_ok,
@@ -403,11 +413,14 @@ def _log_level(line: str) -> str:
 def _build_diagnostics() -> dict:
     import platform
     from datetime import datetime, timedelta
+    commit_sha, commit_note = _commit_report()
     data = {
         "platform":  sys.platform,
         "hostname":  platform.node(),
         "python":    sys.version,
         "version":   _app_version(),
+        "commit_sha": commit_sha,
+        "commit_note": commit_note,
         "uptime_s":  int(time.time() - _START_TIME),
         "log_lines": [],
         "log_raw":   "",

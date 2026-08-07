@@ -38,21 +38,117 @@ async def _run_git(*args: str, timeout: float = 30.0) -> tuple[int, str, str]:
     return await asyncio.to_thread(_sync)
 
 
-def get_local_commit_sha(short: bool = True) -> str:
-    """This checkout's current HEAD commit, synchronously and without any
-    network call (unlike check_for_update(), which does a `git fetch`) --
-    safe to call cheaply and often, e.g. on every remote-client heartbeat.
-    Empty string if this isn't a git checkout at all or the command fails."""
-    if not (_REPO_ROOT / ".git").exists():
+# Why get_commit_report() couldn't produce a SHA. Sent verbatim to the admin
+# console (remote/client.py -> remote/server.py) so its Remote Clients card can
+# say what's actually wrong with a client instead of guessing.
+COMMIT_NO_CHECKOUT   = "no-checkout"    # never updated: install scripts copy files, never clone
+COMMIT_GIT_UNREADABLE = "git-unreadable"  # .git is there but neither git nor a direct read worked
+
+
+def _is_sha(value: str) -> bool:
+    return len(value) == 40 and all(c in "0123456789abcdef" for c in value.lower())
+
+
+def _read_sha_from_git_dir() -> str:
+    """HEAD's SHA read straight off .git, with no `git` process involved.
+
+    The install scripts only ever put a working `git` on the machine when
+    Homebrew is present ("FOREX Start.command"), and on macOS an Xcode
+    Command Line Tools stub or a "dubious ownership" refusal makes every
+    `git` invocation exit non-zero even in a perfectly good checkout. Reading
+    the ref files is enough to answer "which commit is this?", so commit
+    reporting shouldn't be lost to any of that.
+
+    Returns the full 40-char SHA, or "" if anything about the layout is
+    unexpected -- this is a best-effort fallback, never a hard requirement.
+    """
+    git_path = _REPO_ROOT / ".git"
+    try:
+        if git_path.is_file():
+            # Linked worktree / submodule: ".git" is a file "gitdir: <path>".
+            text = git_path.read_text(encoding="utf-8").strip()
+            if not text.startswith("gitdir:"):
+                return ""
+            git_dir = Path(text.split(":", 1)[1].strip())
+            if not git_dir.is_absolute():
+                git_dir = (_REPO_ROOT / git_dir).resolve()
+        else:
+            git_dir = git_path
+
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if not head.startswith("ref:"):
+            return head if _is_sha(head) else ""
+        ref = head.split(":", 1)[1].strip()
+
+        # A linked worktree keeps its own HEAD but shares refs with the main
+        # repo, pointed at by its "commondir" file.
+        search_dirs = [git_dir]
+        commondir_file = git_dir / "commondir"
+        if commondir_file.exists():
+            common = Path(commondir_file.read_text(encoding="utf-8").strip())
+            if not common.is_absolute():
+                common = (git_dir / common).resolve()
+            search_dirs.append(common)
+
+        for d in search_dirs:
+            loose = d / ref
+            if loose.is_file():
+                sha = loose.read_text(encoding="utf-8").strip()
+                if _is_sha(sha):
+                    return sha
+        for d in search_dirs:
+            packed = d / "packed-refs"
+            if not packed.is_file():
+                continue
+            for line in packed.read_text(encoding="utf-8").splitlines():
+                if line.startswith("#") or line.startswith("^"):
+                    continue
+                parts = line.split(" ", 1)
+                if len(parts) == 2 and parts[1].strip() == ref and _is_sha(parts[0]):
+                    return parts[0].strip()
+    except Exception:
         return ""
+    return ""
+
+
+def get_commit_report(short: bool = True) -> tuple[str, str]:
+    """(sha, reason) for this install's HEAD commit, with no network call
+    (unlike check_for_update(), which does a `git fetch`) -- safe to call
+    cheaply and often, e.g. on every remote-client heartbeat.
+
+    `reason` is "" whenever a SHA was found, and otherwise one of the
+    COMMIT_* constants above explaining why there isn't one. The distinction
+    matters to the admin console: COMMIT_NO_CHECKOUT is the normal state of a
+    freshly installed machine (the .bat/.command scripts copy files rather
+    than cloning, so .git only appears after apply_update() bootstraps it),
+    not a fault, whereas COMMIT_GIT_UNREADABLE means a checkout is there but
+    unreadable and worth looking at.
+    """
+    if not (_REPO_ROOT / ".git").exists():
+        return "", COMMIT_NO_CHECKOUT
     try:
         args = ["git", "rev-parse", "--short", "HEAD"] if short else ["git", "rev-parse", "HEAD"]
         proc = subprocess.run(
             args, cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=5,
         )
-        return proc.stdout.strip() if proc.returncode == 0 else ""
-    except Exception:
-        return ""
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip(), ""
+        log.debug("[Update] git rev-parse failed (rc=%s): %s",
+                  proc.returncode, proc.stderr.strip()[:200])
+    except Exception as e:
+        log.debug("[Update] git rev-parse could not run: %s", e)
+
+    sha = _read_sha_from_git_dir()
+    if sha:
+        return (sha[:7] if short else sha), ""
+    return "", COMMIT_GIT_UNREADABLE
+
+
+def get_local_commit_sha(short: bool = True) -> str:
+    """This checkout's current HEAD commit, or "" if it can't be determined.
+    Thin wrapper over get_commit_report() for callers that don't need to know
+    why it's missing."""
+    return get_commit_report(short)[0]
 
 
 async def check_for_update() -> dict:

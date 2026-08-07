@@ -137,6 +137,10 @@ from forex_trader.core.core_bot_commands_trading import (
     cmd_report as _cmd_report_impl,
 )
 from forex_trader.core.core_bridge_watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl
+from forex_trader.core.core_ea_link_watchdog import (
+    ea_link_check as _ea_link_check_impl,
+    new_state as _ea_link_new_state,
+)
 from forex_trader.core.core_profit_sync import (
     sync_profit as _sync_profit_impl,
     schedule_profit_sync as _schedule_profit_sync_impl,
@@ -408,6 +412,7 @@ class SimulationEngine:
             self._ea_bridge = _ea_mod.EABridge(self)
             await self._ea_bridge.start()
             _ea_mod.set_instance(self._ea_bridge)
+            self._ea_link_task = asyncio.create_task(self._ea_link_watchdog_loop())
         except Exception as _ea_e:
             log.warning("[EA] bridge failed to start: %s", _ea_e)
         log.info("SimulationEngine started")
@@ -421,7 +426,8 @@ class SimulationEngine:
                   self._ai_model_refresh_task, self._data_retention_task,
                   self._reversal_engine_research_task,
                   self._closed_market_queue_task,
-                  self._ref_backfill_task):
+                  self._ref_backfill_task,
+                  getattr(self, "_ea_link_task", None)):
             if t and not t.done():
                 t.cancel()
         if hasattr(self, "_self_healer"):
@@ -3382,6 +3388,19 @@ class SimulationEngine:
             sleep_for = await _bridge_watchdog_check_impl(
                 self._bridge, state, self._bridge_inhibit_reconnect, self._start_bridge_process,
             )
+            await asyncio.sleep(sleep_for)
+
+    async def _ea_link_watchdog_loop(self) -> None:
+        """Watch the EA's socket link and keep every port it might dial open.
+
+        Separate from _bridge_watchdog_loop above: that one watches the MT5
+        *bridge process* (which this app owns and can restart), this one
+        watches the *EA inside the terminal* (which it cannot). See
+        core_ea_link_watchdog for what happened on 2026-08-07.
+        """
+        state = _ea_link_new_state()
+        while self._monitor_running:
+            sleep_for = await _ea_link_check_impl(self._ea_bridge, state)
             await asyncio.sleep(sleep_for)
 
     # ── Bot commands ──────────────────────────────────────────────────────────

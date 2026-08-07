@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.02"
+#property version   "1.03"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,12 +40,27 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.02"
+#define EA_VERSION "1.03"
 
 #include <Trade\Trade.mqh>
 
 input string InpHost      = "127.0.0.1";
 input int    InpPort      = 9111;  // this checkout's isolated EA-bridge port -- see forex_trader/config.py's ea_bridge_port
+
+// ── Port candidates (2026-08-07) ──────────────────────────────────────────
+// InpPort above is only the *default*. MetaTrader stores the input's value
+// inside the chart file and a persisted value always wins over a recompiled
+// default -- so a chart restored after a terminal crash brings back whatever
+// port was saved the last time that chart was written to disk, which can be
+// days old. That is exactly how a crash on 2026-08-07 left this EA retrying
+// port 9101 every 2.3s while the app listened on 9111, for four hours, with
+// nothing in either log admitting it.
+//
+// So the port is treated as a guess, not a fact: on repeated failure the EA
+// walks these candidates until Python actually answers. Python listens on
+// all of them for the same reason (ea_bridge._LEGACY_PORTS).
+#define EA_PORT_PRIMARY  9111   // current app default
+#define EA_PORT_FALLBACK 9101   // what this EA shipped with before 2026-08-05
 input ulong  InpMagic     = 20260706;
 input double InpDefaultTrailStopPts = 5.0;   // used by trail_stop if the open_trade message omits trail_dist
 input double InpConservativeTrailPts = 3.0;  // used by conservative/scalp_runner if omitted
@@ -57,6 +72,15 @@ bool   g_connected = false;
 string g_recvBuffer = "";
 datetime g_lastPingSent = 0;
 datetime g_lastRecv = 0;
+// Socket link state. g_connected only means SocketConnect returned true --
+// under Wine that happens even when nothing is listening, which is why the
+// EA used to print "connected" on every one of its retries. g_linkConfirmed
+// is the honest one: Python has actually sent us something back.
+int      g_ports[];              // candidate ports, in the order they're tried
+int      g_portIdx = 0;
+int      g_activePort = 0;
+bool     g_linkConfirmed = false;
+datetime g_lastLinkDownLog = 0;
 // TEMPORARY DIAGNOSTIC (remove once the scalp_runner "silently orphaned
 // trade" investigation is closed) — last time the tracked-trades heartbeat
 // below was printed, and the count it saw, so a full g_trades wipe (e.g. an
@@ -470,19 +494,64 @@ string JsonEsc(const string s)
 //+------------------------------------------------------------------+
 //| Socket handling                                                   |
 //+------------------------------------------------------------------+
+// Build the candidate port list: the chart's own input first (it is right in
+// every normal case), then the current app default, then the legacy one.
+// Duplicates dropped so the common case is a single-entry list and the EA
+// keeps hammering the one correct port.
+void BuildPortList()
+{
+   int cand[3];
+   cand[0] = InpPort;
+   cand[1] = EA_PORT_PRIMARY;
+   cand[2] = EA_PORT_FALLBACK;
+   ArrayResize(g_ports, 0);
+   for(int i = 0; i < 3; i++)
+   {
+      if(cand[i] <= 0) continue;
+      bool dup = false;
+      for(int j = 0; j < ArraySize(g_ports); j++)
+         if(g_ports[j] == cand[i]) { dup = true; break; }
+      if(dup) continue;
+      int n = ArraySize(g_ports);
+      ArrayResize(g_ports, n + 1);
+      g_ports[n] = cand[i];
+   }
+   g_portIdx = 0;
+}
+
+// Move on to the next candidate port and say so — throttled to once every
+// 30s, because the retry itself runs every couple of seconds and the point
+// of this line is to be findable in the log, not to fill it.
+void NextPort(const string reason)
+{
+   int n = ArraySize(g_ports);
+   if(n > 1) g_portIdx = (g_portIdx + 1) % n;
+   if(TimeCurrent() - g_lastLinkDownLog < 30) return;
+   g_lastLinkDownLog = TimeCurrent();
+   Print("[EABridge] NO LINK to Python on ", InpHost, ":", g_activePort,
+         " (", reason, ") — retrying on port ", g_ports[g_portIdx],
+         ". Trades are being managed by the app, not this EA.");
+}
+
 void EnsureConnected()
 {
    if(g_connected) return;
    if(g_socket != INVALID_HANDLE) { SocketClose(g_socket); g_socket = INVALID_HANDLE; }
+   if(ArraySize(g_ports) == 0) BuildPortList();
+   g_activePort = g_ports[g_portIdx];
    g_socket = SocketCreate();
    if(g_socket == INVALID_HANDLE) return;
-   if(!SocketConnect(g_socket, InpHost, InpPort, 2000))
+   if(!SocketConnect(g_socket, InpHost, g_activePort, 2000))
    {
       SocketClose(g_socket);
       g_socket = INVALID_HANDLE;
+      NextPort("connect refused");
       return;
    }
    g_connected = true;
+   // Not confirmed yet: SocketConnect returning true is not proof anything is
+   // on the other end. PollSocket promotes this once Python replies.
+   g_linkConfirmed = false;
    g_lastRecv = TimeCurrent();
    // __DATETIME__ is stamped by MetaEditor at compile time in local time, and
    // Python compares it against the repo source file's own local mtime. That
@@ -494,9 +563,6 @@ void EnsureConnected()
             ",\"compiled\":\"" + TimeToString(__DATETIME__, TIME_DATE | TIME_SECONDS) + "\"" +
             ",\"mql_build\":" + (string)__MQL5BUILD__ +
             ",\"terminal_build\":" + (string)TerminalInfoInteger(TERMINAL_BUILD) + "}");
-   Print("[EABridge] connected to ", InpHost, ":", InpPort,
-         " (v", EA_VERSION, ", compiled ",
-         TimeToString(__DATETIME__, TIME_DATE | TIME_SECONDS), ")");
 }
 
 void SendJson(const string msg)
@@ -511,6 +577,9 @@ void SendJson(const string msg)
       g_connected = false;
       SocketClose(g_socket);
       g_socket = INVALID_HANDLE;
+      // Failing on the very first write means the port was never really
+      // open — try the next candidate rather than this one forever.
+      if(!g_linkConfirmed) NextPort("send failed");
    }
 }
 
@@ -526,6 +595,21 @@ void PollSocket()
       {
          g_recvBuffer += CharArrayToString(buf, 0, got);
          g_lastRecv = TimeCurrent();
+         if(!g_linkConfirmed)
+         {
+            // First byte back from Python — only now is the link real.
+            g_linkConfirmed = true;
+            g_lastLinkDownLog = 0;
+            Print("[EABridge] connected to ", InpHost, ":", g_activePort,
+                  " (v", EA_VERSION, ", compiled ",
+                  TimeToString(__DATETIME__, TIME_DATE | TIME_SECONDS), ")");
+            if(g_activePort != InpPort)
+               Print("[EABridge] NOTE: reached the app on port ", g_activePort,
+                     " but this chart's InpPort input says ", InpPort,
+                     " — set InpPort=", g_activePort,
+                     " in the EA's properties and save the chart, or the next "
+                     "terminal restart starts this search over.");
+         }
          int nl;
          while((nl = StringFind(g_recvBuffer, "\n")) >= 0)
          {
@@ -551,10 +635,22 @@ void PollSocket()
    }
    if(g_connected && TimeCurrent() - g_lastRecv > 10)
    {
-      Print("[EABridge] no data from Python in 10s — reconnecting");
       g_connected = false;
       SocketClose(g_socket);
       g_socket = INVALID_HANDLE;
+      if(g_linkConfirmed)
+      {
+         // A link that worked and went quiet: the app is restarting or has
+         // stalled. Same port, it will be back.
+         Print("[EABridge] no data from Python in 10s — reconnecting on port ",
+               g_activePort);
+      }
+      else
+      {
+         // Never got a single byte on this port. Something accepted the
+         // connection (or Wine pretended it did) but it is not the app.
+         NextPort("no reply in 10s");
+      }
    }
 }
 
@@ -3382,7 +3478,11 @@ int PanelDrawLeft()
    y += S;
 
    // ── Link lamps ───────────────────────────────────────────────────
-   bool linked = (g_socket != INVALID_HANDLE);
+   // g_linkConfirmed, not "the socket handle exists": an open handle to a
+   // port nothing is serving showed this lamp lit for four hours on
+   // 2026-08-07 while the app had no EA at all. The lamp now means the same
+   // thing the app's own EA badge means.
+   bool linked = g_linkConfirmed;
    PnlCell("tg", x, y, W2, H,
            "TELEGRAM: " + (g_tgActive ? "ACTIVE" : "OFF"),
            g_tgActive ? CLR_GREENBG : CLR_REDBG,
@@ -4086,6 +4186,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 int OnInit()
 {
    EventSetMillisecondTimer(200);
+   BuildPortList();
    EnsureConnected();
    if(InpShowPanel) PanelUpdate();
    return(INIT_SUCCEEDED);
@@ -4095,6 +4196,9 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    if(g_socket != INVALID_HANDLE) SocketClose(g_socket);
+   g_socket = INVALID_HANDLE;
+   g_connected = false;
+   g_linkConfirmed = false;
    // The panel's trend row and ATR gauge hold indicator handles. A chart
    // reload calls OnInit again and would otherwise leak one handle per
    // timeframe per reload, until iMA starts returning INVALID_HANDLE and the

@@ -215,13 +215,38 @@ def _resolve_port() -> int:
 
 _PORT = _resolve_port()
 
+# Ports an older build of this app listened on, kept open alongside the
+# configured one.
+#
+# WHY (2026-08-07): MetaTrader stores the EA's InpPort inside the chart file,
+# and persisted chart inputs always beat the recompiled source default. A
+# terminal that crashes never writes its charts, so the restart restores
+# whatever was last saved to disk -- which can predate a change to
+# ea_bridge_port by days. That is exactly what happened: MT5 crashed at 13:35,
+# restored a chart saved on 4 Aug carrying InpPort=9101, and the EA then
+# reconnected every 2.3s to a port nothing was listening on while this process
+# sat on 9111. Both sides looked healthy in their own logs and the link was
+# dead. One extra idle listening socket makes that drift heal itself.
+_LEGACY_PORTS = (9101,)
+
+
+def listen_ports() -> list[int]:
+    """Configured port first, then any legacy port not equal to it."""
+    return [_PORT] + [p for p in _LEGACY_PORTS if p != _PORT]
+
 
 class EABridge:
     def __init__(self, engine):
         self._engine = engine
-        self._server: Optional[asyncio.base_events.Server] = None
+        # port -> listening server. Several, so an EA whose chart-persisted
+        # InpPort predates a port change still lands here (see _LEGACY_PORTS).
+        self._servers: dict[int, Any] = {}
         self._writer: Optional[asyncio.StreamWriter] = None
         self._last_seen: float = 0.0
+        # Wall-clock time the EA last connected, 0.0 if it never has in this
+        # process. The EA link watchdog uses it to tell "the EA dropped and
+        # hasn't come back" apart from "this install doesn't use the EA".
+        self.last_connected_at: float = 0.0
         # trade_id -> {"ticket": int, "strategy": str} for trades currently
         # handed to the EA — used to validate/enrich incoming events and by
         # the fallback watchdog to know what needs reclaiming if the EA dies.
@@ -248,8 +273,39 @@ class EABridge:
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        self._server = await asyncio.start_server(self._handle_conn, _HOST, _PORT)
-        log.info("[EABridge] listening on %s:%d", _HOST, _PORT)
+        await self.bind_ports()
+
+    async def bind_ports(self) -> list[int]:
+        """Listen on every port in listen_ports() that isn't bound yet, and
+        return the ones newly bound.
+
+        Idempotent, so the EA link watchdog can call it again later: a legacy
+        port held by another process at startup (a second copy of the app, a
+        leftover from a crash) is not fatal here, and this picks it up once
+        that process lets go. Failing to bind the *configured* port is still
+        fatal -- that is the port a current EA dials, and silently running
+        without it is how a dead link goes unnoticed.
+        """
+        newly: list[int] = []
+        for port in listen_ports():
+            if port in self._servers:
+                continue
+            try:
+                srv = await asyncio.start_server(self._handle_conn, _HOST, port)
+            except OSError as e:
+                if port == _PORT:
+                    raise
+                log.info("[EABridge] fallback port %d unavailable (%s) — "
+                         "will retry while the EA is offline", port, e)
+                continue
+            self._servers[port] = srv
+            newly.append(port)
+            log.info("[EABridge] listening on %s:%d%s", _HOST, port,
+                     "" if port == _PORT else " (fallback for a stale chart InpPort)")
+        return newly
+
+    def listening_ports(self) -> list[int]:
+        return sorted(self._servers)
 
     async def stop(self) -> None:
         if self._panel_task is not None:
@@ -260,8 +316,9 @@ class EABridge:
                 self._writer.close()
             except Exception:
                 pass
-        if self._server is not None:
-            self._server.close()
+        for srv in self._servers.values():
+            srv.close()
+        self._servers.clear()
 
     def is_ea_healthy(self) -> bool:
         return self._writer is not None and (time.time() - self._last_seen) < _HEARTBEAT_TIMEOUT_S
@@ -291,7 +348,19 @@ class EABridge:
                 pass
         self._writer = writer
         self._last_seen = time.time()
-        log.info("[EABridge] EA connected from %s", peer)
+        self.last_connected_at = self._last_seen
+        local = writer.get_extra_info("sockname")
+        local_port = local[1] if isinstance(local, tuple) and len(local) > 1 else None
+        log.info("[EABridge] EA connected from %s on port %s", peer, local_port)
+        if local_port is not None and local_port != _PORT:
+            log.warning(
+                "[EABridge] EA reached us on fallback port %d, not the configured "
+                "%d — the chart's saved InpPort is stale (MetaTrader restores a "
+                "crashed terminal's charts from the last file it wrote, inputs "
+                "and all). The link is working, but set InpPort=%d in the EA's "
+                "inputs and save the chart so it survives the next restart.",
+                local_port, _PORT, _PORT,
+            )
         try:
             while True:
                 line = await reader.readline()

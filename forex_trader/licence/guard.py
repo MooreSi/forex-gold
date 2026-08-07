@@ -247,6 +247,10 @@ def _show_registration_page(notice: str = "") -> None:
 
             status_lbl = ui.label("").classes("text-sm min-h-5")
 
+            # Holder so a second click replaces the delivery watcher rather
+            # than stacking another timer alongside the first.
+            _delivery: dict = {"timer": None}
+
             # ── Request Registration (automated flow) ──────────────────────────
 
             async def _request_registration():
@@ -274,11 +278,43 @@ def _show_registration_page(notice: str = "") -> None:
                 # triggering the rate-limiter before registration gets through.
                 _rc.request_registration(email, nickname)
 
-                status_lbl.set_text(
-                    "Request sent — awaiting administrator approval. "
-                    "The app will activate automatically once approved."
-                )
-                status_lbl.classes(replace="text-sm text-yellow-400")
+                # Do NOT claim the request was sent here. request_registration()
+                # only queues a connection attempt; the registration itself is
+                # transmitted later, and only if the client reaches the admin
+                # server (client.py sends MSG_REGISTER from exactly one place,
+                # in response to the server's reject). Confirmed live
+                # 2026-08-07: a user was told their request was awaiting
+                # approval while the admin server was down, so nothing had been
+                # transmitted and nothing ever arrived -- with no way to tell
+                # from the screen that anything was wrong. Watch the client's
+                # real status instead and report what actually happened.
+                status_lbl.set_text("Contacting administrator server...")
+                status_lbl.classes(replace="text-sm text-gray-400")
+
+                def _watch_delivery():
+                    st = _rc.get_status()
+                    if st.get("registration_sent_at"):
+                        status_lbl.set_text(
+                            "Request delivered — awaiting administrator approval. "
+                            "The app will activate automatically once approved."
+                        )
+                        status_lbl.classes(replace="text-sm text-green-400")
+                        if _delivery["timer"] is not None:
+                            _delivery["timer"].cancel()
+                        return
+                    err = str(st.get("last_error") or "")
+                    if err and err != "contacting administrator server":
+                        status_lbl.set_text(
+                            "Cannot reach the administrator server yet — still "
+                            f"retrying. ({err}) Leave this screen open; the "
+                            "request is sent automatically as soon as the "
+                            "server answers."
+                        )
+                        status_lbl.classes(replace="text-sm text-orange-400")
+
+                if _delivery["timer"] is not None:
+                    _delivery["timer"].cancel()
+                _delivery["timer"] = ui.timer(2.0, _watch_delivery)
 
             ui.button(
                 "Request Registration", icon="send",

@@ -167,6 +167,10 @@ _status: dict = {
     "email":               "",
     "nickname":            "",
     "is_remote_admin":     False,
+    # Unix time the last MSG_REGISTER actually reached the admin server, 0 if
+    # none has. Reset by request_registration() so each new request is judged
+    # on its own delivery, not an earlier one's.
+    "registration_sent_at": 0.0,
 }
 
 
@@ -207,7 +211,8 @@ def request_registration(email: str, nickname: str = "") -> None:
     _EMAIL_FILE.write_text(email.strip(), encoding="utf-8")
     if nickname.strip():
         _NICKNAME_FILE.write_text(nickname.strip(), encoding="utf-8")
-    _status["last_error"] = "awaiting admin approval"
+    _status["registration_sent_at"] = 0.0
+    _status["last_error"] = "contacting administrator server"
     if _client_task and not _client_task.done():
         _client_task.cancel()
     try:
@@ -617,6 +622,16 @@ async def _connect_loop() -> None:
                         # Wrapped in try-except so a close-race never doubles backoff.
                         try:
                             await ws.send(json.dumps(_build_register()))
+                            # Positive proof the request actually left this
+                            # machine. This is the ONLY place a registration is
+                            # ever sent, and it needs a live connection to the
+                            # admin server to get here -- so the activation
+                            # screen must not claim "request sent" off the back
+                            # of the button click alone (confirmed live
+                            # 2026-08-07: it told a user their request was
+                            # awaiting approval while the admin server was down
+                            # and nothing had been transmitted at all).
+                            _status["registration_sent_at"] = time.time()
                             log.info("[RemoteClient] Registration request sent — awaiting admin approval")
                         except Exception:
                             log.info("[RemoteClient] Token rejected — awaiting admin approval")

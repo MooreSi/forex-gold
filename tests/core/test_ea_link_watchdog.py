@@ -451,6 +451,7 @@ def _run_at(bridge, state, start, seconds, send, **kw):
     )
 
 
+@pytest.mark.live_market_hours
 def test_weekend_does_not_alert():
     sent, send = _collector()
     bridge = FakeBridge(healthy=False)
@@ -462,6 +463,7 @@ def test_weekend_does_not_alert():
     assert sent == []
 
 
+@pytest.mark.live_market_hours
 def test_weekend_does_not_restart_mt5():
     sent, send = _collector()
     calls, restart = _restarter()

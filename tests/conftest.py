@@ -26,9 +26,29 @@ their own monkeypatching -- theirs applies after this fixture, so it wins --
 and they supply their own events and settings, which is what makes them
 deterministic. Mark a test `@pytest.mark.live_news` if it genuinely needs the
 network.
+
+The same lesson, learned again on 2026-08-07 at 21:08 UTC
+-----------------------------------------------------------
+Eight minutes after the forex week closed (Fri 21:00 UTC), 147 tests started
+failing with "Trading session 'closed' is not active in your Trading Markets
+selection". Not one of them was about market hours.
+
+core_db_risk_settings.is_session_allowed() calls dpm_engine.
+is_weekly_market_closed() with no way to override the clock, and
+core_signal_resolution.resolve() raises on it before reaching anything a test
+came to check -- so every test that resolves a signal fails from Friday 21:00
+UTC to Sunday 22:00 UTC and passes the rest of the week. The suite was
+stubbed against the news feed but not against the calendar week, so the same
+trap was still set one function over.
+
+So the week is pinned open by default, exactly like the blackout above. Tests
+about weekend behaviour override it themselves -- theirs applies after this
+fixture, so it wins -- or take the `live_market_hours` marker to opt out
+entirely.
 """
 import pytest
 
+from forex_trader.core import dpm_engine as _dpm
 from forex_trader.core import news_calendar as _nc
 
 
@@ -37,6 +57,11 @@ def pytest_configure(config):
         "markers",
         "live_news: test deliberately uses the live economic calendar feed "
         "(exempt from the offline stub in tests/conftest.py)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "live_market_hours: test deliberately reads the real calendar week "
+        "(exempt from the market-open stub in tests/conftest.py)",
     )
 
 
@@ -82,3 +107,26 @@ def _offline_news_calendar(request, monkeypatch, tmp_path):
         return _real_get(key, default)
 
     monkeypatch.setattr(_cfg, "get", _get)
+
+
+@pytest.fixture(autouse=True)
+def _market_week_open(request, monkeypatch):
+    """Pin the forex week open so the suite means the same thing on a Sunday.
+
+    Only the weekly close is neutralised, not dpm_engine.detect_session():
+    that one maps hour-of-day onto asian/london/overlap/ny, and all three
+    session toggles ship enabled (vantage_risk_settings.session_*_enabled
+    DEFAULT 1), so whatever hour the suite runs at is allowed. "closed" is the
+    single value that fails, and it comes only from here.
+
+    Patched in two places because core_closed_market_queue binds the function
+    by name at import time, so patching the dpm_engine attribute alone would
+    leave that module holding the real one.
+    """
+    if "live_market_hours" in request.keywords:
+        return
+
+    monkeypatch.setattr(_dpm, "is_weekly_market_closed", lambda now=None: False)
+
+    from forex_trader.core import core_closed_market_queue as _cmq
+    monkeypatch.setattr(_cmq, "is_weekly_market_closed", lambda now=None: False)

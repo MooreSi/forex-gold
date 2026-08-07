@@ -3391,16 +3391,42 @@ class SimulationEngine:
             await asyncio.sleep(sleep_for)
 
     async def _ea_link_watchdog_loop(self) -> None:
-        """Watch the EA's socket link and keep every port it might dial open.
+        """Watch the EA's socket link, keep every port it might dial open, and
+        bounce the terminal if it stays down.
 
         Separate from _bridge_watchdog_loop above: that one watches the MT5
-        *bridge process* (which this app owns and can restart), this one
-        watches the *EA inside the terminal* (which it cannot). See
-        core_ea_link_watchdog for what happened on 2026-08-07.
+        *bridge* and acts when it goes unhealthy, this one watches the *EA
+        inside the terminal*, which can be dead while the bridge is perfectly
+        fine -- exactly the 2026-08-07 outage, where the bridge watchdog
+        correctly did nothing for four hours. Both end up calling the same
+        _start_bridge_process; core_ea_link_watchdog checks bridge health
+        first so only one of them ever owns a given restart.
         """
+        # Only the macOS/Wine path of _start_bridge_process tears the terminal
+        # down (wineserver + terminal64.exe), which is what makes MT5 restore
+        # its charts and reload the expert. The Windows path restarts
+        # mt5_bridge.py alone and the native bridge just reconnects in-process
+        # -- on both, the terminal keeps running and the EA is NOT reloaded, so
+        # a restart would drop the bridge for no gain. Withhold the restarter
+        # there and let the watchdog run alert-only.
+        import sys as _sys
+        _restart_reloads_ea = (
+            not self._using_native_bridge and _sys.platform != "win32"
+        )
+        if not _restart_reloads_ea:
+            log.info("[EALink] automatic EA recovery unavailable on this bridge "
+                     "(restarting it would not reload the expert) — alert-only")
+
         state = _ea_link_new_state()
         while self._monitor_running:
-            sleep_for = await _ea_link_check_impl(self._ea_bridge, state)
+            sleep_for = await _ea_link_check_impl(
+                self._ea_bridge, state,
+                mt5_bridge=self._bridge,
+                restart_bridge=(
+                    self._start_bridge_process if _restart_reloads_ea else None
+                ),
+                inhibit_reconnect=self._bridge_inhibit_reconnect,
+            )
             await asyncio.sleep(sleep_for)
 
     # ── Bot commands ──────────────────────────────────────────────────────────

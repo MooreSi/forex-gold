@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import socket
+import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -61,6 +62,42 @@ def _free_port(port: int) -> None:
             log.info("Freed port %s (killed pid %s)", port, ", ".join(map(str, pids)))
     except Exception as e:
         log.debug("Could not free port %s: %s", port, e)
+
+
+def _claim_port(port: int, timeout: float = 10.0) -> bool:
+    """Free `port` and wait until it is genuinely free. True if it now is.
+
+    Freeing the port once at the top of main() is not enough: the bind happens
+    several seconds later, after the database opens and forex_trader.ui.app is
+    imported, and whatever claims the port inside that window wins. A licence
+    activation is exactly when two instances exist -- the activation restart
+    spawns a delayed relaunch, and a user who sees nothing happen launches the
+    app themselves -- so the two come up seconds apart and one dies on bind.
+
+    Confirmed live 2026-08-07 on a remote Mac: it activated, restarted, and
+    then died with "[Errno 48] address already in use" roughly four seconds
+    after freeing the port, with the Terminal window closing on a bare uvicorn
+    error. From the user's side the app simply never came back, and neither
+    the link nor the launcher would bring it up.
+
+    Claiming the port immediately before ui.run() closes that window to
+    approximately nothing.
+    """
+    try:
+        from forex_trader.core.platform_utils import is_port_listening
+    except Exception:
+        return True
+    _free_port(port)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if not is_port_listening(port):
+                return True
+        except Exception:
+            return True
+        time.sleep(0.25)
+        _free_port(port)
+    return False
 
 
 def _start_mt5_bridge() -> subprocess.Popen | None:
@@ -258,6 +295,22 @@ def main():
 
         from nicegui import ui
         import forex_trader.ui.app  # registers startup hooks and page routes  # noqa: F401
+
+        # Last thing before binding — see _claim_port. Everything above this
+        # line (database open, ui.app import) takes seconds, and the port was
+        # only freed before all of it.
+        if not _claim_port(port):
+            from forex_trader.core.platform_utils import pids_listening_on
+            holders = pids_listening_on(port)
+            log.error(
+                "Port %s is still held by PID %s after repeated attempts to free "
+                "it — not starting. Another FOREX Trader is most likely already "
+                "running and serving on http://localhost:%s; open that instead. "
+                "If it is wedged, stop it (FOREX Stop.command / Stop FOREX.bat) "
+                "and start again.",
+                port, ", ".join(map(str, holders)) or "unknown", port,
+            )
+            return
 
         ui.run(
             host="0.0.0.0",

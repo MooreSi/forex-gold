@@ -1140,6 +1140,38 @@ def _apply_schema() -> None:
             # sl_pips ahead of it. 50 pips matches ea_trade_templates.sl_pips'
             # own default.
             "ALTER TABLE vantage_risk_settings ADD COLUMN lk_fallback_sl_pips REAL NOT NULL DEFAULT 50.0",
+        ] + [
+            # Realized-R inputs, captured at open (2026-08-07). R:R on Closed
+            # Trades is net_pnl / initial risk (core_db_max_tp.
+            # get_rr_map_by_ticket), and BOTH stop columns it used to
+            # reconstruct that risk from are unusable:
+            #
+            #   * vantage_simulated_trades.stop_loss is overwritten in place
+            #     by every breakeven/trailing path, so a winner's stored stop
+            #     is no longer what it risked (often exactly entry_price).
+            #   * vantage_signals.stop_loss -- preferred instead to dodge
+            #     that -- is not what got placed for an EA Template channel:
+            #     core_signal_resolution.py makes the template's own sl_pips
+            #     authoritative and replaces the signal's stop outright.
+            #
+            # Measured live 2026-08-07 on "Grid - Zone Mode" (sl_pips=40, so
+            # every stop 4.00 from entry) against signal stops ranging 0.90
+            # to 8.78: full stop-outs reported anywhere from -0.71R to
+            # -2.20R instead of -1.00R.
+            #
+            # initial_sl is the stop price actually sent to the broker,
+            # written once and never touched again. initial_risk is that
+            # distance in account currency across EVERY leg -- an EA Template
+            # grid is N broker positions behind ONE row whose lot_size is
+            # only the promoting leg's, while core_profit_sync sums all N
+            # legs into net_pnl, so a 2-leg grid's R was also ~2x too large
+            # in magnitude on top of the wrong distance. Seeded at open from
+            # the legs the EA's ack says it placed, then replaced with the
+            # exact figure (each filled leg's own opening price and volume)
+            # by core_profit_sync once the legs settle -- a resting leg that
+            # never fills carries no risk and must not count.
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN initial_sl REAL",
+            "ALTER TABLE vantage_simulated_trades ADD COLUMN initial_risk REAL",
         ]:
             try:
                 conn.execute(stmt)

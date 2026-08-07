@@ -287,3 +287,87 @@ def test_template_group_map_ignores_a_prefix_with_no_local_row(fresh_db):
     comment = comment_for_trade("nosuchrow12")
     leg_comments = {"1": f"{comment}a1", "2": f"{comment}g2"}
     assert _template_group_map(leg_comments) == {}
+
+
+# ── initial_risk refinement (2026-08-07) ─────────────────────────────────
+# net_pnl covers every leg, so the R:R denominator has to as well. The row's
+# open-time seed had to assume every staged leg fills at the anchor's price;
+# each leg's own opening deal is what actually resolves it.
+
+
+def _insert_trade_with_initial_sl(trade_id, mt5_ticket, initial_sl, seed_risk,
+                                  strategy="template:Sig Gen Grid"):
+    _insert_trade(trade_id, mt5_ticket=mt5_ticket, strategy=strategy)
+    with db.db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades SET initial_sl=?, initial_risk=? "
+            "WHERE trade_id=?",
+            (initial_sl, seed_risk, trade_id),
+        )
+
+
+def test_initial_risk_is_recomputed_from_every_filled_leg(fresh_db):
+    """Two legs filling at different prices against the shared stop of 3990:
+    the anchor at 4000 risks 10.00 * 0.10 * 100 = $100, the pending leg
+    filling 4 better at 3996 risks only $60. The seed written at open
+    assumed both at the anchor's price ($200)."""
+    trade_id = "5b88a61e-6544-4f"
+    comment = comment_for_trade(trade_id)
+    _insert_trade_with_initial_sl(trade_id, mt5_ticket=100,
+                                  initial_sl=3990.0, seed_risk=200.0)
+    deals = {
+        100: [{"entry": 0, "comment": f"{comment}a1", "price": 4000.0, "volume": 0.10},
+              {"entry": 1, "profit": 30.0, "swap": 0.0, "fee": 0.0}],
+        101: [{"entry": 0, "comment": f"{comment}g2", "price": 3996.0, "volume": 0.10},
+              {"entry": 1, "profit": 10.0, "swap": 0.0, "fee": 0.0}],
+    }
+    asyncio.run(core_profit_sync.sync_profit(trade_id, 100, _FakeBridge(deals)))
+    assert _trade_dict(trade_id)["initial_risk"] == pytest.approx(160.0)
+
+
+def test_a_pending_leg_that_never_filled_carries_no_risk(fresh_db):
+    """The seed counts every leg the EA staged, but a resting leg that
+    expires unfilled never took on risk -- it must not inflate the
+    denominator of a trade the anchor alone actually ran."""
+    trade_id = "5b88a61e-6544-4f"
+    comment = comment_for_trade(trade_id)
+    _insert_trade_with_initial_sl(trade_id, mt5_ticket=100,
+                                  initial_sl=3990.0, seed_risk=200.0)
+    deals = {
+        100: [{"entry": 0, "comment": f"{comment}a1", "price": 4000.0, "volume": 0.10},
+              {"entry": 1, "profit": -98.0, "swap": 0.0, "fee": 0.0}],
+    }
+    asyncio.run(core_profit_sync.sync_profit(trade_id, 100, _FakeBridge(deals)))
+    row = _trade_dict(trade_id)
+    assert row["initial_risk"] == pytest.approx(100.0)
+    # -$98 against the one leg's real $100 risk is the -0.98R it actually was,
+    # not the -0.49R the two-leg seed would have shown.
+    assert row["net_pnl"] / row["initial_risk"] == pytest.approx(-0.98)
+
+
+def test_rerunning_the_sync_does_not_accumulate_risk(fresh_db):
+    """initial_risk is written as an absolute, not an increment -- sync_profit
+    is retried on a schedule while later legs settle."""
+    trade_id = "5b88a61e-6544-4f"
+    comment = comment_for_trade(trade_id)
+    _insert_trade_with_initial_sl(trade_id, mt5_ticket=100,
+                                  initial_sl=3990.0, seed_risk=200.0)
+    deals = {
+        100: [{"entry": 0, "comment": f"{comment}a1", "price": 4000.0, "volume": 0.10},
+              {"entry": 1, "profit": 30.0, "swap": 0.0, "fee": 0.0}],
+    }
+    bridge = _FakeBridge(deals)
+    asyncio.run(core_profit_sync.sync_profit(trade_id, 100, bridge))
+    asyncio.run(core_profit_sync.sync_profit(trade_id, 100, bridge))
+    assert _trade_dict(trade_id)["initial_risk"] == pytest.approx(100.0)
+
+
+def test_a_row_with_no_initial_sl_is_left_alone(fresh_db):
+    """Rows opened before the column existed have nothing to measure a
+    distance from -- the seed must not be overwritten with a bogus figure
+    computed against a NULL stop."""
+    _insert_trade("t-old", mt5_ticket=555, strategy="scale_out", net_pnl=10.0)
+    deals = {555: [{"entry": 0, "price": 4000.0, "volume": 0.10},
+                   {"entry": 1, "profit": 20.0, "swap": 0.0, "fee": 0.0}]}
+    asyncio.run(core_profit_sync.sync_profit("t-old", 555, _FakeBridge(deals)))
+    assert _trade_dict("t-old")["initial_risk"] is None

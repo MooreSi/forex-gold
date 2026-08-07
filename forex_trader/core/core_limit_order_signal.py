@@ -59,7 +59,7 @@ from typing import Any, Awaitable, Callable
 from forex_trader.core import database as db_module
 from forex_trader.core.core_closed_market_queue import queue_closed_market_limit, should_queue
 from forex_trader.core.core_strategy_params import get_strategy_params
-from forex_trader.core.models import MAX_TP, STRATEGY_LIMIT_RUNNER
+from forex_trader.core.models import CONTRACT_SIZE, MAX_TP, STRATEGY_LIMIT_RUNNER
 
 log = logging.getLogger(__name__)
 
@@ -390,15 +390,21 @@ async def _open_realigned_market_order(
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                 lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                 status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                tg_source,managed_by,tp_open,order_type,pending_placed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                tg_source,managed_by,tp_open,order_type,pending_placed_at,
+                initial_sl,initial_risk)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, ticket, direction, entry_low, entry_high, fill_price,
              lot, lot, realigned_sl,
              realigned_tps.get(1), realigned_tps.get(2), realigned_tps.get(3),
              realigned_tps.get(4), realigned_tps.get(5), realigned_tps.get(6),
              realigned_tps.get(7), realigned_tps.get(8),
              "open", now, 0.0, 0.0, 0.0, 0.0, manage_strategy,
-             channel_name, "ea", int(tp_open), "market", None),
+             channel_name, "ea", int(tp_open), "market", None,
+             # Realized-R inputs, against the REALIGNED stop this fill
+             # actually opened with. See database.py's initial_sl/
+             # initial_risk migration note.
+             realigned_sl,
+             round(abs(fill_price - float(realigned_sl)) * float(lot) * CONTRACT_SIZE, 4)),
         )
     log.info(
         "[LimitRunner] entry realigned tg_id=%s ticket=%s %s %.2f lots @ %.2f "

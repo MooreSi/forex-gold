@@ -24,6 +24,7 @@ from typing import Any, Optional
 from forex_trader.core import database as db_module
 from forex_trader.core import telegram_alerts
 from forex_trader.core.core_close_trade import CloseTradeContext, record_close
+from forex_trader.core.models import CONTRACT_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -62,10 +63,13 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
     def _fetch_strategy():
         with db_module.db() as conn:
             row = conn.execute(
-                "SELECT strategy FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
+                "SELECT strategy, direction, initial_sl "
+                "FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
             ).fetchone()
-            return row[0] if row else None
-    strategy = await db_module.to_db_thread(_fetch_strategy)
+            return db_module.row_to_dict(row) if row else {}
+    _row = await db_module.to_db_thread(_fetch_strategy)
+    strategy   = _row.get("strategy")
+    initial_sl = _row.get("initial_sl")
 
     ticket_set = {int(mt5_ticket)}
     if strategy and strategy.startswith("template:"):
@@ -86,6 +90,14 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
     total = 0.0
     any_closed = False
     all_settled = True
+    # Exact initial risk, summed the same way net_pnl is: over every leg that
+    # actually FILLED. The row's own seed (core_open_trade) had to assume each
+    # staged leg would fill at the anchor's price, which a resting pending leg
+    # need not do -- it can fill deeper in the zone, closer to the shared stop,
+    # or expire without ever taking on risk. Each leg's own opening deal
+    # carries the price and volume that resolve it. Skipped entirely when
+    # initial_sl is NULL (every row opened before that column existed).
+    risk_total = 0.0
     for t in sorted(ticket_set):
         deals = await bridge.get_position_history(t)
         if not deals:
@@ -103,6 +115,12 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
         any_closed = True
         total += sum(float(d.get("profit", 0)) + float(d.get("swap", 0)) + float(d.get("fee", 0))
                      for d in deals)
+        if initial_sl:
+            for d in deals:
+                if d.get("entry") != 0:
+                    continue
+                risk_total += (abs(float(d.get("price", 0)) - float(initial_sl))
+                               * float(d.get("volume", 0)) * CONTRACT_SIZE)
 
     if not any_closed:
         return None
@@ -136,6 +154,16 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
                         "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
                         trade_id, our_estimate, mt5_profit, correction,
                     )
+            # Absolute value, not an increment, so re-running it as later
+            # legs settle is idempotent -- it just converges on the full
+            # basket the same way net_pnl above does. Written on every pass
+            # rather than only at all_settled so R:R matches whatever P&L
+            # the row is currently showing, over the same set of legs.
+            if risk_total > 0:
+                conn.execute(
+                    "UPDATE vantage_simulated_trades SET initial_risk=? WHERE trade_id=?",
+                    (round(risk_total, 4), trade_id),
+                )
             if all_settled:
                 conn.execute(
                     "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",

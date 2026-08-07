@@ -150,3 +150,86 @@ def test_multiple_trades_map_correctly(fresh_db):
     rr_map = maxtp.get_rr_map_by_ticket()
     assert rr_map["777"] == pytest.approx(1.5)
     assert rr_map["888"] == pytest.approx(-0.2)
+
+
+# ── initial_risk (2026-08-07) ────────────────────────────────────────────
+# The entry/stop/lot reconstruction above is only ever as good as the two
+# stop columns it picks between, and for an EA Template grid both are
+# wrong: the signal's stop is not what got placed (the template's sl_pips
+# replaces it), and lot_size is one leg of a basket whose net_pnl covers
+# every leg. initial_risk records the real figure at open instead.
+
+
+def _insert_trade_with_initial_risk(trade_id, *, direction, entry_price, sig_stop,
+                                    lot_size, net_pnl, mt5_ticket, initial_risk,
+                                    strategy="template:Grid - Zone Mode"):
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_signals (signal_id, direction, entry_low, entry_high, "
+            "stop_loss, status, created_at) VALUES (?,?,?,?,?,?,?)",
+            (f"sig-{trade_id}", direction, entry_price, entry_price, sig_stop, "active", 0.0),
+        )
+        conn.execute(
+            "INSERT INTO vantage_simulated_trades (trade_id, signal_id, direction, "
+            "entry_low, entry_high, entry_price, lot_size, remaining_lots, stop_loss, "
+            "status, open_time, net_pnl, strategy, mt5_ticket, initial_sl, initial_risk) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (trade_id, f"sig-{trade_id}", direction, entry_price, entry_price, entry_price,
+             lot_size, 0.0, entry_price, "closed", 0.0, net_pnl, strategy, mt5_ticket,
+             sig_stop, initial_risk),
+        )
+
+
+def test_initial_risk_wins_over_the_signal_stop(fresh_db):
+    # Live shape, ticket 1726323015: a "Grid - Zone Mode" SELL whose single
+    # leg stopped out at the template's own 40-pip stop ($39.60 on 0.1 lot
+    # gold) -- a clean -1R. The signal's stop was only 2.34 away, so
+    # reconstructing risk from it reported -1.69R for a full stop-out.
+    _insert_trade_with_initial_risk(
+        "tir1", direction="SELL", entry_price=4284.16, sig_stop=4286.50,
+        lot_size=0.10, net_pnl=-39.60, mt5_ticket=1726323015, initial_risk=40.0)
+    rr_map = maxtp.get_rr_map_by_ticket()
+    assert rr_map["1726323015"] == pytest.approx(-0.99)
+
+
+def test_initial_risk_covers_every_grid_leg_not_just_the_promoting_one(fresh_db):
+    # Ticket 1726213592: a 2-leg grid. core_profit_sync sums BOTH legs into
+    # net_pnl (-$76.00) while lot_size stays the promoting leg's 0.10, so
+    # any risk derived from lot_size alone is half the real basket and the
+    # magnitude comes out roughly doubled -- this reported -2.20R.
+    _insert_trade_with_initial_risk(
+        "tir2", direction="SELL", entry_price=4275.30, sig_stop=4278.75,
+        lot_size=0.10, net_pnl=-76.00, mt5_ticket=1726213592, initial_risk=80.0)
+    rr_map = maxtp.get_rr_map_by_ticket()
+    assert rr_map["1726213592"] == pytest.approx(-0.95)
+
+
+def test_initial_risk_survives_a_breakeven_move_on_the_trade_stop(fresh_db):
+    # The reason the signal stop was preferred in the first place: a winner
+    # that moved to breakeven has trade.stop_loss sitting on entry_price.
+    # initial_risk is written once at open and never touched, so it needs
+    # no such workaround -- _insert_trade_with_initial_risk deliberately
+    # stores stop_loss == entry_price to prove it.
+    _insert_trade_with_initial_risk(
+        "tir3", direction="BUY", entry_price=4276.32, sig_stop=4268.50,
+        lot_size=0.10, net_pnl=149.90, mt5_ticket=1715704187, initial_risk=80.0)
+    rr_map = maxtp.get_rr_map_by_ticket()
+    assert rr_map["1715704187"] == pytest.approx(149.90 / 80.0)
+
+
+def test_falls_back_to_the_stop_columns_when_initial_risk_is_absent(fresh_db):
+    # Every row opened before the column existed. Unchanged behaviour --
+    # approximate, but the best those rows can support.
+    _insert_trade("tir4", direction="BUY", entry_price=2400.0, stop_loss=2390.0,
+                  lot_size=0.10, net_pnl=150.0, mt5_ticket=4444)
+    rr_map = maxtp.get_rr_map_by_ticket()
+    assert rr_map["4444"] == pytest.approx(1.5)
+
+
+def test_zero_initial_risk_falls_back_rather_than_dividing_by_zero(fresh_db):
+    _insert_trade_with_initial_risk(
+        "tir5", direction="BUY", entry_price=2400.0, sig_stop=2390.0,
+        lot_size=0.10, net_pnl=150.0, mt5_ticket=5555, initial_risk=0.0)
+    rr_map = maxtp.get_rr_map_by_ticket()
+    # initial_risk of 0 is not usable; the signal stop still is ($100 risk).
+    assert rr_map["5555"] == pytest.approx(1.5)

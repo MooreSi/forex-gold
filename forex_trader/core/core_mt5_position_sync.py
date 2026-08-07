@@ -27,7 +27,7 @@ from forex_trader.core.core_close_trade import CloseTradeContext, record_close
 from forex_trader.core.core_partial_close import partial_close_trade
 from forex_trader.core.core_profit_sync import schedule_profit_sync, sync_profit
 from forex_trader.core.core_tp_trigger_tracking import last_closed_tp
-from forex_trader.core.models import STRATEGY_SCALE_OUT
+from forex_trader.core.models import CONTRACT_SIZE, STRATEGY_SCALE_OUT
 
 log = logging.getLogger(__name__)
 
@@ -295,14 +295,21 @@ async def sync_closed_mt5_positions(
                         """INSERT INTO vantage_simulated_trades
                            (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,
                             entry_price,lot_size,remaining_lots,stop_loss,tp1,
-                            status,open_time,strategy,tg_source)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            status,open_time,strategy,tg_source,
+                            initial_sl,initial_risk)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
                             trade_id, "MT5_DIRECT", ticket, direction,
                             entry_p, entry_p, entry_p,
                             lot_size, lot_size,
                             sl, tp,
                             "open", open_ts, default_strategy, "MT5_imported",
+                            # Realized-R inputs (see database.py's initial_sl/
+                            # initial_risk note). An imported position may carry
+                            # no stop at all, which is genuinely unmeasurable
+                            # risk -- left NULL rather than recorded as zero.
+                            sl or None,
+                            round(abs(entry_p - sl) * lot_size * CONTRACT_SIZE, 4) if sl else None,
                         ),
                     )
             await db_module.to_db_thread(_import_position)

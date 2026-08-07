@@ -29,7 +29,7 @@ from forex_trader.core import core_ea_templates as ea_templates
 from forex_trader.core.core_pips import PIPS_TO_PRICE_XAUUSD
 from forex_trader.core.core_risk_governor import is_trading_paused, price_in_entry_range
 from forex_trader.core.models import (
-    Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
+    Tick, CONTRACT_SIZE, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_FIXED_RR,
     STRATEGY_ADAPTIVE_RUNNER_2,
@@ -416,6 +416,12 @@ async def open_trade(
     # below, since that synthetic ack never carries a real leg count and
     # guessing one risks closing a trade that actually did fill.
     _grid_legs_total: Optional[int] = None
+    # Per-leg lot sizes actually staged, for the initial_risk seed written
+    # with the row below. A single-position trade is just [lot_size]; an EA
+    # Template grid is one entry per leg the ack says it placed, since
+    # lot_size alone only ever describes the ONE leg that promotes the row
+    # (see database.py's initial_sl/initial_risk migration note).
+    _leg_lots: list[float] = [lot_size]
     _is_template = ea_templates.is_template_override(strategy)
     ea_rs = await db_module.to_db_thread(db_module.get_risk_settings)
     if bool(ea_rs.get("ea_bridge_enabled", 0)) and mt5_tp_override is None:
@@ -607,6 +613,19 @@ async def open_trade(
                                 "anchor/pending leg was rejected by the broker; "
                                 "no trade opened"
                             )
+                    # Per-leg lots for the initial_risk seed. HandleOpenTemplateGrid
+                    # stages the anchor leg(s) first and the pendings after, each at
+                    # its own template lot (falling back to the single lot sent when
+                    # the template leaves one at 0), so legs_placed maps onto the
+                    # anchor lots first and the pending lots with whatever remains.
+                    _leg_lots = [_ea_lot]
+                    if _ea_template is not None and _grid_legs_total:
+                        _l_anc = float(_ea_template.get("lot_anchor") or 0) or _ea_lot
+                        _l_pen = float(_ea_template.get("lot_pending") or 0) or _ea_lot
+                        _n_anc = min(_grid_legs_total,
+                                     max(0, int(_ea_template.get("anchors") or 0)))
+                        _leg_lots = ([_l_anc] * _n_anc
+                                     + [_l_pen] * (_grid_legs_total - _n_anc))
                     log.info("[EA] order placed: ticket=%s dir=%s lots=%s @ %s (strategy=%s)",
                              mt5_ticket, direction, _ea_lot, entry_price, strategy)
                 elif _is_template:
@@ -661,19 +680,33 @@ async def open_trade(
     else:
         _row_tps = [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8]
 
+    # Realized-R inputs, captured now because neither survives the trade:
+    # stop_loss below is overwritten in place by every breakeven/trailing
+    # path, and lot_size only ever describes one leg of a grid. See
+    # database.py's initial_sl/initial_risk migration note for the full
+    # reasoning. This is the SEED -- core_profit_sync replaces initial_risk
+    # with the exact figure from the legs that actually filled, since a
+    # resting pending leg staged here may expire without ever taking on
+    # risk. entry_price is 0 on a grid placeholder row, so fall back to the
+    # tick the stop was measured from rather than booking a risk the width
+    # of the whole gold price.
+    _risk_ref = entry_price or (tick.ask if direction.upper() == "BUY" else tick.bid)
+    _initial_risk = abs(_risk_ref - stop_loss) * sum(_leg_lots) * CONTRACT_SIZE
+
     with db_module.db() as conn:
         conn.execute(
             """INSERT INTO vantage_simulated_trades
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                 lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                 status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,tg_source,
-                managed_by,grid_legs_total)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                managed_by,grid_legs_total,initial_sl,initial_risk)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, mt5_ticket, direction.upper(), entry_low, entry_high, entry_price,
              lot_size, lot_size, stop_loss, *_row_tps,
              "open", now,
              0.0, 0.0, 0.0, 0.0,
-             strategy, tg_source, managed_by, _grid_legs_total),
+             strategy, tg_source, managed_by, _grid_legs_total,
+             stop_loss, round(_initial_risk, 4)),
         )
         conn.execute(
             "UPDATE vantage_signals SET status='active' WHERE signal_id=?", (signal_id,)

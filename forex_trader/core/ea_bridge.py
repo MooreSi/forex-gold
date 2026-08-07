@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from forex_trader.core.core_trading_schedule import check_trading_schedule
+from forex_trader.core.models import CONTRACT_SIZE
 
 log = logging.getLogger("ea_bridge")
 
@@ -1498,8 +1499,9 @@ class EABridge:
                            (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                             lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                             status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                            tg_source,managed_by,tp_open,order_type,pending_placed_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            tg_source,managed_by,tp_open,order_type,pending_placed_at,
+                            initial_sl,initial_risk)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (trade_id, row["signal_id"], ticket, row["direction"],
                          row["price"], row["price"], fill_price,
                          row["lot_size"], row["lot_size"], row["stop_loss"],
@@ -1513,7 +1515,15 @@ class EABridge:
                          # attribution and showed as an unattributed trade in
                          # Trade Analysis.
                          row["channel_name"], "ea", row["tp_open"],
-                         "limit", row["created_at"]),
+                         "limit", row["created_at"],
+                         # Realized-R inputs -- the stop actually placed and
+                         # what it risks on this fill, recorded here because
+                         # stop_loss above is overwritten in place by every
+                         # breakeven/trailing path. See database.py's
+                         # initial_sl/initial_risk migration note.
+                         row["stop_loss"],
+                         round(abs(fill_price - float(row["stop_loss"]))
+                               * float(row["lot_size"]) * CONTRACT_SIZE, 4)),
                     )
                     conn.execute(
                         "UPDATE vantage_signals SET status='active' WHERE signal_id=?",

@@ -83,37 +83,64 @@ def get_rr_map_by_ticket() -> dict[str, float]:
     trade-journal definition of R:R for an already-closed trade: how many
     multiples of the initial risk did this trade actually return.
 
-    Risk distance prefers vantage_signals.stop_loss (set once at signal
-    creation, never touched again) over vantage_simulated_trades.stop_loss
-    -- every breakeven/trailing-stop code path (be_runner, scale_out,
-    protected_scale, scalp_runner, conservative_trial, DPM, TP safety net,
-    the EA's own sl_moved reports...) overwrites the latter IN PLACE, so
-    for any trade that had already banked enough to move to breakeven, its
-    stored stop_loss no longer reflects what was actually risked -- often
-    landing exactly on entry_price (zero risk, ratio undefined), silently
-    blanking R:R for a large share of winning trades specifically. Falls
-    back to the trade's own stop_loss when there's no linked signal (manual
-    trades) or the signal's stop_loss is unset.
+    Risk comes from vantage_simulated_trades.initial_risk (2026-08-07) --
+    the account-currency risk recorded at open by core_open_trade and
+    refined by core_profit_sync to the legs that actually filled. It exists
+    because BOTH stop columns this used to reconstruct risk from are wrong,
+    in opposite directions:
+
+      * t.stop_loss is overwritten IN PLACE by every breakeven/trailing
+        path (be_runner, scale_out, protected_scale, scalp_runner,
+        conservative_trial, DPM, TP safety net, the EA's own sl_moved
+        reports...), so a trade that banked enough to reach breakeven no
+        longer records what it risked -- often landing exactly on
+        entry_price (zero risk, ratio undefined), which silently blanked
+        R:R for winning trades specifically.
+      * s.stop_loss, preferred instead to dodge that, is set once at signal
+        creation and never touched -- but it is not what got PLACED for an
+        EA Template channel, where core_signal_resolution makes the
+        template's own sl_pips authoritative and replaces the signal's stop
+        outright.
+
+    On top of which lot_size is only ever the ONE leg that promoted the
+    row, while core_profit_sync sums every leg of an EA Template grid into
+    net_pnl -- so a 2-leg grid's R came out roughly doubled in magnitude
+    regardless of which stop was used. Measured live 2026-08-07 on "Grid -
+    Zone Mode": full stop-outs reporting -0.71R to -2.20R instead of
+    -1.00R, and a +0.39R trade reporting 1.74.
+
+    The old entry/stop/lot reconstruction remains as the fallback for rows
+    opened before initial_risk existed, unchanged and with the same
+    caveats -- historical R:R on those rows is as approximate as it always
+    was, since nothing recorded at the time can recover the real figure.
 
     Available immediately at close (net_pnl/entry_price/lot_size are all
     set by record_close()), no async job involved -- excluded whenever any
-    input is missing or the resolved risk distance is zero."""
+    input is missing or the resolved risk is zero."""
     from forex_trader.core.core_fees_sizing import pnl as _pnl
     with db() as conn:
         rows = conn.execute(
             "SELECT t.mt5_ticket, t.direction, t.entry_price, "
             "COALESCE(s.stop_loss, t.stop_loss) AS risk_stop, "
-            "t.lot_size, t.net_pnl "
+            "t.lot_size, t.net_pnl, t.initial_risk "
             "FROM vantage_simulated_trades t "
             "LEFT JOIN vantage_signals s ON s.signal_id = t.signal_id "
             "WHERE t.mt5_ticket IS NOT NULL AND t.direction IS NOT NULL "
             "AND t.entry_price IS NOT NULL "
             "AND t.lot_size IS NOT NULL AND t.net_pnl IS NOT NULL "
-            "AND COALESCE(s.stop_loss, t.stop_loss) IS NOT NULL"
+            "AND (t.initial_risk IS NOT NULL "
+            "     OR COALESCE(s.stop_loss, t.stop_loss) IS NOT NULL)"
         ).fetchall()
     result: dict[str, float] = {}
-    for mt5_ticket, direction, entry_price, risk_stop, lot_size, net_pnl in rows:
-        risk_dollars = abs(_pnl(direction, float(entry_price), float(risk_stop), float(lot_size)))
+    for (mt5_ticket, direction, entry_price, risk_stop,
+         lot_size, net_pnl, initial_risk) in rows:
+        if initial_risk is not None and float(initial_risk) > 0:
+            risk_dollars = float(initial_risk)
+        elif risk_stop is None:
+            continue
+        else:
+            risk_dollars = abs(_pnl(direction, float(entry_price),
+                                    float(risk_stop), float(lot_size)))
         if risk_dollars <= 0:
             continue
         result[str(mt5_ticket)] = float(net_pnl) / risk_dollars

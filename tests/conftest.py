@@ -48,6 +48,9 @@ entirely.
 """
 import pytest
 
+import logging
+import logging.handlers
+
 from forex_trader.core import dpm_engine as _dpm
 from forex_trader.core import news_calendar as _nc
 
@@ -130,3 +133,45 @@ def _market_week_open(request, monkeypatch):
 
     from forex_trader.core import core_closed_market_queue as _cmq
     monkeypatch.setattr(_cmq, "is_weekly_market_closed", lambda now=None: False)
+
+
+@pytest.fixture(autouse=True)
+def _never_write_to_the_apps_log():
+    """Detach any file handler aimed at the user data directory.
+
+    Importing `run` used to attach a rotating file handler to the ROOT logger
+    at module scope, pointed at the LIVE app's forex_trader.log -- and
+    tests/test_claim_port.py imports it, so every pytest session wrote into
+    the log of whatever app instance was running at the time. On 2026-08-07
+    that put five WARNINGs about an EA outage and a failed terminal restart
+    into the production log; none of it happened, the durations came from a
+    fixture and the exception was injected. A log that invents outages is
+    worse than no log, because it is read precisely when something is wrong.
+    Two processes were also sharing one TimedRotatingFileHandler, so both
+    would try to perform the midnight rename.
+
+    run.setup_logging() is now called from main() rather than at import, which
+    fixes that at the source. This is the guard that stops the next one, and
+    it runs per-test rather than per-session so a handler attached midway
+    through a run is gone again by the next test. Handlers writing anywhere
+    else -- a tmp_path, caplog's own -- are left alone.
+    """
+    from forex_trader.config import USER_DATA_DIR
+    target = str(USER_DATA_DIR)
+
+    removed = []
+    for name in [None] + list(logging.root.manager.loggerDict):
+        logger = logging.getLogger(name) if name else logging.getLogger()
+        if not isinstance(logger, logging.Logger):
+            continue
+        for h in list(logger.handlers):
+            path = getattr(h, "baseFilename", None)
+            if path and target in str(path):
+                logger.removeHandler(h)
+                h.close()
+                removed.append(str(path))
+    if removed:
+        # Loud on purpose: something reintroduced the import-time side effect.
+        print(f"\n[conftest] detached {len(removed)} handler(s) writing to the "
+              f"app's data dir: {sorted(set(removed))}")
+    yield

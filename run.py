@@ -20,32 +20,60 @@ sys.path.insert(0, str(ROOT))
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s — %(message)s"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=_LOG_FORMAT,
-)
-
-# Write logs to a daily-rotating file in the user data directory.
-# Rotates at midnight; keeps 30 daily files before the oldest is removed.
-# Backup filenames:  forex_trader.log.YYYY-MM-DD
-#
-# Must match forex_trader.config.USER_DATA_DIR exactly -- this checkout
-# (forex-refactor2) is a fork of the live app and must never default to its
-# "ForexTrader" folder (see the long comment in config.py for why).
-from forex_trader.config import USER_DATA_DIR as _USER_DATA
-_log_dir   = _USER_DATA / "data"
-_log_dir.mkdir(parents=True, exist_ok=True)
-_fh = TimedRotatingFileHandler(
-    _log_dir / "forex_trader.log",
-    when="midnight",
-    backupCount=30,
-    encoding="utf-8",
-    utc=False,
-)
-_fh.setFormatter(logging.Formatter(_LOG_FORMAT))
-logging.getLogger().addHandler(_fh)
-
 log = logging.getLogger("forex_trader")
+
+_LOGGING_READY = False
+
+
+def setup_logging() -> None:
+    """Attach the app's console + rotating-file logging to the root logger.
+
+    Called from main(), NOT at import (2026-08-07). This used to run as a
+    module-level side effect, which meant that merely importing `run` pointed
+    the root logger at the LIVE app's forex_trader.log -- and
+    tests/test_claim_port.py imports it, so every pytest session wrote into the
+    running app's log.
+
+    That was not just noise. A test run on 2026-08-07 put five WARNINGs into
+    the production log reading "EA offline 601s with a healthy MT5 bridge --
+    restarting the terminal (attempt 1/3)" and "terminal restart failed:
+    wineserver would not die", none of which ever happened: they were fake
+    durations from a fixture and an injected exception. Anyone reading that log
+    to diagnose a real outage -- which is the whole reason it exists -- would
+    have been chasing an event that never occurred.
+
+    It also had two processes sharing one TimedRotatingFileHandler, so both
+    would try to perform the midnight rename.
+
+    Idempotent, so a re-import or a second call cannot double up handlers and
+    write every line twice.
+    """
+    global _LOGGING_READY
+    if _LOGGING_READY:
+        return
+
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+
+    # Write logs to a daily-rotating file in the user data directory.
+    # Rotates at midnight; keeps 30 daily files before the oldest is removed.
+    # Backup filenames:  forex_trader.log.YYYY-MM-DD
+    #
+    # Must match forex_trader.config.USER_DATA_DIR exactly -- this checkout
+    # (forex-refactor2) is a fork of the live app and must never default to its
+    # "ForexTrader" folder (see the long comment in config.py for why).
+    from forex_trader.config import USER_DATA_DIR as _USER_DATA
+    _log_dir = _USER_DATA / "data"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    fh = TimedRotatingFileHandler(
+        _log_dir / "forex_trader.log",
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+        utc=False,
+    )
+    fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+    logging.getLogger().addHandler(fh)
+    _LOGGING_READY = True
 
 
 def _ensure_data_dirs():
@@ -243,6 +271,10 @@ def _run_headless() -> None:
 
 
 def main():
+    # First thing, before anything else here can log: everything below this
+    # point expects the console and file handlers to already be attached.
+    setup_logging()
+
     import argparse
     _ap = argparse.ArgumentParser(add_help=False)
     _ap.add_argument("--no-browser", action="store_true",

@@ -40,6 +40,52 @@ log = logging.getLogger(__name__)
 # see the same ADMIN_AVAILABLE value without duplicating the KeyGen lookup —
 # ui/app.py imports admin_open_fn for its button's on_click handler.
 
+def _import_with_timeout(module_name: str, timeout: float = 20.0):
+    """Import `module_name` on a worker thread, giving up after `timeout`.
+
+    These KeyGen modules run real work at import time — forex_admin.py opens
+    the licence registry SQLite file at module level — and that work can block
+    forever rather than fail. Confirmed live 2026-08-07: iCloud Drive had
+    evicted ~/Documents/KeyGen/licences.db (file flagged "dataless") and could
+    no longer download it back, so sqlite3.connect() never returned. The app
+    logged "Starting FOREX Trader on http://localhost:8888", hung inside this
+    module's import, and never reached ui.run() — it never bound the port, so
+    it looked like a silent failure to start, with nothing in the log and no
+    traceback. Three processes ended up wedged on the same open().
+
+    The admin console is optional; the trading app must start without it. A
+    plain import cannot be interrupted, so run it on a daemon thread and walk
+    away if it stalls — the thread stays stuck, but the process exits normally
+    and the app carries on with the admin button hidden.
+    """
+    import importlib
+    import threading
+
+    outcome: dict = {}
+
+    def _work():
+        try:
+            outcome["module"] = importlib.import_module(module_name)
+        except BaseException as exc:      # noqa: BLE001 — reported, not swallowed
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=_work, daemon=True, name=f"import-{module_name}")
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        log.error(
+            "[Admin] Importing %s blocked for over %.0fs — continuing without the "
+            "admin console. This usually means a file it opens at import time is "
+            "unreadable rather than missing (an iCloud-evicted 'dataless' file, a "
+            "stalled network mount). Check: ls -lO ~/Documents/KeyGen",
+            module_name, timeout,
+        )
+        return None
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("module")
+
+
 def _find_admin_open_fn():
     """Look for KeyGen/forex_admin.py next to the FOREX directory.
     Adds KeyGen to sys.path if found and returns open_admin_dialog, else None."""
@@ -53,7 +99,9 @@ def _find_admin_open_fn():
             if str(kg_path) not in sys.path:
                 sys.path.insert(0, str(kg_path))
             try:
-                import forex_admin as _fa
+                _fa = _import_with_timeout("forex_admin")
+                if _fa is None:
+                    return None
                 log.info("[Admin] Loaded admin module from %s", kg_path)
                 return _fa.open_admin_dialog
             except Exception as exc:
@@ -87,7 +135,9 @@ def _find_remote_admin_open_fn():
             if str(kg_path) not in sys.path:
                 sys.path.insert(0, str(kg_path))
             try:
-                import admin_panel as _ap
+                _ap = _import_with_timeout("admin_panel")
+                if _ap is None:
+                    return None
                 log.info("[Admin] Remote admin panel loaded from %s", kg_path)
                 return _ap.open_dialog
             except Exception as exc:

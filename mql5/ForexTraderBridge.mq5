@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,7 +40,7 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.03"
+#define EA_VERSION "1.04"
 
 #include <Trade\Trade.mqh>
 
@@ -70,8 +70,23 @@ CTrade trade;
 int    g_socket = INVALID_HANDLE;
 bool   g_connected = false;
 string g_recvBuffer = "";
-datetime g_lastPingSent = 0;
-datetime g_lastRecv = 0;
+// ── Link timers run on GetTickCount64(), never TimeCurrent() (2026-08-07) ──
+// TimeCurrent() is the time of the LAST QUOTE RECEIVED, not a clock. It stops
+// advancing the moment the market stops ticking, so on TimeCurrent() the
+// heartbeat below simply stopped every weekend and in the daily gap between
+// the New York close and the Asian open: "TimeCurrent() - g_lastPingSent >= 2"
+// can never come true when TimeCurrent() is frozen. The socket stayed open and
+// this EA was fine, but Python saw nothing arrive inside its 8s window and
+// reported the EA offline for the whole of every closed session.
+//
+// GetTickCount64() is milliseconds since the machine booted: monotonic,
+// quote-independent, and 64-bit so it does not wrap the way GetTickCount()
+// does at ~49.7 days. Hence these are ulong milliseconds, not datetime
+// seconds -- the thresholds below are in ms accordingly. TimeCurrent()
+// remains correct everywhere else in this file (order expiry, VWAP windows,
+// panel timestamps), all of which genuinely mean market time.
+ulong  g_lastPingSent = 0;
+ulong  g_lastRecv = 0;
 // Socket link state. g_connected only means SocketConnect returned true --
 // under Wine that happens even when nothing is listening, which is why the
 // EA used to print "connected" on every one of its retries. g_linkConfirmed
@@ -80,7 +95,7 @@ int      g_ports[];              // candidate ports, in the order they're tried
 int      g_portIdx = 0;
 int      g_activePort = 0;
 bool     g_linkConfirmed = false;
-datetime g_lastLinkDownLog = 0;
+ulong    g_lastLinkDownLog = 0;   // 0 = never logged; see NextPort
 // TEMPORARY DIAGNOSTIC (remove once the scalp_runner "silently orphaned
 // trade" investigation is closed) — last time the tracked-trades heartbeat
 // below was printed, and the count it saw, so a full g_trades wipe (e.g. an
@@ -526,8 +541,12 @@ void NextPort(const string reason)
 {
    int n = ArraySize(g_ports);
    if(n > 1) g_portIdx = (g_portIdx + 1) % n;
-   if(TimeCurrent() - g_lastLinkDownLog < 30) return;
-   g_lastLinkDownLog = TimeCurrent();
+   // The != 0 guard matters now these are milliseconds-since-boot rather than
+   // epoch seconds: a terminal started less than 30s ago has a tick count
+   // below the throttle window, which would have swallowed the first and most
+   // useful "NO LINK" line of the session.
+   if(g_lastLinkDownLog != 0 && GetTickCount64() - g_lastLinkDownLog < 30000) return;
+   g_lastLinkDownLog = GetTickCount64();
    Print("[EABridge] NO LINK to Python on ", InpHost, ":", g_activePort,
          " (", reason, ") — retrying on port ", g_ports[g_portIdx],
          ". Trades are being managed by the app, not this EA.");
@@ -552,7 +571,7 @@ void EnsureConnected()
    // Not confirmed yet: SocketConnect returning true is not proof anything is
    // on the other end. PollSocket promotes this once Python replies.
    g_linkConfirmed = false;
-   g_lastRecv = TimeCurrent();
+   g_lastRecv = GetTickCount64();
    // __DATETIME__ is stamped by MetaEditor at compile time in local time, and
    // Python compares it against the repo source file's own local mtime. That
    // is only meaningful because the two always run on the same machine (see
@@ -594,7 +613,7 @@ void PollSocket()
       if(got > 0)
       {
          g_recvBuffer += CharArrayToString(buf, 0, got);
-         g_lastRecv = TimeCurrent();
+         g_lastRecv = GetTickCount64();
          if(!g_linkConfirmed)
          {
             // First byte back from Python — only now is the link real.
@@ -628,12 +647,14 @@ void PollSocket()
    // Heartbeat every 2s; if nothing received for 10s, force a reconnect —
    // Python's own fallback watchdog uses a similar timeout on its side, so a
    // dead socket on either end reclaims management within a few seconds.
-   if(TimeCurrent() - g_lastPingSent >= 2)
+   // Milliseconds off GetTickCount64(), so this keeps beating through a closed
+   // market -- see the note on g_lastPingSent's declaration.
+   if(GetTickCount64() - g_lastPingSent >= 2000)
    {
       SendJson("{\"type\":\"ping\"}");
-      g_lastPingSent = TimeCurrent();
+      g_lastPingSent = GetTickCount64();
    }
-   if(g_connected && TimeCurrent() - g_lastRecv > 10)
+   if(g_connected && GetTickCount64() - g_lastRecv > 10000)
    {
       g_connected = false;
       SocketClose(g_socket);

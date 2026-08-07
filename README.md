@@ -44,6 +44,13 @@ macOS) — enter your MT5/broker and Telegram credentials from the app's Setting
 
 To stop the app, use `Stop FOREX.bat` / `FOREX Stop.command`, or the in-app Power dialog.
 
+## Uninstalling
+
+Double-click `Windows Uninstall.bat` or `Mac Uninstall.command`. Both remove the app folder,
+the user data directory, the licence activation, and any Desktop shortcut, after two
+confirmations. On Windows, an install made with `FOREX_Trader_Setup.exe` should instead be
+removed via Settings > Apps, which also clears its registry entries and Start Menu shortcuts.
+
 ## Project layout
 
 ```

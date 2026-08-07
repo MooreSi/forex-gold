@@ -57,7 +57,10 @@ def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
     log.error("Licence check failed: %s", reason)
 
     if allow_register:
-        _show_registration_page()
+        # `reason` is shown on the activation screen as an explanatory banner
+        # rather than being dropped, so the user knows why they are being asked
+        # to register again instead of just seeing a bare "activation required".
+        _show_registration_page(notice=reason)
         return
 
     @ui.page("/")
@@ -130,8 +133,13 @@ _ACTIVATION_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def _show_registration_page() -> None:
-    """Show the licence activation screen and block until activated."""
+def _show_registration_page(notice: str = "") -> None:
+    """Show the licence activation screen and block until activated.
+
+    `notice` explains why activation is being asked for again (stale key after
+    a signing-scheme change, expired licence, machine change). Empty on a
+    genuine first install.
+    """
     import asyncio
     import os
     import sys
@@ -142,11 +150,43 @@ def _show_registration_page() -> None:
 
     machine_id = get_fingerprint()
 
+    # A machine that was approved before already has a remote token, so the
+    # admin server knows it and can push a corrected licence key without the
+    # user re-registering at all (see remote/server.py's resign_all_licences).
+    # Nothing else on this screen starts the remote client — without this,
+    # a client stranded by a re-signing event would sit here doing nothing
+    # until someone manually filled the form in, which is exactly the case
+    # that has no remote fix. Start the agent up front when a token exists so
+    # the push can land on its own.
+    _known_client = False
+    _stored_email = ""
+    _stored_nickname = ""
+    try:
+        from forex_trader.remote import client as _rc_boot
+        _known_client = _rc_boot._TOKEN_FILE.exists()
+        _stored_email = _rc_boot.get_stored_email()
+        _stored_nickname = _rc_boot.get_stored_nickname()
+    except Exception as _rc_err:
+        log.warning("Could not inspect remote client state on activation screen: %s", _rc_err)
+
     # Plain HTML "please wait" page served while the process restarts.
     # No socket.io — survives the NiceGUI process dying.
     @_ng_app.get("/licence-activated")
     def _lic_page():
         return HTMLResponse(_ACTIVATION_HTML)
+
+    if _known_client:
+        @_ng_app.on_startup
+        def _autoconnect_known_client():
+            try:
+                from forex_trader.remote import client as _rc_auto
+                _rc_auto.start()
+                log.info(
+                    "Activation screen: existing remote token found — "
+                    "connecting so an admin-pushed licence can self-heal this install."
+                )
+            except Exception as exc:
+                log.warning("Could not auto-start remote client on activation screen: %s", exc)
 
     @ui.page("/")
     def _reg_page():
@@ -157,6 +197,20 @@ def _show_registration_page() -> None:
             ui.icon("vpn_key", size="3.5rem").classes("text-blue-400")
             ui.label("FOREX Trader").classes("text-3xl font-bold text-white tracking-tight")
             ui.label("Licence activation required.").classes("text-gray-400 text-sm")
+
+            if notice:
+                with ui.card().classes(
+                    "w-full bg-amber-950 border border-amber-700 p-3 gap-1"
+                ):
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        ui.icon("info", size="1.2rem").classes("text-amber-400")
+                        ui.label(notice).classes("text-amber-200 text-xs leading-snug")
+                    if _known_client:
+                        ui.label(
+                            "This machine is already known to your administrator — "
+                            "if they are online, a replacement licence may arrive "
+                            "automatically. Otherwise request one below."
+                        ).classes("text-amber-300/70 text-xs leading-snug")
 
             # Machine ID — displayed for reference; also sent automatically in the request flow.
             with ui.card().classes("w-full bg-gray-900 border border-gray-700 p-4 gap-2"):
@@ -179,6 +233,7 @@ def _show_registration_page() -> None:
             nickname_input = ui.input(
                 "Your Name / Nickname *",
                 placeholder="e.g. John or JohnTrader",
+                value=_stored_nickname,
             ).props("outlined").classes("w-full text-sm")
             ui.label(
                 "This will identify you in the admin panel and on your licence."
@@ -187,6 +242,7 @@ def _show_registration_page() -> None:
             email_input = ui.input(
                 "Email Address *",
                 placeholder="your@email.com",
+                value=_stored_email,
             ).props("outlined").classes("w-full text-sm")
 
             status_lbl = ui.label("").classes("text-sm min-h-5")
@@ -327,8 +383,15 @@ def enforce() -> None:
 
     Check order:
       1. Store has machine_id + expiry_date + licence_key — if missing, show activation screen
-      2. Stored machine_id matches current machine — if not, block (wrong machine)
-      3. HMAC-SHA256 valid for machine_id + expiry_date — if not, clear store and block
+      2. Stored machine_id matches current machine — if not, clear store and show activation
+      3. Ed25519 signature valid for machine_id + expiry_date — if not, clear store
+         and show activation
+      4. Expiry date not passed — if it has, show activation so a renewal can be requested
+
+    Every failure path lands on the activation screen rather than a dead-end
+    error page: that screen can request a new licence and can receive one
+    pushed by the admin console, so a stranded install is always recoverable
+    without physical access to the machine.
     """
     from forex_trader.licence import store as _store
     from forex_trader.licence.fingerprint import get_fingerprint
@@ -381,13 +444,32 @@ def enforce() -> None:
                 stored_machine_id[:8], current_machine[:8],
             )
             _store.clear()
-            _show_error_and_exit("", allow_register=True)
+            _show_error_and_exit(
+                "This licence was issued for a different machine. "
+                "Request a new one for this machine below.",
+                allow_register=True,
+            )
             return
 
     if not already_verified and not _verify_licence_key(stored_machine_id, expiry_date, licence_key):
-        log.warning("Licence signature verification failed — clearing store.")
+        # A key that no longer verifies is far more often a stale key than a
+        # forged one: upgrading over an older install brings a new verify.py,
+        # and every key issued under the retired signing scheme (e.g. the HMAC
+        # keygen.py -> Ed25519 migration) stops validating against it. The old
+        # behaviour here was a dead-end error screen, which is unrecoverable
+        # both locally and remotely — the remote client never starts, so the
+        # admin cannot push a corrected key either. Clear the bad key and send
+        # the user to the activation screen instead, which can request a new
+        # licence and accepts an admin push. A genuinely forged key still gets
+        # nowhere: it is discarded here, and the activation screen only ever
+        # admits a key that verifies.
+        log.warning("Licence signature verification failed — clearing store and re-registering.")
         _store.clear()
-        _show_error_and_exit("Your licence key is invalid or has been tampered with.")
+        _show_error_and_exit(
+            "Your saved licence key is no longer valid for this version of "
+            "FOREX Trader — it needs to be reissued.",
+            allow_register=True,
+        )
         return
 
     # Check expiry date (skip for perpetual licences)
@@ -396,9 +478,15 @@ def enforce() -> None:
         try:
             exp_date = _dt_exp.strptime(expiry_date, "%Y-%m-%d").replace(tzinfo=_tz_exp.utc)
             if _dt_exp.now(_tz_exp.utc).date() > exp_date.date():
+                # Same reasoning as the signature failure above: a dead-end
+                # screen leaves no route back, so offer the activation screen
+                # where a renewal can be requested or pushed. The expired key
+                # is left in the store — it is genuine, and re-saving is the
+                # activation screen's job once a renewal actually arrives.
                 _show_error_and_exit(
                     f"Your licence expired on {expiry_date}. "
-                    "Contact your administrator to obtain a renewal key."
+                    "Request a renewal below, or contact your administrator.",
+                    allow_register=True,
                 )
                 return
         except ValueError:

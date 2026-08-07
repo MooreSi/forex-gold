@@ -722,9 +722,26 @@ async def _connect_loop() -> None:
                         email    = m.get("email", get_stored_email())
                         mid      = m.get("machine_id", "")
                         if lic_key and expiry:
+                            # Verify before storing. guard.enforce() now sends a
+                            # client with an unverifiable key back to the
+                            # activation screen (instead of a dead-end error),
+                            # and that screen reconnects here — so saving a key
+                            # that does not verify would restart the app straight
+                            # into the same screen, forever. An admin console
+                            # still running a retired signing scheme is exactly
+                            # the case that would trigger it. Reject it here
+                            # instead and stay on the activation screen.
+                            from forex_trader.licence.fingerprint import get_fingerprint
+                            from forex_trader.licence.verify import verify_licence_key
+                            if not verify_licence_key(mid or get_fingerprint(), expiry, lic_key):
+                                log.error(
+                                    "[RemoteClient] Rejected pushed licence — signature does not "
+                                    "verify for this machine (admin console may be running an "
+                                    "older signing scheme). Staying on the activation screen."
+                                )
+                                continue
                             existing = _licence_store.load()
                             if not existing or existing.get("licence_key") != lic_key:
-                                from forex_trader.licence.fingerprint import get_fingerprint
                                 _licence_store.save({
                                     "machine_id":   mid or get_fingerprint(),
                                     "email":        email,

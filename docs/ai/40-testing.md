@@ -1,5 +1,9 @@
 # Testing — the protocol
 
+This is the contract. `/test` is the working skill that applies it — the rules
+in full, the directory layout, the anti-pattern table and the review checklist.
+Use `/test` when writing or reviewing; read this when you want to know why.
+
 ## Red, green, then commit
 
 1. **Write the test first.**
@@ -45,6 +49,19 @@ When a body moves, the characterization test stays as-is and a surface test
 covers the new home. Delete a characterization test **only** when an
 identically-named surface twin exists and you have run it green first — and
 say so in the commit.
+
+## Where tests live
+
+The tree mirrors `backend/src/`. A test's directory is decided by the directory
+of the module it covers — `services/trading/close_trade.py` is tested by
+`tests/services/trading/test_close_trade.py`. Every directory needs
+`__init__.py`; basenames repeat across service dirs and without it pytest
+imports two files as one module and silently runs only one.
+
+**`tests/core/` is legacy and closed.** `backend/src/core/` no longer exists —
+it was dissolved into `services/` and the tests did not follow. Never add a file
+there. When you touch one, move it to the directory mirroring its subject as
+part of that change. `python -m tools.test_layout.migrate` prints the mapping.
 
 ## Never do this to a test
 

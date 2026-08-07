@@ -52,6 +52,32 @@ chart, failed to compile, AutoTrading off) must not put the terminal into a
 restart cycle for the rest of the week. Past the cap it goes back to alerting
 and waits for a human.
 
+A CLOSED MARKET IS NOT AN OUTAGE
+--------------------------------
+The EA looks dead every weekend and in the daily gap between the New York
+close and the Asian open, and it is not: its heartbeat is driven by
+TimeCurrent(), which in MQL5 is the time of the *last quote received*, not a
+clock. No ticks, no advancing TimeCurrent(), so PollSocket's
+"TimeCurrent() - g_lastPingSent >= 2" never comes true and the pings simply
+stop. The socket stays open, the EA is fine, and is_ea_healthy() goes False
+anyway because nothing has arrived within its 8s window.
+
+So everything below is gated on the market actually ticking, and while it
+isn't, the outage clock is reset rather than merely paused -- when the market
+reopens the EA gets the full grace period to come back before anything fires,
+instead of reopening into a 49-hour "outage" and being restarted seconds
+before it would have reconnected on its own.
+
+Liveness is judged by watching the MT5 bridge's tick timestamp *move*, not by
+comparing it to the local clock: MT5 reports tick.time in broker-server time,
+which sits a couple of hours off true UTC, so an absolute freshness test would
+be wrong by that offset in whichever direction the broker's timezone happens
+to fall. Movement is immune to that, and it covers holidays and broker
+maintenance windows too, neither of which any hardcoded schedule would know
+about. The weekend is additionally checked against dpm_engine's fixed
+Fri-21:00/Sun-22:00 UTC window, which needs no bridge at all and so still
+answers when the bridge is the thing that is down.
+
 WHERE THE RECOVERY IS AVAILABLE
 -------------------------------
 Only where restarting actually reloads the expert, which means only the
@@ -102,10 +128,25 @@ RESTART_COOLDOWN_S = 1800.0
 # off will never come back no matter how many times MT5 is bounced.
 MAX_RESTARTS = 3
 
+# How long the bridge's tick timestamp may sit unchanged before the market is
+# treated as shut. XAUUSD ticks many times a second in every live session, so
+# even the quietest stretch of the Asian session is orders of magnitude below
+# this; the daily break is around an hour and the weekend around 49.
+#
+# Must stay BELOW DOWN_ALERT_AFTER_S. Liveness is judged by movement, so the
+# gate needs this much history before it can call a market shut -- and if that
+# took longer than the alert threshold, an app started during a closed market
+# would alert once before the gate could stop it. Erring short is the safe
+# direction anyway: a false "closed" only suppresses alerting until quotes
+# resume, whereas a false "open" is the weekend noise this exists to end.
+TICK_STALE_S = 60.0
+
 
 def new_state() -> dict:
     return {"was_healthy": True, "down_since": 0.0, "last_alert_at": 0.0,
-            "last_restart_at": 0.0, "restarts": 0}
+            "last_restart_at": 0.0, "restarts": 0,
+            "last_tick_ts": 0.0, "last_tick_change_at": 0.0,
+            "market_closed": False}
 
 
 async def ea_link_check(
@@ -173,14 +214,40 @@ async def ea_link_check(
     except Exception as e:
         log.debug("[EALink] re-bind failed: %s", e)
 
-    down_for = now - state["down_since"]
-    if down_for < DOWN_ALERT_AFTER_S:
-        return CHECK_INTERVAL
-
     # An EA that has never connected in this process isn't a fault -- plenty
     # of installs never attach it. Only a link that existed and went away is
-    # worth alerting on, or restarting the terminal for.
+    # worth watching, alerting on, or restarting the terminal for.
     if not getattr(bridge, "last_connected_at", 0.0):
+        return CHECK_INTERVAL
+
+    # Sampled from the very first quiet cycle, not lazily when a decision is
+    # due: liveness is judged by the tick timestamp *moving*, so the first
+    # sample can only ever read "live" -- there is nothing yet to compare it
+    # against. Deferring this until the alert was due meant a market that shut
+    # before the app started got one free alert before the gate had any
+    # history. Starting here gives TICK_STALE_S of evidence to accumulate
+    # inside the grace window below, which is why it must stay the shorter of
+    # the two.
+    live, why_not = await _market_is_live(state, now, mt5_bridge)
+    if not live:
+        # Reset rather than pause: the EA stops pinging the moment quotes stop
+        # (its heartbeat runs on TimeCurrent()), so this is the normal state of
+        # every weekend and every daily break. Restarting the clock means the
+        # reopen gets a full grace period instead of inheriting hours of
+        # "downtime" that was only ever the market being shut.
+        state["down_since"] = now
+        if not state["market_closed"]:
+            state["market_closed"] = True
+            log.info("[EALink] EA quiet but the market is not ticking (%s) — "
+                     "expected, not alerting or restarting", why_not)
+        return CHECK_INTERVAL
+
+    if state["market_closed"]:
+        state["market_closed"] = False
+        log.info("[EALink] market is ticking again — EA link is back under watch")
+
+    down_for = now - state["down_since"]
+    if down_for < DOWN_ALERT_AFTER_S:
         return CHECK_INTERVAL
 
     # Before the re-alert throttle below, not after: a cycle that is merely too
@@ -210,6 +277,50 @@ async def ea_link_check(
         "the EA is attached with AutoTrading on and its InpPort matches."
     )
     return CHECK_INTERVAL
+
+
+async def _market_is_live(state: dict, now: float, mt5_bridge: Any) -> tuple[bool, str]:
+    """(is_ticking, reason_if_not). See the module docstring: the EA stops
+    heartbeating whenever quotes stop, so "no ticks" fully explains its
+    silence and must never be reported as a fault."""
+    from datetime import datetime, timezone
+    # Local import, same as core_db_risk_settings does, to avoid a cycle.
+    from forex_trader.core.dpm_engine import is_weekly_market_closed
+
+    # Needs no bridge, so it still answers when the bridge is the casualty.
+    if is_weekly_market_closed(datetime.fromtimestamp(now, timezone.utc)):
+        return False, "weekend"
+
+    if mt5_bridge is None:
+        return True, ""   # nothing to judge with; don't suppress on a guess
+
+    try:
+        tick = await mt5_bridge.get_tick()
+    except Exception as e:
+        log.debug("[EALink] tick fetch raised: %s", e)
+        tick = None
+    if tick is None:
+        # The bridge itself is not answering. That is the bridge watchdog's
+        # problem, and it is not evidence the EA has failed.
+        return False, "MT5 bridge is not serving ticks"
+
+    ts = float(getattr(tick, "timestamp", 0.0) or 0.0)
+    if ts <= 0:
+        return True, ""   # no usable timestamp; fall back to old behaviour
+
+    if ts != state["last_tick_ts"]:
+        state["last_tick_ts"] = ts
+        state["last_tick_change_at"] = now
+        return True, ""
+
+    if not state["last_tick_change_at"]:
+        state["last_tick_change_at"] = now
+        return True, ""
+
+    quiet_for = now - state["last_tick_change_at"]
+    if quiet_for >= TICK_STALE_S:
+        return False, f"no new tick for {quiet_for / 60:.0f} min"
+    return True, ""
 
 
 async def _maybe_restart_terminal(

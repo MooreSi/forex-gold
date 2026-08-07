@@ -9,6 +9,7 @@ back to Python-side management.
 No MT5 order is ever placed, closed, or modified by any of this.
 """
 import asyncio
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -202,12 +203,31 @@ def test_a_failing_rebind_does_not_stop_the_alert():
 # Every test below is about a guard, because the failure mode of getting this
 # wrong is an app that cycles MT5 for days while nobody is at the keyboard.
 
+class FakeTick:
+    def __init__(self, timestamp):
+        self.timestamp = timestamp
+
+
 class FakeMT5Bridge:
-    def __init__(self, connected=True):
+    """`ticking=False` is a shut market: the tick timestamp stops moving, which
+    is the only signal that distinguishes a closed session from a dead EA."""
+
+    def __init__(self, connected=True, ticking=True, tick_ts=500000.0,
+                 serves_ticks=True):
         self.connected = connected
+        self.ticking = ticking
+        self.serves_ticks = serves_ticks
+        self._tick_ts = tick_ts
 
     async def get_health(self):
         return {"connected": self.connected}
+
+    async def get_tick(self):
+        if not self.serves_ticks:
+            return None
+        if self.ticking:
+            self._tick_ts += 1.0
+        return FakeTick(self._tick_ts)
 
 
 def _restarter(result=True, raises=None):
@@ -411,4 +431,142 @@ def test_without_a_restarter_it_stays_alert_only():
     _run_down_for(bridge, state, wd.RESTART_AFTER_S + 1, send)
 
     assert state["restarts"] == 0
+    assert len(sent) == 1
+
+
+# ── Closed markets are not outages ───────────────────────────────────────────
+# The EA's heartbeat runs on TimeCurrent(), which in MQL5 is the time of the
+# last quote, not a clock. No ticks means no advancing TimeCurrent(), so the
+# pings simply stop -- every weekend, and in the daily gap between the New York
+# close and the Asian open. The EA is fine; alerting on it is noise, and
+# bouncing MT5 for it is worse than noise.
+
+_SATURDAY = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc).timestamp()
+
+
+def _run_at(bridge, state, start, seconds, send, **kw):
+    asyncio.run(wd.ea_link_check(bridge, state, now=start, alert=send, **kw))
+    return asyncio.run(
+        wd.ea_link_check(bridge, state, now=start + seconds, alert=send, **kw)
+    )
+
+
+def test_weekend_does_not_alert():
+    sent, send = _collector()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+
+    _run_at(bridge, state, _SATURDAY, wd.DOWN_ALERT_AFTER_S + 1, send,
+            mt5_bridge=FakeMT5Bridge(connected=True))
+
+    assert sent == []
+
+
+def test_weekend_does_not_restart_mt5():
+    sent, send = _collector()
+    calls, restart = _restarter()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+
+    _run_at(bridge, state, _SATURDAY, wd.RESTART_AFTER_S + 1, send,
+            mt5_bridge=FakeMT5Bridge(connected=True), restart_bridge=restart)
+
+    assert calls == []
+    assert sent == []
+
+
+def test_a_market_that_stopped_ticking_is_not_an_ea_fault():
+    """The daily NY-close-to-Asian-open break, holidays, and broker
+    maintenance -- none of which any hardcoded schedule would know about, and
+    all of which stop the EA's heartbeat exactly the way a weekend does."""
+    sent, send = _collector()
+    calls, restart = _restarter()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+    mt5 = FakeMT5Bridge(connected=True, ticking=False)
+    kw = {"mt5_bridge": mt5, "restart_bridge": restart}
+
+    # First cycle records the tick; from then on it never moves.
+    asyncio.run(wd.ea_link_check(bridge, state, now=1000.0, alert=send, **kw))
+    t = 1000.0
+    for _ in range(12):
+        t += wd.TICK_STALE_S
+        asyncio.run(wd.ea_link_check(bridge, state, now=t, alert=send, **kw))
+
+    assert sent == []
+    assert calls == []
+
+
+def test_a_live_market_still_alerts_and_restarts():
+    """The gate must not swallow the real thing it was built for."""
+    sent, send = _collector()
+    calls, restart = _restarter()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+
+    _run_at(bridge, state, 1000.0, wd.RESTART_AFTER_S + 1, send,
+            mt5_bridge=FakeMT5Bridge(connected=True, ticking=True),
+            restart_bridge=restart)
+
+    assert calls == [True]
+    assert len(sent) >= 1
+
+
+def test_reopening_gives_the_ea_a_fresh_grace_period():
+    """The whole point of resetting the clock rather than pausing it. A link
+    quiet all weekend must not reopen into a 49-hour "outage" and get MT5
+    restarted seconds before the EA would have reconnected on its own."""
+    sent, send = _collector()
+    calls, restart = _restarter()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+    mt5 = FakeMT5Bridge(connected=True, ticking=False)
+    kw = {"mt5_bridge": mt5, "restart_bridge": restart}
+
+    asyncio.run(wd.ea_link_check(bridge, state, now=1000.0, alert=send, **kw))
+    t = 1000.0
+    for _ in range(20):                      # a long shut market
+        t += wd.RESTART_AFTER_S
+        asyncio.run(wd.ea_link_check(bridge, state, now=t, alert=send, **kw))
+    assert calls == []
+
+    # Quotes resume. The EA is still quiet, but it has only just had the
+    # chance to reconnect, so nothing fires yet.
+    mt5.ticking = True
+    t += wd.CHECK_INTERVAL
+    asyncio.run(wd.ea_link_check(bridge, state, now=t, alert=send, **kw))
+    assert calls == []
+    assert sent == []
+
+    # Still quiet a full restart window into the live session: now it is real.
+    t += wd.RESTART_AFTER_S + 1
+    asyncio.run(wd.ea_link_check(bridge, state, now=t, alert=send, **kw))
+    assert calls == [True]
+
+
+def test_bridge_not_serving_ticks_is_not_treated_as_an_ea_fault():
+    """No ticks to judge by means no evidence the EA failed -- and a bridge
+    that cannot answer is already the bridge watchdog's alert to raise."""
+    sent, send = _collector()
+    calls, restart = _restarter()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+
+    _run_at(bridge, state, 1000.0, wd.RESTART_AFTER_S + 1, send,
+            mt5_bridge=FakeMT5Bridge(connected=True, serves_ticks=False),
+            restart_bridge=restart)
+
+    assert calls == []
+    assert sent == []
+
+
+def test_without_an_mt5_bridge_liveness_is_not_guessed():
+    """Nothing to judge with, so the watchdog behaves as it did before the
+    gate existed rather than suppressing on an assumption."""
+    sent, send = _collector()
+    bridge = FakeBridge(healthy=False)
+    state = wd.new_state()
+
+    _run_at(bridge, state, 1000.0, wd.DOWN_ALERT_AFTER_S + 1, send)
+
     assert len(sent) == 1

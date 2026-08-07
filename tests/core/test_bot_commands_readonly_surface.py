@@ -157,13 +157,58 @@ def test_status_shows_paused_state(fresh_db):
     assert "PAUSED until" in result
 
 
-def test_status_includes_tg_reader_slots_when_present(fresh_db):
+def test_status_includes_tg_reader_auth_and_channel_block(fresh_db):
+    """The per-slot list was replaced by a per-channel block (2026-08-07) --
+    the slot number survives as the channel's C-number, and the feed line
+    carries what the old '(active)' suffix said."""
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO channel_parser_config (channel_name, created_at) VALUES (?,?)",
+            ("GD VIP", time.time()),
+        )
     tg_reader = SimpleNamespace(get_status=lambda: {
         "auth_state": "connected",
         "slots": [{"slot": 1, "group_name": "GD VIP", "listener_active": True}],
     })
     result = asyncio.run(cmds.cmd_status([], _FakeBridge(), tg_reader=tg_reader))
-    assert "Slot 1: GD VIP (active)" in result
+    assert "Telegram:     connected" in result
+    assert "(C1) (Name: GD VIP)" in result
+    assert "Feed: listening" in result
+
+
+def test_status_reports_the_trading_schedule_gate(fresh_db):
+    from forex_trader.core import core_trading_schedule as sched
+    assert "Schedule:     OFF" in asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    sched.set_trading_schedule_enabled(True)
+    schedule = sched.get_trading_schedule()
+    for day in sched.DAY_NAMES:
+        for block in schedule[day]:
+            block["enabled"] = False
+    sched.set_trading_schedule(schedule)
+    result = asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert "Schedule:     ON — blocked:" in result
+
+
+def test_status_is_trimmed_to_telegrams_message_limit(fresh_db):
+    """sendMessage rejects anything over 4096 characters outright, so a
+    status with enough channels to overflow would deliver nothing at all."""
+    text = cmds._fit_telegram(["x" * 200] * 40)
+    assert len(text) <= 4096
+    assert text.endswith(cmds._TRUNCATED)
+
+
+def test_status_under_the_limit_is_left_alone(fresh_db):
+    lines = ["one", "two", "three"]
+    assert cmds._fit_telegram(lines) == "one\ntwo\nthree"
+
+
+def test_status_reports_the_ea_link_separately_from_the_mt5_bridge(fresh_db):
+    """The bridge and the EA fail independently -- a status that only spoke
+    for the bridge is exactly how an EA dialling the wrong port stayed
+    invisible for four hours (see core_ea_link_watchdog)."""
+    result = asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert "MT5 Bridge:" in result
+    assert "EA (MT5):     NOT connected" in result
 
 
 # ── cmd_trades ────────────────────────────────────────────────────────────

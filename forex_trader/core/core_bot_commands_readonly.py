@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
+from forex_trader.core.core_bot_channel_status import channel_status_lines
 from forex_trader.core.core_fees_sizing import pnl
 from forex_trader.core.core_sim_account import get_sim_account
 from forex_trader.core.core_tp_trigger_tracking import last_closed_tp
@@ -43,13 +44,16 @@ async def cmd_help(args: list) -> str:
         "Send /panel to open it. Everything is buttons — the old typed "
         "commands are now the buttons listed here.\n\n"
         "*Main menu*\n"
-        "📊 Status / 📋 All Settings — system status & current settings\n"
+        "📊 Status / 📋 All Settings — system status, MT5 bridge & EA link, "
+        "then every channel's lots, entries, TP ladders and trigger settings\n"
         "💵 Balance — balance, equity & open P&L\n"
         "📈 Daily — today's P&L, closed trades & account\n"
         "📜 Open Trades — all open trades with P&L\n"
         "⚙️ Channel Strategy — per-channel settings\n"
         "🎯 Channel Trades — per-channel trade operations\n"
         "🛠️ System — pause/resume, DPM, IME, restarts, demo/live\n"
+        "🗓️ Trading Schedule — on/off, daily target, and per-day windows "
+        "(hours, profit target, which channels/engines may trade)\n"
         "⛔ CLOSE ALL TRADES — close every open trade\n\n"
         "*Channel Strategy* — pick a channel, then:\n"
         "• EA Template channels get the full grid: anchors, layers, lots, "
@@ -308,20 +312,27 @@ async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -
         _bridge_up = False
     bridge_line = "Connected" if _bridge_up else "NOT running"
 
-    # Telegram channel status
-    tg_lines: list[str] = []
+    # EA link. The MT5 bridge above and the EA are two different links and
+    # fail independently -- the bridge can be up (prices, account, manual
+    # orders all fine) while the EA sits on a chart dialling a port nobody
+    # is listening on, which is exactly the failure core_ea_link_watchdog
+    # exists to catch. get_effective_ea_status reports whichever node is
+    # actually trading, so a VPS-traded setup doesn't report the laptop's
+    # idle EA socket.
+    try:
+        from forex_trader.core.ea_bridge import get_effective_ea_status
+        ea_up, ea_scope = get_effective_ea_status()
+    except Exception:
+        ea_up, ea_scope = False, "unknown"
+    ea_line = f"{'Connected' if ea_up else 'NOT connected'} ({ea_scope})"
+
+    schedule_line = _schedule_line()
+
     if tg_reader is not None:
-        tg_status = tg_reader.get_status()
-        auth      = tg_status.get("auth_state", "disconnected")
-        for slot in tg_status.get("slots", []):
-            slot_num  = slot.get("slot", "?")
-            name      = slot.get("group_name") or slot.get("group_id")
-            active    = slot.get("listener_active") or slot.get("poller_active")
-            if name:
-                state = "active" if active else "idle"
-                tg_lines.append(f"  Slot {slot_num}: {name} ({state})")
-            else:
-                tg_lines.append(f"  Slot {slot_num}: not configured")
+        try:
+            auth = tg_reader.get_status().get("auth_state", "disconnected")
+        except Exception:
+            auth = "unavailable"
     else:
         auth = "not started"
 
@@ -334,14 +345,59 @@ async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -
         f"Max trades:   {max_trades}",
         f"Open trades:  {open_count}",
         f"Trading:      {trade_line}",
+        f"Schedule:     {schedule_line}",
         "",
         f"MT5 Bridge:   {bridge_line}",
+        f"EA (MT5):     {ea_line}",
         f"Telegram:     {auth}",
     ]
-    if tg_lines:
-        lines.extend(tg_lines)
 
-    return "\n".join(lines)
+    # Per-channel blocks — what each channel would actually do with its next
+    # signal, replacing the old one-line-per-slot list (which said only that
+    # a group was attached).
+    channel_lines = channel_status_lines(tg_reader)
+    if channel_lines:
+        lines.append("")
+        lines.extend(channel_lines)
+
+    return _fit_telegram(lines)
+
+
+def _schedule_line() -> str:
+    """Whether the Trading Schedule is gating automated entries right now."""
+    try:
+        from forex_trader.core.core_trading_schedule import (
+            check_trading_schedule, is_trading_schedule_enabled,
+        )
+        if not is_trading_schedule_enabled():
+            return "OFF (always open)"
+        allowed, reason = check_trading_schedule()
+        return "ON — trading window open" if allowed else f"ON — blocked: {reason}"
+    except Exception:
+        return "unavailable"
+
+
+# Telegram rejects a sendMessage over 4096 characters outright, so a status
+# with enough channels to overflow would return nothing at all rather than a
+# long message. Drop whole trailing lines instead, and say so.
+_TG_MAX_CHARS = 4096
+_TRUNCATED = "_…truncated — open the app for the full settings._"
+
+
+def _fit_telegram(lines: list[str]) -> str:
+    text = "\n".join(lines)
+    if len(text) <= _TG_MAX_CHARS:
+        return text
+    budget = _TG_MAX_CHARS - len(_TRUNCATED) - 1
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) + 1 > budget:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    kept.append(_TRUNCATED)
+    return "\n".join(kept)
 
 
 async def cmd_trades(args: list, bridge: Any) -> str:

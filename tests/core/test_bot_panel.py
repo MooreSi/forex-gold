@@ -9,11 +9,13 @@ survives the channel set changing, and template edits that must not reset the
 import asyncio
 import os
 import tempfile
+import time
 
 import pytest
 
 from forex_trader.core import core_bot_panel as panel
 from forex_trader.core import core_ea_templates as et
+from forex_trader.core import core_trading_schedule as sched
 from forex_trader.core import database as db
 
 
@@ -66,6 +68,18 @@ def _all_buttons(screen):
     return [b for row in (screen.keyboard or []) for b in row]
 
 
+def _tg_channel_name(name: str = "Panel Sched Channel") -> str:
+    """A configured Telegram channel. get_telegram_channel_names() reads
+    channel_parser_config, not the strategy-override table, so a channel that
+    only has an override row is invisible to the schedule screens."""
+    with db.db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO channel_parser_config (channel_name, created_at) "
+            "VALUES (?,?)", (name, time.time()),
+        )
+    return name
+
+
 # ── Callback data limits ──────────────────────────────────────────────────────
 
 def test_every_reachable_button_fits_telegrams_64_byte_callback_cap(template_channel):
@@ -73,7 +87,8 @@ def test_every_reachable_button_fits_telegrams_64_byte_callback_cap(template_cha
     64 bytes, so one over-long field name would blank a whole screen rather
     than break one button. Walk every navigational screen and check all of it."""
     nav = {"root", "chlist", "cs", "ct", "tpm", "tpl", "strat",
-           "f", "fc", "tlist", "sys", "cur", "noop", "x"}
+           "f", "fc", "tlist", "sys", "cur", "noop", "x",
+           "sch", "schd", "schw", "schc", "schx"}
     seen, queue = set(), ["p|root"]
     checked = 0
     while queue:
@@ -249,6 +264,113 @@ def test_pause_toggle_round_trips(template_channel):
 ])
 def test_value_formatting(field, value, expected):
     assert panel._fmt_value(field, value) == expected
+
+
+# ── Trading Schedule ──────────────────────────────────────────────────────────
+
+def test_schedule_toggle_round_trips(fresh_db):
+    assert sched.is_trading_schedule_enabled() is False
+    _run(panel.handle_callback("p|sch2|en", None))
+    assert sched.is_trading_schedule_enabled() is True
+    _run(panel.handle_callback("p|sch2|en", None))
+    assert sched.is_trading_schedule_enabled() is False
+
+
+def test_window_toggle_writes_only_that_window(fresh_db):
+    """Every write saves the whole 7x4 grid back, so a toggle that failed to
+    merge would wipe six other days' hours and targets."""
+    before = sched.get_trading_schedule()
+    before["tuesday"][2]["start"] = "09:15"
+    before["tuesday"][2]["target"] = 40.0
+    sched.set_trading_schedule(before)
+
+    _run(panel.handle_callback("p|scht|0|1|enabled", None))
+
+    after = sched.get_trading_schedule()
+    assert after["monday"][1]["enabled"] is True
+    assert after["tuesday"][2]["start"] == "09:15"
+    assert after["tuesday"][2]["target"] == pytest.approx(40.0)
+    assert after["monday"][0]["enabled"] is False
+
+
+def test_engine_toggle_flips_that_source_only(fresh_db):
+    _run(panel.handle_callback("p|scht|3|0|reversal_engine", None))
+    block = sched.get_trading_schedule()["thursday"][0]
+    assert block["reversal_engine"] is False
+    assert block["breakout_engine"] is True
+
+
+def test_channel_toggle_records_an_explicit_entry(fresh_db):
+    """A channel with no entry inherits telegram_default_enabled; switching
+    it off has to write an explicit entry, or the window's default would
+    silently switch it straight back on."""
+    channel = _tg_channel_name()
+    slug = panel._slug(channel)
+
+    _run(panel.handle_callback(f"p|schtc|0|1|{slug}", None))
+    cfg = sched.get_trading_schedule()["monday"][1]["telegram_channels"][channel]
+    assert cfg["enabled"] is False
+
+    _run(panel.handle_callback(f"p|schtc|0|1|{slug}", None))
+    cfg = sched.get_trading_schedule()["monday"][1]["telegram_channels"][channel]
+    assert cfg["enabled"] is True
+
+
+def test_channel_toggle_preserves_a_windows_strategy_override(fresh_db):
+    """The override is not editable from the panel, so a toggle must not be
+    a way to lose one that was set on the Trading page."""
+    channel = _tg_channel_name()
+    full = sched.get_trading_schedule()
+    full["monday"][1]["telegram_channels"] = {
+        channel: {"enabled": True, "strategy_override": "template:Sched Grid"},
+    }
+    sched.set_trading_schedule(full)
+
+    _run(panel.handle_callback(f"p|schtc|0|1|{panel._slug(channel)}", None))
+    cfg = sched.get_trading_schedule()["monday"][1]["telegram_channels"][channel]
+    assert cfg["enabled"] is False
+    assert cfg["strategy_override"] == "template:Sched Grid"
+
+
+def test_schedule_prompt_token_round_trips(fresh_db):
+    prompt = panel.schedule_prompt_text(2, 3, "start")
+    assert panel.parse_prompt(prompt) == ("start", "sch.2.3")
+
+
+def test_typed_window_time_is_saved(fresh_db):
+    prompt = panel.schedule_prompt_text(0, 1, "start")
+    screen = _run(panel.handle_value_reply(prompt, "8:30"))
+    assert screen.mode == "send"
+    assert sched.get_trading_schedule()["monday"][1]["start"] == "08:30"
+
+
+@pytest.mark.parametrize("raw", ["25:00", "8.30", "half eight", "08:60", ""])
+def test_invalid_time_is_refused_without_writing(fresh_db, raw):
+    prompt = panel.schedule_prompt_text(0, 1, "start")
+    _run(panel.handle_value_reply(prompt, raw))
+    assert sched.get_trading_schedule()["monday"][1]["start"] == "00:00"
+
+
+def test_start_after_end_is_refused(fresh_db):
+    """_find_active_block matches start <= now < end, so a window whose end
+    is not after its start opens for no minute of the day at all."""
+    prompt = panel.schedule_prompt_text(0, 1, "end")
+    screen = _run(panel.handle_value_reply(prompt, "00:00"))
+    assert "must be before" in screen.text
+    assert sched.get_trading_schedule()["monday"][1]["end"] == "23:59"
+
+
+def test_typed_daily_target_is_saved(fresh_db):
+    prompt = panel.schedule_prompt_text(0, 0, "daily")
+    assert panel.parse_prompt(prompt) == ("daily", "sch.daily")
+    _run(panel.handle_value_reply(prompt, "$125"))
+    assert sched.get_daily_profit_target() == pytest.approx(125.0)
+
+
+def test_unknown_window_is_reported_not_applied(fresh_db):
+    assert _run(panel.handle_callback("p|schw|0|9", None)).mode == "noop"
+    assert _run(panel.handle_callback("p|schd|9", None)).mode == "noop"
+    assert _run(panel.handle_callback("p|scht|0|9|enabled", None)).mode == "noop"
 
 
 # ── Failure handling ──────────────────────────────────────────────────────────

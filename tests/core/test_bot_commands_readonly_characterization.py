@@ -167,13 +167,22 @@ def test_status_shows_paused_state(fresh_db, engine):
     assert "PAUSED until" in result
 
 
-def test_status_includes_tg_reader_slots_when_present(fresh_db, engine):
+def test_status_includes_tg_reader_auth_and_channel_block(fresh_db, engine):
+    """Was 'Slot 1: GD VIP (active)' until 2026-08-07, when the per-slot list
+    became a per-channel settings block keyed by the same slot number."""
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO channel_parser_config (channel_name, created_at) VALUES (?,?)",
+            ("GD VIP", time.time()),
+        )
     engine._tg_reader = SimpleNamespace(get_status=lambda: {
         "auth_state": "connected",
         "slots": [{"slot": 1, "group_name": "GD VIP", "listener_active": True}],
     })
     result = asyncio.run(SimulationEngine._cmd_status(engine, []))
-    assert "Slot 1: GD VIP (active)" in result
+    assert "Telegram:     connected" in result
+    assert "(C1) (Name: GD VIP)" in result
+    assert "Feed: listening" in result
 
 
 # ── _cmd_trades ───────────────────────────────────────────────────────────

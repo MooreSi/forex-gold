@@ -122,11 +122,44 @@ async def _scan_lan_for_server() -> str:
             return ""
 
     results = await asyncio.gather(*[_probe(f"{prefix}.{i}") for i in range(1, 255)])
-    for ip in results:
-        if ip and ip != local_ip:
+    candidates = [ip for ip in results if ip and ip != local_ip]
+    for ip in candidates:
+        if await _speaks_our_protocol(ip):
             log.info("[RemoteClient] LAN scan found server at %s", ip)
             return ip
+        log.info(
+            "[RemoteClient] LAN scan: %s has port %d open but is not the admin "
+            "server — ignoring", ip, SERVER_PORT,
+        )
     return ""
+
+
+async def _speaks_our_protocol(host: str) -> bool:
+    """Return True only if `host` completes a WebSocket handshake on SERVER_PORT.
+
+    An open TCP port is not proof of anything: 8443 is a common alternate-HTTPS
+    port, so a router, NAS or hypervisor on the client's subnet answers the scan
+    just as readily as the admin server does. Accepting the first open port
+    outright meant the client locked onto that device and never fell back to the
+    WAN address -- confirmed live 2026-08-07 on a remote Mac, which sat on the
+    activation screen reporting "server rejected WebSocket connection: HTTP 404"
+    while the real server was up and reachable the whole time. Rediscovery ran
+    every retry, so it picked the same wrong host forever.
+
+    The handshake is the cheapest thing only our server can pass; it runs on the
+    handful of hosts the fast TCP scan shortlisted, not the whole subnet.
+    """
+    import websockets
+    try:
+        async with websockets.connect(
+            f"wss://{host}:{SERVER_PORT}",
+            ssl=client_ssl_context(),
+            open_timeout=4,
+            close_timeout=2,
+        ):
+            return True
+    except Exception:
+        return False
 
 
 async def _discover_lan_server(timeout: float = 6.0) -> str:

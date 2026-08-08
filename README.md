@@ -101,10 +101,15 @@ money-critical areas carry hand-set floors.
 
 ## The rules
 
-Everything an agent or a new contributor needs is in [docs/](docs/):
+Everything an agent or a new contributor needs is in [docs/](docs/).
+[docs/system/](docs/system/) is the knowledge base and single point of truth:
+[vision/](docs/system/vision/) says why the system exists,
+[rules/](docs/system/rules/) what must never be violated, and
+[domains/](docs/system/domains/) holds a living file per part of the system.
 
 | | |
 |---|---|
+| [docs/system/vision/000-goal.md](docs/system/vision/000-goal.md) | what this system is and what it is for |
 | **[docs/system/rules/10-golden-rules.md](docs/system/rules/10-golden-rules.md)** | **read this first** |
 | [docs/system/rules/20-trading-safety.md](docs/system/rules/20-trading-safety.md) | what can cost money |
 | [docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md) | layers and boundaries |

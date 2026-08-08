@@ -9,6 +9,7 @@ That single fact drives everything else on this page.
 
 | | Document | Read it when |
 |---|---|---|
+| 0 | [../vision/000-goal.md](../vision/000-goal.md) | to understand what this system is for |
 | 1 | **[10-golden-rules.md](10-golden-rules.md)** | **always, before touching anything** |
 | 2 | [20-trading-safety.md](20-trading-safety.md) | before any change near orders, sizing or the bridge |
 | 3 | [30-architecture.md](30-architecture.md) | before adding a file or an import |
@@ -58,10 +59,15 @@ Asking costs one message. The alternative has cost real money here before.
 ## Where everything lives
 
 ```
-docs/system/rules/            these rules — agent-agnostic
-docs/specs/         what we are building and why (spec-driven)
-docs/architecture/  how the system is put together
-docs/operations/    running it, releasing it, recovering it
-docs/decisions/     decisions taken and the reasoning
-docs/history/       audit trail of past work — read-only
+docs/system/          the knowledge base — the single point of truth
+docs/system/vision/   why the system exists, what success looks like
+docs/system/rules/    these rules — agent-agnostic
+docs/system/domains/  one living directory per part of the system
+docs/specs/           what we are building and why (spec-driven)
+docs/todo/            multi-session work packs in progress
+docs/history/         audit trail of past work — read-only
 ```
+
+The domain files under `docs/system/domains/` hold each part's constraints,
+known behaviours and open questions. Read the affected domain's README
+before designing a change; update it when a change teaches you something.

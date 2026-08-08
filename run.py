@@ -77,7 +77,11 @@ def setup_logging() -> None:
 
 
 def _ensure_data_dirs():
-    (_USER_DATA / "data" / "sessions").mkdir(parents=True, exist_ok=True)
+    # Imported here, not at module scope: _setup_logging owns the only other
+    # reference and binds it as a local, so a module-level name would be a
+    # second source of truth for the same directory. Same import as line 175's.
+    from forex_trader.config import USER_DATA_DIR
+    (USER_DATA_DIR / "data" / "sessions").mkdir(parents=True, exist_ok=True)
 
 
 def _free_port(port: int) -> None:

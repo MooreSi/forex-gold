@@ -14,7 +14,7 @@ already 3,000+ lines and over the LOC ceiling -- see FINISH_LINE.md.
 """
 from nicegui import ui
 
-from backend.src.controllers.settings import controller as settings_ctl
+from backend.src.controllers import settings_controller as settings_ctl
 
 
 def render():

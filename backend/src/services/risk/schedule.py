@@ -160,7 +160,7 @@ def _forward_trading_schedule_over_sync() -> None:
     sync.server.init()/sync.client.get_instance() have actually been used.
     Mirrors core_db_risk_settings._forward_settings_over_sync() exactly."""
     try:
-        from backend.src.controllers.sync import client as _sync_cli_mod
+        from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None:
             _schedule_coro(cli.propose_trading_schedule(trading_schedule_snapshot()))
@@ -169,7 +169,7 @@ def _forward_trading_schedule_over_sync() -> None:
         log.debug("[Sync] trading schedule forward (client) failed: %s", e)
 
     try:
-        from backend.src.controllers.sync import server as _sync_srv_mod
+        from backend.src.services.cluster.sync import server as _sync_srv_mod
         srv = _sync_srv_mod.get_instance()
         if srv is not None:
             _schedule_coro(srv.broadcast_trading_schedule())

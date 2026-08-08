@@ -63,7 +63,7 @@ def test_no_contract_has_regressed_against_its_baseline():
 
 def test_the_baseline_file_matches_the_declared_contracts():
     """A stale baseline entry hides a contract that stopped running."""
-    baseline = json.loads(ic.BASELINE_PATH.read_text())
+    baseline = json.loads(ic.BASELINE_PATH.read_text(encoding="utf-8"))
     declared = {c.name for c in ic.CONTRACTS if not c.enforced_at_zero}
     assert set(baseline) == declared, (
         f"baseline/contract mismatch -- only in baseline: "
@@ -82,6 +82,75 @@ def test_the_checker_can_actually_see_a_violation():
         forbidden=("json",),
     )
     assert ic.violations_for(fake), "scanner found no `import json` in backend/src"
+
+
+def test_the_scanner_sees_the_from_package_import_module_form(tmp_path):
+    """Negative control for the form this codebase actually uses.
+
+    `_module_names` used to record only `node.module` for an ImportFrom, so
+    `from backend.src.services.dpm import repo` was filed as the module
+    `backend.src.services.dpm` and the bare-name rule never saw `repo`. Only
+    `import a.b.repo` and `from a.b.repo import x` were caught -- and nothing
+    here writes either of those. The result was
+    `controllers-never-import-repos` printing "enforced at zero" while 14 real
+    repo imports sat in the controller layer.
+
+    That is the exact failure CLAUDE.md was written about: a guardrail that
+    scans the wrong thing and reports all-good forever. Assert the shape
+    directly, not via the totals, so it cannot regress silently again.
+    """
+    module = tmp_path / "sample.py"
+    module.write_text(
+        "from backend.src.services.dpm import repo\n"
+        "from backend.src.services.signals import tg_repo as _tg\n",
+        encoding="utf-8",
+    )
+    found = {name for _, name in ic._module_names(module)}
+    assert "backend.src.services.dpm.repo" in found, (
+        "scanner cannot see `from <package> import repo` -- the form every "
+        "real violation in this repo uses"
+    )
+    assert "backend.src.services.signals.tg_repo" in found, (
+        "an aliased `import tg_repo as _tg` must still count as a dependency"
+    )
+
+
+def test_the_scanner_can_read_every_file_it_claims_to_scan():
+    """A file the scanner cannot decode is a file it silently reports clean.
+
+    `_module_names` swallows UnicodeDecodeError and returns [] -- no imports,
+    no violations, no warning. `path.read_text()` without an explicit encoding
+    uses the platform default, which on Windows is cp1252, and 12 of the 268
+    files in scope contain a box-drawing or arrow character in a section
+    comment. Among them was frontend/app.py, the module that owns the only
+    @ui.page route and all the startup wiring -- invisible to
+    `frontend-never-imports-the-database`, a contract enforced at zero.
+
+    The count for frontend-reaches-the-backend-through-controllers was 53 on
+    Windows and 60 on a UTF-8 platform for exactly this reason. Same code,
+    same repo, different answer.
+    """
+    unreadable = []
+    for package in {p for c in ic.CONTRACTS for p in c.source_packages}:
+        base = REPO / package
+        if not base.exists():
+            continue
+        for path in base.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            if not ic._module_names(path) and path.read_text(encoding="utf-8").strip():
+                # No imports found in a non-empty file is legal (see __init__.py
+                # files), so only flag it when the bytes genuinely will not decode
+                # under the platform default -- that is the silent-skip case.
+                try:
+                    path.read_text()
+                except UnicodeDecodeError:
+                    unreadable.append(path.relative_to(REPO).as_posix())
+    assert unreadable == [], (
+        "these files decode as UTF-8 but not under the platform default, and "
+        "would be silently skipped by a read_text() without encoding=:\n  "
+        + "\n  ".join(unreadable)
+    )
 
 
 def test_running_the_checker_as_a_script_reports_cleanly():

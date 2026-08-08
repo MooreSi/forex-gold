@@ -18,7 +18,7 @@ from nicegui import ui
 import backend.src.config as cfg_module
 from backend.src.services.ai import claude_ai as ai_module
 from backend.src.services.ai import provider as ai_provider
-from backend.src.controllers.ai_analysis import controller as ai_ctl
+from backend.src.controllers import ai_analysis_controller as ai_ctl
 
 # ── Regex for channel update message scanning ─────────────────────────────────
 _TP_HIT_RE = re.compile(

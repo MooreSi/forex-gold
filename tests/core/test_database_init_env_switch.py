@@ -110,6 +110,7 @@ def test_init_invalidates_the_risk_settings_cache():
         # The fresh database must answer with its own default, not 5.0.
         assert db.get_risk_settings()["max_risk_per_trade_pct"] == 1.0
     finally:
+        db._close_thread_local_conn()
         for p in (path_a, path_b):
             if os.path.exists(p):
                 os.remove(p)

@@ -1091,7 +1091,7 @@ from backend.src.services.risk.circuit_breaker_repo import (  # noqa: E402,F401
     record_live_trade_outcome,
     reset_circuit_breaker,
 )
-from backend.src.utils.retention import (  # noqa: E402,F401
+from backend.src.db.retention import (  # noqa: E402,F401
     get_data_retention_days,
     set_data_retention_days,
     prune_historical_data,

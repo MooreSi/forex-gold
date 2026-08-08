@@ -486,7 +486,7 @@ def test_remote_forwarding_forwards_when_centralized(fresh_db):
     fake_client = _FakeSyncClient()
     bridge = _FakeBridge()
 
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client):
         result = asyncio.run(ot.open_trade(bridge, **_open_kwargs()))
 
     assert result["executed_remotely"] is True

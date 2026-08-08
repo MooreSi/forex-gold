@@ -9,7 +9,7 @@ import tempfile
 import pytest
 
 from backend.src.db import database as db
-from backend.src.utils import theme as theme_mod
+from frontend import theme as theme_mod
 
 
 def _reset_thread_local_connection():

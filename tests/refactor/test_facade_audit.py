@@ -83,5 +83,5 @@ def test_the_real_runtime_is_green_against_the_checked_in_baselines():
 def test_update_baseline_tightens_to_current(tmp_path, monkeypatch):
     monkeypatch.setattr(fa, "BASELINE_PATH", tmp_path / "b.json")
     fa.update_baseline(census_of(_SYNTHETIC))
-    written = json.loads((tmp_path / "b.json").read_text())
+    written = json.loads((tmp_path / "b.json").read_text(encoding="utf-8"))
     assert written["method_count"] == 3

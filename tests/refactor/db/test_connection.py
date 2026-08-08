@@ -22,6 +22,9 @@ def test_init_db_creates_adapter_bound_to_path():
         assert adapter is not None
         assert connection.get_db() is adapter
     finally:
+        # Windows will not unlink a file that still has an open handle, and the
+        # autouse fixture's close_db() does not run until after this block.
+        connection.close_db()
         os.remove(path)
 
 

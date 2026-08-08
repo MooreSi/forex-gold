@@ -37,7 +37,7 @@ def test_the_old_name_still_resolves_for_callers_that_have_not_moved():
 
 
 def test_the_class_definition_itself_uses_the_new_name():
-    tree = ast.parse(RUNTIME.read_text())
+    tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
     classes = [n.name for n in tree.body if isinstance(n, ast.ClassDef)]
     assert "TradingRuntime" in classes
     assert "SimulationEngine" not in classes, (
@@ -50,5 +50,5 @@ def test_the_facade_audit_follows_the_rename():
     so this rename is a one-line change there."""
     from tools.refactor_audit import facade_audit
     assert facade_audit.CLASS_NAME == "TradingRuntime"
-    census = facade_audit.census(RUNTIME.read_text())
+    census = facade_audit.census(RUNTIME.read_text(encoding="utf-8"))
     assert census, "the audit found no methods -- it is looking at the wrong class"

@@ -733,7 +733,7 @@ def get_effective_ea_status() -> tuple[bool, str]:
     matter which node is actually doing the trading."""
     try:
         from backend.src.db import database as db_module
-        from backend.src.controllers.sync import client as _sync_cli_mod
+        from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None and cli.conn_state == "connected" and db_module.get_active_trader() != "local":
             return bool(cli.remote_status.get("ea_connected")), "VPS"

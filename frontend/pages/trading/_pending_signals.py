@@ -1,7 +1,7 @@
 """Pending signals awaiting activation or a zone re-entry."""
 import asyncio
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 
 # Sibling sections of this page.
 from ._shared import (
@@ -15,7 +15,7 @@ def _render_pending_signals(engine):
 
     async def refresh():
         container.clear()
-        sigs = await trading_ctl.run_db(engine.get_signals, status="pending")
+        sigs = await trading_ctl.get_signals(engine, status="pending")
         with container:
             if not sigs:
                 ui.label(

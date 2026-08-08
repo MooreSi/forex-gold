@@ -40,6 +40,12 @@ def init_db(db_path: str, namespace: str = _DEFAULT_NAMESPACE) -> DbAdapter:
     calls from each engine's own async loop on the main thread) -- see
     SqliteAdapter's own docstring for the locking that makes that safe.
     """
+    # Re-initialising a namespace (the demo/live env switch, and every test
+    # that builds a fresh temp database) used to overwrite the slot and drop
+    # the previous adapter on the floor with its sqlite connection still
+    # open -- an fd leak on every platform, and on Windows it also pins the
+    # old file so it can never be removed.
+    close_db(namespace)
     con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
     adapter = SqliteAdapter(con)
     _adapters[namespace] = adapter

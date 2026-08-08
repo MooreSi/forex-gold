@@ -1,7 +1,7 @@
 """Trading schedule, and the strategy-comparison table cells."""
 from datetime import datetime, timezone
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 
 # Sibling sections of this page.
 

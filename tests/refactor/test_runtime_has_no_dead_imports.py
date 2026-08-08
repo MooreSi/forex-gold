@@ -54,14 +54,14 @@ def _reexported_names() -> set[str]:
         for path in base.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue
-            for match in pattern.finditer(path.read_text()):
+            for match in pattern.finditer(path.read_text(encoding="utf-8")):
                 for part in match.group(1).split(","):
                     names.add(part.strip().split(" as ")[0].strip())
     return names
 
 
 def _unused_imports() -> list[str]:
-    source = RUNTIME.read_text()
+    source = RUNTIME.read_text(encoding="utf-8")
     tree = ast.parse(source)
     imported = _imported_names(tree)
     reexported = _reexported_names()

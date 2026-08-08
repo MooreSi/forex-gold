@@ -37,6 +37,7 @@ def fresh_db():
     os.close(fd2)
     _legacy_bo_db.init(legacy_path)
     yield db
+    db.close_db()
     os.remove(path)
     os.remove(legacy_path)
 

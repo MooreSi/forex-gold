@@ -79,7 +79,7 @@ async def max_tp_checker_sweep(bridge: Any) -> None:
             )
 
             try:
-                from backend.src.controllers.sync.ledger import push_trade_closed
+                from backend.src.services.cluster.sync.ledger import push_trade_closed
                 net_pnl = t.get("net_pnl")
                 push_trade_closed({
                     "trade_id": t["trade_id"],
@@ -146,7 +146,7 @@ async def backfill_max_tp_hit_corrected(bridge: Any) -> None:
             log.info("[MaxTP-backfill] trade=%s %s -> %s", t["trade_id"], t.get("old_hit"), hit)
 
             try:
-                from backend.src.controllers.sync.ledger import push_trade_closed
+                from backend.src.services.cluster.sync.ledger import push_trade_closed
                 net_pnl = t.get("net_pnl")
                 push_trade_closed({
                     "trade_id": t["trade_id"],

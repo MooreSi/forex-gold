@@ -37,6 +37,19 @@ BASELINE_PATH = od.REPO_ROOT / "tools" / "refactor_audit" / "structure_baseline.
 
 LOC_CEILING = 800
 
+# Controllers route; they do not decide. A file that only names operations and
+# forwards each to one service does not reach 200 lines, so crossing this is
+# evidence that logic has moved back up into the translation layer.
+#
+# Enforced at zero rather than baselined, because unlike the other gates here
+# there is nothing to ratchet down from: the layer was rebuilt to satisfy it.
+# The ceiling is deliberately well above the current largest (sync_controller,
+# 166) -- most of that file is the rationale for why each command exists, and a
+# ceiling that forces those docstrings out would trade the thing that makes the
+# boundary understandable for a number.
+CONTROLLER_LOC_CEILING = 200
+CONTROLLER_DIR = "backend/src/controllers"
+
 # Deliberately crude. This catches SQL embedded in application code, which is
 # the thing being driven out; it is not a SQL parser and does not need to be.
 SQL_PATTERN = re.compile(
@@ -53,10 +66,55 @@ def is_repo_file(path: Path) -> bool:
 
 def loc_report() -> dict[str, int]:
     return {
-        str(p.relative_to(od.REPO_ROOT)): len(p.read_text(encoding="utf-8").splitlines())
+        p.relative_to(od.REPO_ROOT).as_posix(): len(p.read_text(encoding="utf-8").splitlines())
         for p in od.production_files()
         if len(p.read_text(encoding="utf-8").splitlines()) > LOC_CEILING
     }
+
+
+def controller_loc_report() -> dict[str, int]:
+    """Controller modules over CONTROLLER_LOC_CEILING, and how long they are.
+
+    Flat `<name>_controller.py` files are a documented exception to
+    70-file-organisation.md's "package directories, not sibling files" rule,
+    which exists for modules over 800 lines. This gate is what makes the
+    exception safe: a controller cannot grow into a package's worth of code
+    without failing the build first.
+    """
+    out: dict[str, int] = {}
+    base = od.REPO_ROOT / CONTROLLER_DIR
+    if not base.exists():
+        return out
+    for path in sorted(base.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        lines = len(path.read_text(encoding="utf-8").splitlines())
+        if lines > CONTROLLER_LOC_CEILING:
+            out[path.relative_to(od.REPO_ROOT).as_posix()] = lines
+    return out
+
+
+def controller_shape_report() -> list[str]:
+    """Controller files that are not flat `<name>_controller.py` modules.
+
+    A package directory under controllers/ is how remote/ and sync/ grew to
+    4,950 lines of websocket server without anyone noticing they were not
+    controllers at all. Flat modules keep the layer's whole contents legible
+    from one `ls`.
+    """
+    offenders: list[str] = []
+    base = od.REPO_ROOT / CONTROLLER_DIR
+    if not base.exists():
+        return offenders
+    for path in sorted(base.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(base)
+        if len(rel.parts) > 1:
+            offenders.append(f"{path.relative_to(od.REPO_ROOT).as_posix()} (not a flat module)")
+        elif rel.name != "__init__.py" and not rel.name.endswith("_controller.py"):
+            offenders.append(f"{path.relative_to(od.REPO_ROOT).as_posix()} (not *_controller.py)")
+    return offenders
 
 
 def sql_report() -> dict[str, int]:
@@ -75,7 +133,7 @@ def sql_report() -> dict[str, int]:
             and SQL_PATTERN.search(node.value)
         )
         if count:
-            out[str(path.relative_to(od.REPO_ROOT))] = count
+            out[path.relative_to(od.REPO_ROOT).as_posix()] = count
     return out
 
 
@@ -151,7 +209,7 @@ def transaction_report() -> dict[str, list[str]]:
             and _writes_in(node) >= 2 and not _has_transaction(node)
         ]
         if offenders:
-            out[str(path.relative_to(od.REPO_ROOT))] = sorted(offenders)
+            out[path.relative_to(od.REPO_ROOT).as_posix()] = sorted(offenders)
     return out
 
 
@@ -189,7 +247,7 @@ def ui_db_report() -> dict[str, int]:
                     if alias.name == "sqlite3" or alias.name.endswith(".database"):
                         hits += 1
         if hits:
-            out[str(path.relative_to(od.REPO_ROOT))] = hits
+            out[path.relative_to(od.REPO_ROOT).as_posix()] = hits
     return out
 
 
@@ -222,6 +280,15 @@ def check(now: dict, baseline: dict) -> list[str]:
             elif value > was:
                 failures.append(
                     f"[{gate}] {path}: {label} rose {was} -> {value}")
+
+    # The controller gates are enforced at zero -- no baseline, no allowance.
+    for path, lines in sorted(controller_loc_report().items()):
+        failures.append(
+            f"[controller_loc] {path}: {lines} lines, ceiling is "
+            f"{CONTROLLER_LOC_CEILING}. A controller this long is holding "
+            f"logic that belongs in a service.")
+    for offender in controller_shape_report():
+        failures.append(f"[controller_shape] {offender}")
     return failures
 
 
@@ -260,6 +327,11 @@ def main() -> int:
           f"  ({sum(now['transaction'].values())} functions)")
     print(f"UI files importing the database directly: {len(now['ui_db'])}"
           f"  ({sum(now['ui_db'].values())} imports)")
+    _ctl_loc, _ctl_shape = controller_loc_report(), controller_shape_report()
+    print(f"Controllers over {CONTROLLER_LOC_CEILING} LOC: {len(_ctl_loc)}"
+          f"  (enforced at zero)")
+    print(f"Controllers not flat *_controller.py modules: {len(_ctl_shape)}"
+          f"  (enforced at zero)")
 
     if args.check:
         failures = check(now, load_baseline())

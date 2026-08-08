@@ -295,7 +295,7 @@ class TradingRuntime:
         self._ai_model_refresh_task = asyncio.create_task(self._ai_model_refresh_loop())
         self._data_retention_task = asyncio.create_task(self._data_retention_loop())
         self._reversal_engine_research_task = asyncio.create_task(self._reversal_engine_research_loop())
-        from backend.src.utils.self_healer import SelfHealer
+        from backend.src.services.health.self_healer import SelfHealer
         self._self_healer = SelfHealer(self)
         self._self_healer.start()
         # EA bridge — local TCP listener a companion MQL5 EA connects to.

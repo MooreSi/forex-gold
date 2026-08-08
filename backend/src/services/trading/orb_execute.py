@@ -54,7 +54,7 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
     """
     _active_here = is_active_trader_node
     try:
-        from backend.src.controllers.sync import server as _sync_srv_mod
+        from backend.src.services.cluster.sync import server as _sync_srv_mod
         _is_vps = _sync_srv_mod.get_instance() is not None
     except ImportError:
         _is_vps = False

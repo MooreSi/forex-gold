@@ -1,13 +1,13 @@
 """Active positions: the open-trade cards, including remote-node trades."""
 import asyncio
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.utils.models import (
     STRATEGY_NAMES,
     STRATEGY_SCALE_OUT,
 )
-from backend.src.controllers.sync import client as sync_client
-from backend.src.controllers.history.controller import (  # noqa: E402,F401
+from backend.src.controllers import sync_controller as sync_ctl
+from backend.src.controllers.history_controller import (  # noqa: E402,F401
     trade_channel_label, trade_source_label,
 )
 
@@ -114,7 +114,7 @@ def _render_active_trades(engine):
         # new data is ready means the swap only happens once, atomically.
         try:
             tick       = await engine.get_tick()
-            trades     = await trading_ctl.run_db(engine.get_open_trades)
+            trades     = await trading_ctl.get_open_trades(engine)
             untracked  = await engine.get_untracked_mt5_positions()
         except Exception:
             trades, tick, untracked = [], None, []
@@ -130,9 +130,8 @@ def _render_active_trades(engine):
             # ── Untracked MT5 positions (opened directly in MT5, or opened by
             # the other Local/Remote node — check the sync heartbeat before
             # falling back to the bare "untracked" card) ──────────────────────
-            sync_cli = sync_client.get_instance()
             for pos in untracked:
-                remote = sync_cli.get_remote_open_position(pos.get("ticket")) if sync_cli else None
+                remote = sync_ctl.get_remote_open_position(pos.get("ticket"))
                 if remote:
                     _render_remote_trade_card(pos, remote)
                     continue

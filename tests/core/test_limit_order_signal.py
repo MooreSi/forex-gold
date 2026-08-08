@@ -265,8 +265,8 @@ async def test_be_at_pos_param_is_converted_from_1_based_to_0_indexed(fresh_db):
     await _insert_tg_row("tg1")
     sp.set_strategy_params(STRATEGY_LIMIT_RUNNER, {"be_at_pos": 2})
     fake_ea = _FakeEA()
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=None), \
-         patch("backend.src.controllers.sync.server.get_instance", return_value=None), \
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=None), \
+         patch("backend.src.services.cluster.sync.server.get_instance", return_value=None), \
          patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
         await los.handle_limit_order_signal(
             _parsed("BUY"), "tg1", "chan", "chan", _rs(),

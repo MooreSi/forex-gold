@@ -14,12 +14,12 @@ from nicegui import ui
 
 import backend.src.config as cfg_module
 from backend.src.services.analytics import trade_history_repo, signal_lab_repo
-from backend.src.controllers.history import controller as history_ctl
+from backend.src.controllers import history_controller as history_ctl
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.runtime import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
 from frontend.pages import ai_trade_analysis as _ai_analysis
-from backend.src.controllers.history.controller import trade_source_label, trade_channel_label
+from backend.src.controllers.history_controller import trade_source_label, trade_channel_label
 
 
 def render(get_engine: Callable):
@@ -261,7 +261,7 @@ def _render_equity_curve(engine):
 # Short display names for the strategy column
 def _render_trade_table(engine):
     # The six ticket-map builders moved verbatim to
-    # backend.src.controllers.history.controller (M3 page drain).
+    # backend.src.controllers.history_controller (M3 page drain).
 
     with ui.card().classes("w-full bg-gray-800 rounded-lg overflow-hidden"):
         with ui.row().classes("items-center justify-between px-4 py-2 flex-wrap gap-2"):
@@ -398,7 +398,7 @@ def _render_trade_table(engine):
             max_tp_map = await history_ctl.ticket_max_tp_map()
             rr_map     = await history_ctl.ticket_rr_map()
             order_type_map = await history_ctl.ticket_order_type_map(_days_now)
-            comm_rate  = await history_ctl.run_db(_platform_fee_rate)
+            comm_rate  = await history_ctl.platform_fee_rate()
             try:
                 deals = await engine._bridge.get_deal_history(int(days_sel.value))
                 if deals:
@@ -730,7 +730,7 @@ def _render_calendar(engine):
         _detail_store.clear()
         # Offloaded — both are synchronous DB reads.
         _tinfo    = await history_ctl.ticket_info()
-        comm_rate = await history_ctl.run_db(_platform_fee_rate)
+        comm_rate = await history_ctl.platform_fee_rate()
 
         try:
             today_d   = datetime.now(_UK_TZ).date()

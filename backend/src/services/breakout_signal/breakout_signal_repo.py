@@ -32,6 +32,16 @@ def init_db(db_path: str):
     return _conn_mod.init_db(db_path, _NAMESPACE)
 
 
+def close_db():
+    """Release this namespace's connection.
+
+    Tests that build a temp database must call this before unlinking it:
+    the adapter holds the file open (and its WAL sidecars), and Windows
+    refuses to remove a file that still has an open handle.
+    """
+    return _conn_mod.close_db(_NAMESPACE)
+
+
 _STARTING_BALANCE = 1000.0
 
 _SCHEMA = """
@@ -236,7 +246,7 @@ def get_open_signals() -> list[dict]:
 
 
 def get_all_signals(limit: int = 100) -> list[dict]:
-    rows = get_db().all("SELECT * FROM bo_signals ORDER BY created_at DESC LIMIT ?", limit)
+    rows = get_db().all("SELECT * FROM bo_signals ORDER BY created_at DESC, id DESC LIMIT ?", limit)
     return [_row(r) for r in rows]
 
 

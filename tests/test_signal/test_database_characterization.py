@@ -27,6 +27,12 @@ def fresh_db(request, db_path):
     module = request.param
     module.init(db_path)
     yield module
+    # database.py opens a connection per call and closes it in a finally; the
+    # repo backend holds one open for the life of the namespace. Only the
+    # latter defines close_db(), and db_path cannot unlink the file until it
+    # is released -- Windows refuses to remove a file with an open handle.
+    if hasattr(module, "close_db"):
+        module.close_db()
 
 
 def _sig(**overrides) -> dict:

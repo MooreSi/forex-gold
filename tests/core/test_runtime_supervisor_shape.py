@@ -27,7 +27,7 @@ RUNTIME = Path(__file__).resolve().parents[2] / "backend" / "src" / "runtime.py"
 
 
 def _methods() -> dict[str, ast.AST]:
-    tree = ast.parse(RUNTIME.read_text())
+    tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
     cls = next(n for n in tree.body
                if isinstance(n, ast.ClassDef) and n.name == "TradingRuntime")
     return {n.name: n for n in cls.body

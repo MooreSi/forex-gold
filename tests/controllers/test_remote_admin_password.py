@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.controllers.remote import auth
+from backend.src.services.cluster.remote import auth
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ def test_the_directory_is_created_if_missing(hash_file):
 
 def test_the_plaintext_never_touches_disk(hash_file):
     auth.set_password("correct horse battery staple")
-    written = hash_file.read_text()
+    written = hash_file.read_text(encoding="utf-8")
     assert "correct horse battery staple" not in written
     assert "correct" not in written
 
@@ -75,10 +75,10 @@ def test_the_same_password_hashes_differently_each_time(hash_file, tmp_path):
     """Salting. Without it, identical passwords produce identical hashes and
     a stolen file tells an attacker which machines share a password."""
     auth.set_password("same password")
-    first = hash_file.read_text()
+    first = hash_file.read_text(encoding="utf-8")
 
     auth.set_password("same password")
-    second = hash_file.read_text()
+    second = hash_file.read_text(encoding="utf-8")
 
     assert first != second
     assert auth.verify_password("same password") is True
@@ -86,7 +86,7 @@ def test_the_same_password_hashes_differently_each_time(hash_file, tmp_path):
 
 def test_the_stored_format_is_salt_and_digest(hash_file):
     auth.set_password("hunter2")
-    salt_hex, digest_hex = hash_file.read_text().split(":")
+    salt_hex, digest_hex = hash_file.read_text(encoding="utf-8").split(":")
     assert len(bytes.fromhex(salt_hex)) == 32
     assert len(bytes.fromhex(digest_hex)) == 32
 

@@ -6,7 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.src.services.broker import ea_bridge as ea_bridge
-from backend.src.controllers.sync.server import SyncServer
+from backend.src.services.cluster.sync.server import SyncServer
 
 
 class _FakeEngine:

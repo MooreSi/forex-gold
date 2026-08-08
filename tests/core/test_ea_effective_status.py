@@ -37,7 +37,7 @@ def fresh_db():
 
 
 def test_standalone_no_sync_client_reflects_local_ea(fresh_db):
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=None):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=None):
         fake_ea = MagicMock()
         fake_ea.is_ea_healthy.return_value = True
         ea_bridge.set_instance(fake_ea)
@@ -47,7 +47,7 @@ def test_standalone_no_sync_client_reflects_local_ea(fresh_db):
 
 
 def test_standalone_no_local_ea_instance_is_unhealthy(fresh_db):
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=None):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=None):
         ea_bridge.set_instance(None)
         ok, scope = ea_bridge.get_effective_ea_status()
         assert ok is False
@@ -58,7 +58,7 @@ def test_sync_connected_but_this_node_is_active_trader_reflects_local_ea(fresh_d
     db.set_active_trader("local")
     fake_client = MagicMock()
     fake_client.conn_state = "connected"
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client):
         fake_ea = MagicMock()
         fake_ea.is_ea_healthy.return_value = False
         ea_bridge.set_instance(fake_ea)
@@ -72,7 +72,7 @@ def test_sync_connected_and_remote_is_active_trader_reflects_remote_heartbeat(fr
     fake_client = MagicMock()
     fake_client.conn_state = "connected"
     fake_client.remote_status = {"ea_connected": True}
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client):
         # Local EA healthy is irrelevant here -- must not be consulted.
         fake_ea = MagicMock()
         fake_ea.is_ea_healthy.return_value = False
@@ -87,7 +87,7 @@ def test_remote_active_but_heartbeat_says_ea_disconnected(fresh_db):
     fake_client = MagicMock()
     fake_client.conn_state = "connected"
     fake_client.remote_status = {"ea_connected": False}
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client):
         ok, scope = ea_bridge.get_effective_ea_status()
         assert ok is False
         assert scope == "VPS"
@@ -99,7 +99,7 @@ def test_remote_active_trader_but_sync_client_disconnected_falls_back_to_local(f
     db.set_active_trader("remote_vps")
     fake_client = MagicMock()
     fake_client.conn_state = "disconnected"
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client):
         fake_ea = MagicMock()
         fake_ea.is_ea_healthy.return_value = True
         ea_bridge.set_instance(fake_ea)

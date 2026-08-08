@@ -17,8 +17,8 @@ from typing import Optional, Callable
 from nicegui import ui
 
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
-from backend.src.controllers.chart import controller as chart_controller
-from backend.src.controllers.sync import client as sync_client
+from backend.src.controllers import chart_controller as chart_controller
+from backend.src.controllers import sync_controller as sync_ctl
 from frontend.pages.trading import trade_source_label, trade_channel_label
 
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
@@ -98,10 +98,8 @@ def _untracked_position_node_label() -> str:
     open_trade() guarantees only one node ever opens a given position, so
     this is a reliable inference, not a guess."""
     try:
-        from backend.src.controllers.sync.client import SyncClient
-        from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
-        host, _, _ = SyncClient.load_config()
-        if host and chart_controller.get_active_trader() == TRADER_REMOTE_VPS:
+        host, _, _ = sync_ctl.load_config()
+        if host and chart_controller.get_active_trader() == sync_ctl.TRADER_REMOTE_VPS:
             return "Remote"
         return "Local"
     except Exception:
@@ -484,10 +482,9 @@ def render(get_engine: Callable):
             # (strategy, TP ladder, channel, SL) is already mirrored to this
             # node every 3s via get_remote_open_position(), same source
             # trading.py's Active Trades tab already uses for this exact case.
-            _sync_cli = sync_client.get_instance()
             for pos in (untracked or []):
                 ticket = pos.get("ticket", "—")
-                remote = _sync_cli.get_remote_open_position(ticket) if _sync_cli else None
+                remote = sync_ctl.get_remote_open_position(ticket)
 
                 if remote:
                     direction  = (remote.get("direction") or pos.get("type", "BUY")).upper()

@@ -31,6 +31,10 @@ def fresh_db():
     # applied to the real app.
     _legacy_db.init(path)
     yield db
+    # `db` here is test_signal_repo, whose adapter holds the file open until
+    # released; _legacy_db opens per call. Windows cannot unlink either while
+    # a handle is live.
+    db.close_db()
     os.remove(path)
 
 

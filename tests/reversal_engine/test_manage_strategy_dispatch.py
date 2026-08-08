@@ -36,6 +36,7 @@ def fresh_db():
     os.close(fd)
     db.init(path)
     yield db
+    db.close_db()
     os.remove(path)
 
 
@@ -56,7 +57,7 @@ def _no_external_side_effects(monkeypatch):
         lambda engine, signal_id: None,
     )
     monkeypatch.setattr(
-        "backend.src.controllers.sync.ledger.push_trade_closed",
+        "backend.src.services.cluster.sync.ledger.push_trade_closed",
         lambda trade: None,
     )
 

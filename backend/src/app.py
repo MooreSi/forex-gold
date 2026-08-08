@@ -26,9 +26,9 @@ from backend.src.services.telegram.reader import TelegramReader
 import backend.src.services.test_signal.test_signal_service as _test_engine_module
 import backend.src.services.breakout_signal.breakout_signal_service as _breakout_engine_module
 import backend.src.services.reversal_engine.reversal_engine_service as _re_engine_module
-import backend.src.controllers.remote.client as _remote_client
-import backend.src.controllers.remote.server as _remote_server
-from backend.src.controllers.remote.auth import password_is_set
+import backend.src.services.cluster.remote.client as _remote_client
+import backend.src.services.cluster.remote.server as _remote_server
+from backend.src.services.cluster.remote.auth import password_is_set
 
 log = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ async def startup() -> None:
     # previously-configured VPS without re-entering the token.
     try:
         if db_module.get_app_config("sync_server_enabled") == "1":
-            from backend.src.controllers.sync import server as _sync_srv_mod
+            from backend.src.services.cluster.sync import server as _sync_srv_mod
             token = db_module.get_sync_token()
             if token:
                 import socket as _socket
@@ -277,10 +277,10 @@ async def startup() -> None:
         log.error("[startup] Sync server auto-start failed: %s", _e)
 
     try:
-        from backend.src.controllers.sync.client import SyncClient
+        from backend.src.services.cluster.sync.client import SyncClient
         _sc_host, _sc_port, _sc_token = SyncClient.load_config()
         if _sc_host and _sc_token:
-            from backend.src.controllers.sync import client as _sync_cli_mod
+            from backend.src.services.cluster.sync import client as _sync_cli_mod
             _sync_cli_mod.get_instance().start(_sc_host, _sc_port, _sc_token)
             log.info("[startup] Sync client auto-connecting to %s:%d", _sc_host, _sc_port)
     except Exception as _e:
@@ -316,7 +316,7 @@ async def shutdown() -> None:
     _remote_client.stop()
     _remote_server.stop()
     try:
-        from backend.src.controllers.sync import server as _sync_srv_mod, client as _sync_cli_mod
+        from backend.src.services.cluster.sync import server as _sync_srv_mod, client as _sync_cli_mod
         _srv = _sync_srv_mod.get_instance()
         if _srv:
             await _srv.stop()

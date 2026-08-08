@@ -87,7 +87,7 @@ def _find_private_reaches() -> list[str]:
         for path in sorted((REPO_ROOT / root).rglob("*.py")):
             if path.name == "runtime.py" or "__pycache__" in path.parts:
                 continue
-            source = path.read_text()
+            source = path.read_text(encoding="utf-8")
             try:
                 docs = _docstring_lines(ast.parse(source))
             except SyntaxError:  # pragma: no cover - repo must parse
@@ -125,7 +125,7 @@ def test_the_leak_scan_can_actually_see_a_leak():
 def test_the_promoted_names_are_all_allowlisted():
     """A promoted name that skips the allowlist defeats the facade audit."""
     allowlist = json.loads(
-        (REPO_ROOT / "tools" / "refactor_audit" / "facade_allowlist.json").read_text()
+        (REPO_ROOT / "tools" / "refactor_audit" / "facade_allowlist.json").read_text(encoding="utf-8")
     )
     for new in PROMOTED.values():
         assert new in allowlist, f"{new} is public now -- allowlist it."

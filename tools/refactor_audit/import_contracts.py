@@ -68,6 +68,35 @@ CONTRACTS: list[Contract] = [
         enforced_at_zero=True,
     ),
     Contract(
+        name="controllers-never-import-the-database",
+        rationale=(
+            "A controller that imports db.database does not need a service to "
+            "exist, so none gets written and the logic pools in the controller "
+            "instead -- which is how history/controller.py ended up owning "
+            "three-source ledger merges. db/database.py also re-exports ~90 "
+            "names upward from services, so `db_module.get_risk_settings()` "
+            "reaches a service repo without ever naming it, and the "
+            "never-import-repos contract cannot see it happen."
+        ),
+        source_packages=("backend/src/controllers",),
+        forbidden=("backend.src.db",),
+        enforced_at_zero=True,
+    ),
+    Contract(
+        name="services-never-import-controllers",
+        rationale=(
+            "Layers point downward. A service importing a controller is not a "
+            "style problem, it is proof the module is filed in the wrong "
+            "layer: 40 service call sites imported controllers.sync, which is "
+            "how 2,276 lines of cluster networking came to live in the "
+            "controller directory. Enforced at zero because there is no "
+            "legitimate reason for behaviour to depend on translation."
+        ),
+        source_packages=("backend/src/services",),
+        forbidden=("backend.src.controllers",),
+        enforced_at_zero=True,
+    ),
+    Contract(
         name="frontend-never-imports-the-database",
         rationale=(
             "Won in M3, and the reason the ui_db counter exists. A page that "
@@ -122,9 +151,22 @@ CONTRACTS: list[Contract] = [
 
 def _module_names(path: Path) -> list[tuple[int, str]]:
     """(lineno, dotted module) for every import in `path`, including
-    function-local ones -- a deferred import is still a dependency."""
+    function-local ones -- a deferred import is still a dependency.
+
+    An `ImportFrom` yields TWO names per alias: the package as written, and
+    the package joined to the imported name. `from x.y import repo` cannot be
+    told apart statically from `from x.y import SOME_CONSTANT`, so both forms
+    are emitted and the contract's own rules decide which matters.
+
+    Emitting only `node.module` is what let `controllers-never-import-repos`
+    report "enforced at zero" for months while 14 controller files imported a
+    service repo: every one of them uses `from <package> import <repo module>`,
+    and the bare-name rule below only ever saw `<package>`. `violations_for`
+    collapses the pair back to one violation per statement so this widening
+    cannot inflate a baselined count.
+    """
     try:
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError):
         return []
     out: list[tuple[int, str]] = []
@@ -134,6 +176,8 @@ def _module_names(path: Path) -> list[tuple[int, str]]:
                 continue
             if node.module:
                 out.append((node.lineno, node.module))
+                for alias in node.names:
+                    out.append((node.lineno, f"{node.module}.{alias.name}"))
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 out.append((node.lineno, alias.name))
@@ -144,9 +188,20 @@ def _matches(module: str, prefixes: tuple[str, ...]) -> bool:
     for prefix in prefixes:
         if module == prefix or module.startswith(prefix + "."):
             return True
-        # bare-name rules like "repo" match the final segment, so that
+        # Bare-name rules like "repo" match a whole path segment, so that
         # `from x.y import repo` and `import x.y.repo` both count.
-        if "." not in prefix and prefix in module.split("."):
+        #
+        # The suffix form matters as much as the exact one: this codebase
+        # names most repos after their table, not after the layer --
+        # trade_history_repo, tg_repo, sync_repo, ai_analysis_repo. Matching
+        # only the exact segment "repo" caught 4 of the 14 real violations
+        # and let the other 10 read as compliant. A segment is a repo when it
+        # IS the name or ENDS WITH _<name>; "reporting" is neither, and must
+        # stay clean or the rule starts flagging the analytics service.
+        if "." not in prefix and any(
+            segment == prefix or segment.endswith("_" + prefix)
+            for segment in module.split(".")
+        ):
             return True
     return False
 
@@ -175,13 +230,26 @@ def violations_for(contract: Contract) -> list[Violation]:
         for path in sorted(base.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
-            rel = path.relative_to(REPO_ROOT)
+            # as_posix, not str: _source_unit and every prefix rule below
+            # split on "/", so a Windows backslash path silently matches
+            # nothing and the coupling-edge dedup stops working.
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            # One import statement is one violation. _module_names emits both
+            # `x.y` and `x.y.name` for a `from x.y import name`; keeping the
+            # SHORTEST name that matched preserves the module string every
+            # existing baseline was counted on, while still letting the longer
+            # form be the thing that trips a bare-name rule like "repo".
+            per_statement: dict[int, str] = {}
             for lineno, module in _module_names(path):
                 if not _matches(module, contract.forbidden):
                     continue
                 if contract.allowed and _matches(module, contract.allowed):
                     continue
-                found.append(Violation(str(rel), lineno, module))
+                current = per_statement.get(lineno)
+                if current is None or len(module) < len(current):
+                    per_statement[lineno] = module
+            for lineno, module in sorted(per_statement.items()):
+                found.append(Violation(rel, lineno, module))
     return found
 
 
@@ -206,7 +274,7 @@ class Report:
 def _baseline() -> dict[str, int]:
     if not BASELINE_PATH.exists():
         return {}
-    return json.loads(BASELINE_PATH.read_text())
+    return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
 
 
 def coupling_edges(contract: Contract) -> set[tuple[str, str]]:

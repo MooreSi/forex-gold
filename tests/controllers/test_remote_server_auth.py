@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.controllers.remote import server
+from backend.src.services.cluster.remote import server
 
 
 @pytest.fixture
@@ -300,5 +300,5 @@ def test_the_fixture_really_isolates_the_store(store, tmp_path):
     token = _add_pending()
     server.approve_registration(token, "X")
     assert server._TOKENS_FILE.exists()
-    written = json.loads(server._TOKENS_FILE.read_text())
+    written = json.loads(server._TOKENS_FILE.read_text(encoding="utf-8"))
     assert token in written

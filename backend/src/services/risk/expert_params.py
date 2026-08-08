@@ -247,6 +247,38 @@ def get(key: str) -> float:
 _applying_sync = False  # re-entrancy guard -- see strategy_params.set_strategy_params
 
 
+def catalogue() -> dict:
+    """{domain: [row, ...]} where each row carries the spec plus the live value.
+
+    Both value and default are included because every row offers a reset
+    control and has to know whether it is currently overridden. Rows are plain
+    dicts so the page never needs to import this module to read a field.
+
+    This lived in settings/controller.py as a nested comprehension. Building a
+    view model is service work: the shape of a row is this module's business,
+    and a controller that assembles it is a controller that can assemble a
+    different one.
+    """
+    values = all_values()
+    return {
+        domain: [
+            {
+                "key":     param.key,
+                "label":   param.label,
+                "value":   values[param.key],
+                "default": param.default,
+                "min":     param.min,
+                "max":     param.max,
+                "unit":    param.unit,
+                "desc":    param.desc,
+                "integer": param.integer,
+            }
+            for param in params
+        ]
+        for domain, params in specs_by_domain().items()
+    }
+
+
 def set_params(values: dict, _from_sync: bool = False) -> dict:
     """Merge `values` over the current overrides. Unknown keys are dropped
     rather than stored: a typo'd key would otherwise sit in the DB looking
@@ -298,7 +330,7 @@ def _forward_over_sync() -> None:
     process has. No-op and near-zero cost when sync is not configured.
     Mirrors strategy_params._forward_strategy_params_over_sync."""
     try:
-        from backend.src.controllers.sync import client as _sync_cli_mod
+        from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
         if cli is not None and hasattr(cli, "propose_expert_params"):
             _schedule_coro(cli.propose_expert_params(snapshot()))
@@ -307,7 +339,7 @@ def _forward_over_sync() -> None:
         log.debug("[Sync] expert params forward (client) failed: %s", exc)
 
     try:
-        from backend.src.controllers.sync import server as _sync_srv_mod
+        from backend.src.services.cluster.sync import server as _sync_srv_mod
         srv = _sync_srv_mod.get_instance()
         if srv is not None and hasattr(srv, "broadcast_expert_params"):
             _schedule_coro(srv.broadcast_expert_params())

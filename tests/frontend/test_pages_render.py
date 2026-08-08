@@ -63,7 +63,7 @@ def test_the_app_shell_imports_and_registers_its_route():
 def test_the_new_expert_tunables_page_is_wired_into_settings():
     """M7's page is reached from a settings tab; an unreferenced renderer
     would leave the tab blank with no error anywhere."""
-    settings_source = (PAGES_DIR / "settings.py").read_text()
+    settings_source = (PAGES_DIR / "settings.py").read_text(encoding="utf-8")
     assert "from frontend.pages.expert_tunables import render" in settings_source
     assert 'ui.tab("Expert Tunables")' in settings_source
 

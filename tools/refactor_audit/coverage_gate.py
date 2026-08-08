@@ -55,10 +55,35 @@ CRITICAL = {
 
 
 def area_of(path: str) -> str:
-    """Group a file into the area its floor is tracked against."""
+    """Group a file into the area its floor is tracked against.
+
+    The separator is normalised first. coverage.py writes native paths, so on
+    Windows every key in coverage.json is backslash-separated while the areas
+    above (and the baseline file) are written with forward slashes. Without
+    this, nothing matched any area, every recorded floor reported "no longer
+    measured (deleted? renamed?)", and the ratchet was inert -- the same
+    silent-guardrail failure mode as the import-contract scanner that could
+    not decode a file and reported it clean.
+    """
+    path = path.replace("\\", "/")
     parts = path.split("/")
-    if path.startswith("backend/src/services/") and len(parts) > 3:
-        return "/".join(parts[:4])
+    if path.startswith("backend/src/services/"):
+        # A nested service subpackage carries its own floor. Without this,
+        # relocating a large untested package INTO a well-covered service
+        # drags the parent's percentage down and reads as a regression, when
+        # no previously-covered line lost coverage at all -- only the
+        # denominator changed. services/cluster is the live case: its three
+        # original modules still measure exactly their recorded 50.4%, while
+        # the 2,692 statements of remote/ and sync/ that moved in from
+        # controllers/ were untested before the move and still are.
+        #
+        # Splitting the area keeps the original floor intact AND puts an
+        # honest, shrink-only floor on the moved code, which is strictly
+        # better than lowering one number to cover both.
+        if len(parts) > 5:
+            return "/".join(parts[:5])
+        if len(parts) > 3:
+            return "/".join(parts[:4])
     if path.startswith("frontend/"):
         return "frontend"
     if path.endswith("runtime.py") or path.endswith("app.py"):
@@ -75,7 +100,7 @@ def measure(coverage_json: Path = COVERAGE_JSON) -> dict[str, dict]:
             f"run: pytest tests/ -q --cov=backend --cov=frontend "
             f"--cov-report=json:{coverage_json.name}"
         )
-    data = json.loads(coverage_json.read_text())
+    data = json.loads(coverage_json.read_text(encoding="utf-8"))
     areas: dict[str, dict] = {}
     for path, entry in data["files"].items():
         area = area_of(path)
@@ -91,7 +116,7 @@ def measure(coverage_json: Path = COVERAGE_JSON) -> dict[str, dict]:
 def _baseline() -> dict[str, float]:
     if not BASELINE_PATH.exists():
         return {}
-    return json.loads(BASELINE_PATH.read_text()).get("areas", {})
+    return json.loads(BASELINE_PATH.read_text(encoding="utf-8")).get("areas", {})
 
 
 def check() -> list[str]:

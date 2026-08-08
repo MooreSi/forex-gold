@@ -1,7 +1,7 @@
 """Pure display-formatting helpers behind the Trade Analysis views:
 strategy_display_label (Strategy column) and format_duration (Held / Pending
 For columns). No DB, no NiceGUI rendering -- these never touch either."""
-from backend.src.controllers.history import controller as history
+from backend.src.controllers import history_controller as history
 
 
 def test_strategy_display_label_known_strategy():

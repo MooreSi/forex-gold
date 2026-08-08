@@ -146,7 +146,7 @@ def test_check_sl_exists_in_exactly_one_module():
     """
     from tools.refactor_audit.ast_normalise import find_function
     defining = [
-        str(p.relative_to(od.REPO_ROOT)) for p in sorted(od.production_files())
+        p.relative_to(od.REPO_ROOT).as_posix() for p in sorted(od.production_files())
         if p.suffix == ".py" and "check_sl" in p.read_text(encoding="utf-8")
         and find_function(ast.parse(p.read_text(encoding="utf-8")), "check_sl")
     ]

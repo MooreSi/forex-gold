@@ -253,7 +253,7 @@ async def _broadcast_to_peer_node(
     separate approval) for the same message shape. Best-effort: a missed
     delivery just means the peer falls back to learning it independently."""
     try:
-        from backend.src.controllers.sync import server as sync_server
+        from backend.src.services.cluster.sync import server as sync_server
         srv = sync_server.get_instance()
         if srv is not None:
             await srv.push_own_learned_rule(
@@ -264,8 +264,8 @@ async def _broadcast_to_peer_node(
         log.debug("[AI-Rule] peer sync via server skipped/failed: %s", e)
 
     try:
-        from backend.src.controllers.sync import client as sync_client
-        from backend.src.controllers.sync.protocol import CONN_CONNECTED
+        from backend.src.services.cluster.sync import client as sync_client
+        from backend.src.services.cluster.sync.protocol import CONN_CONNECTED
         cli = sync_client.get_instance()
         if cli.conn_state == CONN_CONNECTED:
             await cli.push_learned_rule(

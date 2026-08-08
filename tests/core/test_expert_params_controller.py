@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.src.controllers.settings import controller as ctl
+from backend.src.controllers import settings_controller as ctl
 from backend.src.services.risk import expert_params as ep
 
 
@@ -77,7 +77,7 @@ def test_the_page_never_imports_the_service_directly():
     """Guards the boundary this controller exists to provide."""
     from pathlib import Path
     page = Path(__file__).resolve().parents[2] / "frontend" / "pages" / "settings.py"
-    source = page.read_text()
+    source = page.read_text(encoding="utf-8")
     assert "risk.expert_params" not in source and "import expert_params" not in source, (
         "settings.py must reach Expert Tunables through the settings "
         "controller, not by importing the service"

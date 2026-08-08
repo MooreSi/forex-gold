@@ -186,7 +186,7 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
     }
 
     try:
-        from backend.src.controllers.sync.ledger import push_trade_closed
+        from backend.src.services.cluster.sync.ledger import push_trade_closed
         _rr = None
         try:
             _entry = row.get("entry_price")

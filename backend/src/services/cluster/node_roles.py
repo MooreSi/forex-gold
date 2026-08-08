@@ -40,15 +40,15 @@ def is_active_trader_node() -> bool:
     before, so a promoted standby still has everything it needs.
     """
     try:
-        from backend.src.controllers.sync import server as _sync_srv_mod
+        from backend.src.services.cluster.sync import server as _sync_srv_mod
         _srv = _sync_srv_mod.get_instance()
         if _srv is not None and _srv.is_standing_down():
             return False
     except ImportError:
         pass
     try:
-        from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
-        from backend.src.controllers.sync.client import SyncClient
+        from backend.src.services.cluster.sync.protocol import TRADER_REMOTE_VPS
+        from backend.src.services.cluster.sync.client import SyncClient
         _host, _, _ = SyncClient.load_config()
         if _host and db_module.get_active_trader() == TRADER_REMOTE_VPS:
             return False
@@ -73,10 +73,10 @@ def is_bot_command_authority() -> bool:
     so it always polls.
     """
     try:
-        from backend.src.controllers.sync.protocol import TRADER_LOCAL, TRADER_REMOTE_VPS
+        from backend.src.services.cluster.sync.protocol import TRADER_LOCAL, TRADER_REMOTE_VPS
         if db_module.get_app_config("sync_server_enabled") == "1":
             return db_module.get_active_trader() == TRADER_REMOTE_VPS
-        from backend.src.controllers.sync.client import SyncClient
+        from backend.src.services.cluster.sync.client import SyncClient
         host, _port, _token = SyncClient.load_config()
         if not host:
             return True  # standalone install, no counterpart to conflict with

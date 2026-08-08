@@ -7,7 +7,7 @@ from typing import Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from backend.src.controllers.dpm import controller as dpm_controller
+from backend.src.controllers import dpm_controller as dpm_controller
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ def _milestones(row: dict) -> str:
 
 
 # The three DB reads this page used to run itself now live behind
-# backend.src.controllers.dpm.controller (M3 page drain): same queries, same
+# backend.src.controllers.dpm_controller (M3 page drain): same queries, same
 # off-loop dispatch, plain dicts back.
 
 

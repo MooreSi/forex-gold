@@ -101,7 +101,7 @@ def _locally_bound(fn: ast.AST) -> set[str]:
 
 
 def _unresolved(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     module_scope = (_bound_at_module_level(tree)
                     | set(dir(builtins)) | _MODULE_DUNDERS)
 

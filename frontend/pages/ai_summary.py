@@ -11,7 +11,7 @@ from typing import Callable, Optional
 from nicegui import ui
 
 import backend.src.config as cfg_module
-from backend.src.controllers.settings import controller as settings_controller
+from backend.src.controllers import settings_controller as settings_controller
 from backend.src.services.analytics import read_repo
 from backend.src.utils.models import STRATEGY_NAMES
 

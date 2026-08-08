@@ -14,20 +14,15 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-from backend.src.controllers.engines import controller as engines_controller
+from backend.src.controllers import engines_controller as engines_controller
 
-from backend.src.services.test_signal import test_signal_repo as _tdb_real
 from backend.src.services.test_signal import test_signal_service as test_engine_module
-from backend.src.services.test_signal import adaptive_params as _ap_real
-from backend.src.services.test_signal import ml_engine as _ml_real
-from backend.src.controllers.sync import client as sync_client
-from backend.src.controllers.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode
+from backend.src.controllers import sync_controller as sync_ctl
 
-# In Remote mode (VPS is the active trader), these transparently read from
-# the mirrored remote signal-gen stats instead of this node's own local
-# data — see sync/remote_stats_facade.py. Every other call site below is
-# unchanged; the facades expose the same functions as the real modules.
-tdb, ml, ap = make_facades("bounce", _tdb_real, _ml_real, _ap_real)
+# Local/Remote switching now lives in the bounce panel_data service:
+# in Remote mode these read the VPS's mirrored stats instead of this
+# node's own, and the page cannot tell the difference.
+_ml_thresh = engines_controller.bounce.ml_thresholds()
 
 _STARTING_BALANCE = 1000.0
 
@@ -145,7 +140,7 @@ def _render_main() -> None:
             "text-green-400 text-xs font-mono" if _live else "text-gray-500 text-xs font-mono"
         )
         with ui.row().classes("ml-auto items-center gap-2"):
-            _tg_on = tdb.get_config("tg_learning", "0") == "1"
+            _tg_on = engines_controller.bounce.get_config("tg_learning", "0") == "1"
             tg_chip = ui.badge(
                 "TG LEARNING ON" if _tg_on else "TG LEARNING OFF",
                 color="teal" if _tg_on else "gray",
@@ -154,9 +149,9 @@ def _render_main() -> None:
             )
 
             def _toggle_tg_learning(chip=tg_chip):
-                current = tdb.get_config("tg_learning", "0")
+                current = engines_controller.bounce.get_config("tg_learning", "0")
                 new_val = "0" if current == "1" else "1"
-                tdb.set_config("tg_learning", new_val)
+                engines_controller.bounce.set_config("tg_learning", new_val)
                 if new_val == "1":
                     chip.text = "TG LEARNING ON"
                     chip.props("color=teal")
@@ -175,12 +170,12 @@ def _render_main() -> None:
     )
 
     async def _render_balance_banner():
-        balance    = await engines_controller.run_db(tdb.get_virtual_balance)
+        balance    = await engines_controller.bounce.virtual_balance()
         pnl_total  = round(balance - _STARTING_BALANCE, 2)
         pnl_pct    = round((pnl_total / _STARTING_BALANCE) * 100, 1)
-        max_dd     = await engines_controller.run_db(tdb.get_max_drawdown)
-        stats      = await engines_controller.run_db(tdb.get_stats)
-        consec     = await engines_controller.run_db(tdb.get_consecutive_losses)
+        max_dd     = await engines_controller.bounce.max_drawdown()
+        stats      = await engines_controller.bounce.stats()
+        consec     = await engines_controller.bounce.consecutive_losses()
         balance_row.clear()
         with balance_row:
             bal_color  = "text-green-400" if balance >= _STARTING_BALANCE else "text-red-400"
@@ -239,8 +234,8 @@ def _render_main() -> None:
     stats_row = ui.row().classes("w-full gap-3 flex-wrap px-4 pt-3")
 
     async def _render_stats():
-        stats = await engines_controller.run_db(tdb.get_stats)
-        balance = await engines_controller.run_db(tdb.get_virtual_balance)
+        stats = await engines_controller.bounce.stats()
+        balance = await engines_controller.bounce.virtual_balance()
         pnl_total = round(balance - _STARTING_BALANCE, 2)
         stats_row.clear()
         with stats_row:
@@ -287,7 +282,7 @@ def _render_main() -> None:
             active_area = ui.column().classes("w-full gap-2")
 
             async def _render_active():
-                sigs = await engines_controller.run_db(tdb.get_open_signals)
+                sigs = await engines_controller.bounce.open_signals()
                 active_area.clear()
                 with active_area:
                     if not sigs:
@@ -314,8 +309,8 @@ def _render_main() -> None:
                         signal_ref = sig.get("signal_ref") or f"SIG-{sig['id']:04d}"
                         is_fallback = bool(sig.get("claude_fallback"))
                         ml_prob_val = sig.get("ml_prob")
-                        _ood_feat   = tdb.get_ml_features_for_signal(sig["id"])
-                        _ood_dist   = ml.ood_distance(_ood_feat) if _ood_feat else None
+                        _ood_feat   = engines_controller.bounce.ml_features_for_signal(sig["id"])
+                        _ood_dist   = engines_controller.bounce.ood_distance(_ood_feat) if _ood_feat else None
 
                         border = "border-green-800" if direction == "BUY" else "border-red-800"
                         with ui.card().classes(
@@ -426,7 +421,7 @@ def _render_main() -> None:
             history_area = ui.column().classes("w-full")
 
             async def _render_history():
-                sigs   = await engines_controller.run_db(tdb.get_all_signals, limit=100)
+                sigs   = await engines_controller.bounce.all_signals(limit=100)
                 closed = [s for s in sigs if s.get("status") not in ("pending", "triggered")]
                 history_area.clear()
                 with history_area:
@@ -601,9 +596,9 @@ def _render_main() -> None:
             analytics_area = ui.column().classes("w-full gap-3")
 
             async def _render_analytics():
-                by_session = await engines_controller.run_db(tdb.get_perf_by_session)
-                by_bias    = await engines_controller.run_db(tdb.get_perf_by_bias)
-                by_level   = await engines_controller.run_db(tdb.get_perf_by_level_type)
+                by_session = await engines_controller.bounce.perf_by_session()
+                by_bias    = await engines_controller.bounce.perf_by_bias()
+                by_level   = await engines_controller.bounce.perf_by_level_type()
                 analytics_area.clear()
                 with analytics_area:
                     _COL_TIPS = {
@@ -696,9 +691,9 @@ def _render_main() -> None:
             ap_area = ui.column().classes("w-full gap-1")
 
             async def _render_ap():
-                all_p     = await engines_controller.run_db(ap.get_all)
-                overrides = await engines_controller.run_db(ap.get_regime_overrides)
-                _log_rows = await engines_controller.run_db(tdb.get_analysis_log, limit=60)
+                all_p     = await engines_controller.bounce.adaptive_params()
+                overrides = await engines_controller.bounce.regime_overrides()
+                _log_rows = await engines_controller.bounce.analysis_log(limit=60)
                 param_changes = [e for e in _log_rows if (e.get("result") or "").startswith("param_")]
                 ap_area.clear()
                 with ap_area:
@@ -751,7 +746,7 @@ def _render_main() -> None:
                                         ui.element("th").classes("text-left px-1 py-0.5").text = h
                             with ui.element("tbody"):
                                 for key in sorted(overrides.keys()):
-                                    dflt = ap.PARAMS[key]["default"]
+                                    dflt = engines_controller.bounce.param_specs()[key]["default"]
                                     label = key.replace("_", " ")
                                     for regime, val in sorted(overrides[key].items()):
                                         val_str = f"{val:.2f}" if val != int(val) else str(int(val))
@@ -797,8 +792,8 @@ def _render_main() -> None:
             ml_area = ui.column().classes("w-full gap-2")
 
             async def _render_ml():
-                s    = await engines_controller.run_db(ml.summary)
-                mets = await engines_controller.run_db(ml.get_ml_metrics)
+                s    = await engines_controller.bounce.ml_summary()
+                mets = await engines_controller.bounce.ml_metrics()
                 ml_area.clear()
                 with ml_area:
 
@@ -843,12 +838,12 @@ def _render_main() -> None:
                               "Total labeled training examples (closed signals with features).")
 
                         _have    = s["labeled_samples"]
-                        _needed  = ml.MIN_TRAIN_SAMPLES
+                        _needed  = _ml_thresh['min_train_samples']
                         _next_in = s["next_train_in"]
                         _next_str = f"+{_next_in}" if s["trained"] else f"{_have}/{_needed}"
                         _chip("Next Train", _next_str, "text-cyan-300",
-                              f"Retrains every {ml.RETRAIN_EVERY} new labeled examples "
-                              f"once {ml.MIN_TRAIN_SAMPLES} minimum reached. "
+                              f"Retrains every {_ml_thresh['retrain_every']} new labeled examples "
+                              f"once {_ml_thresh['min_train_samples']} minimum reached. "
                               f"{'Model is trained.' if s['trained'] else 'Not yet trained.'}")
 
                         _backend = "LGB" if s["backend"].startswith("Light") else "RF"
@@ -942,7 +937,7 @@ def _render_main() -> None:
                     else:
                         ui.label(
                             f"No calibration data yet. "
-                            f"Need {ml.MIN_TRAIN_SAMPLES} closed signals with ML probability stored."
+                            f"Need {_ml_thresh['min_train_samples']} closed signals with ML probability stored."
                         ).classes("text-gray-600 text-xs italic")
 
                     # ── Calibration diagram ───────────────────────────────────
@@ -1000,7 +995,7 @@ def _render_main() -> None:
                                                 ui.label(val)
 
                     # ── Regime performance ────────────────────────────────────
-                    regime_rows = tdb.get_perf_by_regime()
+                    regime_rows = engines_controller.bounce.perf_by_regime()
                     if regime_rows:
                         ui.label("By Regime").classes(
                             "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-2"
@@ -1069,7 +1064,7 @@ def _render_main() -> None:
             )
 
             async def _render_log():
-                entries = await engines_controller.run_db(tdb.get_analysis_log, limit=40)
+                entries = await engines_controller.bounce.analysis_log(limit=40)
                 log_area.clear()
                 with log_area:
                     if not entries:
@@ -1138,19 +1133,11 @@ def _render_main() -> None:
     _refresh_sig = [None]
 
     async def _compute_sig():
+        # Offloaded in one hop -- this runs every 30s tick unconditionally
+        # (it IS the diffing check), so three separate reads would be three
+        # worker round trips per tick.
         try:
-            def _fetch():
-                stats   = tdb.get_stats()
-                balance = round(tdb.get_virtual_balance(), 2)
-                opens   = tuple(
-                    (s.get("id"), s.get("status"), s.get("stop_loss"),
-                     s.get("sl_moved_to_be"), s.get("ml_prob"))
-                    for s in tdb.get_open_signals()
-                )
-                return (tuple(sorted(stats.items())), balance, opens)
-            # Offloaded — this runs every 30s tick unconditionally (it's the
-            # diffing check itself), same class of bug as the render fetches.
-            return await engines_controller.run_db(_fetch)
+            return await engines_controller.bounce.change_signature()
         except Exception:
             return None
 
@@ -1172,15 +1159,15 @@ def _render_main() -> None:
             # every 3s via the sync heartbeat), NOT this node's local
             # instance, which is stood down and would always show "stopped"
             # here even while the VPS is actively running it.
-            if _is_remote_active():
-                cli = sync_client.get_instance()
-                is_r = bool((cli.remote_status.get("engines", {}) if cli else {}).get("bounce"))
+            if sync_ctl.is_remote_active():
+                _remote = sync_ctl.link_state()["remote_status"]
+                is_r = bool(_remote.get("engines", {}).get("bounce"))
                 status_chip.set_text("RUNNING - REMOTE" if is_r else "STOPPED - REMOTE")
                 status_chip.props(f"color={'green' if is_r else 'gray'}")
                 detail_lbl.set_text("")
             elif eng:
                 chip_text = eng.status.upper()
-                if _is_centralized_remote_mode():
+                if sync_ctl.is_centralized_remote_mode():
                     chip_text += " - LOCAL"
                 chip_color = "green" if eng.is_running else "gray"
                 status_chip.set_text(chip_text)
@@ -1200,12 +1187,8 @@ def _render_main() -> None:
         """Send Start/Stop/Run Now to the VPS's own bounce (test) engine
         instead of this node's local one, which is stood down in Remote
         mode and would do nothing while the button looked like it worked."""
-        cli = sync_client.get_instance()
-        if cli is None:
-            ui.notify("Not connected to VPS", type="negative")
-            return
         try:
-            ack = await cli.send_engine_control("bounce", action)
+            ack = await sync_ctl.send_engine_control("bounce", action)
             if ack.get("error"):
                 ui.notify(f"VPS rejected request: {ack['error']}", type="negative")
             else:
@@ -1214,27 +1197,27 @@ def _render_main() -> None:
             ui.notify(f"Failed to reach VPS: {e}", type="negative")
 
     async def _on_start():
-        if _is_remote_active():
+        if sync_ctl.is_remote_active():
             await _remote_control("start", "Test engine started (VPS)")
             return
         if eng:
-            tdb.set_config("sg_engine_enabled", "1")
+            engines_controller.bounce.set_config("sg_engine_enabled", "1")
             eng.start()
             await _refresh_all(force=True)
             ui.notify("Test engine started", type="positive")
 
     async def _on_stop():
-        if _is_remote_active():
+        if sync_ctl.is_remote_active():
             await _remote_control("stop", "Test engine stopped (VPS)")
             return
         if eng:
-            tdb.set_config("sg_engine_enabled", "0")
+            engines_controller.bounce.set_config("sg_engine_enabled", "0")
             eng.stop()
             await _refresh_all(force=True)
             ui.notify("Test engine stopped", type="warning")
 
     async def _on_run_now():
-        if _is_remote_active():
+        if sync_ctl.is_remote_active():
             await _remote_control("run_now", "Manual cycle triggered (VPS)")
             return
         if eng and eng.is_running:

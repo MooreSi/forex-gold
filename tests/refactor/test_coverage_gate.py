@@ -46,7 +46,7 @@ def test_the_baseline_file_exists_and_parses():
         "no coverage baseline -- run "
         "`python -m tools.refactor_audit.coverage_gate --update-baseline`"
     )
-    data = json.loads(cg.BASELINE_PATH.read_text())
+    data = json.loads(cg.BASELINE_PATH.read_text(encoding="utf-8"))
     assert data["areas"], "baseline records no areas"
 
 
@@ -58,7 +58,7 @@ def test_money_critical_areas_hold_their_floor(area, floor):
     and names the area -- which is the whole point. The baseline is meant to
     record improvement, not to absorb regression.
     """
-    baseline = json.loads(cg.BASELINE_PATH.read_text())["areas"]
+    baseline = json.loads(cg.BASELINE_PATH.read_text(encoding="utf-8"))["areas"]
     assert area in baseline, f"{area} is not being measured at all"
     assert baseline[area] >= floor, (
         f"{area} is baselined at {baseline[area]}%, below its {floor}% floor. "

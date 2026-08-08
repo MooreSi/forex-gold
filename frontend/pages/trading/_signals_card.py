@@ -1,8 +1,7 @@
 """The signals card. Public -- the Telegram page renders it too."""
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
-from backend.src.controllers.sync import client as sync_client
-from backend.src.controllers.sync.remote_stats_facade import _is_remote_active
+from backend.src.controllers import trading_controller as trading_ctl
+from backend.src.controllers import sync_controller as sync_ctl
 
 
 def render_signals_card() -> None:
@@ -95,11 +94,7 @@ def render_signals_card() -> None:
 
                 async def toggle_sg_claude(badge=sg_claude_badge):
                     key = "sg_claude_eval_enabled"
-                    if _is_remote_active():
-                        cli = sync_client.get_instance()
-                        if cli is None:
-                            ui.notify("Not connected to VPS", type="negative")
-                            return
+                    if sync_ctl.is_remote_active():
                         # Read "current" from the VPS's own confirmed settings
                         # snapshot, not this node's local DB row — the RPC below
                         # never updates that local row, only the periodic full
@@ -108,17 +103,17 @@ def render_signals_card() -> None:
                         # "new" value forever (toggle stuck one-directional:
                         # confirmed live — Bounce stuck OFF, Breakout stuck ON,
                         # each click just re-sent the same target state).
-                        cur = bool(cli.remote_settings.get(key, 1))
+                        cur = bool(sync_ctl.link_state()["remote_settings"].get(key, 1))
                         new = not cur
                         try:
-                            ack = await cli.send_engine_control("bounce", "set_ai_eval", enabled=new)
+                            ack = await sync_ctl.send_engine_control("bounce", "set_ai_eval", enabled=new)
                         except Exception as exc:
                             ui.notify(f"Failed to reach VPS: {exc}", type="negative")
                             return
                         if ack.get("error"):
                             ui.notify(f"VPS rejected: {ack['error']}", type="negative")
                             return
-                        cli.remote_settings[key] = 1 if new else 0
+                        sync_ctl.note_remote_setting(key, 1 if new else 0)
                     else:
                         cur = bool(trading_ctl.get_risk_settings().get(key, 1))
                         new = not cur
@@ -189,26 +184,22 @@ def render_signals_card() -> None:
 
                 async def toggle_bo_claude(badge=bo_claude_badge):
                     key = "bo_claude_eval_enabled"
-                    if _is_remote_active():
-                        cli = sync_client.get_instance()
-                        if cli is None:
-                            ui.notify("Not connected to VPS", type="negative")
-                            return
+                    if sync_ctl.is_remote_active():
                         # See toggle_sg_claude's comment above — "current" must
                         # come from the VPS's confirmed settings snapshot, not
                         # this node's local DB row, or the toggle sticks in one
                         # direction forever.
-                        cur = bool(cli.remote_settings.get(key, 1))
+                        cur = bool(sync_ctl.link_state()["remote_settings"].get(key, 1))
                         new = not cur
                         try:
-                            ack = await cli.send_engine_control("breakout", "set_ai_eval", enabled=new)
+                            ack = await sync_ctl.send_engine_control("breakout", "set_ai_eval", enabled=new)
                         except Exception as exc:
                             ui.notify(f"Failed to reach VPS: {exc}", type="negative")
                             return
                         if ack.get("error"):
                             ui.notify(f"VPS rejected: {ack['error']}", type="negative")
                             return
-                        cli.remote_settings[key] = 1 if new else 0
+                        sync_ctl.note_remote_setting(key, 1 if new else 0)
                     else:
                         cur = bool(trading_ctl.get_risk_settings().get(key, 1))
                         new = not cur

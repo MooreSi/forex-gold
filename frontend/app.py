@@ -61,7 +61,7 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 
 import backend.src.config as cfg_module
 from backend.src.utils.version_history import __version__ as _APP_VERSION
-from backend.src.controllers.settings import controller as settings_ctl
+from backend.src.controllers import settings_controller as settings_ctl
 from frontend.pages import backtest as backtest_page
 
 log = logging.getLogger(__name__)
@@ -734,7 +734,7 @@ def main_page():
     # Settings > Theme -- override CSS is static (all presets), the active
     # preset is picked via a data attribute set inline before first paint
     # (avoids a flash of the wrong theme).
-    from backend.src.utils.theme import THEME_HEAD_CSS, get_theme
+    from frontend.theme import THEME_HEAD_CSS, get_theme
     ui.add_head_html(THEME_HEAD_CSS)
     ui.add_head_html(f'<script>document.documentElement.setAttribute("data-fx-theme","{get_theme()}")</script>')
 
@@ -987,9 +987,8 @@ def main_page():
         async def _refresh_mode_btn():
             if _mode_switching[0]:
                 return
-            from backend.src.controllers.sync import client as sync_client
-            cli = sync_client.get_instance()
-            if not cli or cli.conn_state != "connected":
+            from backend.src.controllers import sync_controller as sync_ctl
+            if not sync_ctl.is_connected():
                 mode_btn.text = "LOCAL"
                 mode_btn.props("color=grey")
                 mode_btn.tooltip(
@@ -1008,9 +1007,8 @@ def main_page():
                 mode_btn.tooltip("VPS is actively trading; this is a view-only dashboard. Click to take over.")
 
         async def _toggle_mode():
-            from backend.src.controllers.sync import client as sync_client
-            cli = sync_client.get_instance()
-            if not cli or cli.conn_state != "connected":
+            from backend.src.controllers import sync_controller as sync_ctl
+            if not sync_ctl.is_connected():
                 ui.notify("Not connected to a remote node — configure one in "
                           "Settings > Remote Node first.", type="warning")
                 return
@@ -1026,7 +1024,7 @@ def main_page():
                     # Remote -> Local: take over. Must succeed on the VPS
                     # side (its ack) before this node starts trading.
                     try:
-                        ack = await cli.request_stand_down(timeout=15.0)
+                        ack = await sync_ctl.request_stand_down(timeout=15.0)
                     except Exception as exc:
                         ui.notify(f"VPS did not acknowledge stand-down: {exc}", type="negative")
                         return
@@ -1056,7 +1054,7 @@ def main_page():
                         if eng is not None and getattr(eng, "is_running", False):
                             eng.stop()
                     try:
-                        await cli.request_resume(timeout=15.0)
+                        await sync_ctl.request_resume(timeout=15.0)
                     except Exception as exc:
                         ui.notify(f"VPS did not acknowledge resume: {exc}", type="negative")
                         # Engines are already stopped locally; leave them stopped

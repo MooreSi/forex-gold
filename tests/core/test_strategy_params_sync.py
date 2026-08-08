@@ -18,8 +18,8 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.risk import strategy_params as sp
 from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER
-from backend.src.controllers.sync.server import SyncServer
-from backend.src.controllers.sync.client import SyncClient
+from backend.src.services.cluster.sync.server import SyncServer
+from backend.src.services.cluster.sync.client import SyncClient
 
 
 def _reset_thread_local_connection():
@@ -55,15 +55,15 @@ def _sample_snapshot():
 def test_forward_is_a_noop_when_sync_not_configured(fresh_db):
     """Both get_instance() calls return None until sync is actually set up --
     must not raise, must not hang."""
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=None), \
-         patch("backend.src.controllers.sync.server.get_instance", return_value=None):
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=None), \
+         patch("backend.src.services.cluster.sync.server.get_instance", return_value=None):
         sp.set_strategy_params(STRATEGY_CONSERVATIVE, {"sl_pt": 6.0})  # must not raise
 
 
 def test_local_edit_forwards_over_client_when_configured(fresh_db):
     fake_client = AsyncMock()
     fake_client.propose_strategy_params = AsyncMock()
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client), \
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client), \
          patch("backend.src.services.risk.strategy_params._schedule_coro") as fake_schedule_coro:
         sp.set_strategy_params(STRATEGY_CONSERVATIVE, {"sl_pt": 6.0})
         assert fake_schedule_coro.called
@@ -88,14 +88,14 @@ def test_reset_and_apply_template_also_forward(fresh_db):
     not just the direct set_strategy_params() call."""
     fake_client = AsyncMock()
     fake_client.propose_strategy_params = AsyncMock()
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client), \
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client), \
          patch("backend.src.services.risk.strategy_params._schedule_coro") as fake_schedule_coro:
         sp.reset_strategy_params(STRATEGY_CONSERVATIVE)
         assert fake_schedule_coro.called
         fake_schedule_coro.call_args[0][0].close()
 
     tid = sp.save_template(STRATEGY_SCALP_RUNNER, "Wide", {"sl_pt": 20.0})
-    with patch("backend.src.controllers.sync.client.get_instance", return_value=fake_client), \
+    with patch("backend.src.services.cluster.sync.client.get_instance", return_value=fake_client), \
          patch("backend.src.services.risk.strategy_params._schedule_coro") as fake_schedule_coro2:
         sp.apply_template(tid)
         assert fake_schedule_coro2.called

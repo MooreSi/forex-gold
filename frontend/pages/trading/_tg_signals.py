@@ -1,7 +1,7 @@
 """Raw Telegram signals list."""
 import asyncio
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 
 # Sibling sections of this page.
 from ._shared import _uk
@@ -12,7 +12,7 @@ def _render_tg_signals(engine):
 
     async def refresh():
         container.clear()
-        sigs = await trading_ctl.run_db(engine.get_tg_signals, 50)
+        sigs = await trading_ctl.get_tg_signals(engine, 50)
         with container:
             if not sigs:
                 ui.label("No Telegram signals detected yet.").classes(

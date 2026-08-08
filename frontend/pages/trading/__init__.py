@@ -25,14 +25,14 @@ log = logging.getLogger(__name__)
 
 from nicegui import ui
 
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 
 
 
 # trade_source_label / trade_channel_label moved to the history controller
 # (M3 page drain) -- they are display shaping the controllers need too.
 # Re-imported here because several pages import them from this module.
-from backend.src.controllers.history.controller import (  # noqa: E402,F401
+from backend.src.controllers.history_controller import (  # noqa: E402,F401
     trade_channel_label, trade_source_label,
 )
 

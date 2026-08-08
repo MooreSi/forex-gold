@@ -30,6 +30,7 @@ def fresh_db():
     os.close(fd)
     db.init(path)
     yield db
+    db.close_db()
     os.remove(path)
 
 

@@ -10,12 +10,12 @@ import logging
 
 from nicegui import ui
 
-from backend.src.controllers.remote_node import controller as rn_controller
-from backend.src.controllers.sync import tls_util
+from backend.src.controllers import remote_node_controller as rn_controller
+from backend.src.controllers import sync_controller as sync_ctl
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_PORT = tls_util.DEFAULT_SYNC_PORT
+_DEFAULT_PORT = sync_ctl.DEFAULT_SYNC_PORT
 
 
 def _get_sub_engines():
@@ -49,7 +49,7 @@ def render(get_engine=None) -> None:
             server_status_lbl = ui.label("stopped").classes("text-xs text-gray-500")
 
             def _refresh_fingerprint():
-                fp = tls_util.cert_fingerprint()
+                fp = sync_ctl.cert_fingerprint()
                 fingerprint_lbl.text = f"Cert fingerprint: {fp}" if fp else \
                     "Cert fingerprint: (generated on first start)"
 
@@ -60,7 +60,6 @@ def render(get_engine=None) -> None:
                            type="warning")
 
             async def _toggle_server(e):
-                from backend.src.controllers.sync import server as sync_server
                 rn_controller.set_app_config("sync_server_enabled", "1" if e.value else "0")
                 rn_controller.set_app_config("sync_server_port", str(int(port_input.value)))
                 if e.value:
@@ -76,12 +75,12 @@ def render(get_engine=None) -> None:
                         host = "0.0.0.0"
                     bo, bc, gd = _get_sub_engines()
                     main_eng = get_engine() if get_engine else None
-                    srv = sync_server.init(
-                        main_engine=main_eng, breakout_engine=bo,
-                        bounce_engine=bc, re_engine=gd,
-                    )
                     try:
-                        await srv.start(host, int(port_input.value), token)
+                        await sync_ctl.server_start(
+                            host, int(port_input.value), token,
+                            main_engine=main_eng, breakout_engine=bo,
+                            bounce_engine=bc, re_engine=gd,
+                        )
                         server_status_lbl.text = f"listening on port {int(port_input.value)}"
                         _refresh_fingerprint()
                         ui.notify("Sync server started.", type="positive")
@@ -90,9 +89,7 @@ def render(get_engine=None) -> None:
                         ui.notify(f"Failed to start sync server: {exc}", type="negative")
                         server_enabled.value = False
                 else:
-                    srv = sync_server.get_instance()
-                    if srv is not None:
-                        await srv.stop()
+                    await sync_ctl.server_stop()
                     server_status_lbl.text = "stopped"
                     ui.notify("Sync server stopped.", type="warning")
 
@@ -142,19 +139,16 @@ def render(get_engine=None) -> None:
             remote_status_box = ui.column().classes("w-full gap-1 mt-2")
 
             async def _save_and_connect():
-                from backend.src.controllers.sync import client as sync_client
-                cli = sync_client.get_instance()
                 host, port, token = host_input.value.strip(), int(cport_input.value), token_input.value.strip()
                 if not host or not token:
                     ui.notify("Host and token are required.", type="negative")
                     return
-                cli.configure(host, port, token)
-                cli.start(host, port, token)
+                sync_ctl.configure(host, port, token)
+                sync_ctl.start(host, port, token)
                 ui.notify("Connecting…", type="info")
 
             async def _disconnect():
-                from backend.src.controllers.sync import client as sync_client
-                sync_client.get_instance().stop()
+                sync_ctl.stop()
                 ui.notify("Disconnected from VPS.", type="warning")
 
             with ui.row().classes("gap-2 mt-2"):
@@ -162,14 +156,14 @@ def render(get_engine=None) -> None:
                 ui.button("Disconnect", on_click=_disconnect).props("outline")
 
             def _tick_status():
-                from backend.src.controllers.sync import client as sync_client
-                cli = sync_client.get_instance()
-                conn_status_lbl.text = f"status: {cli.conn_state}" + (
-                    f" ({cli.last_error})" if cli.last_error and cli.conn_state != "connected" else ""
+                _link = sync_ctl.link_state()
+                conn_status_lbl.text = f"status: {_link['conn_state']}" + (
+                    f" ({_link['last_error']})"
+                    if _link["last_error"] and _link["conn_state"] != "connected" else ""
                 )
                 remote_status_box.clear()
-                if cli.conn_state == "connected" and cli.remote_status:
-                    s = cli.remote_status
+                if _link["conn_state"] == "connected" and _link["remote_status"]:
+                    s = _link["remote_status"]
                     with remote_status_box:
                         ui.label(
                             f"VPS balance: ${s.get('balance') or 0:,.2f}  "
@@ -239,14 +233,12 @@ def render(get_engine=None) -> None:
             transfer_status_lbl = ui.label("").classes("text-xs text-gray-400 mt-1")
 
             async def _download_models():
-                from backend.src.controllers.sync import client as sync_client
-                cli = sync_client.get_instance()
-                if cli.conn_state != "connected":
+                if not sync_ctl.is_connected():
                     ui.notify("Not connected to a VPS.", type="negative")
                     return
                 transfer_status_lbl.text = "downloading…"
                 try:
-                    await cli.request_model_snapshot("download")
+                    await sync_ctl.request_model_snapshot("download")
                     transfer_status_lbl.text = "download complete"
                     ui.notify("Model snapshot downloaded from VPS.", type="positive")
                 except Exception as exc:
@@ -254,14 +246,12 @@ def render(get_engine=None) -> None:
                     ui.notify(f"Download failed: {exc}", type="negative")
 
             async def _upload_models():
-                from backend.src.controllers.sync import client as sync_client
-                cli = sync_client.get_instance()
-                if cli.conn_state != "connected":
+                if not sync_ctl.is_connected():
                     ui.notify("Not connected to a VPS.", type="negative")
                     return
                 transfer_status_lbl.text = "uploading…"
                 try:
-                    await cli.request_model_snapshot("upload")
+                    await sync_ctl.request_model_snapshot("upload")
                     transfer_status_lbl.text = "upload complete"
                     ui.notify("Model snapshot uploaded to VPS.", type="positive")
                 except Exception as exc:
@@ -274,5 +264,4 @@ def render(get_engine=None) -> None:
 
 
 def _load_client_config() -> tuple[str, int, str]:
-    from backend.src.controllers.sync.client import SyncClient
-    return SyncClient.load_config()
+    return sync_ctl.load_config()

@@ -9,22 +9,17 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from backend.src.controllers.engines import controller as engines_controller
+from backend.src.controllers import engines_controller as engines_controller
 
 from nicegui import ui
 
-from backend.src.services.breakout_signal import breakout_signal_repo as _bdb_real
 from backend.src.services.breakout_signal import breakout_signal_service as bo_engine_module
-from backend.src.services.breakout_signal import adaptive_params as _ap_real
-from backend.src.services.breakout_signal import ml_engine as _bo_ml_real
-from backend.src.controllers.sync import client as sync_client
-from backend.src.controllers.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode
+from backend.src.controllers import sync_controller as sync_ctl
 
-# In Remote mode (VPS is the active trader), these transparently read from
-# the mirrored remote signal-gen stats instead of this node's own local
-# data — see sync/remote_stats_facade.py. Every other call site below is
-# unchanged; the facades expose the same functions as the real modules.
-bdb, bo_ml, ap = make_facades("breakout", _bdb_real, _bo_ml_real, _ap_real)
+# Local/Remote switching now lives in the breakout panel_data service:
+# in Remote mode these read the VPS's mirrored stats instead of this
+# node's own, and the page cannot tell the difference.
+_ml_thresh = engines_controller.breakout.ml_thresholds()
 
 _STARTING_BALANCE = 1000.0
 
@@ -121,11 +116,11 @@ def render() -> None:
     )
 
     async def _render_balance():
-        balance   = await engines_controller.run_db(bdb.get_virtual_balance)
+        balance   = await engines_controller.breakout.virtual_balance()
         pnl_total = round(balance - _STARTING_BALANCE, 2)
         pnl_pct   = round(pnl_total / _STARTING_BALANCE * 100, 1)
-        max_dd    = await engines_controller.run_db(bdb.get_max_drawdown)
-        stats     = await engines_controller.run_db(bdb.get_stats)
+        max_dd    = await engines_controller.breakout.max_drawdown()
+        stats     = await engines_controller.breakout.stats()
         balance_row.clear()
         with balance_row:
             bal_color = "text-green-400" if balance >= _STARTING_BALANCE else "text-red-400"
@@ -178,8 +173,8 @@ def render() -> None:
     stats_row = ui.row().classes("w-full gap-3 flex-wrap px-4 pt-3")
 
     async def _render_stats():
-        stats   = await engines_controller.run_db(bdb.get_stats)
-        balance = await engines_controller.run_db(bdb.get_virtual_balance)
+        stats   = await engines_controller.breakout.stats()
+        balance = await engines_controller.breakout.virtual_balance()
         pnl_tot = round(balance - _STARTING_BALANCE, 2)
         stats_row.clear()
         with stats_row:
@@ -224,7 +219,7 @@ def render() -> None:
             active_area = ui.column().classes("w-full gap-2")
 
             async def _render_active():
-                sigs = await engines_controller.run_db(bdb.get_open_signals)
+                sigs = await engines_controller.breakout.open_signals()
                 active_area.clear()
                 with active_area:
                     if not sigs:
@@ -309,7 +304,7 @@ def render() -> None:
             history_area = ui.column().classes("w-full")
 
             async def _render_history():
-                sigs   = await engines_controller.run_db(bdb.get_all_signals, limit=80)
+                sigs   = await engines_controller.breakout.all_signals(limit=80)
                 closed = [s for s in sigs if s.get("status") not in ("pending", "triggered")]
                 history_area.clear()
                 with history_area:
@@ -427,10 +422,10 @@ def render() -> None:
             analytics_area = ui.column().classes("w-full gap-3")
 
             async def _render_analytics():
-                by_type    = await engines_controller.run_db(bdb.get_perf_by_breakout_type)
-                by_adx     = await engines_controller.run_db(bdb.get_perf_by_adx_band)
-                by_session = await engines_controller.run_db(bdb.get_perf_by_session)
-                by_bias    = await engines_controller.run_db(bdb.get_perf_by_bias)
+                by_type    = await engines_controller.breakout.perf_by_breakout_type()
+                by_adx     = await engines_controller.breakout.perf_by_adx_band()
+                by_session = await engines_controller.breakout.perf_by_session()
+                by_bias    = await engines_controller.breakout.perf_by_bias()
                 analytics_area.clear()
                 with analytics_area:
 
@@ -476,7 +471,7 @@ def render() -> None:
             ap_area = ui.column().classes("w-full gap-1")
 
             async def _render_ap():
-                all_p = await engines_controller.run_db(ap.get_all)
+                all_p = await engines_controller.breakout.adaptive_params()
                 ap_area.clear()
                 with ap_area:
                     with ui.element("table").classes("w-full text-xs"):
@@ -504,7 +499,7 @@ def render() -> None:
                                         ui.label(dflt_str)
 
                     def _reset_ap():
-                        ap.reset_to_defaults()
+                        engines_controller.breakout.reset_adaptive_params()
                         asyncio.create_task(_render_ap())
                         ui.notify("Breakout parameters reset", type="info")
 
@@ -523,8 +518,8 @@ def render() -> None:
             ml_area = ui.column().classes("w-full gap-2")
 
             async def _render_ml():
-                s    = await engines_controller.run_db(bo_ml.summary)
-                mets = await engines_controller.run_db(bo_ml.get_ml_metrics)
+                s    = await engines_controller.breakout.ml_summary()
+                mets = await engines_controller.breakout.ml_metrics()
                 ml_area.clear()
                 with ml_area:
 
@@ -566,14 +561,14 @@ def render() -> None:
                         _chip("Samples", str(s.get("labeled_count", 0)), "text-gray-300",
                               "Total labeled training examples (closed signals with features).")
 
-                        needed   = bo_ml.MIN_TRAIN_SAMPLES
+                        needed   = _ml_thresh['min_train_samples']
                         have     = s.get("labeled_count", 0)
                         next_in  = max(0, needed - have) if not s.get("trained") else \
-                                   bo_ml.RETRAIN_EVERY - (have % bo_ml.RETRAIN_EVERY or bo_ml.RETRAIN_EVERY)
+                                   _ml_thresh['retrain_every'] - (have % _ml_thresh['retrain_every'] or _ml_thresh['retrain_every'])
                         next_str = f"+{next_in}" if s.get("trained") else f"{have}/{needed}"
                         _chip("Next Train", next_str, "text-cyan-300",
-                              f"Retrains every {bo_ml.RETRAIN_EVERY} new labeled examples "
-                              f"once {bo_ml.MIN_TRAIN_SAMPLES} minimum reached.")
+                              f"Retrains every {_ml_thresh['retrain_every']} new labeled examples "
+                              f"once {_ml_thresh['min_train_samples']} minimum reached.")
 
                         backend = "LGB" if s.get("lgb_available") else "RF"
                         _chip("Backend", backend, "text-orange-300",
@@ -657,7 +652,7 @@ def render() -> None:
                     else:
                         ui.label(
                             f"No calibration data yet. "
-                            f"Need {bo_ml.MIN_TRAIN_SAMPLES} closed signals with ML probability stored."
+                            f"Need {_ml_thresh['min_train_samples']} closed signals with ML probability stored."
                         ).classes("text-gray-600 text-xs italic")
 
                     # ── Calibration ────────────────────────────────────────────
@@ -753,7 +748,7 @@ def render() -> None:
             )
 
             async def _render_log():
-                entries = await engines_controller.run_db(bdb.get_analysis_log, limit=40)
+                entries = await engines_controller.breakout.analysis_log(limit=40)
                 log_area.clear()
                 with log_area:
                     if not entries:
@@ -833,15 +828,15 @@ def render() -> None:
             # every 3s via the sync heartbeat), NOT this node's local
             # instance, which is stood down and would always show "stopped"
             # here even while the VPS is actively running it.
-            if _is_remote_active():
-                cli = sync_client.get_instance()
-                is_r = bool((cli.remote_status.get("engines", {}) if cli else {}).get("breakout"))
+            if sync_ctl.is_remote_active():
+                _remote = sync_ctl.link_state()["remote_status"]
+                is_r = bool(_remote.get("engines", {}).get("breakout"))
                 status_chip.set_text("RUNNING - REMOTE" if is_r else "STOPPED - REMOTE")
                 status_chip.props(f"color={'orange' if is_r else 'gray'}")
                 detail_lbl.set_text("")
             elif eng:
                 chip_text  = eng.status.upper() if eng.is_running else "stopped"
-                if _is_centralized_remote_mode():
+                if sync_ctl.is_centralized_remote_mode():
                     chip_text += " - LOCAL"
                 chip_color = "orange" if eng.is_running else "gray"
                 status_chip.set_text(chip_text)
@@ -859,12 +854,8 @@ def render() -> None:
         """Send Start/Stop/Run Now to the VPS's own breakout engine instead
         of this node's local one, which is stood down in Remote mode and
         would do nothing while the button looked like it worked."""
-        cli = sync_client.get_instance()
-        if cli is None:
-            ui.notify("Not connected to VPS", type="negative")
-            return
         try:
-            ack = await cli.send_engine_control("breakout", action)
+            ack = await sync_ctl.send_engine_control("breakout", action)
             if ack.get("error"):
                 ui.notify(f"VPS rejected request: {ack['error']}", type="negative")
             else:
@@ -873,27 +864,27 @@ def render() -> None:
             ui.notify(f"Failed to reach VPS: {e}", type="negative")
 
     async def _on_start():
-        if _is_remote_active():
+        if sync_ctl.is_remote_active():
             await _remote_control("start", "Breakout engine started (VPS)")
             return
         if eng:
-            bdb.set_config("bo_engine_enabled", "1")
+            engines_controller.breakout.set_config("bo_engine_enabled", "1")
             eng.start()
             await _refresh_all()
             ui.notify("Breakout engine started", type="positive")
 
     async def _on_stop():
-        if _is_remote_active():
+        if sync_ctl.is_remote_active():
             await _remote_control("stop", "Breakout engine stopped (VPS)")
             return
         if eng:
-            bdb.set_config("bo_engine_enabled", "0")
+            engines_controller.breakout.set_config("bo_engine_enabled", "0")
             eng.stop()
             await _refresh_all()
             ui.notify("Breakout engine stopped", type="warning")
 
     async def _on_run_now():
-        if _is_remote_active():
+        if sync_ctl.is_remote_active():
             await _remote_control("run_now", "Manual cycle triggered (VPS)")
             return
         if eng and eng.is_running:

@@ -2,7 +2,7 @@
 and EA templates."""
 import json
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.utils.models import (
     STRATEGY_NAMES,
     STRATEGY_SCALE_OUT,

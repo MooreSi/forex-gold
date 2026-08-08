@@ -147,7 +147,7 @@ async def push_ai_recovered_created(
     comment. Best-effort: a missed delivery is caught by the periodic
     full-queue pull (sync.client.SyncClient._ai_recovered_pull_loop)."""
     try:
-        from backend.src.controllers.sync import server as sync_server
+        from backend.src.services.cluster.sync import server as sync_server
         srv = sync_server.get_instance()
         if srv is not None:
             await srv.push_own_ai_recovered_signal(
@@ -159,8 +159,8 @@ async def push_ai_recovered_created(
     except Exception as e:
         log.debug("[AI-Fallback] peer sync via server skipped/failed: %s", e)
     try:
-        from backend.src.controllers.sync import client as sync_client
-        from backend.src.controllers.sync.protocol import CONN_CONNECTED
+        from backend.src.services.cluster.sync import client as sync_client
+        from backend.src.services.cluster.sync.protocol import CONN_CONNECTED
         cli = sync_client.get_instance()
         if cli.conn_state == CONN_CONNECTED:
             await cli.push_ai_recovered_signal(

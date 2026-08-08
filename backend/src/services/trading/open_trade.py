@@ -110,7 +110,7 @@ async def open_trade(
     # No-op (near-zero cost) on any install that hasn't configured sync —
     # get_instance() returns None until sync.server.init() has run.
     try:
-        from backend.src.controllers.sync import server as _sync_srv_mod
+        from backend.src.services.cluster.sync import server as _sync_srv_mod
         _srv = _sync_srv_mod.get_instance()
         if _srv is not None and _srv.is_standing_down():
             raise ValueError(
@@ -132,8 +132,8 @@ async def open_trade(
     # once. Only applies if this Mac has actually been paired with a VPS
     # (a standalone install with no pairing configured is never gated).
     try:
-        from backend.src.controllers.sync.protocol import TRADER_REMOTE_VPS
-        from backend.src.controllers.sync.client import SyncClient
+        from backend.src.services.cluster.sync.protocol import TRADER_REMOTE_VPS
+        from backend.src.services.cluster.sync.client import SyncClient
         _host, _, _ = SyncClient.load_config()
         if _host and db_module.get_active_trader() == TRADER_REMOTE_VPS:
             # Centralized signal generation (Settings > Remote Node): this
@@ -148,7 +148,7 @@ async def open_trade(
             # anything via open_trade_from_signal.
             _rs = await db_module.to_db_thread(db_module.get_risk_settings)
             if _rs.get("centralized_signal_gen_enabled"):
-                from backend.src.controllers.sync.client import get_instance as _sync_cli_instance
+                from backend.src.services.cluster.sync.client import get_instance as _sync_cli_instance
                 _cli = _sync_cli_instance()
                 _ack = await _cli.send_signal_order(
                     signal_id=signal_id, direction=direction,

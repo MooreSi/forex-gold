@@ -150,7 +150,9 @@ def live_corpus() -> set[str]:
 
 
 def audit_module(path: Path, historical: bool = False) -> list[dict]:
-    rel = str(path.relative_to(od.REPO_ROOT))
+    # git wants POSIX separators; str() yields backslashes on Windows and every
+    # rev-list/show lookup against them silently finds nothing.
+    rel = path.relative_to(od.REPO_ROOT).as_posix()
     commit = extraction_commit(rel)
     if commit is None:
         return [{"module": path.stem, "status": "no extraction commit"}]

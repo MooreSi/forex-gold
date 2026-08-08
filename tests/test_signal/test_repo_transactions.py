@@ -20,6 +20,7 @@ def fresh_repo():
     os.close(fd)
     repo.init(path)
     yield repo
+    repo.close_db()
     os.remove(path)
 
 

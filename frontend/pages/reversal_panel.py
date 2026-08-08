@@ -18,21 +18,17 @@ import time
 from datetime import datetime
 from typing import Callable, Optional
 
-from backend.src.controllers.engines import controller as engines_controller
+from backend.src.controllers import engines_controller as engines_controller
 
 from nicegui import ui
 
-from backend.src.services.reversal_engine import reversal_engine_repo as _re_db_real
 from backend.src.services.reversal_engine import reversal_engine_service as re_engine_module
-from backend.src.services.reversal_engine import ml_engine as _re_ml_real
-from backend.src.controllers.sync import client as sync_client
-from backend.src.controllers.sync.remote_stats_facade import make_facades, _is_remote_active, _is_centralized_remote_mode
+from backend.src.controllers import sync_controller as sync_ctl
 
-# In Remote mode (VPS is the active trader), these transparently read from
-# the mirrored remote signal-gen stats instead of this node's own local
-# data — see sync/remote_stats_facade.py. Every other call site below is
-# unchanged; the facades expose the same functions as the real modules.
-re_db, re_ml, _ = make_facades("reversal_engine", _re_db_real, _re_ml_real)
+# Local/Remote switching now lives in the reversal panel_data service:
+# in Remote mode these read the VPS's mirrored stats instead of this
+# node's own, and the page cannot tell the difference.
+_ml_thresh = engines_controller.reversal.ml_thresholds()
 
 _STARTING_BALANCE = 1000.0
 
@@ -154,7 +150,7 @@ def render() -> None:
     with ui.row().classes("px-4 py-1 gap-2 flex-wrap"):
 
         async def _start():
-            if _is_remote_active():
+            if sync_ctl.is_remote_active():
                 await _remote_control("start", "Reversal Engine started (VPS)")
                 return
             if eng:
@@ -162,7 +158,7 @@ def render() -> None:
             ui.notify("Reversal Engine started", type="positive")
 
         async def _stop():
-            if _is_remote_active():
+            if sync_ctl.is_remote_active():
                 await _remote_control("stop", "Reversal Engine stopped (VPS)")
                 return
             if eng:
@@ -170,7 +166,7 @@ def render() -> None:
             ui.notify("Reversal Engine stopped", type="info")
 
         async def _run_now():
-            if _is_remote_active():
+            if sync_ctl.is_remote_active():
                 await _remote_control("run_now", "Cycle triggered (VPS)")
                 return
             if eng:
@@ -181,12 +177,8 @@ def render() -> None:
             """Send Start/Stop/Run Now to the VPS's own Reversal Engine instead
             of this node's local one, which is stood down in Remote mode and
             would do nothing while the button looked like it worked."""
-            cli = sync_client.get_instance()
-            if cli is None:
-                ui.notify("Not connected to VPS", type="negative")
-                return
             try:
-                ack = await cli.send_engine_control("reversal_engine", action)
+                ack = await sync_ctl.send_engine_control("reversal_engine", action)
                 if ack.get("error"):
                     ui.notify(f"VPS rejected request: {ack['error']}", type="negative")
                 else:
@@ -338,9 +330,9 @@ def render() -> None:
         # (mirrored every 3s via the sync heartbeat), NOT this node's local
         # instance, which is stood down and would always show "Stopped"
         # here even while the VPS is actively running it.
-        if _is_remote_active():
-            cli = sync_client.get_instance()
-            is_r = bool((cli.remote_status.get("engines", {}) if cli else {}).get("reversal_engine"))
+        if sync_ctl.is_remote_active():
+            _remote = sync_ctl.link_state()["remote_status"]
+            is_r = bool(_remote.get("engines", {}).get("reversal_engine"))
             status_badge.props(f"color={'green' if is_r else 'grey'}")
             status_badge.text = "Running - Remote" if is_r else "Stopped - Remote"
             detail_lbl.text = ""
@@ -348,7 +340,7 @@ def render() -> None:
         elif eng:
             st = eng.get_status()
             is_r = st["is_running"]
-            _suffix = " - Local" if _is_centralized_remote_mode() else ""
+            _suffix = " - Local" if sync_ctl.is_centralized_remote_mode() else ""
             status_badge.props(f"color={'green' if is_r else 'grey'}")
             status_badge.text = f"Running{_suffix}" if is_r else f"Stopped{_suffix}"
             detail_lbl.text   = st["status_msg"]
@@ -357,9 +349,9 @@ def render() -> None:
 
         # Balance
         try:
-            bal  = await engines_controller.run_db(re_db.get_virtual_balance)
+            bal  = await engines_controller.reversal.virtual_balance()
             pnl  = bal - _STARTING_BALANCE
-            dd   = await engines_controller.run_db(re_db.get_max_drawdown)
+            dd   = await engines_controller.reversal.max_drawdown()
             balance_lbl.text = f"${bal:,.2f}"
             balance_lbl.classes(
                 replace="text-2xl font-bold font-mono "
@@ -374,7 +366,7 @@ def render() -> None:
 
         # Stats
         try:
-            stats = await engines_controller.run_db(re_db.get_stats)
+            stats = await engines_controller.reversal.stats()
             stat_cards["Total"].text    = str(stats["total"])
             stat_cards["Wins"].text     = str(stats["wins"])
             stat_cards["Losses"].text   = str(stats["losses"])
@@ -391,7 +383,7 @@ def render() -> None:
         levels_container.clear()
         try:
             cached_levels = eng._cached.get("levels", []) if eng else []
-            db_levels     = await engines_controller.run_db(re_db.get_active_levels)
+            db_levels     = await engines_controller.reversal.active_levels()
             display_lvls  = cached_levels[:6] if cached_levels else []
 
             if display_lvls:
@@ -416,7 +408,7 @@ def render() -> None:
         # Open signals
         open_container.clear()
         try:
-            open_sigs = await engines_controller.run_db(re_db.get_open_signals)
+            open_sigs = await engines_controller.reversal.open_signals()
             if open_sigs:
                 with open_container:
                     for sig in open_sigs:
@@ -459,7 +451,7 @@ def render() -> None:
         # plus the REF correlation lead/lag column those two don't have).
         history_container.clear()
         try:
-            all_sigs = await engines_controller.run_db(re_db.get_all_signals, limit=80)
+            all_sigs = await engines_controller.reversal.all_signals(limit=80)
             closed   = [s for s in all_sigs if s.get("status") == "closed"][:60]
 
             if closed:
@@ -564,8 +556,8 @@ def render() -> None:
         # Bounce/Breakout's ML Learning panels (ported from breakout_panel.py).
         ml_container.clear()
         try:
-            ml_sum = await engines_controller.run_db(re_ml.summary)
-            mets   = await engines_controller.run_db(re_ml.get_ml_metrics)
+            ml_sum = await engines_controller.reversal.ml_summary()
+            mets   = await engines_controller.reversal.ml_metrics()
             with ml_container:
                 with ui.row().classes("w-full gap-2 flex-wrap"):
                     ui.badge(
@@ -617,14 +609,14 @@ def render() -> None:
                     _chip("Labeled", str(mets.get("n_data", 0)), "text-blue-300",
                           "Closed signals with ML probability stored.")
 
-                    needed  = re_ml.MIN_TRAIN_SAMPLES
+                    needed  = _ml_thresh['min_train_samples']
                     have    = ml_sum.get("labeled_count", 0)
                     next_in = max(0, needed - have) if not ml_sum.get("trained") else \
-                              re_ml.RETRAIN_EVERY - (have % re_ml.RETRAIN_EVERY or re_ml.RETRAIN_EVERY)
+                              _ml_thresh['retrain_every'] - (have % _ml_thresh['retrain_every'] or _ml_thresh['retrain_every'])
                     next_str = f"+{next_in}" if ml_sum.get("trained") else f"{have}/{needed}"
                     _chip("Next Train", next_str, "text-cyan-300",
-                          f"Retrains every {re_ml.RETRAIN_EVERY} new labeled examples "
-                          f"once {re_ml.MIN_TRAIN_SAMPLES} minimum reached.")
+                          f"Retrains every {_ml_thresh['retrain_every']} new labeled examples "
+                          f"once {_ml_thresh['min_train_samples']} minimum reached.")
 
                 # ── Is it learning? ────────────────────────────────────────────
                 sig_ids      = mets.get("signal_ids", [])
@@ -700,7 +692,7 @@ def render() -> None:
                                             ui.label(v)
                 else:
                     ui.label(
-                        f"No calibration data yet. Need {re_ml.MIN_TRAIN_SAMPLES} "
+                        f"No calibration data yet. Need {_ml_thresh['min_train_samples']} "
                         f"closed signals with ML probability stored."
                     ).classes("text-gray-600 text-xs italic mt-1")
 
@@ -715,9 +707,9 @@ def render() -> None:
         # shape as Bounce/Breakout's Performance Analytics card.
         analytics_container.clear()
         try:
-            by_session = await engines_controller.run_db(re_db.get_perf_by_session)
-            by_bias    = await engines_controller.run_db(re_db.get_perf_by_bias)
-            by_level   = await engines_controller.run_db(re_db.get_perf_by_level_type)
+            by_session = await engines_controller.reversal.perf_by_session()
+            by_bias    = await engines_controller.reversal.perf_by_bias()
+            by_level   = await engines_controller.reversal.perf_by_level_type()
             with analytics_container:
                 def _perf_table(title: str, rows: list[dict], key_col: str):
                     if not rows:
@@ -756,7 +748,7 @@ def render() -> None:
         # Cycle log
         log_container.clear()
         try:
-            log_entries = await engines_controller.run_db(re_db.get_analysis_log, limit=30)
+            log_entries = await engines_controller.reversal.analysis_log(limit=30)
             with log_container:
                 for entry in log_entries:
                     is_signal = entry.get("result") == "signal"

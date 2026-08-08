@@ -2,17 +2,16 @@ import logging
 """Manual entry: signal form, market order form, and the ORB/IVB report.
 
 These place real orders. The forms collect and validate; execution goes
-through the trading controller -- see docs/ai/20-trading-safety.md.
+through the trading controller -- see docs/system/rules/20-trading-safety.md.
 """
 import asyncio
 from nicegui import ui
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
 from backend.src.services.signals.parser import validate_signal
-from backend.src.controllers.sync import client as sync_client
-from backend.src.controllers.sync.remote_stats_facade import _is_remote_active
+from backend.src.controllers import sync_controller as sync_ctl
 
 # Sibling sections of this page.
 from ._shared import _stat_cell
@@ -280,15 +279,12 @@ def _render_market_order_form(engine):
                 _lot    = lot_val if lot_val > 0 else None
                 _strat  = mo_strategy.value or None
 
-                if _is_remote_active():
+                if sync_ctl.is_remote_active():
                     # This node is stood down (VPS is the active trader) — route
                     # the order to the VPS's own account instead of just
                     # failing with "Trading stood down". Mirrors the Signal
                     # Generator panels' remote Start/Stop/Run Now pattern.
-                    cli = sync_client.get_instance()
-                    if cli is None:
-                        raise ConnectionError("Not connected to VPS")
-                    ack = await cli.send_market_order(
+                    ack = await sync_ctl.send_market_order(
                         direction=mo_direction.value,
                         stop_loss=_sl, lot_size=_lot, strategy=_strat,
                     )
@@ -458,11 +454,8 @@ def _render_orb_report(engine):
                         try:
                             _lot_val = float(lot_inp.value or 0)
                             _lot = _lot_val if _lot_val > 0 else None
-                            if _is_remote_active():
-                                cli = sync_client.get_instance()
-                                if cli is None:
-                                    raise ConnectionError("Not connected to VPS")
-                                ack = await cli.send_market_order(
+                            if sync_ctl.is_remote_active():
+                                ack = await sync_ctl.send_market_order(
                                     direction=mt5_direction, lot_size=_lot,
                                     stop_loss=report["stop"], take_profit=report["target"],
                                     strategy=STRATEGY_ORB_FIXED, source_name="ORB/IVB Report",

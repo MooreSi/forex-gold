@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from nicegui import ui
 from backend.src.services.ai import provider as ai_provider
-from backend.src.controllers.trading import controller as trading_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.utils.models import STRATEGY_NAMES
 
 

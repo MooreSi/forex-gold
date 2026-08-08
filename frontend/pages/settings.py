@@ -8,9 +8,9 @@ from typing import Callable
 
 from nicegui import app, ui
 
-from backend.src.controllers.settings import controller as settings_ctl
+from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.utils import os_utils as _pu
-from backend.src.controllers.sync import client as sync_client
+from backend.src.controllers import sync_controller as sync_ctl
 import backend.src.config as cfg_module
 
 # ── Prevent-sleep state (module-level so it survives page re-renders) ──────────
@@ -724,7 +724,7 @@ async def _push_ai_config_to_vps(updates: dict) -> None:
     picked here" actually apply on both nodes instead of only the one whose
     UI you happened to save it on."""
     try:
-        await sync_client.get_instance().push_ai_config(updates)
+        await sync_ctl.push_ai_config(updates)
     except Exception:
         pass
 
@@ -2290,87 +2290,6 @@ def _render_diagnostics(engine):
     _live_diag_active = [False]
     _live_diag_timer  = [None]
 
-    # ── Event patterns to KEEP in the live log ────────────────────────────────
-    _KEEP_RE = _re.compile(
-        r"\b(ERROR|WARNING|CRITICAL"
-        r"|NEW SIGNAL|signal_created|signal.*triggered|signal.*rejected"
-        r"|trade.*open|Trade opened|order.*placed|placed.*order"
-        r"|trade.*clos|Trade closed|SL hit|TP\d hit|stop.loss"
-        r"|bridge.*reconnect|bridge.*offline|bridge.*restart"
-        r"|Watchdog|self.heal|Self.heal"
-        r"|Telegram.*reconnect|auth.*state"
-        r"|engine.*start|engine.*stop|SimulationEngine"
-        r"|maintenance|AutoTrading"
-        r")\b",
-        _re.IGNORECASE,
-    )
-    # Lines to always suppress regardless of content
-    _DROP_RE = _re.compile(
-        r"(HTTP Request: GET.*(tick|candle|positions|account|health)"
-        r"|DEBUG"
-        r"|keepalive ping OK"
-        r"|refresh_header"
-        r"|timer.*tick)",
-        _re.IGNORECASE,
-    )
-
-    def _live_log_lines() -> list[tuple[str, str]]:
-        """
-        Return [(level, line), ...] for meaningful events since app startup.
-        Only ERRORs, WARNINGs, and recognised app-event INFO lines are included.
-        """
-        from backend.src.config import DATA_DIR
-        log_base = _Path(DATA_DIR) / "forex_trader.log"
-        if not log_base.exists():
-            return []
-
-        # Find startup marker — look for the most recent "SimulationEngine started" line.
-        _TS_RE = _re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
-        startup_ts = 0.0
-        result: list[tuple[str, str]] = []
-
-        try:
-            raw_lines = log_base.read_text(encoding="utf-8", errors="replace").splitlines()
-        except Exception:
-            return []
-
-        # Find last startup timestamp
-        for ln in raw_lines:
-            if "SimulationEngine started" in ln:
-                m = _TS_RE.match(ln)
-                if m:
-                    try:
-                        from datetime import datetime
-                        startup_ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").timestamp()
-                    except Exception:
-                        pass
-
-        for ln in raw_lines:
-            if not ln.strip():
-                continue
-            # Only include lines from after last startup
-            m = _TS_RE.match(ln)
-            if m:
-                try:
-                    from datetime import datetime
-                    line_ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").timestamp()
-                    if line_ts < startup_ts:
-                        continue
-                except Exception:
-                    pass
-
-            if _DROP_RE.search(ln):
-                continue
-
-            if " ERROR " in ln or " CRITICAL " in ln:
-                result.append(("error", ln))
-            elif " WARNING " in ln:
-                result.append(("warning", ln))
-            elif _KEEP_RE.search(ln):
-                result.append(("event", ln))
-
-        return result[-200:]  # show last 200 meaningful lines max
-
     async def _render_live_lines():
         live_diag_card.clear()
         with live_diag_card:
@@ -2387,7 +2306,7 @@ def _render_diagnostics(engine):
             # synchronously on the event loop blocked the whole app for as
             # long as this took, same class of bug as the sqlite3.connect()
             # sites fixed earlier.
-            lines = await settings_ctl.run_db(_live_log_lines)
+            lines = await settings_ctl.live_log_lines()
             if not lines:
                 ui.label(
                     "No events recorded yet since last restart. Start the engine and generate some activity."
@@ -2682,7 +2601,7 @@ def _render_diagnostics(engine):
         import time as _time
         from datetime import datetime as _dt
         from pathlib import Path as _Path
-        from backend.src.controllers.settings import controller as _db_ctl
+        from backend.src.controllers import settings_controller as _db_ctl
         import httpx as _httpx
 
         DAYS       = 5
@@ -3081,7 +3000,7 @@ def _render_theme():
     See core_ui_theme.py's module docstring for why this is dark-only
     presets (neutral palette swap) rather than a real light mode.
     """
-    from backend.src.utils import theme as theme_mod
+    from frontend import theme as theme_mod
 
     with ui.column().classes("w-full max-w-2xl gap-3"):
         ui.label("Color Theme").classes("text-base font-bold text-yellow-300")

@@ -12,10 +12,11 @@ from pathlib import Path
 
 from nicegui import ui
 
-from backend.src.controllers.remote.client import (
-    get_or_create_token, get_status, get_stored_email, request_registration, _app_version,
+from backend.src.controllers.remote_controller import (
+    SERVER_HOST, SERVER_PORT,
+    app_version, get_or_create_token, get_status, get_stored_email,
+    request_registration,
 )
-from backend.src.controllers.remote.tls import SERVER_HOST, SERVER_PORT
 
 
 def _read_changelog() -> list[str]:
@@ -26,7 +27,7 @@ def _read_changelog() -> list[str]:
 
 
 def render():
-    version = _app_version()
+    version = app_version()
     token   = get_or_create_token()
 
     with ui.column().classes("w-full gap-4"):

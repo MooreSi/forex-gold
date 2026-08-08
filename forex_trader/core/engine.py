@@ -112,7 +112,6 @@ from forex_trader.core.core_email_scheduler import email_scheduler_sweep as _ema
 from forex_trader.core.core_bot_commands_readonly import (
     cmd_help as _cmd_help_impl,
     cmd_balance as _cmd_balance_impl,
-    cmd_daily as _cmd_daily_impl,
     cmd_status as _cmd_status_impl,
     cmd_trades as _cmd_trades_impl,
     cmd_pause as _cmd_pause_impl,
@@ -3134,10 +3133,6 @@ class SimulationEngine:
 
     async def _cmd_balance(self, args: list) -> str:
         return await _cmd_balance_impl(args, self._bridge)
-
-    async def _cmd_daily(self, args: list) -> str:
-        """Send a daily summary: account state, today's closed trades and open positions."""
-        return await _cmd_daily_impl(args, self._bridge)
 
     async def _cmd_status(self, args: list) -> str:
         return await _cmd_status_impl(args, self._bridge, self._tg_reader)

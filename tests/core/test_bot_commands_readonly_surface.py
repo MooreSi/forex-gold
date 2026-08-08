@@ -116,29 +116,9 @@ def test_balance_includes_open_pnl_when_trades_open(fresh_db):
     assert "1 trade)" in result
 
 
-# ── cmd_daily ─────────────────────────────────────────────────────────────
-
-def test_daily_no_closed_trades_today(fresh_db):
-    result = asyncio.run(cmds.cmd_daily([], _FakeBridge(account={})))
-    assert "No closed trades today." in result
-
-
-def test_daily_aggregates_closed_trades(fresh_db):
-    now = time.time()
-    _insert_signal_and_trade("t-1", status="closed", close_time=now, close_price=2410.0,
-                             mt5_profit=50.0, exit_reason="TP1")
-    _insert_signal_and_trade("t-2", status="closed", close_time=now, close_price=2390.0,
-                             mt5_profit=-20.0, exit_reason="[SL]")
-    result = asyncio.run(cmds.cmd_daily([], _FakeBridge(account={})))
-    assert "Net P&L:  +$30.00" in result
-    assert "Win rate: 50%  (1W / 1L)" in result
-
-
-def test_daily_shows_open_trades_section(fresh_db):
-    bridge = _FakeBridge(account={}, tick=SimpleNamespace(bid=2410.0, ask=2410.5))
-    _insert_signal_and_trade("t-1", entry_price=2400.0, remaining_lots=0.10)
-    result = asyncio.run(cmds.cmd_daily([], bridge))
-    assert "Open Trades (1)" in result
+# cmd_daily was removed (2026-08-08) with the panel's Daily button; its
+# account + today's-P&L sections are what cmd_balance now opens with, and are
+# covered by the tests above plus tests/core/test_bot_balance_report.py.
 
 
 # ── cmd_status ────────────────────────────────────────────────────────────

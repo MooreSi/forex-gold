@@ -1,17 +1,19 @@
-"""Read-only/toggle Telegram bot commands -- extracted verbatim (no logic
-changes) from core/engine.py's SimulationEngine._cmd_help/_cmd_balance/
-_cmd_daily/_cmd_status/_cmd_trades/_cmd_pause/_cmd_resume/_cmd_risk/
-_cmd_strategy/_cmd_dpm_on/_cmd_dpm_off/_cmd_ime_on/_cmd_ime_off, as part of
-the core/engine.py migration series. See
+"""Read-only/toggle Telegram bot commands -- originally extracted verbatim
+from core/engine.py's SimulationEngine._cmd_* methods as part of the
+core/engine.py migration series. See
 docs/todo/refactor/core-bot-commands-readonly-migration/020-*.md.
 
 None of these commands place, close, or modify a live order -- they only
 read account/trade state or flip a risk-settings/app-config flag.
 
-`_handle_bot_command` (the dispatcher) is NOT touched by this pack -- it
-keeps calling `self._cmd_*` in engine.py unmodified until a future
-integration pass rewires the whole dispatcher once all three bot-command
-packs are done.
+Two of them have since grown past "extracted verbatim", and the detail now
+lives in its own module so this one stays a thin command surface:
+cmd_balance -> core_bot_balance_report, cmd_status -> core_bot_channel_status.
+
+cmd_daily was removed (2026-08-08) along with the panel's Daily button: its
+account and today's-P&L sections are what cmd_balance now opens with, so
+keeping it would have meant two buttons answering the same question with
+independently-drifting arithmetic.
 """
 from __future__ import annotations
 
@@ -20,10 +22,12 @@ from datetime import datetime
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
-from forex_trader.core.core_bot_channel_status import channel_status_lines
+from forex_trader.core.core_bot_balance_report import build_balance_report
+from forex_trader.core.core_bot_channel_status import (
+    channel_status_lines, internal_engine_lines,
+)
 from forex_trader.core.core_fees_sizing import pnl
 from forex_trader.core.core_sim_account import get_sim_account
-from forex_trader.core.core_tp_trigger_tracking import last_closed_tp
 from forex_trader.core.core_trade_reporting import get_open_trades
 from forex_trader.core.models import (
     STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP,
@@ -46,8 +50,8 @@ async def cmd_help(args: list) -> str:
         "*Main menu*\n"
         "📊 Status / 📋 All Settings — system status, MT5 bridge & EA link, "
         "then every channel's lots, entries, TP ladders and trigger settings\n"
-        "💵 Balance — balance, equity & open P&L\n"
-        "📈 Daily — today's P&L, closed trades & account\n"
+        "💵 Balance — balance, equity, open P&L, then realised P&L for "
+        "today, this week day by day, and this month\n"
         "📜 Open Trades — all open trades with P&L\n"
         "⚙️ Channel Strategy — per-channel settings\n"
         "🎯 Channel Trades — per-channel trade operations\n"
@@ -70,226 +74,14 @@ async def cmd_help(args: list) -> str:
 
 
 async def cmd_balance(args: list, bridge: Any) -> str:
-    account = await bridge.get_account()
-    if account and float(account.get("balance") or 0) > 0:
-        bal  = float(account.get("balance", 0))
-        eq   = float(account.get("equity", 0))
-        fm   = float(account.get("margin_free", 0))
-        mode = "MT5 Live" if db_module.get_app_config("account_env") == "live" else "MT5 Demo"
-    else:
-        acc  = get_sim_account()
-        bal  = float(acc.get("balance", 0))
-        eq   = bal
-        fm   = bal
-        mode = "Simulation"
-
-    open_trades = get_open_trades()
-    tick        = await bridge.get_tick()
-    open_pnl    = 0.0
-    if tick:
-        for t in open_trades:
-            open_pnl += pnl(
-                t["direction"], float(t["entry_price"]),
-                tick.bid if t["direction"] == "BUY" else tick.ask,
-                float(t["remaining_lots"]),
-            )
-
-    lines = [
-        f"*XAUUSD FOREX Trader — {mode}*",
-        "",
-        f"Balance:     ${bal:,.2f}",
-        f"Equity:      ${eq:,.2f}",
-        f"Free Margin: ${fm:,.2f}",
-    ]
-    if open_trades:
-        sign = "+" if open_pnl >= 0 else ""
-        n    = len(open_trades)
-        lines.append(f"Open P&L:    {sign}${open_pnl:.2f}  ({n} trade{'s' if n != 1 else ''})")
-    return "\n".join(lines)
-
-
-async def cmd_daily(args: list, bridge: Any) -> str:
-    """Send a daily summary: account state, today's closed trades and open positions."""
-    today_str  = datetime.now().strftime("%a %d %b %Y")
-    day_cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-
-    # ── Account balance/equity ────────────────────────────────────────────
-    mode = "Simulation"
-    bal  = 0.0
-    eq   = 0.0
-
-    try:
-        account = await bridge.get_account()
-        if account and float(account.get("balance") or 0) > 0:
-            bal  = float(account["balance"])
-            eq   = float(account.get("equity", bal))
-            env  = db_module.get_app_config("account_env") or "demo"
-            mode = "MT5 Live" if env == "live" else "MT5 Demo"
-        else:
-            raise ValueError("no MT5 balance")
-    except Exception:
-        sim = get_sim_account()
-        bal  = float(sim.get("balance", 0))
-        eq   = bal
-
-    # ── Live open P&L ──────────────────────────────────────────────────────
-    open_trades = get_open_trades()
-    tick        = await bridge.get_tick()
-    open_pnl    = 0.0
-    if tick and open_trades:
-        open_pnl = sum(
-            pnl(
-                t["direction"], float(t["entry_price"]),
-                tick.bid if t["direction"] == "BUY" else tick.ask,
-                float(t["remaining_lots"]),
-            )
-            for t in open_trades
-        )
-
-    # ── Today's closed trades from DB ─────────────────────────────────────
-    # close_time is always a proper UTC epoch (time.time() at moment of close)
-    with db_module.db() as conn:
-        today_closed = [
-            db_module.row_to_dict(r)
-            for r in conn.execute(
-                "SELECT * FROM vantage_simulated_trades "
-                "WHERE status='closed' AND close_time >= ? "
-                "ORDER BY close_time DESC",
-                (day_cutoff,),
-            ).fetchall()
-        ]
-
-    # P&L uses mt5_profit when available (accurate broker figure), else net_pnl
-    def _trade_pnl(t: dict) -> float:
-        raw = t.get("mt5_profit")
-        return float(raw if raw is not None else t.get("net_pnl", 0))
-
-    daily_pnls  = [_trade_pnl(t) for t in today_closed]
-    daily_pnl   = sum(daily_pnls)
-    daily_n     = len(daily_pnls)
-    wins        = sum(1 for p in daily_pnls if p > 0)
-    losses      = sum(1 for p in daily_pnls if p < 0)
-    daily_wr    = round(wins / daily_n * 100) if daily_n else 0
-    daily_best  = max(daily_pnls) if daily_pnls else 0.0
-    daily_worst = min(daily_pnls) if daily_pnls else 0.0
-
-    # ── Risk settings ──────────────────────────────────────────────────────
-    rs       = db_module.get_risk_settings()
-    dpm_on   = bool(rs.get("dpm_enabled", 0))
-    strategy = ("DPM" if dpm_on
-                else STRATEGY_NAMES.get(rs.get("trade_strategy", STRATEGY_SCALE_OUT), "?"))
-    risk_pct = float(rs.get("risk_per_trade_pct", 0.5))
-    # Escape underscore for Telegram Markdown v1
-    strategy_esc = strategy.replace("_", "\\_")
-
-    # ── Helper: compact exit-reason label ─────────────────────────────────
-    def _is_sl(exit_reason: str) -> bool:
-        r = (exit_reason or "").lower()
-        return r.startswith("[sl") or r == "sl" or "stop" in r
-
-    def _reason_lbl(exit_reason: str, trade_id: str = "") -> str:
-        r = (exit_reason or "").lower()
-        if _is_sl(r):
-            ltp = last_closed_tp(trade_id) if trade_id else None
-            return f"SL+TP{ltp}" if ltp is not None else "SL"
-        if (r.startswith("[tp") or r.startswith("tp")
-                or r in ("all_tps_hit", "mt5_sync_tp", "profit_close_target")):
-            return "TP"
-        if "manual" in r or r in ("mt5_close", "mt5_import"):
-            return "manual"
-        if "partial" in r or "scale" in r:
-            return "partial"
-        # Escape underscores so Markdown v1 doesn't treat them as italics
-        return (exit_reason or "?")[:10].replace("_", ".")
-
-    # ── Assemble message ───────────────────────────────────────────────────
-    op_sign  = "+" if open_pnl  >= 0 else ""
-    pnl_sign = "+" if daily_pnl >= 0 else ""
-
-    lines: list[str] = [
-        f"*Daily Summary — {today_str}*",
-        f"_{mode}_",
-        "",
-        "*Account*",
-        f"Balance:  ${bal:,.2f}",
-        f"Equity:   ${eq:,.2f}",
-    ]
-    if open_trades:
-        n = len(open_trades)
-        lines.append(
-            f"Open P&L: {op_sign}${open_pnl:.2f}  "
-            f"({n} trade{'s' if n != 1 else ''})"
-        )
-
-    lines += ["", f"*Today's Closed ({daily_n})*"]
-
-    if daily_n == 0:
-        lines.append("No closed trades today.")
-    else:
-        lines += [
-            f"Net P&L:  {pnl_sign}${daily_pnl:.2f}",
-            f"Win rate: {daily_wr}%  ({wins}W / {losses}L)",
-            f"Best: {'+' if daily_best  >= 0 else ''}${daily_best:.2f}   "
-            f"Worst: {'' if daily_worst >= 0 else ''}${daily_worst:.2f}",
-        ]
-
-        if today_closed:
-            lines += ["", "*Trade Log*"]
-            for t in today_closed[:8]:
-                direction = t.get("direction", "?")
-                entry_px  = float(t.get("entry_price", 0))
-                close_px  = float(t.get("close_price", 0))
-                lots      = float(t.get("lot_size", 0))
-                pnl_t     = _trade_pnl(t)
-                rlbl      = _reason_lbl(t.get("exit_reason") or "", t.get("trade_id", ""))
-                emoji     = "✅" if pnl_t >= 0 else "❌"
-                sign_t    = "+" if pnl_t >= 0 else ""
-                lines.append(
-                    f"{emoji} {direction} {lots:.2f}L  "
-                    f"${entry_px:.0f}→${close_px:.0f}  "
-                    f"{sign_t}${pnl_t:.2f} [{rlbl}]"
-                )
-            if len(today_closed) > 8:
-                lines.append(f"_...and {len(today_closed) - 8} more_")
-
-    # Open trades detail
-    if open_trades:
-        lines += ["", f"*Open Trades ({len(open_trades)})*"]
-        for t in open_trades[:5]:
-            direction = t.get("direction", "?")
-            entry_px  = float(t.get("entry_price", 0))
-            lots      = float(t.get("remaining_lots", 0))
-            sl        = t.get("stop_loss")
-
-            pnl_t = (pnl(direction, entry_px,
-                        tick.bid if direction == "BUY" else tick.ask, lots)
-                     if tick else 0.0)
-            p_sign = "+" if pnl_t >= 0 else ""
-
-            held_secs = int(time.time() - float(t.get("open_time") or time.time()))
-            held = (f"{held_secs // 60}m" if held_secs < 3600
-                    else f"{held_secs // 3600}h {(held_secs % 3600) // 60}m")
-
-            sl_str = f"  SL ${float(sl):.0f}" if sl is not None else ""
-            lines.append(
-                f"{direction} {lots:.2f}L @ ${entry_px:.2f}  "
-                f"P&L: {p_sign}${pnl_t:.2f}  [{held}]{sl_str}"
-            )
-        if len(open_trades) > 5:
-            lines.append(f"_...and {len(open_trades) - 5} more_")
-
-    lines += ["", f"_Strategy: {strategy_esc}  |  Risk: {risk_pct}%_"]
-
-    return "\n".join(lines)
+    """Account state plus realised P&L for today, this week (by day) and this
+    month. Absorbed the old /daily summary when the panel's separate Daily
+    button was removed -- see core_bot_balance_report for why they merged."""
+    return await build_balance_report(bridge)
 
 
 async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -> str:
     rs         = db_module.get_risk_settings()
-    dpm_on     = bool(rs.get("dpm_enabled", 0))
-    if dpm_on:
-        strategy_name = "DPM"
-    else:
-        strategy_name = STRATEGY_NAMES.get(rs.get("trade_strategy", STRATEGY_SCALE_OUT), "?")
     auto_exec  = bool(rs.get("auto_execute_signals", 0))
     risk_pct   = float(rs.get("risk_per_trade_pct", 0.5))
     max_trades = int(rs.get("max_open_trades", 1))
@@ -336,10 +128,14 @@ async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -
     else:
         auth = "not started"
 
+    # No global "Strategy:" line here. It named the app's Active Strategy,
+    # which nothing on this account actually trades: every channel and every
+    # internal generator resolves its own strategy (and a Trading Schedule
+    # window can override that by time of day), so one global name at the top
+    # was wrong for every block below it. Each block states its own instead.
     lines = [
         "*System Status*",
         "",
-        f"Strategy:     {strategy_name}",
         f"Auto-execute: {'ON' if auto_exec else 'OFF'}",
         f"Risk/trade:   {risk_pct}%",
         f"Max trades:   {max_trades}",
@@ -359,6 +155,14 @@ async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -
     if channel_lines:
         lines.append("")
         lines.extend(channel_lines)
+
+    # The internal generators trade this account too, on their own strategies
+    # and their own schedule gates -- a status that listed only the Telegram
+    # channels described maybe half of what the app is doing.
+    engine_lines = internal_engine_lines()
+    if engine_lines:
+        lines.append("")
+        lines.extend(engine_lines)
 
     return _fit_telegram(lines)
 

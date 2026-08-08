@@ -19,6 +19,7 @@ import pytest
 
 from forex_trader.core import core_bot_channel_status as status
 from forex_trader.core import core_ea_templates as et
+from forex_trader.core import core_trading_schedule as sched
 from forex_trader.core import database as db
 
 
@@ -162,6 +163,124 @@ def test_builtin_strategy_channel_gets_a_block_without_invented_grid_fields(fres
     assert "No EA Template bound" in text
     assert "Take Profits Pips" not in text
     assert "Anchor Count" not in text
+
+
+# ── Effective strategy (time of day) ─────────────────────────────────────────
+
+def _window_today(**changes) -> None:
+    """Enable one all-day window for today carrying `changes`."""
+    from datetime import datetime
+    sched.set_trading_schedule_enabled(True)
+    full = sched.get_trading_schedule()
+    day = sched.DAY_NAMES[datetime.now().weekday()]
+    full[day][0].update({"enabled": True, "start": "00:00", "end": "23:59", **changes})
+    sched.set_trading_schedule(full)
+
+
+def test_channel_reports_its_own_strategy(fresh_db):
+    name = _channel("C One")
+    db.set_channel_strategy_override(name, "conservative")
+    assert "🎛️ Strategy: Conservative" in "\n".join(status.channel_status_lines())
+
+
+def test_channel_bound_to_a_template_names_the_template(fresh_db):
+    name = _channel("C One")
+    _bind(name, "Grid A", {"mode": "grid"})
+    assert "Strategy: Template: Grid A" in "\n".join(status.channel_status_lines())
+
+
+def test_an_active_schedule_window_override_replaces_the_reported_strategy(fresh_db):
+    """The whole point of this screen is "what happens to the next signal",
+    and inside an override window that is not the channel's own pick."""
+    name = _channel("C One")
+    _bind(name, "Day Grid", {"mode": "grid", "sl_pips": 60.0})
+    et.save_ea_template("Night Grid", {"mode": "grid", "sl_pips": 12.0})
+    _window_today(telegram_channels={
+        name: {"enabled": True,
+               "strategy_override": et.override_for_template("Night Grid")},
+    })
+
+    text = "\n".join(status.channel_status_lines())
+    assert "Strategy: Template: Night Grid" in text
+    assert "from the active Trading Schedule window" in text
+    assert "channel setting is Template: Day Grid" in text
+    # and the block below it must describe the template that will actually run
+    assert "SL = 12.0 pips" in text
+    assert "SL = 60.0 pips" not in text
+
+
+def test_no_override_reports_the_channel_setting_without_a_provenance_note(fresh_db):
+    name = _channel("C One")
+    _bind(name, "Grid A", {"mode": "grid"})
+    _window_today()
+    text = "\n".join(status.channel_status_lines())
+    assert "Strategy: Template: Grid A" in text
+    assert "Trading Schedule window" not in text
+
+
+def test_a_channel_blocked_by_the_current_window_says_so(fresh_db):
+    """Settings that look live but cannot fire are the most misleading thing
+    this screen could print."""
+    name = _channel("C One")
+    _bind(name, "Grid A", {"mode": "grid"})
+    _window_today(telegram_channels={name: {"enabled": False, "strategy_override": ""}})
+    assert "⛔ Schedule: blocked" in "\n".join(status.channel_status_lines())
+
+
+def test_no_schedule_gate_line_when_the_schedule_is_off(fresh_db):
+    name = _channel("C One")
+    _bind(name, "Grid A", {"mode": "grid"})
+    assert "Schedule: blocked" not in "\n".join(status.channel_status_lines())
+
+
+def test_a_channel_with_no_override_falls_back_to_the_global_strategy(fresh_db):
+    _channel("C One")
+    db.update_risk_settings({"trade_strategy": "trail_stop"})
+    text = "\n".join(status.channel_status_lines())
+    assert "Strategy: Trailing Stop" in text
+    assert "inherited from the global Active Strategy" in text
+
+
+# ── Internal signal generators ───────────────────────────────────────────────
+
+def test_a_running_generator_gets_a_full_block(fresh_db, monkeypatch):
+    _bind("Reversal Engine", "RE Grid", {"mode": "grid", "sl_pips": 25.0})
+    monkeypatch.setattr(status, "_ENGINES",
+                        (("Reversal Engine", lambda: True),))
+    text = "\n".join(status.internal_engine_lines())
+    assert "🤖 *REVERSAL ENGINE* (internal generator)" in text
+    assert "Engine: running" in text
+    assert "Strategy: Template: RE Grid" in text
+    assert "SL = 25.0 pips" in text
+
+
+def test_a_stopped_generator_is_named_but_not_expanded(fresh_db, monkeypatch):
+    """A stopped engine's TP ladder describes trades that cannot happen."""
+    _bind("Reversal Engine", "RE Grid", {"mode": "grid", "sl_pips": 25.0})
+    monkeypatch.setattr(status, "_ENGINES",
+                        (("Reversal Engine", lambda: False),))
+    text = "\n".join(status.internal_engine_lines())
+    assert "Not generating:* Reversal Engine (stopped)" in text
+    assert "SL = 25.0 pips" not in text
+
+
+def test_an_unreachable_generator_is_not_reported_as_stopped(fresh_db, monkeypatch):
+    """'stopped' is a claim about the engine; an import failure is a claim
+    about us, and the two must not read the same."""
+    def _boom():
+        raise RuntimeError("module gone")
+
+    monkeypatch.setattr(status, "_ENGINES", (("Bounce Engine", _boom),))
+    assert "Bounce Engine (state unknown)" in "\n".join(status.internal_engine_lines())
+
+
+def test_generators_are_the_canonical_channel_names(fresh_db):
+    """They resolve strategies through the same channel_performance rows the
+    Channel Strategy tab edits, so a typo here would silently report the
+    global default for an engine that has its own template."""
+    from forex_trader.core import core_db_channel as chan
+    for name, _probe in status._ENGINES:
+        assert name in chan._FIXED_ENGINE_CHANNELS
 
 
 # ── Numbering and feed state ──────────────────────────────────────────────────

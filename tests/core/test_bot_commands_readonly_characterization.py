@@ -124,31 +124,8 @@ def test_balance_includes_open_pnl_when_trades_open(fresh_db, engine):
     assert "1 trade)" in result
 
 
-# ── _cmd_daily ────────────────────────────────────────────────────────────
-
-def test_daily_no_closed_trades_today(fresh_db, engine):
-    engine._bridge = _FakeBridge(account={})
-    result = asyncio.run(SimulationEngine._cmd_daily(engine, []))
-    assert "No closed trades today." in result
-
-
-def test_daily_aggregates_closed_trades(fresh_db, engine):
-    engine._bridge = _FakeBridge(account={})
-    now = time.time()
-    _insert_signal_and_trade("t-1", status="closed", close_time=now, close_price=2410.0,
-                             mt5_profit=50.0, exit_reason="TP1")
-    _insert_signal_and_trade("t-2", status="closed", close_time=now, close_price=2390.0,
-                             mt5_profit=-20.0, exit_reason="[SL]")
-    result = asyncio.run(SimulationEngine._cmd_daily(engine, []))
-    assert "Net P&L:  +$30.00" in result
-    assert "Win rate: 50%  (1W / 1L)" in result
-
-
-def test_daily_shows_open_trades_section(fresh_db, engine):
-    engine._bridge = _FakeBridge(account={}, tick=SimpleNamespace(bid=2410.0, ask=2410.5))
-    _insert_signal_and_trade("t-1", entry_price=2400.0, remaining_lots=0.10)
-    result = asyncio.run(SimulationEngine._cmd_daily(engine, []))
-    assert "Open Trades (1)" in result
+# _cmd_daily was removed (2026-08-08) along with the panel's Daily button --
+# see the note in core_bot_commands_readonly's docstring.
 
 
 # ── _cmd_status ───────────────────────────────────────────────────────────

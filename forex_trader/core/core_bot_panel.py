@@ -324,13 +324,16 @@ def root_screen() -> Screen:
         [_btn("\U0001f4ca Status", "st"), _btn("\U0001f4cb All Settings", "allset")],
         [_btn("⚙️ Channel Strategy", "chlist", "s"),
          _btn("\U0001f3af Channel Trades", "chlist", "t")],
-        [_btn("\U0001f4b5 Balance", "bal"), _btn("\U0001f4c8 Daily", "daily")],
-        [_btn("\U0001f4dc Open Trades", "trades"), _btn("\U0001f6e0️ System", "sys")],
-        [_btn("\U0001f5d3️ Trading Schedule", "sch")],
+        # Balance absorbed the old Daily button (2026-08-08) -- it now opens
+        # with the account and today's P&L, then this week by day and the
+        # month, so a separate Daily screen would answer the same question
+        # with its own copy of the arithmetic.
+        [_btn("\U0001f4b5 Balance", "bal"), _btn("\U0001f4dc Open Trades", "trades")],
+        [_btn("\U0001f6e0️ System", "sys"), _btn("\U0001f5d3️ Trading Schedule", "sch")],
         [_btn("⛔ CLOSE ALL TRADES", "closeall", "*")],
         [_btn("❌ Close Control Panel", "x")],
     ]
-    return Screen("\U0001f3ae *FOREX Control Panel*\n\nChoose an action from the buttons below:", kb)
+    return Screen("\U0001f4b0 *FOREX Control Panel*\n\nChoose an action from the buttons below:", kb)
 
 
 def _channel_list_screen(kind: str) -> Screen:
@@ -1046,7 +1049,7 @@ async def _dispatch(action: str, args: list, ctx: Any) -> Screen:
     if action == "reg_rj":
         return _reject_registration(args[0])
 
-    if action in ("st", "allset", "bal", "daily", "trades"):
+    if action in ("st", "allset", "bal", "trades"):
         return await _readonly(action, ctx)
     if action == "sys2":
         return await _system_action(args[0], ctx)
@@ -1303,8 +1306,6 @@ async def _readonly(action: str, ctx: Any) -> Screen:
         return Screen(await ctx._cmd_status([]), mode="send")
     if action == "bal":
         return Screen(await ctx._cmd_balance([]), mode="send")
-    if action == "daily":
-        return Screen(await ctx._cmd_daily([]), mode="send")
     return Screen(await ctx._cmd_trades([]), mode="send")
 
 

@@ -20,7 +20,10 @@ It is, if it touches any of:
 | Sizing | `services/risk/governor.py`, `suggest_lot_size` |
 | Bridge | `mt5_bridge.py`, `services/broker/ea_bridge.py` |
 
-If yes, read `docs/ai/20-trading-safety.md` in full before continuing.
+If yes, read `docs/system/rules/20-trading-safety.md` in full before
+continuing, plus the affected domain's knowledge file —
+`docs/system/domains/trading/`, `risk/`, `broker/` or `positions/` — for
+constraints and gotchas specific to that surface.
 
 ## 2. Check whether the close path is involved
 

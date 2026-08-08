@@ -5,7 +5,7 @@ description: Break a file over 800 lines into a package directory without changi
 
 # Splitting a big file
 
-Full rationale in `docs/ai/70-file-organisation.md`. This is the procedure.
+Full rationale in `docs/system/rules/70-file-organisation.md`. This is the procedure.
 
 ## The decision, already made
 
@@ -96,7 +96,7 @@ directories for nothing.
 
 ## Current queue
 
-Priority order, from `docs/ai/70-file-organisation.md`:
+Priority order, from `docs/system/rules/70-file-organisation.md`:
 
 1. `frontend/pages/trading.py` (3,254)
 2. `frontend/pages/settings.py` (3,193)

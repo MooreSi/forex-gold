@@ -77,7 +77,7 @@ Layers point downward only:
 `frontend → controllers → services → db`. The frontend never touches the
 database directly; every DB call is dispatched off the UI event loop by a
 controller. This is enforced, not conventional — see
-[docs/ai/30-architecture.md](docs/ai/30-architecture.md).
+[docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md).
 
 ## Developing
 
@@ -105,11 +105,11 @@ Everything an agent or a new contributor needs is in [docs/](docs/):
 
 | | |
 |---|---|
-| **[docs/ai/10-golden-rules.md](docs/ai/10-golden-rules.md)** | **read this first** |
-| [docs/ai/20-trading-safety.md](docs/ai/20-trading-safety.md) | what can cost money |
-| [docs/ai/30-architecture.md](docs/ai/30-architecture.md) | layers and boundaries |
-| [docs/ai/40-testing.md](docs/ai/40-testing.md) | the testing protocol |
-| [docs/ai/50-workflow.md](docs/ai/50-workflow.md) | how a change gets made |
+| **[docs/system/rules/10-golden-rules.md](docs/system/rules/10-golden-rules.md)** | **read this first** |
+| [docs/system/rules/20-trading-safety.md](docs/system/rules/20-trading-safety.md) | what can cost money |
+| [docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md) | layers and boundaries |
+| [docs/system/rules/40-testing.md](docs/system/rules/40-testing.md) | the testing protocol |
+| [docs/system/rules/50-workflow.md](docs/system/rules/50-workflow.md) | how a change gets made |
 | [docs/specs/](docs/specs/) | what we are building and why |
 
 The short version: **never** place a real or demo order to test something,

@@ -56,7 +56,7 @@ declare victory.
 
 ## Writing the tests
 
-Follow `docs/ai/40-testing.md`:
+Follow `docs/system/rules/40-testing.md`:
 
 - write it, **run it, watch it fail**, then make it pass
 - every "there are zero X" assertion needs a negative control proving the

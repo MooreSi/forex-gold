@@ -8,11 +8,13 @@ run.py                     launcher: logging, licence, then starts the UI
 frontend/                  NiceGUI only. Pages, widgets, formatting.
   │                        Knows nothing about SQL or brokers.
   ▼
-backend/src/controllers/   Translation layer. UI shapes ⇄ service calls.
-  │                        Owns off-loop dispatch (to_db_thread).
+backend/src/controllers/   Flat modules, one per page: <name>_controller.py.
+  │                        Validate early, call one service, return plain
+  │                        values. No loops, merges, formatting or fallbacks.
   ▼
 backend/src/services/      All the behaviour. One package per domain.
-  │                        Each owns its own repo/*.py for data access.
+  │                        Each owns its own repo/*.py for data access, and
+  │                        its own off-loop dispatch (to_db_thread).
   ▼
 backend/src/db/            Connections, schema, transactions.
 
@@ -29,8 +31,8 @@ mt5_bridge.py              Separate process, different Python interpreter.
 | Layer | Must never |
 |---|---|
 | `frontend/` | import `backend.src.db`, run SQL, block the event loop |
-| `controllers/` | import a service's `repo` module directly |
-| `services/` | import `nicegui` |
+| `controllers/` | import `backend.src.db`, import a service's `repo`, hold logic |
+| `services/` | import `nicegui`, import a controller |
 | `utils/`, `config/` | import anything from `backend.src` above themselves |
 
 These are checked, by name, on every test run:
@@ -39,10 +41,73 @@ These are checked, by name, on every test run:
 python -m tools.refactor_audit.import_contracts --check
 ```
 
-Two contracts are enforced at **zero** — `controllers-never-import-repos`
+Four contracts are enforced at **zero** — `controllers-never-import-repos`,
+`controllers-never-import-the-database`, `services-never-import-controllers`
 and `frontend-never-imports-the-database`. Any violation fails. Three carry a
 shrink-only baseline because they still have known violations; the number may
 go down, never up.
+
+## Controllers route; services decide
+
+A controller names the operations a page can perform and forwards each to one
+service. That is the whole job. If you find yourself writing a loop, merging
+two sources, formatting a timestamp or catching an exception to return a
+default, it belongs in a service.
+
+Two rules exist because breaking them is how the layer collapsed before:
+
+**Controllers do not import `backend.src.db`.** A controller that can reach
+the database does not need a service to exist, so none gets written and the
+logic pools in the controller. `history/controller.py` reached 403 lines of
+three-source ledger merges this way, under a docstring claiming "nothing
+touches the database". `db/database.py` also re-exports ~90 names *upward*
+from services, so `db_module.get_risk_settings()` reached a service repo
+without ever naming it — invisible to the never-import-repos contract.
+
+**Services own off-loop dispatch.** Any service function a `ui.timer` reaches
+has an `async` sibling that wraps `to_db_thread`; the controller just awaits
+it. This is a change from the original design, where controllers owned
+`to_db_thread` — that ownership was precisely what forced every controller to
+import `backend.src.db`, and it is why the boundary was unenforceable.
+
+There is no generic dispatch hatch. `run_db(fn)` used to let a page hand an
+arbitrary callable through the controller onto the DB worker thread, which
+inverted the layering: the *page* chose the data access and the controller
+only supplied a thread. Every one of its 51 call sites is now a named service
+function.
+
+### Why `controllers/` is flat
+
+`<name>_controller.py` modules, no package directories. This is a deliberate
+exception to [70-file-organisation.md](70-file-organisation.md), whose
+"package directories, not sibling files" rule exists for modules over 800
+lines. A controller that approaches 800 lines has already failed the rule
+above, so the exception is safe — and it is enforced rather than trusted:
+
+```bash
+python -m tools.refactor_audit.structure_gates --check
+```
+
+`controller_loc` (ceiling 200) and `controller_shape` (flat `*_controller.py`
+only) are both enforced at zero. The shape gate exists because a package
+directory under `controllers/` is exactly how `remote/` and `sync/` grew to
+4,950 lines of websocket server, TLS setup and licence issuance without
+anyone noticing they were not controllers at all. They are now
+`services/cluster/remote/` and `services/cluster/sync/`.
+
+## Where a helper lives
+
+- Used by **two or more services** → `backend/src/utils/`
+- Used by **one service** → inside that service's package
+- Used only by the **UI** → `frontend/`
+
+Applying this moved three modules out of `utils/`: `retention.py` (only
+`db/database.py` used it, and it imports `db()`) to `backend/src/db/`,
+`self_healer.py` (only the runtime used it, and it imported the runtime back)
+to `services/health/`, and `theme.py` to `frontend/`. That last one is worth
+noting — `theme.py` is a stylesheet, and the only reason it had ever been
+filed as backend was two lines that read and wrote `app_config` directly.
+Those now go through `settings_controller`.
 
 ## Why the frontend must not touch the database
 

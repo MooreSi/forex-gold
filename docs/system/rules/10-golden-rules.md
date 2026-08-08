@@ -33,7 +33,7 @@ allowed.
 
 Any behaviour constant that becomes configurable keeps its exact previous
 value as the default. An upgrade must never change how the system trades.
-See `docs/ai/60-adding-a-tunable.md`.
+See `docs/system/rules/60-adding-a-tunable.md`.
 
 ### 4. A failing test is information, not an obstacle
 
@@ -82,7 +82,7 @@ frontend/  →  controllers/  →  services/  →  db/  →  (nothing)
 
 The frontend never imports `backend.src.db`. Controllers never import a
 service's `repo`. `utils/` and `config/` import nothing above them. These are
-enforced — see `docs/ai/30-architecture.md`.
+enforced — see `docs/system/rules/30-architecture.md`.
 
 ### 9. Delete code, don't comment it out
 

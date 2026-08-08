@@ -7,27 +7,39 @@ required — any AI agent or human reads the same files.
 
 | Directory | What it holds | Who reads it |
 |---|---|---|
-| **[ai/](ai/)** | **The rules.** Safety, architecture, testing, workflow. | **every agent, every change** |
+| **[system/](system/)** | **The knowledge base.** Goal, rules, and one living directory per part of the system. The single point of truth. | **every agent, every change** |
 | [specs/](specs/) | What we are building and why, one file per change | before building |
-| [architecture/](architecture/) | How the system is put together | when adding something |
-| [operations/](operations/) | Running, releasing, recovering | when it is live |
-| [decisions/](decisions/) | Decisions taken and the reasoning | when asking "why is it like this" |
+| [todo/](todo/) | Multi-session work packs in progress | while executing a plan |
+| [reviews/](reviews/) | Point-in-time review snapshots | when auditing |
 | [history/](history/) | Audit trail of completed work — **read-only** | archaeology |
 
 ## If you are an AI agent
 
-Read **[ai/00-start-here.md](ai/00-start-here.md)** first. Then
-**[ai/10-golden-rules.md](ai/10-golden-rules.md)**, always, before changing
-anything.
+Read **[system/rules/00-start-here.md](system/rules/00-start-here.md)** first.
+Then **[system/rules/10-golden-rules.md](system/rules/10-golden-rules.md)**,
+always, before changing anything.
 
 This app places real money orders. The rules are strict for that reason and
 not negotiable by convenience.
 
 ## If you are new here
 
-1. [../README.md](../README.md) — what the app is and how to run it
-2. [ai/30-architecture.md](ai/30-architecture.md) — how it is laid out
-3. [ai/20-trading-safety.md](ai/20-trading-safety.md) — what can cost money
+1. [system/vision/000-goal.md](system/vision/000-goal.md) — what this system is and what it is for
+2. [../README.md](../README.md) — how to run it
+3. [system/rules/30-architecture.md](system/rules/30-architecture.md) — how it is laid out
+4. [system/rules/20-trading-safety.md](system/rules/20-trading-safety.md) — what can cost money
+
+## The knowledge base — `system/`
+
+`system/` is a living game plan: [system/vision/](system/vision/) says why the
+system exists, [system/rules/](system/rules/) says what must never be
+violated, and [system/domains/](system/domains/) holds one directory per part
+of the system — its constraints, known behaviours, and open questions.
+
+These files are **updated as we learn**. When you discover a non-obvious
+behaviour, settle a question, or add a constraint, record it in the relevant
+domain file in the same change. Code explains *how*; `system/` explains
+*what and why*.
 
 ## Spec-driven development
 
@@ -40,13 +52,15 @@ is the one that matters most here — most of this system's value is in
 behaviour that must stay exactly as it is.
 
 Specs exist because a chat transcript is not a record. Six months from now the
-spec is what explains the code.
+spec is what explains the code. When a spec ships, fold what it taught us
+back into the relevant `system/domains/` file.
 
 ## A note on `history/`
 
 `history/refactor-2026/` holds 58 work packs from the 2026 restructure. It is
 an audit trail: each says what was true at the time, including names of files
-that no longer exist.
+that no longer exist — and links to `docs/ai/`, which has since moved to
+`docs/system/rules/`.
 
 **Do not update it to match today's code.** Its value is that it records what
 was actually done and when. Rewriting it to look current destroys the only

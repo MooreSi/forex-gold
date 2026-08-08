@@ -8,6 +8,11 @@ description: Write a spec in docs/specs before building anything bigger than a o
 Anything beyond a one-line fix starts here. Copy `docs/specs/TEMPLATE.md` to
 `docs/specs/NNN-short-name.md` and fill it in.
 
+**First, ground the spec in the knowledge base.** Read the affected domain's
+`docs/system/domains/<domain>/README.md` — its constraints and gotchas feed
+"What must NOT change" directly. When the spec ships, fold anything it taught
+us back into that domain file.
+
 ## Why bother
 
 A chat transcript is not a record. Six months from now the spec is what

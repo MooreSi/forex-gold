@@ -33,12 +33,12 @@ not a record.
 | Bug fix | a test reproducing the bug first |
 | New behaviour | a spec + tests |
 | Refactor | characterization tests before moving anything |
-| Config/tunable | see `docs/ai/60-adding-a-tunable.md` |
+| Config/tunable | see `docs/system/rules/60-adding-a-tunable.md` |
 | Anything touching orders | **stop** — owner sign-off + demo session |
 
 ## 3. Write the failing test
 
-See `docs/ai/40-testing.md`. Watch it fail for the right reason.
+See `docs/system/rules/40-testing.md`. Watch it fail for the right reason.
 
 ## 4. Make the smallest change that passes
 
@@ -92,14 +92,14 @@ between a trade being managed and being abandoned. Check whether it is in
 `EXPERT_PARAMS` first — if it is, it is a config change, not a code change.
 
 **"This constant should be configurable."** Probably true, and there is a
-process: `docs/ai/60-adding-a-tunable.md`. Do not hardcode a second copy.
+process: `docs/system/rules/60-adding-a-tunable.md`. Do not hardcode a second copy.
 
 **"The test is flaky, I'll rerun it."** Rerun once. If it fails again, it is
 not flaky. Known real flakiness sources here: module-level timestamps, and
 running two suites concurrently.
 
 **"This file is huge, let me split it while I'm here."** File splits are their
-own change with their own risks — see `docs/ai/70-file-organisation.md`. Do
+own change with their own risks — see `docs/system/rules/70-file-organisation.md`. Do
 not bundle one with a behaviour change.
 
 **"Coverage dropped 0.1%, that's fine."** It is a ratchet. Add the test.

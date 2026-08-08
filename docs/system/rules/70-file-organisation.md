@@ -38,6 +38,13 @@ learn by reading all of them. Directories make the relationship structural.
 
 ### Where this does NOT apply
 
+- **`backend/src/controllers/`** is flat: `<name>_controller.py` modules, never
+  package directories. A controller routes and does not decide, so it never
+  reaches a size that needs splitting -- and `structure_gates` enforces that
+  with a 200-line ceiling and a shape check, both at zero. Package directories
+  here are what let `remote/` and `sync/` grow to 4,950 lines of websocket
+  server inside the controller layer. See
+  [30-architecture.md](30-architecture.md).
 - **`mt5_bridge.py`** stays a single root-level file. It runs under a
   *different Python interpreter* (Wine/Windows) as a subprocess. Its import
   path is a filesystem path passed on a command line, and the test suite here
@@ -50,10 +57,12 @@ learn by reading all of them. Directories make the relationship structural.
 
 **A split is only safe when tests can tell you it worked.**
 
-`backend/src/controllers/remote/` is 2,116 lines of licence-token issuance,
-revocation and admin-machine authority — with **zero** tests. Splitting it for
-a line-count target would be surgery on the auth path with no way to detect a
-mistake. The line ceiling is a code-health heuristic; it does not outrank
+`backend/src/services/cluster/remote/` is 2,092 lines of licence-token
+issuance, revocation and admin-machine authority — with **zero** tests. (It
+lived under `controllers/` until it was moved to the layer it actually belongs
+to; the move was a pure `git mv`, and the line counts below are unchanged
+because nothing inside it was reshaped.) Splitting it for a line-count target
+would be surgery on the auth path with no way to detect a mistake. The line ceiling is a code-health heuristic; it does not outrank
 "can we tell if this broke".
 
 Order of operations, always:
@@ -133,6 +142,7 @@ That was a flaw in the metric, and it was fixed rather than baselined around.
 | File | Lines | Plan |
 |---|---|---|
 | ~~`frontend/pages/trading.py`~~ | ~~3,254~~ | ✅ **split** into 10 modules, largest 561 |
+| `services/reversal_engine/reversal_engine_repo.py` | 809 | newly over the ceiling |
 | `frontend/pages/settings.py` | 3,193 | package split |
 | `frontend/app.py` | 1,635 | package split |
 | `frontend/pages/history.py` | 1,416 | package split |
@@ -141,18 +151,18 @@ That was a flaw in the metric, and it was fixed rather than baselined around.
 | `frontend/pages/test_panel.py` | 1,263 | package split |
 | `backend/src/db/database.py` | 1,251 | package split |
 | `frontend/pages/ai_trade_analysis.py` | 1,250 | package split |
-| `controllers/remote/server.py` | 1,196 | **blocked: needs tests first** |
-| `controllers/sync/server.py` | 1,073 | blocked behind remote/ tests |
+| `services/cluster/remote/server.py` | 1,196 | **blocked: needs tests first** |
+| `services/cluster/sync/server.py` | 1,073 | blocked behind remote/ tests |
 | `frontend/pages/breakout_panel.py` | 928 | package split |
-| `controllers/remote/client.py` | 920 | **blocked: needs tests first** |
-| `controllers/sync/client.py` | 867 | blocked behind remote/ tests |
+| `services/cluster/remote/client.py` | 920 | **blocked: needs tests first** |
+| `services/cluster/sync/client.py` | 867 | blocked behind remote/ tests |
 | `frontend/pages/chart.py` | 842 | package split |
 | `frontend/pages/reversal_panel.py` | 812 | package split |
 
 The LOC gate is shrink-only: `structure_gates --check` fails if the count of
 oversized files rises, or any listed file grows.
 
-Also blocked on tests: `controllers/remote/server.py` and `client.py`. The
+Also blocked on tests: `services/cluster/remote/server.py` and `client.py`. The
 auth *decisions* are now covered (`tests/controllers/test_remote_server_auth.py`,
 `test_remote_admin_password.py`), but the websocket handler and TLS setup are
 not, and those are the bulk of both files.

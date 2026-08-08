@@ -1,6 +1,6 @@
 ---
 name: test
-description: Write and review test cases. Use when creating new tests, reviewing existing tests for correctness, or improving coverage. Enforces rules that stop AI-generated tests from being written to pass rather than to verify. Read alongside docs/ai/40-testing.md.
+description: Write and review test cases. Use when creating new tests, reviewing existing tests for correctness, or improving coverage. Enforces rules that stop AI-generated tests from being written to pass rather than to verify. Read alongside docs/system/rules/40-testing.md.
 ---
 
 # /test — Write & Review Test Cases
@@ -522,9 +522,9 @@ to declare victory. See `/coverage-gap`.
 
 | | |
 |---|---|
-| `docs/ai/40-testing.md` | The protocol this skill implements |
-| `docs/ai/20-trading-safety.md` | What can cost money |
-| `docs/ai/30-architecture.md` | Layer boundaries the gates enforce |
+| `docs/system/rules/40-testing.md` | The protocol this skill implements |
+| `docs/system/rules/20-trading-safety.md` | What can cost money |
+| `docs/system/rules/30-architecture.md` | Layer boundaries the gates enforce |
 | `/verify` | Pre-commit: full suite + gates + boot |
 | `/coverage-gap` | Finding and filling untested code |
 | `/safe-change` | Anything near orders, sizing or the close path |

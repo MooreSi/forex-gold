@@ -58,7 +58,7 @@ Asking costs one message. The alternative has cost real money here before.
 ## Where everything lives
 
 ```
-docs/ai/            these rules — agent-agnostic
+docs/system/rules/            these rules — agent-agnostic
 docs/specs/         what we are building and why (spec-driven)
 docs/architecture/  how the system is put together
 docs/operations/    running it, releasing it, recovering it

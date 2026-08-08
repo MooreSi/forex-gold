@@ -5,7 +5,7 @@ description: Make a hardcoded behaviour constant user-editable through Settings 
 
 # Adding an Expert Tunable
 
-Full rationale in `docs/ai/60-adding-a-tunable.md`. This is the procedure.
+Full rationale in `docs/system/rules/60-adding-a-tunable.md`. This is the procedure.
 
 ## First: should it be exposed at all?
 
@@ -89,4 +89,4 @@ python -m tools.checks all
 
 Say so in the report. These do: the R:R floors, the directional cap, the
 signal-age cutoff, the broker-close miss threshold. They should get a pass in
-the next demo-account session, and `docs/ai/20-trading-safety.md` lists them.
+the next demo-account session, and `docs/system/rules/20-trading-safety.md` lists them.

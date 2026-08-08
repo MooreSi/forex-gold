@@ -2,7 +2,7 @@
 
 **This app places real orders on a live MetaTrader 5 account with real money.**
 
-Read **[docs/ai/10-golden-rules.md](docs/ai/10-golden-rules.md)** before
+Read **[docs/system/rules/10-golden-rules.md](docs/system/rules/10-golden-rules.md)** before
 changing anything. It is short and it is not optional.
 
 ---
@@ -30,18 +30,34 @@ python -m tools.checks all
 Runs the suite, all four gates, the coverage ratchet and the boot smoke test.
 Everything must pass. **A failing gate is not noise.**
 
+## The knowledge base — docs/system/
+
+**[docs/system/](docs/system/) is the single point of truth** for what this
+system is and what we know about it. It is a living game plan:
+
+- [docs/system/vision/000-goal.md](docs/system/vision/000-goal.md) — what the system is for
+- [docs/system/rules/](docs/system/rules/) — the non-negotiables (below)
+- [docs/system/domains/](docs/system/domains/) — one living directory per part
+  of the system: constraints, known things, gotchas, open questions
+
+**Before changing a domain, read its `docs/system/domains/<domain>/README.md`.**
+After a change teaches you something non-obvious — a constraint, a gotcha, a
+settled question — record it in that domain file in the same change. If a
+domain file and the code disagree, the code is the fact: fix the file and say
+so.
+
 ## Where the rules live
 
 | Topic | File |
 |---|---|
-| Start here | [docs/ai/00-start-here.md](docs/ai/00-start-here.md) |
-| **Golden rules** | [docs/ai/10-golden-rules.md](docs/ai/10-golden-rules.md) |
-| What can cost money | [docs/ai/20-trading-safety.md](docs/ai/20-trading-safety.md) |
-| Layers and boundaries | [docs/ai/30-architecture.md](docs/ai/30-architecture.md) |
-| Testing protocol | [docs/ai/40-testing.md](docs/ai/40-testing.md) |
-| How to make a change | [docs/ai/50-workflow.md](docs/ai/50-workflow.md) |
-| Making a constant configurable | [docs/ai/60-adding-a-tunable.md](docs/ai/60-adding-a-tunable.md) |
-| Splitting a big file | [docs/ai/70-file-organisation.md](docs/ai/70-file-organisation.md) |
+| Start here | [docs/system/rules/00-start-here.md](docs/system/rules/00-start-here.md) |
+| **Golden rules** | [docs/system/rules/10-golden-rules.md](docs/system/rules/10-golden-rules.md) |
+| What can cost money | [docs/system/rules/20-trading-safety.md](docs/system/rules/20-trading-safety.md) |
+| Layers and boundaries | [docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md) |
+| Testing protocol | [docs/system/rules/40-testing.md](docs/system/rules/40-testing.md) |
+| How to make a change | [docs/system/rules/50-workflow.md](docs/system/rules/50-workflow.md) |
+| Making a constant configurable | [docs/system/rules/60-adding-a-tunable.md](docs/system/rules/60-adding-a-tunable.md) |
+| Splitting a big file | [docs/system/rules/70-file-organisation.md](docs/system/rules/70-file-organisation.md) |
 
 These live in `docs/` as plain Markdown so any tool reads them — not just
 Claude Code.
@@ -50,11 +66,14 @@ Claude Code.
 
 | Skill | Use when |
 |---|---|
+| `/test` | writing or reviewing any test — rules, layout, anti-patterns |
 | `/verify` | before every commit — full suite + gates + boot |
 | `/safe-change` | any change near orders, sizing or the close path |
 | `/add-tunable` | a hardcoded constant should be user-editable |
 | `/split-file` | a file is over 800 lines |
 | `/new-spec` | starting anything bigger than a one-line fix |
+| `/spec` | work needing several tasks and more than one session — scaffolds a plan pack under `docs/todo/` |
+| `/frontend-conventions` | writing, moving or splitting anything under `frontend/` |
 | `/coverage-gap` | find and fill untested code |
 
 ## Layers point downward, never up
@@ -64,9 +83,14 @@ frontend/ → controllers/ → services/ → db/
                 utils/, config/ → nothing
 ```
 
-The frontend never imports `backend.src.db`. Controllers never import a
-service's `repo`. Enforced at zero — see
-[docs/ai/30-architecture.md](docs/ai/30-architecture.md).
+Controllers route; services decide; repos hold the SQL. A controller is a flat
+`<name>_controller.py` that names an operation and forwards it to one service —
+no loops, no merges, no formatting, no fallbacks.
+
+The frontend never imports `backend.src.db`. Controllers never import
+`backend.src.db` or a service's `repo`. Services never import a controller.
+All four enforced at zero — see
+[docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md).
 
 ## Do not
 

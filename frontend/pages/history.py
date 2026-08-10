@@ -713,7 +713,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
 # ── Monthly calendar ───────────────────────────────────────────────────────────
 
 def _render_calendar(engine):
-    _state = {"year": datetime.now(_UK_TZ).year, "month": datetime.now(_UK_TZ).month}
+    _state = {"year": datetime.now(_ZoneInfo("Europe/London")).year, "month": datetime.now(_ZoneInfo("Europe/London")).month}
 
     header_row  = ui.row().classes("w-full items-center gap-3 mb-3")
     stats_lbl   = ui.label("Loading...").classes("text-sm text-gray-400")
@@ -733,7 +733,7 @@ def _render_calendar(engine):
         comm_rate = await history_ctl.platform_fee_rate()
 
         try:
-            today_d   = datetime.now(_UK_TZ).date()
+            today_d   = datetime.now(_ZoneInfo("Europe/London")).date()
             first     = date(year, month, 1)
             days_back = max((today_d - first).days + 35, 35)
             deals     = await engine._bridge.get_deal_history(int(days_back))
@@ -880,7 +880,7 @@ def _render_calendar(engine):
                     )
 
             cal   = _sun_cal.monthdayscalendar(year, month)
-            today = datetime.now(_UK_TZ).date()
+            today = datetime.now(_ZoneInfo("Europe/London")).date()
 
             for week in cal:
                 with ui.grid(columns=7).classes("w-full gap-1.5 mb-1.5"):

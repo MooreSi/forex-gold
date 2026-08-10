@@ -36,3 +36,6 @@ FOREX Trader.app/
 .local/
 .coverage.json
 .coverage
+
+# NiceGUI runtime storage (sessions, app.storage) — never commit
+.nicegui/

@@ -120,12 +120,22 @@ def test_the_app_serves_its_page(running_app):
     composition root and the page stack are all working. The dashboard
     itself is covered by test_pages_render.py.
     """
+    import re
     import urllib.request
 
     _proc, log_path = running_app
+    # The activation screen hardcodes 8888, but a LICENSED app serves on its
+    # configured port (and debug mode is designed to let a dev run it that way),
+    # so read the port the server actually reported rather than assuming 8888.
+    log = _read(log_path)
+    m = (re.search(r"NiceGUI ready to go on http://[\d.]+:(\d+)", log)
+         or re.search(r"laddr=\('[\d.]+', (\d+)\)", log))
+    port = int(m.group(1)) if m else PORT
     # The proxy in this environment must not intercept a localhost call.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(f"http://127.0.0.1:{PORT}/", timeout=30) as response:
+    # A licensed app gates every route behind /login (307) — following the
+    # redirect still proves the server, composition root and page stack work.
+    with opener.open(f"http://127.0.0.1:{port}/", timeout=30) as response:
         assert response.status == 200
         body = response.read().decode("utf-8", errors="replace")
     assert body.strip(), "served an empty body"

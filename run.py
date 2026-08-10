@@ -235,6 +235,33 @@ def _resolve_bind_host(cfg: dict) -> str:
     return host
 
 
+def _dashboard_storage_secret() -> str:
+    """A stable per-install secret used to sign the login session cookie.
+
+    Generated once and stored in the user data dir (never shipped). This only
+    signs the dashboard session — it is not the licence or admin secret.
+    """
+    import secrets
+    secret_file = _USER_DATA / "dashboard_storage_secret"
+    try:
+        if secret_file.exists():
+            val = secret_file.read_text(encoding="utf-8").strip()
+            if val:
+                return val
+        val = secrets.token_urlsafe(48)
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        secret_file.write_text(val, encoding="utf-8")
+        try:
+            os.chmod(secret_file, 0o600)
+        except OSError:
+            pass
+        return val
+    except OSError:
+        # If the data dir isn't writable, fall back to an ephemeral secret so the
+        # app still runs (sessions just won't survive a restart).
+        return secrets.token_urlsafe(48)
+
+
 def main():
     import argparse
     _ap = argparse.ArgumentParser(add_help=False)
@@ -300,6 +327,11 @@ def main():
 
         from nicegui import ui
         import frontend.app  # registers startup hooks and page routes  # noqa: F401
+        # Gate every dashboard route behind a login (both modes). Registered here,
+        # after the pages import and before ui.run, so the middleware is in place
+        # when the server starts.
+        from frontend import auth_gate as _auth_gate
+        _auth_gate.install()
 
         ui.run(
             host=_resolve_bind_host(cfg),
@@ -309,6 +341,10 @@ def main():
             dark=True,
             reload=False,
             show=show_browser,
+            # Signs the session cookie that backs app.storage.user — required for
+            # the dashboard login gate (frontend/auth_gate.py). Per-install secret
+            # stored in the user data dir; NOT a licence/auth secret.
+            storage_secret=_dashboard_storage_secret(),
             # Keep the WebSocket alive when the browser tab is backgrounded or
             # the screen is locked.  Browsers throttle background tabs, so the
             # default 3 s reconnect window and 20 s uvicorn ping timeout cause

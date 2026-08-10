@@ -40,6 +40,11 @@ telegram_chat_id: ''
 
 # ── App ───────────────────────────────────────────────────────────────────────
 port: 8888
+# Debug mode runs the whole app on fakes — no MT5 terminal, no Telegram, no
+# credentials, no network — for local development. It uses its own database
+# (forex_trader_debug.db) and never touches the demo/live files. Off by default;
+# the env var FOREX_DEBUG_MODE=1 overrides this. (See docs/todo/infra/local-debug-mode.)
+debug_mode: false
 # Dashboard bind address. Defaults to 127.0.0.1 (this machine only) because the
 # UI has no login and can place/close live orders. Do NOT change to 0.0.0.0 or a
 # LAN IP unless real authentication is in front of it — the app logs a warning

@@ -164,6 +164,16 @@ def load() -> dict:
         # defaulting to 8888 here would kill the live app's web server.
         "port": int(_e("PORT", base.get("port", 8890))),
 
+        # Debug mode: run the whole app on fakes with no credentials or network
+        # (fake MT5 bridge, fake Telegram reader, canned news/AI/email). Default
+        # OFF; env FOREX_DEBUG_MODE wins over config.yaml's debug_mode:. When on,
+        # the DB is isolated to its own file (below) so a debug boot can never
+        # open a demo/live database. Read explicitly (not via _e) because the env
+        # name is FOREX_DEBUG_MODE while the yaml key is debug_mode.
+        "debug_mode": (
+            os.environ.get("FOREX_DEBUG_MODE") or str(base.get("debug_mode", False))
+        ).strip().lower() in ("1", "true", "yes"),
+
         # Bind address for the dashboard web server. Defaults to loopback:
         # the UI can place and close live orders and has no login of its own,
         # so it must not be reachable from other machines. Widen this (to
@@ -186,12 +196,22 @@ def load() -> dict:
         )).lower() == "true",
     }
 
-    # Derive DB path from account_env (must be after the dict is partially built)
-    env     = _cfg["account_env"]
-    db_name = f"forex_trader_{env}.db"
+    # Derive DB path from account_env (must be after the dict is partially built).
+    # Debug mode always gets its OWN file, independent of account_env, so a debug
+    # boot can never read or write a real demo/live database.
+    if _cfg["debug_mode"]:
+        db_name = "forex_trader_debug.db"
+    else:
+        db_name = f"forex_trader_{_cfg['account_env']}.db"
     _cfg["db_path"]      = str(DATA_DIR / db_name)
     _cfg["sessions_dir"] = str(SESSIONS_DIR)
     return _cfg
+
+
+def is_debug() -> bool:
+    """True when the app is running on fakes (debug mode). Reads the loaded
+    config; call load() first (run.py and app.startup() both do)."""
+    return bool((_cfg or {}).get("debug_mode", False))
 
 
 def get(key: str, default: Any = None) -> Any:

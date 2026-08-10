@@ -1,0 +1,45 @@
+name: checks
+
+# One job: run the SAME command developers run locally, so local-green and
+# CI-green can never disagree. CI adds no checks of its own — tools.checks is
+# the single source of truth (the suite, all four structural gates, the orphan
+# gate, the coverage ratchet and the boot smoke).
+on:
+  push:
+  pull_request:
+
+# One run per ref; cancel a superseded run so two suites never race (CLAUDE.md:
+# two full suites at once produce phantom failures).
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # Windows to match the dev + production environment (MetaTrader5 is a win32
+    # dependency; the suite fakes MT5 and never connects a terminal).
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run all checks
+        run: python -m tools.checks all
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-json
+          path: .coverage.json
+          if-no-files-found: ignore

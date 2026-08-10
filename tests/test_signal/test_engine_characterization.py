@@ -13,7 +13,6 @@ import tempfile
 import pytest
 
 from backend.src.services.test_signal import test_signal_repo as db
-from backend.src.services.test_signal import database as _legacy_db
 from backend.src.services.test_signal.test_signal_service import TestSignalEngine
 from backend.src.services.test_signal.test_signal_generate import _calc_lot_size
 from backend.src.services.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
@@ -25,15 +24,9 @@ def fresh_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     db.init(path)
-    # ml_engine.py (unmigrated, out of scope) imports the OLD database
-    # module directly -- _close_signal's ml.record_outcome() call needs it
-    # initialized too. See test_signal_service.py's init() for the same fix
-    # applied to the real app.
-    _legacy_db.init(path)
     yield db
     # `db` here is test_signal_repo, whose adapter holds the file open until
-    # released; _legacy_db opens per call. Windows cannot unlink either while
-    # a handle is live.
+    # released; Windows cannot unlink while a handle is live.
     db.close_db()
     os.remove(path)
 

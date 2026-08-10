@@ -27,19 +27,8 @@ ALLOWED = {
     # the alias without a cycle. Runs once at startup; its writes are
     # CREATE TABLE statements, not trading data.
     "backend/src/db/database.py": ["_apply_schema"],
-
-    # These live in the per-engine research databases, not the trading DB,
-    # and they do not use db() at all -- they use each engine's own _conn(),
-    # which opens a FRESH connection per call and does not nest. So the
-    # alias cannot simply be swapped in: close_signal genuinely opens three
-    # separate connections with a balance update between them, and making
-    # it atomic means giving _conn() the depth-counting behaviour db() has.
-    # That is a change to an engine's data layer, not a rename, so it is
-    # recorded rather than half-done. See OPEN_QUESTIONS.md.
-    "backend/src/services/reversal_engine/database.py": [
-        "close_signal", "upsert_daily_correlation", "upsert_level",
-    ],
-    "backend/src/services/test_signal/database.py": ["insert_signal"],
+    # (The per-engine research-database clones that were recorded here were
+    # deleted 2026-08-10 — dead code, superseded by their *_repo.py.)
 }
 
 

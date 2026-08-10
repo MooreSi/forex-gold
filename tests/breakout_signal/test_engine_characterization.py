@@ -16,7 +16,6 @@ from unittest.mock import patch
 import pytest
 
 from backend.src.services.breakout_signal import breakout_signal_repo as db
-from backend.src.services.breakout_signal import database as _legacy_bo_db
 from backend.src.services.breakout_signal.breakout_signal_service import BreakoutEngine
 
 
@@ -25,21 +24,9 @@ def fresh_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     db.init(path)
-    # _close_and_learn -> bo_ml.record_outcome reaches into the legacy
-    # backend.src.services.breakout_signal.database module directly (not yet
-    # migrated to breakout_signal_repo) for its ml_features/signal lookups.
-    # That module's _DB_PATH is process-wide global state, not reset between
-    # test files -- without initializing it here too, this test only passes
-    # by accident of whatever _DB_PATH some earlier-collected test file
-    # happened to leave behind (confirmed: reproduces "no such table:
-    # bo_signals" when nothing else in the run initializes it first).
-    fd2, legacy_path = tempfile.mkstemp(suffix=".db")
-    os.close(fd2)
-    _legacy_bo_db.init(legacy_path)
     yield db
     db.close_db()
     os.remove(path)
-    os.remove(legacy_path)
 
 
 @pytest.fixture

@@ -32,24 +32,19 @@ from backend.src.services.test_signal import test_signal_repo
 PINNED = 1785835911.5   # one instant; every row shares it
 
 
-def _from_module(dotted):
-    """Reuse a test module's own row factory where it has one."""
-    import importlib
-    return lambda ref: importlib.import_module(dotted)._sig(signal_ref=ref)
-
-
-# (repo module, create fn name, row builder). reversal_engine's own
-# characterization tests build the dict inline rather than via a factory,
-# so it gets the same minimal row here.
+# (repo module, create fn name, row builder). Minimal valid payloads for each
+# engine's create/insert function — required fields have no .get default there.
 ENGINES = [
     pytest.param(breakout_signal_repo, "create_signal",
-                 _from_module("tests.breakout_signal.test_database_characterization"),
+                 lambda ref: {"direction": "BUY", "breakout_type": "go",
+                              "entry_mid": 2400.0, "stop_loss": 2390.0, "signal_ref": ref},
                  id="breakout"),
     pytest.param(reversal_engine_repo, "create_signal",
                  lambda ref: {"direction": "BUY", "signal_ref": ref},
                  id="reversal_engine"),
     pytest.param(test_signal_repo, "insert_signal",
-                 _from_module("tests.test_signal.test_database_characterization"),
+                 lambda ref: {"direction": "BUY", "entry_low": 2399.0, "entry_high": 2401.0,
+                              "entry_mid": 2400.0, "stop_loss": 2390.0, "signal_ref": ref},
                  id="test_signal"),
 ]
 

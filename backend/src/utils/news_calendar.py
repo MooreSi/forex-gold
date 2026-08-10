@@ -16,15 +16,27 @@ Cache TTL: 10 minutes (events don't change that quickly).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
+# The cache is refreshed by a background daemon thread, NEVER inline from a
+# caller. Two bugs are fixed by this (backend review 2026-08-08, #5): the fetch
+# did up to ~10s of blocking urllib ON THE EVENT LOOP, and because the old guard
+# was `_cache_next_mins is not None`, a None result (the common "no upcoming
+# event" case) was never cached and re-fetched every single call. Now the getter
+# only ever reads the cache, and None is a cached value like any other.
+_lock = threading.Lock()
 _cache_ts:           float = 0.0
-_cache_next_mins:    Optional[float] = None   # minutes to next high-impact event
-_CACHE_TTL:          float = 600.0            # 10 minutes
+_cache_next_mins:    Optional[float] = None   # minutes to next high-impact event; None = none/unknown
+_CACHE_TTL:          float = 600.0            # refresh interval, 10 minutes
+
+_refresh_thread:     Optional[threading.Thread] = None
+_wake  = threading.Event()   # nudge the refresher to fetch now (see invalidate_cache)
+_stop  = threading.Event()
 
 # Currencies that affect XAUUSD meaningfully
 _IMPACT_CURRENCIES = {"USD", "XAU", "US", "EUR", "GBP"}
@@ -38,20 +50,63 @@ def _mins_to_norm(minutes: Optional[float], window: float = 120.0) -> float:
     return round(min(1.0, max(0.0, float(minutes) / window)), 4)
 
 
+def refresh_now() -> Optional[float]:
+    """Fetch once and update the cache. BLOCKS — only the refresher thread (and
+    tests) call this; never a live signal path. A failing fetch is swallowed and
+    leaves the cache at None (safe), matching the previous error behaviour."""
+    global _cache_ts, _cache_next_mins
+    try:
+        mins = _fetch_next_event_minutes()
+    except Exception as e:  # a source raising must never take down the caller
+        _log.debug("[NewsCalendar] refresh error: %s", e)
+        mins = None
+    with _lock:
+        _cache_next_mins = mins
+        _cache_ts = time.time()
+    return mins
+
+
+def _refresh_loop() -> None:
+    while not _stop.is_set():
+        refresh_now()
+        _wake.wait(_CACHE_TTL)   # sleep until the interval, or until nudged
+        _wake.clear()
+
+
+def ensure_started() -> None:
+    """Start the background refresher once (idempotent). Called lazily by the
+    getter so news data stays fresh without any caller having to remember to
+    start it; also safe to call explicitly at app startup."""
+    global _refresh_thread
+    with _lock:
+        if _refresh_thread is not None and _refresh_thread.is_alive():
+            return
+        _stop.clear()
+        _refresh_thread = threading.Thread(
+            target=_refresh_loop, name="news-calendar-refresh", daemon=True
+        )
+        _refresh_thread.start()
+
+
+def stop() -> None:
+    """Stop the background refresher (tests, shutdown)."""
+    _stop.set()
+    _wake.set()
+
+
 def get_news_proximity_norm(window_minutes: float = 120.0) -> float:
     """
-    Return news_proximity_norm [0,1].
-    Cached for 10 minutes. Always returns 1.0 (safe) on any error — better to
-    trade on unclear calendar than to block all signals from a broken feed.
-    """
-    global _cache_ts, _cache_next_mins
-    now = time.time()
-    if _cache_next_mins is not None and (now - _cache_ts) < _CACHE_TTL:
-        return _mins_to_norm(_cache_next_mins, window_minutes)
+    Return news_proximity_norm [0,1] from the background-refreshed cache.
 
-    mins = _fetch_next_event_minutes()
-    _cache_next_mins = mins
-    _cache_ts = now
+    NEVER blocks and never fetches inline — the live signal paths call this every
+    cycle. It is a pure cache read: it does not start threads or touch the
+    network, so it is safe to call from anywhere (and from tests). Returns 1.0
+    (safe) until the background refresher — started once at app boot via
+    ensure_started() — has populated the cache, which matches the long-standing
+    "unclear calendar -> trade through" fallback.
+    """
+    with _lock:
+        mins = _cache_next_mins
     return _mins_to_norm(mins, window_minutes)
 
 
@@ -209,5 +264,7 @@ def _from_forexfactory() -> Optional[float]:
 # ── Forced-refresh helper (call after a known news event passes) ──────────────
 
 def invalidate_cache() -> None:
-    global _cache_ts
-    _cache_ts = 0.0
+    """Ask the background refresher to re-fetch on its next wake (call after a
+    known event passes). Also starts the refresher if it isn't running."""
+    ensure_started()
+    _wake.set()

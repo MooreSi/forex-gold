@@ -61,6 +61,12 @@ SQL_PATTERN = re.compile(
 
 def is_repo_file(path: Path) -> bool:
     name = path.name
+    # The data layer is `backend/src/db/` plus any *_repo.py anywhere. SQL is
+    # allowed here and nowhere else (not controllers, services or frontend).
+    # Checking the directory — not just a name heuristic — means new db-layer
+    # modules (schema_sql.py, migrations.py, …) are correctly recognised.
+    if "backend/src/db/" in path.as_posix() + "/":
+        return True
     return "repo" in name or name == "database.py" or name.startswith("core_db_")
 
 
@@ -84,7 +90,11 @@ def controller_loc_report() -> dict[str, int]:
     out: dict[str, int] = {}
     base = od.REPO_ROOT / CONTROLLER_DIR
     if not base.exists():
-        return out
+        raise SystemExit(
+            f"structure-gate: {CONTROLLER_DIR} is missing — the controller LOC "
+            "gate has nothing to scan. If controllers moved, update CONTROLLER_DIR; "
+            "a gate that cannot find its target must not report clean."
+        )
     for path in sorted(base.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
@@ -105,7 +115,11 @@ def controller_shape_report() -> list[str]:
     offenders: list[str] = []
     base = od.REPO_ROOT / CONTROLLER_DIR
     if not base.exists():
-        return offenders
+        raise SystemExit(
+            f"structure-gate: {CONTROLLER_DIR} is missing — the controller shape "
+            "gate has nothing to scan. If controllers moved, update CONTROLLER_DIR; "
+            "a gate that cannot find its target must not report clean."
+        )
     for path in sorted(base.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue

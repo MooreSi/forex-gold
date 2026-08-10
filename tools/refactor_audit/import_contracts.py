@@ -226,7 +226,12 @@ def violations_for(contract: Contract) -> list[Violation]:
     for package in contract.source_packages:
         base = REPO_ROOT / package
         if not base.exists():
-            continue
+            raise SystemExit(
+                f"import-contract: source package '{package}' is missing — the "
+                f"contract '{contract.name}' cannot be enforced. If the package "
+                "moved, update the contract; a rule that scans nothing silently "
+                "stops protecting the layer boundary."
+            )
         for path in sorted(base.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue

@@ -20,6 +20,8 @@ import sys
 import time
 from dataclasses import dataclass
 
+from tools.refactor_audit.coverage_gate import COVERAGE_JSON
+
 PY = sys.executable
 
 
@@ -49,9 +51,9 @@ GATES = [
         "TradingRuntime only shrinks, and its public surface is allowlisted",
     ),
     Check(
-        "orphan detector",
-        [PY, "-m", "tools.refactor_audit.orphan_detector"],
-        "extracted code that nothing calls",
+        "orphan modules",
+        [PY, "-m", "tools.refactor_audit.orphan_modules", "--check"],
+        "whole modules nothing imports (fails closed if an entrypoint is missing)",
     ),
     Check(
         "boot smoke",
@@ -60,9 +62,17 @@ GATES = [
     ),
 ]
 
+# The suite MUST produce coverage data, or the coverage ratchet below has
+# nothing to read and fails with "no coverage data" -- which is exactly how it
+# sat inert for months. --cov-report writes the JSON the gate reads; the path
+# is taken from the gate itself so the two can never drift apart. testpaths in
+# pyproject already includes frontend/tests, so pytest need not be told the
+# paths here.
 SUITE = Check(
     "test suite",
-    [PY, "-m", "pytest", "tests/", "-q"],
+    [PY, "-m", "pytest", "tests/", "-q",
+     "--cov=backend", "--cov=frontend",
+     f"--cov-report=json:{COVERAGE_JSON.name}"],
     "every behaviour anyone bothered to pin",
     slow=True,
 )
@@ -72,6 +82,21 @@ COVERAGE = Check(
     [PY, "-m", "tools.refactor_audit.coverage_gate", "--check"],
     "coverage may rise, never fall",
 )
+
+
+def _clear_stale_coverage() -> None:
+    """Delete any leftover coverage artifact before the suite runs.
+
+    The coverage gate reads whatever `.coverage.json` it finds. If a previous
+    run left one behind and the suite then fails to produce a new one (crash,
+    interrupted run, --cov flag removed), the gate would silently grade the old
+    data. Removing it first means the gate reads only what THIS run produced, or
+    fails closed with "no coverage data".
+    """
+    try:
+        COVERAGE_JSON.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def run(check: Check) -> bool:
@@ -107,6 +132,11 @@ def main() -> int:
         checks = [COVERAGE]
     else:
         checks = [*GATES, SUITE, COVERAGE]
+
+    # If this run will both produce and grade coverage, clear any stale artifact
+    # first so the gate can only ever see data from the suite that just ran.
+    if SUITE in checks and COVERAGE in checks:
+        _clear_stale_coverage()
 
     print(f"\nRunning {len(checks)} check(s)\n")
     failed = [c.name for c in checks if not run(c)]

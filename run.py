@@ -205,6 +205,36 @@ def _run_headless() -> None:
         pass
 
 
+# Hosts that are only reachable from the same machine. Binding the dashboard
+# anywhere else exposes an unauthenticated, live-trading UI to the network.
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _is_loopback(host: str) -> bool:
+    """True only for addresses reachable solely from this machine."""
+    return str(host).strip().lower() in _LOOPBACK_HOSTS
+
+
+def _resolve_bind_host(cfg: dict) -> str:
+    """The address the dashboard binds to — loopback unless deliberately widened.
+
+    The UI has no login of its own and can place and close live orders, so a
+    non-loopback bind is a network-exposed trading terminal. We still allow it
+    (some future networked deployment behind real auth will need it) but never
+    silently: a non-loopback host gets a loud warning every launch.
+    """
+    host = str(cfg.get("host", "127.0.0.1"))
+    if not _is_loopback(host):
+        log.warning(
+            "Dashboard is binding to non-loopback host %r. This UI has no login "
+            "and can place and close live orders — anyone who can reach this "
+            "address controls the account. Only widen the bind once real "
+            "authentication is in place.",
+            host,
+        )
+    return host
+
+
 def main():
     import argparse
     _ap = argparse.ArgumentParser(add_help=False)
@@ -229,6 +259,18 @@ def main():
 
         from backend.src.db import database as _db_mod
         _db_mod.init(cfg["db_path"])
+
+        # Daily snapshot of the live-money DB (at most one per day, keep 30) to a
+        # local backups/ folder. Non-fatal: a backup problem must never stop the
+        # app from starting.
+        try:
+            from backend.src.db import backup as _db_backup
+            from backend.src.config import DATA_DIR as _DATA_DIR
+            made = _db_backup.maybe_daily_backup(cfg["db_path"], _DATA_DIR / "backups")
+            if made:
+                log.info("Daily DB backup written: %s", made)
+        except Exception as exc:
+            log.warning("Daily DB backup failed (non-fatal): %s", exc)
 
         if _db_mod.get_app_config("headless_mode_enabled") == "1":
             log.info("Headless mode enabled — starting without the web UI.")
@@ -260,7 +302,7 @@ def main():
         import frontend.app  # registers startup hooks and page routes  # noqa: F401
 
         ui.run(
-            host="0.0.0.0",
+            host=_resolve_bind_host(cfg),
             port=port,
             title="FOREX Trader",
             favicon="frontend/static/favicon.png",

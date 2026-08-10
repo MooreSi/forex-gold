@@ -1,6 +1,6 @@
 # {{Feature name}}
 
-**Spec:** {{[docs/specs/NNN-slug.md](../../../specs/NNN-slug.md) | none — see "What we're building" below}}
+**Spec:** {{[SPEC.md](SPEC.md) | none — see "What we're building" below}}
 **Status:** planning (pre-implementation)
 **Domain:** {{domain}}
 **Touches money:** {{no | YES — tasks {{0N0}}, {{0N0}}. `/safe-change` governs those; owner sign-off + demo session required before they are Done.}}

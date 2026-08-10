@@ -32,6 +32,23 @@ def render():
 
     with ui.column().classes("w-full gap-4"):
 
+        # ── Standalone-install note (static) ─────────────────────────────────
+        # Automatic push-updates only happen when this machine is connected to
+        # (and authorised by) an admin server. A standalone / local install is
+        # not connected to one, so it updates manually — this panel then just
+        # reports the version and changelog. Stated up front so "not connected"
+        # below reads as expected, not broken.
+        with ui.card().classes(
+            "w-full bg-gray-800 border border-gray-700 p-3 rounded-lg"
+        ):
+            with ui.row().classes("items-center gap-2"):
+                ui.icon("info", color="blue-400", size="xs")
+                ui.label(
+                    "Automatic updates require a connection to an admin server. "
+                    "On a standalone (local) install none is connected, so updates "
+                    "are manual and the automatic push channel stays disabled."
+                ).classes("text-xs text-gray-400")
+
         # ── Update available banner (dynamic) ────────────────────────────────
         banner = ui.element("div").classes("w-full")
 

@@ -59,6 +59,12 @@ def test_repo_files_are_exempt_from_the_sql_gate():
     assert sg.is_repo_file(sg.Path("forex_trader/reversal_engine/reversal_engine_repo.py"))
     assert sg.is_repo_file(sg.Path("forex_trader/core/core_db_channel.py"))
     assert not sg.is_repo_file(sg.Path("frontend/pages/history.py"))
+    # The whole db/ directory is the data layer — new modules there (not just
+    # database.py / *_repo.py) may hold SQL.
+    assert sg.is_repo_file(sg.Path("backend/src/db/schema_sql.py"))
+    assert sg.is_repo_file(sg.Path("backend/src/db/migrations.py"))
+    # Negative control: a same-named file OUTSIDE db/ is still not exempt.
+    assert not sg.is_repo_file(sg.Path("backend/src/services/trading/migrations.py"))
 
 
 def test_the_reference_repos_are_transactionally_clean():

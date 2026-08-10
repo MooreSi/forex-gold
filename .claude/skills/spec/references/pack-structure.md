@@ -7,6 +7,7 @@ Reference for `/spec`. Load when scaffolding or reshaping a pack.
 ```
 docs/todo/<domain>/<feature>/          # flat pack (the default)
 ├── README.md          # the ONLY hub file — onboarding, doc index, decisions, roadmap
+├── SPEC.md            # the anchor spec (per docs/specs/TEMPLATE.md) — the default for every pack
 ├── PROGRESS.md        # live status log (see Companion docs) — add when >1 agent will touch the pack
 ├── 010-<slug>.md      # task files, stepped by 10
 ├── 020-<slug>.md
@@ -14,6 +15,7 @@ docs/todo/<domain>/<feature>/          # flat pack (the default)
 
 docs/todo/<domain>/<feature>/          # phased pack (work spans releases / phases)
 ├── README.md          # single hub at the feature root
+├── SPEC.md            # one anchor spec for the whole pack, all phases
 ├── PROGRESS.md        # one status log for the whole pack, all phases
 ├── phase1-<slug>/     # ALL phases get a dir — phase 1 files never sit flat. Descriptive suffix OK.
 │   ├── README.md      # phase index + gating condition
@@ -36,20 +38,24 @@ docs/todo/<domain>/<feature>/          # phased pack (work spans releases / phas
 - **Phase dir names** may carry a descriptive suffix (`phase1-api-layer`, `phase2-shell`) — far more
   navigable than bare `phase1/`. Keep the `phaseN` prefix so order is obvious.
 
-## How a pack relates to `docs/specs/`
+## The anchor spec — `SPEC.md` in the pack
 
-`docs/specs/NNN-*.md` is **permanent**; the pack is **temporary**.
+Every pack anchors on a **`SPEC.md` in the feature dir**, structured per `docs/specs/TEMPLATE.md`.
+It travels with the pack: written at scaffold time, deleted with the pack at `/spec done` (git
+history is the archive; anything permanent — the filled Verification checklist, design notes — is
+harvested to `CHANGELOG.md` / `docs/system/` first). `docs/specs/NNN-*.md` is only for
+**standalone** `/new-spec` changes that have no pack.
 
-| Lives in the spec (`docs/specs/NNN-*.md`) | Lives in the pack (`docs/todo/…/`) |
+| Lives in `SPEC.md` | Lives in the rest of the pack |
 |---|---|
 | Problem, Goal, Non-goals | The task breakdown and its ordering |
 | **What must NOT change** | Live status, per-task ownership |
 | Test plan (the contract) | Open decisions awaiting an answer |
 | Rollout, Verification checklist | Evidence snapshots, the screen bar |
 
-The pack README links to its anchor spec in the header; the anchor spec's Status moves
-Draft → Approved → Building → Shipped as the pack progresses. At `/spec done` the spec's Verification
-checklist gets filled in and the pack is deleted.
+The pack README links to `SPEC.md` in its header; the spec's Status moves
+Draft → Approved → Building → Shipped as the pack progresses. At `/spec done` the Verification
+checklist gets filled in (and harvested) before the pack is deleted.
 
 ## Companion docs (the only files allowed beside README + numbered tasks)
 
@@ -59,6 +65,7 @@ docs is allowed — each with a defined role. Do **not** invent others (`START.m
 
 | File | Role | When |
 |---|---|---|
+| `SPEC.md` | **The anchor spec** — Problem / Goal / Non-goals / What must NOT change / Design / Test plan / Rollout / Verification, per `docs/specs/TEMPLATE.md`. | Every pack, by default. Skipping it is allowed but must be said explicitly in the README header. |
 | `PROGRESS.md` | **Live multi-agent status log** — one row per task (status / owner / notes) + a decisions log + blockers. Every agent that picks up a task claims its row and updates it. | Whenever more than one agent (or session) will work the pack. Default yes for anything non-trivial. |
 | `QUESTIONS.md` | **Decisions to confirm** — recommendation-first, plain-language, **inline-answerable** (the user writes `ANSWER:` under each). | When the plan has open decisions the user must settle. Retire/annotate once answered. |
 | `SUMMARY.md` | **Owner-facing plain-English digest** — every change, per mechanism, before→after, no jargon or code. For a non-technical reviewer to read the whole pack at a glance. | When the requester isn't the implementer, or the change is broad / behaviour-heavy. |

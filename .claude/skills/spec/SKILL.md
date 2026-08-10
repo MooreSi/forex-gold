@@ -21,10 +21,13 @@ implementation.
 | `/new-spec` | One change, one spec file — `docs/specs/NNN-short-name.md`. Half a page. The default for anything bigger than a one-line fix. |
 | `/spec` | Work that needs **more than one commit and more than one session**: several tasks, an ordering between them, decisions still open, possibly more than one agent. |
 
-They compose. A plan pack normally **anchors on a `docs/specs/NNN-*.md` spec** — that file holds the
-Problem / Goal / Non-goals / *What must NOT change* / Test plan; the pack holds the breakdown, the
-status log and the open decisions. If no spec exists yet, write one with `/new-spec` first and link
-it from the pack README. A pack without an anchor spec is allowed but say so explicitly.
+They compose. A plan pack normally **anchors on a `SPEC.md` inside the pack** —
+`docs/todo/<domain>/<feature>/SPEC.md`, structured per `docs/specs/TEMPLATE.md`; that file holds the
+Problem / Goal / Non-goals / *What must NOT change* / Test plan; the rest of the pack holds the
+breakdown, the status log and the open decisions. If no spec exists yet, write `SPEC.md` first (same
+discipline as `/new-spec`, different location) and link it from the pack README. `docs/specs/NNN-*.md`
+remains the home of **standalone** specs (a `/new-spec` change with no pack); a pack's spec never
+goes there. A pack without an anchor spec is allowed but say so explicitly.
 
 ## Pack shape (summary)
 
@@ -32,9 +35,10 @@ it from the pack README. A pack without an anchor spec is allowed but say so exp
 - **Phased pack** (work spans releases/phases): `README.md` + `PROGRESS.md` at the root, then
   `phase1-<slug>/`, `phase2-<slug>/` dirs, each with its own README index and restarted `010-`
   numbering.
-- **Companion docs** beside the hub — a fixed, allowed set: `PROGRESS.md` (live status),
-  `QUESTIONS.md` (decisions), `SUMMARY.md` (owner-facing plain-English digest), `REVIEW.md`
-  (evidence), `BAR.md` (the screen bar, when the pack builds a UI surface). Nothing else —
+- **Companion docs** beside the hub — a fixed, allowed set: `SPEC.md` (the anchor spec),
+  `PROGRESS.md` (live status), `QUESTIONS.md` (decisions), `SUMMARY.md` (owner-facing plain-English
+  digest), `REVIEW.md` (evidence), `BAR.md` (the screen bar, when the pack builds a UI surface).
+  Nothing else —
   `START/INFO/OVERVIEW/PLAN.md` are banned.
 
 Full detail — directory trees, numbering, companion-doc roles, phase naming, the docs phase — is in
@@ -47,8 +51,9 @@ Full detail — directory trees, numbering, companion-doc roles, phase naming, t
 - Read **[../../../CLAUDE.md](../../../CLAUDE.md)** and
   **[docs/system/rules/10-golden-rules.md](../../../docs/system/rules/10-golden-rules.md)** if they aren't already in
   context. This app places real orders with real money; that shapes every pack.
-- Read the anchor spec in `docs/specs/` if one exists. If there is none and the work warrants one,
-  say so and offer `/new-spec` — proceed without it only if the user says so.
+- Read the pack's `SPEC.md` if the pack already exists, or any related standalone spec in
+  `docs/specs/`. If there is no anchor spec and the work warrants one, plan to write `SPEC.md`
+  (per `docs/specs/TEMPLATE.md`) as part of scaffolding — proceed without it only if the user says so.
 - Scan `docs/todo/` for an existing domain dir that fits and for related prior packs. If a related
   pack exists, propose **extending** it instead of forking a new dir.
 - Skim the code the work touches — enough to name concrete building blocks for the reuse table and
@@ -71,7 +76,8 @@ you can't infer:
 2. **Feature dir name** — propose a slug from the spec/description.
 3. **Shape** — flat vs phased dirs. Recommend flat unless the work clearly spans releases/phases.
 4. **Scope boundary** — what is explicitly out of scope.
-5. **Anchor spec** — which `docs/specs/NNN-*.md` this pack implements, or that there isn't one.
+5. **Anchor spec** — confirm the pack gets a `SPEC.md` (the default), or that there deliberately
+   isn't one; note any related standalone `docs/specs/NNN-*.md` it builds on.
 6. **User-facing?** — if it changes anything the user reads in the app's About / Setup Instructions /
    Glossary pages, or anything that belongs in `CHANGELOG.md` or `docs/system/rules/`, plan a **docs phase** as
    the last phase (see references). Ask now so it isn't forgotten.
@@ -94,6 +100,8 @@ to confirm **before** scaffolding.
 Create the dir and fill the templates with **real content from the spec, interview, evidence and code
 reading** — never lorem placeholders:
 
+- `SPEC.md` per `docs/specs/TEMPLATE.md` — the anchor: Problem / Goal / Non-goals / What must NOT
+  change / Design / Test plan / Rollout / Verification. Written first; everything else references it.
 - `README.md` from [templates/README.md.tpl](templates/README.md.tpl) — the onboarding block, what/why
   prose, doc index (every task + companion doc), decisions-locked table (with a Source column),
   building-blocks reuse table, out-of-scope, open questions. The header carries **Touches money**.
@@ -139,8 +147,10 @@ Print the pack tree, then:
    coverage ratchet and the boot smoke. Paste the real output. If a money-touching task shipped,
    confirm the demo session happened and no real or demo order was touched by the tests.
 3. **Harvest keepers.** Before deletion, move content that must outlive the pack to a real home:
-   the anchor spec's Verification checklist (`docs/specs/NNN-*.md`), `CHANGELOG.md`, in-app help
-   text, `docs/system/rules/` rules that changed, reusable queries or scripts (`tools/`).
+   anything permanent from `SPEC.md` (the filled Verification checklist, design/seam notes →
+   `CHANGELOG.md`, `docs/system/`), in-app help text, `docs/system/rules/` rules that changed,
+   reusable queries or scripts (`tools/`). `SPEC.md` is deleted with the pack — git history is the
+   archive.
 4. **Delete** `docs/todo/<domain>/<feature>/` (companion docs included) — never the domain dir
    itself. Confirm with the user first. Git history preserves everything.
 
@@ -167,7 +177,8 @@ Never touch `docs/history/` at any point — it is an audit trail.
 
 ## Pairs with
 
-- `/new-spec` — write the anchor `docs/specs/NNN-*.md` **before** `/spec`.
+- `/new-spec` — the same spec discipline for standalone changes (`docs/specs/NNN-*.md`); a pack's
+  anchor spec uses its structure but lives at `docs/todo/<domain>/<feature>/SPEC.md`.
 - `/safe-change` — the protocol for every money-touching task in the pack.
 - `/add-tunable` — when a task introduces a number the user should be able to change.
 - `/split-file` — when a task's target file is already over 800 lines.

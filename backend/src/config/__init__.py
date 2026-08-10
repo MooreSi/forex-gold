@@ -164,6 +164,13 @@ def load() -> dict:
         # defaulting to 8888 here would kill the live app's web server.
         "port": int(_e("PORT", base.get("port", 8890))),
 
+        # Bind address for the dashboard web server. Defaults to loopback:
+        # the UI can place and close live orders and has no login of its own,
+        # so it must not be reachable from other machines. Widen this (to
+        # 0.0.0.0 or a LAN IP) only once real authentication is in front of it
+        # -- run.py logs a warning when a non-loopback host is configured.
+        "host": _e("HOST", base.get("host", "127.0.0.1")),
+
         # Environment: "demo" or "live" — controls which DB file is used
         "account_env":   _e("ACCOUNT_ENV", base.get("account_env", "demo")),
 

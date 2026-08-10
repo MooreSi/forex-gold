@@ -40,3 +40,8 @@ telegram_chat_id: ''
 
 # ── App ───────────────────────────────────────────────────────────────────────
 port: 8888
+# Dashboard bind address. Defaults to 127.0.0.1 (this machine only) because the
+# UI has no login and can place/close live orders. Do NOT change to 0.0.0.0 or a
+# LAN IP unless real authentication is in front of it — the app logs a warning
+# every launch if this is non-loopback.
+host: 127.0.0.1

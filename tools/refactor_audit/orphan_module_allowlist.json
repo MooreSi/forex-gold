@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "Whole modules that nothing imports, transitively, from the app entrypoints.",
+    "An entry here is a recorded debt, NOT an approval to keep the code. The gate",
+    "(orphan_modules --check) fails on any orphan NOT listed here, and on any",
+    "listed module that is no longer an orphan (delete its entry when you delete",
+    "or wire the module).",
+    "",
+    "IMPORTANT: 'nothing imports it' has TWO causes, and they need opposite fixes.",
+    "  - superseded: a dead duplicate of live code. Fix = delete (review phase3/010).",
+    "  - unwired: an intended feature/tool/infra that was built but never hooked up.",
+    "    Fix = wire it in (or consciously remove it) -- an OWNER decision, not a",
+    "    mechanical cleanup. Deleting these would destroy real functionality and",
+    "    hide the wiring bug, which is the same class of error this review exists",
+    "    to fix. See docs/todo/review-august-08/phase3-expansion-tax/010-*.md.",
+    "",
+    "Classification below is from the 2026-08-10 investigation; unwired entries are",
+    "AWAITING an owner wire-vs-delete decision and must NOT be deleted until then."
+  ],
+  "allowed": [
+    {
+      "module": "backend.src.services.reversal_engine.database",
+      "file": "backend/src/services/reversal_engine/database.py",
+      "loc": 752,
+      "class": "superseded-dead",
+      "reason": "superseded by reversal_engine_repo.py (zero prod imports). Genuinely dead, but test-entangled: tests/reversal_engine/test_database_characterization.py (dead-code test) and a stale entry in tests/refactor/test_transaction_boundaries.py. Delete deliberately in phase3/010."
+    },
+    {
+      "module": "backend.src.services.test_signal.database",
+      "file": "backend/src/services/test_signal/database.py",
+      "loc": 721,
+      "class": "superseded-dead",
+      "reason": "superseded by test_signal repo (zero prod imports). Test-entangled: tests/test_signal/test_database_characterization.py + a stale entry in tests/refactor/test_transaction_boundaries.py. Delete deliberately in phase3/010."
+    },
+    {
+      "module": "backend.src.services.breakout_signal.database",
+      "file": "backend/src/services/breakout_signal/database.py",
+      "loc": 698,
+      "class": "superseded-dead",
+      "reason": "superseded by breakout_signal_repo.py; ml_engine.record_outcome now uses the repo, NOT this module (the 'not yet migrated' comment in tests/breakout_signal/test_engine_characterization.py is STALE). Test-entangled: that live-engine characterization test still imports it as a vestigial _legacy_bo_db fixture, plus a dedicated dead-code test. Delete deliberately in phase3/010 (requires removing the vestigial fixture line)."
+    },
+    {
+      "module": "backend.src.services.channels.rule_generator",
+      "file": "backend/src/services/channels/rule_generator.py",
+      "loc": 275,
+      "class": "unwired-needs-owner-decision",
+      "reason": "Auto deterministic-rule generation the user 'explicitly chose' (approve-in-Telegram -> app writes a parsing rule). The codebase references 'ai_rule_generator.py' (a different name) in database.py:625 and parser.py:647 -- this may be superseded OR the intended-but-unwired implementation. VERIFY which is live before any delete. Owner decision: wire, replace, or remove."
+    },
+    {
+      "module": "backend.src.services.breakout_signal.backtest",
+      "file": "backend/src/services/breakout_signal/backtest.py",
+      "loc": 226,
+      "class": "unwired-tool",
+      "reason": "Walk-forward backtest harness (added 2026-07-16) for validating breakout recalibrations BEFORE they touch live trading. Its own docstring documents manual invocation (run_walkforward, report); likely a dev tool run by hand, not dead code. The frontend backtest page uses a different system (services.backtest). Do NOT delete without confirming it isn't the pre-live validation tool the developer relies on."
+    },
+    {
+      "module": "backend.src.config.licence.client",
+      "file": "backend/src/config/licence/client.py",
+      "loc": 90,
+      "class": "unwired-infra-needs-owner-decision",
+      "reason": "Licence client: HTTP to the auth server (217.155.25.160) with cert pinning. Zero references today. Security/licence infra -- possibly dormant, possibly intended. Ties into phase4/030 (licence rework) and the security review. Owner decision only; do not delete unilaterally."
+    },
+    {
+      "module": "backend.src.services.test_signal.auth",
+      "file": "backend/src/services/test_signal/auth.py",
+      "loc": 51,
+      "class": "unwired-needs-owner-decision",
+      "reason": "Password protection for the TEST module (PBKDF2 + hardware-fingerprint salt). Zero references -- appears disconnected. Owner decision: was test-module auth intentionally removed, or did the wiring get dropped?"
+    }
+  ]
+}

@@ -49,13 +49,19 @@ def create_signal(source_name: str, direction: str, entry_low: float,
 
 def get_signals(status: Optional[str] = None) -> list[dict]:
     with db_module.db() as conn:
+        # rowid DESC is the tie-break: created_at is float seconds, so two
+        # signals created in the same tick share a value and ORDER BY created_at
+        # alone falls back to rowid ASC -- returning the older one first and
+        # breaking "newest first". rowid is monotonic with insertion, so
+        # newest-inserted wins the tie.
         if status:
             rows = conn.execute(
-                "SELECT * FROM vantage_signals WHERE status=? ORDER BY created_at DESC", (status,)
+                "SELECT * FROM vantage_signals WHERE status=? "
+                "ORDER BY created_at DESC, rowid DESC", (status,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM vantage_signals ORDER BY created_at DESC"
+                "SELECT * FROM vantage_signals ORDER BY created_at DESC, rowid DESC"
             ).fetchall()
     result = [db_module.row_to_dict(r) for r in rows]
     for r in result:

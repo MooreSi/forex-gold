@@ -101,6 +101,28 @@ def test_get_signals_returns_all_newest_first(fresh_db):
     assert ids[1] == r1["signal_id"]
 
 
+def test_get_signals_newest_first_is_stable_on_timestamp_tie(fresh_db, monkeypatch):
+    """Two signals created in the same clock tick must still order newest-first.
+
+    created_at is `time.time()` (float seconds); two back-to-back creates can
+    land on the identical value, and `ORDER BY created_at DESC` alone then falls
+    back to rowid-ascending -- returning the FIRST-inserted signal first and
+    breaking "newest first". This surfaced as a flake in the full suite once the
+    coverage run slowed timing enough to force the tie. Pin the tie explicitly.
+    """
+    monkeypatch.setattr(sig.time, "time", lambda: 1_700_000_000.0)
+    r1 = sig.create_signal(
+        source_name="A", direction="BUY",
+        entry_low=2399.0, entry_high=2401.0, stop_loss=2390.0, tp1=2410.0,
+    )
+    r2 = sig.create_signal(
+        source_name="B", direction="SELL",
+        entry_low=2399.0, entry_high=2401.0, stop_loss=2410.0, tp1=2390.0,
+    )
+    ids = [s["signal_id"] for s in sig.get_signals()]
+    assert ids == [r2["signal_id"], r1["signal_id"]]
+
+
 def test_get_signals_filters_by_status(fresh_db):
     r1 = sig.create_signal(
         source_name="A", direction="BUY",

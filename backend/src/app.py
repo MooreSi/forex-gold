@@ -152,6 +152,29 @@ async def _signal_engine_watchdog_loop() -> None:
             log.debug("[AppWatchdog] Reversal Engine health check error: %s", _e)
 
 
+def _remote_client_enabled(config) -> bool:
+    """Whether to start the outbound remote-admin/update client.
+
+    Default OFF, and it stays off unless explicitly opted in. The channel is
+    unauthenticated (security review 2026-08-08, C2): it finds a server by LAN
+    beacon and applies pushed code with no signature check and no TLS
+    verification. Enabling it is a deliberate, loudly-warned choice — never a
+    silent default — until signed updates + cert pinning land (phase4 security
+    work). Kept as a single predicate so the "is it on?" decision is testable
+    and cannot drift away from the warning.
+    """
+    if not config.get("remote_admin_client_enabled", False):
+        return False
+    log.warning(
+        "remote_admin_client_enabled=true — starting the UNAUTHENTICATED "
+        "remote-admin/update client. It discovers a server by LAN beacon and "
+        "will APPLY PUSHED CODE, with no signature check and no TLS "
+        "verification. Only enable this on a trusted, isolated network, and "
+        "only until signed updates and certificate pinning are in place."
+    )
+    return True
+
+
 async def startup() -> None:
     global _engine, _tg_reader
     config = cfg_module.load()
@@ -289,11 +312,17 @@ async def startup() -> None:
     # App-level watchdog — recovers unexpected crashes every 5 min.
     asyncio.create_task(_signal_engine_watchdog_loop())
 
+    # News calendar: start the background refresher so the signal engines read a
+    # cached snapshot instead of doing up to ~10s of blocking urllib on the event
+    # loop every cycle (backend review 2026-08-08, #5).
+    from backend.src.utils import news_calendar as _news
+    _news.ensure_started()
+
     # Remote admin: server only starts on admin machine (KeyGen present + password set).
     # Client only runs on non-admin machines — the admin Mac doesn't connect to itself.
     if ADMIN_AVAILABLE and password_is_set():
         _remote_server.start()
-    elif config.get("remote_admin_client_enabled", False):
+    elif _remote_client_enabled(config):
         _remote_client.start()
     else:
         log.info("[startup] Remote-admin client disabled (remote_admin_client_enabled=false) "
@@ -315,6 +344,8 @@ async def shutdown() -> None:
         re_eng.stop(persist=False)
     _remote_client.stop()
     _remote_server.stop()
+    from backend.src.utils import news_calendar as _news
+    _news.stop()
     try:
         from backend.src.services.cluster.sync import server as _sync_srv_mod, client as _sync_cli_mod
         _srv = _sync_srv_mod.get_instance()

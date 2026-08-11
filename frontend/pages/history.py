@@ -3,11 +3,9 @@
 import asyncio
 import calendar
 import json as _json
-import re as _re
 import time
 from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo as _ZoneInfo
-from pathlib import Path
 from typing import Callable, Optional
 
 from nicegui import ui
@@ -18,6 +16,7 @@ from backend.src.controllers import history_controller as history_ctl
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.runtime import _apply_fee, _platform_fee_rate
 from backend.src.utils.models import STRATEGY_NAMES, CONTRACT_SIZE
+from frontend.components.empty_state import render_empty_state
 from frontend.pages import ai_trade_analysis as _ai_analysis
 from backend.src.controllers.history_controller import trade_source_label, trade_channel_label
 
@@ -818,7 +817,7 @@ def _render_calendar(engine):
                     ("text-green-400" if day_total >= 0 else "text-red-400")
                 )
             if not trades:
-                ui.label("No trades on this day.").classes("text-gray-500 italic")
+                render_empty_state("day_trades", compact=True)
                 _day_dialog.open()
                 return
             ui.label(f"{len(trades)} trades · {wr:.0f}% win rate").classes("text-xs text-gray-400 mb-2")
@@ -1095,7 +1094,7 @@ def _render_heatmap(engine):
                 "lose (candidates to stop trading), green = consistent winners."
             ).classes("text-xs text-gray-400 mb-1")
             if not grid:
-                ui.label("No closed trades in this period.").classes("text-gray-500 italic")
+                render_empty_state("closed_trades", compact=True)
                 return
 
             max_abs = max((abs(c["avg"]) for c in grid.values()), default=1.0) or 1.0
@@ -1340,7 +1339,7 @@ def _render_channels(engine):
                 "manual pause overrides."
             ).classes("text-xs text-gray-400 mb-2")
             if not scorecard:
-                ui.label("No closed trades in this period.").classes("text-gray-500 italic")
+                render_empty_state("closed_trades", compact=True)
                 return
             for r in scorecard:
                 src    = r["source"]

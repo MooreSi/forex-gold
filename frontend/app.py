@@ -174,7 +174,7 @@ async def shutdown():
 
 # ── Main page ──────────────────────────────────────────────────────────────────
 
-def _render_about():
+def _render_about(nav: Optional[dict] = None):
     _sub: list[str] = ["home"]   # mutable so nested functions can mutate
 
     # ── Sub-page content containers ───────────────────────────────────────────
@@ -184,78 +184,9 @@ def _render_about():
         _sub[0] = "home"
         content_area.clear()
         with content_area:
-            with ui.column().classes("w-full max-w-3xl gap-6 p-6"):
-                with ui.row().classes("items-center gap-3"):
-                    ui.label("FOREX Trader").classes("text-2xl font-bold text-yellow-400")
-                    ui.label("by Simon Moore").classes("text-lg").style("color:#38bdf8")
-                    ui.badge(f"BETA v{_APP_VERSION}", color="green").classes("text-xs")
-                ui.separator()
-
-                # Risk disclaimer
-                with ui.card().classes("w-full rounded-lg p-4").style(
-                    "background:#1a1008;border:1px solid #92400e;"
-                ):
-                    with ui.row().classes("items-start gap-3"):
-                        ui.label("warning").classes(
-                            "material-icons text-orange-400 text-xl shrink-0 mt-0.5"
-                        )
-                        with ui.column().classes("gap-2"):
-                            ui.label("Risk Warning").classes(
-                                "text-xs font-bold text-orange-400 uppercase tracking-wider"
-                            )
-                            ui.label(
-                                "Trading leveraged financial instruments such as gold (XAUUSD) "
-                                "carries a high level of risk and may not be suitable for all "
-                                "investors. A significant proportion of retail trader accounts "
-                                "lose money when trading CFDs and similar products. You should "
-                                "not risk capital you cannot afford to lose."
-                            ).classes("text-xs text-orange-200 leading-relaxed")
-                            ui.label(
-                                "This software is provided as-is, without warranty of any kind. "
-                                "It may contain bugs or produce incorrect results. Automated "
-                                "execution does not guarantee profitability and can result in "
-                                "losses that exceed your initial deposit. You are solely "
-                                "responsible for monitoring all open positions and for any "
-                                "trading decisions made, whether manually or via automation. "
-                                "Do not leave automated trading running unattended for extended "
-                                "periods without reviewing open positions."
-                            ).classes("text-xs text-orange-200 leading-relaxed")
-                            ui.label(
-                                "Past performance is not indicative of future results. "
-                                "This tool does not constitute financial advice."
-                            ).classes("text-xs text-orange-300 font-semibold leading-relaxed")
-
-                # Nav cards
-                ui.label("Sections").classes("text-sm font-semibold text-gray-400 uppercase tracking-wider")
-                with ui.row().classes("gap-4 flex-wrap w-full items-stretch"):
-                    for icon, label, desc, action in [
-                        ("smart_toy",   "Bot Orchestration",
-                         "Detailed guide to signal processing, strategies, DPM, and all automation features.",
-                         lambda: _show_section("orchestration")),
-                        ("menu_book",   "Setup Instructions",
-                         "Step-by-step setup for CrossOver, MT5, Telegram, email and going live.",
-                         lambda: _show_section("instructions")),
-                        ("history",     "Version History",
-                         "Release notes and changelog for each version of FOREX Trader.",
-                         lambda: _show_section("version")),
-                        ("translate",   "Glossary",
-                         "Plain-English explanations of every trading term and app-specific "
-                         "concept used across the app (R:R, ADX, SL, TP, Anchor, Trail, and more).",
-                         lambda: _show_section("glossary")),
-                    ]:
-                        with ui.card().classes(
-                            "flex-1 min-w-56 bg-gray-800 rounded-lg p-4 cursor-pointer "
-                            "hover:bg-gray-700 transition-colors self-stretch"
-                        ).on("click", action):
-                            with ui.row().classes("items-center gap-2 mb-2"):
-                                ui.label(icon).classes(
-                                    "material-icons text-yellow-400 text-xl"
-                                )
-                                ui.label(label).classes(
-                                    "text-sm font-semibold text-gray-100"
-                                )
-                            ui.label(desc).classes("text-xs text-gray-400 leading-relaxed")
-                            ui.label("Open →").classes("text-xs text-yellow-500 mt-2")
+            # "Set up once / Every day" — frontend/components/about_home.py
+            from frontend.components import about_home
+            about_home.render(_show_section, _APP_VERSION)
 
     def _sub_header(title: str, icon: str):
         with ui.row().classes("w-full items-center gap-3 mb-4"):
@@ -703,6 +634,9 @@ def _render_about():
                                         )
 
 
+    if nav is not None:
+        nav["show_section"] = _show_section
+        nav["show_home"] = _show_home
     _show_home()
 
 
@@ -1074,6 +1008,16 @@ def main_page():
                 await _refresh_mode_btn()
 
         mode_btn.on_click(_toggle_mode)
+
+        # ── Help button — opens Getting Started (wired after tabs exist) ───────
+        _help_open: list = [None]
+        ui.button(
+            icon="help_outline",
+            on_click=lambda: _help_open[0]() if _help_open[0] else None,
+        ).classes("ml-2 shrink-0").style(
+            "background:transparent; color:#38bdf8; min-width:32px; min-height:32px; "
+            "width:32px; height:32px; padding:0;"
+        ).tooltip("Help — Getting Started")
 
         # ── Pause button ───────────────────────────────────────────────────────
         ui.button(icon="pause_circle", on_click=_pause_dialog.open).classes(
@@ -1502,7 +1446,9 @@ def main_page():
         # Use on_value_change (NiceGUI 3.x API) — on("update:model-value") passes e.value=None
         env_switch.on_value_change(_on_env_switch)
 
-        # Tabs fill the rest of the row
+        # Tabs fill the rest of the row. Each carries a plain-language
+        # subtitle as its tooltip — see frontend/components/tab_labels.py.
+        from frontend.components.tab_labels import TAB_SUBTITLES
         with ui.tabs().classes("flex-1 bg-transparent") as tabs:
             tab_ai       = ui.tab("AI Analysis", icon="smart_toy")
             tab_chart    = ui.tab("Chart",       icon="candlestick_chart")
@@ -1514,6 +1460,9 @@ def main_page():
             tab_history  = ui.tab("Analysis",    icon="history")
             tab_settings = ui.tab("Settings",    icon="settings")
             tab_about    = ui.tab("About",       icon="info")
+            for _tab in (tab_ai, tab_chart, tab_trading, tab_telegram, tab_test,
+                         tab_edge, tab_backtest, tab_history, tab_settings, tab_about):
+                _tab.tooltip(TAB_SUBTITLES.get(_tab._props.get("name", ""), ""))
 
         # ── Circuit breaker — global, live-trades-only indicator ────────────
         # The only circuit breaker that ever blocks a real MT5 order (see
@@ -1626,8 +1575,25 @@ def main_page():
         with ui.tab_panel(tab_backtest):
             backtest_page.render(get_engine)
         with ui.tab_panel(tab_about):
-            _render_about()
+            _about_nav: dict = {}
+            _render_about(_about_nav)
         with ui.tab_panel(tab_test):
             test_panel.render(get_engine)
         with ui.tab_panel(tab_edge):
             edge_dashboard.render(get_engine)
+
+    # ── Start Here — first-run checklist (frontend/components/start_here.py) ──
+    from frontend.components import start_here as _start_here
+    open_start_here = _start_here.attach(
+        tabs, {"Trading": tab_trading, "Settings": tab_settings},
+        get_engine, get_tg_reader,
+        lambda: cfg_module.get("account_env", "demo") != "live",
+    )
+    if _start_here.should_show(app.storage.user):
+        asyncio.ensure_future(open_start_here())
+
+    # ── Help "?" → Getting Started (frontend/components/getting_started.py) ──
+    from frontend.components import getting_started as _getting_started
+    _help_open[0] = _getting_started.attach(
+        tabs, tab_about, _about_nav, open_start_here
+    )

@@ -3,6 +3,8 @@ import asyncio
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
 
+from frontend.components.empty_state import render_empty_state
+
 # Sibling sections of this page.
 from ._shared import _uk
 
@@ -15,9 +17,7 @@ def _render_tg_signals(engine):
         sigs = await trading_ctl.get_tg_signals(engine, 50)
         with container:
             if not sigs:
-                ui.label("No Telegram signals detected yet.").classes(
-                    "text-gray-500 italic p-4"
-                )
+                render_empty_state("tg_signals")
                 return
 
             # Header row

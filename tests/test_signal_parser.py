@@ -1,10 +1,6 @@
 """Unit tests for signal parsers."""
 
-import sys
 import unittest
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.src.services.signals.parser import parse_gold_signal, parse_gd2_signal, validate_signal
 

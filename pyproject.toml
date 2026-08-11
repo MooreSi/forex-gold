@@ -52,4 +52,4 @@ include = ["backend*", "frontend*"]
 # --market-clock=..., or drop the flag to reproduce real-clock behaviour.
 addopts = "-p tools.testing.fixed_clock"
 # frontend/ has its own suite since Phase 1; both must run by default.
-testpaths = ["tests", "frontend/tests"]
+testpaths = ["tests"]

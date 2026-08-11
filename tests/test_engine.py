@@ -5,18 +5,18 @@ All tests are fully isolated — no real MT5, Claude, or Telegram credentials ne
 """
 
 import asyncio
-import os
-import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Point DB at a temp file
+import pytest
+
+# Point DB at a temp file. (The old VANTAGE_DB_PATH env assignment is gone —
+# nothing in the backend ever read it.)
 _tmp_dir = tempfile.mkdtemp()
 _TEST_DB = str(Path(_tmp_dir) / "test_forex.db")
-os.environ["VANTAGE_DB_PATH"] = _TEST_DB
 
 # Stub config before imports
 _TEST_CONFIG = {
@@ -35,16 +35,20 @@ _TEST_CONFIG = {
     "mt5_server":         "",
 }
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
-
 from backend.src.db import database as db_module
 from backend.src.runtime import TradingRuntime
 from backend.src.services.positions.monitor_loop import check_sl
 from backend.src.services.positions.tp_tracking import check_tp_hits
 from backend.src.utils.models import Tick, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_TRAIL_STOP
 
-db_module.init(_TEST_DB)
+
+@pytest.fixture(scope="module", autouse=True)
+def _point_db_at_this_modules_temp_file():
+    """Was an import-time db_module.init(_TEST_DB) — moved here so merely
+    collecting this file no longer re-points the process-wide DB (unsafe
+    under xdist and against every other module's fixtures)."""
+    db_module.init(_TEST_DB)
+    yield
 
 
 def _make_tick(bid=2350.00, ask=2350.30) -> Tick:

@@ -38,6 +38,10 @@ MONEY_CRITICAL_FLOORS = {
     "backend/src/services/positions": 85.0,
     "backend/src/services/signals":   80.0,
     "backend/src/db":                 90.0,
+    # Set at their measured values (2026-08-11) so they cannot silently fall;
+    # raising the actual coverage is separate follow-up work, not this floor.
+    "backend/src/services/broker":    58.3,
+    "backend/src/runtime.py":         72.2,
 }
 
 
@@ -65,6 +69,30 @@ def test_money_critical_areas_hold_their_floor(area, floor):
         f"This area decides whether real money moves correctly. Add tests -- "
         f"do not lower the floor."
     )
+
+
+def test_broker_and_runtime_have_absolute_floors():
+    """services/broker and runtime.py are in CRITICAL but had no hand-set
+    floor, so either could be baselined downward and still pass — the money
+    path's least-covered code had the weakest guard (stage2 phase3/020)."""
+    assert "backend/src/services/broker" in MONEY_CRITICAL_FLOORS
+    assert "backend/src/runtime.py" in MONEY_CRITICAL_FLOORS
+    baseline = json.loads(cg.BASELINE_PATH.read_text(encoding="utf-8"))["areas"]
+    for area in ("backend/src/services/broker", "backend/src/runtime.py"):
+        assert MONEY_CRITICAL_FLOORS[area] <= baseline[area], (
+            f"{area}: floor {MONEY_CRITICAL_FLOORS[area]} was invented above the "
+            f"measured {baseline[area]} — floors record reality, then hold it"
+        )
+
+
+def test_floor_below_actual_fails():
+    """Negative control: the floor comparison can actually fail — a floor
+    above the recorded value is detected, so the assertion in
+    test_money_critical_areas_hold_their_floor is not vacuous."""
+    baseline = json.loads(cg.BASELINE_PATH.read_text(encoding="utf-8"))["areas"]
+    planted = {"backend/src/services/broker": 101.0}
+    violations = [a for a, f in planted.items() if baseline.get(a, 0.0) < f]
+    assert violations == ["backend/src/services/broker"]
 
 
 def test_every_money_critical_area_is_marked_critical_in_the_tool():

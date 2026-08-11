@@ -24,41 +24,6 @@ from backend.src.db import database as db
 from backend.src.runtime import TradingRuntime
 
 
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    """to_db_thread() (used by _get_triggered_tps) runs on db._db_executor, a
-    PERSISTENT single-worker ThreadPoolExecutor with its own threading.local()
-    storage -- separate from the test's own thread. Resetting
-    db._thread_local from the test thread has zero effect on the worker
-    thread's cached connection, so a "fresh" temp DB would silently keep
-    serving an earlier test's (deleted) file to any to_db_thread() call.
-    Submit the reset function to run ON that worker thread instead."""
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
-
-
 @pytest.fixture
 def engine(fresh_db):
     """A real SimulationEngine instance (correct method binding for

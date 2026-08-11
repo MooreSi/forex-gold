@@ -18,39 +18,6 @@ from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 
 
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    # get_risk_settings() caches for 10s (core_db_risk_settings._RS_CACHE_TTL) --
-    # without invalidating here, a value written in a prior test's temp DB
-    # can leak into this one if both run within that window (found
-    # 2026-07-24 adding push_global_config tests: two tests in a row that
-    # both write+read global_harvest_enabled flaked depending on run order).
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
-
-
 class _FakeWriter:
     def __init__(self):
         self.written: list[bytes] = []

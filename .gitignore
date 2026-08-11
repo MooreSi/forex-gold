@@ -1,4 +1,7 @@
-data/
+# Anchored to the repo root on purpose: the unanchored form silently
+# swallowed docs/system/domains/data/ for its whole life (caught by the
+# doc-links gate's first CI run, 2026-08-11).
+/data/
 .venv/
 auth_server/
 __pycache__/

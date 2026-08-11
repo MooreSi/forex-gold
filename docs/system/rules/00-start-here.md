@@ -71,7 +71,7 @@ answers it. A provisional default is never silent: write down what you chose and
 answer differs. Confirming a queue item is a *decision* — it is **not** the sign-off + demo session
 that order/close/sizing changes still require.
 
-New agent or developer picking this up cold: start from **[../../todo/HANDOFF.md](../../todo/HANDOFF.md)**.
+New agent or developer picking this up cold: start from **[../../todo/refactor/HANDOFF.md](../../todo/refactor/HANDOFF.md)**.
 
 ## Where everything lives
 
@@ -82,7 +82,7 @@ docs/system/rules/    these rules — agent-agnostic
 docs/system/domains/  one living directory per part of the system
 docs/specs/           what we are building and why (spec-driven)
 docs/todo/            multi-session work packs in progress
-docs/history/         audit trail of past work — read-only
+docs/todo/refactor/stage0/         audit trail of past work — read-only
 ```
 
 The domain files under `docs/system/domains/` hold each part's constraints,

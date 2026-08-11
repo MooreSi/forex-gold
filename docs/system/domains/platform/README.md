@@ -52,6 +52,6 @@ allowed to call.
 
 ## Open questions
 
-- `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/history/refactor-2026/OPEN_QUESTIONS.md`).
+- `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).
 - The by-layer split of the websocket transports in `controllers/{remote,sync}` is "still to come".
 - The installer's firewall rules use the live app's ports (8888/9000) while this checkout defaults to 8890/9111 — not reconciled.

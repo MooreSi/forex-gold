@@ -3,7 +3,7 @@
 **Living file — update when this domain teaches you something.**
 Covers: `frontend/`. The canonical rule set is the
 `/frontend-conventions` skill; the active restructure plan is
-`docs/todo/frontend/restructure/` (spec `docs/specs/001-frontend-restructure.md`).
+`docs/todo/refactor/frontend/restructure/` (spec `docs/specs/001-frontend-restructure.md`).
 
 ## What it is
 
@@ -49,7 +49,7 @@ delivered in NiceGUI instead.
 
 ## Open questions
 
-Four owner decisions are open in `docs/todo/frontend/restructure/QUESTIONS.md`:
+Four owner decisions are open in `docs/todo/refactor/frontend/restructure/QUESTIONS.md`:
 split-or-exempt `app.py`; split-or-exempt `chart.py` (839 lines); whether
 phase-2 splits need new tests beyond boot smoke + import tests; whether
 phase 1 must land in one release. `components/` has no established

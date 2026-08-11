@@ -358,7 +358,7 @@ second-caller rule is what keeps it honest.
 `reversal_panel`, `test_panel`) are structurally near-identical. Collapsing them is a behaviour-risk
 change wearing a restructure's clothes — they look alike and behave differently. Noted, not actioned.
 
-**The live plan for all of the above:** `docs/todo/frontend/restructure/` (spec
+**The live plan for all of the above:** `docs/todo/refactor/frontend/restructure/` (spec
 `docs/specs/001-frontend-restructure.md`). Read it before starting any of this work — the tasks are
 already ordered, and several have characterization tests that must be written first.
 

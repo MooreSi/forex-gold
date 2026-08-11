@@ -110,7 +110,7 @@ agent can produce here — the last one cost a full re-audit.
 | Weaken a ratchet baseline to make CI pass | the baseline is the record; raise it only with a stated reason |
 | Run two full test suites at once | produces phantom failures — known, reproducible |
 | `pip install` a new runtime dependency without asking | this app ships to a Windows installer |
-| Edit anything under `docs/history/` | it is an audit trail of what was true at the time |
+| Edit anything under `docs/todo/refactor/stage0/` | it is an audit trail of what was true at the time |
 | Rewrite historical docstrings ("extracted from core/engine.py's X") | they describe a file that really had that name; changing them falsifies the trail |
 
 ---

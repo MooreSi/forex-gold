@@ -12,7 +12,7 @@ required — any AI agent or human reads the same files.
 | [todo/](todo/) | Multi-session work packs in progress | while executing a plan |
 | **[questions/](questions/)** | **Deferred decisions** — the answer-later queue (see below) | when a decision can wait |
 | [reviews/](reviews/) | Point-in-time review snapshots | when auditing |
-| [history/](history/) | Audit trail of completed work — **read-only** | archaeology |
+| [todo/refactor/stage0/](todo/refactor/stage0/) | Audit trail of the 2026 refactor (was docs/history/refactor-2026/) — **read-only** | archaeology |
 
 ## If you are an AI agent
 
@@ -79,9 +79,9 @@ And confirming a default there is a *decision* — **not** the owner sign-off + 
 session that any money-path (order placement, closing, sizing) change still
 requires before it ships.
 
-## A note on `history/`
+## A note on the audit trail (`todo/refactor/stage0/`)
 
-`history/refactor-2026/` holds 58 work packs from the 2026 restructure. It is
+`todo/refactor/stage0/` (formerly `docs/history/refactor-2026/`) holds 58 work packs from the 2026 restructure. It is
 an audit trail: each says what was true at the time, including names of files
 that no longer exist — and links to `docs/ai/`, which has since moved to
 `docs/system/rules/`.

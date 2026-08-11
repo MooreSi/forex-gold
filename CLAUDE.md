@@ -5,7 +5,7 @@
 Read **[docs/system/rules/10-golden-rules.md](docs/system/rules/10-golden-rules.md)** before
 changing anything. It is short and it is not optional.
 
-**New here / picking this up cold?** Start at **[docs/todo/HANDOFF.md](docs/todo/HANDOFF.md)** — who's who, how to run it
+**New here / picking this up cold?** Start at **[docs/todo/refactor/HANDOFF.md](docs/todo/refactor/HANDOFF.md)** — who's who, how to run it
 locally, current state, and where the work is tracked.
 
 **A question you can't answer** (trading policy, risk numbers, money behaviour, licensing) goes in
@@ -107,7 +107,7 @@ All four enforced at zero — see
 - lower a ratchet baseline to get CI green
 - run two full test suites at once (produces phantom failures)
 - `pip install` a new runtime dependency without asking
-- edit anything under `docs/history/` — it is an audit trail
+- edit anything under `docs/todo/refactor/stage0/` — it is an audit trail
 - mention which AI model made a change, in any commit, PR or code comment
 
 ## Stop and ask when

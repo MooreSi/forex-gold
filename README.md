@@ -130,6 +130,6 @@ Suite: ~2,000 tests, 0 failing. Coverage is high on the trading logic
 on the UI pages by design — those are covered by import and boot tests instead.
 
 Known gaps and open decisions are tracked in
-[docs/history/refactor-2026/OPEN_QUESTIONS.md](docs/history/refactor-2026/OPEN_QUESTIONS.md).
+[docs/todo/refactor/stage0/OPEN_QUESTIONS.md](docs/todo/refactor/stage0/OPEN_QUESTIONS.md).
 The largest is that `backend/src/controllers/remote/` — licence-token issuance
 and admin authority — has no tests yet.

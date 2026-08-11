@@ -148,7 +148,7 @@ Print the pack tree, then:
 4. **Delete** `docs/todo/<domain>/<feature>/` (companion docs included) — never the domain dir
    itself. Confirm with the user first. Git history preserves everything.
 
-Never touch `docs/history/` at any point — it is an audit trail.
+Never touch `docs/todo/refactor/stage0/` at any point — it is an audit trail.
 
 ## Rules
 

@@ -95,6 +95,6 @@ Expose a constant when a *trader* would want to move it, not when a
 
 ## Reference
 
-- Full inventory and tiering: `docs/history/refactor-2026/CONFIG_AUDIT.md`
+- Full inventory and tiering: `docs/todo/refactor/stage0/CONFIG_AUDIT.md`
 - Implementation: `backend/src/services/risk/expert_params.py`
 - Tests: `tests/core/test_expert_params*.py`

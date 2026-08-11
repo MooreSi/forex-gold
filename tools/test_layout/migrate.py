@@ -6,7 +6,7 @@
 
 **Why.** `backend/src/core/` does not exist. It was dissolved into
 `backend/src/services/<domain>/` during the 2026 refactor (see
-docs/history/refactor-2026/, 49 `core-*-migration` folders) and the tests did
+docs/todo/refactor/stage0/, 49 `core-*-migration` folders) and the tests did
 not follow. `tests/core/` is now 127 files -- 75% of the suite -- in one flat
 directory named after a deleted module, while `tests/services/` holds 5.
 

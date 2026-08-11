@@ -20,7 +20,7 @@ import pandas as pd
 LAB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB / "_shared"))
 
-from lib import loaders, metrics, sim
+from lib import loaders, metrics, report, sim
 
 OUT = Path(__file__).resolve().parent / "output"
 OUT.mkdir(exist_ok=True)
@@ -73,10 +73,38 @@ for k, v in m.items():
 print(f"\nRecorded book for comparison: -$2,855 net over 614 closed"
       f" (~{-2855/50:.0f}R), 70% win rate, avg loss 3x avg win")
 
-# %% persist
+# %% persist + standardised RESULTS.md
 merged[["id", "signal_ref", "day", "rec_fate", "fate", "net_pnl_dollars", "r",
         "max_tp_hit", "max_tp_hit_sim", "level_type", "hour_utc"]].to_csv(
     OUT / "replay_vs_recorded.csv", index=False)
 pd.Series(m).to_csv(OUT / "baseline_metrics.csv")
-print(f"\nwrote {OUT / 'replay_vs_recorded.csv'}")
-print("\nRESULT: see README.md — fill in after inspecting the numbers above.")
+
+sim_seq = sim.filled(res).sort_values("close_ts")["r"]
+rec_seq = (merged[merged["rec_fate"].isin(["win", "loss", "be"])]
+           .sort_values("close_time")["net_pnl_dollars"] / 50.0)
+report.write_results(
+    Path(__file__).resolve().parent,
+    experiment="001 — baseline replay (simulator calibration)",
+    headline=(
+        f"The offline simulator reproduces recorded history well enough to rank ideas: "
+        f"{agree:.0%} win/loss agreement, {sign_agree:.0%} P&L sign agreement, and the "
+        f"replayed book loses money like the real one did "
+        f"({m['total_R']:+.1f}R simulated vs ≈−57R recorded)."
+    ),
+    numbers=metrics.summary_table({
+        "simulated replay": m,
+        "recorded book": metrics.summarize(rec_seq, n_candidates=len(closed)),
+    }),
+    chart_series={"recorded": list(rec_seq), "simulated": list(sim_seq)},
+    chart_title="Recorded vs simulated equity — same signals, cumulative R",
+    caveats=[
+        "60s price series misses ~11% of fills (recorded 83.5% vs simulated 72.8%).",
+        "Zero costs modelled — half the recorded loss magnitude is costs/slippage/live divergence.",
+        "stop_loss column is the post-BE stop; sim reconstructs the original from zone_mid ∓ sl_dist.",
+    ],
+    verdict=(
+        "KEEP — calibrated for ranking (directional). Re-run first thing after the MT5 "
+        "M1 candle export lands; until then no experiment quotes dollar numbers."
+    ),
+)
+print(f"\nwrote {OUT / 'replay_vs_recorded.csv'} and RESULTS.md")

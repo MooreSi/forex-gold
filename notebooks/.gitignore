@@ -5,6 +5,8 @@ _shared/data/*.db-shm
 _shared/data/*.db-wal
 _shared/data/*.db-journal
 _shared/data/*.csv
-# experiment outputs are reproducible from run.py
-*/output/
+# experiment outputs are reproducible from run.py — except the RESULTS.md
+# chart, which must travel with the repo so the doc renders
+*/output/*
+!*/output/equity_curve.png
 __pycache__/

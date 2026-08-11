@@ -22,7 +22,7 @@ import pandas as pd
 LAB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB / "_shared"))
 
-from lib import loaders, metrics, splits
+from lib import loaders, metrics, report, splits
 
 OUT = Path(__file__).resolve().parent / "output"
 OUT.mkdir(exist_ok=True)
@@ -115,9 +115,40 @@ print(f"\nMean walk-forward AUC: {np.mean(aucs):.3f}"
       f" vs bottom-half {fresh['bottom_half_R'].sum():.1f}R"
       f" vs all {fresh['all_R'].sum():.1f}R")
 
-# %% persist
+# %% persist + standardised RESULTS.md
 tab.to_csv(OUT / "insample_sweep.csv")
 wf.to_csv(OUT / "walkforward_gating.csv", index=False)
 fresh.to_csv(OUT / "fresh_model_walkforward.csv", index=False)
-print(f"\nwrote 3 csvs to {OUT}")
-print("RESULT: fill in README.md from the numbers above.")
+
+# equity comparison on the walk-forward test days: everything vs low-ml_prob-only
+test_days = set(wf["day"])
+td = have[have["day"].isin(test_days)].sort_values("close_time")
+gated = td[td["ml_prob"] < -0.10]  # the rule the folds kept converging on
+report.write_results(
+    Path(__file__).resolve().parent,
+    experiment="002 — ML prob autopsy",
+    headline=(
+        f"The engine's ML score is inverted: AUC {a:.3f} (worse than a coin flip at "
+        f"ranking winners), and a fresh model retrained on the same 24 features also "
+        f"fails (walk-forward AUC {np.mean(aucs):.3f}) — the feature pipeline itself "
+        f"carries the inversion, and the live ML gate is currently selecting FOR losers."
+    ),
+    numbers=metrics.summary_table({
+        "all signals (test days)": metrics.summarize(td["r_rec"], n_candidates=len(td)),
+        "ml_prob<-0.10 only": metrics.summarize(gated["r_rec"], n_candidates=len(td)),
+    }),
+    chart_series={"all signals": list(td["r_rec"]), "low-ml_prob only": list(gated["r_rec"])},
+    chart_title="Walk-forward test days — trading everything vs only LOW-scored signals",
+    price_source="recorded outcomes (no simulator)",
+    caveats=[
+        "Labels come from the recorded book, whose geometry is itself upside-down (001-review).",
+        "The low-ml_prob gate keeps only ~20% of trades — inverse signal, not a strategy.",
+        "607 labelled signals over 9 days; one market regime.",
+    ],
+    verdict=(
+        "KEEP the finding, DROP the feature set. Minimum action for the backend (when "
+        "asked): stop using ml_prob as a positive live-execution gate. Next: pin down "
+        "which of the 24 features carries the inversion."
+    ),
+)
+print(f"\nwrote 3 csvs + RESULTS.md")

@@ -17,6 +17,11 @@ afternoon — *then* ask the AI agent to promote it into the main system
 - Each numbered folder (`001-...`, `002-...`) is one experiment: one
   question, one answer. Read its `README.md` — **Hypothesis → Method →
   Result** — that's the whole story, no code-reading needed.
+- Each experiment also has a **`RESULTS.md`** — the same fixed layout every
+  time: one headline sentence, a numbers table, a chart, the caveats, and a
+  verdict (KEEP / DROP / needs better data). If you only read one file per
+  experiment, read that one. It's regenerated automatically each run, so
+  it's never out of date.
 - Want to test a new idea? Just tell the AI agent, e.g. *"new experiment:
   what happens if we only trade London hours?"* It will create the next
   numbered folder and run it.
@@ -32,6 +37,7 @@ afternoon — *then* ask the AI agent to promote it into the main system
 |---|---|---|
 | 001 | Can we replay history accurately offline? | Yes — 85% agreement with the recorded outcomes. Also found that the stored stop-loss column is rewritten after trades — trap for the unwary. |
 | 002 | Is the engine's ML score helping? | **It's backwards.** It scores losing signals *higher* than winners, and the live gate built on it is filtering out winners. The features it learns from are the problem. |
+| 003 | Do the three fixes stack into a winner? | **First positive result.** Require decent reward-vs-risk, skip the bad hours, skip round-number levels, take profit at 1.5× risk: +10R on days the config never saw, while the unfiltered engine lost 20R. Only 28 trades though — promising, not proven. |
 
 ## House rules (the agent enforces these — see CLAUDE.md)
 

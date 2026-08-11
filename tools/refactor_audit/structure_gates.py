@@ -61,11 +61,14 @@ SQL_PATTERN = re.compile(
 
 def is_repo_file(path: Path) -> bool:
     name = path.name
-    # The data layer is `backend/src/db/` plus any *_repo.py anywhere. SQL is
+    # The data layer is `backend/src/db/` plus `backend/migrations/` (the DDL
+    # + numbered migration registry moved there 2026-08-11 — a migrations
+    # package is data layer by definition) plus any *_repo.py anywhere. SQL is
     # allowed here and nowhere else (not controllers, services or frontend).
     # Checking the directory — not just a name heuristic — means new db-layer
-    # modules (schema_sql.py, migrations.py, …) are correctly recognised.
-    if "backend/src/db/" in path.as_posix() + "/":
+    # modules (schema_sql.py, registry.py, …) are correctly recognised.
+    posix = path.as_posix() + "/"
+    if "backend/src/db/" in posix or "backend/migrations/" in posix:
         return True
     return "repo" in name or name == "database.py" or name.startswith("core_db_")
 

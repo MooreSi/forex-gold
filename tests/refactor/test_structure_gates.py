@@ -61,9 +61,12 @@ def test_repo_files_are_exempt_from_the_sql_gate():
     assert not sg.is_repo_file(sg.Path("frontend/pages/history.py"))
     # The whole db/ directory is the data layer — new modules there (not just
     # database.py / *_repo.py) may hold SQL.
-    assert sg.is_repo_file(sg.Path("backend/src/db/schema_sql.py"))
-    assert sg.is_repo_file(sg.Path("backend/src/db/migrations.py"))
-    # Negative control: a same-named file OUTSIDE db/ is still not exempt.
+    assert sg.is_repo_file(sg.Path("backend/src/db/database.py"))
+    # backend/migrations/ joined the data layer 2026-08-11 (DDL + registry
+    # relocated there; a migrations package is data layer by definition).
+    assert sg.is_repo_file(sg.Path("backend/migrations/schema_sql.py"))
+    assert sg.is_repo_file(sg.Path("backend/migrations/registry.py"))
+    # Negative control: a same-named file OUTSIDE the data layer is not exempt.
     assert not sg.is_repo_file(sg.Path("backend/src/services/trading/migrations.py"))
 
 

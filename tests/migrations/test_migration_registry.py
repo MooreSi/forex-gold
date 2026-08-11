@@ -17,7 +17,7 @@ import sqlite3
 import pytest
 
 from backend.src.db import database as db
-from backend.src.db import migrations
+from backend.migrations import registry as migrations
 
 
 def test_registry_is_ordered_and_dense():

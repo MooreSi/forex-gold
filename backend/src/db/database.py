@@ -203,15 +203,16 @@ def row_to_dict(row) -> dict:
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
-# The full DDL lives in db/schema_sql.py (moved out to keep this file shrinking).
-from backend.src.db.schema_sql import SCHEMA as _SCHEMA  # noqa: E402,F401
+# The base DDL, the numbered migration registry and the data backfills all
+# live in backend/migrations/ (schema evolution, kept apart from this
+# runtime data-access layer — see that package's docstring).
+from backend.migrations.schema_sql import SCHEMA as _SCHEMA  # noqa: E402,F401
 
 
-# Schema migration mechanics live in db/migrations.py (the ordered numbered
-# registry, fail-closed handling, version stamp, pre-flight check), re-exported
-# under the names tests/callers use.
-from backend.src.db.migrations import SCHEMA_VERSION, apply_migration as _apply_migration, run as _run_migrations, stamp_schema_version as _stamp_schema_version, verify_critical_schema as _verify_critical_schema, get_schema_version  # noqa: E402,F401
-from backend.src.db.backfills import run as _run_backfills  # noqa: E402
+# Migration mechanics (the ordered numbered registry, fail-closed handling,
+# version stamp, pre-flight check) re-exported under the names tests/callers use.
+from backend.migrations.registry import SCHEMA_VERSION, apply_migration as _apply_migration, run as _run_migrations, stamp_schema_version as _stamp_schema_version, verify_critical_schema as _verify_critical_schema, get_schema_version  # noqa: E402,F401
+from backend.migrations.backfills import run as _run_backfills  # noqa: E402
 
 
 def _apply_schema() -> None:

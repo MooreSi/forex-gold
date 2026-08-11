@@ -15,7 +15,7 @@ import inspect
 
 import pytest
 
-from backend.src.db import backfills
+from backend.migrations import backfills
 from backend.src.db import database as db
 
 

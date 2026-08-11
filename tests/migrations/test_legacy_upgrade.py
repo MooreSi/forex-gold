@@ -17,8 +17,9 @@ import sqlite3
 
 import pytest
 
-from backend.src.db import backfills, migrations
-from backend.src.db.schema_sql import SCHEMA
+from backend.migrations import backfills
+from backend.migrations import registry as migrations
+from backend.migrations.schema_sql import SCHEMA
 
 
 def _connect(path) -> sqlite3.Connection:

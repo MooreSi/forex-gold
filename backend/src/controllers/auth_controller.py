@@ -4,7 +4,8 @@ from __future__ import annotations
 from backend.src import config as _config
 from backend.src.services.auth import dashboard_auth as _auth
 
-__all__ = ["verify", "is_set", "set_password", "is_debug"]
+__all__ = ["verify", "is_set", "set_password", "is_debug",
+           "needs_setup", "create_initial_password"]
 
 
 def verify(username: str, password: str) -> bool:
@@ -19,6 +20,14 @@ def is_debug() -> bool:
 
 def is_set() -> bool:
     return _auth.is_set()
+
+
+def needs_setup() -> bool:
+    return _auth.needs_setup()
+
+
+def create_initial_password(password: str) -> bool:
+    return _auth.create_initial_password(password)
 
 
 def set_password(password: str) -> None:

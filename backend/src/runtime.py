@@ -23,6 +23,7 @@ from backend.src.utils.models import (
 )
 from backend.src.services.broker.mt5_client import MT5BridgeClient
 from backend.src.services.broker.mt5_native import NativeMT5Bridge, is_available as _native_bridge_available
+from backend.src.services.broker.debug_guard import reject_real_bridge_in_debug as _reject_real_bridge_in_debug
 from backend.src.services.signals.parser import is_gd2_message
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.ai import claude_ai as claude_ai
@@ -181,10 +182,9 @@ def _make_bridge(config: dict):
 
 class TradingRuntime:
     def __init__(self, config: dict):
-        import time as _time_mod
-        self._started_at = _time_mod.monotonic()
+        self._started_at = time.monotonic()
         self._cfg       = config
-        self._bridge    = _make_bridge(config)
+        self._bridge    = _reject_real_bridge_in_debug(_make_bridge(config), config)
         self._using_native_bridge = isinstance(self._bridge, NativeMT5Bridge)
         self._tg_reader: Optional["TelegramReader"] = None
         self._monitor_task: Optional[asyncio.Task] = None

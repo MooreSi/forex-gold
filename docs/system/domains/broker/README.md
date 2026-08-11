@@ -48,6 +48,7 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 
 ## Known things & gotchas
 
+- `services/broker/debug_guard.py` (2026-08-11, review C1): `TradingRuntime.__init__` passes `_make_bridge`'s pick through `reject_real_bridge_in_debug()` — a debug-mode boot that selected a real bridge class raises instead of logging into a live account behind the "no real orders" banner. **Consequence: a plain `FOREX_DEBUG_MODE=1` boot refuses until the Simon-gated seam wires the fake** (local-debug-mode 020); once the seam lands the guard simply never trips (pinned by `tests/runtime/test_debug_bridge_guard.py`). Bridge *selection* in `_make_bridge` is untouched.
 - Timing constants: watchdog checks every 60s, restart cooldown 180s, startup wait 20s. Self-healer: 90s poll, 300s window, threshold 3 occurrences — deliberately below the watchdogs so it ignores one-off blips.
 - Watchdog state is a caller-owned dict mutated in place; callers must seed it with the original loop's initial values.
 - `watchdog.py` imports `monotonic` by name so tests can pin it — the real clock made the cooldown test pass only on machines up longer than the cooldown.

@@ -36,6 +36,7 @@ delivered in NiceGUI instead.
 
 ## Known things & gotchas
 
+- The login gate (`auth_gate.py`) has a first-run branch (2026-08-11, review C2): a real install with no stored password gets a create-password card (username is fixed to `admin`) instead of a login form that can never succeed — before this, `set_password` had no caller and real mode was locked out. `create_initial_password()` refuses once a hash exists, so the unauthenticated setup surface can never reset an existing password (pinned by `tests/services/auth/test_dashboard_auth.py` and the wiring pin in `tests/frontend/test_auth_gate.py`).
 - The `frontend-reaches-the-backend-through-controllers` contract is being driven from 59 violations to zero in restructure phase 1; only one phase-1 task touches money.
 - Placement rule: extract "on the second caller, not in anticipation" — one section's helper stays in that section; two sections → `<page>/_shared.py`; two pages → `components/<domain>/`.
 - Classic split failure: a section calling `log.warning` while `log = logging.getLogger(__name__)` stayed in `__init__.py` — renders fine, `NameError` only on the error path. `tests/frontend/test_page_packages_are_wired.py` catches it statically.

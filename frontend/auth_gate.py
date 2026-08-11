@@ -41,6 +41,12 @@ def install() -> None:
         if app.storage.user.get("authenticated", False):
             ui.navigate.to("/")
             return
+        if _auth.needs_setup():
+            # Fresh real install: no password exists and the debug seed is
+            # off, so a plain login form could never succeed (review
+            # 2026-08-11, C2). Offer the one-time setup instead.
+            _first_run_setup()
+            return
 
         def _attempt():
             if _auth.verify(username.value or "", password.value or ""):
@@ -60,6 +66,33 @@ def install() -> None:
                 ui.button("Log in", on_click=_attempt).props("color=teal").classes("w-full")
                 if _auth.is_debug() and not _auth.is_set():
                     ui.label("Debug mode — use debug / debug").classes("text-xs text-amber-400")
+
+    def _first_run_setup():
+        def _create():
+            if not password.value or password.value != confirm.value:
+                ui.notify("Enter the same non-empty password twice", color="negative")
+                return
+            if _auth.create_initial_password(password.value):
+                app.storage.user.update({"authenticated": True, "username": "admin"})
+                ui.navigate.to("/")
+            else:
+                # A password appeared since the page rendered (second tab /
+                # second machine) — never overwrite; go log in with it.
+                ui.notify("A password already exists — log in instead", color="negative")
+                ui.navigate.to("/login")
+
+        with ui.column().classes("absolute-center items-center gap-4"):
+            ui.icon("lock_open", size="3rem").classes("text-teal-400")
+            ui.label("FOREX Trader — first run").classes("text-2xl font-bold")
+            with ui.card().classes("w-80 p-6 gap-3"):
+                ui.label("Create the dashboard password. You will log in as "
+                         "username admin from now on.").classes("text-sm")
+                password = (ui.input("New password", password=True, password_toggle_button=True)
+                            .props("outlined dense").classes("w-full"))
+                confirm = (ui.input("Confirm password", password=True)
+                           .props("outlined dense").classes("w-full")
+                           .on("keydown.enter", _create))
+                ui.button("Create password", on_click=_create).props("color=teal").classes("w-full")
 
     @ui.page("/logout")
     def _logout_page():

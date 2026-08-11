@@ -28,6 +28,79 @@ def test_ci_triggers_on_push_and_pr():
     assert "push:" in text and "pull_request:" in text
 
 
+# ---------------------------------------------------------------------------
+# CI must install what `tools.checks all` actually invokes (review 2026-08-11,
+# C3). All three real CI runs to date failed in ~2m20s with "No module named
+# pytest": the workflow installs only requirements.txt, which declares no test
+# runner — so the suite and the coverage ratchet never execute, and gate
+# enforcement silently stays local-voluntary. Green here means the workflow
+# provably installs the suite's tooling, wherever it declares it.
+
+import re as _re
+
+
+def _requirement_names(requirements_text: str) -> set[str]:
+    """Package names from requirements-file text (comments and pins stripped)."""
+    names = set()
+    for line in requirements_text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        names.add(_re.split(r"[=<>!~\[; ]", line, 1)[0].lower())
+    return names
+
+
+def _packages_pip_installs(workflow_text: str, read_requirements) -> set[str]:
+    """Every package name any `pip install` line in the workflow installs,
+    resolving `-r <file>` through *read_requirements(path) -> str`."""
+    names: set[str] = set()
+    for args in _re.findall(r"pip install (.+)", workflow_text):
+        tokens = args.split()
+        i = 0
+        while i < len(tokens):
+            if tokens[i] == "-r":
+                names |= _requirement_names(read_requirements(tokens[i + 1]))
+                i += 2
+            elif tokens[i].startswith("-"):
+                i += 1
+            else:
+                names.add(_re.split(r"[=<>!~\[;]", tokens[i], 1)[0].lower())
+                i += 1
+    return names
+
+
+def _packages_ci_installs() -> set[str]:
+    repo = WORKFLOW.parents[2]
+    return _packages_pip_installs(
+        WORKFLOW.read_text(encoding="utf-8"),
+        lambda path: (repo / path).read_text(encoding="utf-8"),
+    )
+
+
+def test_ci_installs_pytest_so_the_suite_step_can_run():
+    assert "pytest" in _packages_ci_installs(), (
+        "the workflow never installs pytest — `tools.checks all` dies at the "
+        "suite step with 'No module named pytest' (observed on every CI run "
+        "to date) and behaviour enforcement stays local-voluntary"
+    )
+
+
+def test_ci_installs_pytest_cov_so_the_coverage_ratchet_has_data():
+    assert "pytest-cov" in _packages_ci_installs(), (
+        "tools.checks runs pytest with --cov and the ratchet reads the JSON "
+        "it writes — without pytest-cov, CI can never enforce coverage"
+    )
+
+
+def test_the_dependency_scan_can_actually_see_a_package():
+    """Negative control: resolves both inline installs and -r files."""
+    found = _packages_pip_installs(
+        "run: |\n  pip install --upgrade pip\n  pip install -r reqs.txt extra-pkg==1.0\n",
+        {"reqs.txt": "pytest-cov==5.0  # pinned\n# comment\npyyaml>=6\n"}.__getitem__,
+    )
+    assert found == {"pip", "pytest-cov", "pyyaml", "extra-pkg"}
+
+
 def test_ci_installs_the_test_dependencies():
     """requirements.txt is runtime-only — it carries no pytest. All three CI
     runs to date died in ~2m20s with 'No module named pytest' (2026-08-11

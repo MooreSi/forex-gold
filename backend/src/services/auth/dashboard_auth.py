@@ -41,6 +41,24 @@ def set_password(password: str, username: str = _REAL_USERNAME) -> None:
     _HASH_FILE.write_bytes(salt + _scrypt(password, salt))
 
 
+def needs_setup() -> bool:
+    """True when the real login has no password yet. A fresh real install
+    must be offered the first-run setup flow or it is locked out of its own
+    dashboard (review 2026-08-11, C2). Debug mode is covered by the
+    debug/debug seed and must not show the flow."""
+    return not is_set() and not bool(_config.is_debug())
+
+
+def create_initial_password(password: str) -> bool:
+    """First run only: establish the admin password and report success.
+    Refuses once a password exists — the unauthenticated setup surface must
+    never double as a password reset."""
+    if is_set():
+        return False
+    set_password(password)
+    return True
+
+
 def verify(username: str, password: str) -> bool:
     """True if the credentials are valid."""
     if not is_set():

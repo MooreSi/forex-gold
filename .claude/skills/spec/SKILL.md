@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Scaffold a spec-driven plan pack under docs/todo/<domain>/<feature>/ for a bigger piece of work — setup interview, 010-stepped task files, a README hub, and companion docs (PROGRESS/QUESTIONS/SUMMARY/REVIEW/BAR) — and tear it down again when the work ships. Use when the user says `/spec`, `/spec done`, "set up a spec for this", or wants a docs/todo planning directory for a larger feature. NOT for a change that fits in one spec file — that is `/new-spec`. NOT for a one-line fix.
+description: Scaffold a spec-driven plan pack under docs/todo/<domain>/<feature>/ for a bigger piece of work — setup interview, 010-stepped task files, a README hub, and companion docs (PROGRESS/QUESTIONS/SUMMARY/REVIEW) — and tear it down again when the work ships. Use when the user says `/spec`, `/spec done`, "set up a spec for this", or wants a docs/todo planning directory for a larger feature. NOT for a change that fits in one spec file — that is `/new-spec`. NOT for a one-line fix.
 user-invocable: true
 ---
 
@@ -37,7 +37,7 @@ goes there. A pack without an anchor spec is allowed but say so explicitly.
   numbering.
 - **Companion docs** beside the hub — a fixed, allowed set: `SPEC.md` (the anchor spec),
   `PROGRESS.md` (live status), `QUESTIONS.md` (decisions), `SUMMARY.md` (owner-facing plain-English
-  digest), `REVIEW.md` (evidence), `BAR.md` (the screen bar, when the pack builds a UI surface).
+  digest), `REVIEW.md` (evidence).
   Nothing else —
   `START/INFO/OVERVIEW/PLAN.md` are banned.
 
@@ -83,8 +83,6 @@ you can't infer:
    the last phase (see references). Ask now so it isn't forgotten.
 7. **Who reviews it?** — if the requester isn't the implementer, or the change is broad, plan a
    **`SUMMARY.md`** (plain-English digest).
-8. **New or reworked UI surface?** — if the pack builds a page, tab, panel, dialog or card, plan a
-   **`BAR.md`** (screen bar). Name the surface and where it opens from; detail comes in Step 4.
 
 Do not interrogate design decisions here — open decisions go in `QUESTIONS.md` for the user to answer
 inline. Don't ask what the anchor spec or the code already answers.
@@ -117,10 +115,8 @@ reading** — never lorem placeholders:
   ([template](templates/QUESTIONS.md.tpl)) when there are open decisions; `SUMMARY.md`
   ([template](templates/SUMMARY.md.tpl)) for an owner-facing digest; `REVIEW.md` for the Step-1
   evidence.
-- **`BAR.md` from [templates/BAR.md.tpl](templates/BAR.md.tpl)** when the pack builds a UI surface.
-  Fill it as far as the spec and code reading honestly allow — real components from the existing
-  frontend, `NEW:` for components this work will create, every string the user reads. Leave
-  `Status: draft`: the bar becomes real only when the **user** edits it and marks it `agreed`.
+- For a pack that builds UI, put the user-facing strings the user must confirm (labels, copy) in
+  `QUESTIONS.md` so they are the user's words, not the builder's — do not invent them silently.
 - If phased: **all** numbered files live inside phase dirs, starting `phase1-<slug>/`. Each phase dir
   gets its own index from [templates/phase-README.md.tpl](templates/phase-README.md.tpl) with its
   gating condition; the feature-root `README.md` stays the single hub. If user-facing, the last phase
@@ -132,8 +128,6 @@ Print the pack tree, then:
 
 - If there's a `QUESTIONS.md`, say plainly that the user answers it inline before implementation
   starts.
-- If the pack has a `BAR.md`, say plainly that it is a draft **the user must edit** — an unedited bar
-  is worthless as a bar, because the builder wrote it.
 - If any task is money-touching, name those tasks and say they route through `/safe-change` and need
   a demo session.
 
@@ -171,9 +165,8 @@ Never touch `docs/history/` at any point — it is an audit trail.
 - **Money-touching is declared, not discovered.** The README header and every affected task say so.
   A pack that quietly reshapes the close path is the exact failure this repo's rules exist to stop.
 - **Answered questions are annotated, not deleted** (in `QUESTIONS.md` and the README short list).
-- **A screen bar is the user's, not yours.** Scaffold `BAR.md` as a draft and hand it over. Never
-  mark it `agreed`, and never grade an implementation against a bar the user has not edited — that
-  is the builder marking its own homework.
+- **User-facing copy is the user's, not yours.** Never invent the strings a UI shows and treat them
+  as settled — put them in `QUESTIONS.md` for the user to confirm.
 
 ## Pairs with
 

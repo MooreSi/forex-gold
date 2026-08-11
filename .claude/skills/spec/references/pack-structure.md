@@ -51,7 +51,7 @@ harvested to `CHANGELOG.md` / `docs/system/` first). `docs/specs/NNN-*.md` is on
 | Problem, Goal, Non-goals | The task breakdown and its ordering |
 | **What must NOT change** | Live status, per-task ownership |
 | Test plan (the contract) | Open decisions awaiting an answer |
-| Rollout, Verification checklist | Evidence snapshots, the screen bar |
+| Rollout, Verification checklist | Evidence snapshots |
 
 The pack README links to `SPEC.md` in its header; the spec's Status moves
 Draft → Approved → Building → Shipped as the pack progresses. At `/spec done` the Verification
@@ -70,9 +70,11 @@ docs is allowed — each with a defined role. Do **not** invent others (`START.m
 | `QUESTIONS.md` | **Decisions to confirm** — recommendation-first, plain-language, **inline-answerable** (the user writes `ANSWER:` under each). | When the plan has open decisions the user must settle. Retire/annotate once answered. |
 | `SUMMARY.md` | **Owner-facing plain-English digest** — every change, per mechanism, before→after, no jargon or code. For a non-technical reviewer to read the whole pack at a glance. | When the requester isn't the implementer, or the change is broad / behaviour-heavy. |
 | `REVIEW.md` | **Evidence + current-state snapshot** — read-only queries against the trade DB, numbers pulled from `latest_logs/`, real trade counts and current values, shareable cold. | For any pack that changes trading behaviour, sizing, thresholds or anything where "is this actually a problem?" needs a number. |
-| `BAR.md` | **The screen bar** — what the UI surface should be, in text, precise enough to build from and to be graded against: anatomy, states, copy, rules, out-of-scope. Scaffolded as `Status: draft`; it is not a bar until the **user** edits it and marks it `agreed`. | When the pack builds or reworks a page, tab, panel, dialog or card. Not for copy tweaks or single-component changes. |
 
 Templates for each live in `templates/`. Keep the README's doc index in sync with whatever exists.
+
+For a pack that builds UI, the user-facing strings (labels, copy) go in `QUESTIONS.md` for the user
+to confirm — do not invent and silently settle them.
 
 ## Gathering evidence for `REVIEW.md`
 

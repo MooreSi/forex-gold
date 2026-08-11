@@ -45,7 +45,6 @@ the lines that constrain the tasks in this pack.}}
 | {{[SUMMARY.md](SUMMARY.md)}} | {{Plain-English digest of every change (owner-facing) — if present}} |
 | {{[QUESTIONS.md](QUESTIONS.md)}} | {{Decisions to confirm / answered — if present}} |
 | {{[REVIEW.md](REVIEW.md)}} | {{Evidence + current-state snapshot — if present}} |
-| {{[BAR.md](BAR.md)}} | {{Screen bar for the UI surface — if present}} |
 | [010-{{slug}}.md](010-{{slug}}.md) | {{one-line summary}} |
 | [020-{{slug}}.md](020-{{slug}}.md) | {{one-line summary}} |
 

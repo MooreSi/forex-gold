@@ -16,7 +16,6 @@ from nicegui import ui
 
 from backend.src.controllers import engines_controller as engines_controller
 
-from backend.src.services.test_signal import test_signal_service as test_engine_module
 from backend.src.controllers import sync_controller as sync_ctl
 
 # Local/Remote switching now lives in the bounce panel_data service:
@@ -122,7 +121,7 @@ def render(get_engine: Callable) -> None:
 # ── Bounce (main) panel ───────────────────────────────────────────────────────
 
 def _render_main() -> None:
-    eng = test_engine_module.get_instance()
+    eng = engines_controller.get_engine("bounce")
 
     # ── Header bar ────────────────────────────────────────────────────────────
     with ui.row().classes(

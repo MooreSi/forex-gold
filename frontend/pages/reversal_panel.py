@@ -22,7 +22,6 @@ from backend.src.controllers import engines_controller as engines_controller
 
 from nicegui import ui
 
-from backend.src.services.reversal_engine import reversal_engine_service as re_engine_module
 from backend.src.controllers import sync_controller as sync_ctl
 
 # Local/Remote switching now lives in the reversal panel_data service:
@@ -128,7 +127,7 @@ def _level_type_badge(ltype: str) -> tuple[str, str]:
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
-    eng = re_engine_module.get_instance()
+    eng = engines_controller.get_engine("reversal")
 
     # ── Header bar ────────────────────────────────────────────────────────────
     with ui.row().classes(

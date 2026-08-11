@@ -13,7 +13,6 @@ from backend.src.controllers import engines_controller as engines_controller
 
 from nicegui import ui
 
-from backend.src.services.breakout_signal import breakout_signal_service as bo_engine_module
 from backend.src.controllers import sync_controller as sync_ctl
 
 # Local/Remote switching now lives in the breakout panel_data service:
@@ -86,7 +85,7 @@ def _bo_type_badge(btype: str) -> tuple[str, str]:
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
-    eng = bo_engine_module.get_instance()
+    eng = engines_controller.get_engine("breakout")
 
     # ── Header ────────────────────────────────────────────────────────────────
     with ui.row().classes(

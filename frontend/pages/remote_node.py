@@ -19,10 +19,10 @@ _DEFAULT_PORT = sync_ctl.DEFAULT_SYNC_PORT
 
 
 def _get_sub_engines():
-    from backend.src.services.breakout_signal import breakout_signal_service as _bo_mod
-    from backend.src.services.test_signal import test_signal_service as _bc_mod
-    from backend.src.services.reversal_engine import reversal_engine_service as _gd_mod
-    return _bo_mod.get_instance(), _bc_mod.get_instance(), _gd_mod.get_instance()
+    # Function-local on purpose: defers the engine imports past page import,
+    # exactly as the direct service imports here always did.
+    from backend.src.controllers import engines_controller
+    return engines_controller.sub_engines()
 
 
 def render(get_engine=None) -> None:

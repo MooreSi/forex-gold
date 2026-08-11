@@ -918,10 +918,10 @@ def main_page():
         _mode_switching = [False]
 
         def _mode_sub_engines():
-            from backend.src.services.breakout_signal import breakout_signal_service as _bo_m
-            from backend.src.services.test_signal import test_signal_service as _bc_m
-            from backend.src.services.reversal_engine import reversal_engine_service as _gd_m
-            return _bo_m.get_instance(), _bc_m.get_instance(), _gd_m.get_instance()
+            # Function-local on purpose: defers the engine imports past app
+            # boot, exactly as the direct service imports here always did.
+            from backend.src.controllers import engines_controller
+            return engines_controller.sub_engines()
 
         async def _refresh_mode_btn():
             if _mode_switching[0]:
@@ -968,10 +968,8 @@ def main_page():
                         ui.notify(f"VPS did not acknowledge stand-down: {exc}", type="negative")
                         return
                     settings_ctl.set_active_trader("local")
-                    bo, bc, gd = _mode_sub_engines()
-                    for eng in (bo, bc, gd):
-                        if eng is not None and not getattr(eng, "is_running", False):
-                            eng.start()
+                    from backend.src.controllers import engines_controller as _engines_ctl
+                    _engines_ctl.start_stopped_engines()
                     _n_open = len(ack.get("open_positions", []))
                     ui.notify(
                         f"Now trading locally. VPS stood down"
@@ -988,10 +986,8 @@ def main_page():
                     # close them manually in MT5/the broker terminal directly.
                     engine = get_engine()
                     open_trades = engine.get_open_trades()
-                    bo, bc, gd = _mode_sub_engines()
-                    for eng in (bo, bc, gd):
-                        if eng is not None and getattr(eng, "is_running", False):
-                            eng.stop()
+                    from backend.src.controllers import engines_controller as _engines_ctl
+                    _engines_ctl.stop_running_engines()
                     try:
                         await sync_ctl.request_resume(timeout=15.0)
                     except Exception as exc:
@@ -1105,8 +1101,8 @@ def main_page():
                                 f"No MT5 orders will be placed until the window clears._"
                             )
                             await _tg.send_message(_tg_msg, event_type="news_pause")
-                        except Exception:
-                            pass
+                        except Exception as _news_alert_exc:
+                            log.warning("news-pause Telegram alert failed: %s", _news_alert_exc)
                 else:
                     news_badge.style("display:none")
                     _news_in_window[0] = False
@@ -1160,8 +1156,11 @@ def main_page():
                         if credits > 0:
                             _net_deposited[0] = credits - debits
                             _deposit_fetch_at[0] = now_m
-                    except Exception:
-                        pass
+                    except Exception as _dep_exc:
+                        # Header P&L keeps its last value — say so in the log
+                        # instead of silently showing a stale figure.
+                        log.warning("net-deposit refresh failed (header P&L may be stale): %s",
+                                    _dep_exc)
 
                 if _net_deposited[0]:
                     total_pnl = eq - _net_deposited[0]
@@ -1201,8 +1200,8 @@ def main_page():
                     f"EA not connected on {ea_scope} — trades still work, "
                     "falling back to Python-managed instead of native on-tick management"
                 )
-            except Exception:
-                pass
+            except Exception as _ea_exc:
+                log.debug("EA badge refresh failed: %s", _ea_exc)
 
             await _refresh_mode_btn()
 
@@ -1223,8 +1222,10 @@ def main_page():
                 _last_profit_seq[0] = current_profit_seq
                 await ui.run_javascript(_CASH_REGISTER_JS)
 
-        except Exception:
-            pass
+        except Exception as _hdr_exc:
+            # One bad tick must not kill the 2s header timer, but a broken
+            # header refresh showing stale balances silently is worse — log it.
+            log.warning("header refresh failed (values on screen may be stale): %s", _hdr_exc)
 
     ui.timer(2.0, _refresh_header)
 

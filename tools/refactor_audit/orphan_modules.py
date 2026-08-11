@@ -212,7 +212,7 @@ def _write_allowlist(orphans: list[dict]) -> None:
         ],
         "allowed": [
             {"module": o["module"], "file": o["file"], "loc": o["loc"],
-             "reason": "dead — scheduled for deletion (review-august-08 phase3/010)"}
+             "reason": "dead — scheduled for deletion (stage1 phase3/010)"}
             for o in orphans
         ],
     }, indent=2) + "\n")

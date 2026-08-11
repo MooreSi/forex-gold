@@ -28,6 +28,14 @@ python -m tools.checks coverage   # just the coverage ratchet
 - orphan detector: no orphans
 - coverage ratchet: no regressions
 - boot smoke: imports cleanly
+- doc links: all resolve (`tools/check_doc_links.py`, part of `checks all`)
+
+And two things no tool checks — answer them yourself before committing:
+
+- **Did this change teach something non-obvious?** Then the relevant
+  `docs/system/domains/<domain>/` file gets that fact in the same commit.
+- **Did this change invalidate a number or claim a skill quotes?** Then that
+  skill file gets corrected in the same commit.
 
 ## When something fails
 

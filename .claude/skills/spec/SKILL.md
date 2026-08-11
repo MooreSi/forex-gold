@@ -145,6 +145,11 @@ Print the pack tree, then:
    `CHANGELOG.md`, `docs/system/`), in-app help text, `docs/system/rules/` rules that changed,
    reusable queries or scripts (`tools/`). `SPEC.md` is deleted with the pack — git history is the
    archive.
+3b. **Refresh stale skills.** Any `.claude/skills/` file that quotes a fact this pack changed —
+   a contract count, a LOC number, "X is empty", a path — gets updated in the same change.
+   (Found live 2026-08-11: frontend-conventions still claimed `components/` was empty and quoted
+   a contract count three revisions old. Skills should state rules and point at gates; only gates
+   own numbers.)
 4. **Delete** `docs/todo/<domain>/<feature>/` (companion docs included) — never the domain dir
    itself. Confirm with the user first. Git history preserves everything.
 

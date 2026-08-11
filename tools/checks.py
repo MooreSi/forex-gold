@@ -60,14 +60,20 @@ GATES = [
         [PY, "-c", "import backend.src.app"],
         "the composition root still imports",
     ),
+    Check(
+        "doc links",
+        [PY, "tools/check_doc_links.py"],
+        "every relative markdown link in the living docs resolves "
+        "(stage0 audit trail excluded)",
+    ),
 ]
 
 # The suite MUST produce coverage data, or the coverage ratchet below has
 # nothing to read and fails with "no coverage data" -- which is exactly how it
 # sat inert for months. --cov-report writes the JSON the gate reads; the path
-# is taken from the gate itself so the two can never drift apart. testpaths in
-# pyproject already includes frontend/tests, so pytest need not be told the
-# paths here.
+# is taken from the gate itself so the two can never drift apart. (testpaths in
+# pyproject is just ["tests"] since 2026-08-11 -- the frontend/tests ghost was
+# removed.)
 SUITE = Check(
     "test suite",
     [PY, "-m", "pytest", "tests/", "-q",

@@ -71,7 +71,7 @@ answers it. A provisional default is never silent: write down what you chose and
 answer differs. Confirming a queue item is a *decision* — it is **not** the sign-off + demo session
 that order/close/sizing changes still require.
 
-New agent or developer picking this up cold: start from **[../../../HANDOFF.md](../../../HANDOFF.md)**.
+New agent or developer picking this up cold: start from **[../../todo/HANDOFF.md](../../todo/HANDOFF.md)**.
 
 ## Where everything lives
 

@@ -5,7 +5,7 @@
 Read **[docs/system/rules/10-golden-rules.md](docs/system/rules/10-golden-rules.md)** before
 changing anything. It is short and it is not optional.
 
-**New here / picking this up cold?** Start at **[HANDOFF.md](HANDOFF.md)** — who's who, how to run it
+**New here / picking this up cold?** Start at **[docs/todo/HANDOFF.md](docs/todo/HANDOFF.md)** — who's who, how to run it
 locally, current state, and where the work is tracked.
 
 **A question you can't answer** (trading policy, risk numbers, money behaviour, licensing) goes in

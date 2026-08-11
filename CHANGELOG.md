@@ -33,9 +33,9 @@
   signal → open → manage → close on the fakes
 
 ### Handoff
-- `docs/give-to-simon-checklist.md` — the readiness gate, honestly filled
+- `docs/simon-handover/readiness-checklist.md` — the readiness gate, honestly filled
 - Decision queue grown and provisionally answered where safe
-  (docs/questions/, restructure + debug-mode QUESTIONS)
+  (docs/simon-handover/, restructure + debug-mode QUESTIONS)
 
 ## v0.8.2 — ORB Auto-Execute Fix, R:R Tracking & Version Reporting
 

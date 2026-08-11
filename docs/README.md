@@ -10,7 +10,7 @@ required — any AI agent or human reads the same files.
 | **[system/](system/)** | **The knowledge base.** Goal, rules, and one living directory per part of the system. The single point of truth. | **every agent, every change** |
 | [specs/](specs/) | What we are building and why, one file per change | before building |
 | [todo/](todo/) | Multi-session work packs in progress | while executing a plan |
-| **[questions/](questions/)** | **Deferred decisions** — the answer-later queue (see below) | when a decision can wait |
+| **[simon-handover/](simon-handover/)** | **Deferred decisions** — the answer-later queue (see below) | when a decision can wait |
 | [reviews/](reviews/) | Point-in-time review snapshots | when auditing |
 | [todo/refactor/stage0/](todo/refactor/stage0/) | Audit trail of the 2026 refactor (was docs/history/refactor-2026/) — **read-only** | archaeology |
 
@@ -56,11 +56,11 @@ Specs exist because a chat transcript is not a record. Six months from now the
 spec is what explains the code. When a spec ships, fold what it taught us
 back into the relevant `system/domains/` file.
 
-## Deferred decisions — `questions/`
+## Deferred decisions — `simon-handover/`
 
 Not every decision has to be made before the work. Some genuinely can be settled
 *after*, once the system is built and running. Those live in
-[questions/](questions/), the answer-later queue.
+[simon-handover/](simon-handover/), the answer-later queue.
 
 The working method:
 
@@ -70,10 +70,10 @@ The working method:
 3. **Make sure it runs** — every provisional default is one the app works under
    today (green suite, boots, safe on demo).
 4. **Hand the queue over** — the owner's brother (who holds the trading and
-   business calls) reviews [questions/](questions/) in one pass and confirms or
+   business calls) reviews [simon-handover/](simon-handover/) in one pass and confirms or
    overrides each. An answered question is annotated, never deleted.
 
-A provisional default is never a silent one: each file in `questions/` records
+A provisional default is never a silent one: each file in `simon-handover/` records
 what was chosen, why, what it touches, and what changes if the answer differs.
 And confirming a default there is a *decision* — **not** the owner sign-off + demo
 session that any money-path (order placement, closing, sizing) change still

@@ -56,7 +56,7 @@ Stop and ask. Specifically stop if:
 
 Asking costs one message. The alternative has cost real money here before.
 
-## Questions you cannot answer go in `docs/questions/`
+## Questions you cannot answer go in `docs/simon-handover/`
 
 The person running the sessions (Darren) is refactoring this for his brother **Simon**, who holds
 the live account, the credentials and the licence, and who makes every trading, risk and money
@@ -66,7 +66,7 @@ So when you hit a decision that isn't yours to make from the code, the rules or 
 especially anything about trading policy, risk numbers, money-path behaviour or licensing — **do not
 block and do not silently guess.** Choose a safe provisional default (one that keeps trading no more
 aggressive than today), proceed, and record the open decision as a file in
-[../../questions/](../../questions/) (see its README for the format). Simon reviews that queue and
+[../../simon-handover/](../../simon-handover/) (see its README for the format). Simon reviews that queue and
 answers it. A provisional default is never silent: write down what you chose and what changes if the
 answer differs. Confirming a queue item is a *decision* — it is **not** the sign-off + demo session
 that order/close/sizing changes still require.

@@ -9,7 +9,7 @@ changing anything. It is short and it is not optional.
 locally, current state, and where the work is tracked.
 
 **A question you can't answer** (trading policy, risk numbers, money behaviour, licensing) goes in
-**[docs/questions/](docs/questions/)** — the owner's brother Simon answers those; the person running
+**[docs/simon-handover/](docs/simon-handover/)** — the owner's brother Simon answers those; the person running
 the sessions usually can't. Choose a safe provisional default, proceed, and record the open decision.
 
 ---

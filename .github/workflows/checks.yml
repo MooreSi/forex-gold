@@ -21,9 +21,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -32,6 +32,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # Test runner deps — requirements.txt is runtime-only (ships in the
+          # installer). Without these every run died at "No module named
+          # pytest" before testing anything (2026-08-11 review C3).
+          pip install pytest pytest-cov pytest-asyncio
 
       - name: Run all checks
         run: python -m tools.checks all
@@ -43,3 +47,6 @@ jobs:
           name: coverage-json
           path: .coverage.json
           if-no-files-found: ignore
+          # (kept on v4 deliberately — bump majors one at a time so a broken
+          # action version is attributable; the checkout/setup-python bumps
+          # silence the Node 20 deprecation warnings)

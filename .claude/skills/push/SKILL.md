@@ -41,15 +41,38 @@ git push origin <current-branch>
 git status -sb    # branch must show level with origin (no "ahead")
 ```
 
-### 4. CI
+### 4. Watch CI — and fix it if it fails
 
 Every push runs `.github/workflows/checks.yml` (`tools.checks all` on a
-Windows runner). Remind the user to check the Actions tab — a local green
-with a red CI is a real signal (environment drift), not noise. While
-`docs/simon-handover/readiness-checklist.md` still has an open CI row, a
-green run is what ticks it.
+Windows runner). A push is not "done" until that run is green — watch it:
+
+```powershell
+gh run list --branch <branch> --limit 1        # find the run this push started
+gh run watch <run-id> --exit-status            # blocks until it finishes
+```
+
+(`gh run watch` can take 10–20 min on the Windows runner; run it in the
+background and continue only non-code work meanwhile.)
+
+**If the run fails:**
+
+```powershell
+gh run view <run-id> --log-failed              # the actual failing output
+```
+
+1. Diagnose from the real log — never guess. A local green with a red CI is
+   environment drift (a missing workflow dep, a path assumption, a
+   Windows-runner difference), and each is fixable in the workflow or code.
+2. Fix it, re-run the relevant local check, `/commit`, push again, watch
+   again. Loop until green.
+3. If the failure is in something you cannot fix from here (billing, runner
+   outage, permissions), report exactly what the log says and stop.
+
+While `docs/simon-handover/readiness-checklist.md` still has an open CI row,
+the first green run is what ticks it.
 
 ## Never
 
 - push with a dirty tree, or force-push a shared branch
 - push around a failed local check "to see what CI says"
+- declare a push done while its CI run is red or still unwatched

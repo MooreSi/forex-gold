@@ -18,14 +18,14 @@ implementation.
 
 | | Use |
 |---|---|
-| `/new-spec` | One change, one spec file — `docs/specs/NNN-short-name.md`. Half a page. The default for anything bigger than a one-line fix. |
+| `/new-spec` | One change, one spec file — `docs/todo/NNN-short-name.md`. Half a page. The default for anything bigger than a one-line fix. |
 | `/spec` | Work that needs **more than one commit and more than one session**: several tasks, an ordering between them, decisions still open, possibly more than one agent. |
 
 They compose. A plan pack normally **anchors on a `SPEC.md` inside the pack** —
-`docs/todo/<domain>/<feature>/SPEC.md`, structured per `docs/specs/TEMPLATE.md`; that file holds the
+`docs/todo/<domain>/<feature>/SPEC.md`, structured per the pack-structure reference; that file holds the
 Problem / Goal / Non-goals / *What must NOT change* / Test plan; the rest of the pack holds the
 breakdown, the status log and the open decisions. If no spec exists yet, write `SPEC.md` first (same
-discipline as `/new-spec`, different location) and link it from the pack README. `docs/specs/NNN-*.md`
+discipline as `/new-spec`, different location) and link it from the pack README. A standalone `docs/todo/NNN-*.md`
 remains the home of **standalone** specs (a `/new-spec` change with no pack); a pack's spec never
 goes there. A pack without an anchor spec is allowed but say so explicitly.
 
@@ -52,8 +52,8 @@ Full detail — directory trees, numbering, companion-doc roles, phase naming, t
   **[docs/system/rules/10-golden-rules.md](../../../docs/system/rules/10-golden-rules.md)** if they aren't already in
   context. This app places real orders with real money; that shapes every pack.
 - Read the pack's `SPEC.md` if the pack already exists, or any related standalone spec in
-  `docs/specs/`. If there is no anchor spec and the work warrants one, plan to write `SPEC.md`
-  (per `docs/specs/TEMPLATE.md`) as part of scaffolding — proceed without it only if the user says so.
+  `docs/todo/`. If there is no anchor spec and the work warrants one, plan to write `SPEC.md`
+  (per the pack-structure reference) as part of scaffolding — proceed without it only if the user says so.
 - Scan `docs/todo/` for an existing domain dir that fits and for related prior packs. If a related
   pack exists, propose **extending** it instead of forking a new dir.
 - Skim the code the work touches — enough to name concrete building blocks for the reuse table and
@@ -77,7 +77,7 @@ you can't infer:
 3. **Shape** — flat vs phased dirs. Recommend flat unless the work clearly spans releases/phases.
 4. **Scope boundary** — what is explicitly out of scope.
 5. **Anchor spec** — confirm the pack gets a `SPEC.md` (the default), or that there deliberately
-   isn't one; note any related standalone `docs/specs/NNN-*.md` it builds on.
+   isn't one; note any related standalone `docs/todo/NNN-*.md` it builds on.
 6. **User-facing?** — if it changes anything the user reads in the app's About / Setup Instructions /
    Glossary pages, or anything that belongs in `CHANGELOG.md` or `docs/system/rules/`, plan a **docs phase** as
    the last phase (see references). Ask now so it isn't forgotten.
@@ -98,7 +98,7 @@ to confirm **before** scaffolding.
 Create the dir and fill the templates with **real content from the spec, interview, evidence and code
 reading** — never lorem placeholders:
 
-- `SPEC.md` per `docs/specs/TEMPLATE.md` — the anchor: Problem / Goal / Non-goals / What must NOT
+- `SPEC.md` per the pack-structure reference — the anchor: Problem / Goal / Non-goals / What must NOT
   change / Design / Test plan / Rollout / Verification. Written first; everything else references it.
 - `README.md` from [templates/README.md.tpl](templates/README.md.tpl) — the onboarding block, what/why
   prose, doc index (every task + companion doc), decisions-locked table (with a Source column),
@@ -170,7 +170,7 @@ Never touch `docs/todo/refactor/stage0/` at any point — it is an audit trail.
 
 ## Pairs with
 
-- `/new-spec` — the same spec discipline for standalone changes (`docs/specs/NNN-*.md`); a pack's
+- `/new-spec` — the same spec discipline for standalone changes (`docs/todo/NNN-*.md`); a pack's
   anchor spec uses its structure but lives at `docs/todo/<domain>/<feature>/SPEC.md`.
 - `/safe-change` — the protocol for every money-touching task in the pack.
 - `/add-tunable` — when a task introduces a number the user should be able to change.

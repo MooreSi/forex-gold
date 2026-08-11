@@ -1,12 +1,12 @@
 ---
 name: new-spec
-description: Write a spec in docs/specs before building anything bigger than a one-line fix. Use when starting a feature, a change with more than one moving part, or when the user describes what they want but not how it should work.
+description: Write a spec in docs/todo before building anything bigger than a one-line fix. Use when starting a feature, a change with more than one moving part, or when the user describes what they want but not how it should work.
 ---
 
 # Writing a spec
 
-Anything beyond a one-line fix starts here. Copy `docs/specs/TEMPLATE.md` to
-`docs/specs/NNN-short-name.md` and fill it in.
+Anything beyond a one-line fix starts here. Create `docs/todo/NNN-short-name.md` (specs live in docs/todo/) using the
+structure below and fill it in.
 
 **First, ground the spec in the knowledge base.** Read the affected domain's
 `docs/system/domains/<domain>/README.md` — its constraints and gotchas feed
@@ -69,6 +69,6 @@ the line about no real or demo order being touched.
 
 ## Naming
 
-`docs/specs/NNN-short-name.md`, NNN sequential. Keep the number even if the
+`docs/todo/NNN-short-name.md`, NNN sequential. Keep the number even if the
 spec is abandoned — mark it Abandoned with a sentence on why. That sentence is
 often more useful later than the spec would have been.

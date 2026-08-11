@@ -19,8 +19,9 @@ If a comment explains why something is odd, it is odd on purpose.
 
 ## 1. Is there a spec?
 
-For anything beyond a one-line fix, write or find a spec in `docs/specs/`.
-See `docs/specs/TEMPLATE.md`. A spec is half a page: what changes, what must
+For anything beyond a one-line fix, write or find a spec **in `docs/todo/`** —
+a plan pack's `SPEC.md` (`/spec`) or a standalone spec file (`/new-spec`).
+A spec is half a page: what changes, what must
 not change, how you will know it worked.
 
 Specs exist so the *intent* survives the conversation. A chat transcript is

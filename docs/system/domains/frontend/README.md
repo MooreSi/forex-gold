@@ -3,7 +3,7 @@
 **Living file — update when this domain teaches you something.**
 Covers: `frontend/`. The canonical rule set is the
 `/frontend-conventions` skill; the active restructure plan is
-`docs/todo/refactor/frontend/restructure/` (spec `docs/specs/001-frontend-restructure.md`).
+`docs/todo/refactor/frontend/restructure/` (the pack is its own spec — the old standalone anchor `001-frontend-restructure.md` was lost in a docs reorg; its substance is the pack README's "What we're building & why").
 
 ## What it is
 

@@ -8,7 +8,7 @@ required — any AI agent or human reads the same files.
 | Directory | What it holds | Who reads it |
 |---|---|---|
 | **[system/](system/)** | **The knowledge base.** Goal, rules, and one living directory per part of the system. The single point of truth. | **every agent, every change** |
-| [specs/](specs/) | What we are building and why, one file per change | before building |
+| [todo/](todo/) | What we are building and why — every piece of work is a plan pack (or single spec file) here; a pack's `SPEC.md` is its spec | before building |
 | [todo/](todo/) | Multi-session work packs in progress | while executing a plan |
 | **[simon-handover/](simon-handover/)** | **Deferred decisions** — the answer-later queue (see below) | when a decision can wait |
 | [reviews/](reviews/) | Point-in-time review snapshots | when auditing |
@@ -44,8 +44,10 @@ domain file in the same change. Code explains *how*; `system/` explains
 
 ## Spec-driven development
 
-Anything beyond a one-line fix starts with a spec in [specs/](specs/), copied
-from [specs/TEMPLATE.md](specs/TEMPLATE.md).
+Anything beyond a one-line fix starts with a spec. **Specs live in [todo/](todo/)**:
+a multi-session piece of work gets a plan pack (`todo/<domain>/<feature>/` with a
+`SPEC.md`, scaffolded by the `/spec` skill); a single contained change gets one
+spec file there (`/new-spec`).
 
 A spec is half a page and answers four questions: what problem, what changes,
 **what must not change**, and how you will know it worked. The third question

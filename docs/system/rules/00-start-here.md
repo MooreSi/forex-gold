@@ -80,8 +80,7 @@ docs/system/          the knowledge base — the single point of truth
 docs/system/vision/   why the system exists, what success looks like
 docs/system/rules/    these rules — agent-agnostic
 docs/system/domains/  one living directory per part of the system
-docs/specs/           what we are building and why (spec-driven)
-docs/todo/            multi-session work packs in progress
+docs/todo/            the work: plan packs + their SPEC.md files (specs live here)
 docs/todo/refactor/stage0/         audit trail of past work — read-only
 ```
 

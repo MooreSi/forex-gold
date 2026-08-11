@@ -61,7 +61,7 @@ questions.
 1. **Before designing** a change, read the affected domain's README —
    constraints and gotchas there override any assumption you brought.
 2. **Before writing code**, read [rules/](rules/) if you have not this
-   session, and the spec template in [../specs/TEMPLATE.md](../specs/TEMPLATE.md).
+   session, and the spec structure in the `/spec` skill's pack-structure reference (specs live in `docs/todo/` as each pack's `SPEC.md`).
 3. **After shipping**, fold what the change taught us back into the domain
    README: new constraints, resolved questions, new gotchas.
 

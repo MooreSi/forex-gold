@@ -12,6 +12,20 @@
   ],
   "allowed": [
     {
+      "module": "backend.src.services.broker.fake_bridge",
+      "file": "backend/src/services/broker/fake_bridge.py",
+      "loc": 316,
+      "class": "awaiting-simon-gated-seam",
+      "reason": "Debug-mode FakeMT5Bridge (stage2 phase5/010). Fully built and test-covered (tests/services/broker/); production wiring is the 3-line _make_bridge seam in runtime.py, which is Simon-gated (sign-off + demo, local-debug-mode 020). Remove this entry the day the seam lands."
+    },
+    {
+      "module": "backend.src.services.broker.fake_market",
+      "file": "backend/src/services/broker/fake_market.py",
+      "loc": 124,
+      "class": "awaiting-simon-gated-seam",
+      "reason": "FakeMT5Bridge's deterministic tick engine -- imported only by fake_bridge.py, so it orphans together with it. Same seam, same removal condition."
+    },
+    {
       "module": "backend.src.services.channels.rule_generator",
       "file": "backend/src/services/channels/rule_generator.py",
       "loc": 275,

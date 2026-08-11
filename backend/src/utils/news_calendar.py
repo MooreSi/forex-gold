@@ -20,6 +20,8 @@ import threading
 import time
 from typing import Optional
 
+from backend.src.config import is_debug as _is_debug
+
 _log = logging.getLogger(__name__)
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -110,8 +112,16 @@ def get_news_proximity_norm(window_minutes: float = 120.0) -> float:
     return _mins_to_norm(mins, window_minutes)
 
 
+# Debug mode's canned answer: one high-impact event two hours out, so the
+# news-proximity code path is exercised (a norm below 1.0) without being
+# inside any blackout window.
+_DEBUG_CANNED_MINUTES = 120.0
+
+
 def _fetch_next_event_minutes() -> Optional[float]:
     """Try each source in order, return minutes to next high-impact event or None."""
+    if _is_debug():
+        return _DEBUG_CANNED_MINUTES
     mins = _from_mt5()
     if mins is not None:
         return mins

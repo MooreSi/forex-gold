@@ -20,6 +20,8 @@ try:
 except Exception:
     _SSL_CTX = ssl.create_default_context()
 
+from backend.src.config import is_debug as _is_debug
+
 _log = logging.getLogger("test_signal")
 
 _CACHE: Optional[list] = None
@@ -38,6 +40,17 @@ def _fetch_calendar() -> list:
     global _CACHE, _CACHE_TS
     now = time.time()
     if _CACHE is not None and (now - _CACHE_TS) < _CACHE_TTL:
+        return _CACHE
+    if _is_debug():
+        # Canned calendar: one high-impact USD event ~2h out, so the
+        # proximity/window code runs against real-shaped data with zero
+        # outbound requests.
+        ev_dt = datetime.fromtimestamp(now + 7200, tz=timezone.utc)
+        _CACHE = [{
+            "title": "[debug] FOMC Statement (canned)", "currency": "USD",
+            "impact": "High", "date": ev_dt.isoformat().replace("+00:00", "Z"),
+        }]
+        _CACHE_TS = now
         return _CACHE
     try:
         url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"

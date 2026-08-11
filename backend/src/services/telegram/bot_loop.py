@@ -28,6 +28,7 @@ import asyncio
 import json
 import re
 
+from backend.src.config import is_debug as _is_debug
 from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.telegram.bot_dispatch import handle_bot_command as _handle_bot_command_impl
@@ -47,6 +48,11 @@ class BotLoopCtx:
 
 
 async def bot_command_loop(ctx: BotLoopCtx) -> None:
+    if _is_debug():
+        # Debug mode: no bot token, no outbound polling. The loop simply
+        # never starts — everything else about the runtime is unchanged.
+        log.info("[debug] telegram bot command loop disabled")
+        return
     import httpx
     await asyncio.sleep(15)
 

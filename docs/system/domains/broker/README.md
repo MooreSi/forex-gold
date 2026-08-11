@@ -29,6 +29,7 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 - `services/broker/repo.py` — broker SQL, including the pending-order fill/cancel lifecycle as single transactions
 - `services/broker/credentials.py` / `credentials_repo.py` — MT5 credential storage (always in the demo DB, env-independent) and bridge credentials-file sync
 - `services/broker/history_import.py` — backfill of closed positions from MT5 deal history; never sends anything to MT5
+- `services/broker/fake_bridge.py` + `fake_market.py` — debug-mode stand-in (2026-08-11): full duck-typed surface of both clients (introspection-pinned), deterministic closed-form price curve / JSON scenarios (`tools/debug_scenarios/`), in-memory ledger with SERVER-SIDE SL/TP settle (the monitor defers a local SL crossing to the broker — a fake without settle deadlocks that path), `inject_error()` for rejection testing. No network code. NOT wired into `_make_bridge` — that 3-line seam edit is Simon-gated (local-debug-mode 020)
 - `services/broker/deposits.py`, `mt5_performance.py`, `fees.py` — net deposits (1h cache), deal-history performance stats, platform-fee rate
 - `services/health/self_healer.py` — 90s log scan for known recoverable patterns; restarts bridge / reconnects Telegram / restarts the monitor
 - `services/health/log_events.py` — live-diagnostics feed of meaningful log events

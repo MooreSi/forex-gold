@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from backend.src.config import is_debug as _is_debug
 from backend.src.services.ai import provider as ai_provider
 
 log = logging.getLogger(__name__)
@@ -129,6 +130,11 @@ _MARKET_SYSTEM = (
 
 async def _fetch_gold_news() -> list[str]:
     """Fetch recent gold news headlines from Yahoo Finance RSS (no API key required)."""
+    if _is_debug():
+        return [
+            "[debug] Gold steadies near 2400 as traders await canned FOMC event",
+            "[debug] Simulated headline: dollar softens, bullion bid",
+        ]
     headlines: list[str] = []
     try:
         import httpx, re  # noqa: F401

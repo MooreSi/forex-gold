@@ -9,6 +9,7 @@ from typing import Optional
 
 import httpx
 
+from backend.src.config import is_debug as _is_debug
 from backend.src.db import database as db_module
 from backend.src.services.broker.ea_templates import TEMPLATE_OVERRIDE_PREFIX as _TEMPLATE_OVERRIDE_PREFIX
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
@@ -153,6 +154,11 @@ async def send_message(text: str, trade_id: Optional[str] = None, event_type: st
         # user doesn't want) — nothing to send, and not worth logging as an
         # attempt.
         return False
+    if _is_debug():
+        # Debug mode makes zero outbound requests; the alert is still visible
+        # in the log so the demo shows what WOULD have been sent.
+        log.info("[debug] telegram alert suppressed (%s): %.200s", event_type or "-", text)
+        return True
     cfg = db_module.get_telegram_config()
     if not cfg.get("enabled") or not cfg.get("bot_token_enc") or not cfg.get("chat_id"):
         return False

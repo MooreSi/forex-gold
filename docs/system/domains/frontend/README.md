@@ -21,7 +21,7 @@ delivered in NiceGUI instead.
 - `frontend/app.py` — the shell: framework patches, lifecycle hooks, header, page composition
 - `frontend/theme.py` — four dark-only presets re-skinning only the neutral Tailwind scale
 - `frontend/pages/` — one module or package per page; `pages/trading/` is the reference page-package shape (`__init__.py` composes; `_active_trades.py`, `_manual_entry.py`, `_signals_card.py`, `_shared.py`)
-- `frontend/components/` — currently empty; intended layout is `components/<domain>/` and `components/shared/`
+- `frontend/components/` — first real residents landed 2026-08-11 (stage2 phase 1/5): `start_here.py` (first-run checklist + status gathering + attach()), `getting_started.py` (Help dialog; owns the shared `DAILY_ROUTINE` copy), `tab_labels.py` (tab subtitles, data-only), `empty_state.py` (shared "do this next" empty states, copy keyed by surface), `about_home.py` (About home, imports the routine from getting_started so the two can't drift), `debug_banner.py`. All flat for now — `components/<domain>/` sub-dirs only when one earns it
 - `frontend/static/` — favicon, banner, icons
 
 ## Constraints / must not change

@@ -1,3 +1,42 @@
+## Unreleased — Road to Handoff (stage-2 sweep, 2026-08-11)
+
+### Onboarding & usability
+- First-run **Start Here** checklist: live licence / MT5 / algo-trading / risk /
+  Telegram / demo-mode status with "Fix this →" jumps; dismissable, reopenable
+  from Help
+- Header **Help "?"** button on every screen → Getting Started (daily routine +
+  the existing Setup/Registration/Orchestration/Glossary guides, finally linked)
+- Plain-language subtitles on all 10 tabs (as tooltips; names unchanged)
+- Empty lists now say what to do next (Trading signals, Analysis periods)
+- About reorganised into "Set up once / Every day"
+
+### Foundations
+- Schema migrations are now an ordered, numbered registry
+  (`db/migrations.py`, 12 steps) with a per-step `schema_version` stamp;
+  legacy database shapes are fixture-tested to upgrade losslessly
+- One-off data backfills moved to named steps (`db/backfills.py`) that fail
+  loud instead of `except: pass`
+- Test-suite remediation: 13 assert-nothing test files deleted (populated
+  twins verified) and structurally banned; coverage floors added for
+  `services/broker` and `runtime.py`; test-layout hazards gated; 35 duplicate
+  `fresh_db` fixtures consolidated
+
+### Debug mode (offline demo)
+- `FakeMT5Bridge` + deterministic fake market (scripted JSON scenarios under
+  `tools/debug_scenarios/`), with broker-side SL/TP settlement and error
+  injection — **not yet wired into the live bridge selection** (that 3-line
+  seam awaits the owner's sign-off + demo session)
+- Fake Telegram reader replays scripted signals through the real parser;
+  alerts/bot/news/AI/email are all no-ops or canned in debug — a debug boot
+  makes zero outbound requests
+- Unmissable **DEBUG MODE** banner; offline end-to-end test proves
+  signal → open → manage → close on the fakes
+
+### Handoff
+- `docs/give-to-simon-checklist.md` — the readiness gate, honestly filled
+- Decision queue grown and provisionally answered where safe
+  (docs/questions/, restructure + debug-mode QUESTIONS)
+
 ## v0.8.2 — ORB Auto-Execute Fix, R:R Tracking & Version Reporting
 
 ### ORB/IVB report

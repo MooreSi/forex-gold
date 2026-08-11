@@ -1,0 +1,19 @@
+{
+  "description": "A BUY around 2400 rides +12 to hit TP1 at ~2410, then eases back. Forces a clean open -> TP -> close demo within 10 minutes.",
+  "market": {
+    "anchors": [
+      [0, 2400.0],
+      [120, 2404.0],
+      [300, 2412.0],
+      [480, 2408.0],
+      [600, 2402.0]
+    ]
+  },
+  "signals": [
+    {
+      "at": 5,
+      "channel": "Debug Channel",
+      "text": "Buy Gold 2400 - 2402\nStop Loss 2392\nTP1 2410  TP2 2418  TP3 2426"
+    }
+  ]
+}

@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable
 import asyncio
 import time
 
+from backend.src.config import is_debug as _is_debug
 from backend.src.db import database as db_module
 from backend.src.services.ai import provider as ai_provider
 
@@ -30,6 +31,11 @@ async def ai_model_refresh_loop(cfg: dict, is_running: Callable[[], bool]) -> No
     and via the on-demand "Refresh Models" button) rather than a
     hardcoded array that only updates when someone edits the source.
     """
+    if _is_debug():
+        # Debug mode makes zero outbound requests — the cached model list
+        # (or the fallback list) is fine for a simulated session.
+        log.info("[debug] AI model refresh loop disabled")
+        return
     await asyncio.sleep(60)  # let the app settle before the first refresh
     _INTERVAL = 86400
     while is_running():

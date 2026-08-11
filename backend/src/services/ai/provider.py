@@ -12,6 +12,8 @@ import json
 import logging
 from typing import Optional
 
+from backend.src.config import is_debug as _is_debug
+
 log = logging.getLogger(__name__)
 
 try:
@@ -60,6 +62,11 @@ async def complete(cfg: dict, system: str, prompt: str, max_tokens: int, timeout
     "" for callers with no separate system prompt. Raises on any failure
     (missing key, network error, timeout, truncation) — callers already wrap
     these calls in their own try/except with a fallback dict."""
+    if _is_debug():
+        # Deterministic canned reply — no SDK client, no network. Tagged so
+        # it can never be mistaken for a real analysis.
+        return ("[debug-canned] Simulated AI response (debug mode — no "
+                "provider was called). Prompt head: " + prompt[:120])
     provider = cfg.get("ai_provider", "claude")
     if provider == "deepseek":
         return await _complete_deepseek(cfg, system, prompt, max_tokens, timeout)
@@ -90,6 +97,9 @@ async def complete_vision(cfg: dict, system: str, prompt: str, images: list[byte
     images should catch the resulting error and retry with plain complete()
     on the SAME provider, rather than this function silently switching
     provider on the caller's behalf."""
+    if _is_debug():
+        return ("[debug-canned] Simulated AI vision response (debug mode — "
+                f"{len(images)} image(s) not analysed).")
     provider = cfg.get("ai_provider", "claude")
     if provider == "deepseek":
         return await _complete_vision_deepseek(cfg, system, prompt, images, max_tokens, timeout)

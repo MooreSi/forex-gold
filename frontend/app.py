@@ -820,6 +820,11 @@ def main_page():
 
         _pause_dialog.on_value_change(_on_pause_dialog_change)
 
+    # ── Debug banner — above everything when running on fakes ─────────────────
+    if cfg_module.is_debug():
+        from frontend.components.debug_banner import render_debug_banner
+        render_debug_banner()
+
     # ── Compact ticker strip ───────────────────────────────────────────────────
     _prev_bid: list[Optional[float]] = [None]
     _price_hist: list[float]         = []

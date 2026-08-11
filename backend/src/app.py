@@ -32,6 +32,30 @@ from backend.src.services.cluster.remote.auth import password_is_set
 
 log = logging.getLogger(__name__)
 
+
+def _make_tg_reader(config: dict):
+    """Composition-root choice: the Telethon reader normally, the scripted
+    FakeTelegramReader in debug mode (offline — see local-debug-mode 030).
+    Services stay swap-unaware; only this entry point decides."""
+    if config.get("debug_mode"):
+        from backend.src.services.telegram.fake_reader import FakeTelegramReader
+        scenario = _load_debug_scenario()
+        return FakeTelegramReader(config, scenario=scenario)
+    return TelegramReader(config)
+
+
+def _load_debug_scenario() -> Optional[dict]:
+    """The default debug scenario (tools/debug_scenarios/tp1-hit.json), or
+    None for the seeded synthetic stream if the file is missing/bad."""
+    import json
+    path = Path(__file__).parent.parent.parent / "tools" / "debug_scenarios" / "tp1-hit.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("[debug] scenario file %s unavailable (%s) — synthetic stream", path, exc)
+        return None
+
+
 # ── Admin panel — loaded from KeyGen (not shipped with FOREX) ─────────────────
 # The admin UI lives in the KeyGen directory alongside FOREX on the admin's
 # machine. Remote users don't have that directory, so the button never appears
@@ -191,7 +215,7 @@ async def startup() -> None:
     db_module.sync_bridge_credentials_file(env)
 
     _engine    = TradingRuntime(config)
-    _tg_reader = TelegramReader(config)
+    _tg_reader = _make_tg_reader(config)
     _engine.set_telegram_reader(_tg_reader)
 
     # Initialise test signal DB immediately (before any async ops that might

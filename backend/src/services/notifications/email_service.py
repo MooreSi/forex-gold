@@ -13,6 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
 
+from backend.src.config import is_debug as _is_debug
 from backend.src.services.notifications.email_html import (  # noqa: F401
     _ORB_CHART_CID,
     build_daily_html,
@@ -229,6 +230,11 @@ async def send_email(
     SMTP; silently omitted (text still sends) on Mailjet — see
     _send_via_mailjet's docstring for why.
     """
+    if _is_debug():
+        # Debug mode sends nothing; the subject is logged so the demo shows
+        # what WOULD have gone out.
+        log.info("[debug] email suppressed: %r", subject)
+        return True, ""
     from backend.src.db import database as db_module
     if cfg is None:
         cfg = db_module.get_email_config()

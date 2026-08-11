@@ -33,8 +33,9 @@ clean up later — later doesn't come.
 
 - **You are about to `import` anything from `backend.src` that is not `backend.src.controllers`.**
   Stop. The `frontend-reaches-the-backend-through-controllers` contract counts it, and it is being
-  driven to zero. `backend.src.utils.models` and `backend.src.config` are the two narrow exceptions
-  (constants and config only — see §2).
+  driven to zero. **This includes `backend.src.config` in a NEW file** — the existing config/models
+  imports are baselined, but a new one regresses the count (found live 2026-08-11: a new component
+  importing config pushed 59→60). Inject values from `frontend/app.py` (already baselined) instead.
 - **You are about to take a page file past 800 lines.** That is the LOC gate. Split it into a package
   first — [70-file-organisation.md](../../../docs/system/rules/70-file-organisation.md) — then make your edit
   in the smaller module.
@@ -97,11 +98,13 @@ room. Do not split a controller into a package to make space; the gate rejects i
 **Never put logic in a controller.** No loops, no merges, no formatting, no fallbacks.
 `history_controller` acquiring three-source ledger merges is the documented example of how that ends.
 
-### The two narrow exceptions
+### The "two narrow exceptions" caveat
 
-`backend.src.utils.models` (strategy-name constants and dataclasses) and `backend.src.config`
-(configuration values) are allowed. Both are leaf modules that depend on nothing above them, and
-neither performs an action. Everything else goes through a controller.
+`backend.src.utils.models` and `backend.src.config` are leaf modules that perform no action, and
+their EXISTING import sites are tolerated (baselined). But the contract still counts them — a NEW
+import of either from a new frontend file raises the count and fails the check. In new code, get
+config values injected from the shell and constants via a controller, or accept that you are
+adding a violation the baseline must then absorb (don't).
 
 ---
 
@@ -347,12 +350,13 @@ Current as of 2026-08-06. New code must not extend these — split first, then a
 | `pages/chart.py` | 839 | 39 over — likely a deliberate exemption |
 | `pages/reversal_panel.py` | 804 | 4 over — likely a deliberate exemption |
 
-**The open boundary:** `frontend-reaches-the-backend-through-controllers` stands at **59**
-violations (down from 99). It is baselined shrink-only and is being driven to zero, after which it
-becomes the fifth contract enforced at zero.
+**The open boundary:** `frontend-reaches-the-backend-through-controllers` stands at **50**
+violations (99 → 59 → 50; the engine-panel lane closed 2026-08-11). It is baselined shrink-only
+and is being driven to zero, after which it becomes the fifth contract enforced at zero.
 
-**`frontend/components/` is empty** — created, never used. §2 is the rule for filling it, and the
-second-caller rule is what keeps it honest.
+**`frontend/components/` gained its first real residents 2026-08-11:** start_here, getting_started,
+tab_labels, empty_state, about_home, debug_banner — all flat. §2 is the rule for adding more, and
+the second-caller rule is what keeps it honest.
 
 **Known duplication, deliberately not fixed:** the three engine panels (`breakout_panel`,
 `reversal_panel`, `test_panel`) are structurally near-identical. Collapsing them is a behaviour-risk

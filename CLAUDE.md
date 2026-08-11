@@ -99,6 +99,37 @@ The frontend never imports `backend.src.db`. Controllers never import
 All four enforced at zero — see
 [docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md).
 
+## Session mechanics (Windows) — hard-won, do not relearn
+
+Each of these cost real time in a past session:
+
+- **Never edit tracked files while `tools.checks all` (or the suite) is
+  running.** Mid-run edits produce phantom gate failures and wasted 8-minute
+  runs. Docs-only edits are the one exception.
+- **Never string-edit source files through PowerShell** (`Get-Content |
+  .Replace() | Set-Content` mangles UTF-8 to mojibake). Use the file tools
+  or Python.
+- **Commit with `git commit -F <msgfile>`** — multiline `-m` here-strings
+  break under PowerShell 5.1.
+- **Start every shell command from an absolute path** — Bash cwd persists
+  across calls and has drifted mid-session before.
+- **Before adding lines to a file in `structure_baseline.json`**, check the
+  LOC ratchet — baselined files are shrink-only; plan the offsetting shrink
+  first or put the code in a new module.
+- **A new module nothing imports yet** must ship with its
+  `orphan_module_allowlist.json` entry (with reason) in the same change, or
+  the orphan gate fails the next full run.
+- **`backend.src.config` imports from frontend COUNT against the
+  controller-boundary contract** — existing sites are baselined, new ones
+  regress it. Inject config values from `frontend/app.py` (already a
+  baselined site) instead.
+- **Repo-wide scripts must exclude** `.git`, `.venv`, `__pycache__`,
+  `docs/todo/refactor/stage0/` (audit trail) and `docs/reviews/`
+  (point-in-time snapshots).
+- **PS 5.1 `;` chains continue past failures** (no `&&`) — verify state
+  after multi-step git chains.
+- Check doc links after moving files: `python tools/check_doc_links.py`.
+
 ## Do not
 
 - `git push --force` to a shared branch

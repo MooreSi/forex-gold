@@ -1,0 +1,5 @@
+# Verified working versions (system Python 3.11.9, 2026-08-11)
+pandas>=2.1
+numpy>=1.26
+scikit-learn>=1.5
+matplotlib>=3.9  # optional, for plots

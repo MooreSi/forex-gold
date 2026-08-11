@@ -37,7 +37,8 @@ ALLOWLIST_PATH = Path(__file__).parent / "orphan_allowlist.json"
 # Directories that are not production code. Tests are excluded on purpose: a
 # module reachable only from its own test is exactly what we're hunting for.
 EXCLUDED_DIRS = {"tests", ".git", ".venv", "venv", "docs", "installer", "mql5",
-                 "__pycache__", "tools"}
+                 "__pycache__", "tools",
+                 "notebooks"}  # offline data-science lab: standalone scripts, never imported by the app
 
 
 def production_files() -> list[Path]:

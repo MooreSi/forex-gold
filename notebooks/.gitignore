@@ -1,0 +1,10 @@
+# DB snapshots contain (encrypted) credential tables — never commit them,
+# including sqlite WAL/journal sidecars
+_shared/data/*.db
+_shared/data/*.db-shm
+_shared/data/*.db-wal
+_shared/data/*.db-journal
+_shared/data/*.csv
+# experiment outputs are reproducible from run.py
+*/output/
+__pycache__/

@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,7 +40,7 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.04"
+#define EA_VERSION "1.05"
 
 #include <Trade\Trade.mqh>
 
@@ -2049,7 +2049,8 @@ bool DoCloseAll(ManagedTrade &t, const int tpIdx)
    return true;
 }
 
-bool MoveSl(ManagedTrade &t, const double newSl_in, const string reason, const int tpIdx = -1)
+bool MoveSl(ManagedTrade &t, const double newSl_in, const string reason, const int tpIdx = -1,
+            const bool clearTp = false)
 {
    double newSl = newSl_in;
 
@@ -2090,13 +2091,33 @@ bool MoveSl(ManagedTrade &t, const double newSl_in, const string reason, const i
    bool better = (t.direction == "BUY") ? (newSl > curSl) : (newSl < curSl);
    if(!better) return false;
    double curTp = PositionSelectByTicket(t.ticket) ? PositionGetDouble(POSITION_TP) : 0.0;
-   if(!trade.PositionModify(t.ticket, newSl, curTp))
+   double newTp = clearTp ? 0.0 : curTp;
+   if(!trade.PositionModify(t.ticket, newSl, newTp))
    {
       Print("[EABridge] modify SL failed ticket=", t.ticket, " err=", trade.ResultRetcodeDescription());
       return false;
    }
    ReportSlMoved(t, newSl, reason, tpIdx);
    return true;
+}
+
+// Standard "Trailing Step" trail: keep SL `dist` behind price, only moving
+// once the improvement is >= trail_step pips (0 = move on any improvement).
+// Factored out of the trail_mode=="step" branch below (2026-08-10) so
+// trail_mode=="staged" can reuse it verbatim once its own ratchet
+// (sl_stage1..3) has cleared -- see ManageTemplate.
+void ApplyTemplateStepTrail(ManagedTrade &t, const MqlTick &tick, const double dist, const string reason)
+{
+   double newSl = (t.direction == "BUY") ? tick.bid - dist : tick.ask + dist;
+   double trailStepPips = TplD(t.tplCfg, "trail_step", 0.0);
+   bool stepOk = true;
+   if(trailStepPips > 0.0)
+   {
+      double curStepSl = PositionSelectByTicket(t.ticket) ? PositionGetDouble(POSITION_SL) : 0.0;
+      double moveAmt = (t.direction == "BUY") ? (newSl - curStepSl) : (curStepSl - newSl);
+      stepOk = (curStepSl == 0.0) || (moveAmt >= PipsToPrice(trailStepPips));
+   }
+   if(stepOk) MoveSl(t, newSl, reason);
 }
 
 double GetAdx(const int period = 14)
@@ -2781,26 +2802,45 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
 
    if(t.tplTrailMode == "step" && trailArmed)
    {
-      double dist = trailDist + trailPad;
-      double newSl = (t.direction == "BUY") ? tick.bid - dist : tick.ask + dist;
-      // trail_step (2026-08-04 -- existed as a template field with no
-      // implementation; trail_distance is what actually sets the trailing
-      // gap, confirmed unused anywhere else in this file). Standard
-      // "Trailing Step" semantics: don't move the stop until it would
-      // improve by at least this many pips over where it already sits, so
-      // a smoothly-rising price doesn't send a PositionModify on every
-      // single tick. 0 (default before this existed) keeps the previous
-      // always-on-any-improvement behaviour -- MoveSl's own `better` check
-      // already rejects a non-improving move regardless.
-      double trailStepPips = TplD(t.tplCfg, "trail_step", 0.0);
-      bool stepOk = true;
-      if(trailStepPips > 0.0)
+      ApplyTemplateStepTrail(t, tick, trailDist + trailPad, "template_trail_step");
+   }
+   else if(t.tplTrailMode == "staged")
+   {
+      // Staged SL ratchet (2026-08-10) -- see core_ea_templates.DEFAULTS'
+      // SL_STAGE_COUNT comment. Each rung is independent: on every tick,
+      // walk sl_stage1..3 in order and, for any rung whose trigger_pips
+      // has been reached, try to move SL to its target_pips (signed --
+      // negative still risks a loss, 0 = breakeven, positive locks
+      // profit). MoveSl's own better-than-current-SL check makes this
+      // idempotent and self-healing across an EA/terminal restart with no
+      // per-trade "which rung already fired" state to carry: a rung whose
+      // target the stop has already passed (via an earlier rung, price
+      // gapping through several triggers on one tick, or a prior session)
+      // is simply rejected as not-better and costs nothing. Processing
+      // ascending means a multi-rung gap still converges on the furthest
+      // rung reached, applied last in the same tick.
+      double favMovePx = (t.direction == "BUY") ? (tick.bid - t.entry_price)
+                                                  : (t.entry_price - tick.ask);
+      double inProfitPips = favMovePx / (10.0 * _Point);
+      double lastTrigger = 0.0;
+      for(int s = 1; s <= 3; s++)
       {
-         double curStepSl = PositionSelectByTicket(t.ticket) ? PositionGetDouble(POSITION_SL) : 0.0;
-         double moveAmt = (t.direction == "BUY") ? (newSl - curStepSl) : (curStepSl - newSl);
-         stepOk = (curStepSl == 0.0) || (moveAmt >= PipsToPrice(trailStepPips));
+         string pfx = "sl_stage" + IntegerToString(s) + "_";
+         double trigPips = TplD(t.tplCfg, pfx + "trigger_pips", 0.0);
+         if(trigPips <= 0.0) continue; // rung unused
+         if(trigPips > lastTrigger) lastTrigger = trigPips;
+         if(inProfitPips < trigPips) continue; // not reached yet
+         double targetPips = TplD(t.tplCfg, pfx + "target_pips", 0.0);
+         double sign = (t.direction == "BUY") ? 1.0 : -1.0;
+         double targetSl = t.entry_price + sign * PipsToPrice(targetPips);
+         bool removeTp = TplB(t.tplCfg, pfx + "remove_tp", false);
+         MoveSl(t, targetSl, "template_sl_stage" + IntegerToString(s), -1, removeTp);
       }
-      if(stepOk) MoveSl(t, newSl, "template_trail_step");
+      // Every configured rung has cleared -- hand off to the same
+      // constant-distance step trail trail_mode=="step" uses, so "trail
+      // every N pips" past the ratchet needs no rung-specific code.
+      if(lastTrigger > 0.0 && inProfitPips >= lastTrigger)
+         ApplyTemplateStepTrail(t, tick, trailDist + trailPad, "template_sl_stage_trail");
    }
    else if(t.tplTrailMode == "candle" && trailArmed)
    {

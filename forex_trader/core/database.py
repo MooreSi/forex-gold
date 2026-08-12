@@ -1172,6 +1172,27 @@ def _apply_schema() -> None:
             # never fills carries no risk and must not count.
             "ALTER TABLE vantage_simulated_trades ADD COLUMN initial_sl REAL",
             "ALTER TABLE vantage_simulated_trades ADD COLUMN initial_risk REAL",
+        ] + [
+            # Staged SL ratchet (2026-08-10) -- trail_mode="staged". Each
+            # rung fires once, moving SL to target_pips (signed: negative
+            # still risks a loss, 0 = breakeven, positive locks profit) when
+            # floating profit crosses trigger_pips; the last rung can also
+            # strip the take-profit. See core_ea_templates.DEFAULTS and
+            # ForexTraderBridge.mq5's ManageTemplate.
+            f"ALTER TABLE ea_trade_templates ADD COLUMN sl_stage{n}_trigger_pips REAL NOT NULL DEFAULT 0.0"
+            for n in (1, 2, 3)
+        ] + [
+            f"ALTER TABLE ea_trade_templates ADD COLUMN sl_stage{n}_target_pips REAL NOT NULL DEFAULT 0.0"
+            for n in (1, 2, 3)
+        ] + [
+            f"ALTER TABLE ea_trade_templates ADD COLUMN sl_stage{n}_remove_tp INTEGER NOT NULL DEFAULT 0"
+            for n in (1, 2, 3)
+        ] + [
+            # Basket harvest (2026-08-12) -- mirror image of equity_protect:
+            # close every open position on this (channel, template) group
+            # once their COMBINED floating profit reaches this many
+            # account-currency units. See core_equity_protect.py.
+            "ALTER TABLE ea_trade_templates ADD COLUMN basket_harvest_threshold REAL NOT NULL DEFAULT 0.0",
         ]:
             try:
                 conn.execute(stmt)

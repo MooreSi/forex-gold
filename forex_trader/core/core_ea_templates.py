@@ -31,7 +31,22 @@ TEMPLATE_OVERRIDE_PREFIX = "template:"
 MODE_CHOICES       = ("single", "grid")
 TPSL_MODE_CHOICES   = ("off", "on", "stealth")
 ANCHOR_CHOICES      = ("unified", "distributed")
-TRAIL_MODE_CHOICES  = ("off", "candle", "step", "fractal", "tp")
+TRAIL_MODE_CHOICES  = ("off", "candle", "step", "fractal", "tp", "staged")
+
+# Number of ratchet rungs "staged" trail_mode supports (2026-08-10). Each
+# rung fires once when floating profit crosses its trigger_pips and moves
+# SL to target_pips from entry (negative = still risking a loss, just a
+# smaller one; 0 = breakeven; positive = a locked-in profit) -- unlike
+# be_trigger/trail_mode="tp", the SL target here is independent of the
+# trigger price, which is what lets a rung say "at +400 pips, lock +300"
+# rather than only ever locking the exact price that armed it. The last
+# rung can also strip the take-profit (remove_tp) so the position rides
+# the trailing stop instead of being flattened at a fixed target. Once
+# every configured rung (trigger_pips > 0) has fired, ManageTemplate falls
+# through to the same trail_distance/trail_step step-trail every other
+# trail_mode="step" template already uses, so "trail every N pips" beyond
+# the ratchet needs no rung-specific code of its own.
+SL_STAGE_COUNT = 3
 BE_MODE_CHOICES     = ("entry", "entry_buffer")
 # How grid mode places its resting legs (2026-08-04).
 #   "zone" -- span the SIGNAL's own stated entry zone (zone_low/zone_high),
@@ -104,6 +119,17 @@ DEFAULTS: dict = {
     # 0 = OFF. Close everything on this channel if floating loss exceeds
     # this many account-currency units (copier's EQUITY PROTECT ($)).
     "equity_protect":    0.0,
+    # 0 = OFF. Mirror image of equity_protect: close everything on this
+    # channel once the group's COMBINED floating PROFIT reaches this many
+    # account-currency units. Added 2026-08-12 after a basket of "Staged
+    # Ratchet 100-500" trades peaked at $1,210 combined floating profit
+    # (each trade's own SL ratchet was managing its own risk correctly) but
+    # gave most of it back to +$45.70 realized -- there was no mechanism to
+    # lock in a strong combined swing across the whole group at once. See
+    # core_equity_protect.check_basket_harvest, which groups and checks
+    # this the same way check_equity_protect already does for the loss
+    # side (same (tg_source, strategy) grouping, same close_trade_fn).
+    "basket_harvest_threshold": 0.0,
     # Reject a signal that arrives this many pips beyond its own zone --
     # copier's InpC{n}_LateGuardPips. 0 = no guard.
     "late_guard_pips":   0.0,
@@ -199,6 +225,13 @@ DEFAULTS: dict = {
     **{f"tp{n}_pips": 0.0 for n in range(1, MAX_TP_LEVELS + 1)},
     **{f"tp{n}_pct":  0.0 for n in range(1, MAX_TP_LEVELS + 1)},
 
+    # ── Staged SL ratchet (2026-08-10) ───────────────────────────────
+    # See SL_STAGE_COUNT above. 0 trigger_pips = that rung is unused (kept
+    # so a template can define fewer than 3 rungs).
+    **{f"sl_stage{n}_trigger_pips": 0.0 for n in range(1, SL_STAGE_COUNT + 1)},
+    **{f"sl_stage{n}_target_pips":  0.0 for n in range(1, SL_STAGE_COUNT + 1)},
+    **{f"sl_stage{n}_remove_tp":    False for n in range(1, SL_STAGE_COUNT + 1)},
+
     # ── Pending TP ladder (2026-07-29) ───────────────────────────────
     # A SEPARATE ladder for the resting legs. The copier ships wider
     # defaults here than for the anchor (40/70/110/150/250 vs
@@ -238,21 +271,29 @@ _PENDING_TP_FIELDS = (
 # than leaving unfilled legs to fill blind or open siblings sitting at
 # their original, wider stop. See ForexTraderBridge.mq5's
 # ApplyGroupTpAction. No effect in single mode (no siblings to act on).
+_SL_STAGE_TRIGGER_FIELDS = tuple(
+    f"sl_stage{n}_trigger_pips" for n in range(1, SL_STAGE_COUNT + 1))
+_SL_STAGE_TARGET_FIELDS = tuple(
+    f"sl_stage{n}_target_pips" for n in range(1, SL_STAGE_COUNT + 1))
+_SL_STAGE_REMOVE_TP_FIELDS = tuple(
+    f"sl_stage{n}_remove_tp" for n in range(1, SL_STAGE_COUNT + 1))
+
 _BOOL_FIELDS  = (
     "tg_cmd_enabled", "harvest_enabled", "cancel_pending", "group_tp_action",
     "sig_guard", "anc_shave", "auto_sl", "partials", "close_full_on_last",
     "use_dynamic_atr", "use_emergency_sl", "gold_half_pip_anchor",
     "tp_from_telegram", "tp_pen_from_telegram",
-)
+) + _SL_STAGE_REMOVE_TP_FIELDS
 _FLOAT_FIELDS = (
     "harvest_threshold", "grid_step_pts", "be_buffer_pts",
     "lot_anchor", "lot_pending", "sl_pips", "risk_pct", "equity_protect",
+    "basket_harvest_threshold",
     "late_guard_pips", "sig_guard_pips",
     "trail_distance", "trail_step", "trail_activation",
     "trail_padding", "max_spread_pips", "harvest_pips",
     "atr_sl_mult", "atr_tp1_mult", "guard_pips", "safety_cap_pips",
     "emergency_sl_mult", "signal_rr_ratio", "manual_sl_push_pips",
-) + _ANCHOR_TP_FIELDS + _PENDING_TP_FIELDS
+) + _ANCHOR_TP_FIELDS + _PENDING_TP_FIELDS + _SL_STAGE_TRIGGER_FIELDS + _SL_STAGE_TARGET_FIELDS
 _INT_FIELDS   = (
     "grid_legs", "be_trigger", "anchors", "pendings",
     "cancel_pending_level", "slippage", "signal_max_age_sec",
@@ -341,13 +382,13 @@ def _clean_fields(fields: dict) -> dict:
     merged["pendings"] = max(0, min(20, merged["pendings"]))
     for f in ("lot_anchor", "lot_pending"):
         merged[f] = max(0.0, merged[f])
-    for f in ("sl_pips", "risk_pct", "equity_protect", "late_guard_pips",
-              "sig_guard_pips",
+    for f in ("sl_pips", "risk_pct", "equity_protect", "basket_harvest_threshold",
+              "late_guard_pips", "sig_guard_pips",
               "trail_distance", "trail_step", "trail_activation",
               "trail_padding", "max_spread_pips", "harvest_pips",
               "atr_sl_mult", "atr_tp1_mult", "guard_pips",
               "safety_cap_pips", "emergency_sl_mult", "signal_rr_ratio",
-              "manual_sl_push_pips"):
+              "manual_sl_push_pips", *_SL_STAGE_TRIGGER_FIELDS):
         merged[f] = max(0.0, merged[f])
     merged["slippage"] = max(0, merged["slippage"])
     merged["signal_max_age_sec"] = max(0, merged["signal_max_age_sec"])

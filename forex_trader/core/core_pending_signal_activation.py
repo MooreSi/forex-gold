@@ -321,10 +321,55 @@ async def try_activate_pending_signals(
         # template, whose legs rest AT the zone on the broker's book, so
         # requiring price to already be there before placing them defeats
         # the point. MT5 does the waiting for these.
+        #
+        # IME gap-fire (2026-08-12, explicit user direction, generalised
+        # from the scan path's own gap-adjusted market entry -- see
+        # core_scan_messages_auto_execute.execute_auto_signal): a signal
+        # that was queued because price had already moved past its zone at
+        # first arrival stays queued here forever if price never comes back
+        # -- exactly what happened to a GOLD DIGGERS INSTITUTIONAL signal
+        # only ~2pt outside its zone. When IME is enabled for this signal's
+        # channel, shift entry_low/entry_high/stop_loss/tp1..8 by the same
+        # distance price has already moved (preserving the signal's
+        # original risk/reward shape from the actual current price) and
+        # fall through to activate at market instead of continuing to wait.
         if _grid_tpl is None and not price_in_entry_range(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]), tick
         ):
-            continue
+            _pw_ime = _ime_enabled_for_source(rs, sig.get("source_name"))
+            _pw_dir = sig["direction"].upper()
+            _pw_el, _pw_eh = float(sig["entry_low"]), float(sig["entry_high"])
+            _pw_px = tick.ask if _pw_dir == "BUY" else tick.bid
+            _pw_gap = (
+                round(_pw_px - _pw_eh, 2) if _pw_dir == "BUY"
+                else round(_pw_el - _pw_px, 2)
+            )
+            if not (_pw_ime and _pw_gap > 0):
+                continue
+
+            _pw_sign = 1.0 if _pw_dir == "BUY" else -1.0
+            _pw_updates = {
+                "entry_low":  round(_pw_el + _pw_sign * _pw_gap, 2),
+                "entry_high": round(_pw_eh + _pw_sign * _pw_gap, 2),
+                "stop_loss":  round(float(sig["stop_loss"]) + _pw_sign * _pw_gap, 2),
+            }
+            for _pw_i in range(1, 9):
+                _pw_tp = sig.get(f"tp{_pw_i}")
+                if _pw_tp is not None:
+                    _pw_updates[f"tp{_pw_i}"] = round(float(_pw_tp) + _pw_sign * _pw_gap, 2)
+            with db_module.db() as conn:
+                conn.execute(
+                    f"UPDATE vantage_signals SET "
+                    f"{', '.join(f'{k}=?' for k in _pw_updates)} WHERE signal_id=?",
+                    (*_pw_updates.values(), sig["signal_id"]),
+                )
+            sig = dict(sig)
+            sig.update(_pw_updates)
+            log.info(
+                "[PendingWatcher] Signal %s gap-adjusted market entry (IME): "
+                "zone %.2f-%.2f, market %.2f, gap=%.2f pts -> SL %.2f",
+                sig["signal_id"][:8], _pw_el, _pw_eh, _pw_px, _pw_gap, _pw_updates["stop_loss"],
+            )
 
         # Respect the max-trades cap
         if open_count >= max_trades:
@@ -419,7 +464,7 @@ async def try_activate_pending_signals(
                  "staging grid legs" if _grid_tpl is not None else "activating", age)
         try:
             trade_result = await open_trade_from_signal(
-                bridge, sig["signal_id"], age_lot_mult=_age_lot_mult,
+                bridge, sig["signal_id"], tick=tick, age_lot_mult=_age_lot_mult,
                 dpm_candles=dpm_candles, starting_balance=starting_balance,
                 background_open_commentary=background_open_commentary,
             )

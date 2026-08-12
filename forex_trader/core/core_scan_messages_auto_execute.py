@@ -379,21 +379,29 @@ async def execute_auto_signal(
                                 "skip_reason": skip_reason, "gap_note": gap_note,
                             }
 
-                        # ── Gap-adjusted market entry (GD2 / Gold Diggers VIP) ──
-                        src_lower = source_label.lower()
-                        gap_cap: Optional[float] = None
-                        if bool(rs.get("immediate_market_entry", 0)):
-                            if "gold diggers vip" in src_lower:
-                                gap_cap = 15.0
-                            elif "gold diggers 2.0" in src_lower:
-                                gap_cap = 10.0
-
-                        if not in_range and gap_cap is not None:
+                        # ── Gap-adjusted market entry (any IME channel) ──────────
+                        # When Immediate Market Entry is enabled for this channel,
+                        # a signal whose price has already moved past its stated
+                        # zone fires immediately at the current market price
+                        # instead of queuing to wait for an exact return to zone
+                        # -- using the channel's own assigned strategy/template,
+                        # with SL/TP/zone shifted by the same distance price has
+                        # already moved so the original risk/reward shape is
+                        # preserved from the actual fill rather than the now-
+                        # stale zone.
+                        #
+                        # Was scoped to "gold diggers vip"/"gold diggers 2.0" by
+                        # channel-name substring match with a hard gap cap
+                        # (15pt/10pt) -- generalised to every IME-enabled channel
+                        # with no distance cap (2026-08-12, explicit user
+                        # direction), after GOLD DIGGERS INSTITUTIONAL queued a
+                        # signal only ~2pt outside its zone instead of firing.
+                        if not in_range and ime_enabled_for_channel(rs, channel_name):
                             gap = (
                                 round(cur_px - eh, 2) if direction == "BUY"
                                 else round(el - cur_px, 2)
                             )
-                            if 0 < gap <= gap_cap:
+                            if gap > 0:
                                 sign = 1.0 if direction == "BUY" else -1.0
                                 parsed = dict(parsed)
                                 parsed["stop_loss"] = round(float(parsed["stop_loss"]) + sign * gap, 2)
@@ -411,10 +419,9 @@ async def execute_auto_signal(
                                     f"Levels shifted to match fill."
                                 )
                                 log.info(
-                                    "[%s] Gap-adjusted market entry: zone %.2f–%.2f, "
-                                    "market %.2f, gap=%.2f pts (cap=%.0f) → "
-                                    "SL %.2f  TP1 %.2f",
-                                    source_label, el, eh, cur_px, gap, gap_cap,
+                                    "[%s] Gap-adjusted market entry (IME): zone %.2f–%.2f, "
+                                    "market %.2f, gap=%.2f pts → SL %.2f  TP1 %.2f",
+                                    source_label, el, eh, cur_px, gap,
                                     parsed["stop_loss"], parsed.get("tp1") or 0,
                                 )
 

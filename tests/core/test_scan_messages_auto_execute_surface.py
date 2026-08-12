@@ -266,16 +266,47 @@ def test_executed_remotely_flag_passed_through(fresh_db):
     assert result["trade_result"]["executed_remotely"] is True
 
 
-def test_gap_adjusted_market_entry_gd2_source(fresh_db):
+def test_gap_adjusted_market_entry_any_ime_channel(fresh_db):
+    # 2026-08-12: generalised from a hardcoded "gold diggers vip"/"gold
+    # diggers 2.0" channel-name substring match (with a 15pt/10pt gap cap)
+    # to any channel with IME enabled, no cap -- gated by the real
+    # channel_parser_config row (what ime_enabled_for_channel actually
+    # checks), not a display-label string. "TestChannel" (what _call always
+    # passes as the actual channel_name, regardless of source_label) is
+    # seeded here as gd2-format, which defaults instant_entry_enabled on.
+    db.save_channel_parser_config("TestChannel", "gd2", "", True, True, "")
     gap_tick = SimpleNamespace(bid=4535.0, ask=4536.0)
     result, calls, bridge = _call(
-        rs={"immediate_market_entry": 1}, tick=gap_tick, source_label="Gold Diggers 2.0",
+        rs={"immediate_market_entry": 1}, tick=gap_tick, source_label="GOLD DIGGERS INSTITUTIONAL",
     )
     assert result["executed"] is True
     assert calls[0]["stop_loss"] == 4529.0
     assert calls[0]["tp1"] == 4539.0
     assert calls[0]["entry_low"] == 4531.0
     assert "Gap-adjusted" in result["gap_note"]
+
+
+def test_gap_adjusted_market_entry_no_cap(fresh_db):
+    # No distance cap any more (was 15pt/10pt) -- a signal far outside its
+    # zone still fires at market when IME is on for the channel.
+    db.save_channel_parser_config("TestChannel", "gd2", "", True, True, "")
+    far_tick = SimpleNamespace(bid=4600.0, ask=4601.0)  # 67pt past the 4534 zone top
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, tick=far_tick,
+    )
+    assert result["executed"] is True
+    assert calls[0]["entry_low"] == 4529.0 + 67.0
+
+
+def test_gap_adjusted_market_entry_skipped_when_ime_off_for_channel(fresh_db):
+    # No channel_parser_config row for "TestChannel" -> ime_enabled_for_channel
+    # is False regardless of the global toggle -- signal stays queued.
+    gap_tick = SimpleNamespace(bid=4535.0, ask=4536.0)
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, tick=gap_tick,
+    )
+    assert result["executed"] is False
+    assert calls == []
 
 
 def test_ea_managed_conservative_post_fill_sync(fresh_db):

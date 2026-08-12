@@ -134,6 +134,46 @@ def test_price_outside_zone_skips(fresh_db):
     assert not ot.called
 
 
+def test_price_outside_zone_ime_gap_fires_at_market(fresh_db):
+    """2026-08-12: when IME is enabled for the signal's channel, a signal
+    stuck outside its zone (e.g. GOLD DIGGERS INSTITUTIONAL queued ~2pt
+    outside its zone instead of firing) gap-adjusts entry/SL/TP by the
+    distance price has moved and activates at market instead of continuing
+    to wait indefinitely for an exact zone return."""
+    _insert_signal()
+    db.save_channel_parser_config("Chan", "gd2", "", True, True, "")
+    rs = {"max_open_trades": 1, "trade_strategy": "scale_out", "immediate_market_entry": 1}
+    with mock.patch.object(psa, "get_open_trades", return_value=[]), \
+         mock.patch.object(psa, "open_trade_from_signal",
+                           new=mock.AsyncMock(return_value={"entry_price": 2410.5, "trade_id": "t"})) as ot:
+        result = asyncio.run(psa.try_activate_pending_signals(_TICK_OUTSIDE, rs, _FakeBridge(), {}, []))
+    assert result is True
+    assert ot.called
+    assert ot.call_args.kwargs.get("tick") is _TICK_OUTSIDE
+    with db.db() as conn:
+        row = dict(conn.execute(
+            "SELECT entry_low, entry_high, stop_loss, tp1 FROM vantage_signals WHERE signal_id=?",
+            ("sig-1",),
+        ).fetchone())
+    # gap = ask(2410.5) - entry_high(2401.0) = 9.5, shifted +9.5 (BUY)
+    assert row["entry_high"] == pytest.approx(2410.5)
+    assert row["entry_low"] == pytest.approx(2408.5)
+    assert row["stop_loss"] == pytest.approx(2399.5)
+    assert row["tp1"] == pytest.approx(2419.5)
+
+
+def test_price_outside_zone_ime_off_for_channel_still_skips(fresh_db):
+    """Global immediate_market_entry on but no channel_parser_config row
+    for "Chan" -> ime_enabled_for_channel is False -- must not gap-fire."""
+    _insert_signal()
+    rs = {"max_open_trades": 1, "trade_strategy": "scale_out", "immediate_market_entry": 1}
+    with mock.patch.object(psa, "get_open_trades", return_value=[]), \
+         mock.patch.object(psa, "open_trade_from_signal", new=mock.AsyncMock()) as ot:
+        result = asyncio.run(psa.try_activate_pending_signals(_TICK_OUTSIDE, rs, _FakeBridge(), {}, []))
+    assert result is True
+    assert not ot.called
+
+
 def test_working_ea_pending_order_excludes_signal_from_market_fill(fresh_db):
     """A signal_id with a resting genuine EA pending order (Limit Runner /
     ORB auto-execute) must be excluded from this generic market-fill

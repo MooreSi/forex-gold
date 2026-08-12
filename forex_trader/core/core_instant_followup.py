@@ -43,6 +43,33 @@ async def apply_followup_to_instant_trade(
     trade_id  = instant_trade["trade_id"]
     signal_id = instant_trade.get("signal_id")
 
+    # EA-managed trades -- built-in EA ladder strategies and EA Templates
+    # ("template:<name>") alike -- compute and maintain their own SL/TP
+    # entirely inside the EA's on-tick logic (ManageLadder/ManageTemplate).
+    # Applying the follow-up signal's own price ladder here would silently
+    # overwrite that management with the raw Telegram levels instead --
+    # confirmed live on trade 86576593 (channel Gold Diggers VIP, assigned
+    # to EA Template "Staged Ratchet 100-500"): IME opened it correctly
+    # with managed_by='ea', but this function still stamped the signal's
+    # own 7-level TP ladder and a near-zero SL over it, bypassing the
+    # template's 100p SL / staged ratchet entirely. Same class of bug
+    # ime_timeout_watchdog() already guards against below (ticket
+    # 1556670216 / EA Template stealth mode) -- mirrored here.
+    if instant_trade.get("managed_by") == "ea":
+        log.info(
+            "[IME] Follow-up acknowledged but not applied to trade %s "
+            "(managed_by=ea, strategy=%s manages its own SL/TP)",
+            trade_id[:8], instant_trade.get("strategy"),
+        )
+        if signal_id:
+            with db_module.db() as conn:
+                conn.execute(
+                    "UPDATE vantage_tg_signals SET status='followup_applied', signal_id=?"
+                    " WHERE tg_message_id=?",
+                    (signal_id, tg_id),
+                )
+        return
+
     # Strategies that calculate their own SL/TP from the actual fill price must
     # not have those levels overwritten by the follow-up signal's levels.
     # Conservative / Conservative Trial set exact 5-pt levels post-fill —

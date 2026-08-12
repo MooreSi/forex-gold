@@ -223,7 +223,10 @@ from forex_trader.core.core_close_trade import (
 from forex_trader.core.core_template_placeholder_repair import (
     repair_template_placeholders as _repair_template_placeholders,
 )
-from forex_trader.core.core_equity_protect import check_equity_protect as _check_equity_protect_impl
+from forex_trader.core.core_equity_protect import (
+    check_equity_protect as _check_equity_protect_impl,
+    check_basket_harvest as _check_basket_harvest_impl,
+)
 from forex_trader.core.core_signal_snapshot import (
     capture_pending_snapshots as _capture_signal_snapshots_impl,
     capture_background_snapshot as _capture_background_snapshot_impl,
@@ -1131,6 +1134,10 @@ class SimulationEngine:
                             await _check_equity_protect_impl(open_trades, self._bridge, self.close_trade)
                         except Exception:
                             log.debug("Equity Protect check failed", exc_info=True)
+                        try:
+                            await _check_basket_harvest_impl(open_trades, self._bridge, self.close_trade)
+                        except Exception:
+                            log.debug("Basket Harvest check failed", exc_info=True)
                         # Repair rows the broker has already closed but the
                         # app never heard about (see core_orphan_reconcile).
                         # Every 60s, not every cycle: it costs a /positions

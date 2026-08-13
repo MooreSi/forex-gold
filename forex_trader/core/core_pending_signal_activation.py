@@ -333,6 +333,11 @@ async def try_activate_pending_signals(
         # distance price has already moved (preserving the signal's
         # original risk/reward shape from the actual current price) and
         # fall through to activate at market instead of continuing to wait.
+        # _pw_updates stays None unless a gap-fire is warranted. CRITICALLY it
+        # is NOT written to the database here -- see the deferred write just
+        # before open_trade_from_signal below, and _revert_gap_adjust.
+        _pw_updates: Optional[dict] = None
+        _pw_original: Optional[dict] = None
         if _grid_tpl is None and not price_in_entry_range(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]), tick
         ):
@@ -346,6 +351,22 @@ async def try_activate_pending_signals(
             )
             if not (_pw_ime and _pw_gap > 0):
                 continue
+            # Distance cap (2026-08-13). Restored after the uncapped version
+            # chased a signal 28.22 points (282 pips) past its own zone --
+            # at that distance the level the signal was built around is long
+            # gone and the "entry" is just buying the top of a move. Beyond
+            # the cap the signal keeps waiting for a genuine return to zone.
+            # Shared with the fresh-signal scan path so the two cannot drift.
+            from forex_trader.core.core_scan_messages_auto_execute import (
+                MAX_GAP_FIRE_PTS,
+            )
+            if _pw_gap > MAX_GAP_FIRE_PTS:
+                log.debug(
+                    "[PendingWatcher] Signal %s gap %.2f pts exceeds the %.1f pt "
+                    "gap-fire cap — staying queued for a real zone return",
+                    sig["signal_id"][:8], _pw_gap, MAX_GAP_FIRE_PTS,
+                )
+                continue
 
             _pw_sign = 1.0 if _pw_dir == "BUY" else -1.0
             _pw_updates = {
@@ -357,19 +378,18 @@ async def try_activate_pending_signals(
                 _pw_tp = sig.get(f"tp{_pw_i}")
                 if _pw_tp is not None:
                     _pw_updates[f"tp{_pw_i}"] = round(float(_pw_tp) + _pw_sign * _pw_gap, 2)
-            with db_module.db() as conn:
-                conn.execute(
-                    f"UPDATE vantage_signals SET "
-                    f"{', '.join(f'{k}=?' for k in _pw_updates)} WHERE signal_id=?",
-                    (*_pw_updates.values(), sig["signal_id"]),
-                )
+            # Snapshot the pre-shift values so the write can be undone if the
+            # activation below does not actually result in an open trade.
+            _pw_original = {k: sig.get(k) for k in _pw_updates}
+            _pw_log = (sig["signal_id"][:8], _pw_el, _pw_eh, _pw_px, _pw_gap,
+                       _pw_updates["stop_loss"])
+            # Apply to the in-memory row only, so the remaining gates below
+            # (R:R filter, momentum, duplicate guard) score the levels the
+            # trade would actually open on rather than the stale pre-shift
+            # ones. The database still holds the original until the write
+            # immediately before activation succeeds.
             sig = dict(sig)
             sig.update(_pw_updates)
-            log.info(
-                "[PendingWatcher] Signal %s gap-adjusted market entry (IME): "
-                "zone %.2f-%.2f, market %.2f, gap=%.2f pts -> SL %.2f",
-                sig["signal_id"][:8], _pw_el, _pw_eh, _pw_px, _pw_gap, _pw_updates["stop_loss"],
-            )
 
         # Respect the max-trades cap
         if open_count >= max_trades:
@@ -456,6 +476,32 @@ async def try_activate_pending_signals(
         # All fills within the 2-minute window are treated as fresh (full lot)
         _age_lot_mult = 1.0
 
+        # Deferred gap-fire write (2026-08-13). Every gate above has now
+        # passed, so the shifted levels are finally persisted -- the row this
+        # activation is about to read must carry them.
+        #
+        # Doing this at the point of decision rather than at the point of
+        # detection is the whole fix: the original version wrote the shift as
+        # soon as it computed one, then fell through to these same gates, and
+        # any of them refusing left the shifted values committed. The next
+        # cycle re-measured the gap from those already-shifted levels and
+        # shifted AGAIN, compounding every second. Live this walked one
+        # signal's stop 110 pips over 80 passes (4 signals, 190 passes, all
+        # compounding); three of the four expired without ever opening, at
+        # levels bearing no relation to what the channel actually sent.
+        if _pw_updates is not None:
+            with db_module.db() as conn:
+                conn.execute(
+                    f"UPDATE vantage_signals SET "
+                    f"{', '.join(f'{k}=?' for k in _pw_updates)} WHERE signal_id=?",
+                    (*_pw_updates.values(), sig["signal_id"]),
+                )
+            log.info(
+                "[PendingWatcher] Signal %s gap-adjusted market entry (IME): "
+                "zone %.2f-%.2f, market %.2f, gap=%.2f pts -> SL %.2f",
+                *_pw_log,
+            )
+
         # Price is back in zone — activate (or, for a grid template, stage the
         # resting legs across the zone without waiting for price at all)
         log.info("[PendingWatcher] Signal %s %s zone $%.2f–$%.2f — %s (age %.0fs)",
@@ -503,6 +549,27 @@ async def try_activate_pending_signals(
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
         except Exception as exc:
             _exc_msg = str(exc)
+            # Undo the gap-fire write so the next attempt re-measures from the
+            # channel's own original levels instead of the shifted ones. This
+            # is the second half of the anti-compounding fix -- open_trade_
+            # from_signal raising (schedule gate, margin, EA reject, R:R) is
+            # exactly the case that previously left a drifted row behind.
+            if _pw_updates is not None and _pw_original is not None:
+                try:
+                    with db_module.db() as conn:
+                        conn.execute(
+                            f"UPDATE vantage_signals SET "
+                            f"{', '.join(f'{k}=?' for k in _pw_original)} WHERE signal_id=?",
+                            (*_pw_original.values(), sig["signal_id"]),
+                        )
+                    log.info(
+                        "[PendingWatcher] Signal %s gap-fire reverted to original "
+                        "levels after failed activation",
+                        sig["signal_id"][:8],
+                    )
+                except Exception:
+                    log.warning("[PendingWatcher] gap-fire revert failed for %s",
+                                sig["signal_id"][:8], exc_info=True)
             retry_after[sig["signal_id"]] = now + _PENDING_ACTIVATION_BACKOFF_S
             # "Expected" refusals are the gates deliberately declining to
             # trade (bad R:R, breaker open, not this node's turn). They cost

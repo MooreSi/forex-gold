@@ -286,16 +286,30 @@ def test_gap_adjusted_market_entry_any_ime_channel(fresh_db):
     assert "Gap-adjusted" in result["gap_note"]
 
 
-def test_gap_adjusted_market_entry_no_cap(fresh_db):
-    # No distance cap any more (was 15pt/10pt) -- a signal far outside its
-    # zone still fires at market when IME is on for the channel.
+def test_gap_adjusted_market_entry_capped_at_max_gap(fresh_db):
+    # 2026-08-13: the 2026-08-12 generalisation dropped the distance cap and
+    # uncapped it chased a live signal 28.22pt (282 pips) past its own zone.
+    # Beyond MAX_GAP_FIRE_PTS the signal must NOT fire at market -- it stays
+    # queued for a genuine zone return.
     db.save_channel_parser_config("TestChannel", "gd2", "", True, True, "")
     far_tick = SimpleNamespace(bid=4600.0, ask=4601.0)  # 67pt past the 4534 zone top
     result, calls, bridge = _call(
         rs={"immediate_market_entry": 1}, tick=far_tick,
     )
+    assert result["executed"] is False
+    assert calls == []
+
+
+def test_gap_adjusted_market_entry_fires_just_inside_cap(fresh_db):
+    # A gap within the cap still gap-fires, so the cap only removes the chase.
+    db.save_channel_parser_config("TestChannel", "gd2", "", True, True, "")
+    gap = ae.MAX_GAP_FIRE_PTS - 1.0          # 14pt past the 4534 zone top
+    tick = SimpleNamespace(bid=4534.0 + gap, ask=4534.0 + gap)
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, tick=tick,
+    )
     assert result["executed"] is True
-    assert calls[0]["entry_low"] == 4529.0 + 67.0
+    assert calls[0]["entry_low"] == pytest.approx(4529.0 + gap)
 
 
 def test_gap_adjusted_market_entry_skipped_when_ime_off_for_channel(fresh_db):

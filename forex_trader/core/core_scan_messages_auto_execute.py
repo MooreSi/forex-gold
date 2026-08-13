@@ -72,6 +72,21 @@ def price_in_entry_range(direction: str, entry_low: float, entry_high: float, ti
         return tick.bid >= entry_low
 
 
+# Furthest past its own entry zone a signal may be gap-fired at market
+# (2026-08-13). Lives here beside ime_enabled_for_channel so both IME entry
+# paths -- this module's fresh-signal scan and core_pending_signal_activation's
+# queued-signal watcher -- read one value and cannot drift apart.
+#
+# The 2026-08-12 generalisation of gap-fire to every IME channel also dropped
+# the per-channel caps (15pt Gold Diggers VIP / 10pt GD2) entirely. Uncapped,
+# it chased a GOLD DIGGERS INSTITUTIONAL signal 28.22 points -- 282 pips --
+# past the zone it was built around. Over that period gap-fired entries ran a
+# median adverse excursion (74-93 pips) well above their median favourable one
+# (46-52 pips): past some distance "enter at market anyway" stops being a fill
+# and becomes a chase. Restored at 15, the wider of the two original values.
+MAX_GAP_FIRE_PTS = 15.0
+
+
 def ime_enabled_for_channel(rs: dict, channel_name: str) -> bool:
     """True when Immediate Market Entry is live for `channel_name`.
 
@@ -393,15 +408,21 @@ async def execute_auto_signal(
                         # Was scoped to "gold diggers vip"/"gold diggers 2.0" by
                         # channel-name substring match with a hard gap cap
                         # (15pt/10pt) -- generalised to every IME-enabled channel
-                        # with no distance cap (2026-08-12, explicit user
-                        # direction), after GOLD DIGGERS INSTITUTIONAL queued a
-                        # signal only ~2pt outside its zone instead of firing.
+                        # (2026-08-12, explicit user direction), after GOLD
+                        # DIGGERS INSTITUTIONAL queued a signal only ~2pt outside
+                        # its zone instead of firing.
+                        #
+                        # That generalisation also dropped the distance cap, and
+                        # uncapped it chased a signal 28.22 points (282 pips) past
+                        # its zone. Cap restored 2026-08-13 at the wider of the two
+                        # original values -- see MAX_GAP_FIRE_PTS, which this deliberately shares so the
+                        # two entry paths cannot drift apart again.
                         if not in_range and ime_enabled_for_channel(rs, channel_name):
                             gap = (
                                 round(cur_px - eh, 2) if direction == "BUY"
                                 else round(el - cur_px, 2)
                             )
-                            if gap > 0:
+                            if 0 < gap <= MAX_GAP_FIRE_PTS:
                                 sign = 1.0 if direction == "BUY" else -1.0
                                 parsed = dict(parsed)
                                 parsed["stop_loss"] = round(float(parsed["stop_loss"]) + sign * gap, 2)

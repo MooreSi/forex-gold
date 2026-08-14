@@ -1282,11 +1282,39 @@ def _apply_schema() -> None:
             pass  # table/column doesn't exist on this schema version
         # Enable instant_entry for any GD2 channel configs that were bootstrapped
         # before the GD2 IME support was added (they defaulted to 0).
-        conn.execute(
-            "UPDATE channel_parser_config "
-            "SET instant_entry_enabled=1 "
-            "WHERE parser_format='gd2' AND instant_entry_enabled=0"
-        )
+        #
+        # ONCE, not on every init (2026-08-14). This is a heal-forward backfill
+        # for rows predating the gd2 IME default, but it was unconditional and
+        # init() runs on every app start -- so it re-enabled IME for every gd2
+        # channel every time, silently reverting the setting within seconds of
+        # it being turned off. In practice that made Immediate Market Entry
+        # impossible to disable on a gd2 channel at all, through the UI or
+        # otherwise. Found while turning IME off for GOLD DIGGERS
+        # INSTITUTIONAL, where market entry backtests at -0.03R against
+        # +0.26R for the limit entry the channel actually publishes.
+        #
+        # New rows no longer need it: engine.py's auto-bootstrap already
+        # defaults gd2 to instant_entry_enabled=1 at first sight.
+        _ime_backfill_key = "gd2_ime_backfill_done"
+        try:
+            _done = conn.execute(
+                "SELECT value FROM app_config WHERE key=?", (_ime_backfill_key,)
+            ).fetchone()
+        except Exception:
+            _done = None
+        if not _done:
+            conn.execute(
+                "UPDATE channel_parser_config "
+                "SET instant_entry_enabled=1 "
+                "WHERE parser_format='gd2' AND instant_entry_enabled=0"
+            )
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)",
+                    (_ime_backfill_key, "1"),
+                )
+            except Exception:
+                pass
         # Strip legacy "instant:" prefix from tg_source in all trade tables
         conn.execute(
             "UPDATE vantage_simulated_trades "

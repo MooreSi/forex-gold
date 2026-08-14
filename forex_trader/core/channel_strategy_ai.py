@@ -191,6 +191,21 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
         log.debug("channel_strategy_ai: market data fetch failed: %s", exc)
 
     rule_regime   = classify_regime(atr_h1, adx_h1)
+    # Regime from the SAME classifier core_auto_template's mapping was
+    # backtested against -- dpm_engine.detect_regime over the engine's own
+    # M5/30 window. Deliberately not classify_regime() above (H1 ATR/ADX):
+    # if the AI reasoned about one regime label while the deterministic
+    # baseline and the auto loop used another, an override would look
+    # arbitrary and be impossible to audit.
+    from forex_trader.core.dpm_engine import (
+        detect_regime as _detect_regime, compute_atr as _dpm_atr,
+    )
+    _dpm = list(getattr(engine, "_dpm_candles", None) or [])
+    try:
+        _auto_regime = (_detect_regime(_dpm, _dpm_atr(_dpm))
+                        if len(_dpm) >= 20 else rule_regime)
+    except Exception:
+        _auto_regime = rule_regime
     hour_utc      = _utc_hour()
     session_label = (
         "Asian"               if hour_utc < 7  else
@@ -201,7 +216,20 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
 
     # ── Gather channel performance + open trade counts ───────────────────────
     channels_data    = _db.get_all_channel_strategy_settings()
-    valid_strategies = list(STRATEGY_NAMES.keys())
+    # Built-in strategies PLUS the regime-tuned EA templates and the
+    # stand-down option (2026-08-14). Previously this was STRATEGY_NAMES
+    # alone and the validator below silently rewrote anything else back to
+    # the rule-based regime pick -- so a template could never be
+    # recommended no matter what the model returned, and Auto mode could
+    # only ever select built-in strategies.
+    from forex_trader.core import core_auto_template as _auto
+    valid_strategies = (list(STRATEGY_NAMES.keys())
+                        + _auto.auto_templates()
+                        + [_auto.STAND_DOWN])
+    _auto_baselines = "\n".join(
+        f"  {_c['source']}: {_auto.describe_cell(_c['source'], _auto_regime)}"
+        for _c in channels_data
+    ) or "  (no channels configured)"
 
     channel_lines: list[str] = []
     for ch in channels_data:
@@ -264,7 +292,25 @@ Respond ONLY with a JSON object — no prose before or after:
 }}
 
 Use only these strategy keys: {json.dumps(valid_strategies)}
-If a channel has no performance data, recommend "conservative" with confidence 0.4."""
+If a channel has no performance data, recommend "conservative" with confidence 0.4.
+
+REGIME-TUNED EA TEMPLATES (backtested 31 days, per channel per market regime).
+The current regime is "{_auto_regime}". These are the measured baselines --
+prefer them unless the live conditions above genuinely argue otherwise, and
+say why in the reasoning if you deviate:
+{_auto_baselines}
+
+Template shapes:
+  template:Auto Limit Scalp     resting limit legs in the zone, SL35, banks 60% at 35 pips
+  template:Auto Limit Balanced  resting limit legs, SL40, 40/80/130
+  template:Auto Limit Trend     resting limit legs, SL50, runs to 300 pips
+  template:Auto Market Balanced fills at market, SL40, 40/80/130
+  template:Auto Market Trend    fills at market, SL50, runs to 300 pips
+  template:Auto Market Runner   fills at market, SL60, 60/120/200
+
+"{_auto.STAND_DOWN}" is a valid and expected answer: return it when a channel
+has no edge in the current regime. Not trading is preferable to trading a
+configuration with negative expectancy."""
 
     # ── Snapshot current recs before updating (for change detection) ─────────
     prev_recs: dict[str, str] = {
@@ -297,7 +343,16 @@ If a channel has no performance data, recommend "conservative" with confidence 0
             reasoning  = (rec.get("reasoning") or "")[:200]
             confidence = float(rec.get("confidence", 0.7))
             if strategy not in valid_strategies:
-                strategy = rule_regime
+                # Fall back to the BACKTESTED cell for this channel/regime
+                # rather than the H1 rule regime. An unparseable answer
+                # should land on the measured baseline, which is the whole
+                # point of having a deterministic floor -- rule_regime is a
+                # built-in strategy pick and would quietly drop the channel
+                # out of template management altogether.
+                _fallback = _auto.baseline_for(src, _auto_regime)
+                log.info("channel_strategy_ai: %s returned unknown strategy %r "
+                         "-- using backtested baseline %s", src, strategy, _fallback)
+                strategy = _fallback
             _db.set_channel_strategy_rec(src, strategy, reasoning, confidence)
             results[src] = {"strategy": strategy, "reasoning": reasoning, "confidence": confidence}
         log.info(

@@ -369,6 +369,7 @@ class SimulationEngine:
         self._signal_bus_prune_task: Optional[asyncio.Task] = None
         self._tp_safety_net_task: Optional[asyncio.Task] = None
         self._channel_ai_task: Optional[asyncio.Task] = None
+        self._auto_template_task: Optional[asyncio.Task] = None
         self._ai_model_refresh_task: Optional[asyncio.Task] = None
         self._data_retention_task: Optional[asyncio.Task] = None
         self._reversal_engine_research_task: Optional[asyncio.Task] = None
@@ -397,6 +398,7 @@ class SimulationEngine:
         self._signal_bus_prune_task = asyncio.create_task(self._signal_bus_prune_loop())
         self._tp_safety_net_task  = asyncio.create_task(self._tp_safety_net_loop())
         self._channel_ai_task     = asyncio.create_task(self._channel_ai_auto_eval_loop())
+        self._auto_template_task  = asyncio.create_task(self._auto_template_loop())
         self._ai_model_refresh_task = asyncio.create_task(self._ai_model_refresh_loop())
         self._data_retention_task = asyncio.create_task(self._data_retention_loop())
         self._reversal_engine_research_task = asyncio.create_task(self._reversal_engine_research_loop())
@@ -425,6 +427,7 @@ class SimulationEngine:
                   self._email_task, self._bridge_watchdog_task,
                   self._max_tp_task, self._signal_bus_prune_task,
                   self._tp_safety_net_task, self._channel_ai_task,
+                  self._auto_template_task,
                   self._ai_model_refresh_task, self._data_retention_task,
                   self._reversal_engine_research_task,
                   self._closed_market_queue_task,
@@ -2644,6 +2647,83 @@ class SimulationEngine:
             except Exception as e:
                 log.debug("_ref_backfill_loop error: %s", e)
             await asyncio.sleep(self._REF_BACKFILL_INTERVAL)
+
+    async def _auto_template_loop(self) -> None:
+        """Auto template management (2026-08-14).
+
+        Two cadences, deliberately split by cost:
+
+          every 60s   detect the live regime from the M5 window the monitor
+                      loop already keeps, and write the BACKTESTED baseline
+                      pick for each Auto channel. Free, deterministic, and
+                      immediate -- a regime flip is acted on within a minute
+                      instead of waiting for the next AI cycle.
+
+          AI review   on a regime CHANGE, or every 15 minutes, whichever
+                      comes first. This is the only part that costs money,
+                      and it is bounded to ~4-8 calls/hour rather than the
+                      per-minute rate the detection loop runs at.
+
+        The split exists because engine.py already carries a scar here: the
+        Channel Strategy AI used to be a page-level ui.timer that respawned
+        on every browser reconnect and "was burning Anthropic API credits"
+        (see _channel_ai_auto_eval_loop). Frequent *detection* is cheap;
+        frequent *inference* is not, so only the former runs per minute.
+
+        Does nothing at all when no source is set to Auto, so the default
+        configuration pays neither cost.
+        """
+        from forex_trader.core import core_auto_template as _auto
+
+        await asyncio.sleep(90)   # let the first M5 window populate
+        last_regime: Optional[str] = None
+        last_ai = 0.0
+        AI_INTERVAL = 15 * 60
+
+        while self._monitor_running:
+            try:
+                sources = _auto.auto_enabled_sources()
+                if sources:
+                    regime = _auto.regime_from_candles(self._dpm_candles)
+                    regime_flipped = (last_regime is not None and regime != last_regime)
+                    # Only re-assert the baseline when the regime actually
+                    # moved (or on the very first pass). Otherwise just fill
+                    # sources that have no pick yet -- see apply_baselines'
+                    # `force` note: forcing every tick reverts the AI's
+                    # override within 60s of it being made.
+                    changed = _auto.apply_baselines(
+                        regime, sources,
+                        force=(regime_flipped or last_regime is None),
+                    )
+                    if regime_flipped or changed:
+                        log.info(
+                            "[AutoTemplate] regime=%s%s%s", regime,
+                            f" (was {last_regime})" if regime_flipped else "",
+                            "".join(f" | {s}: {a or 'none'} -> {b}"
+                                    for s, (a, b) in changed.items()),
+                        )
+                    last_regime = regime
+
+                    now = time.time()
+                    if (regime_flipped or now - last_ai >= AI_INTERVAL) and \
+                            ai_provider.is_configured(self._cfg):
+                        last_ai = now
+                        try:
+                            from forex_trader.core import channel_strategy_ai as _csai
+                            await _csai.evaluate_channels(self, self._cfg)
+                            log.info("[AutoTemplate] AI review complete (trigger=%s)",
+                                     "regime change" if regime_flipped else "15m interval")
+                        except Exception as e:
+                            # The deterministic baseline is already written, so
+                            # a failed review degrades to backtested behaviour
+                            # rather than to no management at all.
+                            log.warning("[AutoTemplate] AI review failed, keeping "
+                                        "backtested baseline: %s", e)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug("_auto_template_loop error: %s", e)
+            await asyncio.sleep(60)
 
     async def _channel_ai_auto_eval_loop(self) -> None:
         """

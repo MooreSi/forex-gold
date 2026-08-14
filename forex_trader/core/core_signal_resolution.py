@@ -214,8 +214,34 @@ async def resolve_open_trade_params(
         _ch_override = _sched_override
 
     if _ch_override == "auto":
+        # Auto mode (2026-08-14): the AI/auto-manage layer's current pick for
+        # this channel. Three outcomes, in order:
+        #
+        #   stand_down  -- this channel has no measured edge in the current
+        #                  regime (see core_auto_template's mapping), so
+        #                  refuse the trade outright rather than fall through
+        #                  to some default that would still open it.
+        #   a rec       -- use it.
+        #   no rec yet  -- fall back to the BACKTESTED baseline for the live
+        #                  regime, not the global Active Strategy. Auto must
+        #                  behave sensibly before the first AI cycle has run
+        #                  (app just started, API unconfigured or down),
+        #                  which the old `or rs["trade_strategy"]` did not.
+        from forex_trader.core import core_auto_template as _auto
         _rec = db_module.get_channel_strategy_rec(_ch_src_early)
-        strategy = _rec.get("strategy") or rs.get("trade_strategy", STRATEGY_SCALE_OUT)
+        strategy = (_rec.get("strategy") or "").strip()
+        if _auto.is_stand_down(strategy):
+            raise ValueError(
+                f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
+                f"(Trading > Schedule: Auto)"
+            )
+        if not strategy:
+            strategy = _auto.baseline_for(_ch_src_early, _auto.regime_from_candles(dpm_candles))
+            if _auto.is_stand_down(strategy):
+                raise ValueError(
+                    f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
+                    f"(Trading > Schedule: Auto)"
+                )
     elif _ch_override:
         strategy = _ch_override
     else:

@@ -1634,7 +1634,14 @@ def _render_schedule():
     # map onto a time window).
     from forex_trader.core import core_ea_templates as _sched_et
     from forex_trader.core.core_db_channel import get_telegram_channel_names
-    _sched_strat_opts = {"": "— No Override —"}
+    # "Auto (AI)" sits directly under "No Override" because it is the option
+    # most likely to be wanted (2026-08-14). Picking it hands this channel's
+    # template choice to the auto-manage layer: a backtested regime->template
+    # baseline refreshed every minute, reviewed by Claude on every regime
+    # change and at least every 15 minutes, and allowed to stand the channel
+    # down entirely in conditions where it has no measured edge. See
+    # core_auto_template and engine._auto_template_loop.
+    _sched_strat_opts = {"": "— No Override —", "auto": "⚙ Auto (AI-managed)"}
     _sched_strat_opts.update(STRATEGY_NAMES)
     for _t in _sched_et.list_ea_templates():
         _sched_strat_opts[_sched_et.override_for_template(_t["name"])] = f"Template: {_t['name']}"
@@ -1750,7 +1757,10 @@ def _render_schedule():
                                             f"Force {ch} onto this strategy or EA template "
                                             "while this window is active, overriding its "
                                             "own Channel Strategy pick. No Override = "
-                                            "normal per-channel resolution."
+                                            "normal per-channel resolution. "
+                                            "Auto (AI-managed) = the template is chosen "
+                                            "from live market conditions and may stand "
+                                            "this channel down entirely."
                                         )
                                     _chan_widgets[ch] = {"enabled": c_chk, "strategy_override": c_sel}
 

@@ -469,6 +469,56 @@ def fmt_mt5_partial_close(
     return "\n".join(lines)
 
 
+def _pips_and_rr(trade: dict, profit: float) -> tuple[Optional[float], Optional[float]]:
+    """(total_pips, r_multiple) for a FINISHED trade, or (None, None) when
+    the row can't support an honest figure. Final-close only -- deliberately
+    not used by fmt_mt5_partial_close, where "total" isn't known yet.
+
+    Pips are derived from realised MONEY, not from (exit - entry). That
+    difference is load-bearing: a laddered trade banks most of its move in
+    partial closes at prices the final exit never returns to, so the raw
+    price move understates -- or inverts -- what was actually achieved.
+    Confirmed on a live SELL that closed its last portion at exactly its
+    entry (0 pips by price) having already realised +$43.29 through
+    partials. Money already sums every partial and, for an EA Template
+    grid, every leg.
+
+    initial_risk is the preferred denominator because core_profit_sync
+    recomputes it per FILLED leg (see its own comment) -- so it stays
+    correct for a multi-leg grid whose row-level lot_size is only the
+    promoting leg's, where profit / (lot_size * CONTRACT_SIZE) would
+    overstate the move by roughly the leg count. Pips are then expressed in
+    that same risk unit, which keeps the two numbers mutually consistent:
+    R x risk_pips == total_pips, always.
+    """
+    from forex_trader.core.models import CONTRACT_SIZE
+    from forex_trader.core.core_pips import PIPS_TO_PRICE_XAUUSD
+
+    entry      = float(trade.get("entry_price") or 0)
+    initial_sl = trade.get("initial_sl")
+    init_risk  = trade.get("initial_risk")
+
+    risk_pips = None
+    if entry > 0 and initial_sl:
+        risk_pips = abs(entry - float(initial_sl)) / PIPS_TO_PRICE_XAUUSD
+
+    # Preferred path: dollar R against the per-leg initial risk, with pips
+    # rendered in the same unit.
+    if init_risk and float(init_risk) > 0:
+        r = profit / float(init_risk)
+        return ((r * risk_pips) if risk_pips else None), r
+
+    # Fallback for rows predating initial_sl/initial_risk: money over the
+    # row's own size. Correct for the single-leg trades that make up
+    # essentially all of that history; R is only offered when a stop
+    # distance is actually recorded.
+    lots = float(trade.get("lot_size") or 0)
+    if lots > 0:
+        pips = (profit / (lots * CONTRACT_SIZE)) / PIPS_TO_PRICE_XAUUSD
+        return pips, ((pips / risk_pips) if risk_pips else None)
+    return None, None
+
+
 def fmt_trade_close(
     trade: dict,
     result: dict,
@@ -514,6 +564,24 @@ def fmt_trade_close(
         (f"Profit: ${pnl_sign}{profit:.2f}" if profit_known
          else "Profit: unknown (no entry price recorded for this trade)"),
     ]
+
+    # Total pips + realised risk:reward. Final close only -- the partial-close
+    # message deliberately has no equivalent, since neither figure is settled
+    # until the position is fully out. Only shown when profit itself is
+    # trustworthy: with no entry price the same arithmetic that produced a
+    # $-16086 "profit" on a 0.03-lot trade would produce a nonsense pip count.
+    if profit_known:
+        _pips, _r = _pips_and_rr(trade, profit)
+        if _pips is not None:
+            lines.append(f"Total pips: {'+' if _pips >= 0 else ''}{_pips:.1f}")
+        if _r is not None:
+            # Measured against the risk actually taken at open, so a full stop
+            # reads ~-1R, a loss cut early reads better than -1R, and a winner
+            # reads as its true multiple of the risk. Conventional "1 : X"
+            # notation only for gains -- a ratio is meaningless on a loss, so
+            # those show the signed R alone.
+            _rr = (f"1 : {_r:.2f}  ({_r:.2f}R)" if _r >= 0 else f"{_r:.2f}R")
+            lines.append(f"Risk:Reward: {_rr}")
 
     if account:
         bal  = float(account.get("balance",     0) or 0)

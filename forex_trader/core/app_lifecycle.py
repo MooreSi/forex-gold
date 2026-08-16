@@ -217,6 +217,14 @@ async def startup() -> None:
     env = config.get("account_env", "demo")
     db_module.sync_bridge_credentials_file(env)
 
+    # Re-arm the auto-restart watchdog. The stop scripts disarm it so that Stop
+    # genuinely stops, which means arming has to happen on the way back up --
+    # otherwise the first clean stop would silently retire supervision for good.
+    from forex_trader.core import core_autostart as _autostart
+    _autostart.sync_from_setting(
+        db_module.get_app_config("auto_restart_enabled") == "1"
+    )
+
     _engine    = SimulationEngine(config)
     _tg_reader = TelegramReader(config)
     _engine.set_telegram_reader(_tg_reader)

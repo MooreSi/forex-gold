@@ -8,6 +8,7 @@ from typing import Callable
 
 from nicegui import app, ui
 
+from forex_trader.core import core_autostart as _autostart
 from forex_trader.core import database as db_module
 from forex_trader.core import platform_utils as _pu
 from forex_trader.sync import client as sync_client
@@ -3223,6 +3224,106 @@ def _render_diagnostics(engine):
         "Automatically releases when the app exits."
     )
     _update_sleep_btn(sleep_btn)
+
+    # ── Auto-restart watchdog toggle ────────────────────────────────────────
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
+        with ui.row().classes("w-full items-center justify-between"):
+            auto_restart_sw = ui.switch(
+                "Auto-Restart if the app stops",
+                value=(db_module.get_app_config("auto_restart_enabled") == "1"),
+            ).classes("text-blue-300 font-bold")
+            ui.icon("restart_alt", size="sm").classes("text-blue-400")
+
+        _autostart_lbl = ui.label("").classes("text-xs mt-1 text-gray-500")
+
+        with ui.expansion(
+            "How does Auto-Restart work?", icon="info_outline"
+        ).classes("w-full text-sm"):
+            ui.markdown(
+                f"When **ON**, {_os_label} checks every "
+                f"{_autostart.CHECK_INTERVAL_SECS // 60} minutes that the app is "
+                "still serving on its port, and starts it again if it is not. "
+                "It also runs that check at login/boot, so the app comes back by "
+                "itself after a reboot.\n\n"
+                + (
+                    "Registered as a **LaunchAgent** (`launchctl`) under your user "
+                    "account.\n\n"
+                    if sys.platform == "darwin"
+                    else "Registered as a **Scheduled Task** under your user account.\n\n"
+                )
+                + "Stopping the app deliberately still stops it — "
+                "`FOREX Stop.command` / `Stop FOREX.bat` pause the watchdog, and "
+                "starting the app again re-arms it. Restarting from inside the app "
+                "is unaffected.\n\n"
+                "When **OFF**, nothing restarts the app and it stays down until "
+                "started by hand."
+            ).classes("text-gray-300")
+
+        def _refresh_autostart_lbl():
+            if not _autostart.is_supported():
+                _autostart_lbl.text = f"Not supported on this platform ({sys.platform})."
+                _autostart_lbl.classes(replace="text-xs mt-1 text-gray-500")
+                return
+            if not auto_restart_sw.value:
+                _autostart_lbl.text = "Off — nothing will restart the app if it stops."
+                _autostart_lbl.classes(replace="text-xs mt-1 text-gray-500")
+            elif _autostart.is_installed():
+                _autostart_lbl.text = (
+                    f"Active — checking every "
+                    f"{_autostart.CHECK_INTERVAL_SECS // 60} min."
+                    + ("" if _autostart.is_armed() else " Currently paused (app stopped).")
+                )
+                _autostart_lbl.classes(replace="text-xs mt-1 text-green-400")
+            else:
+                _autostart_lbl.text = "On, but the scheduler entry is missing — toggle off and on to repair."
+                _autostart_lbl.classes(replace="text-xs mt-1 text-yellow-400")
+
+        # Reverting the switch after a failure re-fires this handler, which
+        # would run disable() a second time and stack a second notification on
+        # top of the error the user actually needs to read.
+        _autostart_reverting = {"active": False}
+
+        def _revert_switch(to_value: bool):
+            _autostart_reverting["active"] = True
+            try:
+                auto_restart_sw.value = to_value
+            finally:
+                _autostart_reverting["active"] = False
+            _refresh_autostart_lbl()
+
+        def _on_autostart_change(e):
+            if _autostart_reverting["active"]:
+                return
+            want = bool(e.value)
+            if want and not _autostart.is_supported():
+                ui.notify(
+                    f"Auto-restart is not supported on {sys.platform}",
+                    type="warning", position="top",
+                )
+                _revert_switch(False)
+                return
+            try:
+                if want:
+                    _autostart.enable()
+                else:
+                    _autostart.disable()
+            except Exception as exc:
+                # Leave the stored setting alone when the OS refused — a toggle
+                # showing ON with no scheduler entry behind it is exactly the
+                # false sense of safety this feature exists to remove.
+                ui.notify(f"Could not enable auto-restart: {exc}",
+                          type="negative", position="top")
+                _revert_switch(not want)
+                return
+            db_module.set_app_config("auto_restart_enabled", "1" if want else "0")
+            ui.notify(
+                "Auto-restart enabled" if want else "Auto-restart disabled",
+                type="positive" if want else "info", position="top",
+            )
+            _refresh_autostart_lbl()
+
+        auto_restart_sw.on_value_change(_on_autostart_change)
+        _refresh_autostart_lbl()
 
     with ui.row().classes("gap-2 mb-2 items-center flex-wrap"):
         ui.button("Run Diagnostics", on_click=run_diag).classes(

@@ -255,6 +255,23 @@ def delayed_relaunch_cmd(
         return ["bash", "-c", f"sleep {delay_secs} && '{python}' '{script}'{args_part}"]
 
 
+def app_python(root) -> str:
+    """Return the interpreter that should be used to launch run.py.
+
+    Prefers the checkout's own .venv (a symlink is fine -- it resolves through
+    normally), falling back to whatever interpreter is running right now. Shared
+    by restart_app() and the autostart watchdog so a relaunch never picks a
+    different Python than the one the app was installed against.
+    """
+    from pathlib import Path
+    root = Path(root)
+    if sys.platform == "win32":
+        venv_python = root / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = root / ".venv" / "bin" / "python3"
+    return str(venv_python) if venv_python.exists() else sys.executable
+
+
 def restart_app(root) -> None:
     """Spawn a detached relaunch of run.py after a delay, then shut this
     process down -- the shared restart mechanism used by both the header
@@ -266,11 +283,7 @@ def restart_app(root) -> None:
     """
     from pathlib import Path
     root = Path(root)
-    if sys.platform == "win32":
-        venv_python = root / ".venv" / "Scripts" / "python.exe"
-    else:
-        venv_python = root / ".venv" / "bin" / "python3"
-    python = str(venv_python) if venv_python.exists() else sys.executable
+    python = app_python(root)
 
     from forex_trader.config import USER_DATA_DIR
     log_path = USER_DATA_DIR / "data" / "restart.log"

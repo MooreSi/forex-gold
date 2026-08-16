@@ -103,6 +103,46 @@ def test_unset_ladder_says_so_rather_than_printing_zeros(fresh_db):
     assert "Take Profits Pips (Anchor): not set" in text
 
 
+def test_empty_pending_ladder_is_reported_as_inheriting_the_anchor(fresh_db):
+    """The EA falls back to the anchor's absolute tp{n}/pct{n} for any level
+    where tpl_tp_pen{n}_pips is 0, so resting legs DO take profit. Printing a
+    bare "not set" read as "these legs never close in profit" -- and on a
+    pendings-only template (anchors=0) that is the entire trade.
+    """
+    _bind(_channel("C One"), "PendInherit", {
+        "mode": "grid", "anchors": 0, "pendings": 2,
+        "tp1_pips": 40, "tp2_pips": 80, "tp3_pips": 130,
+        "tp1_pct": 50, "tp2_pct": 30, "tp3_pct": 20,
+    })
+    text = "\n".join(status.channel_status_lines())
+    assert "Take Profits Pips (Pending):inherits anchor (40/80/130)" in text
+    assert "TP Close Pcts (Pending):    inherits anchor (50/30/20)" in text
+    assert "Take Profits Pips (Pending):not set" not in text
+
+
+def test_pending_ladder_set_explicitly_is_printed_not_marked_inherited(fresh_db):
+    """An override must still read as its own levels -- several live templates
+    (Sig Gen Grid, GD Institutional - Grid) deliberately run pendings tighter
+    than the anchor, and showing those as inherited would misreport them."""
+    _bind(_channel("C One"), "PendOwn", {
+        "mode": "grid", "anchors": 1, "pendings": 1,
+        "tp1_pips": 100, "tp1_pct": 50,
+        "tp_pen1_pips": 10, "tp_pen1_pct": 25,
+    })
+    text = "\n".join(status.channel_status_lines())
+    assert "Take Profits Pips (Pending):10" in text
+    assert "inherits anchor" not in text
+
+
+def test_pending_stays_not_set_when_the_anchor_ladder_is_also_empty(fresh_db):
+    """With no anchor ladder there is nothing to inherit, so the honest
+    report is still "not set" -- claiming inheritance would invent a target."""
+    _bind(_channel("C One"), "BothBare", {"mode": "grid", "anchors": 0, "pendings": 2})
+    text = "\n".join(status.channel_status_lines())
+    assert "Take Profits Pips (Pending):not set" in text
+    assert "inherits anchor" not in text
+
+
 def test_telegram_sourced_ladder_is_marked_not_reported_as_the_levels_used(fresh_db):
     """With tp_from_telegram on, the signal's own TPs replace this column for
     Telegram trades -- reporting the pips plainly would name levels the next

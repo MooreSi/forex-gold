@@ -96,10 +96,20 @@ async def cmd_status(args: list, bridge: Any, tg_reader: Optional[Any] = None) -
         trade_line = "Active" if auto_exec else "Manual only"
 
     # MT5 bridge status — LISTEN filter ensures we detect the bridge server,
-    # not our own keep-alive client connection to port 9000
+    # not our own keep-alive client connection to the bridge port.
+    #
+    # The port comes from mt5_bridge_url, not a hardcoded 9000: an instance
+    # configured on any other port (this checkout defaults to 9010, precisely
+    # so a fork cannot dial into the live app's bridge) reported "NOT running"
+    # while the bridge was healthy and the EA was trading through it. A status
+    # command that cries wolf about the bridge is worse than one that omits
+    # the line -- it sends you diagnosing an outage that isn't happening.
     try:
+        from urllib.parse import urlparse
         from forex_trader.core.platform_utils import is_port_listening as _ipl
-        _bridge_up = _ipl(9000)
+        import forex_trader.config as _cfg_mod
+        _bridge_port = urlparse(_cfg_mod.get("mt5_bridge_url", "") or "").port or 9000
+        _bridge_up = _ipl(_bridge_port)
     except Exception:
         _bridge_up = False
     bridge_line = "Connected" if _bridge_up else "NOT running"

@@ -121,9 +121,21 @@ def _template_block(tpl: dict, paused: bool) -> list[str]:
         f"SL = {float(tpl.get('sl_pips') or 0):.1f} pips",
     ]
 
+    anchor_pips, anchor_pcts = _ladder(tpl, "tp")
+
     for label, prefix, tg_field in (("Anchor", "tp", "tp_from_telegram"),
                                     ("Pending", "tp_pen", "tp_pen_from_telegram")):
         pips, pcts = _ladder(tpl, prefix)
+        # An empty PENDING ladder does not mean the resting legs run without a
+        # target -- the EA falls back to the anchor's absolute tp{n}/pct{n} for
+        # any level where tpl_tp_pen{n}_pips is 0 (HandleOpenTemplateGrid in
+        # ForexTraderBridge.mq5). The bare "not set" this used to print read as
+        # "these legs never take profit", which is the opposite of what runs,
+        # and on a pendings-only template (anchors=0, e.g. Auto Limit Balanced)
+        # that is the whole trade being described.
+        if prefix == "tp_pen" and pips == "not set" and anchor_pips != "not set":
+            pips = f"inherits anchor ({anchor_pips})"
+            pcts = f"inherits anchor ({anchor_pcts})"
         # With "TP levels from Telegram" on, a Telegram signal's own stated
         # targets replace this column -- so print it in brackets rather than
         # as the levels the next signal will actually use. The pips still

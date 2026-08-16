@@ -191,6 +191,45 @@ def test_status_reports_the_ea_link_separately_from_the_mt5_bridge(fresh_db):
     assert "EA (MT5):     NOT connected" in result
 
 
+def test_status_probes_the_configured_bridge_port_not_a_hardcoded_9000(fresh_db, monkeypatch):
+    """This instance's bridge runs on whatever mt5_bridge_url says (9010 here,
+    deliberately, so a fork cannot dial into the live app's bridge). Probing a
+    fixed 9000 reported "NOT running" while the bridge was healthy and the EA
+    was trading through it -- a status that cries wolf sends you diagnosing an
+    outage that isn't happening."""
+    probed = []
+
+    def fake_listening(port):
+        probed.append(port)
+        return port == 9010
+
+    monkeypatch.setattr(
+        "forex_trader.core.platform_utils.is_port_listening", fake_listening
+    )
+    monkeypatch.setattr(
+        "forex_trader.config.get",
+        lambda key, default=None: ("http://localhost:9010"
+                                   if key == "mt5_bridge_url" else default),
+    )
+    result = asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert probed == [9010], f"probed {probed}, expected the configured port"
+    assert "MT5 Bridge:   Connected" in result
+
+
+def test_status_falls_back_to_9000_when_the_url_states_no_port(fresh_db, monkeypatch):
+    probed = []
+    monkeypatch.setattr(
+        "forex_trader.core.platform_utils.is_port_listening",
+        lambda port: (probed.append(port), False)[1],
+    )
+    monkeypatch.setattr(
+        "forex_trader.config.get",
+        lambda key, default=None: "" if key == "mt5_bridge_url" else default,
+    )
+    asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert probed == [9000]
+
+
 # ── cmd_trades ────────────────────────────────────────────────────────────
 
 def test_trades_no_open_trades(fresh_db):

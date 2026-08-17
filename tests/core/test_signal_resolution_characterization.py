@@ -201,11 +201,23 @@ def test_strategy_resolution_uses_channel_override(fresh_db, engine):
 
 
 def test_strategy_resolution_uses_auto_rec(fresh_db, engine):
+    """Updated 2026-08-17, deliberately and not as a refactor artifact: Auto's
+    vocabulary became EA templates + stand_down, so a rec naming a built-in is
+    now treated as stale and replaced by the backtested baseline. The
+    characterized behaviour -- "a valid stored rec is what gets used" -- is
+    unchanged; only what counts as valid moved. See
+    core_auto_template.is_valid_auto_choice.
+    """
     _insert_signal(source_name="AutoChannel")
     db.set_channel_strategy_override("AutoChannel", None, auto=True)
-    db.set_channel_strategy_rec("AutoChannel", STRATEGY_SIGNAL_CLIMBER, "reasoning", 0.9)
-    result = asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
-    assert result["strategy"] == STRATEGY_SIGNAL_CLIMBER
+    db.set_channel_strategy_rec("AutoChannel", "stand_down", "reasoning", 0.9)
+    # stand_down is asserted rather than a template because every other Auto
+    # choice is now an EA template, and this file drives the FULL
+    # open_trade_from_signal, which refuses a template with no EA attached --
+    # a fake EA would be characterizing the EA handoff, not this pack's scope.
+    # The property under test is unchanged: the stored rec is what decides.
+    with pytest.raises(ValueError, match="Auto"):
+        asyncio.run(SimulationEngine.open_trade_from_signal(engine, "sig-1"))
 
 
 def test_strategy_resolution_falls_back_to_global_default(fresh_db, engine):

@@ -160,6 +160,29 @@ def auto_templates() -> list[str]:
                   | set(_DEFAULT_BY_REGIME.values()))
 
 
+def is_valid_auto_choice(choice: Optional[str]) -> bool:
+    """Whether `choice` is something Auto mode is allowed to run today.
+
+    Stored recommendations outlive the rules that produced them. When the
+    built-in strategies stopped being selectable (2026-08-17), every channel
+    holding a built-in in channel_strategy_rec kept trading it: the change
+    only governed new AI responses, and nothing revalidated a row already in
+    the database. GOLD DIGGERS INSTITUTIONAL ran "limit_runner" for nearly
+    nine hours afterwards -- six trades at the global 0.1 lot rather than its
+    template's configured 0.05 -- because the row simply never came up for
+    reconsideration.
+
+    So consumers check the stored value against the current vocabulary rather
+    than trusting it, and fall back to the backtested baseline when it no
+    longer qualifies. stand_down counts as valid: it is a real outcome, not a
+    stale value.
+    """
+    c = (choice or "").strip()
+    if not c:
+        return False
+    return is_stand_down(c) or c in set(auto_templates())
+
+
 def auto_enabled_sources() -> list[str]:
     """Channels/engines currently set to Auto anywhere that matters.
 

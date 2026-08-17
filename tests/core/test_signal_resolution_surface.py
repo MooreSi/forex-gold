@@ -187,12 +187,71 @@ def test_strategy_resolution_uses_channel_override(fresh_db):
 
 
 def test_strategy_resolution_uses_auto_rec(fresh_db):
+    """A stored rec is used when it is still something Auto may run. Auto's
+    vocabulary is EA templates + stand_down (2026-08-17), so the rec here is
+    a template -- this used to assert a built-in, which Auto can no longer
+    select."""
+    from forex_trader.core import core_auto_template as _auto
+    from forex_trader.core import core_ea_templates as et
     _insert_signal(source_name="AutoChannel")
     db.set_channel_strategy_override("AutoChannel", None, auto=True)
-    db.set_channel_strategy_rec("AutoChannel", STRATEGY_SIGNAL_CLIMBER, "reasoning", 0.9)
+    pick = _auto.auto_templates()[0]
+    et.save_ea_template(et.template_name_from_override(pick), {"mode": "grid"})
+    db.set_channel_strategy_rec("AutoChannel", pick, "reasoning", 0.9)
     bridge = _FakeBridge()
     result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
-    assert result["strategy"] == STRATEGY_SIGNAL_CLIMBER
+    assert result["strategy"] == pick
+    assert result["is_template"] is True
+
+
+def test_auto_rec_naming_a_no_longer_valid_strategy_falls_back_to_the_baseline(fresh_db):
+    """Stored recs outlive the rules that produced them. When the built-ins
+    stopped being selectable, rows already holding one kept being traded --
+    GOLD DIGGERS INSTITUTIONAL ran limit_runner for nearly nine hours
+    afterwards, at the global 0.1 lot instead of its template's 0.05, because
+    only an EMPTY rec fell through to the baseline."""
+    from forex_trader.core import core_auto_template as _auto
+    from forex_trader.core import core_ea_templates as et
+    _insert_signal(source_name="AutoChannel")
+    db.set_channel_strategy_override("AutoChannel", None, auto=True)
+    for tpl in _auto.auto_templates():
+        et.save_ea_template(et.template_name_from_override(tpl), {"mode": "grid"})
+    db.set_channel_strategy_rec("AutoChannel", STRATEGY_SIGNAL_CLIMBER, "stale", 0.9)
+    bridge = _FakeBridge()
+    result = asyncio.run(sr.resolve_open_trade_params(bridge, "sig-1"))
+    assert result["strategy"] != STRATEGY_SIGNAL_CLIMBER
+    assert _auto.is_valid_auto_choice(result["strategy"])
+
+
+def test_auto_resolved_template_is_treated_as_a_template_like_a_pinned_one(fresh_db):
+    """_is_template used to key off the channel override, which for an Auto
+    channel is the literal "auto" -- so a template reaching resolution through
+    Auto was not recognised as one, and skipped the template's SL authority,
+    Sig Guard, and the guard that stops the global Fixed Lot Size overwriting
+    a template's own Anchor Lot. An Auto channel and a pinned channel on the
+    SAME template have to resolve it identically."""
+    from forex_trader.core import core_auto_template as _auto
+    from forex_trader.core import core_ea_templates as et
+    # An Auto-selectable template, since Auto only accepts its own vocabulary.
+    override = _auto.auto_templates()[0]
+    et.save_ea_template(et.template_name_from_override(override),
+                        {"mode": "grid", "sl_pips": 40.0})
+
+    _insert_signal(sig_id="sig-pinned", source_name="PinnedChannel")
+    db.set_channel_strategy_override("PinnedChannel", override)
+    pinned = asyncio.run(sr.resolve_open_trade_params(_FakeBridge(), "sig-pinned"))
+
+    _insert_signal(sig_id="sig-auto", source_name="AutoTplChannel")
+    db.set_channel_strategy_override("AutoTplChannel", None, auto=True)
+    db.set_channel_strategy_rec("AutoTplChannel", override, "reasoning", 0.9)
+    auto_res = asyncio.run(sr.resolve_open_trade_params(_FakeBridge(), "sig-auto"))
+
+    assert pinned["is_template"] is True
+    assert auto_res["is_template"] is True, "Auto-resolved template not seen as a template"
+    assert auto_res["strategy"] == pinned["strategy"]
+    assert auto_res["stop_loss_to_use"] == pinned["stop_loss_to_use"], \
+        "template SL authority skipped on the Auto path"
+    assert auto_res["template"] is not None and pinned["template"] is not None
 
 
 def test_strategy_resolution_falls_back_to_global_default(fresh_db):

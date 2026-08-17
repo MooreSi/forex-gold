@@ -19,6 +19,7 @@ suggest_lot_size (pack 1), core_close_trade.get_trading_balance (pack 10).
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from forex_trader.core import database as db_module
@@ -37,6 +38,8 @@ from forex_trader.core.models import (
     STRATEGY_FIXED_RR,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, MAX_TP,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _rr_sl_dist(stated_sl_dist: float) -> float:
@@ -230,6 +233,23 @@ async def resolve_open_trade_params(
         from forex_trader.core import core_auto_template as _auto
         _rec = db_module.get_channel_strategy_rec(_ch_src_early)
         strategy = (_rec.get("strategy") or "").strip()
+        # A stored rec outlives the rules that produced it, so it is checked
+        # against what Auto may run TODAY rather than trusted. When the
+        # built-ins stopped being selectable (2026-08-17) the rows already in
+        # the database kept their built-in picks, and this branch went on
+        # using them: GOLD DIGGERS INSTITUTIONAL traded "limit_runner" for
+        # nearly nine hours afterwards at the global 0.1 lot instead of its
+        # template's 0.05, because only an EMPTY rec fell through to the
+        # baseline. Treating a no-longer-valid pick the same as a missing one
+        # is what makes a change to the vocabulary take effect everywhere.
+        if strategy and not _auto.is_valid_auto_choice(strategy):
+            _stale = strategy
+            strategy = ""
+            log.info(
+                "[Auto] %s had a stale recommendation %r that Auto can no "
+                "longer run — falling back to the backtested baseline",
+                _ch_src_early, _stale,
+            )
         if _auto.is_stand_down(strategy):
             raise ValueError(
                 f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
@@ -253,10 +273,25 @@ async def resolve_open_trade_params(
     # signal levels plus the template's own fields, so none of the
     # strategy-specific SL/lot logic below applies. See
     # core_ea_templates.py's module docstring.
-    _is_template = ea_templates.is_template_override(_ch_override)
+    # Keyed off the RESOLVED strategy, not _ch_override. For a pinned channel
+    # those are the same string, but an Auto channel's override is the literal
+    # "auto" -- so a template arriving through Auto was not recognised as one
+    # here and silently skipped everything in this block: the template's SL
+    # authority (below), Sig Guard, the "template no longer exists" check, and
+    # the `not _is_template` guard that keeps the global Fixed Lot Size from
+    # overwriting a template's own Anchor Lot.
+    #
+    # It went unnoticed because core_open_trade.py derives its own
+    # _is_template from `strategy` and does load the template there, so EA
+    # legs still used the template's lots -- the two modules disagreed about
+    # what "is a template" meant, and only the later one was right. Auto
+    # gained template support on 2026-08-14; this half was never updated with
+    # it, which is why an Auto channel and a pinned channel on the SAME
+    # template did not trade it the same way.
+    _is_template = ea_templates.is_template_override(strategy)
     _template: Optional[dict] = None
     if _is_template:
-        _tpl_name = ea_templates.template_name_from_override(_ch_override)
+        _tpl_name = ea_templates.template_name_from_override(strategy)
         _template = ea_templates.get_ea_template(_tpl_name)
         if _template is None:
             raise ValueError(f"Template '{_tpl_name}' no longer exists — reassign this channel")

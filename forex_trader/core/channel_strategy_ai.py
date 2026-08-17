@@ -223,9 +223,23 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
     # recommended no matter what the model returned, and Auto mode could
     # only ever select built-in strategies.
     from forex_trader.core import core_auto_template as _auto
-    valid_strategies = (list(STRATEGY_NAMES.keys())
-                        + _auto.auto_templates()
-                        + [_auto.STAND_DOWN])
+    # Templates and stand_down ONLY -- deliberately NOT the built-in strategies
+    # (2026-08-17). Auto mode is defined by the backtested template map, and
+    # every other layer of it already speaks only templates: _MAP,
+    # _DEFAULT_BY_REGIME and apply_baselines can each return a template or
+    # stand_down and nothing else. Leaving the built-ins selectable let the AI
+    # half hand a channel something the deterministic half would never choose,
+    # and the two then fought every cycle.
+    #
+    # It also silently changed position size. A built-in takes the global
+    # Fixed Lot Size (strategy_lot_size, 0.1) via core_signal_resolution's
+    # `if strategy_lot > 0 and not _is_template`, while a template uses its own
+    # Anchor/Pending Lot fields. So an AI pick of "conservative_trial" over
+    # "template:Auto Limit Balanced" quietly doubled the Reversal Engine from
+    # the configured 0.05 to 0.1 -- observed live on tickets 1776668203/1776668211.
+    # Sizing that swings on which strategy name a model happened to return is
+    # not sizing the user configured.
+    valid_strategies = _auto.auto_templates() + [_auto.STAND_DOWN]
     _auto_baselines = "\n".join(
         f"  {_c['source']}: {_auto.describe_cell(_c['source'], _auto_regime)}"
         for _c in channels_data
@@ -263,9 +277,22 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
                 f'n={b["n"]} PnL=${b["net_pnl"]:.2f}'
             )
 
+    # Describes the selectable set, which is valid_strategies -- not the
+    # built-in STRATEGY_NAMES catalogue it used to print. Offering a menu
+    # wider than what the validator accepts just invites answers that get
+    # coerced back to the baseline, wasting the call and the reasoning.
+    _TEMPLATE_SHAPES = {
+        "template:Auto Limit Scalp":     "resting limit legs in the zone, SL35, banks 60% at 35 pips",
+        "template:Auto Limit Balanced":  "resting limit legs, SL40, 40/80/130",
+        "template:Auto Limit Trend":     "resting limit legs, SL50, runs to 300 pips",
+        "template:Auto Market Balanced": "fills at market, SL40, 40/80/130",
+        "template:Auto Market Trend":    "fills at market, SL50, runs to 300 pips",
+        "template:Auto Market Runner":   "fills at market, SL60, 60/120/200",
+    }
     strat_desc = "\n".join(
-        f"  {k}: {v}" for k, v in STRATEGY_NAMES.items()
-    )
+        f"  {s}: {_TEMPLATE_SHAPES.get(s, 'EA template')}"
+        for s in valid_strategies if s != _auto.STAND_DOWN
+    ) + f"\n  {_auto.STAND_DOWN}: do not trade this channel in these conditions"
 
     rsi_str     = f"{rsi_h1:.1f}"   if rsi_h1   is not None else "unavailable"
     atr_m15_str = f"{atr_m15:.2f} pts" if atr_m15 is not None else "unavailable"
@@ -282,7 +309,7 @@ CURRENT MARKET CONDITIONS:
 - Rule-based regime: {rule_regime}
 - Recent H1 price action (last 3 candles): {price_narrative}
 
-AVAILABLE STRATEGIES:
+AVAILABLE CHOICES (EA templates only, plus stand_down — nothing else is valid):
 {strat_desc}
 
 CHANNEL PERFORMANCE (last 30 days):
@@ -301,16 +328,21 @@ READING THE PERFORMANCE SPLIT (important):
 - Conversely, a channel profitable only under a geometry you are NOT selecting
   is not evidence the selected one will work.
 
-STRATEGY SELECTION RULES:
-- Channels with open_trades > 0: keep the SAME strategy as last_rec (no disruption mid-trade)
-- signal_climber: use for professional multi-TP signals (GD2, GDV) with 4+ TPs; TP1 R:R < 1.0 is fine
-- no_sl_scale: ONLY during Overlap (UTC 12-16) AND ADX > 25 AND H1 ATR 15-35 pts
-- protected_scale: London session, ADX 20-25, trend developing
-- trail_stop: ADX > 25, M15 ATR expanding, clear directional structure
-- conservative: Asian session, ATR > 35 (spike risk), RSI extreme (>75 or <25), or channel WR < 55%
-  (WR here means the channel's rate under comparable geometry per the split above, not the headline
-   figure -- a headline dragged down by a configuration you are not selecting does not trigger this)
-- Channels with WR > 65% and good momentum: can use aggressive strategies
+SELECTION RULES:
+- Channels with open_trades > 0: keep the SAME choice as last_rec (no disruption mid-trade)
+- Limit templates rest legs inside the signal's zone and win when price retraces to
+  them: prefer them in ranging/weak conditions and when spread is wide.
+- Market templates fill immediately and win when the move runs without a pullback:
+  prefer them when ADX > 25 with clear directional structure, or when missing the
+  entry costs more than a worse fill.
+- Scalp (SL35) in the Asian session and when ATR is low; Trend/Runner (SL50-60) only
+  when ATR and ADX both support a move of that size; Balanced (SL40) otherwise.
+- Tighten toward Scalp when ATR > 35 (spike risk), RSI is extreme (>75 or <25), or the
+  channel's rate under COMPARABLE geometry is below 55% -- read that from the split
+  above, not the headline; a headline dragged down by a configuration you are not
+  selecting does not trigger this.
+- stand_down when no available template's geometry matches what the channel's own
+  record supports in these conditions.
 
 TASK: Recommend the single best strategy per channel for current conditions.
 
@@ -354,13 +386,21 @@ configuration with negative expectancy."""
     # ── Call the configured AI provider ──────────────────────────────────────
     if not ai_provider.is_configured(cfg):
         log.info("channel_strategy_ai: no API key — using rule-based fallback")
+        # The backtested cell, not rule_regime: rule_regime names a BUILT-IN
+        # strategy, so writing it here dropped the channel out of template
+        # management entirely (and onto the global fixed lot) every time the
+        # API key was missing -- the one situation where falling back to the
+        # measured baseline matters most. Same reason the unknown-strategy
+        # branch below already uses baseline_for.
         for ch in channels_data:
             src       = ch["source"]
+            pick      = _auto.baseline_for(src, _auto_regime)
             reasoning = (
-                f"Rule: {session_label}, ATR={atr_h1 or '?'}, ADX={adx_h1 or '?'} → {rule_regime}"
+                f"No API key — backtested {_auto_regime} baseline "
+                f"({session_label}, ATR={atr_h1 or '?'}, ADX={adx_h1 or '?'})"
             )
-            _db.set_channel_strategy_rec(src, rule_regime, reasoning, 0.6)
-            results[src] = {"strategy": rule_regime, "reasoning": reasoning, "confidence": 0.6}
+            _db.set_channel_strategy_rec(src, pick, reasoning, 0.6)
+            results[src] = {"strategy": pick, "reasoning": reasoning, "confidence": 0.6}
         return results
 
     try:
@@ -423,12 +463,16 @@ configuration with negative expectancy."""
             ))
 
     except Exception as exc:
-        log.warning("channel_strategy_ai: Claude call failed: %s — using rule fallback", exc)
+        log.warning("channel_strategy_ai: AI call failed: %s — using backtested baseline", exc)
+        # Baseline, not rule_regime -- see the no-API-key branch above. A
+        # provider outage must not be able to silently move every channel off
+        # its template (and onto the global fixed lot) until someone notices.
         for ch in channels_data:
             src       = ch["source"]
-            reasoning = f"Rule fallback ({exc.__class__.__name__}): {rule_regime}"
-            _db.set_channel_strategy_rec(src, rule_regime, reasoning, 0.5)
-            results[src] = {"strategy": rule_regime, "reasoning": reasoning, "confidence": 0.5}
+            pick      = _auto.baseline_for(src, _auto_regime)
+            reasoning = f"AI unavailable ({exc.__class__.__name__}) — {_auto_regime} baseline"
+            _db.set_channel_strategy_rec(src, pick, reasoning, 0.5)
+            results[src] = {"strategy": pick, "reasoning": reasoning, "confidence": 0.5}
 
     return results
 

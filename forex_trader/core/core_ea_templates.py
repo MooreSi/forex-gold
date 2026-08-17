@@ -397,6 +397,63 @@ def _clean_fields(fields: dict) -> dict:
     return merged
 
 
+def signal_has_usable_zone(entry_low, entry_high) -> bool:
+    """Whether a signal states an entry zone the EA can stage legs across.
+
+    Mirrors HandleOpenTemplateGrid's own `useZone` test exactly
+    (zoneLow > 0 && zoneHigh > zoneLow) so Python and the EA can never
+    disagree about whether a zone exists. A single stated price is not a
+    zone: high == low fails this, as does a missing/zero level.
+    """
+    try:
+        low, high = float(entry_low or 0.0), float(entry_high or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return low > 0.0 and high > low
+
+
+def apply_market_anchor_for_zoneless_signal(template: dict,
+                                            entry_low, entry_high) -> dict:
+    """Give a pendings-only template one market leg when the signal has no zone.
+
+    An Instant Market Entry signal states a single price, not a range -- it
+    means "take this now". Handed to a template with anchors=0, nothing can
+    execute it: the EA's anchor loop (`for a = 1; a <= anchors`) never runs, and
+    with no usable zone the resting legs fall back to step-staging
+    grid_step_pts away from the market, so they only fill if price happens to
+    come back. Gold Diggers VIP ran exactly that pairing on 2026-08-17 -- 8
+    signals, 8 grids staged, zero legs filled, every one expiring at $0 after
+    its 60-minute life.
+
+    So the first leg becomes a market fill and the pending count drops by one.
+    Converting a leg rather than adding one is deliberate: total leg count, and
+    therefore total exposure, is exactly what the template already specified.
+    The rest of the tuned geometry -- lots, SL, both TP ladders, BE and trail --
+    is untouched.
+
+    Templates that already take an anchor, non-grid templates, and signals that
+    do state a real zone are all returned unchanged.
+    """
+    if signal_has_usable_zone(entry_low, entry_high):
+        return template
+    if not template or str(template.get("mode") or "") != "grid":
+        return template
+    anchors  = int(template.get("anchors") or 0)
+    pendings = int(template.get("pendings") or 0)
+    if anchors > 0 or pendings < 1:
+        return template
+    adjusted = dict(template)
+    adjusted["anchors"]  = 1
+    adjusted["pendings"] = pendings - 1
+    log.info(
+        "[EATemplates] %r: signal states a single price (%s), not a zone — "
+        "staging 1 market anchor + %d pending(s) instead of %d resting leg(s), "
+        "which could only fill on a retrace that may never come",
+        template.get("name") or "template", entry_low, pendings - 1, pendings,
+    )
+    return adjusted
+
+
 def save_ea_template(name: str, fields: dict) -> dict:
     """Insert or overwrite the named template."""
     name = (name or "").strip()

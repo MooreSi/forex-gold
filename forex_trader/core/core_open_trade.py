@@ -505,6 +505,20 @@ async def open_trade(
                             _ea_template = dict(_ea_template)
                             for n in range(1, ea_templates.MAX_TP_LEVELS + 1):
                                 _ea_template[f"tp_pen{n}_pips"] = float(_pen_pips.get(n, 0.0))
+
+                        # A signal stating one price rather than a zone cannot
+                        # be executed by a pendings-only template: the EA's
+                        # anchor loop never runs, and with no zone the resting
+                        # legs step away from the market and only fill on a
+                        # retrace. Convert one pending into a market anchor so
+                        # the signal is actually taken, keeping total leg count
+                        # (and exposure) exactly as the template specified.
+                        # Applied to the COPY sent to the EA, never to the
+                        # stored template -- the same channel's ranged signals
+                        # must still stage the full resting grid.
+                        _ea_template = ea_templates.apply_market_anchor_for_zoneless_signal(
+                            _ea_template, entry_low, entry_high,
+                        )
                 _ea_lot = lot_size
                 if _ea_template is not None and _ea_template.get("mode") == "grid":
                     # Global Parameters > Fixed Lot Size (Grid) -- used for

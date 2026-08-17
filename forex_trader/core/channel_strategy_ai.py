@@ -231,6 +231,19 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
         for _c in channels_data
     ) or "  (no channels configured)"
 
+    # Per-strategy split of each channel's record. The aggregate alone cannot
+    # distinguish "this channel has no edge" from "this channel was run on the
+    # wrong geometry for two days", and on 2026-08-16 that cost GOLD DIGGERS
+    # INSTITUTIONAL a stand_down on WR=50%/PnL=-$1465 -- while the same 30 days
+    # show it at 76.5% WR and +$228 on limit entries, with the whole loss
+    # sitting in two wide-stop templates (Staged Ratchet 100-500: 13% WR,
+    # -$1087; Asian Reversal - ATR: 33% WR, -$560). See
+    # core_db_channel.get_channel_strategy_breakdown.
+    try:
+        _breakdown = _db.get_channel_strategy_breakdown()
+    except Exception:
+        _breakdown = {}
+
     channel_lines: list[str] = []
     for ch in channels_data:
         src     = ch["source"]
@@ -244,6 +257,11 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
             f'PnL=${ch["net_pnl"]:.2f} open_trades={open_n} '
             f'mode={mode_tag} last_rec={rec.get("strategy") or "none"}'
         )
+        for b in _breakdown.get(src, []):
+            channel_lines.append(
+                f'        under {b["strategy"]}: WR={b["win_rate"]:.1f}% '
+                f'n={b["n"]} PnL=${b["net_pnl"]:.2f}'
+            )
 
     strat_desc = "\n".join(
         f"  {k}: {v}" for k, v in STRATEGY_NAMES.items()
@@ -268,7 +286,20 @@ AVAILABLE STRATEGIES:
 {strat_desc}
 
 CHANNEL PERFORMANCE (last 30 days):
+Each channel's headline row is followed by the same 30 days SPLIT BY the
+strategy the trades actually ran under.
 {chr(10).join(channel_lines) if channel_lines else "  No data yet"}
+
+READING THE PERFORMANCE SPLIT (important):
+- A channel's headline PnL mixes configurations, some of which are no longer
+  in use. Judge the SIGNALS by the rows whose geometry resembles what you are
+  considering, not by the headline.
+- A loss concentrated in one or two mismatched configurations is evidence
+  about THAT configuration, not evidence the channel lacks an edge. Do not
+  stand a channel down on a headline loss when its split shows it profitable
+  under geometry comparable to the template you would select.
+- Conversely, a channel profitable only under a geometry you are NOT selecting
+  is not evidence the selected one will work.
 
 STRATEGY SELECTION RULES:
 - Channels with open_trades > 0: keep the SAME strategy as last_rec (no disruption mid-trade)
@@ -277,6 +308,8 @@ STRATEGY SELECTION RULES:
 - protected_scale: London session, ADX 20-25, trend developing
 - trail_stop: ADX > 25, M15 ATR expanding, clear directional structure
 - conservative: Asian session, ATR > 35 (spike risk), RSI extreme (>75 or <25), or channel WR < 55%
+  (WR here means the channel's rate under comparable geometry per the split above, not the headline
+   figure -- a headline dragged down by a configuration you are not selecting does not trigger this)
 - Channels with WR > 65% and good momentum: can use aggressive strategies
 
 TASK: Recommend the single best strategy per channel for current conditions.

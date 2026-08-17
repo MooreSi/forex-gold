@@ -151,6 +151,66 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
     log.info("[Channel] Renamed channel '%s' -> '%s' across all tracking tables", old_canon, new_name)
 
 
+def get_channel_strategy_breakdown(days: int = 30, min_n: int = 3,
+                                   top_n: int = 4) -> dict[str, list[dict]]:
+    """Per-channel performance SPLIT BY the strategy each trade actually ran.
+
+    A channel's aggregate PnL says nothing about whether the channel has an
+    edge, because it mixes results from configurations that no longer apply.
+    GOLD DIGGERS INSTITUTIONAL is the worked example: 67 trades to 2026-08-12
+    made +$108, then 26 trades on 08-13/14 lost $1,574 running
+    "Asian Reversal - ATR" (the Reversal Engine's own SL120 template) and
+    "Staged Ratchet 100-500" (SL100, one TP at 500) -- wide-stop, far-target
+    shapes on a channel whose measured edge is tight limit entries. The
+    aggregate that reached the AI evaluator was "WR=50% PnL=$-1465", with no
+    way to tell "this channel has no edge" from "this channel was run on the
+    wrong geometry for two days", so it stood the channel down -- against its
+    own backtested map, which rates that channel positive in every regime.
+
+    Returns {canonical channel: [{strategy, n, win_rate, net_pnl}, ...]},
+    each list sorted by trade count and capped at `top_n`. Strategies with
+    fewer than `min_n` trades are dropped: a one-trade sample is noise, and
+    the point of this is to inform a judgement, not to bury it in rows.
+    """
+    import time as _t
+    cutoff = _t.time() - days * 86400
+    out: dict[str, dict[str, dict]] = {}
+    try:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT tg_source, strategy, net_pnl FROM vantage_simulated_trades "
+                "WHERE status='closed' AND close_time >= ? "
+                "  AND tg_source IS NOT NULL AND strategy IS NOT NULL",
+                (cutoff,),
+            ).fetchall()
+    except Exception:
+        return {}
+    for src, strategy, pnl in rows:
+        canon = _canonical(src)
+        bucket = out.setdefault(canon, {}).setdefault(
+            str(strategy), {"strategy": str(strategy), "n": 0, "wins": 0, "net_pnl": 0.0}
+        )
+        p = float(pnl or 0.0)
+        bucket["n"] += 1
+        bucket["net_pnl"] += p
+        if p > 0:
+            bucket["wins"] += 1
+    result: dict[str, list[dict]] = {}
+    for canon, by_strategy in out.items():
+        kept = [b for b in by_strategy.values() if b["n"] >= min_n]
+        kept.sort(key=lambda b: (-b["n"], b["strategy"]))
+        result[canon] = [
+            {
+                "strategy": b["strategy"],
+                "n": b["n"],
+                "win_rate": round(100.0 * b["wins"] / b["n"], 1),
+                "net_pnl": round(b["net_pnl"], 2),
+            }
+            for b in kept[:top_n]
+        ]
+    return result
+
+
 def get_channel_scorecard(days: int = 30) -> list[dict]:
     """Per signal-source performance over the last `days`, sorted by net P&L desc.
     Each row: source, trades, wins, losses, win_rate, avg_pts, payoff_rr,

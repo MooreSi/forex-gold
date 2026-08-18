@@ -397,6 +397,60 @@ def _clean_fields(fields: dict) -> dict:
     return merged
 
 
+def ladder_rr(sl_pips: float, levels, close_full_on_last: bool = True) -> dict:
+    """Reward-per-unit-risk for one TP ladder.
+
+    `levels` is [(n, pips, pct), ...] in ladder order. Returns:
+
+        rows       [(n, rr, closed_pct, contribution_r), ...] for levels with pips
+        total_r    sum of the contributions -- what the ladder returns if price
+                   reaches every configured level
+        remaining  % of the position still open at the end (a runner)
+        pct_sum    the raw sum of the % column, before any capping
+
+    Two things this is careful about, because both silently overstate a ladder:
+
+    Position is walked as REMAINING lots, not by summing the % column, because
+    that is what the EA does -- DoPartialClose takes MathMin(lots, remaining),
+    so a level can never close more than is still open. "GD Institutional -
+    Grid" (25/25/25/100) sums to 4.00R that way but really banks 1.50R, since
+    TP4's 100% can only take the 25% its own earlier levels left behind.
+
+    And close_full_on_last means the deepest CONFIGURED level banks whatever is
+    still open regardless of its own %, so a ladder whose %s stop at 70 is not
+    leaving 30% running unless that switch is off.
+
+    total_r is the all-levels-hit figure, deliberately NOT probability-weighted:
+    it says what the geometry pays when it works, which is the thing being
+    designed here. What it does not say is how often that happens.
+    """
+    try:
+        sl = float(sl_pips or 0)
+    except (TypeError, ValueError):
+        sl = 0.0
+    rows: list = []
+    pct_sum = sum(float(p or 0) for _n, _pips, p in levels)
+    if sl <= 0 or not levels:
+        return {"rows": rows, "total_r": 0.0, "remaining": 100.0, "pct_sum": pct_sum}
+
+    last_n = levels[-1][0]
+    remaining = 100.0
+    total = 0.0
+    for n, pips, pct in levels:
+        pips = float(pips or 0)
+        pct = float(pct or 0)
+        if pips <= 0:
+            continue
+        rr = pips / sl
+        closed = remaining if (close_full_on_last and n == last_n) else min(pct, remaining)
+        closed = max(0.0, min(closed, remaining))
+        contrib = rr * closed / 100.0
+        total += contrib
+        remaining = max(0.0, remaining - closed)
+        rows.append((n, rr, closed, contrib))
+    return {"rows": rows, "total_r": total, "remaining": remaining, "pct_sum": pct_sum}
+
+
 def signal_has_usable_zone(entry_low, entry_high) -> bool:
     """Whether a signal states an entry zone the EA can stage legs across.
 

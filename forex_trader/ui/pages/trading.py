@@ -2796,6 +2796,10 @@ def _render_ea_templates_card() -> None:
                         f"also falls back to it.")
                 return sw
 
+            # Both ladders' R:R readouts, so shared inputs created after them
+            # (SL is above, close_full_on_last is below) can refresh every one.
+            _rr_refreshers: list = []
+
             def _ladder_grid(prefix: str, tg_switch=None) -> None:
                 with ui.grid(columns=N + 1).classes("w-full gap-1"):
                     ui.label("").classes("text-xs")
@@ -2818,6 +2822,104 @@ def _render_ea_templates_card() -> None:
                         fields[f"{prefix}{n}_pct"] = ui.number(
                             value=float(live[f"{prefix}{n}_pct"]), step=1.0, min=0, max=100,
                         ).classes("w-full").props("dense outlined")
+
+                    # ── R:R readout ───────────────────────────────────────
+                    # Reward per unit of risk, so the ladder can be judged
+                    # against the stop it is actually running rather than by
+                    # eye. Two rows because they answer different questions:
+                    # "R at TP" is how far that level reaches (pips / SL), and
+                    # is unchanged by how much closes there; "weighted" is
+                    # what that level actually contributes once only its own
+                    # slice of the position is banked. A ladder can look
+                    # generous on the first row and give back most of it on
+                    # the second -- Asian Reversal - ATR reaches 2.50R at TP5
+                    # but contributes 0.25R, because only 10% is left by then.
+                    ui.label("R at TP").classes("text-xs text-gray-500 self-center")
+                    rr_cells = {}
+                    for n in range(1, N + 1):
+                        rr_cells[n] = ui.label("—").classes(
+                            "text-xs text-center text-gray-400 self-center")
+                    ui.label("weighted R").classes("text-xs text-gray-500 self-center")
+                    w_cells = {}
+                    for n in range(1, N + 1):
+                        w_cells[n] = ui.label("—").classes(
+                            "text-xs text-center text-emerald-400 self-center")
+
+                total_lbl = ui.label("").classes("text-xs mt-1")
+
+                def _refresh_rr() -> None:
+                    """Recompute the readout from whatever is in the boxes now."""
+                    try:
+                        sl = float(fields["sl_pips"].value or 0)
+                    except (TypeError, ValueError):
+                        sl = 0.0
+
+                    # close_full_on_last is created further down the form, so
+                    # fall back to the stored value until it exists.
+                    _cfol_field = fields.get("close_full_on_last")
+                    close_full = bool(_cfol_field.value if _cfol_field is not None
+                                      else live["close_full_on_last"])
+
+                    levels, pct_sum = [], 0.0
+                    for n in range(1, N + 1):
+                        try:
+                            pips = float(fields[f"{prefix}{n}_pips"].value or 0)
+                            pct = float(fields[f"{prefix}{n}_pct"].value or 0)
+                        except (TypeError, ValueError):
+                            pips = pct = 0.0
+                        if pips > 0 or pct > 0:
+                            levels.append((n, pips, pct))
+                            pct_sum += pct
+
+                    from_signal = bool(tg_switch is not None and tg_switch.value)
+
+                    for n in range(1, N + 1):
+                        rr_cells[n].text = "—"
+                        w_cells[n].text = "—"
+
+                    if sl <= 0:
+                        total_lbl.text = "Set an SL above to see R:R."
+                        total_lbl.classes(replace="text-xs mt-1 text-gray-500")
+                        return
+                    if not levels:
+                        total_lbl.text = "No TP levels set."
+                        total_lbl.classes(replace="text-xs mt-1 text-gray-500")
+                        return
+
+                    # The arithmetic lives in core_ea_templates.ladder_rr so it
+                    # is testable and cannot drift from what the EA does -- see
+                    # its docstring for why the position is walked as remaining
+                    # lots rather than by summing the % column.
+                    calc = et.ladder_rr(sl, levels, close_full)
+                    for n, rr, closed, contrib in calc["rows"]:
+                        rr_cells[n].text = f"{rr:.2f}R"
+                        if closed > 0:
+                            w_cells[n].text = f"{contrib:.2f}R"
+                    total = calc["total_r"]
+                    remaining = calc["remaining"]
+                    banked = 100.0 - remaining
+                    bits = [f"Total {total:.2f}R if every level is hit"]
+                    if pct_sum > 100.0:
+                        bits.append(f"⚠ %s add to {pct_sum:.0f}% — later levels "
+                                    f"can only close what is left")
+                    elif remaining > 0:
+                        bits.append(f"{remaining:.0f}% left running on the trail/SL")
+                    if from_signal:
+                        bits.append("pips come from the signal — this uses the boxes above")
+                    total_lbl.text = "  •  ".join(bits) + f"  (closes {banked:.0f}%)"
+                    total_lbl.classes(replace=(
+                        "text-xs mt-1 " + ("text-amber-400" if pct_sum > 100.0
+                                           else "text-emerald-400")))
+
+                _watched = [fields["sl_pips"]]
+                for n in range(1, N + 1):
+                    _watched += [fields[f"{prefix}{n}_pips"], fields[f"{prefix}{n}_pct"]]
+                if tg_switch is not None:
+                    _watched.append(tg_switch)
+                for _w in _watched:
+                    _w.on_value_change(lambda _e: _refresh_rr())
+                _rr_refreshers.append(_refresh_rr)
+                _refresh_rr()
 
             with _section(
                 "Anchor TP", "text-amber-400",
@@ -2896,6 +2998,12 @@ def _render_ea_templates_card() -> None:
                             "instead of being flattened at the last level.")
                     fields["close_full_on_last"] = ui.switch(
                         "", value=bool(live["close_full_on_last"])).classes("text-xs")
+                    # Changes which slice the deepest level actually banks, so
+                    # both ladders' R:R totals move with it.
+                    fields["close_full_on_last"].on_value_change(
+                        lambda _e: [r() for r in _rr_refreshers])
+                    for _r in _rr_refreshers:
+                        _r()
                 _toggle("mode", "Mode", {"grid": "GRID", "single": "SINGLE"},
                         "GRID stages anchor + pending legs across the signal's "
                         "zone. SINGLE opens one position.")

@@ -280,3 +280,75 @@ def test_both_resume_paths_re_arm():
     from forex_trader.core import core_bot_panel as panel
     assert "rearm_giveback_guard" in inspect.getsource(ro.cmd_resume)
     assert "rearm_giveback_guard" in inspect.getsource(panel._resume_trading)
+
+
+# ── daily loss ceiling (governor-independent) ────────────────────────────────
+#
+# The give-back guard measures from the day's PEAK, so a day that never gets
+# ahead never arms it. Three days in the sample never got $30 ahead and lost
+# $336.80 between them; 2026-08-10 peaked at exactly $0.00 and closed -$220.26.
+# The limit already existed but only ran behind risk_governor_enabled, which is
+# off on this account, so it had never once fired.
+
+DL = {"max_daily_loss_pct": 3.0}
+
+
+def test_a_day_that_never_got_ahead_is_caught_by_the_loss_ceiling(fresh_db):
+    """The exact gap: no peak, so nothing for the give-back guard to measure."""
+    _closes([-40])
+    assert rg.check_giveback_guard(ON) is None, "give-back guard cannot see this"
+    assert rg.check_daily_loss_limit(DL, balance=960.0) is not None
+
+
+def test_it_does_not_fire_inside_the_limit(fresh_db):
+    _closes([-20])                      # -20 on a 1000 day base = 2%
+    assert rg.check_daily_loss_limit(DL, balance=980.0) is None
+
+
+def test_the_limit_is_measured_against_the_days_opening_balance(fresh_db):
+    """balance is live and already includes today's losses, so the base has to
+    add them back -- otherwise the threshold shrinks as the day loses and the
+    halt arrives progressively later than configured."""
+    _closes([-30])
+    reason = rg.check_daily_loss_limit(DL, balance=970.0)
+    assert reason is not None and "3.0% of $1,000.00" in reason
+
+
+def test_a_profitable_day_never_trips_it(fresh_db):
+    _closes([500])
+    assert rg.check_daily_loss_limit(DL, balance=1500.0) is None
+
+
+def test_zero_disables_it(fresh_db):
+    _closes([-900])
+    assert rg.check_daily_loss_limit({"max_daily_loss_pct": 0}, balance=100.0) is None
+
+
+def test_applying_it_halts_until_the_next_broker_day(fresh_db):
+    _closes([-40])
+    rg.apply_daily_loss_halt_on_close(DL, balance=960.0)
+    assert rg.is_trading_paused() is True
+    assert float(db.get_app_config("trade_pause_until")) == pytest.approx(
+        rg.rg_day_start_ts() + 86400.0)
+    assert "Daily loss limit" in (db.get_app_config("risk_halt_reason") or "")
+
+
+def test_it_runs_without_the_risk_governor(fresh_db):
+    rg.apply_daily_loss_halt_on_close({**DL, "risk_governor_enabled": 0}, balance=960.0)
+    _closes([-40])
+    rg.apply_daily_loss_halt_on_close({**DL, "risk_governor_enabled": 0}, balance=960.0)
+    assert rg.is_trading_paused() is True
+
+
+def test_it_does_not_extend_an_existing_pause(fresh_db):
+    manual = time.time() + 600
+    db.set_app_config("trade_pause_until", str(manual))
+    _closes([-40])
+    rg.apply_daily_loss_halt_on_close(DL, balance=960.0)
+    assert float(db.get_app_config("trade_pause_until")) == pytest.approx(manual)
+
+
+def test_close_trade_invokes_the_loss_ceiling_unconditionally():
+    import inspect
+    from forex_trader.core import core_close_trade
+    assert "apply_daily_loss_halt_on_close" in inspect.getsource(core_close_trade)

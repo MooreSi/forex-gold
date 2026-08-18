@@ -214,6 +214,53 @@ def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
     return running, peak
 
 
+def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
+    """Reason to stop when today's realised losses breach max_daily_loss_pct.
+
+    The give-back guard cannot cover this case by construction: it measures
+    from the day's peak, so a day that never gets ahead never arms it. Three
+    days in the sample never got $30 ahead and lost $336.80 between them --
+    2026-08-10 peaked at exactly $0.00 and closed -$220.26.
+
+    The limit itself already existed (rg_check_halt) but only ran behind
+    risk_governor_enabled, which is off here, so it has never fired. Split out
+    so it can run on its own: this is a loss ceiling, and it has nothing to do
+    with the governor's sizing model.
+    """
+    max_daily = float(rs.get("max_daily_loss_pct", 0) or 0)
+    if max_daily <= 0:
+        return None
+    realised, _peak = day_pnl_and_peak()
+    day_base = balance - realised
+    if day_base <= 0:
+        return None
+    limit = day_base * (max_daily / 100.0)
+    if realised > -abs(limit):
+        return None
+    return (
+        f"Daily loss limit hit: ${realised:.2f} today vs -${abs(limit):.2f} "
+        f"({max_daily:.1f}% of ${day_base:,.2f})"
+    )
+
+
+def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:
+    """Stop for the rest of the broker day on the daily-loss limit.
+
+    Runs regardless of risk_governor_enabled, for the same reason the
+    give-back guard does -- see apply_giveback_guard_on_close.
+    """
+    reason = check_daily_loss_limit(rs, balance)
+    if not reason:
+        return
+    if is_trading_paused():
+        return
+    until = rg_day_start_ts() + 86400.0
+    with db_module.db():
+        db_module.set_app_config("trade_pause_until", str(until))
+        db_module.set_app_config("risk_halt_reason", reason)
+    log.warning("[RG] %s — trading stopped until the next broker day", reason)
+
+
 def rearm_giveback_guard() -> None:
     """Start the give-back guard's window again from now.
 

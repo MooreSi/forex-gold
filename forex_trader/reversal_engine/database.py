@@ -202,6 +202,24 @@ def _run_migrations() -> None:
         # record_ref_signal was only ever called with was_win=None and the
         # `wins` counter behind ref_level_win_rate sat at 0 forever.
         "ALTER TABLE re_signals ADD COLUMN correlated_ref_level_type TEXT",
+        # Max favourable / adverse excursion in points, tracked while the
+        # signal is live (2026-08-18). Nothing recorded how far price actually
+        # travelled either way, so every question about geometry had to be
+        # answered from max_tp_hit -- which only tells you which fixed target
+        # was tagged, not how close the others came.
+        #
+        # That gap made a wrong call look right: "raise TP1 above 1R" is the
+        # obvious fix for a 0.32:1 payoff, but the reach data says only 9.4% of
+        # signals ever touch 1.0R (median 0.43R), so raising TP1 would take the
+        # win rate from 70.5% to ~9% and expectancy to about -0.86R. The edge
+        # here is a small, high-probability move.
+        #
+        # The remaining lever is stop WIDTH -- stops are 4-7pt while price
+        # typically travels ~3pt -- and sizing that safely needs MAE, which is
+        # exactly what was missing. Recorded now so the next geometry change is
+        # measured rather than guessed.
+        "ALTER TABLE re_signals ADD COLUMN mfe_pts REAL",
+        "ALTER TABLE re_signals ADD COLUMN mae_pts REAL",
     ]
     with _conn() as con:
         for stmt in _migrations:

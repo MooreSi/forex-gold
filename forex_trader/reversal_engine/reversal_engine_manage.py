@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Optional
 
 from forex_trader.core.models import STRATEGY_CONSERVATIVE
 from forex_trader.reversal_engine import reversal_engine_repo as re_db
@@ -66,6 +67,12 @@ _CONSERVATIVE_TP1_PTS   = 3.0
 _CONSERVATIVE_TP1_FRAC  = 0.80
 _CONSERVATIVE_TRAIL_PTS = 3.0
 
+# Slippage allowed BEYOND the stop price when booking a stop-out, on top of the
+# spread. Anything past this is polling latency (the outcome loop runs every
+# 5s), not slippage, and charging it to the trade is what pushed the average
+# loss to -1.263R against a 1R stop. See _stop_fill.
+_STOP_SLIP_MAX_PTS = 0.5
+
 
 class _ManagementMixin:
     def _realistic_fill(self, tick, direction: str, closing: bool) -> float:
@@ -73,6 +80,42 @@ class _ManagementMixin:
         closing=True means we're exiting the position (opposite side of entry)."""
         buy_side = (direction == "BUY") != closing
         return float(tick.ask if buy_side else tick.bid) or float(tick.mid or 0)
+
+    def _stop_fill(self, tick, direction: str, sl: float) -> float:
+        """Where a stop-out actually fills — at the stop, not wherever the poll
+        caught price.
+
+        The outcome loop runs every _OUTCOME_INTERVAL_S (5s), and the SL branch
+        used to book the exit at the CURRENT tick. So every point gold happened
+        to travel between the stop being touched and the next poll was charged
+        to the trade, as if the position had sat there unprotected. A broker
+        stop does not behave that way: it triggers at the stop and fills within
+        slippage of it.
+
+        Measured across 605 closed losing signals, 84% came in worse than -1.0R
+        (worst -5.75R), which is what dragged the average loss to -1.263R
+        against +0.406R average wins -- a 0.32:1 payoff that needs a 75.7% win
+        rate to break even, against the 70.5% actually achieved. The model then
+        trains on those labels, so it has been learning that these trades lose
+        by more than a stopped-out trade really loses.
+
+        Slippage is allowed but bounded: the spread (the real cost of crossing)
+        plus _STOP_SLIP_MAX_PTS. Beyond that is polling latency, not slippage.
+        The fill is also never better than the stop itself -- once touched, a
+        stop is filled, so a price that recovered before the next poll must not
+        hand the trade a better exit than it actually got.
+        """
+        raw = self._realistic_fill(tick, direction, closing=True)
+        try:
+            spread = abs(float(tick.ask) - float(tick.bid))
+        except (TypeError, ValueError):
+            spread = 0.0
+        allowance = spread + _STOP_SLIP_MAX_PTS
+        if direction == "BUY":
+            # Stop sits below entry; adverse is lower.
+            return min(float(sl), max(raw, float(sl) - allowance))
+        # Stop sits above entry; adverse is higher.
+        return max(float(sl), min(raw, float(sl) + allowance))
 
     def _net_pnl(self, sig: dict, pnl_pts: float, exit_tick) -> tuple[float, float]:
         """(gross_pnl_dollars, net_pnl_dollars) after spread/commission/slippage,
@@ -142,6 +185,19 @@ class _ManagementMixin:
         partial_booked = float(sig.get("partial_pnl_dollars") or 0.0)
         price = float(tick.mid or tick.bid or 0)
 
+        # How far this signal actually travelled each way, recorded while it is
+        # live because nothing else captures it: max_tp_hit only says which
+        # fixed target was tagged, not how close the others came. Without it,
+        # any change to stop width or target distance is a guess -- and the
+        # obvious guess ("raise TP1 above 1R") is measurably wrong here, since
+        # only 9.4% of signals ever reach 1.0R. See the migration note in
+        # reversal_engine/database.py.
+        try:
+            _fav = (price - entry_ref) if direction == "BUY" else (entry_ref - price)
+            re_db.record_excursion(sig_id, _fav, -_fav)
+        except Exception:
+            pass
+
         if direction == "BUY":
             hit_sl    = price <= sl
             hit_tp1   = price >= tp1 and remaining >= 1.0 - 1e-6
@@ -162,7 +218,8 @@ class _ManagementMixin:
             return (exit_px - entry_ref) if direction == "BUY" else (entry_ref - exit_px)
 
         if hit_sl:
-            exit_fill = self._realistic_fill(tick, direction, closing=True)
+            # At the stop, not at whatever tick the 5s poll happened to catch.
+            exit_fill = self._stop_fill(tick, direction, sl)
             leg_pts   = _leg_pts(exit_fill)
             gross_leg, net_leg = self._net_pnl(sig, leg_pts, tick)
             gross_leg *= remaining
@@ -307,8 +364,14 @@ class _ManagementMixin:
         def _leg_pts(exit_px: float) -> float:
             return (exit_px - entry_ref) if direction == "BUY" else (entry_ref - exit_px)
 
-        def _close_remaining(outcome: str) -> None:
-            exit_fill = self._realistic_fill(tick, direction, closing=True)
+        def _close_remaining(outcome: str, stop_px: Optional[float] = None) -> None:
+            # Both exits here are stop-type -- the fixed stop and the trail --
+            # so both fill at their stop level rather than at the polled tick,
+            # for the reason in _stop_fill. stop_px=None keeps the old
+            # behaviour for any caller that is not a stop-out.
+            exit_fill = (self._stop_fill(tick, direction, stop_px)
+                         if stop_px is not None
+                         else self._realistic_fill(tick, direction, closing=True))
             leg_pts   = _leg_pts(exit_fill)
             gross_leg, net_leg = self._net_pnl(sig, leg_pts, tick)
             gross_leg *= remaining
@@ -366,7 +429,7 @@ class _ManagementMixin:
             hit_sl  = price <= fixed_sl if direction == "BUY" else price >= fixed_sl
             hit_tp1 = price >= fixed_tp1 if direction == "BUY" else price <= fixed_tp1
             if hit_sl:
-                _close_remaining("loss")
+                _close_remaining("loss", fixed_sl)
             elif hit_tp1:
                 exit_fill = self._realistic_fill(tick, direction, closing=True)
                 leg_pts   = _leg_pts(exit_fill)
@@ -392,7 +455,7 @@ class _ManagementMixin:
 
         hit_trail = price <= current_sl if direction == "BUY" else price >= current_sl
         if hit_trail:
-            _close_remaining("win")
+            _close_remaining("win", current_sl)
 
     async def _template_leg_tickets(self, sig: dict, ticket: int) -> set:
         """Every broker position belonging to this signal's trade, not just

@@ -375,6 +375,23 @@ def set_stop_loss(sig_id: int, price: float) -> None:
     get_db().run("UPDATE re_signals SET stop_loss=? WHERE id=?", round(price, 2), sig_id)
 
 
+def record_excursion(sig_id: int, favourable_pts: float, adverse_pts: float) -> None:
+    """Widen this signal's max favourable / adverse excursion watermarks.
+
+    Both are stored as positive point distances from the entry reference.
+    MAX/MIN in SQL rather than read-modify-write so a concurrent poll cannot
+    narrow a watermark that another already widened, and so a NULL (first
+    observation) is simply replaced.
+    """
+    get_db().run(
+        "UPDATE re_signals SET "
+        "  mfe_pts = MAX(COALESCE(mfe_pts, 0), ?), "
+        "  mae_pts = MAX(COALESCE(mae_pts, 0), ?) "
+        "WHERE id=?",
+        round(max(0.0, favourable_pts), 2), round(max(0.0, adverse_pts), 2), sig_id,
+    )
+
+
 def book_partial_close(sig_id: int, leg_net_dollars: float, frac_closed: float,
                        tp_idx: int) -> float:
     """Bank realized profit for a fraction of the position at a ladder TP

@@ -258,6 +258,37 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
     except Exception:
         _breakdown = {}
 
+    # Today's realised state. The 30-day rows are the only thing this evaluator
+    # has ever seen, so it re-ran every 15 minutes through 2026-08-17 (peak
+    # +$348.76, closed -$88.48) and 08-18 selecting exactly as it would on a
+    # good day -- it had no way to know the difference. A 30-day aggregate
+    # cannot express "we are down $500 since this morning".
+    try:
+        from forex_trader.core.core_risk_governor import day_pnl_and_peak
+        _today_pnl, _today_peak = day_pnl_and_peak()
+        _give_back = _today_peak - _today_pnl
+        _bits = [f"  realised P&L today: ${_today_pnl:+.2f}"]
+        if _today_peak > 0:
+            _bits.append(f"  peak today: +${_today_peak:.2f}")
+            if _give_back > 0:
+                # Stated as "all of it, and $X beyond" once the day is red --
+                # a bare percentage reads as 358% given back, which is true of
+                # the ratio and useless as a description of the day.
+                if _today_pnl < 0:
+                    _bits.append(
+                        f"  the whole peak has been given back, and ${abs(_today_pnl):.2f} beyond it"
+                    )
+                else:
+                    _pct = _give_back / _today_peak * 100.0
+                    _bits.append(
+                        f"  given back from that peak: ${_give_back:.2f} ({_pct:.0f}% of it)"
+                    )
+        else:
+            _bits.append("  the day has not been in profit at any point")
+        _today_block = "\n".join(_bits)
+    except Exception:
+        _today_block = "  (unavailable)"
+
     channel_lines: list[str] = []
     for ch in channels_data:
         src     = ch["source"]
@@ -311,6 +342,21 @@ CURRENT MARKET CONDITIONS:
 
 AVAILABLE CHOICES (EA templates only, plus stand_down — nothing else is valid):
 {strat_desc}
+
+TODAY SO FAR:
+{_today_block}
+
+HOW TO USE TODAY'S STATE:
+- The 30-day rows below say which geometry suits a channel. This block says what
+  kind of day it is actually turning out to be, which the 30-day rows cannot.
+- Down on the day, or well off the day's peak: prefer the tighter-stopped,
+  nearer-target templates (Scalp over Balanced, Balanced over Trend), and
+  stand_down a channel whose own split gives it no edge in these conditions.
+  Trading a worse configuration harder is how a bad day compounds.
+- Up on the day with the peak intact: no reason to change what is working.
+- This is a tilt, not an override. A channel with a genuinely strong record
+  under the geometry you are selecting does not become unsuitable because the
+  day is red.
 
 CHANNEL PERFORMANCE (last 30 days):
 Each channel's headline row is followed by the same 30 days SPLIT BY the

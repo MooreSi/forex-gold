@@ -57,13 +57,23 @@ def fresh_db():
 _seq = [0]
 
 
-def _closes(pnls, day_start=None):
+def _closes(pnls, day_start=None, at=None):
     """Write closed trades across today, in the order given.
 
     Ids come from a module counter so repeated calls in one test (which is how
     "recomputed, not stored" is proven) cannot collide on the signal_id key.
     """
-    base = (day_start if day_start is not None else rg.rg_day_start_ts()) + 60
+    # Default to a couple of minutes ago -- inside today, but unambiguously
+    # BEFORE any rearm_giveback_guard() a test calls afterwards. Same-instant
+    # timestamps would land on the inclusive edge of the window and make the
+    # re-arm tests pass or fail on sub-second luck. Post-resume closes pass an
+    # explicit later `at`.
+    if day_start is not None:
+        base = day_start + 60
+    elif at is not None:
+        base = at
+    else:
+        base = time.time() - 120
     with db.db() as conn:
         for p in pnls:
             i = _seq[0]; _seq[0] += 1
@@ -229,3 +239,44 @@ def test_close_trade_invokes_the_guard_unconditionally():
     from forex_trader.core import core_close_trade
     src = inspect.getsource(core_close_trade)
     assert "apply_giveback_guard_on_close" in src
+
+
+# ── re-arming after a manual resume ──────────────────────────────────────────
+#
+# Without this, Resume is useless after a give-back halt: the day's peak has
+# already been handed back, so the guard re-trips on the very next close and
+# stops the day again.
+
+def test_resuming_re_arms_so_the_guard_does_not_instantly_re_trip(fresh_db):
+    _closes([100, -60])
+    assert rg.check_giveback_guard(ON) is not None
+    rg.rearm_giveback_guard()
+    assert rg.check_giveback_guard(ON) is None
+
+
+def test_re_arming_is_not_a_licence_to_bleed_for_the_rest_of_the_day(fresh_db):
+    """It restarts the window; it does not switch the guard off. A NEW peak
+    past the arming amount, handed back, still stops the day."""
+    _closes([100, -60])
+    rg.rearm_giveback_guard()
+    _closes([80], at=time.time() + 1)   # new peak of 80 since the resume
+    assert rg.check_giveback_guard(ON) is None
+    _closes([-40], at=time.time() + 2)  # half of it handed back
+    assert rg.check_giveback_guard(ON) is not None
+
+
+def test_a_quiet_period_after_resuming_does_not_arm_anything(fresh_db):
+    _closes([100, -60])
+    rg.rearm_giveback_guard()
+    _closes([10, -8], at=time.time() + 1)   # never reaches the $50 arm
+    assert rg.check_giveback_guard(ON) is None
+
+
+def test_both_resume_paths_re_arm():
+    """/resume and the panel's Resume button must behave the same -- a fix on
+    one path only is how the two drift apart."""
+    import inspect
+    from forex_trader.core import core_bot_commands_readonly as ro
+    from forex_trader.core import core_bot_panel as panel
+    assert "rearm_giveback_guard" in inspect.getsource(ro.cmd_resume)
+    assert "rearm_giveback_guard" in inspect.getsource(panel._resume_trading)

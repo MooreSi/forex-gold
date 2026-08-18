@@ -285,6 +285,14 @@ async def cmd_pause(args: list) -> str:
 
 async def cmd_resume(args: list) -> str:
     db_module.set_app_config("trade_pause_until", "0")
+    # Re-arm the give-back guard from now. Without this, resuming after a
+    # give-back halt is a no-op: the day's peak is already spent, so the guard
+    # re-trips on the very next close.
+    try:
+        from forex_trader.core.core_risk_governor import rearm_giveback_guard
+        rearm_giveback_guard()
+    except Exception:
+        pass
     rs        = db_module.get_risk_settings()
     auto_exec = bool(rs.get("auto_execute_signals", 0))
     return (

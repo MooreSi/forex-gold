@@ -751,6 +751,13 @@ def _pause_until_session(key: str) -> Screen:
 
 def _resume_trading() -> Screen:
     db_module.set_app_config("trade_pause_until", "0")
+    # See cmd_resume: without re-arming, a resume after a give-back halt is
+    # undone by the next close.
+    try:
+        from forex_trader.core.core_risk_governor import rearm_giveback_guard
+        rearm_giveback_guard()
+    except Exception:
+        pass
     log.info("[Panel] trading resumed from the pause panel")
     return Screen("▶️ Trading resumed.", mode="send")
 

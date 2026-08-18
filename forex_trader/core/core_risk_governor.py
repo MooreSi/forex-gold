@@ -214,6 +214,31 @@ def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
     return running, peak
 
 
+def rearm_giveback_guard() -> None:
+    """Start the give-back guard's window again from now.
+
+    Called whenever trading is resumed by hand. Without it, Resume is useless
+    after a guard halt: the day's peak has already been given back, so the
+    guard re-trips on the very next close and stops the day again. Re-arming
+    means it only fires again if the day makes a NEW peak past the arming
+    amount from here and then hands that back -- which is what someone
+    resuming is asking for, rather than an override that switches the
+    protection off for the rest of the day.
+    """
+    db_module.set_app_config("giveback_baseline_ts", str(time.time()))
+
+
+def _giveback_window_start() -> float:
+    """Where the guard starts measuring: the broker day, or the last manual
+    resume if that came later."""
+    day_start = rg_day_start_ts()
+    try:
+        baseline = float(db_module.get_app_config("giveback_baseline_ts") or 0)
+    except (TypeError, ValueError):
+        baseline = 0.0
+    return max(day_start, baseline)
+
+
 def check_giveback_guard(rs: dict) -> Optional[str]:
     """Reason to stop for the day when today's profit has been given back.
 
@@ -234,7 +259,7 @@ def check_giveback_guard(rs: dict) -> Optional[str]:
     if arm <= 0 or pct <= 0:
         return None
 
-    realised, peak = day_pnl_and_peak()
+    realised, peak = day_pnl_and_peak(_giveback_window_start())
     if peak < arm:
         return None
     floor_ = peak * (1.0 - pct / 100.0)

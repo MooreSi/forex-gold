@@ -45,7 +45,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from forex_trader.core import core_ea_templates as ea_templates
@@ -330,10 +331,19 @@ def root_screen() -> Screen:
         # with its own copy of the arithmetic.
         [_btn("\U0001f4b5 Balance", "bal"), _btn("\U0001f4dc Open Trades", "trades")],
         [_btn("\U0001f6e0️ System", "sys"), _btn("\U0001f5d3️ Trading Schedule", "sch")],
+        # Labelled with the state it is in, not just the action: a panel that
+        # says "Pause Trading" while trading is already paused is how you end
+        # up believing you are flat when you are not.
+        [_btn(_pause_root_label(), "pt")],
         [_btn("⛔ CLOSE ALL TRADES", "closeall", "*")],
         [_btn("❌ Close Control Panel", "x")],
     ]
     return Screen("\U0001f4b0 *FOREX Control Panel*\n\nChoose an action from the buttons below:", kb)
+
+
+def _pause_root_label() -> str:
+    paused, until_str = _pause_state()
+    return f"⏸️ PAUSED until {until_str} — tap to change" if paused else "⏸️ Pause Trading"
 
 
 def _channel_list_screen(kind: str) -> Screen:
@@ -639,6 +649,133 @@ def system_screen() -> Screen:
         [_btn("← Back to Main Menu", "root")],
     ]
     return Screen("\U0001f6e0️ *System*\n\nInfrastructure and mode controls.", rows)
+
+
+# ── Pause Trading ────────────────────────────────────────────────────────────
+#
+# Pausing until a session boundary, rather than for a duration, is what you
+# actually want on a phone: "stop until London closes" is a decision about the
+# market, and working out that it is 4h17m away is exactly the arithmetic you
+# don't want to be doing to make it.
+#
+# Boundaries are UTC hours taken from dpm_engine.detect_session's own
+# partition -- the same one is_session_allowed() and the analytics heat map
+# read -- so "end of London" here means precisely what the rest of the app
+# calls the end of London, and cannot drift from it:
+#
+#     asian   21:00-07:00      london  07:00-12:00
+#     overlap 12:00-16:00      ny      16:00-21:00
+#
+# The pause itself reuses trade_pause_until (the /pause command's own key),
+# so this adds a way to choose the moment, not a second pause mechanism with
+# its own semantics to keep in step.
+_SESSION_END_UTC = {
+    "as": ("Asian",   7),
+    "lo": ("London",  12),
+    "ov": ("Overlap", 16),
+    "ny": ("NY",      21),
+}
+
+# Order shown on the panel: soonest-ending session first is tempting, but the
+# boundary that is soonest changes through the day and a keyboard whose
+# buttons move is one you mis-tap. Fixed session order instead.
+_SESSION_ORDER = ("ny", "ov", "lo", "as")
+
+
+def _next_utc_hour(hour: int, now: Optional[datetime] = None) -> float:
+    """Unix timestamp of the next time it is `hour`:00 UTC.
+
+    Strictly in the future: at exactly 12:00:00 UTC, "end of London" means
+    tomorrow's, not a zero-length pause that lifts on the same tick.
+    """
+    now = now or datetime.now(timezone.utc)
+    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target.timestamp()
+
+
+def _pause_state() -> tuple[bool, str]:
+    """(paused, 'HH:MM' local) for the current trade_pause_until value."""
+    try:
+        until = float(db_module.get_app_config("trade_pause_until") or 0)
+    except (TypeError, ValueError):
+        return False, ""
+    if until <= time.time():
+        return False, ""
+    return True, datetime.fromtimestamp(until).strftime("%H:%M")
+
+
+def pause_trading_screen() -> Screen:
+    rows = []
+    for key in _SESSION_ORDER:
+        label, hour = _SESSION_END_UTC[key]
+        # Each button states when it lands in the reader's own clock -- the
+        # boundaries are defined in UTC and this panel is used from a phone
+        # in whatever timezone it happens to be in.
+        local = datetime.fromtimestamp(_next_utc_hour(hour)).strftime("%H:%M")
+        rows.append([_btn(f"⏸ End of {label}  ({local})", "ptu", key)])
+    rows.append([_btn("⏱ Custom (hrs)", "ptc")])
+
+    paused, until_str = _pause_state()
+    if paused:
+        rows.append([_btn("▶️ Resume trading now", "ptr")])
+    rows.append([_btn("← Back to Main Menu", "root")])
+
+    head = (f"⏸️ *Pause Trading*\n\nCurrently *PAUSED* until {until_str}."
+            if paused else
+            "⏸️ *Pause Trading*\n\nTrading is currently *active*.")
+    return Screen(
+        f"{head}\n\nPause until the end of a session, or set your own length.\n"
+        "_Times shown are your local clock._",
+        rows,
+    )
+
+
+def _pause_until_session(key: str) -> Screen:
+    entry = _SESSION_END_UTC.get(key)
+    if not entry:
+        return Screen(toast="Unknown session.", mode="noop")
+    label, hour = entry
+    until = _next_utc_hour(hour)
+    db_module.set_app_config("trade_pause_until", str(until))
+    local = datetime.fromtimestamp(until).strftime("%H:%M")
+    hrs = (until - time.time()) / 3600.0
+    log.info("[Panel] trading paused until end of %s (%s local, %.1fh)", label, local, hrs)
+    return Screen(
+        f"⏸️ Trading paused until the end of *{label}* — {local} "
+        f"({hrs:.1f}h from now).\n\nTap Resume, or send /resume, to lift it early.",
+        mode="send",
+    )
+
+
+def _resume_trading() -> Screen:
+    db_module.set_app_config("trade_pause_until", "0")
+    log.info("[Panel] trading resumed from the pause panel")
+    return Screen("▶️ Trading resumed.", mode="send")
+
+
+def pause_prompt_text() -> str:
+    return ("Send the number of hours to pause trading (e.g. 2, or 1.5).\n"
+            "[hrs@pause]")
+
+
+def _pause_custom_reply(raw: str) -> Screen:
+    try:
+        hours = float(raw.strip().lower().rstrip("h").strip())
+    except ValueError:
+        return Screen(f"`{raw}` is not a number of hours.", mode="send")
+    # Upper bound is a week: a pause is a decision to sit out a session or a
+    # day, and a typo'd 240 that silently parks trading until next month is
+    # not a pause anyone meant to set.
+    if not (0 < hours <= 168):
+        return Screen("Hours must be between 0 and 168 (one week).", mode="send")
+    until = time.time() + hours * 3600.0
+    db_module.set_app_config("trade_pause_until", str(until))
+    local = datetime.fromtimestamp(until).strftime("%H:%M")
+    log.info("[Panel] trading paused for %.2fh (until %s local)", hours, local)
+    return Screen(f"⏸️ Trading paused for *{hours:g}h* — until {local}.\n\n"
+                  "Send /resume to lift it early.", mode="send")
 
 
 # ── Trading Schedule ─────────────────────────────────────────────────────────
@@ -951,6 +1088,8 @@ async def handle_value_reply(prompt: str, value_text: str) -> Screen:
     if not parsed:
         return Screen(mode="noop")
     field, slug = parsed
+    if slug == "pause":
+        return _pause_custom_reply(value_text)
     if slug.startswith("sch."):
         return _schedule_value_reply(field, slug, value_text.strip())
     chan = _channel(slug)
@@ -1040,6 +1179,14 @@ async def _dispatch(action: str, args: list, ctx: Any) -> Screen:
         return await _toggle_field(args[0], args[1])
     if action == "fs":
         return _set_choice(args[0], args[1], args[2])
+    if action == "pt":
+        return pause_trading_screen()
+    if action == "ptu":
+        return _pause_until_session(args[0])
+    if action == "ptc":
+        return Screen(pause_prompt_text(), mode="force_reply")
+    if action == "ptr":
+        return _resume_trading()
     if action == "sset":
         return _set_strategy(args[0], args[1])
     if action == "pause":

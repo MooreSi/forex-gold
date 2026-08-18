@@ -250,7 +250,7 @@ def test_close_trade_invokes_the_guard_unconditionally():
 def test_resuming_re_arms_so_the_guard_does_not_instantly_re_trip(fresh_db):
     _closes([100, -60])
     assert rg.check_giveback_guard(ON) is not None
-    rg.rearm_giveback_guard()
+    rg.rearm_risk_guards()
     assert rg.check_giveback_guard(ON) is None
 
 
@@ -258,7 +258,7 @@ def test_re_arming_is_not_a_licence_to_bleed_for_the_rest_of_the_day(fresh_db):
     """It restarts the window; it does not switch the guard off. A NEW peak
     past the arming amount, handed back, still stops the day."""
     _closes([100, -60])
-    rg.rearm_giveback_guard()
+    rg.rearm_risk_guards()
     _closes([80], at=time.time() + 1)   # new peak of 80 since the resume
     assert rg.check_giveback_guard(ON) is None
     _closes([-40], at=time.time() + 2)  # half of it handed back
@@ -267,7 +267,7 @@ def test_re_arming_is_not_a_licence_to_bleed_for_the_rest_of_the_day(fresh_db):
 
 def test_a_quiet_period_after_resuming_does_not_arm_anything(fresh_db):
     _closes([100, -60])
-    rg.rearm_giveback_guard()
+    rg.rearm_risk_guards()
     _closes([10, -8], at=time.time() + 1)   # never reaches the $50 arm
     assert rg.check_giveback_guard(ON) is None
 
@@ -278,8 +278,8 @@ def test_both_resume_paths_re_arm():
     import inspect
     from forex_trader.core import core_bot_commands_readonly as ro
     from forex_trader.core import core_bot_panel as panel
-    assert "rearm_giveback_guard" in inspect.getsource(ro.cmd_resume)
-    assert "rearm_giveback_guard" in inspect.getsource(panel._resume_trading)
+    assert "rearm_risk_guards" in inspect.getsource(ro.cmd_resume)
+    assert "rearm_risk_guards" in inspect.getsource(panel._resume_trading)
 
 
 # ── daily loss ceiling (governor-independent) ────────────────────────────────
@@ -352,3 +352,28 @@ def test_close_trade_invokes_the_loss_ceiling_unconditionally():
     import inspect
     from forex_trader.core import core_close_trade
     assert "apply_daily_loss_halt_on_close" in inspect.getsource(core_close_trade)
+
+
+def test_resuming_also_re_arms_the_daily_loss_ceiling(fresh_db):
+    """Without this, resuming after the ceiling fires is a no-op: the day's
+    losses are already past the threshold, so it re-halts on the next close."""
+    _closes([-40])
+    assert rg.check_daily_loss_limit(DL, balance=960.0) is not None
+    rg.rearm_risk_guards()
+    assert rg.check_daily_loss_limit(DL, balance=960.0) is None
+
+
+def test_the_ceiling_still_fires_on_a_fresh_breach_after_resuming(fresh_db):
+    """A reset, not an off switch -- another max_daily_loss_pct from the
+    resume point still stops trading."""
+    _closes([-40])
+    rg.rearm_risk_guards()
+    _closes([-35], at=time.time() + 1)      # 35 on a ~965 base > 3%
+    assert rg.check_daily_loss_limit(DL, balance=925.0) is not None
+
+
+def test_a_small_loss_after_resuming_does_not_re_halt(fresh_db):
+    _closes([-40])
+    rg.rearm_risk_guards()
+    _closes([-5], at=time.time() + 1)
+    assert rg.check_daily_loss_limit(DL, balance=955.0) is None

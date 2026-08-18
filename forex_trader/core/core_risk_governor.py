@@ -230,7 +230,18 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
     max_daily = float(rs.get("max_daily_loss_pct", 0) or 0)
     if max_daily <= 0:
         return None
-    realised, _peak = day_pnl_and_peak()
+    # Measured from the last manual resume when there has been one, not always
+    # from the broker day. Without that, resuming after this limit fires is a
+    # no-op -- the day's losses are already past the threshold, so it re-halts
+    # on the next close and Resume does nothing but waste a trade.
+    #
+    # Worth being plain about what that makes it: once resumed it is no longer
+    # a hard ceiling on the DAY, it is "another `max_daily_loss_pct` from where
+    # you resumed". Someone who keeps resuming can keep losing that much again.
+    # The protection it still gives is a bounded loss per resume, and it goes
+    # back to being a true daily ceiling at the next broker day, when the
+    # baseline falls behind day_start and stops applying.
+    realised, _peak = day_pnl_and_peak(_daily_loss_window_start())
     day_base = balance - realised
     if day_base <= 0:
         return None
@@ -259,6 +270,33 @@ def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:
         db_module.set_app_config("trade_pause_until", str(until))
         db_module.set_app_config("risk_halt_reason", reason)
     log.warning("[RG] %s — trading stopped until the next broker day", reason)
+
+
+def _daily_loss_window_start() -> float:
+    """Where the daily loss ceiling starts counting: the broker day, or the
+    last manual resume if that came later."""
+    day_start = rg_day_start_ts()
+    try:
+        baseline = float(db_module.get_app_config("daily_loss_baseline_ts") or 0)
+    except (TypeError, ValueError):
+        baseline = 0.0
+    return max(day_start, baseline)
+
+
+def rearm_risk_guards() -> None:
+    """Restart both post-close guards' windows from now.
+
+    Called whenever trading is resumed by hand. Both guards halt for the rest
+    of the broker day, so without this a resume is undone by the next close and
+    the button appears broken.
+
+    This is a reset, not an off switch: each guard stays armed and fires again
+    on a fresh breach measured from here.
+    """
+    now = str(time.time())
+    with db_module.db():
+        db_module.set_app_config("giveback_baseline_ts", now)
+        db_module.set_app_config("daily_loss_baseline_ts", now)
 
 
 def rearm_giveback_guard() -> None:

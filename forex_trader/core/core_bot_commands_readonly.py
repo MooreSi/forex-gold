@@ -289,8 +289,8 @@ async def cmd_resume(args: list) -> str:
     # give-back halt is a no-op: the day's peak is already spent, so the guard
     # re-trips on the very next close.
     try:
-        from forex_trader.core.core_risk_governor import rearm_giveback_guard
-        rearm_giveback_guard()
+        from forex_trader.core.core_risk_governor import rearm_risk_guards
+        rearm_risk_guards()
     except Exception:
         pass
     rs        = db_module.get_risk_settings()

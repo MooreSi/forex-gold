@@ -754,8 +754,8 @@ def _resume_trading() -> Screen:
     # See cmd_resume: without re-arming, a resume after a give-back halt is
     # undone by the next close.
     try:
-        from forex_trader.core.core_risk_governor import rearm_giveback_guard
-        rearm_giveback_guard()
+        from forex_trader.core.core_risk_governor import rearm_risk_guards
+        rearm_risk_guards()
     except Exception:
         pass
     log.info("[Panel] trading resumed from the pause panel")

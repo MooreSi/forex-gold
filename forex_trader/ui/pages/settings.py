@@ -598,6 +598,47 @@ def _render_risk_settings_subcard(rs: dict) -> None:
                 "all auto-execution is paused."
             )
 
+        # ── Give-back guard ──────────────────────────────────────────────
+        # Measures from the day's PEAK, not its opening balance, which is the
+        # only way to express "protect the profit I had". Both limits above
+        # measure from the open and so cannot see a day that goes +$349 and
+        # closes -$88 -- which is what 2026-08-17 did.
+        ui.separator().classes("my-3")
+        with ui.row().classes("w-full items-center gap-1"):
+            giveback_sw = ui.switch(
+                "Stop for the day after giving back today's profit",
+                value=bool(rs.get("giveback_guard_enabled", 0)),
+            ).classes("text-sm text-blue-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Max daily loss measures from the day's OPENING balance, so a "
+                "day that rises and then bleeds back never breaches it. This "
+                "measures from the day's PEAK instead: once the day is up by "
+                "the arming amount, handing back more than the set share of "
+                "that peak stops new trades until the next broker day.\n\n"
+                "Open trades are unaffected — this blocks new entries only, "
+                "and Resume (or /resume) lifts it early.\n\n"
+                "Unlike the limits above, this does NOT require the Risk "
+                "Governor to be on."
+            )
+        with ui.row().classes("w-full items-center gap-2"):
+            giveback_arm = ui.number(
+                "Arm above profit ($)", value=float(rs.get("giveback_arm_usd", 50.0)),
+                min=0, max=100000, step=10, format="%.0f",
+            ).classes("flex-1").tooltip(
+                "The guard only arms once the day's realised profit has reached "
+                "this. Below it, ordinary churn around break-even can never lock "
+                "the day out."
+            )
+            giveback_pct = ui.number(
+                "Give-back limit (%)", value=float(rs.get("giveback_pct", 40.0)),
+                min=1, max=99, step=5, format="%.0f",
+            ).classes("flex-1").tooltip(
+                "How much of the day's peak profit may be handed back before "
+                "stopping. 40 = stop once 40% of the peak is gone."
+            )
+        giveback_arm.bind_visibility_from(giveback_sw, "value")
+        giveback_pct.bind_visibility_from(giveback_sw, "value")
+
         with ui.row().classes("w-full items-center gap-1"):
             max_trades = ui.number(
                 "Max open trades", value=int(rs.get("max_open_trades", 1)),
@@ -636,6 +677,9 @@ def _render_risk_settings_subcard(rs: dict) -> None:
                     "max_open_trades":                int(max_trades.value    or 1),
                     "max_lot_size":                   float(max_lot.value     or 0),
                     "exclude_high_risk":              int(bool(excl_high.value)),
+                    "giveback_guard_enabled":         int(bool(giveback_sw.value)),
+                    "giveback_arm_usd":               float(giveback_arm.value or 0),
+                    "giveback_pct":                   float(giveback_pct.value or 0),
                 })
                 ui.notify("Risk settings saved", type="positive")
             except (TypeError, ValueError) as _save_err:

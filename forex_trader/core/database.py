@@ -952,6 +952,22 @@ def _apply_schema() -> None:
             "ALTER TABLE vantage_risk_settings ADD COLUMN internal_hedge_mode TEXT NOT NULL DEFAULT 'off'",
             "ALTER TABLE vantage_risk_settings ADD COLUMN internal_net_exposure_max_lots REAL NOT NULL DEFAULT 0.30",
         ] + [
+            # Intraday give-back guard (2026-08-18). The existing daily-loss
+            # limit measures from the day's OPENING balance, so it cannot see a
+            # day that goes +$350 and then bleeds back to -$190 -- realised P&L
+            # never breaches a from-open threshold on the way down, and that is
+            # exactly the shape of 2026-08-17 (peak +$348.76 at 09:06, closed
+            # -$88.48) and 08-18. This measures from the day's PEAK instead.
+            #
+            # Off by default: it stops trading for the rest of the broker day,
+            # which is not a behaviour to switch on behind anyone's back.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN giveback_guard_enabled INTEGER NOT NULL DEFAULT 0",
+            # Arms only once the day is genuinely up, so normal churn around
+            # break-even can never lock the day out.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN giveback_arm_usd REAL NOT NULL DEFAULT 50.0",
+            # How much of that peak may be surrendered before stopping.
+            "ALTER TABLE vantage_risk_settings ADD COLUMN giveback_pct REAL NOT NULL DEFAULT 40.0",
+        ] + [
             # Parsing Settings > TP/SL in Second Message (2026-07-31). Holds a
             # bare "direction + entry, no levels yet" signal while its
             # follow-up is awaited. Deliberately NOT vantage_tg_signals: a row

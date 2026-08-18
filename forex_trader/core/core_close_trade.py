@@ -34,7 +34,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from forex_trader.core import database as db_module
 from forex_trader.core.core_fees_sizing import pnl as _pnl
-from forex_trader.core.core_risk_governor import rg_apply_halts_on_close
+from forex_trader.core.core_risk_governor import apply_giveback_guard_on_close, rg_apply_halts_on_close
 from forex_trader.core.core_dpm_bookkeeping import finalize_dpm_record
 from forex_trader.core.core_tp_trigger_tracking import TPCache
 
@@ -277,6 +277,13 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
                 ctx.bridge, ctx.starting_balance
             )
             await db_module.to_db_thread(rg_apply_halts_on_close, _rg_rs, _rg_balance)
+        # Give-back guard runs whether or not the governor is on: it protects
+        # the day's realised profit and has nothing to do with the governor's
+        # sizing model, so gating it behind that switch would make "stop when
+        # I hand back today's gains" unavailable to exactly the setup that
+        # needs it (this account runs with the governor off, which is why its
+        # configured daily-loss limit never fired through two losing days).
+        await db_module.to_db_thread(apply_giveback_guard_on_close, _rg_rs)
     except Exception as _rg_e:
         log.debug("[RG] post-close halt check skipped: %s", _rg_e)
 

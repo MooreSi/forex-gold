@@ -191,6 +191,88 @@ def rg_day_start_ts() -> float:
     return (broker_midnight - timedelta(hours=3)).timestamp()
 
 
+def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
+    """(realised P&L so far today, the highest it reached today).
+
+    Recomputed from the day's closes every call rather than kept as a stored
+    watermark. A stored peak needs resetting at the broker-day boundary and
+    survives restarts only if it is persisted correctly -- two things to get
+    wrong, both of which fail toward "the guard silently stopped guarding".
+    Replaying a day's closed rows is cheap and cannot drift.
+    """
+    if day_start is None:
+        day_start = rg_day_start_ts()
+    with db_module.db() as conn:
+        rows = conn.execute(
+            "SELECT net_pnl FROM vantage_simulated_trades "
+            "WHERE close_time >= ? ORDER BY close_time", (day_start,),
+        ).fetchall()
+    running = peak = 0.0
+    for (pnl,) in rows:
+        running += float(pnl or 0.0)
+        peak = max(peak, running)
+    return running, peak
+
+
+def check_giveback_guard(rs: dict) -> Optional[str]:
+    """Reason to stop for the day when today's profit has been given back.
+
+    The daily-loss limit measures from the day's OPENING balance, which cannot
+    see a day that rises and then bleeds: on 2026-08-17 realised P&L peaked at
+    +$348.76 (09:06) and finished -$88.48, and a from-open threshold was never
+    breached on the way down. Measuring from the day's PEAK is what makes
+    "protect the profit I had" expressible at all.
+
+    Arms only above giveback_arm_usd so ordinary churn near break-even cannot
+    lock the day out over a few dollars, and the peak must be positive -- a
+    losing day is the daily-loss limit's job, not this one's.
+    """
+    if not bool(rs.get("giveback_guard_enabled", 0)):
+        return None
+    arm = float(rs.get("giveback_arm_usd", 50.0) or 0)
+    pct = float(rs.get("giveback_pct", 40.0) or 0)
+    if arm <= 0 or pct <= 0:
+        return None
+
+    realised, peak = day_pnl_and_peak()
+    if peak < arm:
+        return None
+    floor_ = peak * (1.0 - pct / 100.0)
+    if realised > floor_:
+        return None
+    return (
+        f"Give-back guard: today peaked at +${peak:.2f} and is now "
+        f"${realised:+.2f} — more than {pct:.0f}% of the day's profit handed "
+        f"back (floor ${floor_:+.2f})"
+    )
+
+
+def apply_giveback_guard_on_close(rs: dict) -> None:
+    """Halt for the rest of the broker day if the give-back guard has tripped.
+
+    Deliberately NOT behind risk_governor_enabled. The governor also takes
+    over position sizing and adds its own pre-trade gates, so requiring it
+    would mean nobody can have "stop when I give back today's profit" without
+    also accepting a different sizing model -- and the account this was written
+    for has the governor off, which is precisely why every configured limit on
+    it was inert while two days bled out.
+
+    Writes the same trade_pause_until / risk_halt_reason pair the governor
+    uses, so /resume, the panel's Resume button and the status line all keep
+    working with no special case.
+    """
+    reason = check_giveback_guard(rs)
+    if not reason:
+        return
+    if is_trading_paused():
+        return
+    until = rg_day_start_ts() + 86400.0
+    with db_module.db():
+        db_module.set_app_config("trade_pause_until", str(until))
+        db_module.set_app_config("risk_halt_reason", reason)
+    log.warning("[RG] %s — trading stopped until the next broker day", reason)
+
+
 def rg_size_and_check(*, direction: str, ref_price: float,
                       stop_loss: float, tp1, strategy: str,
                       atr: float, balance: float, rs: dict):

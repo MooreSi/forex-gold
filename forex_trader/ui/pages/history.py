@@ -123,6 +123,33 @@ def _broker_ts_to_uk_date(ts) -> Optional[date]:
         return None
 
 
+def _broker_ts_to_utc_hour(ts) -> Optional[int]:
+    """UTC hour-of-day for a broker timestamp, for session attribution.
+
+    Uses the same _BROKER_OFFSET unwind as _broker_ts_to_uk_date so a trade's
+    calendar day and its session can never be derived from two different
+    readings of the same clock. UTC because that is what _session_for_hour
+    expects -- the session boundaries are defined in UTC and the heatmap on
+    this page already reads them that way.
+    """
+    try:
+        return datetime.fromtimestamp(float(ts) - _BROKER_OFFSET, tz=timezone.utc).hour
+    except Exception:
+        return None
+
+
+# Session key -> the label shown in the day-detail breakdown. Ordered
+# chronologically through the trading day rather than by P&L: a fixed order
+# makes two days comparable at a glance, which is the whole point of opening
+# the same panel on different days.
+_SESSION_LABELS = (
+    ("asian",   "Asian"),
+    ("london",  "London"),
+    ("overlap", "Overlap (LDN+NY)"),
+    ("ny",      "New York"),
+)
+
+
 def render(get_engine: Callable):
     engine  = get_engine()
     cfg     = cfg_module.load()
@@ -1322,6 +1349,7 @@ def _render_calendar(engine):
         """Build day-level P&L map exclusively from MT5 deal history."""
         trade_map: dict[int, tuple[date, float]] = {}  # ticket → (date, pnl)
         _dir_by_ticket: dict[str, str] = {}   # from the broker's own opening deal
+        _close_hour_by_ticket: dict[int, int] = {}  # ticket → UTC hour of close
         _detail_store.clear()
         # Offloaded — both are synchronous DB reads.
         _tinfo    = await db_module.to_db_thread(_ticket_info)
@@ -1362,6 +1390,9 @@ def _render_calendar(engine):
                     open_lots = float(open_deal.get("volume", 0)) if open_deal else float(close_deal.get("volume", 0))
                     pnl, _fees = _apply_fee(pos_deals, open_lots, comm_rate)
                     trade_map[ticket] = (d_date, pnl)
+                    _ch = _broker_ts_to_utc_hour(close_ts)
+                    if _ch is not None:
+                        _close_hour_by_ticket[ticket] = _ch
                     if open_deal is not None:
                         _dir_by_ticket[str(ticket)] = (
                             "BUY" if int(open_deal.get("type", 0)) == 0 else "SELL"
@@ -1394,6 +1425,10 @@ def _render_calendar(engine):
             _detail_store.setdefault(d, []).append({
                 "ticket": _ticket, "source": src, "strategy": strat,
                 "direction": dir_, "pnl": pnl,
+                # Kept so the day view can split by trading session as well as
+                # by channel -- the session is derived from the close, the same
+                # event that decides which calendar day the trade lands on.
+                "utc_hour": _close_hour_by_ticket.get(_ticket),
             })
 
         source = f"MT5 ({len(trade_map)} trades)" if trade_map else "no data"
@@ -1438,31 +1473,74 @@ def _render_calendar(engine):
                 return
             ui.label(f"{len(trades)} trades · {wr:.0f}% win rate").classes("text-xs text-gray-400 mb-2")
 
-            # ── Per-source breakdown ──────────────────────────────────────────
-            by_src: dict = {}
-            for t in trades:
-                s = by_src.setdefault(t["source"], {"n": 0, "w": 0, "pnl": 0.0})
-                s["n"] += 1
-                s["pnl"] += t["pnl"]
-                if t["pnl"] > 0:
-                    s["w"] += 1
-            ui.label("By Signal Source").classes("text-xs font-semibold text-gray-300 uppercase tracking-wider mt-1")
-            src_rows = [
-                {"source": k,
-                 "trades": v["n"],
-                 "win_rate": f"{(v['w']/v['n']*100 if v['n'] else 0):.0f}%",
-                 "pnl": f"${v['pnl']:+.2f}"}
-                for k, v in sorted(by_src.items(), key=lambda x: -x[1]["pnl"])
-            ]
-            ui.table(
-                columns=[
-                    {"name": "source", "label": "Source", "field": "source", "align": "left"},
-                    {"name": "trades", "label": "Trades", "field": "trades", "align": "right"},
-                    {"name": "win_rate", "label": "Win%", "field": "win_rate", "align": "right"},
-                    {"name": "pnl", "label": "Net P&L", "field": "pnl", "align": "right"},
-                ],
-                rows=src_rows, row_key="source",
-            ).classes("w-full mb-3").props("dense flat dark")
+            # ── Breakdowns: where the day's result actually came from ─────────
+            def _tally(key_fn) -> dict:
+                out: dict = {}
+                for t in trades:
+                    k = key_fn(t)
+                    if k is None:
+                        continue
+                    s = out.setdefault(k, {"n": 0, "w": 0, "pnl": 0.0})
+                    s["n"] += 1
+                    s["pnl"] += t["pnl"]
+                    if t["pnl"] > 0:
+                        s["w"] += 1
+                return out
+
+            def _breakdown_table(title: str, first_col: str, tally: dict,
+                                 order=None, note: str = "") -> None:
+                """One breakdown table. `order` fixes the row order (used for
+                sessions, which read better chronologically); without it rows
+                sort by P&L, best first."""
+                if not tally:
+                    return
+                ui.label(title).classes(
+                    "text-xs font-semibold text-gray-300 uppercase tracking-wider mt-1")
+                if note:
+                    ui.label(note).classes("text-xs text-gray-500 mb-1")
+                if order is not None:
+                    items = [(k, tally[k]) for k in order if k in tally]
+                else:
+                    items = sorted(tally.items(), key=lambda x: -x[1]["pnl"])
+                rows_ = [
+                    {"k": k,
+                     # Wins as "3 / 5" rather than a bare percentage: on a day
+                     # with two trades a "50%" tells you almost nothing, and
+                     # this panel is most useful on exactly those days.
+                     "wins": f"{v['w']} / {v['n']}",
+                     "win_rate": f"{(v['w'] / v['n'] * 100 if v['n'] else 0):.0f}%",
+                     "pnl": f"${v['pnl']:+.2f}"}
+                    for k, v in items
+                ]
+                ui.table(
+                    columns=[
+                        {"name": "k", "label": first_col, "field": "k", "align": "left"},
+                        {"name": "wins", "label": "Wins", "field": "wins", "align": "right"},
+                        {"name": "win_rate", "label": "Win%", "field": "win_rate", "align": "right"},
+                        {"name": "pnl", "label": "Net P&L", "field": "pnl", "align": "right"},
+                    ],
+                    rows=rows_, row_key="k",
+                ).classes("w-full mb-3").props("dense flat dark")
+
+            _breakdown_table("By Signal Source", "Source", _tally(lambda t: t["source"]))
+
+            # Session comes from the close, the same event that decides which
+            # calendar day the trade belongs to. Trades whose close time the
+            # broker history did not carry are dropped from this split rather
+            # than bucketed into a wrong session, and the note says so when it
+            # happens, so a short table is never mistaken for a quiet session.
+            _sess_names = dict(_SESSION_LABELS)
+            _sess_tally = _tally(
+                lambda t: _sess_names.get(db_module._session_for_hour(t["utc_hour"]))
+                if t.get("utc_hour") is not None else None
+            )
+            _sess_n = sum(v["n"] for v in _sess_tally.values())
+            _breakdown_table(
+                "By Market Session", "Session", _sess_tally,
+                order=[lbl for _k, lbl in _SESSION_LABELS],
+                note=("" if _sess_n == len(trades)
+                      else f"{len(trades) - _sess_n} trade(s) had no close time and are not shown here"),
+            )
 
             # ── Individual trades ─────────────────────────────────────────────
             ui.label("Trades").classes("text-xs font-semibold text-gray-300 uppercase tracking-wider")

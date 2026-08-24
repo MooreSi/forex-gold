@@ -2746,10 +2746,33 @@ void ManageTemplate(ManagedTrade &t, const MqlTick &tick)
    // converges on one common breakeven; "distributed" (the default, and
    // the only behaviour before this field was wired in) uses this leg's
    // own entry_price, same as every other strategy's breakeven already did.
+   //
+   // Arms off triggered[] -- the LATCH DoPartialClose()/DoCloseAll() set when
+   // the level actually traded -- and only falls back to the live TpCleared()
+   // price test when nothing has latched (tpsl_mode="off", or partials=false,
+   // where no level ever closes and so nothing ever sets triggered[]).
+   //
+   // TpCleared() alone was the bug (2026-08-21). It re-asks "is price beyond
+   // the TP *right now*", so the whole block is skipped the moment price
+   // retraces -- and MoveSl() returns false on a broker rejection or when the
+   // guard clamp pushes the stop back inside the current one, leaving
+   // tplBeDone false and the retry depending on a condition that has since
+   // gone away. The clamp added against ticket 1663956102 fixed the rejection
+   // itself but not the give-up: after one failed attempt the stop stayed at
+   // its original full width for the rest of the trade. Measured over 21 Jul
+   // - 21 Aug 2026: 141 trades reached a TP, never moved to breakeven, and
+   // closed a mean 66.7 pips BELOW entry for -$7,562 -- 2.5x the account's
+   // total loss for the period.
+   //
+   // Latching fixes both halves: a level that has traded stays armed, so
+   // every subsequent tick retries the move until it succeeds, wherever
+   // price has gone in the meantime. It cannot arm a level that never
+   // traded, and MoveSl()'s own `better` test still refuses to widen a stop.
    if(!t.tplBeDone)
    {
       int beIdx = t.tplBeTrigger - 1;
-      if(beIdx >= 0 && beIdx < MAX_TPS && TpCleared(t, beIdx, tick))
+      if(beIdx >= 0 && beIdx < MAX_TPS
+         && (t.triggered[beIdx] || TpCleared(t, beIdx, tick)))
       {
          double refPrice = (t.tplAnchor == "unified") ? t.tplAnchorPrice : t.entry_price;
          double beSl = refPrice;

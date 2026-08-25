@@ -17,9 +17,9 @@ TAB_SUBTITLES: dict[str, str] = {
     "Trading": "Signals, open positions and strategy settings",
     "Parsing": "Telegram signal reader — where channel signals arrive",
     "Signal Generator": "The app's own strategy engines (breakout, bounce, reversal)",
-    "Edge": "Live message trace — follow a signal through the system",
     "Backtest": "Replay signals against history to test settings",
     "Analysis": "Trade history and performance stats",
+    "News": "This week's economic calendar and the news blackout controls",
     "Settings": "Connections, risk, alerts and app configuration",
     "About": "Guides, setup instructions and the glossary",
 }

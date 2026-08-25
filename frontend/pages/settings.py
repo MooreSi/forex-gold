@@ -13,7 +13,6 @@ from backend.src.utils import os_utils as _pu
 from backend.src.controllers import sync_controller as sync_ctl
 import backend.src.config as cfg_module
 from backend.src.services.positions import core_autostart as _autostart
-from backend.src.db import database as db_module
 from backend.src.services.cluster.sync import client as sync_client
 
 # ── Prevent-sleep state (module-level so it survives page re-renders) ──────────
@@ -676,7 +675,7 @@ def _render_risk_settings_subcard(rs: dict) -> None:
 
         def save_risk():
             try:
-                db_module.update_risk_settings({
+                settings_ctl.update_risk_settings({
                     "risk_governor_enabled":          int(bool(risk_gov.value)),
                     "max_daily_loss_pct":             float(max_dd.value      or 0),
                     "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),
@@ -746,7 +745,7 @@ def _render_circuit_breaker_subcard(rs: dict) -> None:
 
         def save_cb():
             try:
-                db_module.update_risk_settings({
+                settings_ctl.update_risk_settings({
                     "circuit_breaker_enabled":        int(bool(cb_enabled.value)),
                     "circuit_breaker_losses":         int(cb_losses.value     or 3),
                     "circuit_breaker_cooldown_mins":  int(cb_cooldown.value   or 60),
@@ -923,7 +922,7 @@ def _render_dpm_subcard(rs: dict) -> None:
         ).classes("text-sm text-gray-200")
 
         def _dpm_toggle(e):
-            db_module.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
+            settings_ctl.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
             dpm_badge.props(f"color={'blue' if e.value else 'grey'}")
             dpm_badge.text = "DPM ON" if e.value else "DPM OFF"
             ui.notify(
@@ -961,7 +960,7 @@ def _render_dpm_subcard(rs: dict) -> None:
             def _save_dpm_profit():
                 try:
                     val = max(0.0, float(dpm_profit_inp.value or 0))
-                    db_module.update_risk_settings({"profit_close_usd": val})
+                    settings_ctl.update_risk_settings({"profit_close_usd": val})
                     if val > 0:
                         ui.notify(
                             f"Profit take set to ${val:.2f} — DPM will close when "
@@ -3185,7 +3184,7 @@ def _render_diagnostics(engine):
         with ui.row().classes("w-full items-center justify-between"):
             auto_restart_sw = ui.switch(
                 "Auto-Restart if the app stops",
-                value=(db_module.get_app_config("auto_restart_enabled") == "1"),
+                value=(settings_ctl.get_app_config("auto_restart_enabled") == "1"),
             ).classes("text-blue-300 font-bold")
             ui.icon("restart_alt", size="sm").classes("text-blue-400")
 
@@ -3270,7 +3269,7 @@ def _render_diagnostics(engine):
                           type="negative", position="top")
                 _revert_switch(not want)
                 return
-            db_module.set_app_config("auto_restart_enabled", "1" if want else "0")
+            settings_ctl.set_app_config("auto_restart_enabled", "1" if want else "0")
             ui.notify(
                 "Auto-restart enabled" if want else "Auto-restart disabled",
                 type="positive" if want else "info", position="top",

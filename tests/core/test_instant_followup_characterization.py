@@ -123,7 +123,7 @@ def test_ea_managed_trade_acknowledged_only_not_overwritten(fresh_db, engine):
     _insert_trade(strategy="template:Staged Ratchet 100-500", managed_by="ea")
     _insert_tg("tg-ea")
     trade = _trade_dict("trade-abc")
-    asyncio.run(SimulationEngine._apply_followup_to_instant_trade(
+    asyncio.run(SimulationEngine.apply_followup_to_instant_trade(
         engine, trade, _PARSED_2TP, "tg-ea", "Chan", "Chan",
     ))
     trade_after = _trade_dict("trade-abc")

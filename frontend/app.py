@@ -64,7 +64,6 @@ from backend.src.utils.version_history import __version__ as _APP_VERSION
 from backend.src.controllers import settings_controller as settings_ctl
 from frontend.pages import backtest as backtest_page
 from backend.src.utils.version_history import __version__ as _APP_VERSION
-from backend.src.db import database as db_module
 from frontend.pages import news as news_page
 
 log = logging.getLogger(__name__)

@@ -251,7 +251,9 @@ def test_sibling_lookup_failure_falls_back_to_the_anchor_alone(fresh_db):
 def test_template_group_map_assigns_anchor_to_tier_one(fresh_db):
     """The anchor is tier 1 by which ticket promoted the local row, not by
     ticket number -- here the anchor's ticket (101) is not the lowest."""
-    from frontend.pages.history import _template_group_map
+    # Moved to the analytics repo when the
+    # frontend-never-imports-the-database contract was restored (2026-08-25).
+    from backend.src.services.analytics.trade_history_repo import _template_group_map
 
     trade_id = "5b88a61e-6544-4f"
     comment = comment_for_trade(trade_id)
@@ -270,7 +272,9 @@ def test_template_group_map_assigns_anchor_to_tier_one(fresh_db):
 def test_template_group_map_ignores_a_lone_leg(fresh_db):
     """A prefix with only one resolved ticket is not a group -- nothing to
     collapse, same rule _ticket_group_map's own caller already applies."""
-    from frontend.pages.history import _template_group_map
+    # Moved to the analytics repo when the
+    # frontend-never-imports-the-database contract was restored (2026-08-25).
+    from backend.src.services.analytics.trade_history_repo import _template_group_map
 
     trade_id = "5b88a61e-6544-4f"
     _insert_trade(trade_id, mt5_ticket=101)
@@ -282,7 +286,9 @@ def test_template_group_map_ignores_a_prefix_with_no_local_row(fresh_db):
     """No trade row for the prefix (e.g. it was never promoted, or the DB
     row was pruned) means nothing to attach the group to -- must not raise
     or invent a group id."""
-    from frontend.pages.history import _template_group_map
+    # Moved to the analytics repo when the
+    # frontend-never-imports-the-database contract was restored (2026-08-25).
+    from backend.src.services.analytics.trade_history_repo import _template_group_map
 
     comment = comment_for_trade("nosuchrow12")
     leg_comments = {"1": f"{comment}a1", "2": f"{comment}g2"}

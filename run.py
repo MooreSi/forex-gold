@@ -20,30 +20,12 @@ sys.path.insert(0, str(ROOT))
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s — %(message)s"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=_LOG_FORMAT,
-)
-
-# Write logs to a daily-rotating file in the user data directory.
-# Rotates at midnight; keeps 30 daily files before the oldest is removed.
-# Backup filenames:  forex_trader.log.YYYY-MM-DD
-#
-# Must match backend.src.config.USER_DATA_DIR exactly -- this checkout
-# (forex-refactor2) is a fork of the live app and must never default to its
-# "ForexTrader" folder (see the long comment in config.py for why).
-from backend.src.config import USER_DATA_DIR as _USER_DATA
-_log_dir   = _USER_DATA / "data"
-_log_dir.mkdir(parents=True, exist_ok=True)
-_fh = TimedRotatingFileHandler(
-    _log_dir / "forex_trader.log",
-    when="midnight",
-    backupCount=30,
-    encoding="utf-8",
-    utc=False,
-)
-_fh.setFormatter(logging.Formatter(_LOG_FORMAT))
-logging.getLogger().addHandler(_fh)
+# Logging is deliberately NOT configured here -- see setup_logging() below,
+# which main() calls. Importing a launcher is not consent to take over the root
+# logger and start appending to a file another process is writing. The
+# 2026-08-25 merge briefly had both: upstream's deferred setup_logging() landed
+# while this module-scope block survived conflict resolution, so `import run`
+# still hijacked the root logger and tests/test_log_isolation.py caught it.
 
 log = logging.getLogger("forex_trader")
 
@@ -336,6 +318,9 @@ def _dashboard_storage_secret() -> str:
     signs the dashboard session — it is not the licence or admin secret.
     """
     import secrets
+    # Imported here, not at module scope: importing this launcher must stay
+    # inert (see setup_logging above and tests/test_log_isolation.py).
+    from backend.src.config import USER_DATA_DIR as _USER_DATA
     secret_file = _USER_DATA / "dashboard_storage_secret"
     try:
         if secret_file.exists():

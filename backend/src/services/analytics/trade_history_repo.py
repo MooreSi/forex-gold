@@ -26,7 +26,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import re as _re
+
 from backend.src.db import database as db_module
+from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.services.analytics.labels import (
+    trade_channel_label, trade_source_label,
+)
 
 
 def _rows(sql: str, params: tuple = ()) -> list[tuple]:
@@ -139,3 +145,196 @@ def all_ticket_info_for_legs() -> list[tuple[Any, Any, Any, Any]]:
         "JOIN vantage_simulated_trades t ON t.trade_id = l.trade_id "
         "WHERE l.mt5_ticket IS NOT NULL"
     )
+
+
+# ── Moved out of frontend/pages/history.py by the 2026-08-25 merge ────────────
+# Both arrived with upstream, doing raw SQL from inside a NiceGUI page. The
+# frontend-never-imports-the-database contract is enforced at zero
+# (tests/refactor/test_import_contracts.py), so the queries move down here and
+# the shaping stays on the page -- the same "expression moved, nothing else"
+# split this module's docstring describes.
+
+_STRAT_LABEL = {
+    "scale_out":       "Scale Out",
+    "be_runner":       "BE Runner",
+    "trail_stop":      "Trail Stop",
+    "protected_scale": "Protected Scale",
+    "conservative":    "Conservative",
+}
+
+_COPIER_COMMENT_RE = _re.compile(r"^C(\d+)_[A-Z0-9]+_\d+_(?:ANC|PEN)$", _re.IGNORECASE)
+
+
+def _strategy_display_label(strategy: str) -> str:
+    """Human-readable label for a trade's strategy, including EA Templates
+    ("template:<name>") -- these are user-defined, not one of the fixed
+    built-in strategies, so they were never in STRATEGY_NAMES/_STRAT_LABEL
+    and fell through to the "—" placeholder instead of a readable name.
+    Confirmed live 2026-07-23 that every EA Template trade showed a blank
+    Strategy column in Trade Analysis."""
+    if not strategy:
+        return "—"
+    from backend.src.services.broker import ea_templates as _et
+    if _et.is_template_override(strategy):
+        return f"Template: {_et.template_name_from_override(strategy)}"
+    return _STRAT_LABEL.get(strategy, STRATEGY_NAMES.get(strategy, "—"))
+
+
+def _template_group_map(leg_comments: dict) -> dict[str, tuple[str, int]]:
+    """Return {ticket_str: (trade_id, tier)} for every ticket belonging to an
+    EA Template group of 2+ legs, in the exact shape _ticket_group_map
+    already produces for Adaptive Runner ladder legs -- merged into the same
+    group_map in _render_trade_table so the row-collapsing logic that
+    already exists for ladder legs applies to template siblings too, with no
+    changes needed to that logic itself.
+
+    Before this, a grid trade's anchor and its 2-3 sibling legs each
+    rendered as their own unrelated row -- _template_leg_maps only
+    backfilled their blank Channel/Strategy columns, nothing summed what the
+    signal actually made. tier 1 is always the leg that promoted the local
+    trade row (matches _ticket_group_map's own "tier 1 = anchor"
+    convention); the rest sort by ticket number, which the broker issues in
+    fill order. A prefix with only one resolved ticket is left out entirely
+    -- a group of one is nothing to collapse, same rule _ticket_group_map's
+    own caller applies.
+
+    Module-level (unlike _template_leg_maps) since it has no dependency on
+    _render_trade_table's own closure -- only leg_comments and the DB.
+    """
+    from backend.src.services.broker.ea_bridge import trade_id_prefix_from_comment
+
+    by_prefix: dict[str, list[str]] = {}
+    for ticket, comment in (leg_comments or {}).items():
+        prefix = trade_id_prefix_from_comment(comment)
+        if prefix:
+            by_prefix.setdefault(prefix, []).append(str(ticket))
+
+    result: dict[str, tuple[str, int]] = {}
+    try:
+        with db_module.db() as conn:
+            for prefix, tickets in by_prefix.items():
+                if len(tickets) < 2:
+                    continue
+                row = conn.execute(
+                    "SELECT trade_id, mt5_ticket FROM vantage_simulated_trades "
+                    "WHERE trade_id LIKE ? LIMIT 1",
+                    (prefix + "%",),
+                ).fetchone()
+                if not row:
+                    continue
+                trade_id = row[0]
+                anchor_ticket = str(row[1]) if row[1] else None
+                ordered = sorted(tickets, key=lambda t: (t != anchor_ticket, int(t)))
+                for tier, ticket in enumerate(ordered, start=1):
+                    result[ticket] = (trade_id, tier)
+    except Exception:
+        pass
+    return result
+
+
+def _comment_attribution_maps(leg_comments: dict) -> tuple[dict, dict, dict]:
+    """Return ({ticket: channel}, {ticket: strategy}, {ticket: max_tp_hit})
+    recovered from the broker's own opening-deal comment, for broker positions
+    that have no vantage_simulated_trades row of their own.
+
+    `leg_comments` is {ticket: entry_deal_comment}, taken from the broker's
+    deal history by the caller. Three comment shapes are recognised, all of
+    them written by something that leaves no local row behind:
+
+    "ea:<trade_id[:10]><a|g><N>" -- an EA Template leg. A template trade opens
+        one broker position per Anchor/Grid leg, but Python keeps a SINGLE
+        vantage_simulated_trades row per trade, so every leg except the one
+        that promoted that row has no local row and no ticket lookup can find
+        it. The EA's comment is the link back (see ea_bridge.
+        trade_id_prefix_from_comment) -- the same mechanism
+        core_template_placeholder_repair uses to adopt an orphaned row. Over
+        two days of live history only 59 of 294 broker positions had a local
+        row, and 160 of the remaining 235 were template legs.
+
+    "sig:<signal_id[:8]>" -- this app's own non-template order comment (see
+        core_open_trade.py). A position carrying it IS ours; reaching here
+        means the trade row lost its mt5_ticket link, so recover the channel
+        through signal_id instead.
+
+    "C<n>_..._ANC|_PEN" -- the third-party copier EA. See
+        _COPIER_COMMENT_RE above.
+
+    Module-level so both the Closed Trades table and the calendar's
+    day-detail view attribute a ticket identically -- the calendar had no
+    comment-based fallback at all, so every template leg (and every copier
+    position) showed "Unknown" there while the table beside it resolved the
+    same ticket correctly.
+
+    Max TP Hit (2026-08-07) travels the same route for the same reason: it is
+    only ever computed against a vantage_simulated_trades row, so a leg with
+    no row of its own showed a permanent "..." ("updating in 30 min") that no
+    sweep was ever going to replace. Measured on this account: of 2498 broker
+    positions the Closed Trades table has rendered, only 585 could resolve a
+    Max TP -- 77% of the table stuck on "...". Every leg of a template trade
+    belongs to ONE signal and is measured against that signal's TP ladder, so
+    the parent row's value is the answer for the whole trade, legs included.
+    Copier-EA positions are not ours and have no ladder to measure against at
+    all, so they get the "n/a" sentinel -- rendered as a plain dash rather
+    than a promise of an update that will never come.
+    """
+    from backend.src.services.broker.ea_bridge import trade_id_prefix_from_comment
+
+    src: dict[str, str] = {}
+    strat: dict[str, str] = {}
+    max_tp: dict[str, str] = {}
+
+    by_prefix: dict[str, list] = {}
+    by_signal: dict[str, list] = {}
+    for ticket, comment in (leg_comments or {}).items():
+        comment = comment or ""
+        prefix = trade_id_prefix_from_comment(comment)
+        if prefix:
+            by_prefix.setdefault(prefix, []).append(str(ticket))
+            continue
+        if comment.startswith("sig:"):
+            sig_prefix = comment[len("sig:"):].strip()
+            if sig_prefix:
+                by_signal.setdefault(sig_prefix, []).append(str(ticket))
+            continue
+        m = _COPIER_COMMENT_RE.match(comment)
+        if m:
+            src[str(ticket)] = f"Copier EA (C{int(m.group(1))})"
+            strat[str(ticket)] = "External"
+            max_tp[str(ticket)] = "n/a"
+
+    if not by_prefix and not by_signal:
+        return src, strat, max_tp
+
+    # Prefer a row that actually has max_tp_hit: a template trade can leave
+    # more than one row sharing a trade_id/signal_id prefix, and picking an
+    # arbitrary one would blank the column for legs whose sibling row was
+    # already computed.
+    _SQL_BY_TRADE_ID = ("SELECT tg_source, strategy, max_tp_hit "
+                        "FROM vantage_simulated_trades WHERE trade_id LIKE ? "
+                        "ORDER BY max_tp_hit IS NULL LIMIT 1")
+    _SQL_BY_SIGNAL_ID = ("SELECT tg_source, strategy, max_tp_hit "
+                         "FROM vantage_simulated_trades WHERE signal_id LIKE ? "
+                         "ORDER BY max_tp_hit IS NULL LIMIT 1")
+    try:
+        with db_module.db() as conn:
+            for sql, groups in ((_SQL_BY_TRADE_ID, by_prefix),
+                                (_SQL_BY_SIGNAL_ID, by_signal)):
+                for prefix, tickets in groups.items():
+                    row = conn.execute(sql, (prefix + "%",)).fetchone()
+                    if not row:
+                        continue
+                    tg_source, strategy, parent_max_tp = row[0], row[1], row[2]
+                    ch = trade_channel_label(tg_source or "")
+                    label = ch if ch else trade_source_label(tg_source or "")
+                    for ticket in tickets:
+                        src[ticket] = label
+                        strat[ticket] = _strategy_display_label(strategy or "")
+                        # Left unset when the parent hasn't been computed yet,
+                        # so the leg keeps showing "..." and picks the real
+                        # value up on a later refresh.
+                        if parent_max_tp:
+                            max_tp[ticket] = parent_max_tp
+    except Exception:
+        pass
+    return src, strat, max_tp
+

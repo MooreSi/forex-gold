@@ -19,8 +19,25 @@ from backend.migrations import backfills
 from backend.src.db import database as db
 
 
+def _clear_once_markers(conn) -> None:
+    """Drop the run-once markers db.init() already wrote on the empty database.
+
+    Two backfills are marker-gated rather than WHERE-shaped since the
+    2026-08-25 merge (gd2_instant_entry, anchor_tp_pips_units): re-running them
+    on every boot did real damage -- the gd2 one silently re-enabled Immediate
+    Market Entry within seconds of the user turning it off, making it
+    impossible to disable at all. init() runs the backfills against the empty
+    schema and stamps the markers there, so a test that seeds legacy rows
+    afterwards has to clear them to exercise the correction at all."""
+    conn.execute(
+        "DELETE FROM app_config WHERE key IN"
+        " ('gd2_ime_backfill_done', 'anchor_tp_pips_migrated_2026_07_31')"
+    )
+
+
 def _seed_legacy_rows(conn) -> None:
     """Rows shaped like the pre-2026-07-23 data each backfill corrects."""
+    _clear_once_markers(conn)
     conn.execute(
         "INSERT INTO vantage_signals(signal_id, source_name, direction, entry_low, entry_high,"
         " stop_loss, status, created_at) VALUES ('sig-legacy', 'instant:GoldChannel', 'BUY',"

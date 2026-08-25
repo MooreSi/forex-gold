@@ -17,7 +17,10 @@ FRONTEND = REPO / "frontend"
 
 # Shrinking baseline — lower it as swallows are converted to logged
 # handlers; never raise it.
-SILENT_EXCEPT_PASS_MAX = 40
+# 40 -> 38 (2026-08-25 merge): the two upstream swallows in reversal_panel
+# now log, and two more left frontend/pages/history.py with the SQL that
+# moved down to the analytics repo. Ratchets only ever fall.
+SILENT_EXCEPT_PASS_MAX = 38
 
 
 def _silent_except_passes(root: Path) -> list[str]:

@@ -62,6 +62,20 @@ from backend.src.services.positions.handle_scalp_runner import handle_scalp_runn
 from backend.src.services.positions.handle_trail_stop import handle_trail_stop as _handle_trail_stop_impl
 from backend.src.services.trading.instant_followup import ime_timeout_watchdog as _ime_timeout_watchdog_impl
 from backend.src.services.trading.profit_sync import profit_sweep as _profit_sweep_impl
+# Wired by the 2026-08-25 merge. Upstream calls all four from its monitor loop;
+# that loop is this module here, so the call sites did not come across with the
+# engine hunks and the three modules sat unreachable -- the orphan gate caught
+# it. See tests/refactor/test_orphan_modules.py.
+from backend.src.services.positions.core_equity_protect import (
+    check_equity_protect as _check_equity_protect_impl,
+    check_basket_harvest as _check_basket_harvest_impl,
+)
+from backend.src.services.positions.core_orphan_reconcile import (
+    reconcile_orphaned_trades as _reconcile_orphaned_trades_impl,
+)
+from backend.src.services.positions.core_template_placeholder_repair import (
+    repair_template_placeholders as _repair_template_placeholders_impl,
+)
 from backend.src.services.positions.monitor_loop import reclaim_ea_managed_trade as _reclaim_ea_managed_trade_impl
 from backend.src.services.positions.monitor_loop import reconcile_sl_hit as _reconcile_sl_hit_impl
 from backend.src.services.dpm.handler import run_dpm_calibration as _run_dpm_calibration_impl
@@ -85,6 +99,10 @@ class MonitorState:
     dxy_cycle: int = 0         # every 12 -> refresh DXY candles
     # Added by the 2026-08-25 upstream merge, with _revalidate_pending_orders.
     pending_revalidate_cycle: int = 0
+    # Orphan reconcile is throttled to once a minute, not once a cycle:
+    # it costs a /positions read plus a history lookup per suspect row,
+    # and a stranded row has usually been stranded for hours.
+    last_orphan_sweep: float = 0.0
     dpm_dxy_candles: list = field(default_factory=list)
 
 
@@ -110,6 +128,10 @@ class MonitorCtx:
     close_full_after_tps: Optional[Callable[..., Awaitable[None]]] = None
     make_close_trade_ctx: Optional[Callable[[], Any]] = None
     sync_closed_mt5_positions: Optional[Callable[[], Awaitable[None]]] = None
+    # Close-path operation, injected as the runtime's own bound method and
+    # passed through untouched -- these collaborators decide WHETHER to
+    # close; they never reshape HOW.
+    close_trade: Optional[Callable[..., Awaitable[dict]]] = None
 
 
 async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
@@ -119,6 +141,24 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
         if tick:
             open_trades = await db_module.to_db_thread(ctx.get_open_trades)
             ctx.state.has_open_trades = bool(open_trades)
+            if open_trades and ctx.close_trade is not None:
+                try:
+                    await _check_equity_protect_impl(open_trades, ctx.bridge, ctx.close_trade)
+                except Exception:
+                    log.debug("Equity Protect check failed", exc_info=True)
+                try:
+                    await _check_basket_harvest_impl(open_trades, ctx.bridge, ctx.close_trade)
+                except Exception:
+                    log.debug("Basket Harvest check failed", exc_info=True)
+                # Repair rows the broker has already closed but the app never
+                # heard about (see core_orphan_reconcile).
+                _now_orph = time.time()
+                if _now_orph - ctx.state.last_orphan_sweep > 60.0:
+                    ctx.state.last_orphan_sweep = _now_orph
+                    try:
+                        await _reconcile_orphaned_trades_impl(ctx.bridge, ctx.close_trade)
+                    except Exception:
+                        log.debug("Orphan reconcile failed", exc_info=True)
             rs = await db_module.to_db_thread(db_module.get_risk_settings)
             profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
             # Refresh candle cache once per cycle (shared by all DPM trade handlers)
@@ -250,6 +290,15 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
             await ctx.sync_closed_mt5_positions()
         except Exception as e:
             log.debug("MT5 sync error: %s", e)
+        # EA Template placeholder rows are excluded from the sync above
+        # (managed_by='ea', and they have no ticket to look up anyway), so they
+        # need their own reconciliation: a leg-fill event that never reached
+        # this node otherwise leaves the row a permanent $0-entry ghost in
+        # Active Trades. See core_template_placeholder_repair.py.
+        try:
+            await _repair_template_placeholders_impl(ctx.bridge)
+        except Exception as e:
+            log.debug("Template placeholder repair error: %s", e)
 
     ctx.state.profit_cycle += 1
     if ctx.state.profit_cycle >= 24:

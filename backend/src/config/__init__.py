@@ -21,15 +21,27 @@ BASE_DIR = Path(__file__).parent.parent  # project root — code only
 # so that distributing a new version of the app never touches user credentials.
 # Path is platform-specific; all downstream code uses this constant.
 #
-# This checkout (forex-refactor2) is a full fork of the live, actively-trading
-# app at /Users/simon/Documents/FOREX -- it must NEVER default to that app's
-# "ForexTrader" folder, or a dev run here would boot against the live app's
-# real MT5 bridge, Telegram session, and remote-sync state (confirmed live
-# 2026-07-21: a smoke-test run reconnected the live Telegram session, wrote a
-# real signal row to the shared reversal_engine.db, and started the shared
-# remote-admin server, all before this fix existed). "ForexTrader-Refactor2"
-# is a separate, genuinely empty folder by default -- override with the
-# FOREX_TRADER_DATA_DIR env var if a different location is ever needed.
+# History, because the value here has flipped twice and the reasoning matters:
+#
+# This checkout began as a fork of a separate, live, actively-trading app, and
+# defaulting to that app's "ForexTrader" folder was genuinely dangerous --
+# confirmed live 2026-07-21, when a smoke-test run reconnected the LIVE
+# Telegram session, wrote a real signal row to the shared reversal_engine.db
+# and started the shared remote-admin server. So the default became
+# "ForexTrader-Refactor2".
+#
+# That isolation need ended on 2026-07-24: the fork was promoted to be the only
+# app and the original was retired. The separate name then became its own bug --
+# every launcher and the installer's [Dirs] section still said "ForexTrader"
+# while the running code wrote to "ForexTrader-Refactor2", which stranded a
+# config.yaml on the Windows client. Upstream reverted it (212fd87) and the
+# 2026-08-25 merge takes that revert: "ForexTrader" is correct.
+#
+# The 2026-07-21 hazard is not gone, only narrowed: if you ever run this
+# checkout alongside another install on one machine, set FOREX_TRADER_DATA_DIR
+# (or FOREX_TRADER_DATA_DIR_NAME) FIRST. Nothing in the code can tell the two
+# apart -- the only thing standing between a dev run and the live database is
+# that there is currently only one app.
 _APP_DATA_FOLDER = os.environ.get("FOREX_TRADER_DATA_DIR_NAME", "ForexTrader")
 if sys.platform == "win32":
     USER_DATA_DIR = Path.home() / "AppData" / "Roaming" / _APP_DATA_FOLDER

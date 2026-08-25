@@ -83,7 +83,6 @@ from backend.src.services.positions.core_signal_snapshot import (
     capture_pending_snapshots as _capture_signal_snapshots_impl,
     capture_background_snapshot as _capture_background_snapshot_impl,
 )
-from backend.src.services.trading.profit_sync import profit_sweep as _profit_sweep_impl
 from backend.src.services.positions.core_ea_link_watchdog import (
     new_state as _ea_link_new_state,
     ea_link_check as _ea_link_check_impl,
@@ -656,6 +655,7 @@ class TradingRuntime:
             close_full_after_tps=self._close_full_after_tps,
             make_close_trade_ctx=self._make_close_trade_ctx,
             sync_closed_mt5_positions=self._sync_closed_mt5_positions,
+            close_trade=self.close_trade,
         )
 
     def _set_dpm_candles(self, candles: list) -> None:
@@ -734,11 +734,20 @@ class TradingRuntime:
     async def _schedule_profit_sync(self, trade_id: str, mt5_ticket: int) -> None:
         return await _schedule_profit_sync_impl(trade_id, mt5_ticket, self._bridge)
 
+    async def schedule_profit_sync(self, trade_id: str, mt5_ticket: int) -> None:
+        """Public delegate to _schedule_profit_sync, for collaborators.
+
+        EABridge schedules a profit sync when the EA reports a close; upstream
+        did that by calling the private directly, which
+        tests/core/test_runtime_facade.py forbids. Added as a delegate rather
+        than by renaming the private, because the private is bound into the
+        close-path context and CLAUDE.md freezes that shape -- renaming it
+        reshapes a close-path binding, which needs owner sign-off and a demo.
+        Allowlisted in facade_allowlist.json. (2026-08-25 merge.)"""
+        return await self._schedule_profit_sync(trade_id, mt5_ticket)
+
     async def _revalidate_pending_orders(self) -> None:
         return await _revalidate_pending_orders_impl(self._bridge)
-
-    async def _profit_sweep(self) -> None:
-        return await _profit_sweep_impl(self._bridge)
 
 
     async def _close_full_after_tps(self, trade_id: str, mt5_ticket: Optional[int],

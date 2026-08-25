@@ -20,7 +20,11 @@ from typing import Callable, Optional
 
 from backend.src.controllers import engines_controller as engines_controller
 
+import logging
+
 from nicegui import ui
+
+_log = logging.getLogger(__name__)
 
 from backend.src.controllers import sync_controller as sync_ctl
 
@@ -235,8 +239,13 @@ def render() -> None:
                 try:
                     from backend.src.services.reversal_engine import pro_model
                     pro_model.fit(force=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Toggling the setting still succeeded; only the immediate
+                    # refit failed, and it retrains on its own schedule anyway.
+                    # Logged rather than swallowed so a persistently broken fit
+                    # is visible instead of looking like it worked.
+                    _log.warning("[RE-Panel] pro_model refit after enabling "
+                                 "Learn From Pro Signals failed: %s", exc)
             ui.notify("Learning from professional signals "
                       f"{'enabled' if e.value else 'disabled'}",
                       type="positive" if e.value else "info")
@@ -461,8 +470,11 @@ def render() -> None:
                 f"{live['n']} closed · {live['per_trade']:+.2f}/trade"
                 if live["n"] else "no closed trades yet"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # A panel refresh must never take the page down, but a realised-P&L
+            # figure that silently stops updating reads as "no trades" -- which
+            # is a different claim from "could not read".
+            _log.debug("[RE-Panel] realised P&L refresh failed: %s", exc)
 
         # Stats
         try:

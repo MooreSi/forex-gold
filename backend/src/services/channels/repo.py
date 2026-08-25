@@ -22,6 +22,8 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+# `transaction` is db() under its boundary-declaring name (see backend/src/db/__init__).
+from backend.src.db.database import db as transaction  # noqa: E402
 from backend.src.services.cluster.sync_repo import _ensure_sync_tables  # noqa: E402
 # Imported inside _refresh to avoid an import-order cycle: read_repo imports
 # database, database imports this module, and this module needs read_repo's
@@ -131,7 +133,13 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
     old_canon = _canonical(old_name)
     if old_canon == new_name:
         return
-    with db() as conn:
+    # transaction(), not db(): a rename cascade that half-applies leaves the
+    # old bucket's rows stranded under a name nothing looks up -- which is
+    # precisely the failure upstream traced to a user-set EA Template override
+    # sitting invisible while the channel traded the global default. Nested
+    # transactions participate in the caller's, so this is safe from callers
+    # that already hold one. (2026-08-25 merge.)
+    with transaction() as conn:
         for tbl, col in _CHANNEL_NAME_TABLES:
             try:
                 if tbl in _CHANNEL_UNIQUE_TABLES:

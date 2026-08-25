@@ -1530,7 +1530,12 @@ class EABridge:
             if int(closed_row.get("mt5_ticket") or 0):
                 # Replace the entry-vs-exit estimate with the broker's own
                 # realised figure once the deal history settles.
-                asyncio.create_task(self._engine._schedule_profit_sync(
+                # Through the engine's PUBLIC facade: upstream called
+                # _schedule_profit_sync, and a service reaching into a runtime
+                # private is what tests/core/test_runtime_facade.py stops. The
+                # method was promoted and allowlisted instead, which is the
+                # route that test names.
+                asyncio.create_task(self._engine.schedule_profit_sync(
                     trade_id, int(closed_row["mt5_ticket"]),
                 ))
         except Exception as e:
@@ -1915,6 +1920,20 @@ class EABridge:
 
 
 _instance: Optional[EABridge] = None
+
+
+def schedule_push_template(instance, name: str, values: dict) -> None:
+    """Fire-and-forget a template push to the EA from a sync caller.
+
+    Exists so the UI does not have to import _schedule_coro out of
+    backend.src.db.database: "frontend never imports the database" is enforced
+    at zero (tests/refactor/test_import_contracts.py), and the scheduler only
+    lives in that module for historical reasons -- it is an event-loop utility,
+    not data access. The thread-safety it provides is still needed: this runs on
+    a NiceGUI handler thread, not the loop thread. (2026-08-25 merge.)
+    """
+    from backend.src.db.database import _schedule_coro
+    _schedule_coro(instance.push_template(name, values))
 
 
 def get_instance() -> Optional[EABridge]:

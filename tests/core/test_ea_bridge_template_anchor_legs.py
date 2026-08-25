@@ -144,7 +144,7 @@ class _FakeEngine:
         self.profit_syncs = []
         self._bridge = None
 
-    async def _record_close(self, trade_id, close_price, reason):
+    async def record_close(self, trade_id, close_price, reason):
         with db.db() as conn:
             conn.execute(
                 "UPDATE vantage_simulated_trades SET status='closed',close_price=?,"
@@ -162,7 +162,10 @@ class _FakeEngine:
     async def get_mt5_account(self):
         return {"balance": 599.59, "equity": 599.59, "margin_free": 538.70}
 
-    async def _schedule_profit_sync(self, trade_id, ticket):
+    # Mirrors the runtime's public facade -- EABridge calls
+    # engine.schedule_profit_sync, not the private (see
+    # tests/core/test_runtime_facade.py).
+    async def schedule_profit_sync(self, trade_id, ticket):
         self.profit_syncs.append((trade_id, ticket))
 
 

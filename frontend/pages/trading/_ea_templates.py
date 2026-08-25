@@ -84,8 +84,7 @@ def _render_ea_templates_card() -> None:
             ui.notify("Save the template first, then Send", type="warning")
             return
         try:
-            from backend.src.db.database import _schedule_coro
-            _schedule_coro(ea.push_template(name, _current_values()))
+            _eab.schedule_push_template(ea, name, _current_values())
             ui.notify(f"Sent '{name}' to the EA", type="positive")
         except Exception as exc:
             ui.notify(f"Send failed: {exc}", type="negative")

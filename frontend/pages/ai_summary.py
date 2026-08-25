@@ -15,7 +15,6 @@ from backend.src.controllers import settings_controller as settings_controller
 from backend.src.services.analytics import read_repo
 from backend.src.utils.models import STRATEGY_NAMES
 from backend.src.services.positions import core_strategy_catalogue as strategy_catalogue
-from backend.src.db import database as db_module
 
 def _uk_time() -> str:
     return datetime.now().strftime("%H:%M:%S")

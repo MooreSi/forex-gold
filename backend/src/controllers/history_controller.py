@@ -148,3 +148,13 @@ def get_channel_performance_map():
 
 def set_channel_paused(source: str, paused) -> None:
     _channels.set_paused(source, paused)
+
+
+async def template_group_map(leg_comments: dict) -> dict:
+    """{ticket: (trade_id, tier)} for EA-template groups of 2+ legs."""
+    return await _maps.template_group_map(leg_comments)
+
+
+async def comment_attribution_maps(leg_comments: dict) -> tuple:
+    """(source, strategy, max_tp) maps keyed by ticket, from EA order comments."""
+    return await _maps.comment_attribution_maps(leg_comments)

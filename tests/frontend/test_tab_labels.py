@@ -30,12 +30,17 @@ def test_every_tab_has_a_subtitle_or_plain_name():
 
 
 def test_the_jargon_tabs_explain_their_job():
-    """The four unguessable names must say what they actually are."""
+    """The unguessable names must say what they actually are.
+
+    "Edge" dropped from this list by the 2026-08-25 merge: upstream removed the
+    Edge page itself (152f3df, Simon's own commit), so there is no longer a tab
+    to explain. "News" took its place in the tab bar and is checked instead."""
     subs = tab_labels.TAB_SUBTITLES
     assert "telegram" in subs["Parsing"].lower()
     assert "engine" in subs["Signal Generator"].lower() or "strategy" in subs["Signal Generator"].lower()
     assert "history" in subs["Analysis"].lower() or "stats" in subs["Analysis"].lower()
-    assert subs["Edge"].strip()
+    assert "calendar" in subs["News"].lower() or "blackout" in subs["News"].lower()
+    assert "Edge" not in subs, "the Edge page was removed; its subtitle should go with it"
 
 
 def test_the_subtitle_checker_can_see_a_blank():

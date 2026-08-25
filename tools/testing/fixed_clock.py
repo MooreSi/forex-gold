@@ -61,6 +61,14 @@ def pytest_configure(config):
 
     # Recomputed from the pinned instant rather than hardcoded, so a custom
     # --market-clock stays self-consistent.
+    #
+    # The originals are kept reachable: a test ABOUT the partition itself (e.g.
+    # tests/core/test_bot_panel_pause.py, proving the panel's session-end hours
+    # are dpm_engine's own edges) has to drive the real function against a fake
+    # clock. Without these it would silently assert against this lambda and pass
+    # no matter what the real boundaries said -- which is worse than failing.
+    dpm_engine.detect_session_unpinned = dpm_engine.detect_session
+    dpm_engine.is_weekly_market_closed_unpinned = dpm_engine.is_weekly_market_closed
     dpm_engine.detect_session = lambda: session
     dpm_engine.is_weekly_market_closed = lambda now=None: _closed(now or pinned)
 

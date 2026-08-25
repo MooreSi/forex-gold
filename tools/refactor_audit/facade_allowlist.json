@@ -30,6 +30,7 @@
   "pnl",
   "record_close",
   "restart_app",
+  "schedule_profit_sync",
   "set_bridge_inhibit_reconnect",
   "set_telegram_reader",
   "shutdown",

@@ -40,13 +40,6 @@
       "reason": "Walk-forward harness to validate breakout recalibrations BEFORE they touch live trading; its docstring documents manual invocation (run_walkforward/report). Likely a dev tool, not dead. The frontend backtest page uses a different system (services.backtest)."
     },
     {
-      "module": "backend.src.config.licence.client",
-      "file": "backend/src/config/licence/client.py",
-      "loc": 90,
-      "class": "unwired-infra-needs-owner-decision",
-      "reason": "Licence client: HTTP to the auth server with cert pinning. Zero references. Security/licence infra -- ties into phase4/030 and the local-debug-mode licence approach. Owner decision only."
-    },
-    {
       "module": "backend.src.services.test_signal.auth",
       "file": "backend/src/services/test_signal/auth.py",
       "loc": 51,

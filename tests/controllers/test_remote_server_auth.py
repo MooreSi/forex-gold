@@ -48,6 +48,17 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_admin_machines", [])
     monkeypatch.setattr(server, "_connected", {})
     monkeypatch.setattr(server, "_auth_failures", {})
+    # A stand-in signer. Since upstream 7251656 the server does not sign
+    # licences itself -- the Ed25519 private key lives in KeyGen, outside this
+    # repo, and forex_admin.py injects a signer through register_kg_callbacks.
+    # Before that change this module imported keygen.generate_licence_key
+    # directly, which is exactly the shared-secret hole the change closed. So a
+    # test that expects an approved client to receive a key has to supply the
+    # signer, the same way the admin does.
+    monkeypatch.setattr(
+        server, "_kg_sign_fn",
+        lambda machine_id, expiry_date: f"SIG-{machine_id}-{expiry_date}",
+    )
     return remote_dir
 
 

@@ -210,3 +210,18 @@ async def group_map() -> dict[str, tuple[str, int]]:
 
 async def ticket_info() -> dict:
     return await to_db_thread(_ticket_info)
+
+
+# ── EA order-comment attribution (2026-08-25 merge) ───────────────────────────
+# The queries live in trade_history_repo; the thread hop and the service-facing
+# names live here, because the controller layer may import a service but never a
+# repo or the database (both contracts enforced at zero).
+
+async def template_group_map(leg_comments: dict) -> dict:
+    """{ticket: (trade_id, tier)} for EA-template groups of 2+ legs."""
+    return await to_db_thread(_repo._template_group_map, leg_comments)
+
+
+async def comment_attribution_maps(leg_comments: dict) -> tuple:
+    """(source, strategy, max_tp) maps keyed by ticket, from EA order comments."""
+    return await to_db_thread(_repo._comment_attribution_maps, leg_comments)

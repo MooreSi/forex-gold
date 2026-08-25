@@ -65,8 +65,11 @@ def test_boundaries_match_the_apps_own_session_partition():
     ends = {k: h for k, (_, h) in panel._SESSION_END_UTC.items()}
     assert ends == {"as": 7, "lo": 12, "ov": 16, "ny": 21}
 
-    from backend.src.services.dpm.engine import detect_session
     import backend.src.services.dpm.engine as dpm
+    # The real partition, not the pinned lambda the fixed_clock plugin installs
+    # for the rest of the suite -- this test exists to check the boundaries
+    # themselves, so asserting against the pinned stub would prove nothing.
+    detect_session = getattr(dpm, "detect_session_unpinned", dpm.detect_session)
 
     # The hour immediately before each boundary must still be that session,
     # and the boundary hour itself must not be.

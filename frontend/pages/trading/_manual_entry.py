@@ -7,6 +7,7 @@ through the trading controller -- see docs/system/rules/20-trading-safety.md.
 import asyncio
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
+from backend.src.services.analytics.reporting import is_stuck_placeholder
 from backend.src.utils.models import (
     STRATEGY_NAMES, STRATEGY_SCALE_OUT, STRATEGY_ORB_FIXED,
 )
@@ -345,10 +346,14 @@ def _render_market_order_form(engine):
         "and DPM manages the trade from there."
     ).classes("text-xs text-gray-500 mt-2 max-w-2xl")
 def _render_orb_report(engine):
-    """London open ORB/IVB report — trades the breakout of the last hour
-    before London opens, evaluated within the first 15 minutes of London,
-    volume profile, reload-zone entry setup, manual execute, and an
-    auto-execute-every-morning toggle (places a genuine EA pending order)."""
+    """London opening-range-breakout report — classic ORB methodology
+    (https://www.litefinance.org/blog/for-beginners/trading-strategies/opening-range-breakout-strategy/):
+    the whole Asian session (00:00-08:00 UTC) is a confirmation filter, the
+    first 15 minutes of London (08:00-08:15 UTC) is the traded opening
+    range, a breakout only counts once price clears BOTH in the same
+    direction. Stop at the opening range's midpoint, target at 2x the
+    resulting risk (auto-executed as a genuine market order once
+    confirmed) with an informational-only 3x level shown alongside it."""
     import base64
     from backend.src.services.notifications import email_service
 
@@ -369,22 +374,23 @@ def _render_orb_report(engine):
         with container:
             if not report:
                 ui.label(
-                    "No ORB report available yet — this builds from the last hour "
-                    "before London opens and is only available during the first 15 "
-                    "minutes after London opens."
+                    "No ORB report available yet — this builds from the whole Asian "
+                    "session plus the first 15 minutes of London, and is only "
+                    "available from London open onward."
                 ).classes("text-gray-500 text-sm italic p-4")
                 return
 
             direction = report.get("direction", "inside")
             _label = {"bullish": ("BREAKOUT — BULLISH", "text-green-400"),
                       "bearish": ("BREAKOUT — BEARISH", "text-red-400"),
+                      "unconfirmed": ("BROKE OPENING RANGE — UNCONFIRMED", "text-amber-400"),
                       "inside": ("INSIDE RANGE", "text-gray-400")}
             status_txt, status_col = _label.get(direction, ("—", "text-gray-400"))
 
             with ui.card().classes("w-full max-w-3xl bg-gray-800 p-6 rounded-lg"):
                 with ui.row().classes("items-center gap-2 mb-2"):
                     ui.icon("candlestick_chart").classes("text-amber-400 text-xl")
-                    ui.label("London Open — ORB/IVB Report").classes("text-lg font-bold text-yellow-300")
+                    ui.label("London Open — ORB Report").classes("text-lg font-bold text-yellow-300")
 
                 with ui.row().classes("items-center gap-4 mb-3"):
                     ui.label(f"Current price: ${float(report.get('current_price', 0) or 0):.2f}").classes(
@@ -392,16 +398,27 @@ def _render_orb_report(engine):
                     )
                     ui.label(status_txt).classes(f"text-sm font-bold {status_col}")
 
-                # Pre-London reference range (last hour before London open) + volume profile
-                with ui.grid(columns=4).classes("w-full text-sm gap-2 mb-2"):
+                if report.get("phase") == "forming":
+                    ui.label(report.get("position_note", "")).classes("text-sm text-gray-400 italic mb-2")
                     _stat_cell(
-                        "PRE-LONDON RANGE",
-                        f"${report['range_low']:.2f} – ${report['range_high']:.2f}  "
-                        f"({report['range_height']:.1f} pts)",
+                        "ASIAN RANGE (00:00–08:00 UTC)",
+                        f"${report['asia_low']:.2f} – ${report['asia_high']:.2f}  "
+                        f"({report['asia_range']:.1f} pts)",
                     )
-                    _stat_cell("POC", f"${report['poc']:.2f}")
-                    _stat_cell("VALUE AREA", f"${report['val']:.2f} – ${report['vah']:.2f}")
-                    _stat_cell("WINDOW", "London open + 15min")
+                    return
+
+                # Asian range (filter) + London opening range (traded range)
+                with ui.grid(columns=2).classes("w-full text-sm gap-2 mb-2"):
+                    _stat_cell(
+                        "ASIAN RANGE (00:00–08:00 UTC)",
+                        f"${report['asia_low']:.2f} – ${report['asia_high']:.2f}  "
+                        f"({report['asia_range']:.1f} pts)",
+                    )
+                    _stat_cell(
+                        "LONDON OPENING RANGE (08:00–08:15 UTC)",
+                        f"${report['or_low']:.2f} – ${report['or_high']:.2f}  "
+                        f"({report['or_range']:.1f} pts)",
+                    )
 
                 if report.get("position_note"):
                     ui.label(report["position_note"]).classes("text-xs text-gray-500 mb-3")
@@ -416,32 +433,27 @@ def _render_orb_report(engine):
                     b64 = base64.b64encode(chart_png).decode()
                     ui.image(f"data:image/png;base64,{b64}").classes("w-full rounded mb-3")
 
-                # Reload-zone entry/exit setup, if a breakout has happened
+                # Breakout entry/exit setup, once confirmed
                 if direction in ("bullish", "bearish"):
                     rr = report.get("rr")
-                    n = report.get("target_sample_n", 0)
-                    is_default = report.get("target_is_default", True)
-                    confidence_note = (
-                        f"default 2.0x multiple — only {n} clean-breakout day(s) measured so far"
-                        if is_default else
-                        f"empirically measured from the last {n} clean-breakout days on this account"
-                    )
+                    target2 = report.get("target2")
 
-                    ui.label("Reload Zone Setup").classes(
+                    ui.label("Breakout Setup").classes(
                         "text-xs font-semibold text-amber-300 uppercase tracking-wide mt-2 mb-1"
                     )
                     with ui.grid(columns=4).classes("w-full text-sm gap-2 mb-1"):
-                        _stat_cell(
-                            "ENTRY ZONE",
-                            f"${report['entry_zone_low']:.2f} – ${report['entry_zone_high']:.2f}",
-                        )
                         _stat_cell("STOP", f"${report['stop']:.2f}", "text-red-400")
-                        _stat_cell("TARGET", f"${report['target']:.2f}", "text-green-400")
+                        _stat_cell("TARGET (2:1)", f"${report['target']:.2f}", "text-green-400")
+                        _stat_cell(
+                            "TARGET 2 (3:1, info only)",
+                            f"${target2:.2f}" if target2 else "—", "text-green-400",
+                        )
                         _stat_cell("R:R", f"{rr:.2f}:1" if rr else "—", "text-amber-300")
                     ui.label(
-                        f"Target = breakout level x {report.get('target_multiple', 2.0):.2f} of the "
-                        f"Asian range height ({confidence_note}). Stop = breakout level ± "
-                        f"{report.get('sl_range_pct', 0.50) * 100:.0f}% of the Asian range height."
+                        "Stop = midpoint of the London opening range. Target = 2x the "
+                        "resulting risk (auto-executed). Target 2 = 3x risk, shown for "
+                        "reference only — the automated path closes fully at Target, "
+                        "it does not manage a partial-close ladder."
                     ).classes("text-xs text-gray-500 mb-3")
 
                     mt5_direction = "BUY" if direction == "bullish" else "SELL"
@@ -483,7 +495,7 @@ def _render_orb_report(engine):
                             exec_btn.enable()
 
                     exec_btn = ui.button(
-                        f"Execute {mt5_direction} at Market — ORB/IVB Setup",
+                        f"Execute {mt5_direction} at Market — ORB Setup",
                         on_click=_execute_orb,
                     ).classes("bg-amber-600 hover:bg-amber-500 text-white w-full py-3 text-base font-semibold")
 
@@ -505,10 +517,16 @@ def _render_orb_report(engine):
                             trading_ctl.update_risk_settings({"orb_lot_size": float(e.value or 0)})
 
                         lot_inp.on_value_change(_lot_change)
+                elif direction == "unconfirmed":
+                    ui.label(
+                        "Price broke the London opening range but is still inside the "
+                        "Asian range — not confirmed. The manual Execute button appears "
+                        "once price also clears the Asian range in the same direction."
+                    ).classes("text-xs text-gray-500 italic mb-2")
                 else:
                     ui.label(
                         "No breakout yet — the manual Execute button appears once price "
-                        "clears the Asian range."
+                        "clears both the London opening range and the Asian range."
                     ).classes("text-xs text-gray-500 italic mb-2")
 
                 # Auto-execute toggle

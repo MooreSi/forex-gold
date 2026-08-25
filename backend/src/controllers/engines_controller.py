@@ -16,6 +16,7 @@ from backend.src.services.reversal_engine import reversal_engine_service as _re_
 from backend.src.services.risk import settings as _risk
 from backend.src.services.test_signal import panel_data as bounce
 from backend.src.services.test_signal import test_signal_service as _bc_svc
+from backend.src.db.database import to_db_thread as _to_db_thread
 
 __all__ = ["breakout", "reversal", "bounce",
            "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
@@ -81,3 +82,9 @@ def stop_running_engines() -> None:
         eng = svc.get_instance()
         if eng is not None and getattr(eng, "is_running", False):
             eng.stop()
+
+
+async def reversal_realised_pnl() -> dict:
+    """The Reversal Engine's REAL closed P&L -- the trades it actually placed,
+    read from the core trade ledger rather than the engine's own virtual one."""
+    return await _to_db_thread(reversal.get_realised_pnl)

@@ -13,8 +13,6 @@ unavailable — the only thing they can't do is receive updates.
 """
 
 import asyncio
-import hashlib
-import io
 import json
 import logging
 import os
@@ -24,16 +22,16 @@ import subprocess
 import sys
 import threading
 import time
-import zipfile
 from pathlib import Path
 from typing import Optional
 
 from backend.src.config import USER_DATA_DIR
 from backend.src.config.licence import store as _licence_store
+from backend.src import config as _app_config
 from backend.src.services.cluster.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
-    MSG_PING, MSG_GET_DIAG, MSG_UPDATE_BEGIN, MSG_UPDATE_END, MSG_VERSION_INFO, make,
+    MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO, make,
 )
 from backend.src.services.cluster.remote.tls import client_ssl_context, SERVER_HOST, SERVER_PORT
 
@@ -124,11 +122,44 @@ async def _scan_lan_for_server() -> str:
             return ""
 
     results = await asyncio.gather(*[_probe(f"{prefix}.{i}") for i in range(1, 255)])
-    for ip in results:
-        if ip and ip != local_ip:
+    candidates = [ip for ip in results if ip and ip != local_ip]
+    for ip in candidates:
+        if await _speaks_our_protocol(ip):
             log.info("[RemoteClient] LAN scan found server at %s", ip)
             return ip
+        log.info(
+            "[RemoteClient] LAN scan: %s has port %d open but is not the admin "
+            "server — ignoring", ip, SERVER_PORT,
+        )
     return ""
+
+
+async def _speaks_our_protocol(host: str) -> bool:
+    """Return True only if `host` completes a WebSocket handshake on SERVER_PORT.
+
+    An open TCP port is not proof of anything: 8443 is a common alternate-HTTPS
+    port, so a router, NAS or hypervisor on the client's subnet answers the scan
+    just as readily as the admin server does. Accepting the first open port
+    outright meant the client locked onto that device and never fell back to the
+    WAN address -- confirmed live 2026-08-07 on a remote Mac, which sat on the
+    activation screen reporting "server rejected WebSocket connection: HTTP 404"
+    while the real server was up and reachable the whole time. Rediscovery ran
+    every retry, so it picked the same wrong host forever.
+
+    The handshake is the cheapest thing only our server can pass; it runs on the
+    handful of hosts the fast TCP scan shortlisted, not the whole subnet.
+    """
+    import websockets
+    try:
+        async with websockets.connect(
+            f"wss://{host}:{SERVER_PORT}",
+            ssl=client_ssl_context(),
+            open_timeout=4,
+            close_timeout=2,
+        ):
+            return True
+    except Exception:
+        return False
 
 
 async def _discover_lan_server(timeout: float = 6.0) -> str:
@@ -169,6 +200,10 @@ _status: dict = {
     "email":               "",
     "nickname":            "",
     "is_remote_admin":     False,
+    # Unix time the last MSG_REGISTER actually reached the admin server, 0 if
+    # none has. Reset by request_registration() so each new request is judged
+    # on its own delivery, not an earlier one's.
+    "registration_sent_at": 0.0,
 }
 
 
@@ -209,7 +244,8 @@ def request_registration(email: str, nickname: str = "") -> None:
     _EMAIL_FILE.write_text(email.strip(), encoding="utf-8")
     if nickname.strip():
         _NICKNAME_FILE.write_text(nickname.strip(), encoding="utf-8")
-    _status["last_error"] = "awaiting admin approval"
+    _status["registration_sent_at"] = 0.0
+    _status["last_error"] = "contacting administrator server"
     if _client_task and not _client_task.done():
         _client_task.cancel()
     try:
@@ -239,13 +275,30 @@ def _app_version() -> str:
     return "unknown"
 
 
+def _commit_report() -> tuple[str, str]:
+    """(sha, reason) for the code this instance is running -- see
+    core_app_update.get_commit_report(). The reason travels with the
+    heartbeat so the admin console can distinguish a machine that has simply
+    never self-updated (no .git yet) from one whose checkout is broken,
+    instead of showing the same blank "no commit" for both."""
+    try:
+        from backend.src.services.positions.core_app_update import get_commit_report
+        return get_commit_report()
+    except Exception as e:
+        log.debug("[RemoteClient] commit report unavailable: %s", e)
+        return "", "unavailable"
+
+
 def _build_hello() -> dict:
     import platform
     from backend.src.services.cluster.remote.ip_check import get_machine_uuid
+    commit_sha, commit_note = _commit_report()
     return make(
         MSG_HELLO,
         token=get_or_create_token(),
         version=_app_version(),
+        commit_sha=commit_sha,
+        commit_note=commit_note,
         platform=sys.platform,
         hostname=platform.node(),
         machine_uuid=get_machine_uuid(),
@@ -324,9 +377,12 @@ def _build_status() -> dict:
                 bridge_ok = True
         except Exception:
             bridge_ok = False
+    commit_sha, commit_note = _commit_report()
     return make(
         MSG_STATUS,
         version=_app_version(),
+        commit_sha=commit_sha,
+        commit_note=commit_note,
         uptime_s=uptime,
         trades_open=trades_open,
         bridge_connected=bridge_ok,
@@ -357,11 +413,14 @@ def _log_level(line: str) -> str:
 def _build_diagnostics() -> dict:
     import platform
     from datetime import datetime, timedelta
+    commit_sha, commit_note = _commit_report()
     data = {
         "platform":  sys.platform,
         "hostname":  platform.node(),
         "python":    sys.version,
         "version":   _app_version(),
+        "commit_sha": commit_sha,
+        "commit_note": commit_note,
         "uptime_s":  int(time.time() - _START_TIME),
         "log_lines": [],
         "log_raw":   "",
@@ -472,10 +531,20 @@ def _do_restart() -> None:
         venv_python = app_root / ".venv" / "Scripts" / "python.exe"
         python = str(venv_python) if venv_python.exists() else sys.executable
         with open_restart_log(log_path) as _log:
+            # CREATE_BREAKAWAY_FROM_JOB is required: Task Scheduler puts this
+            # process (and every child it spawns) in a Job Object with
+            # kill-on-close semantics, so without breakaway this relaunch
+            # child dies together with this process before its delay timer
+            # even elapses -- confirmed empirically, see the matching comment
+            # in platform_utils.restart_app().
             subprocess.Popen(
                 delayed_relaunch_cmd(python, "run.py", delay_secs=3, extra_args=["--no-browser"]),
                 cwd=str(app_root),
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=(
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.CREATE_BREAKAWAY_FROM_JOB
+                ),
                 stdin=subprocess.DEVNULL,
                 stdout=_log,
                 stderr=_log,
@@ -501,151 +570,26 @@ def _do_restart() -> None:
 
 # ── Update application ────────────────────────────────────────────────────────
 
-async def _apply_update(zip_data: bytes, sha256: str, version: str,
-                        manifest: list | None = None) -> None:
-    """Verify, extract and apply the update package, then restart.
+async def _apply_git_update() -> None:
+    """Handle MSG_GIT_UPDATE: run core_app_update.apply_update() (git fetch +
+    force-checkout + pip install + pycache clear) and restart on success.
 
-    If manifest is provided, any file inside forex_trader/ or any root-level
-    script (.py/.bat/.command/.exe/.sh/.txt/.toml) that is NOT in the manifest
-    is deleted — this keeps the client in sync with files removed on the server.
+    Deliberately a thin wrapper, not a second implementation -- the whole
+    point of the admin console's Update button sending this message instead
+    of streaming a zip (as it used to) is that both the admin-triggered
+    update and the client's own Settings > Update button converge on this
+    one code path, so they can never drift out of sync with each other the
+    way the old zip-based push and the git-based self-update used to (a zip
+    push wrote files straight to disk with no git awareness at all, leaving
+    the working tree "dirty" and breaking the next git-based update).
     """
-    actual_sha = hashlib.sha256(zip_data).hexdigest()
-    if actual_sha != sha256:
-        log.error("[RemoteClient] Update SHA256 mismatch — aborting")
+    from backend.src.services.positions import core_app_update
+
+    log.info("[RemoteClient] Git update triggered by admin — applying")
+    result = await core_app_update.apply_update()
+    if not result.get("ok"):
+        log.error("[RemoteClient] Git update failed: %s", result.get("error"))
         return
-
-    import shutil
-    app_root = Path(__file__).parent.parent.parent  # FOREX/
-    tmp_dir  = app_root / ".update_tmp"
-    tmp_dir.mkdir(exist_ok=True)
-
-    log.info("[RemoteClient] Applying update v%s (%d bytes)", version, len(zip_data))
-    try:
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-            zf.extractall(tmp_dir)
-
-        # Copy extracted files over live installation, logging each one.
-        # Per-file errors are caught individually so one locked file cannot
-        # abort the whole update and leave requirements.txt un-copied.
-        copied = 0
-        failed = 0
-        for src in tmp_dir.rglob("*"):
-            if not src.is_file():
-                continue
-            rel  = src.relative_to(tmp_dir)
-            dest = app_root / rel
-            try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(src.read_bytes())
-                copied += 1
-                log.debug("[RemoteClient] Updated %s", rel)
-            except Exception as _copy_err:
-                failed += 1
-                log.warning("[RemoteClient] Could not update %s: %s", rel, _copy_err)
-
-        log.info("[RemoteClient] %d files updated, %d skipped", copied, failed)
-
-        # Prune files deleted on the server side.
-        if manifest:
-            manifest_set = set(manifest)
-            _ROOT_MANAGED_EXTS = {".py", ".txt", ".toml", ".bat",
-                                   ".command", ".exe", ".sh"}
-            deleted = 0
-
-            # Prune within forex_trader/
-            for existing in sorted((app_root / "forex_trader").rglob("*"),
-                                   reverse=True):
-                if not existing.is_file():
-                    continue
-                rel_posix = existing.relative_to(app_root).as_posix()
-                if rel_posix not in manifest_set:
-                    try:
-                        existing.unlink()
-                        deleted += 1
-                        log.debug("[RemoteClient] Removed stale file: %s", rel_posix)
-                    except Exception as _del_err:
-                        log.warning("[RemoteClient] Could not remove %s: %s",
-                                    rel_posix, _del_err)
-
-            # Remove empty directories left behind inside forex_trader/
-            for d in sorted((app_root / "forex_trader").rglob("*"), reverse=True):
-                if d.is_dir():
-                    try:
-                        d.rmdir()  # only succeeds if empty
-                    except OSError:
-                        pass
-
-            # Prune root-level managed scripts not in manifest
-            for existing in app_root.iterdir():
-                if not existing.is_file():
-                    continue
-                if existing.suffix not in _ROOT_MANAGED_EXTS:
-                    continue
-                if existing.name not in manifest_set:
-                    try:
-                        existing.unlink()
-                        deleted += 1
-                        log.debug("[RemoteClient] Removed stale root file: %s",
-                                  existing.name)
-                    except Exception as _del_err:
-                        log.warning("[RemoteClient] Could not remove %s: %s",
-                                    existing.name, _del_err)
-
-            if deleted:
-                log.info("[RemoteClient] Removed %d stale file(s)", deleted)
-
-    except Exception as exc:
-        log.error("[RemoteClient] Update extraction failed: %s", exc)
-        return
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    # Install any new requirements using the already-copied file in app_root.
-    # Run synchronously so packages are installed before the process restarts.
-    req_file = app_root / "requirements.txt"
-    if req_file.exists():
-        if sys.platform == "win32":
-            venv_pip = app_root / ".venv" / "Scripts" / "pip.exe"
-        else:
-            venv_pip = app_root / ".venv" / "bin" / "pip"
-        if venv_pip.exists():
-            log.info("[RemoteClient] Running pip install for updated requirements")
-            try:
-                subprocess.run(
-                    [str(venv_pip), "install", "--quiet", "-r", str(req_file)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=180,
-                    check=False,
-                )
-                log.info("[RemoteClient] pip install complete")
-            except subprocess.TimeoutExpired:
-                log.warning("[RemoteClient] pip install timed out after 180 s")
-
-    # Clear compiled bytecode caches so nothing stale survives this update.
-    # The file-sync/prune logic above only touches forex_trader/ and root
-    # scripts — it never sees .venv/Lib/site-packages, so a pip-upgraded
-    # package can leave a __pycache__/*.pyc from its OLD version sitting next
-    # to the NEW source. Python's own mtime-based staleness check normally
-    # catches this, but doesn't always (confirmed live 2026-07-18: pip
-    # upgraded `anthropic`, a stale .pyc survived, and the next startup died
-    # with "ValueError: bad marshal data (unknown type code)" deep in
-    # anthropic's own import chain — every restart attempt for hours,
-    # including the external watchdog's, hit the identical crash since nothing
-    # ever cleared the cache). Deleting compiled caches is always safe — they
-    # regenerate automatically from source on next import.
-    try:
-        import shutil as _shutil
-        _cleared = 0
-        for _base in (app_root / ".venv", app_root / "forex_trader"):
-            if not _base.exists():
-                continue
-            for _pyc_dir in _base.rglob("__pycache__"):
-                _shutil.rmtree(_pyc_dir, ignore_errors=True)
-                _cleared += 1
-        log.info("[RemoteClient] Cleared %d stale __pycache__ dir(s)", _cleared)
-    except Exception as _cache_err:
-        log.warning("[RemoteClient] __pycache__ cleanup failed: %s", _cache_err)
 
     log.info("[RemoteClient] Update applied — restarting")
     if sys.platform == "win32":
@@ -724,6 +668,16 @@ async def _connect_loop() -> None:
                         # Wrapped in try-except so a close-race never doubles backoff.
                         try:
                             await ws.send(json.dumps(_build_register()))
+                            # Positive proof the request actually left this
+                            # machine. This is the ONLY place a registration is
+                            # ever sent, and it needs a live connection to the
+                            # admin server to get here -- so the activation
+                            # screen must not claim "request sent" off the back
+                            # of the button click alone (confirmed live
+                            # 2026-08-07: it told a user their request was
+                            # awaiting approval while the admin server was down
+                            # and nothing had been transmitted at all).
+                            _status["registration_sent_at"] = time.time()
                             log.info("[RemoteClient] Registration request sent — awaiting admin approval")
                         except Exception:
                             log.info("[RemoteClient] Token rejected — awaiting admin approval")
@@ -758,20 +712,32 @@ async def _connect_loop() -> None:
                         _flag_file.unlink(missing_ok=True)
                 except Exception:
                     pass
+
+                # A successful MSG_WELCOME means the server already has this
+                # token in its approved list. Persist that so app_lifecycle.py's
+                # startup check (config.get("remote_admin_client_enabled"),
+                # default False) auto-starts this loop on every future launch —
+                # without this, the only thing that ever calls _connect_loop()
+                # is the manual Settings > Request Registration button, which
+                # calls it directly and never touches this config key at all.
+                if not _app_config.get("remote_admin_client_enabled", False):
+                    try:
+                        _app_config.save_to_yaml({"remote_admin_client_enabled": True})
+                    except Exception as _cfg_err:
+                        log.warning(
+                            "[RemoteClient] Could not persist remote_admin_client_enabled: %s",
+                            _cfg_err,
+                        )
+
                 backoff = 10  # reset on success
                 log.info("[RemoteClient] Connected to admin server (%s)%s",
                          host, " [remote admin]" if is_admin else "")
 
                 # Periodic status sender
                 last_status = 0.0
-                update_buf: bytearray = bytearray()
-                update_meta: dict = {}
-                in_update   = False
 
                 async for raw_msg in ws:
                     if isinstance(raw_msg, bytes):
-                        if in_update:
-                            update_buf.extend(raw_msg)
                         continue
 
                     try:
@@ -801,27 +767,11 @@ async def _connect_loop() -> None:
                     elif t == MSG_GET_DIAG:
                         await ws.send(json.dumps(_build_diagnostics()))
 
-                    elif t == MSG_UPDATE_BEGIN:
-                        update_meta = m
-                        update_buf  = bytearray()
-                        in_update   = True
-                        await ws.send(json.dumps(make(
-                            MSG_UPDATE_STATUS, status="receiving"
-                        )))
-
-                    elif t == MSG_UPDATE_END:
-                        in_update = False
+                    elif t == MSG_GIT_UPDATE:
                         await ws.send(json.dumps(make(
                             MSG_UPDATE_STATUS, status="applying"
                         )))
-                        asyncio.create_task(_apply_update(
-                            bytes(update_buf),
-                            update_meta.get("sha256", ""),
-                            update_meta.get("version", "?"),
-                            manifest=update_meta.get("manifest"),
-                        ))
-                        update_buf  = bytearray()
-                        update_meta = {}
+                        asyncio.create_task(_apply_git_update())
 
                     elif t == MSG_LICENCE:
                         # Admin approved and the server generated the licence key.
@@ -833,6 +783,24 @@ async def _connect_loop() -> None:
                         email    = m.get("email", get_stored_email())
                         mid      = m.get("machine_id", "")
                         if lic_key and expiry:
+                            # Verify before storing. guard.enforce() now sends a
+                            # client with an unverifiable key back to the
+                            # activation screen (instead of a dead-end error),
+                            # and that screen reconnects here — so saving a key
+                            # that does not verify would restart the app straight
+                            # into the same screen, forever. An admin console
+                            # still running a retired signing scheme is exactly
+                            # the case that would trigger it. Reject it here
+                            # instead and stay on the activation screen.
+                            from backend.src.config.licence.fingerprint import get_fingerprint
+                            from backend.src.config.licence.verify import verify_licence_key
+                            if not verify_licence_key(mid or get_fingerprint(), expiry, lic_key):
+                                log.error(
+                                    "[RemoteClient] Rejected pushed licence — signature does not "
+                                    "verify for this machine (admin console may be running an "
+                                    "older signing scheme). Staying on the activation screen."
+                                )
+                                continue
                             existing = _licence_store.load()
                             if not existing or existing.get("licence_key") != lic_key:
                                 from backend.src.config.licence.fingerprint import get_fingerprint

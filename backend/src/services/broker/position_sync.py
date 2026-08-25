@@ -36,7 +36,7 @@ from backend.src.services.broker import repo as _broker_repo
 from backend.src.services.positions.tp_tracking import last_closed_tp as _last_closed_tp_impl
 from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
-
+from backend.src.utils.models import CONTRACT_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -184,9 +184,12 @@ async def sync_closed_mt5_positions(ctx: PositionSyncCtx) -> None:
                         trade["trade_id"], ticket, closed_volume,
                         remaining_lots - closed_volume, partial_profit,
                     )
+                    # `reason` is already "MT5_close"/"MT5_sync_TP" in two of
+                    # its three possible values (only "SL" isn't) -- blindly
+                    # prefixing produced "MT5_MT5_close"/"MT5_MT5_sync_TP".
                     await ctx.partial_close_trade(
-                        trade["trade_id"], closed_volume,
-                        float(close_price), f"MT5_{reason}",
+                        trade["trade_id"], closed_volume, float(close_price),
+                        reason if reason.startswith("MT5_") else f"MT5_{reason}",
                     )
                     # Update ticket if the continuing position has a new ticket
                     new_remaining = round(remaining_lots - closed_volume, 4)
@@ -255,10 +258,14 @@ async def sync_closed_mt5_positions(ctx: PositionSyncCtx) -> None:
         tp        = float(pos.get("tp") or 0) or None
         open_ts   = float(pos.get("open_time") or time.time())
         try:
+            # Realised-R inputs, captured at import (upstream 8d20bd3).
+            _init_risk = (round(abs(entry_p - sl) * lot_size * CONTRACT_SIZE, 4)
+                          if sl else None)
             await db_module.to_db_thread(
                 _broker_repo.import_direct_mt5_position,
                 trade_id, ticket, direction, entry_p, lot_size, sl, tp,
-                open_ts, default_strategy, time.time())
+                open_ts, default_strategy, time.time(),
+                sl or None, _init_risk)
             log.info(
                 "MT5 sync: imported untracked position ticket=%s %s %.2f lots @ %.2f",
                 ticket, direction, lot_size, entry_p,

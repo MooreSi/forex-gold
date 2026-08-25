@@ -12,6 +12,7 @@ from backend.src.controllers.history_controller import (  # noqa: E402,F401
 )
 
 # Sibling sections of this page.
+from backend.src.services.analytics.reporting import is_stuck_placeholder
 from ._shared import (
     _pnl_colour,
     _stat_cell,
@@ -115,6 +116,7 @@ def _render_active_trades(engine):
         try:
             tick       = await engine.get_tick()
             trades     = await trading_ctl.get_open_trades(engine)
+            trades     = [t for t in trades if not is_stuck_placeholder(t)]
             untracked  = await engine.get_untracked_mt5_positions()
         except Exception:
             trades, tick, untracked = [], None, []

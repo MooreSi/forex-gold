@@ -37,7 +37,7 @@ def engine(fresh_db):
 
 def _insert_trade(trade_id="trade-abc", signal_id="sig-x", strategy="scale_out",
                   direction="BUY", entry_price=2415.0, stop_loss=2403.0, mt5_ticket=777,
-                  tg_source="Chan"):
+                  tg_source="Chan", managed_by="python"):
     with db.db() as conn:
         conn.execute(
             "INSERT INTO vantage_signals (signal_id, direction, entry_low, entry_high, "
@@ -47,9 +47,9 @@ def _insert_trade(trade_id="trade-abc", signal_id="sig-x", strategy="scale_out",
         conn.execute(
             "INSERT INTO vantage_simulated_trades (trade_id, signal_id, mt5_ticket, direction, "
             "entry_low, entry_high, entry_price, lot_size, remaining_lots, stop_loss, status, "
-            "open_time, strategy, tg_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "open_time, strategy, tg_source, managed_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (trade_id, signal_id, mt5_ticket, direction, entry_price, entry_price, entry_price,
-             0.10, 0.10, stop_loss, "open", time.time(), strategy, tg_source),
+             0.10, 0.10, stop_loss, "open", time.time(), strategy, tg_source, managed_by),
         )
 
 
@@ -109,6 +109,27 @@ def test_self_managed_channel_override_mismatch_corrects_and_applies(fresh_db, e
     assert trade_after["stop_loss"] == 2400.0
     assert trade_after["tp1"] == 2420.0
     assert trade_after["tp2"] == 2425.0
+
+
+def test_ea_managed_trade_acknowledged_only_not_overwritten(fresh_db, engine):
+    """EA Templates (and any managed_by='ea' trade) compute their own SL/TP
+    inside the EA's on-tick logic -- the follow-up signal's own price ladder
+    must never overwrite that. Regression for trade 86576593 (Gold Diggers
+    VIP / EA Template "Staged Ratchet 100-500"), where this function stamped
+    the signal's raw TP ladder and a near-zero SL over the template's own
+    100p SL / staged ratchet."""
+    _insert_trade(strategy="template:Staged Ratchet 100-500", managed_by="ea")
+    _insert_tg("tg-ea")
+    trade = _trade_dict("trade-abc")
+    asyncio.run(SimulationEngine._apply_followup_to_instant_trade(
+        engine, trade, _PARSED_2TP, "tg-ea", "Chan", "Chan",
+    ))
+    trade_after = _trade_dict("trade-abc")
+    assert trade_after["stop_loss"] == 2403.0  # unchanged -- template owns it
+    assert trade_after["tp1"] is None
+    assert trade_after["tp2"] is None
+    assert engine._bridge.modify_order_calls == []
+    assert _tg_row("tg-ea") == ("followup_applied", "sig-x")
 
 
 def test_two_valid_tps_applied_as_parsed(fresh_db, engine):

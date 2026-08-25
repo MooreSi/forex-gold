@@ -109,7 +109,12 @@ def test_orb_email_sent_with_chart_and_dedup_set(fresh_db):
 def test_orb_auto_execute_only_no_email_report_still_built(fresh_db):
     db.save_email_config({"smtp_host": "smtp.example.com", "orb_report_enabled": 0})
     db.update_risk_settings({"orb_auto_execute_enabled": 1})
-    report = {"ok": True}
+    # A confirmed direction is required for the scheduler to call
+    # orb_auto_execute at all (2026-08-01 -- the auto-execute gate widened
+    # from a single exact-minute check to a per-minute watch, so it now
+    # pre-filters on direction itself rather than deferring entirely to
+    # orb_auto_execute's own internal check).
+    report = {"ok": True, "direction": "bullish"}
     build_calls, auto_calls = [], []
 
     async def fake_build(bridge):

@@ -82,6 +82,8 @@ class MonitorState:
     profit_cycle: int = 0      # every 24 -> profit sweep
     cal_cycle: int = 0         # ~hourly  -> DPM self-calibration
     dxy_cycle: int = 0         # every 12 -> refresh DXY candles
+    # Added by the 2026-08-25 upstream merge, with _revalidate_pending_orders.
+    pending_revalidate_cycle: int = 0
     dpm_dxy_candles: list = field(default_factory=list)
 
 

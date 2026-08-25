@@ -39,6 +39,7 @@ from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.utils.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
+    STRATEGY_FIXED_RR,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     STRATEGY_TRAIL_STOP,
 )
@@ -164,6 +165,49 @@ async def open_trade_from_signal(
                     await _ea.update_trade(result["trade_id"], {1: exact_tp1, 2: exact_tp2})
             except Exception as _e:
                 log.warning("EA update_trade after %s fill failed: %s", strategy, _e)
+
+    # ── Fixed R:R: post-fill SL/TP override ──────────────────────────────
+    # Both levels are fixed distances from the ACTUAL fill, so the pre-fill
+    # proxy (computed off zone mid, since MT5 needs a valid SL on the order)
+    # has to be corrected once the real fill price is known. Unlike every
+    # other strategy here, the take-profit is pushed to the broker too --
+    # this strategy is deliberately unmanaged after open, so MT5 must hold
+    # both sides itself.
+    elif strategy == STRATEGY_FIXED_RR and result.get("trade_id"):
+        _fr_p    = get_strategy_params(STRATEGY_FIXED_RR)
+        _fr_fill = float(result.get("entry_price", _entry_mid))
+        exact_sl = round(_fr_fill - _sign * _fr_p["sl_pt"], 2)
+        exact_tp = round(_fr_fill + _sign * _fr_p["tp_pt"], 2)
+        with db_module.db() as conn:
+            conn.execute(
+                """UPDATE vantage_simulated_trades
+                   SET stop_loss=?, tp1=?, tp2=NULL, tp3=NULL, tp4=NULL,
+                       tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
+                   WHERE trade_id=?""",
+                (exact_sl, exact_tp, result["trade_id"]),
+            )
+        mt5_tkt = result.get("mt5_ticket")
+        if mt5_tkt:
+            try:
+                _fr_res = await bridge.modify_order(int(mt5_tkt), sl=exact_sl, tp=exact_tp)
+                # modify_order signals broker rejection by RETURNING an
+                # error dict, never by raising -- see core_ai_signal_fallback
+                # for the live incident where ignoring that recorded a stop
+                # the broker had refused and cost a full-width loss.
+                if not _fr_res.get("success"):
+                    log.error(
+                        "[fixed_rr] broker REJECTED SL/TP sync for ticket %s "
+                        "(sl=%.2f tp=%.2f): %s -- trade is running on its "
+                        "pre-fill proxy levels, NOT the intended ones",
+                        mt5_tkt, exact_sl, exact_tp, _fr_res.get("error", _fr_res),
+                    )
+            except Exception as _e:
+                log.warning("[fixed_rr] modify_order SL/TP sync failed: %s", _e)
+        log.info(
+            "[fixed_rr] trade=%s fill=%.2f SL=%.2f TP=%.2f (%.1f/%.1f pt, lot=%.2f)",
+            result["trade_id"][:8], _fr_fill, exact_sl, exact_tp,
+            _fr_p["sl_pt"], _fr_p["tp_pt"], lot_size,
+        )
 
     # ── Conservative Trial: post-fill SL/TP override ─────────────────────
     # Recalculate exact SL and all 6 TPs from the actual fill price, then

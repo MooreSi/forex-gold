@@ -86,10 +86,12 @@ class _FakeEA:
         return self._portable
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None, trail_mode=None, template=None):
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None,
+                         zone_low=None, zone_high=None, timeout=5.0):
         self.open_trade_calls.append(
             {"trade_id": trade_id, "direction": direction, "lot_size": lot_size,
-             "stop_loss": stop_loss, "tps": tps, "strategy": strategy, "pcts": pcts}
+             "stop_loss": stop_loss, "tps": tps, "strategy": strategy, "pcts": pcts,
+             "zone_low": zone_low, "zone_high": zone_high}
         )
         return self._ack
 
@@ -364,7 +366,17 @@ def test_template_strategy_raises_when_ea_bridge_disabled_no_python_fallback(fre
 
 # ── EA Templates -- Anchor TP (2026-07-24) ──────────────────────────────────
 
-def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
+def test_anchor_tp_computed_from_template_ignoring_signal_gap(fresh_db):
+    """Regression for the 2026-07-29 precedence change: the template's own
+    tp{n}_pips computes EVERY level (entry ± pips from the fill reference
+    price), even one the signal happened to leave blank -- there is no
+    "signal fills what the template doesn't" merging any more.
+
+    tp{n}_pips is genuine pips as of 2026-07-31 (1 pip = 0.10 price on this
+    XAUUSD feed, matching the reference channels' own wording and
+    ForexTraderBridge.mq5's PipsToPrice()) -- previously added to price as
+    raw points, which placed every anchor TP 10x further out than a pips
+    value implies. See core_pips.PIPS_TO_PRICE_XAUUSD."""
     from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Anchor Test", {
         "tp1_pips": 20.0, "tp1_pct": 25.0,
@@ -376,8 +388,6 @@ def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
     ea_bridge.set_instance(fake_ea)
     bridge = _FakeBridge()  # tick: bid=2399.8, ask=2400.2
 
-    # Signal only states tp1 (2410.0) -- template must fill tp2 from its own
-    # pips ladder (entry ± pips) since the signal didn't supply it.
     asyncio.run(ot.open_trade(
         bridge, **_open_kwargs(
             strategy=et.override_for_template("Anchor Test"), tp1=2410.0, tp2=None,
@@ -385,14 +395,41 @@ def test_anchor_tp_fills_gap_left_by_signal_and_supplies_pcts(fresh_db):
     ))
 
     call = fake_ea.open_trade_calls[0]
-    assert call["tps"][1] == 2410.0                    # signal's own TP1 untouched
-    assert call["tps"][2] == pytest.approx(2400.2 + 50.0)  # BUY: ask + tp2_pips
-    assert call["pcts"] == [25.0, 100.0]                # template's %s, positional by TP number
+    assert call["tps"][1] == pytest.approx(2400.2 + 2.0)  # BUY: ask + 20 pips (2.0 price)
+    assert call["tps"][2] == pytest.approx(2400.2 + 5.0)  # BUY: ask + 50 pips (5.0 price)
+    # 0-1 fraction on the wire (DoPartialClose: lots = orig_lots * pct), not
+    # the 0-100 number the % column stores -- 25.0/100.0 here means 25%.
+    assert call["pcts"] == pytest.approx([0.25, 1.00])   # template's %s, positional by TP number
 
 
-def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
+def test_anchor_tp_overrides_a_tp_the_signal_did_supply(fresh_db):
+    """The template's price is authoritative even when the signal states
+    its own TP1 -- an EA Template channel's targets come from the
+    template, full stop, so the same channel behaves identically
+    regardless of which provider's message shape triggered the trade."""
     from backend.src.services.broker import ea_templates as et
     et.save_ea_template("Anchor Test", {"tp1_pips": 999.0, "tp1_pct": 50.0})
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()  # tick: bid=2399.8, ask=2400.2
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Anchor Test"), tp1=2410.0)
+    ))
+
+    # entry (ask 2400.2) + 999 pips (99.9 price), NOT the signal's 2410.0
+    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2400.2 + 99.9)
+
+
+def test_anchor_tp_level_left_at_zero_is_simply_unused(fresh_db):
+    """A template level with no pips configured contributes nothing --
+    NOT a revival of whatever the signal stated for that level. Discarding
+    the signal's TPs is the whole point of "authoritative"; a partial
+    fallback would quietly undo it for under-configured templates."""
+    from backend.src.services.broker import ea_templates as et
+    et.save_ea_template("Sparse Anchor", {"tp1_pips": 20.0, "tp1_pct": 100.0})
     _insert_signal()
     db.update_risk_settings({"ea_bridge_enabled": 1})
     fake_ea = _FakeEA(healthy=True, portable=True)
@@ -400,10 +437,15 @@ def test_anchor_tp_never_overrides_a_tp_the_signal_did_supply(fresh_db):
     bridge = _FakeBridge()
 
     asyncio.run(ot.open_trade(
-        bridge, **_open_kwargs(strategy=et.override_for_template("Anchor Test"), tp1=2410.0)
+        bridge, **_open_kwargs(
+            strategy=et.override_for_template("Sparse Anchor"),
+            tp1=2410.0, tp2=2420.0, tp3=2430.0,
+        )
     ))
 
-    assert fake_ea.open_trade_calls[0]["tps"][1] == 2410.0  # signal's price wins, not entry+999
+    call = fake_ea.open_trade_calls[0]
+    assert list(call["tps"].keys()) == [1]  # tp2/tp3 never appear at all
+    assert call["tps"][1] == pytest.approx(2400.2 + 2.0)  # 20 pips = 2.0 price
 
 
 def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
@@ -422,7 +464,50 @@ def test_anchor_tp_sell_direction_subtracts_pips(fresh_db):
         )
     ))
 
-    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2399.8 - 30.0)  # SELL: bid - pips
+    assert fake_ea.open_trade_calls[0]["tps"][1] == pytest.approx(2399.8 - 3.0)  # SELL: bid - 30 pips (3.0 price)
+
+
+def test_anchor_tp_pct_is_a_fraction_not_a_percentage_on_the_wire(fresh_db):
+    """Reproduces ticket 1690279387 live, 2026-07-31: template "Conservative
+    Trial" configured tp1_pct=5.0 (meaning 5%) intending a 5% partial close
+    at TP1, SL to breakeven only at TP2. The EA's DoPartialClose computes
+    `lots = orig_lots * pct`, then clamps to whatever remains open -- so
+    receiving the raw percentage number 5.0 instead of the fraction 0.05
+    made it compute orig_lots * 5.0 (far more than the position itself),
+    clamped down to the ENTIRE remaining lot. Terminal Expert log confirmed
+    it: "partial close OK ... tp=1 lots=0.1 remaining=0.0" for a position
+    that should have kept 95% open. The built-in ladder strategies
+    (_GDVR_PCTS/_CLIMBER_PCTS) already send fractions like 0.30/0.70; this
+    is what made the Anchor TP ladder consistent with them and with the EA's
+    own pending-leg conversion (tpl_tp_pen{n}_pct / 100.0)."""
+    from backend.src.services.broker import ea_templates as et
+    et.save_ea_template("Conservative Trial", {
+        "tp1_pips": 30.0, "tp1_pct": 5.0,
+        "tp2_pips": 70.0, "tp2_pct": 20.0,
+        "tp3_pips": 120.0, "tp3_pct": 40.0,
+        "be_trigger": 2,
+    })
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    fake_ea = _FakeEA(healthy=True, portable=True)
+    ea_bridge.set_instance(fake_ea)
+    bridge = _FakeBridge()
+
+    asyncio.run(ot.open_trade(
+        bridge, **_open_kwargs(strategy=et.override_for_template("Conservative Trial"))
+    ))
+
+    pcts = fake_ea.open_trade_calls[0]["pcts"]
+    assert pcts == pytest.approx([0.05, 0.20, 0.40])
+
+    # The actual bug, made concrete: on a 0.1 lot, the broken 5.0 would have
+    # computed 0.1 * 5.0 = 0.5 lots at TP1 -- 5x the whole position, clamped
+    # by the EA's own MathMin(lots, remaining) down to a full close. The
+    # fixed fraction keeps TP1 a genuine partial.
+    orig_lots = 0.1
+    lots_at_tp1 = round(orig_lots * pcts[0], 4)
+    assert lots_at_tp1 == pytest.approx(0.005)
+    assert lots_at_tp1 < orig_lots
 
 
 def test_anchor_tp_all_zero_pct_sends_no_pcts_field(fresh_db):

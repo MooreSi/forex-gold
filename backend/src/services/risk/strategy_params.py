@@ -39,7 +39,7 @@ from backend.src.utils.models import (
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_REVERSAL_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE,
-    STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
+    STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER, STRATEGY_FIXED_RR,
 )
 
 log = logging.getLogger(__name__)
@@ -113,6 +113,16 @@ PARAM_SPECS: dict[str, list[tuple[str, str, float, str]]] = {
     STRATEGY_SIGNAL_CLIMBER: [
         ("be_at_pos", "Breakeven at TP#", 1.0, "tp#"),
     ],
+    # Fixed R:R -- a single stop and a single target, both real broker
+    # orders, with no breakeven move by design. Defaults come from
+    # tools/exit_policy_lab.py's sweep over measured trade paths (s4/t6
+    # scored +0.418R with a bootstrap CI entirely above zero); they are
+    # exposed here so the lab can be re-run and the winner re-applied
+    # without a code change.
+    STRATEGY_FIXED_RR: [
+        ("sl_pt", "Stop Loss", 4.0, "pt"),
+        ("tp_pt", "Take Profit", 6.0, "pt"),
+    ],
     # Protected Scale skips TP1 (insurance only), moves SL to BE at TP2,
     # then closes this same percentage at each of TP3/TP4/TP5.
     STRATEGY_PROTECTED_SCALE: [
@@ -155,7 +165,7 @@ PARAM_STRATEGIES: list[str] = [
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SIGNAL_CLIMBER, STRATEGY_PROTECTED_SCALE, STRATEGY_SCALE_OUT,
     STRATEGY_BE_RUNNER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2, STRATEGY_LIMIT_RUNNER, STRATEGY_FIXED_RR,
 ]
 
 _DEFAULTS: dict[str, dict[str, float]] = {

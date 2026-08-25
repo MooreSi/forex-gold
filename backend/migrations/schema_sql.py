@@ -512,4 +512,52 @@ CREATE TABLE IF NOT EXISTS channel_performance (
     manual_override INTEGER NOT NULL DEFAULT 0,
     updated_at      REAL NOT NULL DEFAULT 0
 );
+
+
+-- Market snapshot at the instant a reference-channel signal arrived
+-- (2026-08-04). One row per signal EVENT, not per signal: Gold Diggers VIP
+-- fires a bare market call and then sends the zone/SL/TPs ~40s later, and
+-- the difference between those two moments is likely where their
+-- market-vs-limit decision actually lives, so each stage is captured
+-- separately (see `stage`).
+--
+-- Purpose is to learn their entry logic from evidence rather than
+-- assumption, and ultimately to feed the Reversal Engine's ML features.
+-- Deliberately a wide, flat, append-only table: this is a research log, so
+-- it favours "record everything at capture time" over normalisation, and
+-- nothing reads it on the trading path.
+CREATE TABLE IF NOT EXISTS tg_signal_snapshots (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_message_id  TEXT NOT NULL,
+    stage          TEXT NOT NULL,          -- market_call | levels | complete
+    group_name     TEXT,
+    direction      TEXT,
+    signal_ts      REAL,                   -- when the message was parsed
+    captured_at    REAL NOT NULL,          -- when this snapshot was taken
+    capture_lag_s  REAL,                   -- captured_at - signal_ts, kept so
+                                           -- staleness is auditable, not hidden
+    -- stated levels (absent on a bare market call)
+    entry_low      REAL,
+    entry_high     REAL,
+    stop_loss      REAL,
+    tp1            REAL,
+    -- market at capture
+    bid            REAL,
+    ask            REAL,
+    spread_points  REAL,
+    price          REAL,
+    -- where price sat relative to what they asked for
+    dist_to_entry_mid   REAL,
+    price_inside_zone   INTEGER,
+    session        TEXT,
+    regime_score   REAL,
+    -- per-timeframe indicators, JSON {"M1": {...}, "M5": {...}, "M15": {...}}
+    -- JSON rather than 3x N columns: the set of indicators will change as
+    -- this research develops, and a schema migration per idea would stall it.
+    indicators_json TEXT,
+    fvg_json        TEXT,
+    raw_text        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tg_snap_msg ON tg_signal_snapshots(tg_message_id, stage);
+CREATE INDEX IF NOT EXISTS idx_tg_snap_ts  ON tg_signal_snapshots(captured_at);
 """

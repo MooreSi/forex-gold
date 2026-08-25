@@ -40,18 +40,40 @@ from backend.src.services.trading.orb_execute import orb_auto_execute
 log = logging.getLogger(__name__)
 
 
+_ORB_AUTO_EXEC_END_HOUR = 21  # stop watching for a fresh breakout after this Europe/London hour
+
+
 async def _run_orb_section(bridge: Any, cfg: dict, is_active_trader_node: bool,
                             uk_now: datetime) -> None:
+    """
+    Email: still sent once, at exactly 08:15 Europe/London (the moment the
+    opening range closes) -- a snapshot of the range/setup, unchanged
+    timing from before this report's methodology rebuild.
+
+    Auto-execute: 2026-08-01 -- widened from a single exact-minute check at
+    08:15 to a per-minute watch from 08:15 through
+    _ORB_AUTO_EXEC_END_HOUR. The rebuilt report only confirms a breakout
+    once price clears BOTH the London opening range and the Asian range,
+    which can happen anywhere from the moment the range closes to hours
+    later, not reliably in the single tick that happens to land on 08:15 --
+    checking only that one minute would have meant this almost never
+    fired. Still at most one trade/day: `orb_auto_execute_last` is set the
+    first time a confirmed breakout is acted on, and gates every
+    subsequent minute the same day.
+    """
     orb_email_on = bool(cfg.get("orb_report_enabled", 1))
     orb_auto_rs = await db_module.to_db_thread(db_module.get_risk_settings)
     orb_auto_on = bool(orb_auto_rs.get("orb_auto_execute_enabled", 0))
     if not (orb_email_on or orb_auto_on):
         return
+    if uk_now.weekday() >= 5:
+        return
     try:
-        if uk_now.hour == 8 and uk_now.minute == 15 and uk_now.weekday() < 5:
-            uk_date_str = uk_now.strftime("%Y-%m-%d")
-            report = None
-            if orb_email_on and db_module.get_app_config("email_last_orb") != uk_date_str:
+        uk_date_str = uk_now.strftime("%Y-%m-%d")
+        report = None
+
+        if orb_email_on and uk_now.hour == 8 and uk_now.minute == 15:
+            if db_module.get_app_config("email_last_orb") != uk_date_str:
                 report = await build_orb_report(bridge)
                 if report:
                     chart_png = email_service.build_orb_chart_image(report)
@@ -68,12 +90,18 @@ async def _run_orb_section(bridge: Any, cfg: dict, is_active_trader_node: bool,
                         db_module.set_app_config("email_last_orb", uk_date_str)
                     log.info("ORB report email %s%s", "sent" if ok else "FAILED",
                               f": {err}" if err else "")
-            if orb_auto_on and db_module.get_app_config("orb_auto_execute_last") != uk_date_str:
-                if report is None:
-                    report = await build_orb_report(bridge)
-                if report:
-                    await orb_auto_execute(report, bridge, is_active_trader_node)
-                    db_module.set_app_config("orb_auto_execute_last", uk_date_str)
+
+        _in_auto_window = (
+            (uk_now.hour == 8 and uk_now.minute >= 15)
+            or (8 < uk_now.hour < _ORB_AUTO_EXEC_END_HOUR)
+        )
+        if orb_auto_on and _in_auto_window \
+                and db_module.get_app_config("orb_auto_execute_last") != uk_date_str:
+            if report is None:
+                report = await build_orb_report(bridge)
+            if report and report.get("direction") in ("bullish", "bearish"):
+                await orb_auto_execute(report, bridge, is_active_trader_node)
+                db_module.set_app_config("orb_auto_execute_last", uk_date_str)
     except Exception as e:
         log.warning("ORB report scheduling error: %s", e)
 

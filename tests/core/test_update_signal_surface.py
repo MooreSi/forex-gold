@@ -69,8 +69,13 @@ class _FakeEA:
     def is_ea_healthy(self):
         return self._healthy
 
-    async def update_trade(self, trade_id, tps):
-        self.update_trade_calls.append({"trade_id": trade_id, "tps": tps})
+    async def update_trade(self, trade_id, tps, stop_loss=None):
+        # stop_loss added 2026-08-04: while the EA is healthy, update_signal
+        # deliberately skips its own modify_order, so this is now the ONLY
+        # route a corrected stop has to the broker. Recorded here so the
+        # tests below can assert it actually travels.
+        self.update_trade_calls.append(
+            {"trade_id": trade_id, "tps": tps, "stop_loss": stop_loss})
         return True
 
 
@@ -220,7 +225,9 @@ def test_ea_managed_healthy_skips_modify_order_calls_update_trade(fresh_db):
     asyncio.run(us.update_signal(bridge, "sig-1", {"stop_loss": 2385.0, "tp1": 2420.0}))
 
     assert bridge.modify_order_calls == []
-    assert fake_ea.update_trade_calls == [{"trade_id": "t-1", "tps": {1: 2420.0}}]
+    assert fake_ea.update_trade_calls == [
+        {"trade_id": "t-1", "tps": {1: 2420.0}, "stop_loss": 2385.0}
+    ]
 
 
 def test_ea_managed_unhealthy_falls_through_to_modify_order_but_still_updates_ea(fresh_db):
@@ -234,7 +241,9 @@ def test_ea_managed_unhealthy_falls_through_to_modify_order_but_still_updates_ea
     asyncio.run(us.update_signal(bridge, "sig-1", {"stop_loss": 2385.0, "tp1": 2420.0}))
 
     assert bridge.modify_order_calls == [{"ticket": 555, "sl": 2385.0, "tp": None}]
-    assert fake_ea.update_trade_calls == [{"trade_id": "t-1", "tps": {1: 2420.0}}]
+    assert fake_ea.update_trade_calls == [
+        {"trade_id": "t-1", "tps": {1: 2420.0}, "stop_loss": 2385.0}
+    ]
 
 
 def test_python_managed_never_calls_ea_update_trade(fresh_db):

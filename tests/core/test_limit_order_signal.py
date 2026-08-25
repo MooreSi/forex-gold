@@ -63,12 +63,12 @@ class _FakeEA:
 
     async def place_pending_order(self, trade_id, direction, price, lot_size, stop_loss,
                                   tps, pcts, be_at_pos, strategy, expire_minutes=240.0,
-                                  close_full_on_last=True):
+                                  close_full_on_last=True, trail_mode=None):
         self.calls.append(dict(
             trade_id=trade_id, direction=direction, price=price, lot_size=lot_size,
             stop_loss=stop_loss, tps=dict(tps), pcts=list(pcts), be_at_pos=be_at_pos,
             strategy=strategy, expire_minutes=expire_minutes,
-            close_full_on_last=close_full_on_last,
+            close_full_on_last=close_full_on_last, trail_mode=trail_mode,
         ))
         if self._raise:
             raise self._raise
@@ -81,6 +81,7 @@ class _FakeEA:
             trade_id=trade_id, direction=direction, lot_size=lot_size,
             stop_loss=stop_loss, tps=dict(tps), strategy=strategy,
             pcts=list(pcts) if pcts is not None else None, be_at_pos=be_at_pos,
+            trail_mode=trail_mode,
         ))
         if self._open_trade_raise:
             raise self._open_trade_raise
@@ -499,3 +500,165 @@ async def test_realignment_writes_market_order_row_no_pending_order_row(fresh_db
             "SELECT COUNT(*) FROM vantage_pending_orders WHERE signal_id=?", (signal_id,),
         ).fetchone()[0]
         assert po_count == 0
+
+
+# ── Channel-override management (option 3: Limit Runner entry, override
+#    strategy manages the fill) ────────────────────────────────────────────
+
+def _set_override(channel: str, strategy: str | None, auto: bool = False):
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO channel_performance (source, strategy_override, auto_strategy, updated_at) "
+            "VALUES (?,?,?,0) ON CONFLICT(source) DO UPDATE SET "
+            "strategy_override=excluded.strategy_override, auto_strategy=excluded.auto_strategy",
+            (channel, strategy, int(auto)),
+        )
+
+
+@pytest.mark.asyncio
+async def test_no_channel_override_still_manages_as_limit_runner(fresh_db):
+    """Unchanged baseline -- a channel with nothing configured keeps pure
+    Limit Runner management, ladder and all."""
+    await _insert_tg_row("tg1")
+    fake_ea = _FakeEA()
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan_x", "chan_x", _rs(),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+        )
+    assert result["manage_strategy"] == STRATEGY_LIMIT_RUNNER
+    assert fake_ea.calls[0]["strategy"] == STRATEGY_LIMIT_RUNNER
+    assert fake_ea.calls[0]["pcts"] == pytest.approx([1 / 3, 1 / 3, 1 / 3])
+    assert fake_ea.calls[0]["trail_mode"] is None
+
+
+@pytest.mark.asyncio
+async def test_channel_override_manages_fill_with_its_own_ladder(fresh_db):
+    """The reported live case: GOLD DIGGERS INSTITUTIONAL is set to Signal
+    Climber, so a "[LIMITS]" signal there still gets Limit Runner's resting
+    order but is managed as Signal Climber once filled."""
+    from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
+    from backend.src.services.trading.open_trade import _CLIMBER_PCTS
+
+    await _insert_tg_row("tg1")
+    _set_override("chan_x", STRATEGY_SIGNAL_CLIMBER)
+    fake_ea = _FakeEA(ack={"type": "pending_order_placed", "ticket": 999})
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan_x", "chan_x", _rs(),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+        )
+    assert result["manage_strategy"] == STRATEGY_SIGNAL_CLIMBER
+    assert "Signal Climber" in result["skip_reason"]
+
+    call = fake_ea.calls[0]
+    assert call["strategy"] == STRATEGY_SIGNAL_CLIMBER
+    assert call["pcts"] == pytest.approx(_CLIMBER_PCTS[3])
+    assert call["be_at_pos"] == 0
+    # Entry mechanic is untouched -- still the near zone edge, still resting.
+    assert call["price"] == 4148.0
+
+    # The stored strategy is what _on_pending_order_filled stamps onto the
+    # trade row at fill time -- the whole point of the change.
+    with db.db() as conn:
+        strategy = conn.execute(
+            "SELECT strategy FROM vantage_pending_orders WHERE ea_ticket=999"
+        ).fetchone()[0]
+    assert strategy == STRATEGY_SIGNAL_CLIMBER
+
+
+@pytest.mark.asyncio
+async def test_auto_strategy_channel_falls_back_to_limit_runner(fresh_db):
+    """'auto' is a mode, not a strategy -- there is nothing concrete to
+    hand the EA, so the default stands."""
+    await _insert_tg_row("tg1")
+    _set_override("chan_x", None, auto=True)
+    fake_ea = _FakeEA()
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan_x", "chan_x", _rs(),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+        )
+    assert result["manage_strategy"] == STRATEGY_LIMIT_RUNNER
+
+
+@pytest.mark.asyncio
+async def test_non_ladder_override_gets_inert_placeholders(fresh_db):
+    """Mirrors reversal_engine_live_execute's own limit path -- a non-ladder
+    strategy's EA branch never reads pcts/be_at_pos."""
+    from backend.src.utils.models import STRATEGY_CONSERVATIVE
+
+    await _insert_tg_row("tg1")
+    _set_override("chan_x", STRATEGY_CONSERVATIVE)
+    fake_ea = _FakeEA()
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
+        await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan_x", "chan_x", _rs(),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+        )
+    call = fake_ea.calls[0]
+    assert call["strategy"] == STRATEGY_CONSERVATIVE
+    assert call["pcts"] == [1.0]
+    assert call["be_at_pos"] == 0
+
+
+@pytest.mark.asyncio
+async def test_tp_open_reserve_survives_an_override_ladder(fresh_db):
+    """"TP OPEN" is a property of the signal, not of the ladder -- an
+    override strategy's table is scaled to leave the same runner share."""
+    from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
+    from backend.src.services.trading.open_trade import _CLIMBER_PCTS
+
+    await _insert_tg_row("tg1")
+    _set_override("chan_x", STRATEGY_SIGNAL_CLIMBER)
+    fake_ea = _FakeEA()
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
+        await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=True, n_tps=3), "tg1", "chan_x", "chan_x", _rs(),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+        )
+    call = fake_ea.calls[0]
+    reserve = sp.get_strategy_params(STRATEGY_LIMIT_RUNNER)["runner_reserve_pct"] / 100.0
+    assert call["pcts"] == pytest.approx([p * (1 - reserve) for p in _CLIMBER_PCTS[3]])
+    assert sum(call["pcts"]) == pytest.approx(1.0 - reserve)
+    assert call["close_full_on_last"] is False
+
+
+@pytest.mark.asyncio
+async def test_realignment_uses_override_strategy_too(fresh_db):
+    """The breached-zone market fallback must not silently revert to Limit
+    Runner management -- it is the same signal on the same channel."""
+    from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
+
+    await _insert_tg_row("tg1")
+    _set_override("chan_x", STRATEGY_SIGNAL_CLIMBER)
+    fake_ea = _FakeEA(open_trade_ack={"type": "trade_opened", "ticket": 900,
+                                      "fill_price": 4150.0})
+    bridge = _FakeBridge(bid=4149.8, ask=4150.0)
+    with patch("backend.src.services.broker.ea_bridge.get_instance", return_value=fake_ea):
+        result = await los.handle_limit_order_signal(
+            _parsed("BUY", tp_open=False, n_tps=3), "tg1", "chan_x", "chan_x",
+            _rs(realign=True),
+            sess_ok=True, per_signal_skip=False, per_signal_skip_reason="",
+            skip_reason="",
+            get_trading_balance_fn=_balance, suggest_lot_size_fn=_lot_size,
+            bridge=bridge,
+        )
+    assert result["manage_strategy"] == STRATEGY_SIGNAL_CLIMBER
+    assert fake_ea.open_trade_calls[0]["strategy"] == STRATEGY_SIGNAL_CLIMBER
+
+    with db.db() as conn:
+        strategy = conn.execute(
+            "SELECT strategy FROM vantage_simulated_trades WHERE mt5_ticket=900"
+        ).fetchone()[0]
+    assert strategy == STRATEGY_SIGNAL_CLIMBER

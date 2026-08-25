@@ -17,7 +17,6 @@ import logging
 from typing import Any, Awaitable, Callable
 
 import asyncio
-import logging
 import time
 
 from backend.src.services.broker.watchdog import bridge_watchdog_check as _bridge_watchdog_check_impl

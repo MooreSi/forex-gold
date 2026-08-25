@@ -301,6 +301,75 @@ def test_on_pending_order_filled_second_grid_leg_is_noop_once_promoted(fresh_db)
         assert ticket == 555  # untouched by the second fill
 
 
+def test_grid_leg_fill_telegram_alert_has_full_trade_detail(fresh_db):
+    """The grid-leg-fill alert must carry the same detail as a normal
+    trade-opened message (ticket, strategy, channel, SL/TP, entry) --
+    replacing the old bare one-liner ("EA Template grid leg FILLED —
+    {dir} {lot} lots @ {price} (ticket {ticket})") that gave no way to
+    tell which channel or strategy a fill belonged to without cross-
+    referencing the DB."""
+    _insert_grid_placeholder_trade(trade_id="grid1", strategy="template:Sig Gen Grid")
+    with db.db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades SET tg_source='Reversal Engine', "
+            "tp1=4155.0, tp2=4160.0 WHERE trade_id='grid1'"
+        )
+    bridge = ea_bridge.EABridge(engine=None)
+    sent = []
+
+    async def _capture(msg, *a, **k):
+        sent.append(msg)
+
+    with mock.patch("backend.src.services.telegram.alerts.send_message", side_effect=_capture):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+        }))
+        asyncio.run(asyncio.sleep(0))
+
+    assert len(sent) == 1
+    body = sent[0]
+    assert "Grid Leg 1" in body
+    assert "Trade Opened" in body
+    assert "555" in body           # MT5 ticket
+    assert "Sig Gen Grid" in body  # strategy
+    assert "Reversal Engine" in body  # channel
+    assert "4149.2" in body        # fill price
+    assert "4155.0" in body        # TP1
+    assert "additional leg" not in body.lower()
+
+
+def test_second_grid_leg_fill_now_sends_its_own_alert(fresh_db):
+    """Regression: with cancel_pending off, a second leg's real broker
+    fill was previously dropped entirely -- a warning log line, no
+    Telegram alert, even though the position genuinely exists. It cannot
+    be promoted into the DB (only one row per template trade), but its
+    fill must still be reported, clearly marked as not DB-tracked."""
+    _insert_grid_placeholder_trade(trade_id="grid1", strategy="template:Sig Gen Grid")
+    bridge = ea_bridge.EABridge(engine=None)
+    sent = []
+
+    async def _capture(msg, *a, **k):
+        sent.append(msg)
+
+    with mock.patch("backend.src.services.telegram.alerts.send_message", side_effect=_capture):
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "grid1-g1", "ticket": 555, "fill_price": 4149.2,
+        }))
+        asyncio.run(bridge._on_pending_order_filled({
+            "trade_id": "grid1-g2", "ticket": 556, "fill_price": 4149.5,
+        }))
+        asyncio.run(asyncio.sleep(0))
+
+    assert len(sent) == 2
+    assert "556" in sent[1]
+    assert "additional leg" in sent[1].lower()
+    with db.db() as conn:
+        ticket = conn.execute(
+            "SELECT mt5_ticket FROM vantage_simulated_trades WHERE trade_id='grid1'"
+        ).fetchone()[0]
+    assert ticket == 555  # still untouched by the second fill
+
+
 def test_on_pending_order_filled_grid_leg_no_placeholder_row_is_noop(fresh_db):
     bridge = ea_bridge.EABridge(engine=None)
     asyncio.run(bridge._on_pending_order_filled({

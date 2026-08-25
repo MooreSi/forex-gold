@@ -162,11 +162,13 @@ class _CorrelationMixin:
 
                 if matched:
 
+                    ref_level_type = self._classify_ref_level(ref_mid)
                     re_db.update_correlation(
                         sig_id=re_sig["id"],
                         ref_signal_id=str(ref["id"]),
                         time_delta_s=round(time_delta, 1),
                         distance_pts=round(dist, 2),
+                        ref_level_type=ref_level_type,
                     )
                     re_sig["correlation_confirmed"] = 1  # keep in-memory snapshot in sync for corr_total below
 
@@ -176,8 +178,10 @@ class _CorrelationMixin:
                     # Signed lead time: negative = we led, positive = we lagged
                     lead_times.append(time_delta)
 
-                    # Feed REF level type back to ML (pattern learning)
-                    ref_level_type = self._classify_ref_level(ref_mid)
+                    # Feed REF level type back to ML (pattern learning). This
+                    # only counts the match; the win/loss half is credited
+                    # later by ml_engine.record_outcome, once this signal
+                    # actually closes.
                     from backend.src.services.reversal_engine import ml_engine as re_ml
                     re_ml.record_ref_signal(ref_level_type)
 

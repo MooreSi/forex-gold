@@ -12,10 +12,36 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from datetime import datetime
 from typing import Optional
 
 from backend.src.db import database as db_module
+
+# How long a $0-entry/ticket-0 EA Template placeholder row is allowed to look
+# like a normal in-flight fill before display code should stop rendering it
+# as an Active Trade card. Well past the EA's own ack-timeout ceiling (60s,
+# core_open_trade._ack_timeout) and the grid-leg expiry window, so this never
+# hides a trade that is still genuinely being placed -- only ones that are
+# stuck (see core_template_placeholder_repair.py for why a row can get stuck
+# despite the self-healers, and core_open_trade.py's legs_placed==0 guard for
+# the specific bug that used to make a grid-total-failure row unrecoverable).
+_STUCK_PLACEHOLDER_GRACE_S = 180
+
+
+def is_stuck_placeholder(trade: dict) -> bool:
+    """True for an open row that never got a real ticket/entry and has been
+    open long enough that it can no longer be a normal in-flight fill.
+
+    Display-only signal -- never used to gate trading/risk logic. Real
+    open-trade counts, duplicate checks, TP Safety Net etc. all still need to
+    see these rows (they may yet resolve, and hiding them there could mask a
+    genuine broker position); only the Active Trades UI/chart panel should
+    stop rendering one as an ordinary card once it's stale."""
+    if (trade.get("mt5_ticket") or 0) or float(trade.get("entry_price") or 0):
+        return False
+    open_time = float(trade.get("open_time") or 0)
+    return open_time > 0 and (time.time() - open_time) > _STUCK_PLACEHOLDER_GRACE_S
 
 
 def get_open_trades() -> list[dict]:

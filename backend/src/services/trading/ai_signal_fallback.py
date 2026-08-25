@@ -31,6 +31,10 @@ from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.signals.parser import _CURRENCY_RE
+from backend.src.services.ai import signal_extractor
+from backend.src.services.ai import claude_ai
+from backend.src.services.telegram import alerts
+from backend.src.utils.models import STRATEGIES_OWN_SL
 
 log = logging.getLogger(__name__)
 
@@ -215,6 +219,23 @@ async def apply_sl_adjustment(
     mt5_ticket = trade.get("mt5_ticket")
     trade_id   = trade["trade_id"]
     old_sl     = trade.get("stop_loss")
+
+    # Strategies that set their own SL from the fill price do not accept a
+    # channel-pushed override -- it would replace the exact level the
+    # strategy exists to control, silently and mid-trade. See
+    # models.STRATEGIES_OWN_SL for the full reasoning and the measurements
+    # behind it. Signal-following strategies are unaffected.
+    _strategy = (trade.get("strategy") or "")
+    if _strategy in STRATEGIES_OWN_SL:
+        log.info(
+            "[%s] SL adjustment (tg_id=%s, via=%s) target %.2f SKIPPED for "
+            "trade=%s -- strategy=%s manages its own SL (currently %.2f) from "
+            "the fill price and ignores channel-pushed levels by design",
+            channel_name, tg_id, via, new_sl, trade_id[:8], _strategy,
+            float(old_sl) if old_sl is not None else 0.0,
+        )
+        return
+
     if old_sl is not None and abs(float(old_sl) - new_sl) < 0.011:
         log.info(
             "[%s] SL adjustment (tg_id=%s, via=%s) target %.2f already matches "
@@ -224,7 +245,40 @@ async def apply_sl_adjustment(
         return
     try:
         if mt5_ticket:
-            await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
+            mt5_res = await bridge.modify_order(int(mt5_ticket), sl=new_sl, tp=None)
+            # modify_order() reports broker-side rejection (invalid stops,
+            # position already closed, requote, etc.) via a returned
+            # {"error": ...} dict, NOT an exception -- so awaiting it inside
+            # a try/except caught nothing, and a rejected move was recorded
+            # as applied: the DB row and the "SL adjusted" Telegram alert
+            # both claimed a stop the broker never accepted. Confirmed live
+            # 2026-07-28 on ticket 1663956102 (Gold Diggers VIP, SELL @
+            # 4027.12): a RISK FREE/BE instruction arrived after price had
+            # already run 7pt against the position, so breakeven was on the
+            # wrong side of the market. MT5 rejected it with "Invalid
+            # stops"; the app reported "4037.12 -> 4027.12" applied and the
+            # position kept running on its original, much wider stop with
+            # nobody aware. Same bug, same shape, as the one already fixed
+            # in core_tp_safety_net.py (ticket 1543412796) -- that fix
+            # never propagated to this call site.
+            if not mt5_res.get("success"):
+                _err = mt5_res.get("error", mt5_res)
+                log.error(
+                    "[%s] SL adjustment (tg_id=%s, via=%s) REJECTED by broker for "
+                    "trade=%s (ticket %s): tried %s -> %s, error: %s — SL NOT moved, "
+                    "trade remains at its original risk",
+                    channel_name, tg_id, via, trade_id[:8], mt5_ticket,
+                    old_sl, new_sl, _err,
+                )
+                asyncio.create_task(telegram_alerts.send_message(
+                    f"*SL ADJUSTMENT REJECTED* — {channel_name}\n"
+                    f"Trade {trade_id[:8]} (ticket {mt5_ticket}): tried to move SL "
+                    f"{old_sl} → {new_sl}, but the broker refused it ({_err}).\n"
+                    f"The SL has NOT moved — this trade is still running on its "
+                    f"original stop. Review manually.",
+                    tg_id, "sl_adjustment_rejected",
+                ))
+                return
         trade_repo.set_stop_loss(trade_id, new_sl)
         log.info(
             "[%s] SL adjustment (tg_id=%s, via=%s) applied to trade=%s (ticket %s): %s -> %s",

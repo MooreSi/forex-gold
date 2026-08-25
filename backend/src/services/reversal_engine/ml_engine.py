@@ -37,7 +37,36 @@ _labeled_count = 0
 # telegram_research.py's nightly AI read of the reference channel/GD2 messages+images, cached
 # in re_config and refreshed once per night. Same discard-and-retrain-from-
 # scratch handling as v3 for the same reason (dimension mismatch).
-_version = "re_ml_v4"
+# v5 (2026-07-31) keeps v4's features but replaces the LABEL: was
+# `rr_tp1 if win else -1.0`, now realised net R (see _realised_r). The old
+# label was a fiction -- it priced every loss at exactly -1.0R and every win
+# at its planned rr_tp1, so summed over the 576 closed signals it read +51.1
+# ("profitable") while the same trades actually lost $2,691 (sum of realised
+# R: -46.1). Measured against real rows: losses averaged -1.22R (worst
+# -5.75R, stops slipping well past sl_dist) and wins +0.39R, a true payoff of
+# 0.32:1 versus the 0.54:1 the model was being told. Retrained from scratch
+# because a model fitted on the old label is calibrated to the wrong scale.
+# v8 (2026-08-06) appends `pro_likeness` -- the output of pro_model.py, a
+# classifier trained on "a reference channel fired here" vs "background", so
+# what the professionals do enters this model as ONE weighted opinion rather
+# than as training rows of its own (their signals have no realised R of ours
+# to regress against, and pooling them would answer a different question with
+# the same weights). Same discard-and-retrain handling as v3-v7: the stored
+# vectors are back-filled to the new width by _FEATURE_NEUTRAL, so the
+# training history survives even though the fitted models do not.
+_version = "re_ml_v8"
+
+# Dollars per point for a virtual signal. Mirrors reversal_engine_manage.py's
+# `gross = pnl_pts * _VIRTUAL_LOT * 100` -- duplicated as a constant rather
+# than imported because that module imports this one (circular otherwise).
+_VIRTUAL_LOT = 0.1
+_DOLLARS_PER_POINT = _VIRTUAL_LOT * 100
+
+# Guard against a corrupt sl_dist/net_pnl_dollars producing an absurd label.
+# Deliberately wider than any real observation to date (worst -5.75R, best
+# +5.01R) so it never silently truncates a genuine tail -- the whole point of
+# this label is that real tails are bigger than the old one could express.
+_R_LABEL_CLAMP = 12.0
 _train_history: list[dict] = []
 
 # REF pattern counters: level_type → {trades, wins, touches}
@@ -60,9 +89,21 @@ def _save_all() -> None:
         return
     try:
         import joblib
+        # record_ref_signal() saves too, and it can fire long before this
+        # process has any labelled count of its own -- so never let an
+        # in-memory 0 overwrite a real stored count (see
+        # _labeled_count_from_db for the failure this caused live).
+        labeled = _labeled_count
+        if labeled == 0:
+            try:
+                prior = joblib.load(_data_dir / "re_ml_meta.pkl")
+                if prior.get("version") == _version:
+                    labeled = int(prior.get("labeled_count", 0) or 0)
+            except Exception:
+                pass
         meta = {
             "version":      _version,
-            "labeled_count": _labeled_count,
+            "labeled_count": labeled,
             "train_history": _train_history[-20:],
             "ref_level_stats": _ref_level_stats,
         }
@@ -85,7 +126,28 @@ def _load_all() -> None:
         if meta_path.exists():
             meta = joblib.load(meta_path)
             if meta.get("version") != _version:
-                _log.info("[RE-ML] version mismatch — discarding saved models")
+                # Models and label-scale-dependent counters are discarded, but
+                # `touches` is salvaged: it's a pure count of levels this engine
+                # evaluated, independent of features and of the label, and it's
+                # the denominator ref_match_rate_for_type needs (~11k observations
+                # that would otherwise take weeks to rebuild).
+                #
+                # trades/wins are deliberately zeroed rather than salvaged. Up to
+                # v4 `wins` was never incremented by anything (record_ref_signal
+                # was only ever called with was_win=None), so every type carried a
+                # non-zero `trades` against 0 `wins` and _ref_win_rate_for_type
+                # returned a hard 0.0 for exactly the level types the reference
+                # channel trades most. Zeroing both restores the neutral 0.65
+                # prior until the now-wired credit-back populates them for real.
+                _ref_level_stats = {
+                    k: {"trades": 0, "wins": 0, "touches": v.get("touches", 0)}
+                    for k, v in (meta.get("ref_level_stats") or {}).items()
+                }
+                _log.info(
+                    "[RE-ML] version mismatch (%s -> %s) — discarding saved models; "
+                    "kept touch counts for %d level types, reset trades/wins",
+                    meta.get("version"), _version, len(_ref_level_stats),
+                )
                 return
             _labeled_count  = meta.get("labeled_count", 0)
             _train_history  = meta.get("train_history", [])
@@ -131,7 +193,102 @@ FEATURE_NAMES = [
     "concurrent_agreement",     # +1 same-dir signal from another engine in last 15min, -1 opposite, 0 none
     "ref_discipline_score",     # 0-1, AI-derived nightly: how closely the reference channel/GD2 stuck to stated SL/sizing that day
     "ref_aggression_score",     # 0-1, AI-derived nightly: how aggressively they scaled in/chased entries that day
+    # ── FVG context (v6, 2026-08-04) — see ict_patterns.fvg_context ──────
+    "fvg_confluence",           # 1.0 entry inside an aligned unfilled FVG, 0.5 inside any, 0 none
+    "fvg_dist_norm",            # distance to nearest aligned FVG in ATR units, clamped [0,5]; 5 = none
+    "fvg_fresh",                # nearest aligned FVG: 1.0 untested, 0.5 filled, 0.0 inverted; 0.5 = none
+    "fvg_size_norm",            # its height in ATR units, clamped [0,3]; 0 = none
+    # ── Reference-channel entry structure (v7, 2026-08-05) ───────────────
+    # How this moment compares with conditions the professional channels
+    # actually fire in, per direction. See reversal_engine/pro_profile.py --
+    # these stay at 0.0 until that module judges its sample trustworthy, so
+    # early rows carry no information rather than a regime artifact.
+    "pro_rsi_delta",            # (rsi - their median) / their sd, clamped [-3,3]
+    "pro_adx_delta",            # same for ADX
+    "pro_fvg_delta",            # our FVG confluence minus theirs
+    "pro_profile_ready",        # 1.0 when the profile is live, else 0.0
+    # ── Pro-likeness (v8, 2026-08-06) — see reversal_engine/pro_model.py ──
+    # P(a reference channel would fire in this moment), from a classifier
+    # trained on their captured entries against background samples. 0.5 --
+    # indistinguishable from "exactly average" -- whenever the learning
+    # toggle is off, the corpus gates are unmet, or the model cannot beat a
+    # coin out of sample. All three mean the same thing to a model: no
+    # information, so they must produce the same number.
+    "pro_likeness",
 ]
+
+# Neutral value for every feature, used to back-fill rows labeled under an
+# earlier _version so a feature addition does not throw away training
+# history. Keyed by name rather than position so it cannot silently drift.
+#
+# THIS IS WHY NEW FEATURES MUST ONLY EVER BE APPENDED to FEATURE_NAMES,
+# never inserted mid-list: padding a short old vector on the right is only
+# correct if the existing positions still mean what they meant when that
+# row was written.
+_FEATURE_NEUTRAL = {
+    "fvg_confluence": 0.0, "fvg_dist_norm": 5.0,
+    "fvg_fresh": 0.5, "fvg_size_norm": 0.0,
+    "pro_rsi_delta": 0.0, "pro_adx_delta": 0.0,
+    "pro_fvg_delta": 0.0, "pro_profile_ready": 0.0,
+    "pro_likeness": 0.5,
+}
+
+
+def learning_from_ref_enabled() -> bool:
+    """The Signal Generator > Reversal toggle. Off (the default) means the
+    Reversal Engine ignores the pro-likeness model entirely -- the feature
+    stays at its neutral, and nothing refits on an incoming signal."""
+    try:
+        from backend.src.db import database as _cdb
+        return bool(_cdb.get_risk_settings().get("re_learn_from_ref_signals", 0))
+    except Exception:
+        return False
+
+
+def _pro_likeness_feature(signal_data: dict) -> float:
+    """pro_model's verdict for this moment, or the neutral when the toggle is
+    off or the model is not trustworthy. Never raises -- a research model
+    must not be able to stop a signal being scored."""
+    if not learning_from_ref_enabled():
+        return 0.5
+    try:
+        from backend.src.services.reversal_engine import pro_model
+        return pro_model.pro_likeness(
+            signal_data.get("direction", "BUY"),
+            signal_data.get("rsi14"),
+            signal_data.get("adx"),
+            signal_data.get("atr"),
+            signal_data.get("regime_score"),
+            {
+                "fvg_confluence": signal_data.get("fvg_confluence"),
+                "fvg_dist_norm":  signal_data.get("fvg_dist_norm"),
+                "fvg_fresh":      signal_data.get("fvg_fresh"),
+                "fvg_size_norm":  signal_data.get("fvg_size_norm"),
+            },
+        )
+    except Exception as exc:
+        _log.debug("[RE-ML] pro_likeness error: %s", exc)
+        return 0.5
+
+
+def _pro_features(signal_data: dict) -> list[float]:
+    """The four pro-profile values, in FEATURE_NAMES order. Never raises:
+    this is enrichment, and a failure here must not stop a signal being
+    scored at all."""
+    try:
+        from backend.src.services.reversal_engine.pro_profile import profile_features
+        f = profile_features(
+            signal_data.get("direction", "BUY"),
+            signal_data.get("rsi14"),
+            signal_data.get("adx"),
+            signal_data.get("fvg_confluence"),
+        )
+    except Exception:
+        f = {}
+    return [float(f.get("pro_rsi_delta") or 0.0),
+            float(f.get("pro_adx_delta") or 0.0),
+            float(f.get("pro_fvg_delta") or 0.0),
+            float(f.get("pro_profile_ready") or 0.0)]
 
 
 def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optional[list[float]]:
@@ -208,6 +365,20 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
             float(signal_data.get("concurrent_agreement")or 0.0),   # concurrent_agreement
             float(signal_data.get("ref_discipline_score") or 0.5),  # ref_discipline_score
             float(signal_data.get("ref_aggression_score") or 0.5),  # ref_aggression_score
+            # FVG context. Supplied by the caller (reversal_engine_service
+            # builds it from ict_patterns.fvg_context on the M15 candles it
+            # already has). Absent -> the documented "no gap found"
+            # neutrals, so a signal generated without FVG context is never
+            # mistaken for one sitting in a fresh gap.
+            float(signal_data.get("fvg_confluence") or 0.0),
+            float(signal_data.get("fvg_dist_norm", 5.0) or 5.0),
+            float(signal_data.get("fvg_fresh", 0.5) if signal_data.get("fvg_fresh") is not None else 0.5),
+            float(signal_data.get("fvg_size_norm") or 0.0),
+            # Reference-channel structure. Computed here rather than by the
+            # caller so every path gets it automatically, and so a missing
+            # profile degrades to the documented neutrals.
+            *_pro_features(signal_data),
+            _pro_likeness_feature(signal_data),
         ]
     except Exception as exc:
         _log.debug("[RE-ML] extract_features error: %s", exc)
@@ -236,6 +407,28 @@ def ref_match_rate_for_type(level_type: str) -> Optional[float]:
 
 # ── Training ──────────────────────────────────────────────────────────────────
 
+def _realised_r(row: dict) -> Optional[float]:
+    """Realised R for a closed signal: actual net dollars banked (partials
+    included) divided by the dollars that signal's own initial stop put at
+    risk. Returns None when the row can't express it.
+
+    This is what the model is trained on as of v5. It differs from the
+    planned rr_tp1 in three ways that all matter: it counts scale-outs at the
+    fraction actually closed rather than the full planned target, it charges
+    spread/commission/slippage, and it lets a loss exceed -1.0R when the stop
+    fills past sl_dist (which on real rows it routinely does)."""
+    try:
+        risk = float(row.get("sl_dist") or 0.0) * _DOLLARS_PER_POINT
+        if risk <= 0:
+            return None
+        net = row.get("net_pnl_dollars")
+        if net is None:
+            return None
+        return max(-_R_LABEL_CLAMP, min(_R_LABEL_CLAMP, float(net) / risk))
+    except (TypeError, ValueError):
+        return None
+
+
 def _get_training_data():
     """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
     try:
@@ -250,22 +443,57 @@ def _get_training_data():
                 f = json.loads(feats)
             except Exception:
                 continue
-            # Guards against a ragged X array when older rows were labeled
-            # under a previous _version with a different feature count (e.g.
-            # pre-v4 rows missing ref_discipline_score/ref_aggression_score).
-            if len(f) != len(FEATURE_NAMES):
+            # Older rows were labeled under a previous _version with fewer
+            # features. Discarding them (the pre-v6 behaviour) meant every
+            # feature addition silently threw the entire training history
+            # away -- at v6 that would have been all 752 labeled signals,
+            # leaving the model with nothing until months of new ones
+            # accumulated. Pad them with the documented neutral for each
+            # missing feature instead, which is truthful: those rows really
+            # do have no FVG context recorded. Only right-padding is valid,
+            # and only because features are append-only (see
+            # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
+            # from a newer build and still can't be interpreted, so it is
+            # still skipped.
+            if len(f) > len(FEATURE_NAMES):
                 continue
+            if len(f) < len(FEATURE_NAMES):
+                f = f + [_FEATURE_NEUTRAL.get(n, 0.0)
+                         for n in FEATURE_NAMES[len(f):]]
             outcome = r.get("outcome", "")
             if outcome not in ("win", "loss", "be"):
                 continue
-            _rr = float(r.get("rr_tp1") or 1.0)
-            label = _rr if outcome == "win" else (-1.0 if outcome == "loss" else 0.0)
+            label = _realised_r(r)
+            if label is None:
+                continue
             X.append(f)
             y.append(label)
         return X, y
     except Exception as exc:
         _log.debug("[RE-ML] training data error: %s", exc)
         return [], []
+
+
+def _labeled_count_from_db() -> int:
+    """How many closed signals are actually trainable right now.
+
+    _labeled_count is an in-memory counter that _save_all() persists, and
+    record_ref_signal() also triggers a save -- so any process that saves
+    before it has a real count (a fresh module whose meta load found nothing,
+    or the first run after a _version bump discards the old meta) writes a 0
+    over a perfectly good number. That then suppresses batch retraining until
+    _RETRAIN_EVERY fresh outcomes accumulate, even though hundreds of
+    trainable rows are sitting in the DB. Observed live 2026-07-31: a
+    retrained model with n=576 came back as labeled=0 with the ML panel
+    claiming it needed 15 more signals before its first training.
+
+    The DB is the real source of truth, so use it to repair the counter
+    rather than trusting whatever was last written to the pickle."""
+    try:
+        X, _ = _get_training_data()
+        return len(X)
+    except Exception:
+        return 0
 
 
 def _retrain() -> None:
@@ -370,6 +598,14 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     if not sig:
         return
 
+    # Credit this outcome back to the REF level type it correlated with, so
+    # ref_level_win_rate reflects how the reference channel's preferred levels
+    # actually resolve. Done before the feature/label guards below so a signal
+    # that can't be trained on still updates the pattern stats.
+    ref_level_type = sig.get("correlated_ref_level_type")
+    if ref_level_type and sig.get("correlation_confirmed"):
+        record_ref_signal(ref_level_type, was_win=(outcome == "win"))
+
     feats_json = sig.get("ml_features_json")
     if not feats_json:
         return
@@ -377,12 +613,24 @@ def record_outcome(signal_id: int, outcome: str) -> None:
         feats = json.loads(feats_json)
     except Exception:
         return
+    if len(feats) != len(FEATURE_NAMES):
+        return  # stored under an older feature set — dimensions won't line up
+
+    label = _realised_r(sig)
+    if label is None:
+        _log.debug("[RE-ML] signal=%s has no realised R (sl_dist/net_pnl missing) — "
+                   "not used for training", signal_id)
+        return
+
+    # Self-heal a counter that was clobbered by a save from a process which
+    # never had it (see _labeled_count_from_db). Done here rather than at
+    # init() because the reversal-engine DB isn't guaranteed to be wired up
+    # that early, whereas by this point we have just read a signal from it.
+    if _labeled_count == 0:
+        _labeled_count = _labeled_count_from_db()
 
     import numpy as np
     fa = np.array(feats, dtype=float).reshape(1, -1)
-
-    rr_tp1 = float((sig or {}).get("rr_tp1") or 1.0)
-    label = rr_tp1 if outcome == "win" else (-1.0 if outcome == "loss" else 0.0)
 
     # Online update — SGDRegressor with huber loss
     if _model_online is None:
@@ -398,8 +646,12 @@ def record_outcome(signal_id: int, outcome: str) -> None:
             loss="huber", epsilon=0.1, random_state=42
         )
     try:
-        sw = [2.0 if label < 0 else 1.0]
-        _model_online.partial_fit(fa, [label], sample_weight=sw)
+        # Unweighted as of v5. The old 2x weight on losing samples existed to
+        # compensate for a label that priced every loss at a flat -1.0R; the
+        # realised-R label now carries that magnitude itself (losses average
+        # -1.22R and reach -5.75R), so keeping the multiplier would count the
+        # same asymmetry twice and over-penalise every loser.
+        _model_online.partial_fit(fa, [label])
     except Exception:
         pass
 
@@ -492,8 +744,12 @@ def get_ml_metrics() -> dict:
             outcome = (row["outcome"] or "").lower()
             if outcome not in ("win", "loss", "be"):
                 continue
-            rr_tp1 = float(row["rr_tp1"] or 1.0)
-            actual_r = rr_tp1 if outcome == "win" else (-1.0 if outcome == "loss" else 0.0)
+            # Same realised-R definition the model is now trained on, so the
+            # panel's "mean actual R" matches the money in re_balance_log
+            # instead of the planned-target fiction it used to plot.
+            actual_r = _realised_r(dict(row))
+            if actual_r is None:
+                continue
             signal_ids.append(row["signal_ref"] or str(row["id"]))
             pred_rs.append(float(row["ml_prob"]))
             actual_rs.append(actual_r)

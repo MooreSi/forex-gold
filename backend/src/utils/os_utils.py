@@ -253,3 +253,74 @@ def delayed_relaunch_cmd(
         args_str = " ".join(extra_args) if extra_args else ""
         args_part = f" {args_str}" if args_str else ""
         return ["bash", "-c", f"sleep {delay_secs} && '{python}' '{script}'{args_part}"]
+
+
+def app_python(root) -> str:
+    """Return the interpreter that should be used to launch run.py.
+
+    Prefers the checkout's own .venv (a symlink is fine -- it resolves through
+    normally), falling back to whatever interpreter is running right now. Shared
+    by restart_app() and the autostart watchdog so a relaunch never picks a
+    different Python than the one the app was installed against.
+    """
+    from pathlib import Path
+    root = Path(root)
+    if sys.platform == "win32":
+        venv_python = root / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = root / ".venv" / "bin" / "python3"
+    return str(venv_python) if venv_python.exists() else sys.executable
+
+
+def restart_app(root) -> None:
+    """Spawn a detached relaunch of run.py after a delay, then shut this
+    process down -- the shared restart mechanism used by both the header
+    Power dialog and the Settings > Update "apply update" flow
+    (core_app_update.py). Caller is responsible for notifying the user and
+    for calling this from a context where `nicegui.app.shutdown()` makes
+    sense (a running NiceGUI server); this function performs the shutdown
+    itself as its final step.
+    """
+    from pathlib import Path
+    root = Path(root)
+    python = app_python(root)
+
+    from backend.src.config import USER_DATA_DIR
+    log_path = USER_DATA_DIR / "data" / "restart.log"
+    cmd = delayed_relaunch_cmd(python, "run.py", delay_secs=5, extra_args=["--no-browser"])
+    with open_restart_log(log_path) as _restart_log:
+        if sys.platform == "win32":
+            # CREATE_BREAKAWAY_FROM_JOB is required, not optional: this app is
+            # normally launched by Task Scheduler, which places it (and every
+            # child it spawns) in a Job Object with kill-on-close semantics.
+            # DETACHED_PROCESS/CREATE_NEW_PROCESS_GROUP alone only detach the
+            # console/signal group, not job membership -- without breakaway,
+            # this relaunch child dies the instant this process exits below,
+            # before its delay timer even elapses (confirmed empirically: the
+            # child never survived without this flag). See _do_restart() in
+            # remote/client.py for the same fix on the licence-activation and
+            # revocation restart paths.
+            subprocess.Popen(
+                cmd,
+                cwd=str(root),
+                creationflags=(
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.CREATE_BREAKAWAY_FROM_JOB
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=_restart_log,
+                stderr=_restart_log,
+            )
+        else:
+            subprocess.Popen(
+                cmd,
+                cwd=str(root),
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=_restart_log,
+                stderr=_restart_log,
+            )
+
+    from nicegui import app
+    app.shutdown()

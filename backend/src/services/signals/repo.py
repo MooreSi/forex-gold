@@ -169,16 +169,23 @@ def find_latest_open_trade_for_source(channel_name: str) -> Optional[dict]:
         return db_module.row_to_dict(row) if row else None
 
 
-def template_trade_open_for(channel_name: str, direction: str,
-                            strategy_like: str) -> bool:
-    """Sig Guard's question: is a template-managed trade already open here?"""
+def template_trade_open_entries(channel_name: str, direction: str,
+                               strategy_like: str) -> list:
+    """Sig Guard's question: the entry price of every template-managed trade
+    already open on this channel and direction, newest-agnostic.
+
+    Returns entries rather than a bare boolean because Sig Guard gained a
+    distance arm on 2026-08-04 (upstream `guard_pips`): the caller decides
+    whether an existing trade is close enough to the new one to block. An
+    unfilled placeholder row has entry 0 and no price to measure from -- it
+    is returned as-is and the caller treats it as blocking."""
     with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM vantage_simulated_trades WHERE status='open' "
-            "AND tg_source=? AND direction=? AND strategy LIKE ? LIMIT 1",
+        rows = conn.execute(
+            "SELECT entry_price FROM vantage_simulated_trades WHERE status='open' "
+            "AND tg_source=? AND direction=? AND strategy LIKE ?",
             (channel_name, direction, strategy_like),
-        ).fetchone()
-    return row is not None
+        ).fetchall()
+    return [float(r[0] or 0) for r in rows]
 
 
 def set_signal_commentary(signal_id: str, commentary_json: str) -> None:

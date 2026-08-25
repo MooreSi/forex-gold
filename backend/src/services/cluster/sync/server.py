@@ -175,6 +175,18 @@ _SYNCED_SETTINGS_KEYS = (
     # each node), so it needs to reach both sides like every other execution
     # -affecting flag above, not just live on whichever node's UI set it.
     "centralized_signal_gen_enabled",
+    # Trading > Strategy > Internal Engine Exposure (2026-07-28) -- added up
+    # front rather than found later as a gap, per the recurring pattern
+    # documented throughout this list. Whichever node is the active trader is
+    # the one whose internal engines actually consult this before executing,
+    # so it has to reach both sides like every other execution-affecting flag.
+    "internal_hedge_mode", "internal_net_exposure_max_lots",
+    # Signal Generator > Reversal > Learn From Pro Signals (2026-08-06) --
+    # added up front, same reasoning as the entries above. Whichever node
+    # runs the Reversal Engine is the one that reads this when scoring a
+    # signal, so a toggle set on the Mac has to reach the VPS or the engine
+    # there keeps scoring with pro_likeness pinned at its neutral.
+    "re_learn_from_ref_signals",
 )
 
 

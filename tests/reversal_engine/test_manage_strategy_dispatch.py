@@ -214,4 +214,10 @@ def test_conservative_runner_trails_and_never_loosens(engine, fresh_db):
     sig = _refetch(fresh_db, sig_id)
     assert sig["status"] == "closed"
     assert sig["outcome"] == "win"
-    assert sig["net_pnl_dollars"] == pytest.approx(39.6, abs=0.05)
+    # 40.2, not the 39.6 this asserted before 2026-08-18: the trail is a stop,
+    # so it now books at the trail level (4007.0) instead of at whatever the
+    # 5s poll caught on the way through (bid 4005.8). Booking a trail late is
+    # the same defect as booking a stop late, just on the profitable side --
+    # it hands back part of the runner the trail was there to protect. See
+    # _stop_fill in reversal_engine_manage.py.
+    assert sig["net_pnl_dollars"] == pytest.approx(40.2, abs=0.05)

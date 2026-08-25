@@ -22,6 +22,7 @@ from backend.src.utils.models import (
     STRATEGY_ADAPTIVE_RUNNER_2 as _AR2,
 )
 from ._ea_templates import _render_ea_templates_card
+from backend.src.utils.models import STRATEGY_ORB_FIXED
 from ._strategy_cards import (
     _render_channel_strategy_card,
     _render_global_parameters_card,
@@ -208,7 +209,9 @@ def _render_strategy(engine):
 
         all_names = {
             k: v for k, v in STRATEGY_NAMES.items()
-            if k not in _hidden
+            # ORB/IVB is a time-of-day breakout engine, not a per-channel
+            # strategy -- it has no signal/channel to attach to.
+            if k not in _hidden and k != STRATEGY_ORB_FIXED
         }
         all_names.update({cs["id"]: cs["name"] for cs in custom_strats})
 
@@ -231,175 +234,14 @@ def _render_strategy(engine):
         with ui.card().classes("w-full bg-gray-800 p-2 rounded-lg"):
             _render_ea_templates_card()
 
-        # ── 3-card row ────────────────────────────────────────────────────────
-        with ui.row().classes("w-full gap-4 flex-wrap items-start"):
-
-            # ── Card 1: Active Strategy ───────────────────────────────────────
-            with ui.card().classes("bg-gray-800 p-4 rounded-lg shrink-0 w-72"):
-                ui.label("Active Strategy").classes("text-base font-bold text-yellow-300 mb-1")
-                ui.label(
-                    "Strategy is selected per-channel in Channel Strategy above. "
-                    "The settings below apply regardless of which strategy is running."
-                ).classes("text-xs text-gray-500 italic mb-3")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Trailing Stop SL (pts)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Trailing Stop strategy only. "
-                            "Initial stop-loss distance from entry price — gives the trade breathing room "
-                            "before the trail activates at TP1."
-                        )
-                    trail_stop_sl = ui.number(
-                        value=float(rs.get("trail_stop_sl_pts", 5.0)),
-                        min=0.5, step=0.5, format="%.1f",
-                    ).classes("w-full")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Trailing Stop Distance (pts)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Trailing Stop strategy only. "
-                            "TP1–TP8 are set at 1×–8× this distance from entry. "
-                            "After TP1 is reached, the SL trails at this distance behind price."
-                        )
-                    trail_dist = ui.number(
-                        value=float(rs.get("trailing_stop_distance", 5.0)),
-                        min=0.1, step=0.5, format="%.1f",
-                    ).classes("w-full")
-
-                ui.separator().classes("my-2")
-
-                with ui.column().classes("gap-0 w-full"):
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("ATR Collapse Threshold (0.0–1.0)").classes("text-xs text-gray-400 font-medium")
-                        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                            "Suppresses signals when current ATR falls below this fraction of the recent "
-                            "ATR baseline. 0.65 = block when volatility drops to 65% or below of normal. "
-                            "Set to 0 to disable. Prevents trading in dead-market chop (Asian gaps, "
-                            "pre-news consolidation) where spread costs eliminate edge."
-                        )
-                    atr_collapse_thresh = ui.number(
-                        value=float(rs.get("atr_collapse_threshold", 0.65) or 0.65),
-                        min=0.0, max=1.0, step=0.05, format="%.2f",
-                    ).classes("w-full")
-
-                kelly_enabled = ui.checkbox(
-                    "Kelly Criterion Sizing",
-                    value=bool(rs.get("kelly_sizing_enabled", 0)),
-                ).classes("text-sm text-gray-300 mt-1")
-                kelly_enabled.tooltip(
-                    "Adjusts live-execution lot size using half-Kelly Criterion "
-                    "based on rolling 50-trade win rate and R:R. "
-                    "Multiplier is clamped to [0.75x, 1.25x] — modest adjustment only. "
-                    "Requires ≥20 closed trades to activate."
-                )
-
-                def save_strategy():
-                    try:
-                        trading_ctl.update_risk_settings({
-                            "trail_stop_sl_pts":       float(trail_stop_sl.value or 5.0),
-                            "trailing_stop_distance":  float(trail_dist.value or 3.0),
-                            "atr_collapse_threshold":  float(atr_collapse_thresh.value or 0.65),
-                            "kelly_sizing_enabled":    int(kelly_enabled.value),
-                        })
-                        ui.notify("Settings saved", type="positive")
-                    except Exception as ex:
-                        ui.notify(str(ex), type="negative")
-
-                ui.button("Save Settings", on_click=save_strategy).classes(
-                    "bg-blue-700 text-white mt-3 px-4 py-2 text-sm"
-                )
-
-                # Auto-Execution moved to Parsing > Logic Keywords tab (2026-07-23).
-
-                # ── Dynamic Position Management ───────────────────────────────
-                ui.separator().classes("my-3")
-                with ui.row().classes("items-center gap-2 mb-1"):
-                    ui.icon("psychology").classes("text-blue-400 text-base")
-                    ui.label("Dynamic Position Management").classes(
-                        "text-sm font-semibold text-blue-300"
-                    )
-                    dpm_enabled_val = bool(rs.get("dpm_enabled", 0))
-                    dpm_badge = ui.badge(
-                        "DPM ON" if dpm_enabled_val else "DPM OFF",
-                        color="blue" if dpm_enabled_val else "grey",
-                    )
-
-                dpm_chk = ui.checkbox(
-                    "Hand off to adaptive management",
-                    value=dpm_enabled_val,
-                ).classes("text-sm text-gray-200")
-
-                def _dpm_toggle(e):
-                    trading_ctl.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
-                    dpm_badge.props(f"color={'blue' if e.value else 'grey'}")
-                    dpm_badge.text = "DPM ON" if e.value else "DPM OFF"
-                    ui.notify(
-                        "DPM enabled — strategy control handed off" if e.value
-                        else "DPM disabled — strategy selection restored",
-                        type="positive" if e.value else "info",
-                    )
-
-                dpm_chk.on_value_change(_dpm_toggle)
-
-                # ── DPM Profit Take ───────────────────────────────────────────
-                with ui.row().classes("items-end gap-2 mt-2 w-full"):
-                    with ui.column().classes("flex-1 gap-0"):
-                        with ui.row().classes("items-center gap-1"):
-                            ui.label("Profit Take ($)").classes(
-                                "text-xs text-gray-400 font-medium"
-                            )
-                            ui.icon("info_outline", size="xs").classes(
-                                "text-blue-400 cursor-help"
-                            ).tooltip(
-                                "Close the remaining position when cumulative profit — "
-                                "partial closes already taken plus unrealised P&L on "
-                                "remaining lots — reaches this amount.\n"
-                                "Example: set $150 and DPM will keep managing the trade "
-                                "through its normal TP levels until the running total "
-                                "hits $150, then close everything.\n"
-                                "0 = DPM decides entirely (no dollar cap)."
-                            )
-                        dpm_profit_inp = ui.number(
-                            value=float(rs.get("profit_close_usd", 0.0) or 0.0),
-                            min=0.0, step=5.0, format="%.2f",
-                            placeholder="0 = DPM decides",
-                        ).classes("w-full")
-
-                    def _save_dpm_profit():
-                        try:
-                            val = max(0.0, float(dpm_profit_inp.value or 0))
-                            trading_ctl.update_risk_settings({"profit_close_usd": val})
-                            if val > 0:
-                                ui.notify(
-                                    f"Profit take set to ${val:.2f} — DPM will close when "
-                                    f"cumulative profit reaches this amount",
-                                    type="positive",
-                                )
-                            else:
-                                ui.notify(
-                                    "Profit take cleared — DPM manages profit levels entirely",
-                                    type="info",
-                                )
-                        except Exception as ex:
-                            ui.notify(str(ex), type="negative")
-
-                    ui.button("Set", on_click=_save_dpm_profit).classes(
-                        "bg-blue-700 text-white px-3 text-xs"
-                    ).style("height:30px; min-width:44px;")
-
-                ui.label(
-                    "Automatically adjusts trail distance, breakeven timing and "
-                    "partial close size using ATR, session and momentum. "
-                    "Set a Profit Take amount above to cap the cumulative target — "
-                    "otherwise DPM decides entirely."
-                ).classes("text-xs text-gray-400 mt-2 leading-relaxed")
-
-                # Immediate Market Buy/Sell moved to Parsing > Logic Keywords tab (2026-07-23).
-
-            # ── Card 1b: Risk Settings ──────────────────────────────────────────
-            render_risk_card("bg-gray-800 p-4 rounded-lg shrink-0 w-72")
+        # ── Risk Settings (full width, own internal 3+2 sub-card layout) ────────
+        # Internal Engine Exposure and DPM (formerly on an "Active Strategy" card
+        # here) moved into Risk Settings itself (2026-08-01) — strategy is
+        # selected per-channel in Channel Strategy above, so a separate "Active
+        # Strategy" card had no strategy-selection content of its own left to
+        # justify existing as a distinct tab/card. render_risk_card lays out its
+        # own five sub-cards (3 top row + 2 bottom row); no outer card here.
+        render_risk_card("w-full")
 
         # ── Quick comparison table ─────────────────────────────────────────────
         compare_container = ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-2")

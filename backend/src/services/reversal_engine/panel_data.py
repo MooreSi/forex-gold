@@ -19,6 +19,7 @@ from backend.src.db.database import to_db_thread
 from backend.src.services.cluster.sync.remote_stats_facade import make_facades
 from backend.src.services.reversal_engine import ml_engine as _real_ml
 from backend.src.services.reversal_engine import reversal_engine_repo as _real_db
+from backend.src.db import database as _core_db
 
 _db, _ml, _ = make_facades("reversal_engine", _real_db, _real_ml)
 
@@ -67,3 +68,22 @@ def ml_thresholds() -> dict:
     """MIN_TRAIN_SAMPLES / RETRAIN_EVERY, which the panel renders as prose."""
     return {"min_train_samples": _ml.MIN_TRAIN_SAMPLES,
             "retrain_every": _ml.RETRAIN_EVERY}
+
+
+def get_realised_pnl() -> dict:
+    """What this engine's trades actually made, from the core trade ledger.
+
+    Deliberately not read from reversal_engine.db: that database records
+    every signal the generator produced and prices them all at the virtual
+    lot, whether or not the trade was ever placed. Only rows here in
+    vantage_simulated_trades correspond to orders that really went to MT5.
+    """
+    with _core_db.db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(net_pnl), 0) total "
+            "FROM vantage_simulated_trades "
+            "WHERE status='closed' AND tg_source='Reversal Engine'"
+        ).fetchone()
+    n = int(row[0] or 0)
+    total = float(row[1] or 0.0)
+    return {"n": n, "total": total, "per_trade": (total / n) if n else 0.0}

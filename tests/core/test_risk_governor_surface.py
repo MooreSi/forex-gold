@@ -143,6 +143,91 @@ def test_check_pre_trade_filters_directional_cap(fresh_db):
     assert "Directional cap" in result
 
 
+# ── rr_filter_bypassed: the IME arm ───────────────────────────────────────────
+# Found live 2026-08-06: every GOLD DIGGERS INSTITUTIONAL signal since 08-05
+# 12:47 was declined here (TP1 4-6pt against an 8-9pt stop) even though the
+# channel runs Immediate Market Entry, so the app opened no GDI trade at all
+# while Gold Diggers VIP -- which differs only by being in the static
+# RR_BYPASS_SOURCES set -- kept trading. The scan path had already been given
+# an IME bypass of its own; the pending-activation watcher and
+# resolve_open_trade_params had not, so they still declined the same signals.
+
+def _configure_channel(name, parser_format="gd2", instant_entry_enabled=True):
+    db.save_channel_parser_config(
+        name, parser_format, "", instant_entry_enabled, True, "test",
+    )
+
+
+def _set_ime(enabled: bool):
+    db.update_risk_settings({"immediate_market_entry": 1 if enabled else 0})
+    db._rs_cache = None
+    db._rs_cache_ts = 0.0
+
+
+def test_rr_bypassed_for_ime_channel(fresh_db):
+    _configure_channel("GOLD DIGGERS INSTITUTIONAL")
+    _set_ime(True)
+    result = rg.check_pre_trade_filters(
+        "BUY", 2395.0, 2405.0, 2390.0, tp1=2401.0, actual_price=2400.0,
+        source_name="GOLD DIGGERS INSTITUTIONAL",
+    )
+    assert result is None
+
+
+def test_rr_still_enforced_when_global_ime_is_off(fresh_db):
+    """The per-channel flag alone is not enough -- the global toggle gates it,
+    exactly as engine.py's own IME gate does."""
+    _configure_channel("GOLD DIGGERS INSTITUTIONAL")
+    _set_ime(False)
+    result = rg.check_pre_trade_filters(
+        "BUY", 2395.0, 2405.0, 2390.0, tp1=2401.0, actual_price=2400.0,
+        source_name="GOLD DIGGERS INSTITUTIONAL",
+    )
+    assert result is not None
+    assert "R:R filter" in result
+
+
+def test_rr_still_enforced_when_channel_opted_out_of_ime(fresh_db):
+    _configure_channel("GOLD DIGGERS INSTITUTIONAL", instant_entry_enabled=False)
+    _set_ime(True)
+    result = rg.check_pre_trade_filters(
+        "BUY", 2395.0, 2405.0, 2390.0, tp1=2401.0, actual_price=2400.0,
+        source_name="GOLD DIGGERS INSTITUTIONAL",
+    )
+    assert result is not None
+    assert "R:R filter" in result
+
+
+def test_rr_still_enforced_for_an_unconfigured_source(fresh_db):
+    """A source with no channel_parser_config row at all (the Reversal
+    Engine, a manual signal) is not a Telegram channel running IME, so it
+    must keep the filter even with the global toggle on."""
+    _set_ime(True)
+    result = rg.check_pre_trade_filters(
+        "BUY", 2395.0, 2405.0, 2390.0, tp1=2401.0, actual_price=2400.0,
+        source_name="Reversal Engine",
+    )
+    assert result is not None
+    assert "R:R filter" in result
+
+
+def test_ime_bypass_does_not_also_waive_the_directional_cap(fresh_db):
+    """Filter 2 is a live-exposure limit, not a judgement about the signal's
+    levels -- IME says nothing about it and must not disable it."""
+    _configure_channel("GOLD DIGGERS INSTITUTIONAL")
+    _set_ime(True)
+    _insert_signal("sig-1")
+    _insert_signal("sig-2")
+    _insert_trade("t-1", "sig-1", direction="BUY", sl_moved_to_be=0)
+    _insert_trade("t-2", "sig-2", direction="BUY", sl_moved_to_be=0)
+    result = rg.check_pre_trade_filters(
+        "BUY", 2395.0, 2405.0, 2390.0, tp1=2401.0, actual_price=2400.0,
+        source_name="GOLD DIGGERS INSTITUTIONAL",
+    )
+    assert result is not None
+    assert "Directional cap" in result
+
+
 def test_check_pre_trade_filters_directional_cap_ignores_protected_trades(fresh_db):
     _insert_signal("sig-1")
     _insert_signal("sig-2")

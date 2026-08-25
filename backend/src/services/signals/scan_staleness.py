@@ -28,6 +28,10 @@ from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
 from backend.src.services.risk import expert_params
+from backend.src.services.telegram import alerts
+from backend.src.services.ai import provider
+from backend.src.services.channels import strategy_ai
+from backend.src.services.risk.schedule import get_schedule_strategy_override
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +115,29 @@ async def resolve_strategy_and_skip_reason(
     per_signal_skip_rsn = ""
     strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
     _ch_ov_tg = db_module.get_channel_strategy_override(channel_name)
+
+    # Trading Schedule per-window override (2026-08-06). The active window's
+    # own strategy/template pick for THIS channel wins over its Channel
+    # Strategy setting for as long as that window is active -- the same
+    # precedence core_signal_resolution.resolve_open_trade_params has applied
+    # since the feature landed (see its "Trading Schedule window override >
+    # channel override" block). This path was the only strategy-resolution
+    # site that never consulted it, so a template assigned per schedule window
+    # was silently ignored for every Telegram signal that arrived through the
+    # scan loop -- the channel-level assignment was the only one that did
+    # anything, and a window configured to a DIFFERENT template than the
+    # channel ran the channel's one instead.
+    #
+    # channel_name is always a real Telegram channel here (this is the
+    # Telegram scan path), so no ENGINE_SOURCE_KEYS mapping is needed --
+    # _resolve_source_gate canonicalises the name and reads the window's
+    # telegram_channels entry. None means "no opinion" (schedule off, no
+    # active window, channel disabled in it, or no override configured) and
+    # leaves the channel-level pick untouched.
+    _sched_ov_tg = get_schedule_strategy_override(channel_name)
+    if _sched_ov_tg:
+        _ch_ov_tg = _sched_ov_tg
+
     if _ch_ov_tg == "auto":
         if auto_execute:
             if ai_provider.is_configured(cfg_obj):
@@ -141,7 +168,20 @@ async def resolve_strategy_and_skip_reason(
     elif _ch_ov_tg:
         strategy = _ch_ov_tg
 
-    if "high risk" in text.lower():
+    # "High Risk" must not override a template-assigned channel -- a
+    # template fully replaces strategy dispatch by design (see
+    # core_ea_templates.py's module docstring), and this override doesn't
+    # just lose that intent locally: engine.py's own Limit-format dispatch
+    # (the tp_open check right after this function returns) tests
+    # is_template_override(strategy) on the ALREADY-mutated value, so
+    # clobbering it here also defeated that check's template-wins
+    # protection -- confirmed live 2026-07-27: GOLD DIGGERS INSTITUTIONAL's
+    # "HIGH RISK TRADE" disclaimer appears on effectively every signal
+    # (channel-wide boilerplate, not a per-signal risk flag), so every one
+    # of that channel's Limit-format signals silently executed as Limit
+    # Runner instead of its assigned Test Template, no grid, no fractal
+    # trail, none of the template's own management.
+    if "high risk" in text.lower() and not ea_templates.is_template_override(strategy):
         log.info("[%s] 'High Risk' flagged in message — using Conservative "
                  "strategy for this trade only", channel_name)
         strategy = STRATEGY_CONSERVATIVE

@@ -115,19 +115,19 @@ def _make_ctx(bridge):
 # ── check_sl (pure) ──────────────────────────────────────────────────────
 
 def test_check_sl_buy_crosses():
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0}
+    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2389.0, ask=2389.5)
     assert ml.check_sl(trade, tick) == ("t1", 2390.0, "SL")
 
 
 def test_check_sl_sell_crosses():
-    trade = {"trade_id": "t1", "direction": "SELL", "stop_loss": 2410.0}
+    trade = {"trade_id": "t1", "direction": "SELL", "stop_loss": 2410.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2409.5, ask=2410.0)
     assert ml.check_sl(trade, tick) == ("t1", 2410.0, "SL")
 
 
 def test_check_sl_no_cross():
-    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0}
+    trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2395.0, ask=2395.5)
     assert ml.check_sl(trade, tick) is None
 
@@ -319,3 +319,45 @@ def test_ea_instance_none_reclaims_returns_false(fresh_db):
     assert result is False
     assert len(alerts) == 1
     assert _trade_row("t-ea-none")["managed_by"] == "python"
+
+
+def test_template_strategy_never_reclaimed_when_ea_unhealthy(fresh_db):
+    # Regression (2026-07-27): a grid template trade got reclaimed here
+    # during a brief EA reconnect. Python has no handler for a
+    # "template:<name>" strategy at all -- the monitor loop's dispatch
+    # falls straight through to the scale_out default, which fabricated a
+    # $40,730 "profit" from a live tick crossing tp1/tp2/tp3 against this
+    # trade's still-zero entry_price (a grid placeholder pending its first
+    # leg fill), with no real broker order ever touched (mt5_ticket was 0).
+    # Template strategies must stay managed_by='ea' and simply go
+    # unmanaged until the EA reconnects -- never reclaimed.
+    _insert_open_trade("t-tpl-unhealthy", managed_by="ea")
+    trade = _trade_row("t-tpl-unhealthy")
+    ea = SimpleNamespace(is_ea_healthy=lambda: False)
+    alerts = []
+
+    async def fake_send(msg, *a, **k):
+        alerts.append(msg)
+
+    with mock.patch.object(ea_bridge, "get_instance", return_value=ea), \
+         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send):
+        result = asyncio.run(ml.reclaim_ea_managed_trade(trade, "template:Test Template"))
+    assert result is True
+    assert alerts == []
+    assert _trade_row("t-tpl-unhealthy")["managed_by"] == "ea"
+
+
+def test_template_strategy_never_reclaimed_when_ea_instance_none(fresh_db):
+    _insert_open_trade("t-tpl-none", managed_by="ea")
+    trade = _trade_row("t-tpl-none")
+    alerts = []
+
+    async def fake_send(msg, *a, **k):
+        alerts.append(msg)
+
+    with mock.patch.object(ea_bridge, "get_instance", return_value=None), \
+         mock.patch.object(telegram_alerts, "send_message", side_effect=fake_send):
+        result = asyncio.run(ml.reclaim_ea_managed_trade(trade, "template:Grid Tpl"))
+    assert result is True
+    assert alerts == []
+    assert _trade_row("t-tpl-none")["managed_by"] == "ea"

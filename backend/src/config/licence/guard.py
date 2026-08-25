@@ -1,14 +1,16 @@
 """
-Licence enforcement for the FOREX Trader app — fully offline, HMAC-SHA256.
+Licence enforcement for the FOREX Trader app — fully offline, Ed25519 signature.
 
 Algorithm:
-  key = HMAC-SHA256(secret, "{machine_id}|{expiry_date}|1.0")
-  formatted as XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX
+  signature = Ed25519_sign(private_key, "{machine_id}|{expiry_date}|2.0")
+  formatted as 16 groups of 8 uppercase hex chars (128 hex chars total)
 
-  The _SERVER_SECRET must match the value in the admin KeyGen tool.
+  Verification uses only the public key bundled in licence/verify.py — the
+  matching private signing key lives solely in the admin KeyGen tool and is
+  never shipped with the app.
 
 Activation code format (what the admin sends to the user):
-  KEY|EXPIRY_DATE  e.g.  6197CA98-...|2027-06-09  or  6197CA98-...|perpetual
+  KEY|EXPIRY_DATE  e.g.  D17BE902-...|2027-06-09  or  D17BE902-...|perpetual
 
 Call enforce() at startup before the NiceGUI server is started.
 """
@@ -16,7 +18,22 @@ import logging
 
 log = logging.getLogger(__name__)
 
-from backend.src.config.licence.keygen import verify_licence_key as _verify_licence_hmac
+from backend.src.config.licence.verify import verify_licence_key as _verify_licence_key
+
+
+def _app_port() -> int:
+    """The port the real app will actually run on, once past this licence
+    gate -- must match run.py's own port (config.get("port"), default 8888
+    per config.py) exactly, or the activation/error screens end up serving
+    on a different port than the app restarts into: the "click here to open
+    FOREX Trader" link and its auto-reload poll are both relative to
+    wherever THIS page loaded from, so a mismatch leaves them pointed at a
+    dead port forever."""
+    try:
+        import backend.src.config as _config
+        return int(_config.get("port", 8888))
+    except Exception:
+        return 8888
 
 
 def _parse_activation_code(code: str):
@@ -40,7 +57,10 @@ def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
     log.error("Licence check failed: %s", reason)
 
     if allow_register:
-        _show_registration_page()
+        # `reason` is shown on the activation screen as an explanatory banner
+        # rather than being dropped, so the user knows why they are being asked
+        # to register again instead of just seeing a bare "activation required".
+        _show_registration_page(notice=reason)
         return
 
     @ui.page("/")
@@ -53,7 +73,7 @@ def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
             ui.label(reason).classes("text-red-300 text-sm")
             ui.label("Contact your administrator for assistance.").classes("text-gray-500 text-xs")
 
-    ui.run(host="0.0.0.0", port=8888, title="FOREX Trader — Licence Error",
+    ui.run(host="0.0.0.0", port=_app_port(), title="FOREX Trader — Licence Error",
            dark=True, reload=False)
     sys.exit(1)
 
@@ -113,8 +133,13 @@ _ACTIVATION_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def _show_registration_page() -> None:
-    """Show the licence activation screen and block until activated."""
+def _show_registration_page(notice: str = "") -> None:
+    """Show the licence activation screen and block until activated.
+
+    `notice` explains why activation is being asked for again (stale key after
+    a signing-scheme change, expired licence, machine change). Empty on a
+    genuine first install.
+    """
     import asyncio
     import os
     import sys
@@ -125,11 +150,43 @@ def _show_registration_page() -> None:
 
     machine_id = get_fingerprint()
 
+    # A machine that was approved before already has a remote token, so the
+    # admin server knows it and can push a corrected licence key without the
+    # user re-registering at all (see remote/server.py's resign_all_licences).
+    # Nothing else on this screen starts the remote client — without this,
+    # a client stranded by a re-signing event would sit here doing nothing
+    # until someone manually filled the form in, which is exactly the case
+    # that has no remote fix. Start the agent up front when a token exists so
+    # the push can land on its own.
+    _known_client = False
+    _stored_email = ""
+    _stored_nickname = ""
+    try:
+        from backend.src.services.cluster.remote import client as _rc_boot
+        _known_client = _rc_boot._TOKEN_FILE.exists()
+        _stored_email = _rc_boot.get_stored_email()
+        _stored_nickname = _rc_boot.get_stored_nickname()
+    except Exception as _rc_err:
+        log.warning("Could not inspect remote client state on activation screen: %s", _rc_err)
+
     # Plain HTML "please wait" page served while the process restarts.
     # No socket.io — survives the NiceGUI process dying.
     @_ng_app.get("/licence-activated")
     def _lic_page():
         return HTMLResponse(_ACTIVATION_HTML)
+
+    if _known_client:
+        @_ng_app.on_startup
+        def _autoconnect_known_client():
+            try:
+                from backend.src.services.cluster.remote import client as _rc_auto
+                _rc_auto.start()
+                log.info(
+                    "Activation screen: existing remote token found — "
+                    "connecting so an admin-pushed licence can self-heal this install."
+                )
+            except Exception as exc:
+                log.warning("Could not auto-start remote client on activation screen: %s", exc)
 
     @ui.page("/")
     def _reg_page():
@@ -140,6 +197,20 @@ def _show_registration_page() -> None:
             ui.icon("vpn_key", size="3.5rem").classes("text-blue-400")
             ui.label("FOREX Trader").classes("text-3xl font-bold text-white tracking-tight")
             ui.label("Licence activation required.").classes("text-gray-400 text-sm")
+
+            if notice:
+                with ui.card().classes(
+                    "w-full bg-amber-950 border border-amber-700 p-3 gap-1"
+                ):
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        ui.icon("info", size="1.2rem").classes("text-amber-400")
+                        ui.label(notice).classes("text-amber-200 text-xs leading-snug")
+                    if _known_client:
+                        ui.label(
+                            "This machine is already known to your administrator — "
+                            "if they are online, a replacement licence may arrive "
+                            "automatically. Otherwise request one below."
+                        ).classes("text-amber-300/70 text-xs leading-snug")
 
             # Machine ID — displayed for reference; also sent automatically in the request flow.
             with ui.card().classes("w-full bg-gray-900 border border-gray-700 p-4 gap-2"):
@@ -162,6 +233,7 @@ def _show_registration_page() -> None:
             nickname_input = ui.input(
                 "Your Name / Nickname *",
                 placeholder="e.g. John or JohnTrader",
+                value=_stored_nickname,
             ).props("outlined").classes("w-full text-sm")
             ui.label(
                 "This will identify you in the admin panel and on your licence."
@@ -170,9 +242,14 @@ def _show_registration_page() -> None:
             email_input = ui.input(
                 "Email Address *",
                 placeholder="your@email.com",
+                value=_stored_email,
             ).props("outlined").classes("w-full text-sm")
 
             status_lbl = ui.label("").classes("text-sm min-h-5")
+
+            # Holder so a second click replaces the delivery watcher rather
+            # than stacking another timer alongside the first.
+            _delivery: dict = {"timer": None}
 
             # ── Request Registration (automated flow) ──────────────────────────
 
@@ -201,11 +278,43 @@ def _show_registration_page() -> None:
                 # triggering the rate-limiter before registration gets through.
                 _rc.request_registration(email, nickname)
 
-                status_lbl.set_text(
-                    "Request sent — awaiting administrator approval. "
-                    "The app will activate automatically once approved."
-                )
-                status_lbl.classes(replace="text-sm text-yellow-400")
+                # Do NOT claim the request was sent here. request_registration()
+                # only queues a connection attempt; the registration itself is
+                # transmitted later, and only if the client reaches the admin
+                # server (client.py sends MSG_REGISTER from exactly one place,
+                # in response to the server's reject). Confirmed live
+                # 2026-08-07: a user was told their request was awaiting
+                # approval while the admin server was down, so nothing had been
+                # transmitted and nothing ever arrived -- with no way to tell
+                # from the screen that anything was wrong. Watch the client's
+                # real status instead and report what actually happened.
+                status_lbl.set_text("Contacting administrator server...")
+                status_lbl.classes(replace="text-sm text-gray-400")
+
+                def _watch_delivery():
+                    st = _rc.get_status()
+                    if st.get("registration_sent_at"):
+                        status_lbl.set_text(
+                            "Request delivered — awaiting administrator approval. "
+                            "The app will activate automatically once approved."
+                        )
+                        status_lbl.classes(replace="text-sm text-green-400")
+                        if _delivery["timer"] is not None:
+                            _delivery["timer"].cancel()
+                        return
+                    err = str(st.get("last_error") or "")
+                    if err and err != "contacting administrator server":
+                        status_lbl.set_text(
+                            "Cannot reach the administrator server yet — still "
+                            f"retrying. ({err}) Leave this screen open; the "
+                            "request is sent automatically as soon as the "
+                            "server answers."
+                        )
+                        status_lbl.classes(replace="text-sm text-orange-400")
+
+                if _delivery["timer"] is not None:
+                    _delivery["timer"].cancel()
+                _delivery["timer"] = ui.timer(2.0, _watch_delivery)
 
             ui.button(
                 "Request Registration", icon="send",
@@ -245,7 +354,7 @@ def _show_registration_page() -> None:
                     status_lbl.set_text("Verifying...")
                     status_lbl.classes(replace="text-sm text-gray-400")
 
-                    if not _verify_licence_hmac(machine_id, expiry_date, key):
+                    if not _verify_licence_key(machine_id, expiry_date, key):
                         status_lbl.set_text(
                             "Invalid licence key — this key was not issued for this machine."
                         )
@@ -297,7 +406,7 @@ def _show_registration_page() -> None:
 
             _lic_timer = ui.timer(1.0, _check_activation)
 
-    ui.run(host="0.0.0.0", port=8888, title="FOREX Trader — Activate",
+    ui.run(host="0.0.0.0", port=_app_port(), title="FOREX Trader — Activate",
            dark=True, reload=False)
     sys.exit(0)
 
@@ -310,8 +419,15 @@ def enforce() -> None:
 
     Check order:
       1. Store has machine_id + expiry_date + licence_key — if missing, show activation screen
-      2. Stored machine_id matches current machine — if not, block (wrong machine)
-      3. HMAC-SHA256 valid for machine_id + expiry_date — if not, clear store and block
+      2. Stored machine_id matches current machine — if not, clear store and show activation
+      3. Ed25519 signature valid for machine_id + expiry_date — if not, clear store
+         and show activation
+      4. Expiry date not passed — if it has, show activation so a renewal can be requested
+
+    Every failure path lands on the activation screen rather than a dead-end
+    error page: that screen can request a new licence and can receive one
+    pushed by the admin console, so a stranded install is always recoverable
+    without physical access to the machine.
     """
     from backend.src.config.licence import store as _store
     from backend.src.config.licence.fingerprint import get_fingerprint
@@ -330,42 +446,66 @@ def enforce() -> None:
     stored_machine_id = data["machine_id"]
     expiry_date       = data["expiry_date"]
     licence_key       = data["licence_key"]
-    # email and licence_type are stored but not required for HMAC verification
+    # email and licence_type are stored but not required for signature verification
     current_machine   = get_fingerprint()
+    already_verified  = False
 
     if stored_machine_id != current_machine:
-        # Fingerprints differ — this can happen when macOS updates change how hardware
-        # values are reported (e.g. system_profiler field format changes) even though
-        # the physical machine hasn't changed.
+        # Fingerprints differ — this can happen when OS updates change how hardware
+        # values are reported (e.g. system_profiler field format changes on macOS, or
+        # a flaky WMI/CIM query on Windows returning a slightly different value between
+        # calls) even though the physical machine hasn't changed.
         #
-        # Verify the HMAC against the STORED machine_id (the one the key was issued for).
-        # If it passes, the key is genuine for this machine — the drift is benign.
-        # Update the stored ID to the new fingerprint so future startups skip this path.
-        # Security is unchanged: the HMAC is still validated; a key for machine A will
-        # not pass this check on a genuinely different machine B.
-        if _verify_licence_hmac(stored_machine_id, expiry_date, licence_key):
+        # Verify the signature against the STORED machine_id (the one the key was
+        # actually issued for). If it passes, the key is genuine for this machine —
+        # the drift is benign. Update the stored ID to the new fingerprint so future
+        # startups skip this path, but keep verifying against the ORIGINAL id for the
+        # rest of this run: the key was only ever signed for that id, so re-checking
+        # it against the new, different current_machine below would always fail even
+        # though nothing was actually tampered with (confirmed live: this was turning
+        # every benign drift into a false "invalid or tampered" error).
+        if _verify_licence_key(stored_machine_id, expiry_date, licence_key):
             log.info(
                 "Fingerprint drift detected (stored %s → current %s) — "
-                "HMAC verified against original ID, updating store.",
+                "signature verified against original ID, updating store.",
                 stored_machine_id[:8], current_machine[:8],
             )
             updated = dict(data)
             updated["machine_id"] = current_machine
             _store.save(updated)
-            stored_machine_id = current_machine  # continue with expiry check below
+            already_verified = True
         else:
             log.warning(
                 "Machine ID mismatch — stored %s, current %s",
                 stored_machine_id[:8], current_machine[:8],
             )
             _store.clear()
-            _show_error_and_exit("", allow_register=True)
+            _show_error_and_exit(
+                "This licence was issued for a different machine. "
+                "Request a new one for this machine below.",
+                allow_register=True,
+            )
             return
 
-    if not _verify_licence_hmac(stored_machine_id, expiry_date, licence_key):
-        log.warning("Licence HMAC verification failed — clearing store.")
+    if not already_verified and not _verify_licence_key(stored_machine_id, expiry_date, licence_key):
+        # A key that no longer verifies is far more often a stale key than a
+        # forged one: upgrading over an older install brings a new verify.py,
+        # and every key issued under the retired signing scheme (e.g. the HMAC
+        # keygen.py -> Ed25519 migration) stops validating against it. The old
+        # behaviour here was a dead-end error screen, which is unrecoverable
+        # both locally and remotely — the remote client never starts, so the
+        # admin cannot push a corrected key either. Clear the bad key and send
+        # the user to the activation screen instead, which can request a new
+        # licence and accepts an admin push. A genuinely forged key still gets
+        # nowhere: it is discarded here, and the activation screen only ever
+        # admits a key that verifies.
+        log.warning("Licence signature verification failed — clearing store and re-registering.")
         _store.clear()
-        _show_error_and_exit("Your licence key is invalid or has been tampered with.")
+        _show_error_and_exit(
+            "Your saved licence key is no longer valid for this version of "
+            "FOREX Trader — it needs to be reissued.",
+            allow_register=True,
+        )
         return
 
     # Check expiry date (skip for perpetual licences)
@@ -374,9 +514,15 @@ def enforce() -> None:
         try:
             exp_date = _dt_exp.strptime(expiry_date, "%Y-%m-%d").replace(tzinfo=_tz_exp.utc)
             if _dt_exp.now(_tz_exp.utc).date() > exp_date.date():
+                # Same reasoning as the signature failure above: a dead-end
+                # screen leaves no route back, so offer the activation screen
+                # where a renewal can be requested or pushed. The expired key
+                # is left in the store — it is genuine, and re-saving is the
+                # activation screen's job once a renewal actually arrives.
                 _show_error_and_exit(
                     f"Your licence expired on {expiry_date}. "
-                    "Contact your administrator to obtain a renewal key."
+                    "Request a renewal below, or contact your administrator.",
+                    allow_register=True,
                 )
                 return
         except ValueError:

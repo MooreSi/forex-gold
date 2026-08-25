@@ -14,6 +14,8 @@ import backend.src.config as cfg_module
 from backend.src.controllers import settings_controller as settings_controller
 from backend.src.services.analytics import read_repo
 from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.services.positions import core_strategy_catalogue as strategy_catalogue
+from backend.src.db import database as db_module
 
 def _uk_time() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -108,6 +110,8 @@ def render(get_engine: Callable):
             resistances = [float(x) for x in (data.get("resistance_levels") or []) if x]
             strat_rec   = data.get("strategy_recommendation") or "scale_out"
             strat_reason = data.get("strategy_reason") or ""
+            strat_label  = data.get("strategy_label") or ""
+            strat_blurb  = data.get("strategy_summary") or ""
             signal_analysis = data.get("signal_analysis") or ""
             disclaimer  = data.get("disclaimer") or ""
             gen_at      = data.get("generated_at") or ""
@@ -284,7 +288,17 @@ def render(get_engine: Callable):
                                 ui.label(rf).classes("text-sm text-gray-300 flex-1")
 
             # ── Strategy recommendation ─────────────────────────────────────────
-            strat_name = STRATEGY_NAMES.get(strat_rec, strat_rec)
+            # The recommendation can now be a built-in strategy, a custom
+            # strategy or an EA template ("template:<name>"), so the label and
+            # blurb come from the catalogue snapshot stored with the analysis.
+            # Older stored analyses have neither, hence the live lookup.
+            strat_name = strat_label
+            if not strat_name:
+                _label, _summary = strategy_catalogue.describe(
+                    strat_rec, strategy_catalogue.build_catalogue(include_hidden=True)
+                )
+                strat_name  = _label
+                strat_blurb = strat_blurb or _summary
             with ui.card().classes("w-full rounded-lg p-0 overflow-hidden").style(
                 "border:1px solid #d97706;"
             ):
@@ -303,44 +317,15 @@ def render(get_engine: Callable):
                     if strat_reason:
                         ui.label(strat_reason).classes("text-sm text-gray-200 leading-relaxed")
 
-                    strategy_blurbs = {
-                        "scale_out": (
-                            "Scale Out closes 20% of the position at each TP level and moves "
-                            "SL to breakeven after TP1. Ideal for controlled, gradual profit-taking."
-                        ),
-                        "be_runner": (
-                            "BE Runner keeps the full position open and advances the SL to each "
-                            "cleared TP level. Best for strong trending markets."
-                        ),
-                        "trail_stop": (
-                            "Trailing Stop activates after TP1 and follows price with a configurable "
-                            "distance. Captures extended moves in momentum conditions."
-                        ),
-                        "protected_scale": (
-                            "Protected Scale holds the full position through TP1 and TP2 to lock "
-                            "in breakeven protection, then scales 20% from TP3 onwards."
-                        ),
-                        "conservative": (
-                            "Conservative uses fixed 5-pt SL and TP1 from the actual fill price — "
-                            "signal levels are discarded after entry. 80% closes at TP1 (1:1 R:R), "
-                            "SL moves to breakeven, and the 20% runner is managed with a 5-pt trailing stop. "
-                            "Works with any signal quality."
-                        ),
-                        "no_sl_scale": (
-                            "Trend Ratchet requires ADX > 30 at entry and uses a 1.5× emergency stop "
-                            "instead of the signal SL. 20% closes at TP1 and TP3; SL ratchets to TP1 "
-                            "at TP3 then steps two TP levels ahead from TP4+. Best for confirmed trending markets."
-                        ),
-                    }
-                    blurb = strategy_blurbs.get(strat_rec, "")
-                    if not blurb and strat_rec:
-                        # Custom strategy — look up description from DB
-                        try:
-                            blurb = read_repo.custom_strategy_blurb(strat_rec) or ""
-                        except Exception:
-                            pass
-                    if blurb:
-                        ui.label(blurb).classes("text-xs text-gray-400 italic")
+                    # One blurb source for all three kinds — the built-in
+                    # descriptions in models.py, the custom strategy's own
+                    # description, or the template's live configuration
+                    # rendered into prose. Previously six built-ins were
+                    # duplicated here by hand and everything else fell through
+                    # to a custom_strategies lookup that a template could
+                    # never match.
+                    if strat_blurb:
+                        ui.label(strat_blurb).classes("text-xs text-gray-400 italic")
 
             # ── Signal analysis ─────────────────────────────────────────────────
             if signal_analysis and signal_analysis != "—":
@@ -425,11 +410,10 @@ def render(get_engine: Callable):
             except Exception:
                 pass
 
-            custom_strats = []
-            try:
-                custom_strats = read_repo.all_custom_strategies()
-            except Exception:
-                pass
+            # Built fresh on every run so an EA template saved seconds ago is
+            # already recommendable — that is the whole point of reading it
+            # here rather than holding a list built at import time.
+            strategies = strategy_catalogue.build_catalogue()
 
             data = await claude_ai.request_market_analysis(
                 tick=tick,
@@ -438,7 +422,7 @@ def render(get_engine: Callable):
                 performance=perf,
                 cfg=config,
                 timeout=60,
-                custom_strategies=custom_strats or None,
+                strategies=strategies,
             )
 
             _result[0] = data

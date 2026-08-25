@@ -7,7 +7,7 @@
 
 RELEASES: list[tuple] = [
     (
-        "v0.8.2",
+        "v0.42",
         "ORB Auto-Execute Fix, R:R Tracking & Version Reporting",
         "teal",
         "",
@@ -41,7 +41,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.8.1",
+        "v0.41",
         "Fix: missing dependencies",
         "orange",
         "",
@@ -56,7 +56,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.8",
+        "v0.4",
         "Local/Remote Sync",
         "blue",
         "",
@@ -70,7 +70,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.7",
+        "v0.3",
         "Windows Compatibility",
         "green",
         "",
@@ -85,7 +85,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.6",
+        "v0.23",
         "Channel Strategy Overrides & Circuit Breaker",
         "blue",
         "",
@@ -100,7 +100,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.5",
+        "v0.22",
         "Bounce Generator & Real-Time Monitoring",
         "purple",
         "",
@@ -118,7 +118,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.4",
+        "v0.21",
         "Performance Improvements",
         "teal",
         "",
@@ -139,7 +139,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.3",
+        "v0.2",
         "TEST Module — Claude Bounce Generator",
         "blue",
         "",
@@ -157,7 +157,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v0.2",
+        "v0.11",
         "Bug Fixes",
         "amber",
         "",

@@ -195,6 +195,16 @@ def _run_migrations() -> None:
         "ALTER TABLE re_signals ADD COLUMN source_channel TEXT DEFAULT 'Gold Diggers VIP'",
         "ALTER TABLE re_signals ADD COLUMN ml_prob_at_fill REAL",
         "ALTER TABLE re_signals ADD COLUMN htf_bias_at_fill TEXT",
+        # The REF level type this signal correlated against (2026-07-31).
+        # Classified at correlation time by reversal_engine_correlate's
+        # _classify_ref_level but previously discarded straight after being
+        # counted, so when the signal later closed there was no way to tell
+        # ml_engine which level type had just won or lost -- which is why
+        # record_ref_signal was only ever called with was_win=None and the
+        # `wins` counter behind ref_level_win_rate sat at 0 forever.
+        # Mirrored in reversal_engine/database.py's own migration list, which
+        # is a structural twin of this one.
+        "ALTER TABLE re_signals ADD COLUMN correlated_ref_level_type TEXT",
     ]
     for stmt in migrations:
         try:
@@ -377,6 +387,23 @@ def set_stop_loss(sig_id: int, price: float) -> None:
     get_db().run("UPDATE re_signals SET stop_loss=? WHERE id=?", round(price, 2), sig_id)
 
 
+def record_excursion(sig_id: int, favourable_pts: float, adverse_pts: float) -> None:
+    """Widen this signal's max favourable / adverse excursion watermarks.
+
+    Both are stored as positive point distances from the entry reference.
+    MAX/MIN in SQL rather than read-modify-write so a concurrent poll cannot
+    narrow a watermark that another already widened, and so a NULL (first
+    observation) is simply replaced.
+    """
+    get_db().run(
+        "UPDATE re_signals SET "
+        "  mfe_pts = MAX(COALESCE(mfe_pts, 0), ?), "
+        "  mae_pts = MAX(COALESCE(mae_pts, 0), ?) "
+        "WHERE id=?",
+        round(max(0.0, favourable_pts), 2), round(max(0.0, adverse_pts), 2), sig_id,
+    )
+
+
 def book_partial_close(sig_id: int, leg_net_dollars: float, frac_closed: float,
                        tp_idx: int) -> float:
     """Bank realized profit for a fraction of the position at a ladder TP
@@ -430,11 +457,17 @@ def store_ml_prob_at_fill(sig_id: int, prob: float, htf_bias: str) -> None:
 
 
 def update_correlation(sig_id: int, ref_signal_id: str,
-                       time_delta_s: float, distance_pts: float) -> None:
+                       time_delta_s: float, distance_pts: float,
+                       ref_level_type: Optional[str] = None) -> None:
+    """`ref_level_type` is persisted so the eventual win/loss can be credited
+    back to that level type when this signal closes (ml_engine.record_outcome
+    -> record_ref_signal(was_win=...)). Without it the correlation's outcome
+    was unrecoverable and ref_level_win_rate could only ever read 0."""
     get_db().run(
         "UPDATE re_signals SET correlated_ref_signal_id=?, correlation_time_delta_s=?, "
-        "correlation_distance_pts=?, correlation_confirmed=1 WHERE id=?",
-        ref_signal_id, time_delta_s, distance_pts, sig_id,
+        "correlation_distance_pts=?, correlation_confirmed=1, correlated_ref_level_type=? "
+        "WHERE id=?",
+        ref_signal_id, time_delta_s, distance_pts, ref_level_type, sig_id,
     )
 
 
@@ -738,7 +771,7 @@ def insert_vantage_pending_order(row: tuple) -> None:
 def fetch_ml_outcome_rows() -> list:
     """Completed, ML-scored RE signals -- the calibration-report corpus."""
     return get_db().all(
-        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
+        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1, sl_dist, net_pnl_dollars "
         "FROM re_signals "
         "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
         "ORDER BY id"

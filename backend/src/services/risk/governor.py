@@ -45,6 +45,52 @@ RR_BYPASS_SOURCES: frozenset = frozenset({
     "gold diggers 2.0",
 })
 
+
+def rr_filter_bypassed(source_name: str) -> bool:
+    """True when `source_name`'s TP/SL should be taken as-is, unscored.
+
+    Two ways to qualify:
+
+      * the channel is in RR_BYPASS_SOURCES above, or
+      * Immediate Market Entry is live for it (the global risk-settings
+        toggle AND the channel's own instant_entry_enabled flag, defaulting
+        by parser format exactly as core_scan_messages_auto_execute.
+        ime_enabled_for_channel and engine.py's own inline gate do).
+
+    The IME arm was added to the scan/auto-execute path on 2026-08-06 by
+    explicit user directive -- IME means the user has opted into taking this
+    channel's fill at market the moment the signal lands, which an R:R gate
+    measured against the live price contradicts by construction. It belongs
+    here rather than only at that one call site: the pending-activation
+    watcher (core_pending_signal_activation) and resolve_open_trade_params
+    (core_signal_resolution) run the same filter over the same signals, so a
+    channel exempted on one path was still declined on the others.
+
+    Found live 2026-08-06: every GOLD DIGGERS INSTITUTIONAL signal since
+    08-05 12:47 was rejected here (TP1 4-6pt against an 8-9pt stop, 0.47-0.67
+    :1 against the 0.75:1 floor) even though the channel has IME on, so the
+    app opened no GDI trade at all in that window while its sibling channel
+    Gold Diggers VIP -- which only differs by being in the static set above
+    -- kept trading.
+    """
+    _src_lower = (source_name or "").lower()
+    if any(ch in _src_lower for ch in RR_BYPASS_SOURCES):
+        return True
+    if not source_name:
+        return False
+    try:
+        rs = db_module.get_risk_settings() or {}
+        if not bool(rs.get("immediate_market_entry", 0)):
+            return False
+        ch_cfg = db_module.get_channel_parser_config(source_name) or {}
+        if not ch_cfg:
+            return False
+        _default = 1 if ch_cfg.get("parser_format") in ("format_ab", "gd2") else 0
+        return bool(ch_cfg.get("instant_entry_enabled", _default))
+    except Exception:
+        return False
+
+
 # 0.30 only rejects badly-inverted setups (TP1 closer than 1/3 of the stop).
 # A 1:1 floor was tested but blocks the breakeven-mechanism winners that the
 # scale-out/conservative strategies rely on, so sizing does the heavy lifting.
@@ -104,8 +150,9 @@ def check_pre_trade_filters(
 
     Filter 1 -- Minimum R:R on TP1 (0.75 : 1)
         Compares TP1 distance against SL distance from the reference price.
-        Skipped for channels in RR_BYPASS_SOURCES that supply their own
-        TP/SL levels from a signal provider service.
+        Skipped for channels that supply their own TP/SL levels from a
+        signal provider service, or that are running Immediate Market Entry
+        -- see rr_filter_bypassed.
 
     Filter 2 -- Directional cap (max 2 unprotected same-direction trades)
         Blocks a new trade when 2 or more currently-open trades in the same
@@ -117,9 +164,7 @@ def check_pre_trade_filters(
 
     # ── Filter 1: Minimum TP1 R:R ─────────────────────────────────────────
     _MIN_RR = expert_params.get("min_tp1_rr")
-    _src_lower    = source_name.lower()
-    _rr_bypassed  = any(ch in _src_lower for ch in RR_BYPASS_SOURCES)
-    if tp1 is not None and not _rr_bypassed:
+    if tp1 is not None and not rr_filter_bypassed(source_name):
         ref_price = float(actual_price) if actual_price is not None \
                     else (entry_low + entry_high) / 2.0
         sl_dist   = abs(ref_price - float(stop_loss))
@@ -150,6 +195,198 @@ def rg_day_start_ts() -> float:
     broker_now      = datetime.now(timezone.utc) + timedelta(hours=3)
     broker_midnight = broker_now.replace(hour=0, minute=0, second=0, microsecond=0)
     return (broker_midnight - timedelta(hours=3)).timestamp()
+
+
+def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
+    """(realised P&L so far today, the highest it reached today).
+
+    Recomputed from the day's closes every call rather than kept as a stored
+    watermark. A stored peak needs resetting at the broker-day boundary and
+    survives restarts only if it is persisted correctly -- two things to get
+    wrong, both of which fail toward "the guard silently stopped guarding".
+    Replaying a day's closed rows is cheap and cannot drift.
+    """
+    if day_start is None:
+        day_start = rg_day_start_ts()
+    with db_module.db() as conn:
+        rows = conn.execute(
+            "SELECT net_pnl FROM vantage_simulated_trades "
+            "WHERE close_time >= ? ORDER BY close_time", (day_start,),
+        ).fetchall()
+    running = peak = 0.0
+    for (pnl,) in rows:
+        running += float(pnl or 0.0)
+        peak = max(peak, running)
+    return running, peak
+
+
+def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
+    """Reason to stop when today's realised losses breach max_daily_loss_pct.
+
+    The give-back guard cannot cover this case by construction: it measures
+    from the day's peak, so a day that never gets ahead never arms it. Three
+    days in the sample never got $30 ahead and lost $336.80 between them --
+    2026-08-10 peaked at exactly $0.00 and closed -$220.26.
+
+    The limit itself already existed (rg_check_halt) but only ran behind
+    risk_governor_enabled, which is off here, so it has never fired. Split out
+    so it can run on its own: this is a loss ceiling, and it has nothing to do
+    with the governor's sizing model.
+    """
+    max_daily = float(rs.get("max_daily_loss_pct", 0) or 0)
+    if max_daily <= 0:
+        return None
+    # Measured from the last manual resume when there has been one, not always
+    # from the broker day. Without that, resuming after this limit fires is a
+    # no-op -- the day's losses are already past the threshold, so it re-halts
+    # on the next close and Resume does nothing but waste a trade.
+    #
+    # Worth being plain about what that makes it: once resumed it is no longer
+    # a hard ceiling on the DAY, it is "another `max_daily_loss_pct` from where
+    # you resumed". Someone who keeps resuming can keep losing that much again.
+    # The protection it still gives is a bounded loss per resume, and it goes
+    # back to being a true daily ceiling at the next broker day, when the
+    # baseline falls behind day_start and stops applying.
+    realised, _peak = day_pnl_and_peak(_daily_loss_window_start())
+    day_base = balance - realised
+    if day_base <= 0:
+        return None
+    limit = day_base * (max_daily / 100.0)
+    if realised > -abs(limit):
+        return None
+    return (
+        f"Daily loss limit hit: ${realised:.2f} today vs -${abs(limit):.2f} "
+        f"({max_daily:.1f}% of ${day_base:,.2f})"
+    )
+
+
+def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:
+    """Stop for the rest of the broker day on the daily-loss limit.
+
+    Runs regardless of risk_governor_enabled, for the same reason the
+    give-back guard does -- see apply_giveback_guard_on_close.
+    """
+    reason = check_daily_loss_limit(rs, balance)
+    if not reason:
+        return
+    if is_trading_paused():
+        return
+    until = rg_day_start_ts() + 86400.0
+    with db_module.db():
+        db_module.set_app_config("trade_pause_until", str(until))
+        db_module.set_app_config("risk_halt_reason", reason)
+    log.warning("[RG] %s — trading stopped until the next broker day", reason)
+
+
+def _daily_loss_window_start() -> float:
+    """Where the daily loss ceiling starts counting: the broker day, or the
+    last manual resume if that came later."""
+    day_start = rg_day_start_ts()
+    try:
+        baseline = float(db_module.get_app_config("daily_loss_baseline_ts") or 0)
+    except (TypeError, ValueError):
+        baseline = 0.0
+    return max(day_start, baseline)
+
+
+def rearm_risk_guards() -> None:
+    """Restart both post-close guards' windows from now.
+
+    Called whenever trading is resumed by hand. Both guards halt for the rest
+    of the broker day, so without this a resume is undone by the next close and
+    the button appears broken.
+
+    This is a reset, not an off switch: each guard stays armed and fires again
+    on a fresh breach measured from here.
+    """
+    now = str(time.time())
+    with db_module.db():
+        db_module.set_app_config("giveback_baseline_ts", now)
+        db_module.set_app_config("daily_loss_baseline_ts", now)
+
+
+def rearm_giveback_guard() -> None:
+    """Start the give-back guard's window again from now.
+
+    Called whenever trading is resumed by hand. Without it, Resume is useless
+    after a guard halt: the day's peak has already been given back, so the
+    guard re-trips on the very next close and stops the day again. Re-arming
+    means it only fires again if the day makes a NEW peak past the arming
+    amount from here and then hands that back -- which is what someone
+    resuming is asking for, rather than an override that switches the
+    protection off for the rest of the day.
+    """
+    db_module.set_app_config("giveback_baseline_ts", str(time.time()))
+
+
+def _giveback_window_start() -> float:
+    """Where the guard starts measuring: the broker day, or the last manual
+    resume if that came later."""
+    day_start = rg_day_start_ts()
+    try:
+        baseline = float(db_module.get_app_config("giveback_baseline_ts") or 0)
+    except (TypeError, ValueError):
+        baseline = 0.0
+    return max(day_start, baseline)
+
+
+def check_giveback_guard(rs: dict) -> Optional[str]:
+    """Reason to stop for the day when today's profit has been given back.
+
+    The daily-loss limit measures from the day's OPENING balance, which cannot
+    see a day that rises and then bleeds: on 2026-08-17 realised P&L peaked at
+    +$348.76 (09:06) and finished -$88.48, and a from-open threshold was never
+    breached on the way down. Measuring from the day's PEAK is what makes
+    "protect the profit I had" expressible at all.
+
+    Arms only above giveback_arm_usd so ordinary churn near break-even cannot
+    lock the day out over a few dollars, and the peak must be positive -- a
+    losing day is the daily-loss limit's job, not this one's.
+    """
+    if not bool(rs.get("giveback_guard_enabled", 0)):
+        return None
+    arm = float(rs.get("giveback_arm_usd", 50.0) or 0)
+    pct = float(rs.get("giveback_pct", 40.0) or 0)
+    if arm <= 0 or pct <= 0:
+        return None
+
+    realised, peak = day_pnl_and_peak(_giveback_window_start())
+    if peak < arm:
+        return None
+    floor_ = peak * (1.0 - pct / 100.0)
+    if realised > floor_:
+        return None
+    return (
+        f"Give-back guard: today peaked at +${peak:.2f} and is now "
+        f"${realised:+.2f} — more than {pct:.0f}% of the day's profit handed "
+        f"back (floor ${floor_:+.2f})"
+    )
+
+
+def apply_giveback_guard_on_close(rs: dict) -> None:
+    """Halt for the rest of the broker day if the give-back guard has tripped.
+
+    Deliberately NOT behind risk_governor_enabled. The governor also takes
+    over position sizing and adds its own pre-trade gates, so requiring it
+    would mean nobody can have "stop when I give back today's profit" without
+    also accepting a different sizing model -- and the account this was written
+    for has the governor off, which is precisely why every configured limit on
+    it was inert while two days bled out.
+
+    Writes the same trade_pause_until / risk_halt_reason pair the governor
+    uses, so /resume, the panel's Resume button and the status line all keep
+    working with no special case.
+    """
+    reason = check_giveback_guard(rs)
+    if not reason:
+        return
+    if is_trading_paused():
+        return
+    until = rg_day_start_ts() + 86400.0
+    with db_module.db():
+        db_module.set_app_config("trade_pause_until", str(until))
+        db_module.set_app_config("risk_halt_reason", reason)
+    log.warning("[RG] %s — trading stopped until the next broker day", reason)
 
 
 def rg_size_and_check(*, direction: str, ref_price: float,

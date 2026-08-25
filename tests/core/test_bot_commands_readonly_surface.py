@@ -55,9 +55,13 @@ def _insert_signal_and_trade(trade_id, direction="BUY", entry_price=2400.0,
 
 # ── cmd_help ──────────────────────────────────────────────────────────────
 
-def test_help_lists_commands(fresh_db):
+def test_help_describes_the_control_panel(fresh_db):
+    """The bot is button-driven now (core_bot_panel) -- help is a map of the
+    panel rather than the old list of typed commands. /status and /help are
+    the only commands that stayed typed."""
     result = asyncio.run(cmds.cmd_help([]))
-    assert "/balance" in result and "/status" in result and "/help" in result
+    assert "/panel" in result and "/status" in result and "/help" in result
+    assert "Channel Strategy" in result and "Channel Trades" in result
 
 
 # ── cmd_balance ───────────────────────────────────────────────────────────
@@ -84,29 +88,9 @@ def test_balance_includes_open_pnl_when_trades_open(fresh_db):
     assert "1 trade)" in result
 
 
-# ── cmd_daily ─────────────────────────────────────────────────────────────
-
-def test_daily_no_closed_trades_today(fresh_db):
-    result = asyncio.run(cmds.cmd_daily([], _FakeBridge(account={})))
-    assert "No closed trades today." in result
-
-
-def test_daily_aggregates_closed_trades(fresh_db):
-    now = time.time()
-    _insert_signal_and_trade("t-1", status="closed", close_time=now, close_price=2410.0,
-                             mt5_profit=50.0, exit_reason="TP1")
-    _insert_signal_and_trade("t-2", status="closed", close_time=now, close_price=2390.0,
-                             mt5_profit=-20.0, exit_reason="[SL]")
-    result = asyncio.run(cmds.cmd_daily([], _FakeBridge(account={})))
-    assert "Net P&L:  +$30.00" in result
-    assert "Win rate: 50%  (1W / 1L)" in result
-
-
-def test_daily_shows_open_trades_section(fresh_db):
-    bridge = _FakeBridge(account={}, tick=SimpleNamespace(bid=2410.0, ask=2410.5))
-    _insert_signal_and_trade("t-1", entry_price=2400.0, remaining_lots=0.10)
-    result = asyncio.run(cmds.cmd_daily([], bridge))
-    assert "Open Trades (1)" in result
+# cmd_daily was removed (2026-08-08) with the panel's Daily button; its
+# account + today's-P&L sections are what cmd_balance now opens with, and are
+# covered by the tests above plus tests/core/test_bot_balance_report.py.
 
 
 # ── cmd_status ────────────────────────────────────────────────────────────
@@ -125,13 +109,97 @@ def test_status_shows_paused_state(fresh_db):
     assert "PAUSED until" in result
 
 
-def test_status_includes_tg_reader_slots_when_present(fresh_db):
+def test_status_includes_tg_reader_auth_and_channel_block(fresh_db):
+    """The per-slot list was replaced by a per-channel block (2026-08-07) --
+    the slot number survives as the channel's C-number, and the feed line
+    carries what the old '(active)' suffix said."""
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO channel_parser_config (channel_name, created_at) VALUES (?,?)",
+            ("GD VIP", time.time()),
+        )
     tg_reader = SimpleNamespace(get_status=lambda: {
         "auth_state": "connected",
         "slots": [{"slot": 1, "group_name": "GD VIP", "listener_active": True}],
     })
     result = asyncio.run(cmds.cmd_status([], _FakeBridge(), tg_reader=tg_reader))
-    assert "Slot 1: GD VIP (active)" in result
+    assert "Telegram:     connected" in result
+    assert "(C1) (Name: GD VIP)" in result
+    assert "Feed: listening" in result
+
+
+def test_status_reports_the_trading_schedule_gate(fresh_db):
+    from backend.src.services.risk import schedule as sched
+    assert "Schedule:     OFF" in asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    sched.set_trading_schedule_enabled(True)
+    schedule = sched.get_trading_schedule()
+    for day in sched.DAY_NAMES:
+        for block in schedule[day]:
+            block["enabled"] = False
+    sched.set_trading_schedule(schedule)
+    result = asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert "Schedule:     ON — blocked:" in result
+
+
+def test_status_is_trimmed_to_telegrams_message_limit(fresh_db):
+    """sendMessage rejects anything over 4096 characters outright, so a
+    status with enough channels to overflow would deliver nothing at all."""
+    text = cmds._fit_telegram(["x" * 200] * 40)
+    assert len(text) <= 4096
+    assert text.endswith(cmds._TRUNCATED)
+
+
+def test_status_under_the_limit_is_left_alone(fresh_db):
+    lines = ["one", "two", "three"]
+    assert cmds._fit_telegram(lines) == "one\ntwo\nthree"
+
+
+def test_status_reports_the_ea_link_separately_from_the_mt5_bridge(fresh_db):
+    """The bridge and the EA fail independently -- a status that only spoke
+    for the bridge is exactly how an EA dialling the wrong port stayed
+    invisible for four hours (see core_ea_link_watchdog)."""
+    result = asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert "MT5 Bridge:" in result
+    assert "EA (MT5):     NOT connected" in result
+
+
+def test_status_probes_the_configured_bridge_port_not_a_hardcoded_9000(fresh_db, monkeypatch):
+    """This instance's bridge runs on whatever mt5_bridge_url says (9010 here,
+    deliberately, so a fork cannot dial into the live app's bridge). Probing a
+    fixed 9000 reported "NOT running" while the bridge was healthy and the EA
+    was trading through it -- a status that cries wolf sends you diagnosing an
+    outage that isn't happening."""
+    probed = []
+
+    def fake_listening(port):
+        probed.append(port)
+        return port == 9010
+
+    monkeypatch.setattr(
+        "backend.src.utils.os_utils.is_port_listening", fake_listening
+    )
+    monkeypatch.setattr(
+        "backend.src.config.get",
+        lambda key, default=None: ("http://localhost:9010"
+                                   if key == "mt5_bridge_url" else default),
+    )
+    result = asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert probed == [9010], f"probed {probed}, expected the configured port"
+    assert "MT5 Bridge:   Connected" in result
+
+
+def test_status_falls_back_to_9000_when_the_url_states_no_port(fresh_db, monkeypatch):
+    probed = []
+    monkeypatch.setattr(
+        "backend.src.utils.os_utils.is_port_listening",
+        lambda port: (probed.append(port), False)[1],
+    )
+    monkeypatch.setattr(
+        "backend.src.config.get",
+        lambda key, default=None: "" if key == "mt5_bridge_url" else default,
+    )
+    asyncio.run(cmds.cmd_status([], _FakeBridge()))
+    assert probed == [9000]
 
 
 # ── cmd_trades ────────────────────────────────────────────────────────────

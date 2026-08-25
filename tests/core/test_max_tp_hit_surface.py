@@ -234,3 +234,63 @@ def test_backfill_per_trade_exception_does_not_stop_loop(fresh_db):
         asyncio.run(maxtp.backfill_max_tp_hit_corrected(bridge))
     assert _max_tp_hit("t-bad") == "TP1"  # untouched, exception before save
     assert _max_tp_hit("t-good") == "TP2"
+
+
+# ── rows that could never be resolved (2026-08-07) ───────────────────────
+# Both of these used to leave max_tp_hit NULL forever, which History renders
+# as "..." tooltipped "Updating in 30 min" -- an update that was never coming,
+# because this sweep was the only thing that could have produced one.
+
+def test_trade_with_no_tp_ladder_is_resolved_not_left_pending(fresh_db):
+    """Trailing-stop strategies, and EA-template trades whose targets live in
+    the template, carry no TP levels on either the trade or the signal. They
+    were filtered out of the pending query entirely and so were never given a
+    value at all."""
+    _insert_trade("t-noladder", tp1=None, tp2=None, sig_tp1=None, sig_tp2=None)
+    bridge = _FakeBridge(candles=[{"high": 2500.0, "low": 2300.0}])
+
+    with mock.patch("backend.src.services.cluster.sync.ledger.push_trade_closed"):
+        asyncio.run(maxtp.max_tp_checker_sweep(bridge))
+
+    assert _max_tp_hit("t-noladder") == "n/a"
+    assert bridge.calls == [], "nothing to measure against, so no candle fetch"
+
+
+def test_backwards_window_is_resolved_not_retried_forever(fresh_db):
+    """An open_time at or after close_time (seen on adopted MT5_DIRECT
+    positions whose open_time came off the wrong deal) makes the candle range
+    query backwards, so it returns nothing -- which read as "bridge offline,
+    retry next cycle" and retried every 5 minutes indefinitely."""
+    now = time.time()
+    _insert_trade("t-backwards", tp1=2405.0,
+                  open_time=now - 2000, close_time=now - 5000)
+    bridge = _FakeBridge(candles=[])
+
+    with mock.patch("backend.src.services.cluster.sync.ledger.push_trade_closed"):
+        asyncio.run(maxtp.max_tp_checker_sweep(bridge))
+
+    assert _max_tp_hit("t-backwards") == "n/a"
+    assert bridge.calls == []
+
+
+def test_not_reached_still_distinguished_from_not_applicable(fresh_db):
+    """"none" is a real trading outcome -- price never got to TP1 -- and must
+    not be collapsed into the "we cannot say" sentinel."""
+    _insert_trade("t-shortfall", direction="BUY", tp1=2405.0)
+    bridge = _FakeBridge(candles=[{"high": 2402.0, "low": 2398.0}])
+
+    with mock.patch("backend.src.services.cluster.sync.ledger.push_trade_closed"):
+        asyncio.run(maxtp.max_tp_checker_sweep(bridge))
+
+    assert _max_tp_hit("t-shortfall") == "none"
+
+
+def test_a_normal_trade_is_unaffected_by_the_new_guards(fresh_db):
+    _insert_trade("t-ok", direction="BUY", tp1=2405.0, sig_tp2=2415.0)
+    bridge = _FakeBridge(candles=[{"high": 2418.0, "low": 2399.0}])
+
+    with mock.patch("backend.src.services.cluster.sync.ledger.push_trade_closed"):
+        asyncio.run(maxtp.max_tp_checker_sweep(bridge))
+
+    assert _max_tp_hit("t-ok") == "TP2"
+    assert len(bridge.calls) == 1

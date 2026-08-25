@@ -12,6 +12,9 @@ from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.utils import os_utils as _pu
 from backend.src.controllers import sync_controller as sync_ctl
 import backend.src.config as cfg_module
+from backend.src.services.positions import core_autostart as _autostart
+from backend.src.db import database as db_module
+from backend.src.services.cluster.sync import client as sync_client
 
 # ── Prevent-sleep state (module-level so it survives page re-renders) ──────────
 # On macOS uses `caffeinate -i -w <app-pid>`.
@@ -504,17 +507,41 @@ Log "Python restarted, watchdog re-enabled. Sequence complete."
 '''
 
 
-def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
-    """Self-contained Risk Settings card — importable by other pages.
+_RISK_SUBCARD_CLASSES = "flex-1 min-w-72 bg-gray-800 p-3 rounded-lg"
+
+
+def render_risk_card(card_classes: str = "w-full"):
+    """Risk settings, split (2026-08-01) into five side-by-side sub-cards
+    across two rows for the same tidy layout the rest of the Trading page
+    uses (Strategy Parameters/Channel Strategy already sit side by side the
+    same way) rather than one long scrolling card:
+
+    Row 1: Risk Settings | Circuit Breaker | Toxic-Hour Blocklist
+    Row 2: Internal Engine Exposure | Dynamic Position Management
+
+    `card_classes` now sizes the OUTER wrapper (was previously the single
+    inner ui.card()'s classes, back when this was one card) -- importable by
+    other pages exactly as before, just laid out differently inside.
 
     Risk per trade (%) / Max risk per trade (%) and Fixed Lot Size all moved
     to Trading > Global Parameters (2026-07-24), so the two no longer need
-    to be greyed in/out against each other from here — this card doesn't
-    return anything for a host page to wire up anymore.
+    to be greyed in/out against each other from here.
     """
     rs = settings_ctl.get_risk_settings()
 
-    with ui.card().classes(card_classes):
+    with ui.column().classes(f"{card_classes} gap-4"):
+        with ui.row().classes("w-full gap-4 flex-wrap items-start"):
+            _render_risk_settings_subcard(rs)
+            _render_circuit_breaker_subcard(rs)
+            _render_toxic_hour_subcard(rs)
+
+        with ui.row().classes("w-full gap-4 flex-wrap items-start"):
+            _render_internal_exposure_subcard(rs)
+            _render_dpm_subcard(rs)
+
+
+def _render_risk_settings_subcard(rs: dict) -> None:
+    with ui.card().classes(_RISK_SUBCARD_CLASSES):
         with ui.row().classes("items-center gap-2 mb-3"):
             ui.icon("shield", size="sm").classes("text-yellow-400")
             ui.label("Risk Settings").classes("text-base font-bold text-yellow-300")
@@ -577,6 +604,47 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
                 "all auto-execution is paused."
             )
 
+        # ── Give-back guard ──────────────────────────────────────────────
+        # Measures from the day's PEAK, not its opening balance, which is the
+        # only way to express "protect the profit I had". Both limits above
+        # measure from the open and so cannot see a day that goes +$349 and
+        # closes -$88 -- which is what 2026-08-17 did.
+        ui.separator().classes("my-3")
+        with ui.row().classes("w-full items-center gap-1"):
+            giveback_sw = ui.switch(
+                "Stop for the day after giving back today's profit",
+                value=bool(rs.get("giveback_guard_enabled", 0)),
+            ).classes("text-sm text-blue-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Max daily loss measures from the day's OPENING balance, so a "
+                "day that rises and then bleeds back never breaches it. This "
+                "measures from the day's PEAK instead: once the day is up by "
+                "the arming amount, handing back more than the set share of "
+                "that peak stops new trades until the next broker day.\n\n"
+                "Open trades are unaffected — this blocks new entries only, "
+                "and Resume (or /resume) lifts it early.\n\n"
+                "Unlike the limits above, this does NOT require the Risk "
+                "Governor to be on."
+            )
+        with ui.row().classes("w-full items-center gap-2"):
+            giveback_arm = ui.number(
+                "Arm above profit ($)", value=float(rs.get("giveback_arm_usd", 50.0)),
+                min=0, max=100000, step=10, format="%.0f",
+            ).classes("flex-1").tooltip(
+                "The guard only arms once the day's realised profit has reached "
+                "this. Below it, ordinary churn around break-even can never lock "
+                "the day out."
+            )
+            giveback_pct = ui.number(
+                "Give-back limit (%)", value=float(rs.get("giveback_pct", 40.0)),
+                min=1, max=99, step=5, format="%.0f",
+            ).classes("flex-1").tooltip(
+                "How much of the day's peak profit may be handed back before "
+                "stopping. 40 = stop once 40% of the peak is gone."
+            )
+        giveback_arm.bind_visibility_from(giveback_sw, "value")
+        giveback_pct.bind_visibility_from(giveback_sw, "value")
+
         with ui.row().classes("w-full items-center gap-1"):
             max_trades = ui.number(
                 "Max open trades", value=int(rs.get("max_open_trades", 1)),
@@ -598,6 +666,38 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
             )
 
         ui.separator().classes("my-3")
+        excl_high = ui.checkbox(
+            "Exclude High-Risk",
+            value=bool(rs.get("exclude_high_risk", 0)),
+        ).classes("text-sm text-gray-300")
+        excl_high.tooltip(
+            "When checked, any Telegram signal containing 'High Risk' is silently ignored and not traded."
+        )
+
+        def save_risk():
+            try:
+                db_module.update_risk_settings({
+                    "risk_governor_enabled":          int(bool(risk_gov.value)),
+                    "max_daily_loss_pct":             float(max_dd.value      or 0),
+                    "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),
+                    "max_open_trades":                int(max_trades.value    or 1),
+                    "max_lot_size":                   float(max_lot.value     or 0),
+                    "exclude_high_risk":              int(bool(excl_high.value)),
+                    "giveback_guard_enabled":         int(bool(giveback_sw.value)),
+                    "giveback_arm_usd":               float(giveback_arm.value or 0),
+                    "giveback_pct":                   float(giveback_pct.value or 0),
+                })
+                ui.notify("Risk settings saved", type="positive")
+            except (TypeError, ValueError) as _save_err:
+                ui.notify(f"Invalid value — {_save_err}", type="negative")
+
+        ui.button("Save Risk Settings", on_click=save_risk).classes(
+            "bg-blue-700 text-white mt-3 px-4 py-2"
+        )
+
+
+def _render_circuit_breaker_subcard(rs: dict) -> None:
+    with ui.card().classes(_RISK_SUBCARD_CLASSES):
         with ui.row().classes("items-center gap-2 mb-2"):
             ui.icon("block", size="sm").classes("text-red-400")
             ui.label("Circuit Breaker").classes("text-sm font-semibold text-red-300")
@@ -636,7 +736,7 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
             settings_ctl.reset_circuit_breaker()
             ui.notify("Circuit breaker reset — live trading unblocked.", type="positive")
 
-        with ui.row().classes("items-center gap-2"):
+        with ui.row().classes("items-center gap-2 mt-1"):
             ui.button("Reset Circuit Breaker Now", on_click=_cb_reset).props("dense outline").classes(
                 "text-xs text-red-300 border-red-600"
             )
@@ -644,8 +744,24 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
                 "Immediately clears an active circuit breaker and resets the loss counter."
             )
 
-        # ── Toxic-hour blocklist (Bounce + Breakout) ──────────────────────────
-        ui.separator().classes("my-3")
+        def save_cb():
+            try:
+                db_module.update_risk_settings({
+                    "circuit_breaker_enabled":        int(bool(cb_enabled.value)),
+                    "circuit_breaker_losses":         int(cb_losses.value     or 3),
+                    "circuit_breaker_cooldown_mins":  int(cb_cooldown.value   or 60),
+                })
+                ui.notify("Circuit breaker settings saved", type="positive")
+            except (TypeError, ValueError) as _save_err:
+                ui.notify(f"Invalid value — {_save_err}", type="negative")
+
+        ui.button("Save Circuit Breaker", on_click=save_cb).classes(
+            "bg-blue-700 text-white mt-3 px-4 py-2"
+        )
+
+
+def _render_toxic_hour_subcard(rs: dict) -> None:
+    with ui.card().classes(_RISK_SUBCARD_CLASSES):
         hour_block_val = bool(rs.get("hour_blocklist_enabled", 0))
 
         with ui.row().classes("items-center gap-2 mb-1"):
@@ -684,36 +800,192 @@ def render_risk_card(card_classes: str = "w-full max-w-xl bg-gray-800 p-6 rounde
             "MT5 order."
         ).classes("text-xs text-gray-400 mt-1 leading-relaxed")
 
-        # ── Exclude High-Risk signals ──────────────────────────────────────────
-        ui.separator().classes("my-3")
-        excl_high = ui.checkbox(
-            "Exclude High-Risk",
-            value=bool(rs.get("exclude_high_risk", 0)),
-        ).classes("text-sm text-gray-300")
-        excl_high.tooltip(
-            "When checked, any Telegram signal containing 'High Risk' is silently ignored and not traded."
+
+def _render_internal_exposure_subcard(rs: dict) -> None:
+    from backend.src.services.positions import core_internal_exposure_guard as _ieg
+
+    with ui.card().classes(_RISK_SUBCARD_CLASSES):
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.icon("compare_arrows").classes("text-blue-400 text-base")
+            ui.label("Internal Engine Exposure").classes(
+                "text-sm font-semibold text-blue-300"
+            )
+            ui.icon("info_outline", size="xs").classes(
+                "text-blue-400 cursor-help"
+            ).tooltip(
+                "Applies ONLY to the internal signal generators "
+                "(Reversal, Breakout, Bounce). Telegram-channel trades "
+                "are never affected by this setting."
+            )
+        ui.label(
+            "The internal engines have no hedge guard of their own — each engine only "
+            "blocks a duplicate in the SAME direction at the same level, and the "
+            "cross-engine check ignores an engine's own signals. So a BUY and a SELL "
+            "can sit open together. This controls whether that's allowed."
+        ).classes("text-xs text-gray-500 mb-2")
+
+        hedge_mode_sel = ui.select(
+            {
+                _ieg.MODE_OFF:          "Off — no restriction (default)",
+                _ieg.MODE_SELF_HEDGE:   "Self-Hedge Guard — block opposing positions",
+                _ieg.MODE_NET_EXPOSURE: "Net Exposure Cap — limit net directional lots",
+            },
+            value=(rs.get("internal_hedge_mode") or _ieg.MODE_OFF),
+            label="Mode",
+        ).classes("w-full").props("dense outlined")
+
+        net_cap_num = ui.number(
+            "Net exposure cap (lots)",
+            value=float(rs.get("internal_net_exposure_max_lots", 0.30) or 0.30),
+            min=0.0, step=0.01, format="%.2f",
+        ).classes("w-full mt-1").props("dense outlined").tooltip(
+            "Only used by Net Exposure Cap mode. Net = total BUY lots minus "
+            "total SELL lots across all open internal-engine trades. "
+            "0 = no cap (mode effectively disabled)."
         )
 
-        def save_risk():
+        with ui.column().classes("gap-0 mt-2"):
+            ui.label("Off — no restriction (default)").classes(
+                "text-xs font-semibold text-gray-300")
+            ui.label(
+                "Long-standing behaviour, nothing is blocked. Opposing positions are "
+                "allowed to open freely. Worth knowing before changing this: on 86 "
+                "closed Reversal Engine trades (21–27 Jul), overlapping opposing pairs "
+                "were 19% of trades but produced ~80% of total profit — 7 of 8 pairs "
+                "had both legs win, and only one pair ever cancelled out (−$15.21). "
+                "For a mean-reversion engine, buying support while selling resistance "
+                "in a range is the strategy working, not a fault."
+            ).classes("text-xs text-gray-500 mb-2")
+
+            ui.label("Self-Hedge Guard").classes(
+                "text-xs font-semibold text-gray-300")
+            ui.label(
+                "Blocks a new internal-engine trade whenever ANY opposing-direction "
+                "internal trade is already open. Strictest option: one direction at a "
+                "time across all three engines combined. Best suited to trending "
+                "conditions, where holding both sides tends to mean one leg is simply "
+                "wrong. Costs you the range-play behaviour described above."
+            ).classes("text-xs text-gray-500 mb-2")
+
+            ui.label("Net Exposure Cap").classes(
+                "text-xs font-semibold text-gray-300")
+            ui.label(
+                "Allows opposing positions but caps how far the book can lean one way. "
+                "A hedge is always permitted because it REDUCES net exposure; what "
+                "gets blocked is stacking further in whichever direction already "
+                "dominates. Example at a 0.30 cap: net +0.20 long, a new 0.10 BUY "
+                "takes it to +0.30 and is allowed; a further 0.10 BUY would reach "
+                "+0.40 and is blocked — but a 0.10 SELL is allowed at any time, since "
+                "it brings net back toward flat. The middle-ground option: keeps the "
+                "range play, limits one-way pile-ups. A cap of 0 disables the check."
+            ).classes("text-xs text-gray-500 mb-1")
+
+        ui.label(
+            "Blocked trades are skipped for live execution only — the signal is still "
+            "generated, tracked, and used for learning, exactly like the other "
+            "execution gates."
+        ).classes("text-xs text-gray-600 italic mb-1")
+
+        def save_strategy():
             try:
+                _hm = hedge_mode_sel.value
+                if isinstance(_hm, dict):
+                    _hm = _hm.get("value")
                 settings_ctl.update_risk_settings({
-                    "risk_governor_enabled":          int(bool(risk_gov.value)),
-                    "max_daily_loss_pct":             float(max_dd.value      or 0),
-                    "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),
-                    "max_open_trades":                int(max_trades.value    or 1),
-                    "max_lot_size":                   float(max_lot.value     or 0),
-                    "circuit_breaker_enabled":        int(bool(cb_enabled.value)),
-                    "circuit_breaker_losses":         int(cb_losses.value     or 3),
-                    "circuit_breaker_cooldown_mins":  int(cb_cooldown.value   or 60),
-                    "exclude_high_risk":              int(bool(excl_high.value)),
+                    "internal_hedge_mode":            _hm or _ieg.MODE_OFF,
+                    "internal_net_exposure_max_lots": float(net_cap_num.value or 0.30),
                 })
-                ui.notify("Risk settings saved", type="positive")
-            except (TypeError, ValueError) as _save_err:
-                ui.notify(f"Invalid value — {_save_err}", type="negative")
+                ui.notify("Settings saved", type="positive")
+            except Exception as ex:
+                ui.notify(str(ex), type="negative")
 
-        ui.button("Save Risk Settings", on_click=save_risk).classes(
-            "bg-blue-700 text-white mt-3 px-4 py-2"
+        ui.button("Save Settings", on_click=save_strategy).classes(
+            "bg-blue-700 text-white mt-3 px-4 py-2 text-sm"
         )
+
+
+def _render_dpm_subcard(rs: dict) -> None:
+    with ui.card().classes(_RISK_SUBCARD_CLASSES):
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.icon("psychology").classes("text-blue-400 text-base")
+            ui.label("Dynamic Position Management").classes(
+                "text-sm font-semibold text-blue-300"
+            )
+            dpm_enabled_val = bool(rs.get("dpm_enabled", 0))
+            dpm_badge = ui.badge(
+                "DPM ON" if dpm_enabled_val else "DPM OFF",
+                color="blue" if dpm_enabled_val else "grey",
+            )
+
+        dpm_chk = ui.checkbox(
+            "Hand off to adaptive management",
+            value=dpm_enabled_val,
+        ).classes("text-sm text-gray-200")
+
+        def _dpm_toggle(e):
+            db_module.update_risk_settings({"dpm_enabled": 1 if e.value else 0})
+            dpm_badge.props(f"color={'blue' if e.value else 'grey'}")
+            dpm_badge.text = "DPM ON" if e.value else "DPM OFF"
+            ui.notify(
+                "DPM enabled — strategy control handed off" if e.value
+                else "DPM disabled — strategy selection restored",
+                type="positive" if e.value else "info",
+            )
+
+        dpm_chk.on_value_change(_dpm_toggle)
+
+        # ── DPM Profit Take ─────────────────────────────────────────────────
+        with ui.row().classes("items-end gap-2 mt-2 w-full"):
+            with ui.column().classes("flex-1 gap-0"):
+                with ui.row().classes("items-center gap-1"):
+                    ui.label("Profit Take ($)").classes(
+                        "text-xs text-gray-400 font-medium"
+                    )
+                    ui.icon("info_outline", size="xs").classes(
+                        "text-blue-400 cursor-help"
+                    ).tooltip(
+                        "Close the remaining position when cumulative profit — "
+                        "partial closes already taken plus unrealised P&L on "
+                        "remaining lots — reaches this amount.\n"
+                        "Example: set $150 and DPM will keep managing the trade "
+                        "through its normal TP levels until the running total "
+                        "hits $150, then close everything.\n"
+                        "0 = DPM decides entirely (no dollar cap)."
+                    )
+                dpm_profit_inp = ui.number(
+                    value=float(rs.get("profit_close_usd", 0.0) or 0.0),
+                    min=0.0, step=5.0, format="%.2f",
+                    placeholder="0 = DPM decides",
+                ).classes("w-full")
+
+            def _save_dpm_profit():
+                try:
+                    val = max(0.0, float(dpm_profit_inp.value or 0))
+                    db_module.update_risk_settings({"profit_close_usd": val})
+                    if val > 0:
+                        ui.notify(
+                            f"Profit take set to ${val:.2f} — DPM will close when "
+                            f"cumulative profit reaches this amount",
+                            type="positive",
+                        )
+                    else:
+                        ui.notify(
+                            "Profit take cleared — DPM manages profit levels entirely",
+                            type="info",
+                        )
+                except Exception as ex:
+                    ui.notify(str(ex), type="negative")
+
+            ui.button("Set", on_click=_save_dpm_profit).classes(
+                "bg-blue-700 text-white px-3 text-xs"
+            ).style("height:30px; min-width:44px;")
+
+        ui.label(
+            "Automatically adjusts trail distance, breakeven timing and "
+            "partial close size using ATR, session and momentum. "
+            "Set a Profit Take amount above to cap the cumulative target — "
+            "otherwise DPM decides entirely."
+        ).classes("text-xs text-gray-400 mt-2 leading-relaxed")
 
 
 async def _push_ai_config_to_vps(updates: dict) -> None:
@@ -2907,6 +3179,106 @@ def _render_diagnostics(engine):
     )
     _update_sleep_btn(sleep_btn)
 
+    # ── Auto-restart watchdog toggle ────────────────────────────────────────
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
+        with ui.row().classes("w-full items-center justify-between"):
+            auto_restart_sw = ui.switch(
+                "Auto-Restart if the app stops",
+                value=(db_module.get_app_config("auto_restart_enabled") == "1"),
+            ).classes("text-blue-300 font-bold")
+            ui.icon("restart_alt", size="sm").classes("text-blue-400")
+
+        _autostart_lbl = ui.label("").classes("text-xs mt-1 text-gray-500")
+
+        with ui.expansion(
+            "How does Auto-Restart work?", icon="info_outline"
+        ).classes("w-full text-sm"):
+            ui.markdown(
+                f"When **ON**, {_os_label} checks every "
+                f"{_autostart.CHECK_INTERVAL_SECS // 60} minutes that the app is "
+                "still serving on its port, and starts it again if it is not. "
+                "It also runs that check at login/boot, so the app comes back by "
+                "itself after a reboot.\n\n"
+                + (
+                    "Registered as a **LaunchAgent** (`launchctl`) under your user "
+                    "account.\n\n"
+                    if sys.platform == "darwin"
+                    else "Registered as a **Scheduled Task** under your user account.\n\n"
+                )
+                + "Stopping the app deliberately still stops it — "
+                "`FOREX Stop.command` / `Stop FOREX.bat` pause the watchdog, and "
+                "starting the app again re-arms it. Restarting from inside the app "
+                "is unaffected.\n\n"
+                "When **OFF**, nothing restarts the app and it stays down until "
+                "started by hand."
+            ).classes("text-gray-300")
+
+        def _refresh_autostart_lbl():
+            if not _autostart.is_supported():
+                _autostart_lbl.text = f"Not supported on this platform ({sys.platform})."
+                _autostart_lbl.classes(replace="text-xs mt-1 text-gray-500")
+                return
+            if not auto_restart_sw.value:
+                _autostart_lbl.text = "Off — nothing will restart the app if it stops."
+                _autostart_lbl.classes(replace="text-xs mt-1 text-gray-500")
+            elif _autostart.is_installed():
+                _autostart_lbl.text = (
+                    f"Active — checking every "
+                    f"{_autostart.CHECK_INTERVAL_SECS // 60} min."
+                    + ("" if _autostart.is_armed() else " Currently paused (app stopped).")
+                )
+                _autostart_lbl.classes(replace="text-xs mt-1 text-green-400")
+            else:
+                _autostart_lbl.text = "On, but the scheduler entry is missing — toggle off and on to repair."
+                _autostart_lbl.classes(replace="text-xs mt-1 text-yellow-400")
+
+        # Reverting the switch after a failure re-fires this handler, which
+        # would run disable() a second time and stack a second notification on
+        # top of the error the user actually needs to read.
+        _autostart_reverting = {"active": False}
+
+        def _revert_switch(to_value: bool):
+            _autostart_reverting["active"] = True
+            try:
+                auto_restart_sw.value = to_value
+            finally:
+                _autostart_reverting["active"] = False
+            _refresh_autostart_lbl()
+
+        def _on_autostart_change(e):
+            if _autostart_reverting["active"]:
+                return
+            want = bool(e.value)
+            if want and not _autostart.is_supported():
+                ui.notify(
+                    f"Auto-restart is not supported on {sys.platform}",
+                    type="warning", position="top",
+                )
+                _revert_switch(False)
+                return
+            try:
+                if want:
+                    _autostart.enable()
+                else:
+                    _autostart.disable()
+            except Exception as exc:
+                # Leave the stored setting alone when the OS refused — a toggle
+                # showing ON with no scheduler entry behind it is exactly the
+                # false sense of safety this feature exists to remove.
+                ui.notify(f"Could not enable auto-restart: {exc}",
+                          type="negative", position="top")
+                _revert_switch(not want)
+                return
+            db_module.set_app_config("auto_restart_enabled", "1" if want else "0")
+            ui.notify(
+                "Auto-restart enabled" if want else "Auto-restart disabled",
+                type="positive" if want else "info", position="top",
+            )
+            _refresh_autostart_lbl()
+
+        auto_restart_sw.on_value_change(_on_autostart_change)
+        _refresh_autostart_lbl()
+
     with ui.row().classes("gap-2 mb-2 items-center flex-wrap"):
         ui.button("Run Diagnostics", on_click=run_diag).classes(
             "bg-blue-700 text-white px-4 py-2"
@@ -2995,10 +3367,10 @@ def _render_diagnostics(engine):
 # ── Registration tab ───────────────────────────────────────────────────────────
 
 def _render_theme():
-    """Settings → Theme tab — pick a dark-mode color preset for the whole app.
+    """Settings → Theme tab — pick Light or Dark for the whole app.
 
-    See core_ui_theme.py's module docstring for why this is dark-only
-    presets (neutral palette swap) rather than a real light mode.
+    See core_ui_theme.py's module docstring for how the neutral-class CSS
+    override mechanism works (and why text-white is excluded on buttons).
     """
     from frontend import theme as theme_mod
 
@@ -3006,8 +3378,7 @@ def _render_theme():
         ui.label("Color Theme").classes("text-base font-bold text-yellow-300")
         ui.label(
             "Applies to the whole app immediately — no restart needed. "
-            "All presets stay dark; only the neutral background/border tones "
-            "change. Status colors (profit/loss/warnings) never change."
+            "Status colors (profit/loss/warnings) never change."
         ).classes("text-xs text-gray-400 mb-2")
 
         current = {"value": theme_mod.get_theme()}

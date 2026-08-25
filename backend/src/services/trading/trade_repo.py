@@ -101,20 +101,34 @@ def insert_trade_and_activate_signal(
     entry_low, entry_high, entry_price, lot_size, stop_loss,
     tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
     now: float, strategy: str, tg_source, managed_by,
+    grid_legs_total=None, initial_sl=None, initial_risk=None,
 ) -> None:
+    """Open-trade row + signal activation, in one transaction.
+
+    tp1..tp8 are the levels the trade is ACTUALLY running -- for an EA
+    Template the template's resolved ladder, not the signal's own -- and a
+    level the ladder does not define is passed as None, so a 6-level template
+    stops claiming 8. grid_legs_total / initial_sl / initial_risk are the
+    realised-R seed: neither the stop nor the lot size survives the trade
+    (every breakeven path overwrites stop_loss in place, and lot_size only
+    describes one leg of a grid), so both are captured at open. profit_sync
+    later replaces initial_risk with the figure from the legs that actually
+    filled -- a resting pending leg staged here may expire never taking on
+    risk. Added by the upstream merge (2026-08-25, upstream 8d20bd3)."""
     with transaction() as conn:
         conn.execute(
             """INSERT INTO vantage_simulated_trades
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                 lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                 status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,tg_source,
-                managed_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                managed_by,grid_legs_total,initial_sl,initial_risk)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, signal_id, mt5_ticket, direction, entry_low, entry_high, entry_price,
              lot_size, lot_size, stop_loss, tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8,
              "open", now,
              0.0, 0.0, 0.0, 0.0,
-             strategy, tg_source, managed_by),
+             strategy, tg_source, managed_by,
+             grid_legs_total, initial_sl, initial_risk),
         )
         conn.execute(
             "UPDATE vantage_signals SET status='active' WHERE signal_id=?", (signal_id,)
@@ -560,8 +574,9 @@ def insert_realigned_limit_entry(signal_id: str, source_label: str, direction: s
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                 lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                 status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                tg_source,managed_by,tp_open,order_type,pending_placed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                tg_source,managed_by,tp_open,order_type,pending_placed_at,
+                initial_sl,initial_risk)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             trade_row,
         )
 

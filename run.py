@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import socket
+import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -46,9 +47,66 @@ logging.getLogger().addHandler(_fh)
 
 log = logging.getLogger("forex_trader")
 
+_LOGGING_READY = False
+
+
+def setup_logging() -> None:
+    """Attach the app's console + rotating-file logging to the root logger.
+
+    Called from main(), NOT at import (2026-08-07). This used to run as a
+    module-level side effect, which meant that merely importing `run` pointed
+    the root logger at the LIVE app's forex_trader.log -- and
+    tests/test_claim_port.py imports it, so every pytest session wrote into the
+    running app's log.
+
+    That was not just noise. A test run on 2026-08-07 put five WARNINGs into
+    the production log reading "EA offline 601s with a healthy MT5 bridge --
+    restarting the terminal (attempt 1/3)" and "terminal restart failed:
+    wineserver would not die", none of which ever happened: they were fake
+    durations from a fixture and an injected exception. Anyone reading that log
+    to diagnose a real outage -- which is the whole reason it exists -- would
+    have been chasing an event that never occurred.
+
+    It also had two processes sharing one TimedRotatingFileHandler, so both
+    would try to perform the midnight rename.
+
+    Idempotent, so a re-import or a second call cannot double up handlers and
+    write every line twice.
+    """
+    global _LOGGING_READY
+    if _LOGGING_READY:
+        return
+
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+
+    # Write logs to a daily-rotating file in the user data directory.
+    # Rotates at midnight; keeps 30 daily files before the oldest is removed.
+    # Backup filenames:  forex_trader.log.YYYY-MM-DD
+    #
+    # Must match backend.src.config.USER_DATA_DIR exactly -- this checkout
+    # (forex-refactor2) is a fork of the live app and must never default to its
+    # "ForexTrader" folder (see the long comment in config.py for why).
+    from backend.src.config import USER_DATA_DIR as _USER_DATA
+    _log_dir = _USER_DATA / "data"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    fh = TimedRotatingFileHandler(
+        _log_dir / "forex_trader.log",
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+        utc=False,
+    )
+    fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+    logging.getLogger().addHandler(fh)
+    _LOGGING_READY = True
+
 
 def _ensure_data_dirs():
-    (_USER_DATA / "data" / "sessions").mkdir(parents=True, exist_ok=True)
+    # Imported here, not at module scope: _setup_logging owns the only other
+    # reference and binds it as a local, so a module-level name would be a
+    # second source of truth for the same directory. Same import as line 175's.
+    from backend.src.config import USER_DATA_DIR
+    (USER_DATA_DIR / "data" / "sessions").mkdir(parents=True, exist_ok=True)
 
 
 def _free_port(port: int) -> None:
@@ -61,6 +119,42 @@ def _free_port(port: int) -> None:
             log.info("Freed port %s (killed pid %s)", port, ", ".join(map(str, pids)))
     except Exception as e:
         log.debug("Could not free port %s: %s", port, e)
+
+
+def _claim_port(port: int, timeout: float = 10.0) -> bool:
+    """Free `port` and wait until it is genuinely free. True if it now is.
+
+    Freeing the port once at the top of main() is not enough: the bind happens
+    several seconds later, after the database opens and frontend.app is
+    imported, and whatever claims the port inside that window wins. A licence
+    activation is exactly when two instances exist -- the activation restart
+    spawns a delayed relaunch, and a user who sees nothing happen launches the
+    app themselves -- so the two come up seconds apart and one dies on bind.
+
+    Confirmed live 2026-08-07 on a remote Mac: it activated, restarted, and
+    then died with "[Errno 48] address already in use" roughly four seconds
+    after freeing the port, with the Terminal window closing on a bare uvicorn
+    error. From the user's side the app simply never came back, and neither
+    the link nor the launcher would bring it up.
+
+    Claiming the port immediately before ui.run() closes that window to
+    approximately nothing.
+    """
+    try:
+        from backend.src.utils.os_utils import is_port_listening
+    except Exception:
+        return True
+    _free_port(port)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if not is_port_listening(port):
+                return True
+        except Exception:
+            return True
+        time.sleep(0.25)
+        _free_port(port)
+    return False
 
 
 def _start_mt5_bridge() -> subprocess.Popen | None:
@@ -263,6 +357,10 @@ def _dashboard_storage_secret() -> str:
 
 
 def main():
+    # First thing, before anything else here can log: everything below this
+    # point expects the console and file handlers to already be attached.
+    setup_logging()
+
     import argparse
     _ap = argparse.ArgumentParser(add_help=False)
     _ap.add_argument("--no-browser", action="store_true",
@@ -332,6 +430,22 @@ def main():
         # when the server starts.
         from frontend import auth_gate as _auth_gate
         _auth_gate.install()
+
+        # Last thing before binding — see _claim_port. Everything above this
+        # line (database open, ui.app import) takes seconds, and the port was
+        # only freed before all of it.
+        if not _claim_port(port):
+            from backend.src.utils.os_utils import pids_listening_on
+            holders = pids_listening_on(port)
+            log.error(
+                "Port %s is still held by PID %s after repeated attempts to free "
+                "it — not starting. Another FOREX Trader is most likely already "
+                "running and serving on http://localhost:%s; open that instead. "
+                "If it is wedged, stop it (FOREX Stop.command / Stop FOREX.bat) "
+                "and start again.",
+                port, ", ".join(map(str, holders)) or "unknown", port,
+            )
+            return
 
         ui.run(
             host=_resolve_bind_host(cfg),

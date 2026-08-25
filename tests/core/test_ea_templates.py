@@ -58,11 +58,45 @@ def test_save_coerces_types(fresh_db):
     assert t["harvest_threshold"] == 75.5
 
 
-def test_be_trigger_clamped_to_1_8(fresh_db):
+def test_be_trigger_clamped_to_ladder_depth(fresh_db):
+    """Upper bound follows MAX_TP_LEVELS (8)."""
     t = et.save_ea_template("T1", {"be_trigger": 0})
     assert t["be_trigger"] == 1
     t = et.save_ea_template("T2", {"be_trigger": 99})
-    assert t["be_trigger"] == 8
+    assert t["be_trigger"] == et.MAX_TP_LEVELS == 8
+
+
+def test_cancel_pending_level_allows_zero_meaning_never(fresh_db):
+    """Unlike be_trigger, 0 is meaningful here -- it means "never cancel
+    siblings" -- so the floor is 0, not 1."""
+    t = et.save_ea_template("T3", {"cancel_pending_level": 0})
+    assert t["cancel_pending_level"] == 0
+    t = et.save_ea_template("T4", {"cancel_pending_level": 99})
+    assert t["cancel_pending_level"] == 8
+
+
+def test_anchor_and_pending_ladders_are_independent(fresh_db):
+    """The copier ships WIDER pending defaults (40/70/110/150/250) than
+    anchor (30/50/80/100/130) because a leg filled deeper in the zone has
+    more room to the same target. The two tables must not alias."""
+    t = et.save_ea_template("Two", {
+        "tp1_pips": 30.0, "tp2_pips": 50.0,
+        "tp_pen1_pips": 40.0, "tp_pen2_pips": 70.0,
+    })
+    assert (t["tp1_pips"], t["tp2_pips"]) == (30.0, 50.0)
+    assert (t["tp_pen1_pips"], t["tp_pen2_pips"]) == (40.0, 70.0)
+
+
+def test_leg_counts_and_lots_are_sanitised(fresh_db):
+    """A hand-edited template must not be able to send a negative count or
+    lot to the broker."""
+    t = et.save_ea_template("Legs", {
+        "anchors": 99, "pendings": -5, "lot_anchor": -1.0, "lot_pending": 0.02,
+    })
+    assert t["anchors"] == 20
+    assert t["pendings"] == 0
+    assert t["lot_anchor"] == 0.0
+    assert t["lot_pending"] == 0.02
 
 
 def test_invalid_enum_raises(fresh_db):
@@ -123,6 +157,13 @@ def test_anchor_tp_saves_and_coerces_types(fresh_db):
     assert t["tp2_pips"] == 0.0  # untouched levels keep the default
 
 
+def test_group_tp_action_defaults_off_and_saves(fresh_db):
+    t = et.save_ea_template("Plain", {})
+    assert t["group_tp_action"] is False
+    t2 = et.save_ea_template("Basket", {"mode": "grid", "group_tp_action": 1})
+    assert t2["group_tp_action"] is True
+
+
 def test_override_helpers_roundtrip():
     assert et.is_template_override("template:My Grid")
     assert not et.is_template_override("reversal_runner")
@@ -130,3 +171,32 @@ def test_override_helpers_roundtrip():
     assert not et.is_template_override("")
     assert et.template_name_from_override("template:My Grid") == "My Grid"
     assert et.override_for_template("My Grid") == "template:My Grid"
+
+
+# ── None-valued numeric fields (2026-07-31) ──────────────────────────────────
+# NiceGUI's ui.number reports its value as None while its box is empty --
+# true for every keystroke that clears a field before typing the next
+# number, not just an abandoned edit. save_ea_template previously ran
+# float()/int() on every numeric field unguarded, so saving while any pips/
+# pct/count box was mid-clear raised "float() argument must be a string or a
+# real number, not 'NoneType'" and aborted the whole save. Root-caused live
+# 2026-07-31 editing Anchor TP pips.
+
+def test_none_pips_value_falls_back_to_default_instead_of_crashing(fresh_db):
+    t = et.save_ea_template("Cleared Field", {"tp1_pips": None, "tp2_pips": 30.0})
+    assert t["tp1_pips"] == 0.0
+    assert t["tp2_pips"] == 30.0
+
+
+def test_none_int_field_falls_back_to_default_instead_of_crashing(fresh_db):
+    t = et.save_ea_template("Cleared Int", {"anchors": None})
+    assert t["anchors"] == et.DEFAULTS["anchors"]
+
+
+def test_none_pct_and_float_fields_all_fall_back(fresh_db):
+    t = et.save_ea_template("Cleared Many", {
+        "tp1_pct": None, "sl_pips": None, "guard_pips": None,
+    })
+    assert t["tp1_pct"] == et.DEFAULTS["tp1_pct"]
+    assert t["sl_pips"] == et.DEFAULTS["sl_pips"]
+    assert t["guard_pips"] == et.DEFAULTS["guard_pips"]

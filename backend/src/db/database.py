@@ -340,6 +340,7 @@ from backend.src.services.channels.repo import (  # noqa: E402,F401
     _normalise_tg_source,
     sync_channel_rename,
     get_channel_scorecard,
+    get_channel_strategy_breakdown,
     _CHANNEL_MIN_SAMPLE,
     _CHANNEL_PAUSE_PF,
     _CHANNEL_NO_AUTO_PAUSE,

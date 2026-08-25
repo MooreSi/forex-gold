@@ -164,6 +164,9 @@ async def compute_mt5_performance(bridge: Any, days: int = 90) -> dict:
             "worst_trade":        round(min(trades_pnl), 4) if trades_pnl else 0.0,
             "max_drawdown_pct":   round(max_dd, 2),
             "max_runup_pct":      round(max_ru, 2),
+            # Return on Investment over the period -- net P&L as a percentage
+            # of the reconstructed starting balance (_period_start above).
+            "roi_pct":            round(sum(trades_pnl) / _period_start * 100, 2) if _period_start > 0 else 0.0,
             # UK calendar-day stats
             "daily_pnl_24h":      round(daily_pnl, 4),   # kept for email compat
             "daily_pnl":          round(daily_pnl, 4),

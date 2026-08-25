@@ -73,6 +73,24 @@ from backend.src.services.cluster.node_roles import (
     is_bot_command_authority as _is_bot_command_authority_impl,
 )
 from backend.src.services.positions.max_tp import max_tp_checker_sweep as _max_tp_checker_sweep_impl
+# ── Added by the 2026-08-25 upstream merge ────────────────────────────────────
+from backend.src.services.positions.core_closed_market_queue import flush_queued_limits
+from backend.src.services.positions.core_ref_signal_backfill import backfill_ref_signals
+from backend.src.services.positions.core_pending_order_revalidation import (
+    revalidate_pending_orders as _revalidate_pending_orders_impl,
+)
+from backend.src.services.positions.core_signal_snapshot import (
+    capture_pending_snapshots as _capture_signal_snapshots_impl,
+    capture_background_snapshot as _capture_background_snapshot_impl,
+)
+from backend.src.services.trading.profit_sync import profit_sweep as _profit_sweep_impl
+from backend.src.services.positions.core_ea_link_watchdog import (
+    new_state as _ea_link_new_state,
+    ea_link_check as _ea_link_check_impl,
+)
+from backend.src.services.trading.limit_order_signal import (
+    handle_limit_order_signal as _handle_limit_order_signal_impl,
+)
 from backend.src.services.trading.fees_sizing import (
     pnl as _pnl_impl, suggest_lot_size as _suggest_lot_size_impl,
     calculate_fees as _calculate_fees_impl)
@@ -196,6 +214,8 @@ class TradingRuntime:
         # Were four loose attributes here; the cycle that owns them lives in
         # services/positions/monitor_cycle.py now and mutates this object by
         # reference, so the counts survive from one cycle to the next.
+        # (Upstream's _pending_revalidate_cycle joined it in the 2026-08-25
+        # merge -- see MonitorState.pending_revalidate_cycle.)
         self._monitor_state = _MonitorState()
         self._bot_offset     = 0
         self._email_task:    Optional[asyncio.Task] = None
@@ -261,6 +281,7 @@ class TradingRuntime:
         self._signal_bus_prune_task: Optional[asyncio.Task] = None
         self._tp_safety_net_task: Optional[asyncio.Task] = None
         self._channel_ai_task: Optional[asyncio.Task] = None
+        self._auto_template_task: Optional[asyncio.Task] = None
         self._ai_model_refresh_task: Optional[asyncio.Task] = None
         self._data_retention_task: Optional[asyncio.Task] = None
         self._reversal_engine_research_task: Optional[asyncio.Task] = None
@@ -269,6 +290,8 @@ class TradingRuntime:
         # 5-minutes window spans scans. Was a lazily-set _tg_off_warned_at
         # attribute before the pipeline moved to services/signals.
         self._tg_off_warn_state: dict = {}
+        self._closed_market_queue_task: Optional[asyncio.Task] = None
+        self._ref_backfill_task: Optional[asyncio.Task] = None
 
     def set_telegram_reader(self, reader: "TelegramReader") -> None:
         self._tg_reader = reader
@@ -287,14 +310,18 @@ class TradingRuntime:
         self._scanner_task        = asyncio.create_task(self._signal_scanner_loop())
         self._bot_task            = asyncio.create_task(self._bot_command_loop())
         self._email_task          = asyncio.create_task(self._email_scheduler_loop())
+        self._sigsnap_task        = asyncio.create_task(self._signal_snapshot_loop())
         self._bridge_watchdog_task = asyncio.create_task(self._bridge_watchdog_loop())
         self._max_tp_task         = asyncio.create_task(self._max_tp_checker_loop())
         self._signal_bus_prune_task = asyncio.create_task(self._signal_bus_prune_loop())
         self._tp_safety_net_task  = asyncio.create_task(self._tp_safety_net_loop())
         self._channel_ai_task     = asyncio.create_task(self._channel_ai_auto_eval_loop())
+        self._auto_template_task  = asyncio.create_task(self._auto_template_loop())
         self._ai_model_refresh_task = asyncio.create_task(self._ai_model_refresh_loop())
         self._data_retention_task = asyncio.create_task(self._data_retention_loop())
         self._reversal_engine_research_task = asyncio.create_task(self._reversal_engine_research_loop())
+        self._closed_market_queue_task = asyncio.create_task(self._closed_market_queue_loop())
+        self._ref_backfill_task = asyncio.create_task(self._ref_backfill_loop())
         from backend.src.services.health.self_healer import SelfHealer
         self._self_healer = SelfHealer(self)
         self._self_healer.start()
@@ -307,6 +334,7 @@ class TradingRuntime:
             self._ea_bridge = _ea_mod.EABridge(self)
             await self._ea_bridge.start()
             _ea_mod.set_instance(self._ea_bridge)
+            self._ea_link_task = asyncio.create_task(self._ea_link_watchdog_loop())
         except Exception as _ea_e:
             log.warning("[EA] bridge failed to start: %s", _ea_e)
         log.info("TradingRuntime started")
@@ -317,8 +345,12 @@ class TradingRuntime:
                   self._email_task, self._bridge_watchdog_task,
                   self._max_tp_task, self._signal_bus_prune_task,
                   self._tp_safety_net_task, self._channel_ai_task,
+                  self._auto_template_task,
                   self._ai_model_refresh_task, self._data_retention_task,
-                  self._reversal_engine_research_task):
+                  self._reversal_engine_research_task,
+                  self._closed_market_queue_task,
+                  self._ref_backfill_task,
+                  getattr(self, "_ea_link_task", None)):
             if t and not t.done():
                 t.cancel()
         if hasattr(self, "_self_healer"):
@@ -702,6 +734,13 @@ class TradingRuntime:
     async def _schedule_profit_sync(self, trade_id: str, mt5_ticket: int) -> None:
         return await _schedule_profit_sync_impl(trade_id, mt5_ticket, self._bridge)
 
+    async def _revalidate_pending_orders(self) -> None:
+        return await _revalidate_pending_orders_impl(self._bridge)
+
+    async def _profit_sweep(self) -> None:
+        return await _profit_sweep_impl(self._bridge)
+
+
     async def _close_full_after_tps(self, trade_id: str, mt5_ticket: Optional[int],
                                      close_price: float) -> None:
         if mt5_ticket:
@@ -758,6 +797,36 @@ class TradingRuntime:
 
     # ── Background commentary ─────────────────────────────────────────────────
 
+    async def _await_trade_promotion(self, trade_id: str,
+                                      timeout: float = 15.0) -> Optional[dict]:
+        """The trade's current DB row, waiting out an EA Template placeholder.
+
+        A template trade's row is INSERTed with mt5_ticket=0/entry_price=0.0 --
+        at that moment the EA has only staged the legs, so no broker ticket or
+        fill price exists yet. The first leg to fill promotes the row (see
+        EABridge._on_template_leg_filled), normally within seconds. Poll for
+        that promotion so the trade-open alert can carry the real ticket and
+        entry instead of the placeholder zeros.
+
+        Never blocks the alert indefinitely: a grid whose legs all sit unfilled
+        is a legitimate state, and fmt_trade_open() reports that case
+        explicitly. Non-placeholder rows (every Python-managed trade, and any
+        template row already promoted) return on the first read with no wait.
+        """
+        deadline = time.monotonic() + timeout
+
+        def _read():
+            with db_module.db() as conn:
+                return db_module.row_to_dict(conn.execute(
+                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
+                ).fetchone())
+
+        row = await db_module.to_db_thread(_read)
+        while row and not row.get("mt5_ticket") and time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            row = await db_module.to_db_thread(_read)
+        return row
+
     async def background_open_commentary(self, trade_id: str, sig: dict, tick: Tick) -> None:
         try:
             candles = await self.get_candles("M5", 20)
@@ -767,8 +836,15 @@ class TradingRuntime:
             )
             db_module.save_commentary(commentary, trade_id, sig.get("signal_id"))
             trade_repo.set_open_commentary(trade_id, json.dumps(commentary))
+            # Re-read the row instead of reusing the copy fetched above: an EA
+            # Template row is INSERTed as a placeholder (mt5_ticket=0,
+            # entry_price=0.0) and only gains its real ticket and fill price
+            # when the first leg fills, which normally happens while the
+            # commentary request above is still in flight. The stale copy is
+            # what produced "MT5 Ticket: 0 / Entry: 0.0" alerts.
+            fresh_row = await self._await_trade_promotion(trade_id) or trade_row
             await telegram_alerts.send_message(
-                telegram_alerts.fmt_trade_open(trade_row, tick, commentary), trade_id, "trade_open",
+                telegram_alerts.fmt_trade_open(fresh_row, tick, commentary), trade_id, "trade_open",
             )
         except Exception as e:
             log.warning("Background open commentary failed %s: %s", trade_id, e)
@@ -1018,6 +1094,127 @@ class TradingRuntime:
                 log.debug("_tp_safety_net_loop error: %s", e)
             await asyncio.sleep(self._TP_SAFETY_NET_INTERVAL)
 
+    # Deliberately its own loop rather than a step inside _monitor_loop:
+    # that loop's whole body sits behind `if tick:`, and over a weekend --
+    # exactly when this queue fills up -- there is no tick to be had, so a
+    # step added there would never run at the moment it's needed. 60s is
+    # ample for a reopen the caller only has to notice within a minute.
+    _CLOSED_MARKET_FLUSH_INTERVAL = 60  # seconds between reopen checks
+
+    async def _closed_market_queue_loop(self) -> None:
+        while self._monitor_running:
+            try:
+                rs = await db_module.to_db_thread(db_module.get_risk_settings)
+                if bool(rs.get("lk_queue_closed_market_limits", 0)):
+                    async def _place(parsed, tg_id, channel_name, source_label):
+                        return await _handle_limit_order_signal_impl(
+                            parsed, tg_id, channel_name, source_label, rs,
+                            True, False, "", "",
+                            get_trading_balance_fn=self._get_trading_balance,
+                            suggest_lot_size_fn=self.suggest_lot_size,
+                            bridge=self._bridge,
+                        )
+                    await flush_queued_limits(rs, _place)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug("_closed_market_queue_loop error: %s", e)
+            await asyncio.sleep(self._CLOSED_MARKET_FLUSH_INTERVAL)
+
+    # Hourly rather than startup-only: while accept_tg_signals is off, new
+    # messages keep arriving and keep going unparsed, so a one-shot at boot
+    # would leave the REF feed going stale again within the hour. Reads and
+    # records only -- see core_ref_signal_backfill's module docstring for why
+    # this can never open a trade.
+    _REF_BACKFILL_INTERVAL = 3600
+
+    async def _ref_backfill_loop(self) -> None:
+        while self._monitor_running:
+            try:
+                await db_module.to_db_thread(backfill_ref_signals)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug("_ref_backfill_loop error: %s", e)
+            await asyncio.sleep(self._REF_BACKFILL_INTERVAL)
+
+    async def _auto_template_loop(self) -> None:
+        """Auto template management (2026-08-14).
+
+        Two cadences, deliberately split by cost:
+
+          every 60s   detect the live regime from the M5 window the monitor
+                      loop already keeps, and write the BACKTESTED baseline
+                      pick for each Auto channel. Free, deterministic, and
+                      immediate -- a regime flip is acted on within a minute
+                      instead of waiting for the next AI cycle.
+
+          AI review   on a regime CHANGE, or every 15 minutes, whichever
+                      comes first. This is the only part that costs money,
+                      and it is bounded to ~4-8 calls/hour rather than the
+                      per-minute rate the detection loop runs at.
+
+        The split exists because engine.py already carries a scar here: the
+        Channel Strategy AI used to be a page-level ui.timer that respawned
+        on every browser reconnect and "was burning Anthropic API credits"
+        (see _channel_ai_auto_eval_loop). Frequent *detection* is cheap;
+        frequent *inference* is not, so only the former runs per minute.
+
+        Does nothing at all when no source is set to Auto, so the default
+        configuration pays neither cost.
+        """
+        from backend.src.services.positions import core_auto_template as _auto
+
+        await asyncio.sleep(90)   # let the first M5 window populate
+        last_regime: Optional[str] = None
+        last_ai = 0.0
+        AI_INTERVAL = 15 * 60
+
+        while self._monitor_running:
+            try:
+                sources = _auto.auto_enabled_sources()
+                if sources:
+                    regime = _auto.regime_from_candles(self._dpm_candles)
+                    regime_flipped = (last_regime is not None and regime != last_regime)
+                    # Only re-assert the baseline when the regime actually
+                    # moved (or on the very first pass). Otherwise just fill
+                    # sources that have no pick yet -- see apply_baselines'
+                    # `force` note: forcing every tick reverts the AI's
+                    # override within 60s of it being made.
+                    changed = _auto.apply_baselines(
+                        regime, sources,
+                        force=(regime_flipped or last_regime is None),
+                    )
+                    if regime_flipped or changed:
+                        log.info(
+                            "[AutoTemplate] regime=%s%s%s", regime,
+                            f" (was {last_regime})" if regime_flipped else "",
+                            "".join(f" | {s}: {a or 'none'} -> {b}"
+                                    for s, (a, b) in changed.items()),
+                        )
+                    last_regime = regime
+
+                    now = time.time()
+                    if (regime_flipped or now - last_ai >= AI_INTERVAL) and \
+                            ai_provider.is_configured(self._cfg):
+                        last_ai = now
+                        try:
+                            from backend.src.services.channels import strategy_ai as _csai
+                            await _csai.evaluate_channels(self, self._cfg)
+                            log.info("[AutoTemplate] AI review complete (trigger=%s)",
+                                     "regime change" if regime_flipped else "15m interval")
+                        except Exception as e:
+                            # The deterministic baseline is already written, so
+                            # a failed review degrades to backtested behaviour
+                            # rather than to no management at all.
+                            log.warning("[AutoTemplate] AI review failed, keeping "
+                                        "backtested baseline: %s", e)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.debug("_auto_template_loop error: %s", e)
+            await asyncio.sleep(60)
+
     async def _channel_ai_auto_eval_loop(self) -> None:
         """
         Periodic Channel Strategy AI evaluation — one singleton instance per engine.
@@ -1093,56 +1290,57 @@ class TradingRuntime:
         await _reversal_engine_research_loop_impl(self, lambda: self._monitor_running)
 
     # ── Morning ORB / IVB report ──────────────────────────────────────────────
-    # Adapted from Faber Vaale's "The Simplest Orderflow Trading Model"
-    # (youtube.com/watch?v=cUTsoU-15Tc) — the IVB (Initial Value Balance)
-    # method: define an opening range, overlay a volume profile on it to find
-    # the POC and value area, use the value-area-edge-to-POC band as the
-    # "reload zone" entry after a breakout+retracement (tighter, better R:R
-    # than fading the whole range), and a statistically-derived target
-    # ("protection level"). The video uses the NY session's first 15/30 min;
-    # this account trades gold around the London open instead, so the same
-    # mechanics are applied to the first hour of the London session (Europe/
-    # London local time, so it's DST-correct year-round) rather than NY —
-    # widened from an initial 15-minute window after backtesting showed the
-    # first 15 minutes is dominated by fakeouts (see the scheduler comment
-    # below for the numbers). This matches Market Profile's classic "Initial
-    # Balance" definition. The video's "protection level" comes from DeepCharts' own
-    # proprietary ML model trained on data this app doesn't have access to —
-    # rather than fabricate a number, _get_orb_target_multiple() computes a
-    # genuine analog from this account's own MT5 history (see below).
-    # Order-flow confirmation (the video's "Model 2" — reading absorption/
-    # exhaustion in the footprint at the reload zone) is deliberately not
-    # implemented here; it needs genuine tick-level bid/ask data, which is a
-    # separate, larger undertaking than this report.
+    # Classic Opening-Range-Breakout methodology (rebuilt 2026-08-01) --
+    # see core_orb_report.py's module docstring for the full rationale:
+    # whole-Asian-session (00:00-08:00 UTC) range as a confirmation filter,
+    # the first 15 minutes of London (08:00-08:15 UTC) as the traded
+    # opening range, stop at the opening range's midpoint, target at 2x the
+    # resulting risk. Delegates entirely to core_orb_report.build_orb_report
+    # -- this method only exists as SimulationEngine's public entry point.
 
     async def build_orb_report(self) -> Optional[dict]:
-        """
-        Reference range is the Asian session (00:00-08:00 UTC, the same
-        calendar day) rather than a freshly-forming first-hour-of-London
-        range. Standard London-breakout convention trades the breakout of
-        the ALREADY-ESTABLISHED Asian range the moment London opens — not a
-        brand-new range built from London's own first hour, which this
-        report used until 2026-07-17.
-
-        Why: the Asian range averages ~4x wider than the old London-hour
-        range (~48pt vs ~13pt over a 14-day sample, 2026-07-15). Building a
-        volume-profile stop from an already-13pt window left nowhere for
-        VAL/VAH to spread — confirmed live: all 4 real orb_fixed trades to
-        date hit SL, 3 of them with a stop under 1pt on gold (smaller than
-        typical spread). Switching the reference range to the wider Asian
-        session, and deriving the stop from a fixed fraction of ITS height
-        (_ORB_SL_RANGE_PCT) instead of an inner volume-profile boundary,
-        fixes both: the range itself is more stable, and the stop no longer
-        depends on how tightly volume happens to cluster within it.
-
-        Also means the report is available the instant London opens rather
-        than only after waiting out a full extra hour for a new range to
-        form — the Asian range is already complete by then.
-        """
         return await _build_orb_report_impl(self._bridge)
 
-    # ── Empirical target-multiple backtest ────────────────────────────────────
+    # ── Email scheduler ───────────────────────────────────────────────────────
 
+    async def _signal_snapshot_loop(self) -> None:
+        """Log a full market snapshot for every Gold Diggers VIP / Institutional
+        signal, so their entry logic can be studied from evidence rather than
+        inferred from screenshots. See core_signal_snapshot.
+
+        Polls rather than hooking the parser: vantage_tg_signals has seven
+        separate INSERT sites, and a research log must not be able to break
+        signal processing. 5s keeps capture lag small enough that the
+        candle-derived indicators are effectively contemporaneous.
+        """
+        await asyncio.sleep(20)   # let the bridge settle after startup
+        while self._monitor_running:
+            try:
+                await _capture_signal_snapshots_impl(self._bridge)
+            except Exception:
+                log.debug("Signal snapshot capture failed", exc_info=True)
+            # Background negatives every 15 min -- see
+            # core_signal_snapshot.capture_background_snapshot for why the
+            # study is unusable without them.
+            _now_bg = time.time()
+            if _now_bg - getattr(self, "_last_bg_snapshot", 0.0) > 900.0:
+                self._last_bg_snapshot = _now_bg
+                try:
+                    await _capture_background_snapshot_impl(self._bridge)
+                except Exception:
+                    log.debug("Background snapshot failed", exc_info=True)
+            # Walk captured reference signals forward against their own stated
+            # levels, so the corpus records whether each call actually worked
+            # -- see reversal_engine/pro_outcome.py. Every 60s: it resolves
+            # from a cursor, so a slower cadence costs nothing but latency.
+            if _now_bg - getattr(self, "_last_pro_resolve", 0.0) > 60.0:
+                self._last_pro_resolve = _now_bg
+                try:
+                    from backend.src.services.reversal_engine import pro_outcome as _pro_out
+                    await _pro_out.resolve_pending(self._bridge)
+                except Exception:
+                    log.debug("Pro outcome resolve failed", exc_info=True)
+            await asyncio.sleep(5)
     # ── Email scheduler ───────────────────────────────────────────────────────
 
     async def _email_scheduler_loop(self) -> None:
@@ -1248,6 +1446,45 @@ class TradingRuntime:
             lambda: self._bridge_inhibit_reconnect,
             self.start_bridge_process,
         )
+
+    async def _ea_link_watchdog_loop(self) -> None:
+        """Watch the EA's socket link, keep every port it might dial open, and
+        bounce the terminal if it stays down.
+
+        Separate from _bridge_watchdog_loop above: that one watches the MT5
+        *bridge* and acts when it goes unhealthy, this one watches the *EA
+        inside the terminal*, which can be dead while the bridge is perfectly
+        fine -- exactly the 2026-08-07 outage, where the bridge watchdog
+        correctly did nothing for four hours. Both end up calling the same
+        _start_bridge_process; core_ea_link_watchdog checks bridge health
+        first so only one of them ever owns a given restart.
+        """
+        # Only the macOS/Wine path of _start_bridge_process tears the terminal
+        # down (wineserver + terminal64.exe), which is what makes MT5 restore
+        # its charts and reload the expert. The Windows path restarts
+        # mt5_bridge.py alone and the native bridge just reconnects in-process
+        # -- on both, the terminal keeps running and the EA is NOT reloaded, so
+        # a restart would drop the bridge for no gain. Withhold the restarter
+        # there and let the watchdog run alert-only.
+        import sys as _sys
+        _restart_reloads_ea = (
+            not self._using_native_bridge and _sys.platform != "win32"
+        )
+        if not _restart_reloads_ea:
+            log.info("[EALink] automatic EA recovery unavailable on this bridge "
+                     "(restarting it would not reload the expert) — alert-only")
+
+        state = _ea_link_new_state()
+        while self._monitor_running:
+            sleep_for = await _ea_link_check_impl(
+                self._ea_bridge, state,
+                mt5_bridge=self._bridge,
+                restart_bridge=(
+                    self._start_bridge_process if _restart_reloads_ea else None
+                ),
+                inhibit_reconnect=self._bridge_inhibit_reconnect,
+            )
+            await asyncio.sleep(sleep_for)
 
     # ── Bot commands ──────────────────────────────────────────────────────────
 

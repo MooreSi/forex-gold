@@ -135,13 +135,36 @@ async def update_signal(bridge: Any, signal_id: str, updates: dict) -> dict:
                                 for n in range(1, 9)
                                 if safe.get(f"tp{n}") is not None
                             }
-                            if _new_tps:
-                                sent = await _ea.update_trade(trade_row["trade_id"], _new_tps)
+                            # Carry the corrected SL through the EA as well
+                            # (2026-08-04). The modify_order() above is
+                            # deliberately skipped while the EA is healthy so
+                            # nothing races its SL progression -- but until
+                            # now update_trade only refreshed tp[], so a
+                            # corrected STOP reached neither the broker nor
+                            # the EA and survived only in Python's DB.
+                            #
+                            # Confirmed live, ticket 1705825177: an IME
+                            # anchor filled on a provisional 123-pip stop,
+                            # the follow-up wrote the real 68-pip stop
+                            # (4094.00) to the DB, and the broker order still
+                            # read 4088.56 afterwards. The app believed it
+                            # risked 68 pips while actually risking 123 --
+                            # and the sniper, on the same signal, was on
+                            # 4094.00 from the moment it opened.
+                            #
+                            # Routed through the EA rather than by
+                            # re-enabling modify_order here, so the EA stays
+                            # the single writer of that order and the
+                            # anti-race guard above is left intact.
+                            if _new_tps or new_sl:
+                                sent = await _ea.update_trade(
+                                    trade_row["trade_id"], _new_tps, stop_loss=new_sl,
+                                )
                                 log.info(
-                                    "EA trade %s TP update %s: %s",
+                                    "EA trade %s update %s: tps=%s sl=%s",
                                     trade_row["trade_id"][:8],
                                     "sent" if sent else "skipped (not EA-tracked)",
-                                    _new_tps,
+                                    _new_tps, new_sl,
                                 )
                     except Exception as e:
                         log.warning("EA update_trade after signal update failed: %s", e)

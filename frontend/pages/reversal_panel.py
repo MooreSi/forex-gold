@@ -32,6 +32,8 @@ _ml_thresh = engines_controller.reversal.ml_thresholds()
 _STARTING_BALANCE = 1000.0
 
 
+
+
 # ── Formatting helpers ────────────────────────────────────────────────────────
 
 def _fmt_ts(ts) -> str:
@@ -189,15 +191,102 @@ def render() -> None:
         ui.button("Stop Engine",    icon="stop",         on_click=_stop).classes("text-xs")
         ui.button("Run Now",        icon="refresh",      on_click=_run_now).classes("text-xs")
 
+    # ── Learn From Pro Signals ────────────────────────────────────────────────
+    # The toggle described in reversal_engine/pro_model.py: every captured
+    # Gold Diggers signal refits that classifier, and its verdict enters this
+    # engine's feature vector as `pro_likeness`. Deliberately sits with the
+    # engine controls rather than in Settings -- it changes what this engine
+    # learns from, so it belongs where its effect is visible.
+    with ui.row().classes("px-4 py-1 gap-3 items-center flex-wrap"):
+        def _learn_on() -> bool:
+            try:
+                return bool(engines_controller.get_risk_settings().get("re_learn_from_ref_signals", 0))
+            except Exception:
+                return False
+
+        learn_status_lbl = ui.label("").classes("text-xs font-mono text-gray-500")
+
+        def _refresh_learn_status() -> None:
+            if not _learn_on():
+                learn_status_lbl.set_text("off — pro_likeness held at neutral")
+                learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
+                return
+            try:
+                from backend.src.services.reversal_engine import pro_model
+                st = pro_model.status()
+                c = st.get("corpus") or {}
+                base = (f"corpus {c.get('pos', 0)} pro / {c.get('neg', 0)} background · "
+                        f"outcomes {c.get('wins', 0)}W-{c.get('losses', 0)}L "
+                        f"({c.get('pending', 0)} unresolved)")
+                if st.get("ready"):
+                    learn_status_lbl.set_text(f"live · AUC {st['auc']:.3f} on n={st['n']} · {base}")
+                    learn_status_lbl.classes(replace="text-xs font-mono text-green-400")
+                else:
+                    learn_status_lbl.set_text(f"collecting — {st.get('reason')} · {base}")
+                    learn_status_lbl.classes(replace="text-xs font-mono text-yellow-500")
+            except Exception as e:
+                learn_status_lbl.set_text(f"unavailable: {e}")
+                learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
+
+        def _toggle_learn(e) -> None:
+            engines_controller.update_risk_settings(
+                {"re_learn_from_ref_signals": 1 if e.value else 0})
+            if e.value:
+                try:
+                    from backend.src.services.reversal_engine import pro_model
+                    pro_model.fit(force=True)
+                except Exception:
+                    pass
+            ui.notify("Learning from professional signals "
+                      f"{'enabled' if e.value else 'disabled'}",
+                      type="positive" if e.value else "info")
+            _refresh_learn_status()
+
+        ui.switch("Learn From Pro Signals", value=_learn_on(),
+                  on_change=_toggle_learn).props("dense").classes("text-xs")
+        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+            "Learns from every Gold Diggers VIP / INSTITUTIONAL signal received: "
+            "what the market looked like when they fired, weighted by whether "
+            "that call then reached TP1 before its stop. Enters this engine's ML "
+            "model as one feature (pro_likeness), never as training rows of its "
+            "own. Stays neutral until the corpus is large enough to be honest "
+            "and the model beats chance out of sample."
+        )
+        _refresh_learn_status()
+        ui.timer(30.0, _refresh_learn_status)
+
     ui.separator()
 
     # ── Balance banner ────────────────────────────────────────────────────────
     with ui.row().classes(
         "w-full items-center gap-6 px-4 py-3 bg-gray-900 border-b border-gray-700"
     ):
+        # Realised first, and larger, because it is the one that is real
+        # money. The virtual balance beside it is the signal generator's
+        # hypothetical ledger over EVERY signal it produced -- including the
+        # ~75% that the live-execution gates (ML score, momentum, exposure,
+        # schedule, circuit breaker) deliberately blocked and never traded.
+        # Those blocked signals are overwhelmingly the losers, so the two
+        # numbers diverge hard and in opposite directions: measured
+        # 2026-07-31, virtual sat at -$1,651 while the trades actually placed
+        # were +$1,076. Showing only the virtual figure made a profitable
+        # engine look like it was bleeding.
         with ui.column().classes("items-center"):
-            balance_lbl = ui.label("$—").classes("text-2xl font-bold font-mono text-green-400")
-            ui.label("Virtual Balance").classes("text-xs text-gray-500")
+            live_pnl_lbl = ui.label("$—").classes("text-2xl font-bold font-mono text-green-400")
+            ui.label("Realised P&L (executed)").classes("text-xs text-gray-500")
+            live_n_lbl = ui.label("").classes("text-xs text-gray-600")
+
+        ui.separator().props("vertical").classes("h-10 border-gray-700")
+
+        with ui.column().classes("items-center"):
+            balance_lbl = ui.label("$—").classes("text-lg font-mono text-gray-400")
+            ui.label("Virtual Balance").classes("text-xs text-gray-600")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "Hypothetical balance if every signal this engine generated had "
+                "been traded, including the ones the live-execution gates blocked. "
+                "Useful for judging raw signal quality, not for judging money — "
+                "for that, read Realised P&L."
+            )
 
         ui.separator().props("vertical").classes("h-10 border-gray-700")
 
@@ -220,12 +309,28 @@ def render() -> None:
             wr_sub_lbl = ui.label("Win Rate").classes("text-xs text-gray-600")
 
     # ── Stats cards ───────────────────────────────────────────────────────────
+    # Matches breakout_panel.py's stat-tile styling (per-tile color, tooltip,
+    # fixed size) for visual consistency across the signal-generator panels.
     stat_cards: dict = {}
-    with ui.row().classes("w-full px-4 py-2 gap-3 flex-wrap"):
-        for key in ["Total", "Wins", "Losses", "B/E", "Win Rate", "Avg P&L", "Total P&L"]:
-            with ui.card().classes("bg-gray-800 px-3 py-2 rounded"):
-                ui.label(key).classes("text-xs text-gray-500")
-                stat_cards[key] = ui.label("—").classes("text-sm font-bold font-mono text-white")
+    with ui.row().classes("w-full gap-3 flex-wrap px-4 pt-3"):
+        for label, color, tip in [
+            ("Total Signals", "text-gray-200",  "Total reversal signals generated"),
+            ("Wins",          "text-green-400", "Signals that hit TP1 or better"),
+            ("Losses",        "text-red-400",   "Signals that hit stop-loss"),
+            ("B/E",           "text-yellow-400","Break-even closes (SL moved to entry)"),
+            ("Win Rate",      "text-blue-300",  "Wins as % of all closed signals"),
+            ("Pending",       "text-gray-400",  "Signals not yet triggered"),
+            ("Avg P&L ($)",   "text-gray-200",  "Average dollar P&L per closed trade"),
+            ("Total P&L ($)", "text-gray-200",  "Cumulative virtual P&L"),
+        ]:
+            with ui.card().classes(
+                "bg-gray-800 rounded-lg px-3 py-2 text-center flex-none"
+                " w-32 min-h-[4.5rem] flex flex-col items-center justify-center"
+            ):
+                val_lbl = ui.label("—").classes(f"text-lg font-bold {color}")
+                ui.label(label).classes("text-xs text-gray-500 leading-tight mt-0.5")
+                ui.tooltip(tip)
+            stat_cards[label] = val_lbl
 
     ui.separator()
 
@@ -248,26 +353,6 @@ def render() -> None:
                     ui.label("Active Positions").classes(
                         "text-sm font-bold text-yellow-300"
                     )
-                    _limit_order_val = bool(engines_controller.get_risk_settings().get("re_use_limit_order", 0))
-                    limit_order_sw = ui.switch(
-                        "LIMIT ORDER", value=_limit_order_val,
-                    ).classes("text-xs").props("dense color=amber")
-                    ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-                        "ON: live-executed signals are routed via the EA as a genuine "
-                        "MT5 pending limit order at the signal's entry zone. If the EA "
-                        "is unreachable when a signal triggers, falls back to the normal "
-                        "market-fill flow automatically. OFF: acts as it does now "
-                        "(immediate market fill)."
-                    )
-
-                    def _toggle_limit_order(e):
-                        engines_controller.update_risk_settings({"re_use_limit_order": 1 if e.value else 0})
-                        ui.notify(
-                            f"Reversal Engine LIMIT ORDER {'enabled' if e.value else 'disabled'}",
-                            type="positive" if e.value else "info",
-                        )
-
-                    limit_order_sw.on_value_change(_toggle_limit_order)
 
                 open_container = ui.column().classes("w-full gap-2")
 
@@ -353,8 +438,8 @@ def render() -> None:
             dd   = await engines_controller.reversal.max_drawdown()
             balance_lbl.text = f"${bal:,.2f}"
             balance_lbl.classes(
-                replace="text-2xl font-bold font-mono "
-                + ("text-green-400" if bal >= _STARTING_BALANCE else "text-red-400")
+                replace="text-lg font-mono "
+                + ("text-gray-300" if bal >= _STARTING_BALANCE else "text-red-400")
             )
             pnl_lbl.text = _pnl_str(pnl, "$")
             pnl_lbl.classes(replace=f"text-lg font-bold font-mono {_pnl_color(pnl)}")
@@ -363,16 +448,39 @@ def render() -> None:
         except Exception:
             pass
 
+        # Realised P&L -- the trades this engine actually placed, read from
+        # the core trade ledger rather than the engine's own virtual one.
+        try:
+            live = await engines_controller.reversal_realised_pnl()
+            live_pnl_lbl.text = f"${live['total']:,.2f}"
+            live_pnl_lbl.classes(
+                replace="text-2xl font-bold font-mono "
+                + ("text-green-400" if live["total"] >= 0 else "text-red-400")
+            )
+            live_n_lbl.text = (
+                f"{live['n']} closed · {live['per_trade']:+.2f}/trade"
+                if live["n"] else "no closed trades yet"
+            )
+        except Exception:
+            pass
+
         # Stats
         try:
             stats = await engines_controller.reversal.stats()
-            stat_cards["Total"].text    = str(stats["total"])
-            stat_cards["Wins"].text     = str(stats["wins"])
-            stat_cards["Losses"].text   = str(stats["losses"])
-            stat_cards["B/E"].text      = str(stats["bes"])
-            stat_cards["Win Rate"].text = f"{stats['win_rate']:.1f}%"
-            stat_cards["Avg P&L"].text  = f"${stats['avg_pnl']:+.2f}"
-            stat_cards["Total P&L"].text= f"${stats['total_pnl']:+.2f}"
+            stat_cards["Total Signals"].text = str(stats["total"])
+            stat_cards["Wins"].text          = str(stats["wins"])
+            stat_cards["Losses"].text        = str(stats["losses"])
+            stat_cards["B/E"].text           = str(stats["bes"])
+            stat_cards["Win Rate"].text      = f"{stats['win_rate']:.1f}%"
+            stat_cards["Pending"].text       = str(stats["pending"])
+            stat_cards["Avg P&L ($)"].text   = f"${stats['avg_pnl']:+.2f}"
+            stat_cards["Avg P&L ($)"].classes(
+                replace=f"text-lg font-bold {_pnl_color(stats['avg_pnl'])}"
+            )
+            stat_cards["Total P&L ($)"].text = f"${stats['total_pnl']:+.2f}"
+            stat_cards["Total P&L ($)"].classes(
+                replace=f"text-lg font-bold {_pnl_color(stats['total_pnl'])}"
+            )
             wr_lbl.text = f"{stats['win_rate']:.1f}%"
             wr_sub_lbl.text = f"Win Rate ({stats['wins']}W / {stats['losses']}L)"
         except Exception:

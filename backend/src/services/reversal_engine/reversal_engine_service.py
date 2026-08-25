@@ -70,7 +70,7 @@ _OUTCOME_INTERVAL_S   = 5       # outcome/trigger loop
 _CORR_INTERVAL_S      = 30      # correlation check loop
 _SIGNAL_MAX_AGE_S     = 7200    # 2-hour pending expiry
 _LEVEL_COOLDOWN_S     = 1800    # 30 min before same level re-signals
-_MAX_OPEN_SIGNALS     = 3       # cap concurrent open positions
+_MAX_OPEN_SIGNALS     = 6       # cap concurrent open positions
 _CONSEC_LOSS_LIMIT    = 3       # consecutive same-direction losses -> cooldown
 _CONSEC_LOSS_WINDOW   = 7200    # 2-hour window for consecutive-loss check
 
@@ -261,6 +261,16 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         # Market context
         atr     = self._calc_atr(m15_candles or h1_candles)
         adx     = self._calc_adx(h1_candles)
+        # M15 RSI. Both pro_profile (pro_rsi_delta) and pro_model read this,
+        # and until 2026-08-06 nothing on this path supplied it -- so
+        # pro_rsi_delta was pinned at its 0.0 neutral for every signal ever
+        # scored, silently, while the profile itself was live.
+        try:
+            from backend.src.services.positions.core_indicators import rsi_last
+            rsi14 = rsi_last([float(c.get("close", 0) or 0)
+                              for c in (m15_candles or h1_candles or [])])
+        except Exception:
+            rsi14 = None
         htf     = ld.get_htf_bias(h1_candles, h4_candles)
         session = ld.get_session(utc_hour)
 
@@ -398,6 +408,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # of these through it raises "no such column" and silently
             # kills every signal-creation cycle.
             feat_input = dict(sig_data)
+            feat_input["rsi14"]                  = rsi14
             feat_input["news_proximity_norm"]    = news_proximity_norm
             feat_input["regime_score"]           = regime_score
             feat_input["equity_drawdown_pct"]    = equity_drawdown_pct
@@ -410,6 +421,21 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("reversal_engine", direction)
             except Exception:
                 feat_input["concurrent_agreement"] = 0.0
+            # FVG context (2026-08-04). Measured against THIS level, on the
+            # M15 candles already fetched above, so it costs no extra bridge
+            # call. Silence here would be wrong -- extract_features' own
+            # "no gap found" neutrals are the correct fallback and are
+            # applied automatically when these keys are absent.
+            try:
+                from backend.src.services.reversal_engine.ict_patterns import fvg_context
+                feat_input.update(fvg_context(
+                    m15_candles or h1_candles,
+                    float(level.get("price") or 0),
+                    direction,
+                    atr,
+                ))
+            except Exception:
+                pass
 
             feats = re_ml.extract_features(feat_input, win_rate)
             prob  = re_ml.predict(feats) if feats else None
@@ -457,6 +483,17 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
                 signal_created = True
                 self._notify_refresh()
+
+                # Grid EA template: place the resting legs NOW rather than
+                # waiting for _check_outcomes to see price enter the zone --
+                # the legs themselves are what waits. No-op unless this
+                # engine is actually assigned a grid template and live
+                # execution is on. See _maybe_stage_grid_template.
+                try:
+                    await self._maybe_stage_grid_template(sig_id, tick, price)
+                except Exception as _grid_exc:
+                    _log.warning("[RE-Engine] grid staging failed for %s: %s",
+                                 sig_data.get("signal_ref"), _grid_exc)
 
         if not signal_created:
             top = candidates[0] if candidates else {}
@@ -527,8 +564,21 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                         "[RE-Engine] TRIGGERED %s @ %.2f (fill, mid=%.2f)",
                         sig.get("signal_ref", sig_id), fill, price
                     )
-                    # Optionally execute live trade
-                    await self._try_live_execute(sig, fill, tick)
+                    # Optionally execute live trade. A signal that already
+                    # carries a vantage_signal_id was dispatched at creation
+                    # time (grid template -- _maybe_stage_grid_template), so
+                    # its broker legs are already resting and this trigger is
+                    # bookkeeping only; executing again would open a second
+                    # grid on the same setup.
+                    if sig.get("vantage_signal_id"):
+                        _log.info(
+                            "[RE-Engine] %s zone reached -- legs already staged at "
+                            "creation (vantage %s), not re-executing",
+                            sig.get("signal_ref", sig_id),
+                            str(sig.get("vantage_signal_id"))[:8],
+                        )
+                    else:
+                        await self._try_live_execute(sig, fill, tick)
                     self._notify_refresh()
                 continue
 

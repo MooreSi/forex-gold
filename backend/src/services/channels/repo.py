@@ -63,6 +63,49 @@ _CHANNEL_NAME_TABLES = (
 )
 
 
+# Tables from _CHANNEL_NAME_TABLES whose name column is PRIMARY KEY (at most
+# one row per channel). A blind "UPDATE ... SET col=new WHERE col=old" hits
+# new's existing PK row and raises, which sync_channel_rename's bare except
+# swallows -- permanently orphaning the old row instead of folding it in.
+# Confirmed live: "Gold Diggers 2.0"'s channel_performance row (holding a
+# user-set EA Template override, set before this fix existed) was never
+# folded into "GOLD DIGGERS INSTITUTIONAL" because that canonical row
+# already existed by the time sync_channel_rename ran for this pair --
+# every lookup by the live channel name silently missed the override from
+# then on, for the Test Template channel and any other renamed channel with
+# a pre-existing canonical row alike. Maps table -> columns worth carrying
+# from the old row onto the canonical one (gated on the first column being
+# non-NULL) before the old row is dropped; empty means the canonical row's
+# own data always wins.
+_CHANNEL_UNIQUE_TABLES: dict[str, tuple[str, ...]] = {
+    "channel_parser_config": (),
+    "channel_performance":   ("strategy_override", "auto_strategy"),
+    "channel_strategy_rec":  (),
+}
+
+
+def _fold_renamed_row(conn, table: str, col: str, old_val: str, new_val: str,
+                       carry_cols: tuple[str, ...] = ()) -> None:
+    """Merge a PK-unique table's row keyed by old_val into new_val's row --
+    renaming in place if new_val has no row yet, otherwise carrying the
+    given columns over (only when the old row actually set them) and
+    dropping the old row. See _CHANNEL_UNIQUE_TABLES for why plain UPDATE
+    isn't safe here."""
+    old_row = conn.execute(f"SELECT * FROM {table} WHERE {col}=?", (old_val,)).fetchone()
+    if old_row is None:
+        return
+    exists = conn.execute(f"SELECT 1 FROM {table} WHERE {col}=?", (new_val,)).fetchone()
+    if exists is None:
+        conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new_val, old_val))
+        return
+    old = dict(old_row)
+    if carry_cols and old.get(carry_cols[0]) is not None:
+        assign = ", ".join(f"{c}=?" for c in carry_cols)
+        conn.execute(f"UPDATE {table} SET {assign} WHERE {col}=?",
+                     (*(old[c] for c in carry_cols), new_val))
+    conn.execute(f"DELETE FROM {table} WHERE {col}=?", (old_val,))
+
+
 def sync_channel_rename(old_name: str, new_name: str) -> None:
     """Cascade a channel display-name change (e.g. the Telegram group's real
     title was edited, or a signal generator's own name changed) across every
@@ -91,10 +134,16 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
     with db() as conn:
         for tbl, col in _CHANNEL_NAME_TABLES:
             try:
-                conn.execute(
-                    f"UPDATE {tbl} SET {col}=? WHERE {col} IN (?, ?)",
-                    (new_name, old_canon, old_name),
-                )
+                if tbl in _CHANNEL_UNIQUE_TABLES:
+                    carry = _CHANNEL_UNIQUE_TABLES[tbl]
+                    _fold_renamed_row(conn, tbl, col, old_name, new_name, carry)
+                    if old_canon != old_name:
+                        _fold_renamed_row(conn, tbl, col, old_canon, new_name, carry)
+                else:
+                    conn.execute(
+                        f"UPDATE {tbl} SET {col}=? WHERE {col} IN (?, ?)",
+                        (new_name, old_canon, old_name),
+                    )
             except Exception:
                 pass  # table/column doesn't exist on this schema version
     # Every existing variant that used to resolve to the old canonical name
@@ -106,6 +155,66 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
             CANONICAL_CHANNELS[variant] = new_name
     CANONICAL_CHANNELS[new_name] = new_name
     log.info("[Channel] Renamed channel '%s' -> '%s' across all tracking tables", old_canon, new_name)
+
+
+def get_channel_strategy_breakdown(days: int = 30, min_n: int = 3,
+                                   top_n: int = 4) -> dict[str, list[dict]]:
+    """Per-channel performance SPLIT BY the strategy each trade actually ran.
+
+    A channel's aggregate PnL says nothing about whether the channel has an
+    edge, because it mixes results from configurations that no longer apply.
+    GOLD DIGGERS INSTITUTIONAL is the worked example: 67 trades to 2026-08-12
+    made +$108, then 26 trades on 08-13/14 lost $1,574 running
+    "Asian Reversal - ATR" (the Reversal Engine's own SL120 template) and
+    "Staged Ratchet 100-500" (SL100, one TP at 500) -- wide-stop, far-target
+    shapes on a channel whose measured edge is tight limit entries. The
+    aggregate that reached the AI evaluator was "WR=50% PnL=$-1465", with no
+    way to tell "this channel has no edge" from "this channel was run on the
+    wrong geometry for two days", so it stood the channel down -- against its
+    own backtested map, which rates that channel positive in every regime.
+
+    Returns {canonical channel: [{strategy, n, win_rate, net_pnl}, ...]},
+    each list sorted by trade count and capped at `top_n`. Strategies with
+    fewer than `min_n` trades are dropped: a one-trade sample is noise, and
+    the point of this is to inform a judgement, not to bury it in rows.
+    """
+    import time as _t
+    cutoff = _t.time() - days * 86400
+    out: dict[str, dict[str, dict]] = {}
+    try:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT tg_source, strategy, net_pnl FROM vantage_simulated_trades "
+                "WHERE status='closed' AND close_time >= ? "
+                "  AND tg_source IS NOT NULL AND strategy IS NOT NULL",
+                (cutoff,),
+            ).fetchall()
+    except Exception:
+        return {}
+    for src, strategy, pnl in rows:
+        canon = _canonical(src)
+        bucket = out.setdefault(canon, {}).setdefault(
+            str(strategy), {"strategy": str(strategy), "n": 0, "wins": 0, "net_pnl": 0.0}
+        )
+        p = float(pnl or 0.0)
+        bucket["n"] += 1
+        bucket["net_pnl"] += p
+        if p > 0:
+            bucket["wins"] += 1
+    result: dict[str, list[dict]] = {}
+    for canon, by_strategy in out.items():
+        kept = [b for b in by_strategy.values() if b["n"] >= min_n]
+        kept.sort(key=lambda b: (-b["n"], b["strategy"]))
+        result[canon] = [
+            {
+                "strategy": b["strategy"],
+                "n": b["n"],
+                "win_rate": round(100.0 * b["wins"] / b["n"], 1),
+                "net_pnl": round(b["net_pnl"], 2),
+            }
+            for b in kept[:top_n]
+        ]
+    return result
 
 
 def get_channel_scorecard(days: int = 30) -> list[dict]:
@@ -376,6 +485,21 @@ _FIXED_ENGINE_CHANNELS = [
 def _canonical(source: str) -> str:
     """Return the canonical channel name for a raw tg_source / source string."""
     return CANONICAL_CHANNELS.get(source, source)
+
+
+def canonical_channel_name(source: str) -> str:
+    """Public wrapper around _canonical() for cross-module use (e.g. by
+    core_trading_schedule.py to key its per-channel window settings the same
+    way get_channel_strategy_override() already does)."""
+    return _canonical(source)
+
+
+def get_telegram_channel_names() -> list[str]:
+    """The dynamic channel list (see _dynamic_channel_bucket_order()) minus
+    the fixed internal engines -- i.e. actual Telegram channels only, for
+    UIs/gates that need to enumerate them separately from Reversal Engine /
+    Breakout Engine (which already have their own dedicated toggles)."""
+    return [c for c in _dynamic_channel_bucket_order() if c not in _FIXED_ENGINE_CHANNELS]
 
 
 def _dynamic_channel_bucket_order() -> list[str]:

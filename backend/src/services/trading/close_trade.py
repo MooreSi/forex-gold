@@ -38,6 +38,11 @@ from backend.src.services.trading.fees_sizing import pnl as _pnl
 from backend.src.services.risk.governor import rg_apply_halts_on_close
 from backend.src.services.dpm.bookkeeping import finalize_dpm_record
 from backend.src.services.positions.tp_tracking import TPCache
+from backend.src.services.risk.governor import (
+    apply_daily_loss_halt_on_close,
+    apply_giveback_guard_on_close,
+    rg_apply_halts_on_close,
+)
 
 log = logging.getLogger(__name__)
 
@@ -137,8 +142,25 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
     row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
     direction   = row["direction"]
     remaining   = float(row["remaining_lots"])
-    entry_price = float(row["entry_price"])
-    gross_pnl   = _pnl(direction, entry_price, close_price, remaining)
+    entry_price = float(row["entry_price"] or 0)
+    if entry_price > 0:
+        gross_pnl = _pnl(direction, entry_price, close_price, remaining)
+    else:
+        # No entry price recorded -- an EA Template placeholder row whose leg
+        # fill never got promoted (see ea_bridge._promote_leg_fill). _pnl()
+        # against entry 0 produces a number the size of the whole contract
+        # value: a real -$15.63 loss was recorded and reported as -$16,086
+        # (live, trade 76687f1a, 2026-07-29) and credited straight into
+        # vantage_simulation_account. Record 0 and let the broker's own
+        # realised figure land via sync_profit/mt5_profit instead of
+        # inventing one.
+        gross_pnl = float(row.get("mt5_profit") or 0)
+        log.warning(
+            "record_close %s: entry_price is 0 (unpromoted placeholder row?) — "
+            "recording P&L as %.2f from mt5_profit instead of computing it "
+            "from a zero entry",
+            trade_id, gross_pnl,
+        )
     net_pnl     = gross_pnl  # actual fees already in mt5_profit; no double-counting here
     prev_realised = float(row.get("realised_pnl", 0))
     prev_net_pnl  = float(row.get("net_pnl", 0))
@@ -236,6 +258,20 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
                 ctx.bridge, ctx.starting_balance
             )
             await db_module.to_db_thread(rg_apply_halts_on_close, _rg_rs, _rg_balance)
+        # Give-back guard runs whether or not the governor is on: it protects
+        # the day's realised profit and has nothing to do with the governor's
+        # sizing model, so gating it behind that switch would make "stop when
+        # I hand back today's gains" unavailable to exactly the setup that
+        # needs it (this account runs with the governor off, which is why its
+        # configured daily-loss limit never fired through two losing days).
+        await db_module.to_db_thread(apply_giveback_guard_on_close, _rg_rs)
+        # Daily loss ceiling, also governor-independent: the give-back guard
+        # measures from the day's peak, so a day that never gets ahead never
+        # arms it. 2026-08-10 peaked at $0.00 and closed -$220.26.
+        _dl_balance = live_balance if live_balance is not None else await get_trading_balance(
+            ctx.bridge, ctx.starting_balance
+        )
+        await db_module.to_db_thread(apply_daily_loss_halt_on_close, _rg_rs, _dl_balance)
     except Exception as _rg_e:
         log.debug("[RG] post-close halt check skipped: %s", _rg_e)
 

@@ -19,6 +19,7 @@ suggest_lot_size (pack 1), core_close_trade.get_trading_balance (pack 10).
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
@@ -30,12 +31,18 @@ from backend.src.services.trading.fees_sizing import suggest_lot_size
 from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
+from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
+from backend.src.services.risk.schedule import check_trading_schedule, get_schedule_strategy_override
+from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
     Tick,
     STRATEGY_SCALE_OUT, STRATEGY_NO_SL_SCALE, STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER,
     STRATEGY_CONSERVATIVE_TRIAL, STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
+    STRATEGY_FIXED_RR,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2, MAX_TP,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _rr_sl_dist(stated_sl_dist: float) -> float:
@@ -91,12 +98,36 @@ def _adaptive_final_tp_dist(sig: dict, entry_mid: float, is_buy: bool) -> float:
     return max(dists, default=0.0)
 
 
-def _sig_guard_blocks(channel_name: str, direction: str) -> bool:
+def _sig_guard_blocks(channel_name: str, direction: str,
+                      guard_pips: float = 0.0,
+                      new_entry: Optional[float] = None) -> bool:
     """True if a template-managed trade is already open for this channel +
-    direction -- Sig Guard blocks a new one from opening alongside it."""
-    return signals_repo.template_trade_open_for(
+    direction -- Sig Guard blocks a new one from opening alongside it.
+
+    guard_pips (2026-08-04, the reference copier's "SIG GUARD: 20p"): when
+    >0, only an existing trade whose entry is within this many pips of the
+    new one blocks. That is the difference between "never stack on this
+    channel at all" (0, the original behaviour and still the default) and
+    "don't stack on top of the SAME level, but a genuinely separate setup
+    further down the chart is fine" -- which is what the copier does, and
+    what makes a 20p vs 25p distinction meaningful. Falls back to the
+    all-or-nothing check when no entry price is available to measure from.
+    """
+    entries = signals_repo.template_trade_open_entries(
         channel_name, direction.upper(),
         f"{ea_templates.TEMPLATE_OVERRIDE_PREFIX}%")
+    if not entries:
+        return False
+    if guard_pips <= 0 or new_entry is None:
+        return True
+    for existing in entries:
+        # A placeholder row that has not filled yet (entry 0) has no price
+        # to compare, so treat it as blocking rather than waving it through.
+        if existing <= 0:
+            return True
+        if abs(existing - new_entry) <= guard_pips * PIPS_TO_PRICE_XAUUSD:
+            return True
+    return False
 
 
 async def resolve_open_trade_params(
@@ -142,17 +173,91 @@ async def resolve_open_trade_params(
 
     # Trading Schedule gate — per-day/per-window profit-target discipline cap.
     # Automated-only by construction: this function is never reached from the
-    # manual market order path (see core_manual_market_order.py).
-    _sched_ok, _sched_reason = check_trading_schedule(source="telegram")
+    # manual market order path (see core_manual_market_order.py). ENGINE_
+    # SOURCE_KEYS are per-engine, not per-channel -- "Reversal Engine"/
+    # "Breakout Engine" are this function's own literal source_name for
+    # those engines' signals (see reversal_engine_live_execute.py/
+    # breakout_signal_live_execute.py); every other source_name is a
+    # Telegram channel, gated (and possibly strategy-overridden) per-channel.
+    _ch_src_early = sig.get("source_name") or ""
+    _sched_src_key = (
+        "reversal_engine" if _ch_src_early == "Reversal Engine" else
+        "breakout_engine" if _ch_src_early == "Breakout Engine" else
+        _ch_src_early
+    )
+    _sched_ok, _sched_reason = check_trading_schedule(source=_sched_src_key)
     if not _sched_ok:
         raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
 
-    # Resolve strategy: channel override > auto-Claude rec > global Active Strategy.
-    _ch_src_early = sig.get("source_name") or ""
+    # News blackout (Trading > News) -- same automated-only reach as the
+    # schedule gate above, so it covers Telegram-copied signals and both
+    # engines' signals from this one place. The engines also check it earlier
+    # in their own flows, where they can record a per-signal skip status
+    # instead of raising; this is the backstop for everything that reaches
+    # here by another route.
+    _news_ok, _news_reason = check_news_blackout()
+    if not _news_ok:
+        raise ValueError(f"{_news_reason} (Trading > News)")
+
+    # Resolve strategy: Trading Schedule window override > channel override >
+    # auto-Claude rec > global Active Strategy.
     _ch_override  = db_module.get_channel_strategy_override(_ch_src_early)
+
+    # Trading Schedule per-window override (Trading > Schedule) -- when the
+    # schedule is enabled and the active window has a strategy/template
+    # assigned for this engine or (for Telegram) this specific channel, it
+    # wins over the channel's own Channel Strategy pick for as long as that
+    # window is active.
+    _sched_override = get_schedule_strategy_override(_sched_src_key)
+    if _sched_override:
+        _ch_override = _sched_override
+
     if _ch_override == "auto":
+        # Auto mode (2026-08-14): the AI/auto-manage layer's current pick for
+        # this channel. Three outcomes, in order:
+        #
+        #   stand_down  -- this channel has no measured edge in the current
+        #                  regime (see core_auto_template's mapping), so
+        #                  refuse the trade outright rather than fall through
+        #                  to some default that would still open it.
+        #   a rec       -- use it.
+        #   no rec yet  -- fall back to the BACKTESTED baseline for the live
+        #                  regime, not the global Active Strategy. Auto must
+        #                  behave sensibly before the first AI cycle has run
+        #                  (app just started, API unconfigured or down),
+        #                  which the old `or rs["trade_strategy"]` did not.
+        from backend.src.services.positions import core_auto_template as _auto
         _rec = db_module.get_channel_strategy_rec(_ch_src_early)
-        strategy = _rec.get("strategy") or rs.get("trade_strategy", STRATEGY_SCALE_OUT)
+        strategy = (_rec.get("strategy") or "").strip()
+        # A stored rec outlives the rules that produced it, so it is checked
+        # against what Auto may run TODAY rather than trusted. When the
+        # built-ins stopped being selectable (2026-08-17) the rows already in
+        # the database kept their built-in picks, and this branch went on
+        # using them: GOLD DIGGERS INSTITUTIONAL traded "limit_runner" for
+        # nearly nine hours afterwards at the global 0.1 lot instead of its
+        # template's 0.05, because only an EMPTY rec fell through to the
+        # baseline. Treating a no-longer-valid pick the same as a missing one
+        # is what makes a change to the vocabulary take effect everywhere.
+        if strategy and not _auto.is_valid_auto_choice(strategy):
+            _stale = strategy
+            strategy = ""
+            log.info(
+                "[Auto] %s had a stale recommendation %r that Auto can no "
+                "longer run — falling back to the backtested baseline",
+                _ch_src_early, _stale,
+            )
+        if _auto.is_stand_down(strategy):
+            raise ValueError(
+                f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
+                f"(Trading > Schedule: Auto)"
+            )
+        if not strategy:
+            strategy = _auto.baseline_for(_ch_src_early, _auto.regime_from_candles(dpm_candles))
+            if _auto.is_stand_down(strategy):
+                raise ValueError(
+                    f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
+                    f"(Trading > Schedule: Auto)"
+                )
     elif _ch_override:
         strategy = _ch_override
     else:
@@ -164,18 +269,38 @@ async def resolve_open_trade_params(
     # signal levels plus the template's own fields, so none of the
     # strategy-specific SL/lot logic below applies. See
     # core_ea_templates.py's module docstring.
-    _is_template = ea_templates.is_template_override(_ch_override)
+    # Keyed off the RESOLVED strategy, not _ch_override. For a pinned channel
+    # those are the same string, but an Auto channel's override is the literal
+    # "auto" -- so a template arriving through Auto was not recognised as one
+    # here and silently skipped everything in this block: the template's SL
+    # authority (below), Sig Guard, the "template no longer exists" check, and
+    # the `not _is_template` guard that keeps the global Fixed Lot Size from
+    # overwriting a template's own Anchor Lot.
+    #
+    # It went unnoticed because core_open_trade.py derives its own
+    # _is_template from `strategy` and does load the template there, so EA
+    # legs still used the template's lots -- the two modules disagreed about
+    # what "is a template" meant, and only the later one was right. Auto
+    # gained template support on 2026-08-14; this half was never updated with
+    # it, which is why an Auto channel and a pinned channel on the SAME
+    # template did not trade it the same way.
+    _is_template = ea_templates.is_template_override(strategy)
     _template: Optional[dict] = None
     if _is_template:
-        _tpl_name = ea_templates.template_name_from_override(_ch_override)
+        _tpl_name = ea_templates.template_name_from_override(strategy)
         _template = ea_templates.get_ea_template(_tpl_name)
         if _template is None:
             raise ValueError(f"Template '{_tpl_name}' no longer exists — reassign this channel")
-        if _template["sig_guard"] and _sig_guard_blocks(_ch_src_early, sig["direction"]):
-            raise ValueError(
-                f"Sig Guard: a template-managed trade is already open for "
-                f"'{_ch_src_early}' {sig['direction']}"
-            )
+        if _template["sig_guard"]:
+            _sg_pips = float(_template.get("sig_guard_pips") or 0)
+            _sg_entry = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+            if _sig_guard_blocks(_ch_src_early, sig["direction"], _sg_pips, _sg_entry):
+                _sg_where = (f" within {_sg_pips:.0f} pips of ${_sg_entry:.2f}"
+                             if _sg_pips > 0 else "")
+                raise ValueError(
+                    f"Sig Guard: a template-managed trade is already open for "
+                    f"'{_ch_src_early}' {sig['direction']}{_sg_where}"
+                )
 
     # Pre-trade filters: R:R and directional cap.
     # Conservative, Conservative Trial, Trail Stop, Signal Climber, and
@@ -187,9 +312,12 @@ async def resolve_open_trade_params(
     # so the TP1 R:R check would be measuring against a stop that isn't
     # actually going to be used. EA Templates join them too — the EA computes
     # its own management independent of the raw TP1 distance.
+    # Fixed R:R joins them: it replaces both the stop AND the target with
+    # its own fixed distances from fill, so a check against the signal's
+    # TP1 measures levels this strategy will never use.
     _self_level_strategies = (
         STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
-        STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER,
+        STRATEGY_TRAIL_STOP, STRATEGY_SIGNAL_CLIMBER, STRATEGY_FIXED_RR,
         STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER, STRATEGY_ADAPTIVE_RUNNER_2,
     )
     if strategy not in _self_level_strategies and not _is_template:
@@ -210,7 +338,18 @@ async def resolve_open_trade_params(
         tick = await bridge.get_tick()
         if not tick:
             raise RuntimeError("No live price available")
-        if not price_in_entry_range(_dir, _el, _eh, tick):
+        # Grid templates are a pending-order strategy by construction (they
+        # stage resting legs spanning the zone -- core_open_trade.py's
+        # zone_low/zone_high handoff), so unlike every market-fill strategy
+        # here, price is NOT required to already be in the zone: the resting
+        # legs themselves are what waits for it. Without this exemption, the
+        # "Open Trade Now" button (and anything else routing a template
+        # signal through this function) could never fire a grid template
+        # signal until price happened to already be back in its zone --
+        # exactly the gap that left grid signals unable to be manually
+        # actioned at all (2026-07-28).
+        _is_grid_template = _is_template and _template is not None and _template.get("mode") == "grid"
+        if not _is_grid_template and not price_in_entry_range(_dir, _el, _eh, tick):
             cur = tick.ask if _dir == "BUY" else tick.bid
             raise ValueError(
                 f"Price ${cur:.2f} is {'above' if _dir == 'BUY' else 'below'} the entry zone "
@@ -230,6 +369,53 @@ async def resolve_open_trade_params(
             "Likely a news event — signal stays active for when spread normalises."
         )
 
+    # ── EA Template pre-trade filters ────────────────────────────────────
+    # late_guard_pips/max_spread_pips/signal_rr_ratio existed as template
+    # fields with no implementation until 2026-08-04. All three default to
+    # 0 = off (every template saved before this existed), so this is a
+    # no-op unless a template deliberately sets one.
+    if _is_template and _template is not None:
+        _tpl_max_spread_pips = float(_template.get("max_spread_pips") or 0)
+        if _tpl_max_spread_pips > 0 and tick.spread_points > _tpl_max_spread_pips * 10.0:
+            raise ValueError(
+                f"Template '{_template.get('name', '?')}' Max Spread: spread "
+                f"{tick.spread_points:.1f} pts exceeds {_tpl_max_spread_pips:.1f} pips "
+                f"({_tpl_max_spread_pips * 10.0:.1f} pts) — signal stays active for when "
+                "spread normalises."
+            )
+
+        # Beyond-zone guard for grid templates only -- a non-grid template
+        # already went through the strict price_in_entry_range check above
+        # (grid templates are exempt there by construction, since resting
+        # legs are what waits for price; this is that exemption's own,
+        # optional, distance cap). 0 (default) leaves the always-fire
+        # policy untouched -- this only ever restricts a template that
+        # explicitly opts into a cap.
+        _tpl_late_guard_pips = float(_template.get("late_guard_pips") or 0)
+        _is_grid_tpl_lg = _template.get("mode") == "grid"
+        if _tpl_late_guard_pips > 0 and _is_grid_tpl_lg and not price_in_entry_range(_dir, _el, _eh, tick):
+            _cur = tick.ask if _dir == "BUY" else tick.bid
+            _beyond = (_cur - _eh) if _dir == "BUY" else (_el - _cur)
+            if _beyond * 10.0 > _tpl_late_guard_pips:
+                raise ValueError(
+                    f"Template '{_template.get('name', '?')}' Late Guard: price ${_cur:.2f} is "
+                    f"{_beyond * 10.0:.1f} pips beyond the {_dir} zone ${_el:.2f}-${_eh:.2f}, "
+                    f"past the {_tpl_late_guard_pips:.1f} pip guard — signal stays active for "
+                    "when price returns closer to the zone."
+                )
+
+        _tpl_rr = float(_template.get("signal_rr_ratio") or 0)
+        if _tpl_rr > 0 and sig.get("tp1"):
+            _entry_mid_rr = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+            _rr_risk = abs(_entry_mid_rr - float(sig["stop_loss"]))
+            _rr_reward = abs(float(sig["tp1"]) - _entry_mid_rr)
+            if _rr_risk > 0 and (_rr_reward / _rr_risk) < _tpl_rr:
+                raise ValueError(
+                    f"Template '{_template.get('name', '?')}' Signal R:R: this signal's own "
+                    f"TP1:SL ratio ({_rr_reward / _rr_risk:.2f}:1) is below the required "
+                    f"{_tpl_rr:.2f}:1 — trade skipped."
+                )
+
     # ── Channel scorecard: pause / adaptive sizing ──────────────────────
     # A channel auto-paused (or manually paused) by the scorecard blocks new
     # trades; otherwise its rolling-performance lot multiplier scales size.
@@ -239,20 +425,63 @@ async def resolve_open_trade_params(
         raise ValueError(f"Channel '{_ch_src}' is paused by the scorecard — trade skipped")
 
     lot_size = lot_size_override or sig.get("lot_size")
+    _lot_is_template_fixed = False
+    if not lot_size and _is_template and _template is not None:
+        # A template's own Entries & Lots fields are authoritative for
+        # sizing, not the generic per-strategy path below. Grid mode's
+        # resting legs already read tpl_lot_anchor/tpl_lot_pending directly
+        # on the EA side (HandleOpenTemplateGrid) and only fall back to
+        # whatever this function computes if those are zero -- but single
+        # mode reuses the plain market-order path with no such override, so
+        # it silently used the generic risk-based/global-fixed-lot size
+        # instead of the template's own Anchor Lot. This also fixes the
+        # value recorded in the DB placeholder row and reported via
+        # Telegram, which was never the true anchor size for grid trades
+        # either.
+        #
+        # risk_pct (0 = OFF) lets a template size itself from account risk
+        # instead of a flat lot, same convention as every other strategy's
+        # own risk_pct field.
+        _tpl_risk_pct = float(_template.get("risk_pct") or 0)
+        if _tpl_risk_pct > 0:
+            balance   = await get_trading_balance(bridge, starting_balance)
+            entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+            lot_size  = suggest_lot_size(entry_mid, float(sig["stop_loss"]), balance, _tpl_risk_pct)
+        else:
+            # Global parameters still apply as a ceiling even though the
+            # template's fixed lot is the primary source -- suggest_lot_size
+            # would clamp to this too, but the raw-anchor-lot path bypasses
+            # that function entirely so it needs its own cap.
+            _max_lot = float(rs.get("max_lot_size", 0.10))
+            lot_size = min(float(_template.get("lot_anchor") or 0.01), _max_lot)
+            _lot_is_template_fixed = True
     if not lot_size:
         risk_pct  = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
         balance   = await get_trading_balance(bridge, starting_balance)
         entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
         lot_size  = suggest_lot_size(entry_mid, float(sig["stop_loss"]), balance, risk_pct)
     # Apply the channel multiplier to the risk-derived size (not to a manual
-    # fixed override, which the user set deliberately).
-    if _ch_mult != 1.0 and not lot_size_override:
+    # fixed override, which the user set deliberately). A template's own
+    # fixed Anchor Lot (risk_pct == 0 branch above) is the same kind of
+    # deliberate manual value as lot_size_override -- scaling it silently
+    # (e.g. Reversal Engine's 1.3x -> 0.1 becoming 0.13) defeats the point
+    # of setting a fixed lot on the template. The risk_pct>0 template branch
+    # is excluded from this exemption: that path is genuinely risk-derived,
+    # same as the generic non-template sizing below, so the multiplier is
+    # meant to apply there.
+    if _ch_mult != 1.0 and not lot_size_override and not _lot_is_template_fixed:
         lot_size = lot_size * _ch_mult
     lot_size = max(0.01, round(lot_size, 2))
 
     # strategy already resolved above the filter check
+    #
+    # The global fixed-lot override does NOT apply to templates: a template
+    # is a self-contained, per-channel sizing definition (Anchor Lot/Pending
+    # Lot), and letting one global toggle silently overwrite that would
+    # defeat the entire point of those fields being on the template at all.
+    # Every other strategy keeps "fixed lot always wins".
     strategy_lot = float(rs.get("strategy_lot_size", 0))
-    if strategy_lot > 0:
+    if strategy_lot > 0 and not _is_template:
         lot_size = strategy_lot
 
     # Signal age decay: stale signals trade smaller to reflect reduced confidence
@@ -263,7 +492,42 @@ async def resolve_open_trade_params(
     # Lot sizing always uses the signal SL for position-size calculation.
     stop_loss_to_use = float(sig["stop_loss"])
     if _is_template:
-        pass  # EA computes its own SL/TP management from the template fields
+        # A template's own SL (sl_pips) is meant to be as authoritative as
+        # its TP ladder (core_ea_templates.py's tp{n}_pips -- "replacing the
+        # signal's own TP prices entirely rather than only filling gaps"),
+        # not merely a fallback for when the signal happens to carry none.
+        # This was a no-op unconditionally, though, so a channel's own
+        # signal generator (Reversal/Breakout/Bounce all compute their own
+        # structure/ATR-based stop) silently kept its variable distance no
+        # matter what sl_pips said -- confirmed live: "Asian - Grid"
+        # (sl_pips=50) trades opening with whatever distance the triggering
+        # Reversal Engine signal happened to carry instead of a fixed 50.
+        # Computed from the same price reference resolve_template_tps()
+        # uses for the TP ladder, so SL and TP measure from the same entry
+        # reference. sl_pips=0 (unset) still defers to the signal's own
+        # stop, unchanged.
+        #
+        # use_dynamic_atr (2026-08-04 -- existed as a template field with no
+        # implementation): "sl_pips is ignored in favour of ATR x
+        # atr_sl_mult" per its own comment, when candle data is available to
+        # compute one. Falls back to sl_pips (and, failing that, the
+        # signal's own stop) if it isn't.
+        _tpl_sl_dist = None
+        if _template and bool(_template.get("use_dynamic_atr")) and dpm_candles:
+            from backend.src.services.dpm.engine import compute_atr
+            _tpl_atr = compute_atr(dpm_candles, period=int(_template.get("atr_period") or 14)) or 0.0
+            if _tpl_atr > 0:
+                _tpl_sl_dist = _tpl_atr * float(_template.get("atr_sl_mult") or 1.5)
+        if _tpl_sl_dist is None:
+            _tpl_sl_pips = float(_template.get("sl_pips") or 0) if _template else 0.0
+            if _tpl_sl_pips > 0:
+                _tpl_sl_dist = _tpl_sl_pips * PIPS_TO_PRICE_XAUUSD
+        if _tpl_sl_dist is not None:
+            _tpl_sl_ref = tick.ask if _dir == "BUY" else tick.bid
+            stop_loss_to_use = round(
+                _tpl_sl_ref - _tpl_sl_dist if _dir == "BUY" else _tpl_sl_ref + _tpl_sl_dist,
+                2,
+            )
     elif strategy == STRATEGY_NO_SL_SCALE:
         # ADX > 30 gate: only open Trend Ratchet in confirmed trending conditions
         if dpm_candles:
@@ -280,6 +544,27 @@ async def resolve_open_trade_params(
             stop_loss_to_use = round(entry_mid - sl_dist * 1.5, 2)
         else:
             stop_loss_to_use = round(entry_mid + sl_dist * 1.5, 2)
+    elif strategy == STRATEGY_FIXED_RR:
+        # Fixed R:R -- stop and target are both fixed distances from the
+        # fill, and both go to the broker, so the signal's own SL/TP are
+        # used for nothing but the entry zone.
+        #
+        # Recomputing the lot from that fixed stop is the point, not a
+        # side effect: it makes risk per trade constant instead of a
+        # function of whatever stop distance the signal happened to carry.
+        # Measured 2026-07-28, realised risk across one day ranged $4.87
+        # to $300 (0.5%-32.6% of balance) against a configured 0.5%,
+        # because a fixed lot decouples size from stop distance entirely.
+        _fr_sl_pt     = get_strategy_params(strategy)["sl_pt"]
+        _fr_sign      = 1.0 if sig["direction"].upper() == "BUY" else -1.0
+        _fr_entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+        stop_loss_to_use = round(_fr_entry_mid - _fr_sign * _fr_sl_pt, 2)
+        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
+            _fr_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+            _fr_balance  = await get_trading_balance(bridge, starting_balance)
+            lot_size = max(0.01, round(
+                suggest_lot_size(_fr_entry_mid, stop_loss_to_use, _fr_balance, _fr_risk_pct), 2
+            ))
     elif strategy in (STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER):
         # Fixed-point SL/TP from fill; signal levels ignored after fill.
         # Live-tunable via core_strategy_params (Trading > Strategy).

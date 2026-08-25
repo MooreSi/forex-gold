@@ -19,7 +19,7 @@ EXPECTED_METHODS = [
     "set_main_engine", "add_refresh_callback", "start", "stop", "get_status",
     "_realistic_fill", "_net_pnl", "_manage_triggered_signal", "_reconcile_live_signal",
     "_check_correlation", "_ref_cadence_stats", "_classify_ref_level",
-    "_try_live_execute",
+    "_try_live_execute", "_maybe_stage_grid_template",
     "_cycle_loop", "_run_cycle", "_outcome_loop", "_check_outcomes", "_correlation_loop",
     "_active_strategy", "_level_on_cooldown", "_already_open", "_today_signal_count",
     "_calc_atr", "_calc_adx",

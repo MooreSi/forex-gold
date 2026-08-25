@@ -29,6 +29,11 @@ from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.services.risk.schedule import check_trading_schedule
+from backend.src.services.dpm import engine
+from backend.src.services.telegram import alerts
+from backend.src.services.broker import ea_templates as ea_templates
+from backend.src.services.signals.resolution import _sig_guard_blocks
+from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, Tick,
@@ -119,9 +124,19 @@ async def process_instant_entry(
     # which this fully-automated path never calls; confirmed live 2026-07-23 that
     # a hit profit target did not stop new IME trades. Same check, same place in
     # the flow as the session gate just above.
-    _ime_sched_ok, _ime_sched_reason = check_trading_schedule(source="telegram")
+    _ime_sched_ok, _ime_sched_reason = check_trading_schedule(source=channel_name)
     if not _ime_sched_ok:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_sched_reason)
+        return
+
+    # News blackout (Trading > News) — needs its own copy here for the same
+    # reason the schedule gate above does: this path never calls
+    # resolve_open_trade_params(), where the shared gate lives. IME is the
+    # fastest path to a live order in the app, which makes it the one that
+    # most needs the check.
+    _ime_news_ok, _ime_news_reason = check_news_blackout()
+    if not _ime_news_ok:
+        log.info("[IME] Instant %s blocked — %s", direction, _ime_news_reason)
         return
 
     tick = await bridge.get_tick()
@@ -150,10 +165,33 @@ async def process_instant_entry(
         strategy = _ch_ov_ime
         log.info("[IME] Channel %s strategy override → %s", channel_name, strategy)
     # Per-signal "High Risk" override — same rule as the full-signal path.
-    if "high risk" in text.lower():
+    # Must not override a template-assigned channel (see
+    # core_scan_messages_staleness_strategy.py's identical fix/reasoning) --
+    # a template fully replaces strategy dispatch by design, and clobbering
+    # it here would also defeat the Sig Guard template-detection right below.
+    if "high risk" in text.lower() and not ea_templates.is_template_override(strategy):
         log.info("[IME] 'High Risk' flagged in message — using Conservative "
                   "strategy for this trade only")
         strategy = STRATEGY_CONSERVATIVE
+
+    # EA Template Sig Guard — mirrors core_signal_resolution.py's
+    # resolve_open_trade_params() check (that function is never reached from
+    # this path; IME resolves and opens independently). Without this, IME
+    # could open a second template-managed trade for a channel/direction
+    # that already has one live, exactly the pile-up Sig Guard exists to
+    # prevent on the full-signal path.
+    _template_ime = None
+    if ea_templates.is_template_override(strategy):
+        _tpl_name_ime = ea_templates.template_name_from_override(strategy)
+        _template_ime = ea_templates.get_ea_template(_tpl_name_ime)
+        if _template_ime is None:
+            log.warning("[IME] Template '%s' no longer exists for channel %s — "
+                        "skipping instant entry", _tpl_name_ime, channel_name)
+            return
+        if _template_ime["sig_guard"] and _sig_guard_blocks(channel_name, direction):
+            log.info("[IME] Sig Guard: a template-managed trade is already open "
+                      "for %s %s — skipping instant entry", channel_name, direction)
+            return
 
     open_trades  = get_open_trades()
     open_count   = len(open_trades)
@@ -162,7 +200,20 @@ async def process_instant_entry(
         log.info("[IME] Instant %s — max_trades (%d) reached, skipped", direction, max_trades)
         return
     strategy_lot = float(rs.get("strategy_lot_size", 0))
-    lot          = strategy_lot if strategy_lot > 0 else 0.01
+    if _template_ime is not None:
+        # Templates size from their own Entries & Lots fields even on the
+        # IME path -- this used to hardcode 0.01 (or the global fixed lot)
+        # regardless of the template's configured Anchor Lot, same gap as
+        # the full-signal and immediate-grid-placement paths. See
+        # core_signal_resolution.py's matching fix for the full reasoning.
+        _tpl_risk_ime = float(_template_ime.get("risk_pct") or 0)
+        if _tpl_risk_ime <= 0:
+            lot = min(float(_template_ime.get("lot_anchor") or 0.01),
+                     float(rs.get("max_lot_size", 0.10)))
+        else:
+            lot = 0.01  # placeholder -- the risk_pct>0 branches below recompute it
+    else:
+        lot = strategy_lot if strategy_lot > 0 else 0.01
     # Use the signalled price as the entry reference if one was provided.
     # Execution is always at market; the price is used for entry_low/high only.
     market_px = tick.ask if direction == "BUY" else tick.bid
@@ -172,7 +223,29 @@ async def process_instant_entry(
     # 1 lot XAUUSD = 100 oz; P&L per point = lot × 100.
     # Target max loss $150, but clamp between 8 pts (survive spread/noise) and
     # 25 pts (limit damage if the follow-up never arrives).
-    if bool(rs.get("risk_governor_enabled", 0)):
+    if _template_ime is not None:
+        # Lot is already resolved from the template's own Entries & Lots
+        # fields above -- none of the Risk Governor / fixed-lot / risk_pct
+        # branches below may touch it, since each unconditionally
+        # recomputes `lot` regardless of strategy. That was the actual bug:
+        # a template's Anchor Lot was overwritten by whichever of those
+        # three happened to be active, not just by the Risk Governor one.
+        # The provisional SL distance still needs computing (replaced once
+        # the real follow-up signal arrives) -- same ATR-based default the
+        # risk_pct branch below uses, since a template's own sl_pips isn't
+        # in comparable point-from-fill terms for this placeholder.
+        _ime_atr_tpl = 0.0
+        if dpm_candles:
+            try:
+                _ime_atr_tpl = dpm_engine.compute_atr(dpm_candles) or 0.0
+            except Exception:
+                _ime_atr_tpl = 0.0
+        _IME_SL_DIST = max(8.0, min(round(_ime_atr_tpl * 1.2 if _ime_atr_tpl > 0 else 12.0, 2), 25.0))
+        provisional_sl = round(
+            entry_px - _IME_SL_DIST if direction == "BUY" else entry_px + _IME_SL_DIST, 2
+        )
+        _ime_max_loss = round(_IME_SL_DIST * lot * 100.0, 2)
+    elif bool(rs.get("risk_governor_enabled", 0)):
         # Tier 1 Risk Governor: compute ATR-based provisional SL distance.
         # Lot sizing uses the fixed lot when set; otherwise falls back to risk_pct.
         _rg_atr_ime = 0.0

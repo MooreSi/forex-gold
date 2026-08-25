@@ -9,7 +9,12 @@ echo  ==========================================
 echo.
 
 set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%"
+:: pushd (not cd /d) - if this .bat is launched from a network share (a UNC
+:: path like \\host\share\...), cmd.exe can't set the current directory to
+:: it directly ("UNC paths are not supported") and silently falls back to
+:: the Windows directory instead. pushd maps the UNC path to a temporary
+:: drive letter first, which works from any launch location.
+pushd "%SCRIPT_DIR%"
 
 set "VENV_PYTHON=%SCRIPT_DIR%.venv\Scripts\python.exe"
 set "REQ_FILE=%SCRIPT_DIR%requirements.txt"
@@ -185,6 +190,42 @@ if "!DO_INSTALL!"=="1" (
     echo  Dependencies are up to date.
 )
 
+:: -- Git check / portable install -------------------------------------------
+:: Needed so the Settings > Update page's GitHub self-update panel, and the
+:: git-checkout bootstrap that runs after every admin-console push (see
+:: remote/client.py's _apply_update()), have a git binary to call. Installs
+:: the official portable build (no installer, no admin rights, no registry
+:: changes) into a user-writable folder and adds it to PATH for this session
+:: -- later relaunches inherit the same PATH since restarts spawn from
+:: within this same running process tree.
+where git >nul 2>&1
+if !errorlevel! neq 0 (
+    set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\Programs\PortableGit"
+    if exist "!PORTABLE_GIT_DIR!\bin\git.exe" (
+        set "PATH=!PORTABLE_GIT_DIR!\bin;!PORTABLE_GIT_DIR!\cmd;%PATH%"
+    ) else (
+        echo  Git not found - downloading portable Git ^(one-time setup^)...
+        set "_GIT_URL=https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe"
+        set "_GIT_INST=%TEMP%\PortableGit-64-bit.7z.exe"
+        powershell -NoProfile -Command ^
+          "try { Invoke-WebRequest -Uri '!_GIT_URL!' -OutFile '!_GIT_INST!' -UseBasicParsing } catch { Write-Host ('Download error: ' + $_.Exception.Message); exit 1 }"
+        if !errorlevel! == 0 if exist "!_GIT_INST!" (
+            mkdir "!PORTABLE_GIT_DIR!" 2>nul
+            "!_GIT_INST!" -y -o"!PORTABLE_GIT_DIR!" >nul
+            del /f /q "!_GIT_INST!" 2>nul
+            if exist "!PORTABLE_GIT_DIR!\bin\git.exe" (
+                set "PATH=!PORTABLE_GIT_DIR!\bin;!PORTABLE_GIT_DIR!\cmd;%PATH%"
+                echo  Git installed.
+            ) else (
+                echo  WARNING: Git install did not complete - GitHub update checks will be skipped.
+            )
+        ) else (
+            echo  WARNING: Git download failed - GitHub update checks will be skipped.
+        )
+    )
+    echo.
+)
+
 :: -- Create user data directories ----------------------------------------------
 if not exist "%USER_DATA%\data\sessions" mkdir "%USER_DATA%\data\sessions" 2>nul
 
@@ -279,4 +320,5 @@ goto :restart_check
 :: repeated rapid crashes, which by then needs a human to look at logs anyway.
 echo.
 echo  FOREX Trader has stopped.
+popd
 pause

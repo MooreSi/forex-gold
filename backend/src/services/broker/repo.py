@@ -12,6 +12,7 @@ import logging
 
 from backend.src.db import transaction
 from backend.src.db.database import db, row_to_dict
+from backend.src.utils.models import CONTRACT_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -62,8 +63,9 @@ def apply_pending_fill(trade_id: str, row: dict, ticket, fill_price: float,
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,entry_price,
                 lot_size,remaining_lots,stop_loss,tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
                 status,open_time,spread_cost,commission,slippage_cost,net_pnl,strategy,
-                tg_source,managed_by,tp_open,order_type,pending_placed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                tg_source,managed_by,tp_open,order_type,pending_placed_at,
+                initial_sl,initial_risk)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (trade_id, row["signal_id"], ticket, row["direction"],
              row["price"], row["price"], fill_price,
              row["lot_size"], row["lot_size"], row["stop_loss"],
@@ -76,7 +78,12 @@ def apply_pending_fill(trade_id: str, row: dict, ticket, fill_price: float,
              # Limit Runner fill lost its real channel attribution and showed
              # as an unattributed trade in Trade Analysis.
              row["channel_name"], "ea", row["tp_open"],
-             "limit", row["created_at"]),
+             "limit", row["created_at"],
+             # Realised-R inputs, against the stop this fill actually opened
+             # with. See the initial_sl/initial_risk migration note.
+             row["stop_loss"],
+             round(abs(fill_price - float(row["stop_loss"])) * float(row["lot_size"])
+                   * CONTRACT_SIZE, 4) if row.get("stop_loss") else None),
         )
         conn.execute(
             "UPDATE vantage_signals SET status='active' WHERE signal_id=?",
@@ -88,26 +95,62 @@ def apply_pending_fill(trade_id: str, row: dict, ticket, fill_price: float,
         )
 
 
-def claim_grid_leg_fill(original_id: str, ticket, fill_price: float, now: float):
-    """A grid leg filled: stamp the placeholder row (mt5_ticket=0) with the
-    real ticket/fill. Returns the pre-update row, or None if no placeholder."""
+def claim_template_leg_fill(original_id: str, ticket, fill_price: float,
+                            lots, kind: str, now: float):
+    """An EA Template leg went live: stamp the placeholder row (mt5_ticket=0)
+    with the real ticket/fill, and say whether THIS leg was the one that
+    promoted it.
+
+    Returns (row, is_first). `row` is the promoted row when is_first is True,
+    or the already-promoted row (fetched purely so the caller can report this
+    leg's fill with the right channel/strategy/TP context) when False, or {}
+    when no row exists yet. Nothing is written for a later leg: there is
+    nowhere in the current schema to record a second concurrent position.
+
+    `kind` is "a" for an anchor leg (a market fill) or "g" for a grid limit.
+    Extended by the 2026-08-25 upstream merge to cover anchor legs, whose
+    fills previously reached nothing at all -- the row kept
+    mt5_ticket=0/entry_price=0 for life, so Active Trades showed a $0 entry,
+    every EA-reported TP/SL/close event for it was discarded as an unknown
+    trade_id, and the close message quoted ticket 0 with a P&L computed from
+    a $0 entry (confirmed live 2026-07-29: -$16086 reported on a real
+    -$15.63 loss).
+    """
     with db() as conn:
+        # row_to_dict(None) returns {} (falsy), not None -- this must test
+        # truthiness, never `is not None`.
         row = row_to_dict(conn.execute(
             "SELECT * FROM vantage_simulated_trades WHERE trade_id=? AND mt5_ticket=0",
             (original_id,),
         ).fetchone())
-        if not row:
-            return None
-        conn.execute(
-            "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,open_time=?,"
-            "order_type='limit',pending_placed_at=? WHERE trade_id=?",
-            # row["open_time"] (read above, before this UPDATE overwrites
-            # it) is when open_trade() placed the grid legs -- the only
-            # placement timestamp that exists for a leg, since grid legs
-            # never get their own vantage_pending_orders row.
-            (ticket, fill_price, now, row["open_time"], original_id),
-        )
-        return row
+        if row:
+            conn.execute(
+                "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,"
+                "entry_low=?,entry_high=?,lot_size=?,remaining_lots=?,open_time=?,"
+                "order_type=?,pending_placed_at=? WHERE trade_id=?",
+                # row["open_time"] (read above, before this UPDATE overwrites
+                # it) is when open_trade() placed the legs -- the only
+                # placement timestamp a leg has, since template legs never get
+                # their own vantage_pending_orders row.
+                (ticket, fill_price, fill_price, fill_price,
+                 lots if lots else row["lot_size"],
+                 lots if lots else row["remaining_lots"],
+                 now,
+                 "market" if kind == "a" else "limit",
+                 row["open_time"], original_id),
+            )
+            row = dict(row)
+            row["mt5_ticket"]  = ticket
+            row["entry_price"] = fill_price
+            if lots:
+                row["lot_size"] = lots
+                row["remaining_lots"] = lots
+            return row, True
+        already = row_to_dict(conn.execute(
+            "SELECT * FROM vantage_simulated_trades WHERE trade_id=?",
+            (original_id,),
+        ).fetchone())
+        return already, False
 
 
 def apply_pending_cancelled(trade_id: str, signal_id, now: float) -> None:
@@ -253,7 +296,8 @@ def fetch_known_mt5_tickets() -> set:
 def import_direct_mt5_position(trade_id: str, ticket, direction: str,
                                entry_p: float, lot_size: float, sl, tp,
                                open_ts: float, strategy: str,
-                               sentinel_ts: float) -> None:
+                               sentinel_ts: float,
+                               initial_sl=None, initial_risk=None) -> None:
     """Import a position opened directly in MT5. The MT5_DIRECT sentinel
     signal row is ensured first (idempotent) -- signal_id is NOT NULL with a
     FK, so without the sentinel this insert can never succeed."""
@@ -270,13 +314,18 @@ def import_direct_mt5_position(trade_id: str, ticket, direction: str,
             """INSERT INTO vantage_simulated_trades
                (trade_id,signal_id,mt5_ticket,direction,entry_low,entry_high,
                 entry_price,lot_size,remaining_lots,stop_loss,tp1,
-                status,open_time,strategy,tg_source)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                status,open_time,strategy,tg_source,
+                initial_sl,initial_risk)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 trade_id, "MT5_DIRECT", ticket, direction,
                 entry_p, entry_p, entry_p,
                 lot_size, lot_size,
                 sl, tp,
                 "open", open_ts, strategy, "MT5_imported",
+                # Realised-R inputs (see the initial_sl/initial_risk migration
+                # note). An imported position may carry no stop at all, which is
+                # genuinely unmeasurable risk -- left NULL, never recorded as 0.
+                initial_sl, initial_risk,
             ),
         )

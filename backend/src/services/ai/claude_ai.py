@@ -10,6 +10,8 @@ from typing import Optional
 
 from backend.src.config import is_debug as _is_debug
 from backend.src.services.ai import provider as ai_provider
+from backend.src.services.ai import provider
+from backend.src.services.positions import core_strategy_catalogue as strategy_catalogue
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +123,7 @@ _MARKET_SYSTEM = (
     '"price_low":0.0,"price_high":0.0,'
     '"key_drivers":["string"],"technical_summary":"string",'
     '"support_levels":[0.0],"resistance_levels":[0.0],'
-    '"strategy_recommendation":"scale_out|be_runner|trail_stop|protected_scale|conservative|no_sl_scale|<custom_id>",'
+    '"strategy_recommendation":"<exact key from the Available strategies list in the user message>",'
     '"strategy_reason":"string","risk_factors":["string"],'
     '"signal_analysis":"string","summary":"string",'
     '"disclaimer":"AI analysis for informational purposes only. Not financial advice."}'
@@ -163,8 +165,18 @@ async def request_market_analysis(
     cfg: dict,
     timeout: int = 60,
     custom_strategies: list[dict] | None = None,
+    strategies: list[dict] | None = None,
 ) -> dict:
-    """Request a full market analysis from the configured AI provider for the current gold market."""
+    """Request a full market analysis from the configured AI provider for the current gold market.
+
+    `strategies` is a core_strategy_catalogue entry list — every pre-coded
+    strategy, custom strategy and EA template the user currently has, each
+    with a summary of what it does. It is built fresh by the caller so a
+    template created moments ago is recommendable straight away. When it is
+    omitted the catalogue is built here, so no caller can accidentally fall
+    back to a stale hardcoded subset; `custom_strategies` is kept only for
+    older callers and is ignored once a catalogue is present.
+    """
     if not ai_provider.is_configured(cfg):
         return {
             "sentiment": "neutral",
@@ -235,24 +247,23 @@ async def request_market_analysis(
             f"Open positions: {performance.get('open_trades', 0)}",
         ]
 
-    lines += [
-        "",
-        "Available strategies (use the exact key in strategy_recommendation):",
-        "  scale_out: Close 20% at each TP, SL moves to breakeven after TP1. "
-        "Best for consistent markets — steady profit-booking with zero downside after TP1.",
-        "  be_runner: No partial closes, SL steps up to each cleared TP. "
-        "Best for strongly trending markets — maximises exposure to big moves.",
-        "  trail_stop: No partial closes, trailing stop activates after TP1. "
-        "Best for momentum trades — captures extended moves without a fixed target.",
-        "  protected_scale: Hold full position through TP1+TP2 (SL to BE at TP2), scale 20% from TP3. "
-        "Best for high-conviction setups where early TPs are swept quickly before the real move.",
-        "  conservative: Large partials at TP1 (40%) and TP2 (40%), SL to BE at TP2, small runner to penultimate TP. "
-        "Best for uncertain or risky conditions — 80% profit secured by TP2.",
-        "  no_sl_scale: Wide emergency SL (2.5x normal), 20% close at TP1 and TP3, SL steps up by 2 TP levels from TP3+. "
-        "Best for volatile markets with wide swings — no tight SL to get hunted, runner captured to final TP.",
-    ]
-    if custom_strategies:
-        lines.append("  Custom strategies (also available — use the exact id):")
+    # Every option the user actually has — built-ins, custom strategies and
+    # EA templates alike — rather than the six built-ins this prompt used to
+    # hardcode. Templates are described from their live field values, which
+    # is what lets the model reason about one the user created after this
+    # code was written.
+    if strategies is None:
+        try:
+            strategies = strategy_catalogue.build_catalogue()
+        except Exception as exc:
+            log.warning("Market analysis: strategy catalogue unavailable: %s", exc)
+            strategies = []
+    if strategies:
+        lines.append("")
+        lines += strategy_catalogue.prompt_lines(strategies)
+    elif custom_strategies:
+        # Legacy caller with no catalogue and no working DB access.
+        lines += ["", "Available strategies (use the exact key in strategy_recommendation):"]
         for cs in custom_strategies:
             cid   = cs.get("id", "")
             cname = cs.get("name", cid)
@@ -269,7 +280,11 @@ async def request_market_analysis(
         "Task: Provide a complete gold market analysis covering today's likely price range, "
         "key fundamental and technical drivers, support/resistance levels, what could move "
         "price today (macro events, USD strength, geopolitics, risk sentiment), whether the "
-        "market is bullish or bearish, and which of the four strategies best suits current conditions.",
+        "market is bullish or bearish, and which single option from the Available strategies "
+        "list above best suits current conditions. Consider every option — built-in strategies, "
+        "custom strategies and EA templates are all equally eligible; judge each on the "
+        "behaviour described, not on its name. Put its exact key in strategy_recommendation "
+        "and say in strategy_reason why it beats the alternatives today.",
     ]
 
     prompt = "\n".join(lines)
@@ -282,6 +297,28 @@ async def request_market_analysis(
             if raw.endswith("```"):
                 raw = raw[:-3].strip()
         data = json.loads(raw)
+        # The model is free-typing a key, and templates arrive named rather
+        # than keyed often enough to be worth normalising ("Sniper" ->
+        # "template:Sniper"). A key that matches nothing at all is dropped to
+        # scale_out rather than shown as a strategy the user does not have.
+        if strategies:
+            _rec = strategy_catalogue.resolve_key(data.get("strategy_recommendation"), strategies)
+            if _rec is None:
+                # scale_out unless the user has hidden it, in which case the
+                # first thing they do have beats naming something they do not.
+                _keys = strategy_catalogue.valid_keys(strategies)
+                _rec = "scale_out" if "scale_out" in _keys else _keys[0]
+                log.info(
+                    "Market analysis: unrecognised strategy_recommendation %r — using %s",
+                    data.get("strategy_recommendation"), _rec,
+                )
+            data["strategy_recommendation"] = _rec
+            # Resolved here rather than at render time so a stored analysis
+            # still displays the template/strategy it actually meant, even
+            # after that entry is renamed or deleted.
+            _label, _summary = strategy_catalogue.describe(_rec, strategies)
+            data["strategy_label"]   = _label
+            data["strategy_summary"] = _summary
         data["fetched_news"]  = bool(news)
         data["news_count"]    = len(news)
         data["generated_at"]  = datetime.now(timezone.utc).isoformat()

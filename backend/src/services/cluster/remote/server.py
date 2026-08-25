@@ -11,14 +11,11 @@ Startup:
 """
 
 import asyncio
-import hashlib
-import io
 import json
 import logging
 import os
 import socket
 import time
-import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +23,7 @@ from backend.src.config import USER_DATA_DIR
 from backend.src.services.cluster.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
-    MSG_PING, MSG_GET_DIAG, MSG_UPDATE_BEGIN, MSG_UPDATE_END, MSG_VERSION_INFO,
+    MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO,
     MSG_ADMIN_HELLO, MSG_ADMIN_APPROVE, MSG_ADMIN_REJECT, MSG_ADMIN_ISSUE,
     MSG_ADMIN_REVOKE, MSG_ADMIN_DB_OP, MSG_ADMIN_WELCOME, MSG_PENDING_PUSH,
     MSG_CLIENTS_PUSH, MSG_LICENCES_PUSH, MSG_ADMIN_RESULT,
@@ -76,11 +73,17 @@ _admin_clients: dict[str, dict] = {}
 # _kg_revoke_fn(id: int) → bool  (revoke a licence by DB id)
 # _kg_reinstate_fn(id: int) → bool
 # _kg_delete_fn(id: int) → bool
+# _kg_sign_fn(machine_id: str, expiry_date: str) → str  (Ed25519-sign a licence
+#   key). The private signing key lives only in KeyGen/licence_signing.py —
+#   never imported directly into this (public, shipped-to-every-client)
+#   module, so this callback is the only way approve_registration() can ever
+#   issue a licence key.
 _kg_get_all_fn    = None
 _kg_insert_fn     = None
 _kg_revoke_fn     = None
 _kg_reinstate_fn  = None
 _kg_delete_fn     = None
+_kg_sign_fn       = None
 
 _server_task: Optional[asyncio.Task] = None
 _server_obj = None
@@ -174,18 +177,21 @@ def is_admin_machine_uuid(uuid: str) -> bool:
 
 
 def register_kg_callbacks(get_all_fn, insert_fn, revoke_fn=None,
-                          reinstate_fn=None, delete_fn=None) -> None:
-    """Register callbacks for KeyGen licence DB access.
+                          reinstate_fn=None, delete_fn=None, sign_fn=None) -> None:
+    """Register callbacks for KeyGen licence DB access and licence signing.
 
     Called by forex_admin.py on the main Mac so the server can serve and
-    persist licence records for remote admin clients.
+    persist licence records for remote admin clients, and sign new licence
+    keys without ever importing the private key module (KeyGen/licence_
+    signing.py) into this shipped-everywhere package.
     """
-    global _kg_get_all_fn, _kg_insert_fn, _kg_revoke_fn, _kg_reinstate_fn, _kg_delete_fn
+    global _kg_get_all_fn, _kg_insert_fn, _kg_revoke_fn, _kg_reinstate_fn, _kg_delete_fn, _kg_sign_fn
     _kg_get_all_fn   = get_all_fn
     _kg_insert_fn    = insert_fn
     _kg_revoke_fn    = revoke_fn
     _kg_reinstate_fn = reinstate_fn
     _kg_delete_fn    = delete_fn
+    _kg_sign_fn      = sign_fn
     log.debug("[RemoteServer] KeyGen DB callbacks registered")
 
 
@@ -210,8 +216,26 @@ async def _push_state_to_admin(ws) -> None:
             pass
 
 
-async def _notify_new_registration(hostname: str, email: str, nickname: str, ip: str) -> None:
-    """Send a Telegram alert to the admin when a new licence/registration request comes in."""
+# Duration options offered on the Telegram Approve buttons — same labels and
+# day counts as KeyGen/forex_admin.py's _SUB_TYPES / approve_registration()'s
+# sub_days mapping, just given short codes so they fit in a callback_data
+# string (Telegram's 64-byte cap; a full token is already 64 hex chars, far
+# too long, hence addressing pending requests by their 8-char token prefix
+# instead — same "short handle, not the real ID" idea as the panel's
+# per-channel slugs, see core_bot_panel.py's module docstring).
+_REG_DURATIONS = [
+    ("6m",   "6 Months"),
+    ("1y",   "1 Year"),
+    ("2y",   "2 Years"),
+    ("3y",   "3 Years"),
+    ("perp", "Perpetual"),
+]
+
+
+async def _notify_new_registration(hostname: str, email: str, nickname: str,
+                                    ip: str, token: str = "") -> None:
+    """Send a Telegram alert to the admin when a new licence/registration
+    request comes in, with inline Approve (per duration)/Reject buttons."""
     try:
         from backend.src.services.telegram import alerts as telegram_alerts
         msg = (
@@ -221,7 +245,17 @@ async def _notify_new_registration(hostname: str, email: str, nickname: str, ip:
             f"Hostname: {hostname or '—'}\n"
             f"IP: {ip or '—'}"
         )
-        await telegram_alerts.send_message(msg)
+        reply_markup = None
+        if token:
+            from backend.src.services.positions.core_bot_panel import _btn
+            short = token[:8]
+            approve_row_1 = [_btn(f"✅ {lbl}", "reg_ap", short, code)
+                              for code, lbl in _REG_DURATIONS[:3]]
+            approve_row_2 = [_btn(f"✅ {lbl}", "reg_ap", short, code)
+                              for code, lbl in _REG_DURATIONS[3:]]
+            reject_row = [_btn("❌ Reject", "reg_rj", short)]
+            reply_markup = {"inline_keyboard": [approve_row_1, approve_row_2, reject_row]}
+        await telegram_alerts.send_message(msg, reply_markup=reply_markup)
     except Exception as e:
         log.warning("[RemoteServer] Registration Telegram notify failed: %s", e)
 
@@ -416,7 +450,6 @@ async def _admin_handler(websocket, uuid: str) -> None:
 def approve_registration(token: str, display_name: str, subscription_type: str = "Perpetual") -> bool:
     """Approve a pending client registration.  Returns True on success."""
     from datetime import datetime, timedelta
-    from backend.src.config.licence.keygen import generate_licence_key
     if token not in _pending:
         return False
     sub_days = {"6 Months": 183, "1 Year": 365, "2 Years": 730, "3 Years": 1095}
@@ -430,8 +463,20 @@ def approve_registration(token: str, display_name: str, subscription_type: str =
     email      = pending.get("email", "")
     nickname   = pending.get("nickname", "")
 
-    # Generate the HMAC licence key for this machine + expiry combination.
-    licence_key = generate_licence_key(machine_id, expiry_date) if machine_id else ""
+    # Sign the licence key via the KeyGen-registered callback — the private
+    # Ed25519 key never lives in this module (see register_kg_callbacks).
+    licence_key = ""
+    if machine_id:
+        if _kg_sign_fn:
+            try:
+                licence_key = _kg_sign_fn(machine_id, expiry_date)
+            except Exception as exc:
+                log.error("[RemoteServer] kg_sign_fn failed for %s: %s", token[:8], exc)
+        else:
+            log.error(
+                "[RemoteServer] kg_sign_fn not registered — approving %s with no licence key",
+                token[:8],
+            )
 
     _allowed_tokens[token] = {
         "name":              display_name or pending.get("hostname", token[:8]),
@@ -462,6 +507,55 @@ def approve_registration(token: str, display_name: str, subscription_type: str =
             asyncio.create_task(_send_licence(entry["ws"], token))
     log.info("[RemoteServer] Approved %s — licence generated, expiry=%s", token[:8], expiry_date)
     return True
+
+
+def resign_all_licences() -> dict:
+    """Re-sign every approved token's licence key with the currently
+    registered sign_fn, pushing the refreshed key to anyone connected now.
+
+    Needed because switching the signing scheme (e.g. the HMAC keygen.py ->
+    Ed25519 migration) instantly invalidates every already-issued key against
+    the new verify.py — guard.py's enforce() runs before the remote-client
+    connection even starts, so an already-stuck client can't be reached by
+    any push at all; the only way to avoid stranding every existing customer
+    is to have the currently-connected ones self-heal automatically and the
+    rest pick up the corrected key the moment they next reconnect.
+
+    Ed25519 signing is deterministic (unlike the old HMAC scheme, this
+    produces identical bytes for identical inputs), so calling this
+    unconditionally on every admin-console startup is always safe: a key
+    already signed under the current scheme re-signs to the exact same
+    string (no-op, no re-push), while one signed under a retired scheme
+    changes and gets pushed. Returns {"resigned": N, "unchanged": N,
+    "skipped": N}.
+    """
+    if not _kg_sign_fn:
+        return {"resigned": 0, "unchanged": 0, "skipped": len(_allowed_tokens)}
+    resigned = unchanged = skipped = 0
+    for token, meta in _allowed_tokens.items():
+        machine_id = meta.get("machine_id", "")
+        if not machine_id:
+            skipped += 1
+            continue
+        try:
+            new_key = _kg_sign_fn(machine_id, meta.get("expiry_date", ""))
+        except Exception as exc:
+            log.warning("[RemoteServer] resign failed for %s: %s", token[:8], exc)
+            skipped += 1
+            continue
+        if new_key == meta.get("licence_key"):
+            unchanged += 1
+            continue
+        meta["licence_key"] = new_key
+        resigned += 1
+        entry = _connected.get(token)
+        if entry:
+            asyncio.create_task(_send_licence(entry["ws"], token))
+    if resigned:
+        _save_tokens()
+        log.info("[RemoteServer] Re-signed %d licence(s) with the current signing key "
+                  "(%d already current, %d skipped)", resigned, unchanged, skipped)
+    return {"resigned": resigned, "unchanged": unchanged, "skipped": skipped}
 
 
 async def _send_licence(ws, token: str) -> None:
@@ -518,6 +612,31 @@ async def _close_ws(ws, send_revoke: bool = False) -> None:
         pass
 
 
+def _remember_build(token: str, version: str, commit_sha: str, commit_note: str) -> None:
+    """Persist the build a client last reported onto its token record, so the
+    admin console can still show it once that client goes offline.
+
+    Without this the offline half of get_all_clients() had nothing to read:
+    every disconnected client showed "unknown" version and no commit, because
+    version/commit_sha only ever lived in the in-memory _connected entry that
+    the disconnect throws away. In-memory only -- the callers that matter
+    (HELLO, and the heartbeat's uptime accumulator) already _save_tokens()
+    right after, so this doesn't add a disk write per heartbeat.
+    """
+    meta = _allowed_tokens.get(token)
+    if meta is None:
+        return
+    if version and version != "?":
+        meta["version"] = version
+    # Only overwrite a known SHA with another known SHA -- a transient blank
+    # (e.g. git briefly unreadable) shouldn't erase the last good answer.
+    if commit_sha:
+        meta["commit_sha"] = commit_sha
+        meta["commit_note"] = ""
+    elif commit_note:
+        meta["commit_note"] = commit_note
+
+
 def get_all_clients() -> list[dict]:
     """Return a combined list of connected + known-offline clients."""
     seen = set()
@@ -544,7 +663,12 @@ def get_all_clients() -> list[dict]:
                 "email":             meta.get("email", ""),
                 "nickname":          meta.get("nickname", ""),
                 "online":            False,
-                "version":           "unknown",
+                # Last build this client reported while it was connected
+                # (_remember_build), not "unknown" -- an offline machine still
+                # has a known version until it says otherwise.
+                "version":           meta.get("version", "unknown"),
+                "commit_sha":        meta.get("commit_sha", ""),
+                "commit_note":       meta.get("commit_note", ""),
                 "platform":          meta.get("platform", "unknown"),
                 "hostname":          meta.get("hostname", "unknown"),
                 "last_seen":         meta.get("last_seen", 0),
@@ -575,65 +699,6 @@ def _record_failure(ip: str) -> None:
     lst = _auth_failures.get(ip, [])
     lst.append(now)
     _auth_failures[ip] = lst
-
-
-# ── Update packaging ─────────────────────────────────────────────────────────
-
-def _build_update_zip() -> tuple[bytes, str, list[str]]:
-    """Package all deployable app files into a ZIP.
-    Returns (zip_bytes, sha256_hex, manifest) where manifest is the list
-    of relative POSIX paths included in the archive.  Clients use the manifest
-    to delete files that have been removed from the package."""
-    app_root = Path(__file__).parent.parent.parent  # FOREX/
-
-    # Directory or file name fragments that must never be shipped to clients.
-    # NOTE: "test_signal" is NOT test code despite the name — it's the original
-    # scalping signal engine, a hard runtime dependency of ui/app.py,
-    # breakout_signal, history.py and test_panel.py. Excluding it here used to
-    # ship a build that crashed every client on startup with
-    # ModuleNotFoundError: No module named 'backend.src.services.test_signal'.
-    _SKIP_PARTS = {".venv", "__pycache__", ".git", ".update_tmp",
-                   "tests", "installer"}
-    # Extensions that are never runtime assets.
-    _SKIP_EXTS  = {".db", ".DS_Store", ".passwd", ".pem", ".crt", ".pyc",
-                   ".log", ".bak"}
-    # Extensions safe to include at the root level (launcher scripts + core).
-    _ROOT_INCLUDE_EXTS = {".py", ".txt", ".toml", ".bat", ".command",
-                          ".exe", ".sh"}
-
-    manifest: list[str] = []
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # forex_trader/ package — every file that is safe to deploy.
-        src_dir = app_root / "forex_trader"
-        for path in sorted(src_dir.rglob("*")):
-            if not path.is_file():
-                continue
-            if any(p in _SKIP_PARTS for p in path.parts):
-                continue
-            if path.suffix in _SKIP_EXTS or path.name in _SKIP_EXTS:
-                continue
-            arcname = path.relative_to(app_root).as_posix()
-            zf.write(path, arcname)
-            manifest.append(arcname)
-
-        # Root-level runtime files (.py, .txt, .bat, .command, .exe, .sh, …).
-        # Iterates only immediate children — installer/, tests/ etc. are skipped
-        # because they are directories, not files.
-        for path in sorted(app_root.iterdir()):
-            if not path.is_file():
-                continue
-            if path.suffix not in _ROOT_INCLUDE_EXTS:
-                continue
-            if path.suffix in _SKIP_EXTS or path.name in _SKIP_EXTS:
-                continue
-            arcname = path.name
-            zf.write(path, arcname)
-            manifest.append(arcname)
-
-    data = buf.getvalue()
-    sha  = hashlib.sha256(data).hexdigest()
-    return data, sha, manifest
 
 
 def _read_version() -> str:
@@ -675,10 +740,12 @@ async def _handler(websocket) -> None:
     except Exception:
         return
 
-    token    = msg.get("token", "")
-    hostname = msg.get("hostname", "?")
-    platform = msg.get("platform", "?")
-    version  = msg.get("version", "?")
+    token       = msg.get("token", "")
+    hostname    = msg.get("hostname", "?")
+    platform    = msg.get("platform", "?")
+    version     = msg.get("version", "?")
+    commit_sha  = msg.get("commit_sha", "")
+    commit_note = msg.get("commit_note", "")
 
     # ── Remote admin connection ───────────────────────────────────────────────
     if msg.get("type") == MSG_ADMIN_HELLO:
@@ -745,7 +812,7 @@ async def _handler(websocket) -> None:
             asyncio.create_task(_push_pending_to_all_admins())
             asyncio.create_task(_notify_new_registration(
                 hostname=hostname, email=msg.get("email", ""),
-                nickname=msg.get("nickname", ""), ip=ip,
+                nickname=msg.get("nickname", ""), ip=ip, token=token,
             ))
         await _close_ws(websocket)
         return
@@ -825,6 +892,7 @@ async def _handler(websocket) -> None:
                         hostname=msg2.get("hostname", hostname),
                         email=msg2.get("email", ""),
                         nickname=msg2.get("nickname", ""), ip=ip,
+                        token=reg_token,
                     ))
         except asyncio.TimeoutError:
             log.info("[RemoteServer] No MSG_REGISTER from %s (%s) within 20s "
@@ -870,6 +938,8 @@ async def _handler(websocket) -> None:
         "hostname":     hostname,
         "platform":     platform,
         "version":      version,
+        "commit_sha":   commit_sha,
+        "commit_note":  commit_note,
         "ip":           ip,
         "online":       True,
         "machine_uuid": machine_uuid,
@@ -881,6 +951,7 @@ async def _handler(websocket) -> None:
         "diagnostics": {},
     }
     _allowed_tokens[token]["last_seen"] = time.time()
+    _remember_build(token, version, commit_sha, commit_note)
     _save_tokens()
     # Remote admin consoles only see client online/offline state via this push —
     # unlike the main server's own admin UI, which reads _connected live on every
@@ -914,10 +985,20 @@ async def _handler(websocket) -> None:
                 if conn_entry:
                     conn_entry["info"].update({
                         "version":          m.get("version", version),
+                        "commit_sha":       m.get("commit_sha", commit_sha),
+                        "commit_note":      m.get("commit_note", commit_note),
                         "uptime_s":         m.get("uptime_s", 0),
                         "trades_open":      m.get("trades_open", 0),
                         "bridge_connected": m.get("bridge_connected", False),
                     })
+                    # A client that updates itself mid-session reports the new
+                    # build on its next heartbeat, not on a fresh HELLO.
+                    _remember_build(
+                        token,
+                        conn_entry["info"]["version"],
+                        conn_entry["info"]["commit_sha"],
+                        conn_entry["info"]["commit_note"],
+                    )
                     # Accumulate total time-online across sessions. Status
                     # heartbeats arrive every ~60s while connected; we add the
                     # gap between consecutive heartbeats (capped so a missed
@@ -1017,10 +1098,20 @@ async def _lan_beacon_loop() -> None:
         await asyncio.sleep(5)
 
 
-# ── Push update to all connected clients ──────────────────────────────────────
+# ── Push update to connected clients ────────────────────────────────────────
+# Both functions just tell the client to self-update via git
+# (core_app_update.apply_update(), the same code the client's own
+# Settings > Update button runs) rather than streaming a zip built from
+# this machine's local files. Keeping exactly one update implementation —
+# on the client — means the admin-triggered path and the client's own
+# self-service path can never drift out of sync with each other: the old
+# zip push wrote files straight to disk with no git awareness at all,
+# which left every client's working tree "dirty" and broke its own next
+# git-based update (confirmed live — see the "Fix self-update apply_update()
+# failing when the working tree has drifted" commit).
 
 async def push_update(progress_cb=None) -> dict:
-    """Package and stream the update to all connected clients.
+    """Trigger a git self-update on every connected client.
     progress_cb(msg: str) is called with status updates.
 
     Returns {"sent": N, "version": "x.y"}
@@ -1032,52 +1123,27 @@ async def push_update(progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(msg)
 
-    _update_progress("Packaging update files…")
-    try:
-        zip_data, sha256, manifest = await asyncio.get_running_loop().run_in_executor(
-            None, _build_update_zip
-        )
-    except Exception as exc:
-        _update_progress(f"Packaging failed: {exc}")
-        return {"error": str(exc)}
-
-    version   = _read_version()
-    changelog = _read_changelog()
-    chunk_sz  = 32 * 1024  # 32 KB chunks
-
-    _update_progress(
-        f"Sending {len(zip_data) / 1024:.0f} KB to "
-        f"{len(_connected)} client(s)…"
-    )
+    version = _read_version()
     sent = 0
     for token, entry in list(_connected.items()):
         ws   = entry["ws"]
         name = entry["info"].get("name", token[:8])
         try:
-            await ws.send(json.dumps(make(
-                MSG_UPDATE_BEGIN,
-                version=version,
-                size=len(zip_data),
-                sha256=sha256,
-                changelog=changelog,
-                manifest=manifest,
-            )))
-            # Stream ZIP in chunks
-            for offset in range(0, len(zip_data), chunk_sz):
-                await ws.send(zip_data[offset: offset + chunk_sz])
-            await ws.send(json.dumps(make(MSG_UPDATE_END)))
+            await ws.send(json.dumps(make(MSG_GIT_UPDATE)))
             sent += 1
-            _update_progress(f"Sent to {name}")
+            log.info("[RemoteServer] Sent MSG_GIT_UPDATE to %s", name)
+            _update_progress(f"Triggered git update on {name}")
         except Exception as exc:
-            _update_progress(f"Failed sending to {name}: {exc}")
+            log.warning("[RemoteServer] Failed to send MSG_GIT_UPDATE to %s: %s", name, exc)
+            _update_progress(f"Failed to trigger update on {name}: {exc}")
 
     return {"sent": sent, "version": version}
 
 
 async def push_update_to_client(token: str, progress_cb=None) -> dict:
-    """Package and stream the update to a single connected client, identified
-    by its token — same packaging/protocol as push_update() but targeted, so
-    updating one machine doesn't restart every other connected client too.
+    """Trigger a git self-update on a single connected client, identified by
+    its token — same as push_update() but targeted, so updating one machine
+    doesn't restart every other connected client too.
 
     Returns {"sent": 0 or 1, "version": "x.y"} or {"error": ...}.
     """
@@ -1089,39 +1155,17 @@ async def push_update_to_client(token: str, progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(msg)
 
-    _update_progress("Packaging update files…")
-    try:
-        zip_data, sha256, manifest = await asyncio.get_running_loop().run_in_executor(
-            None, _build_update_zip
-        )
-    except Exception as exc:
-        _update_progress(f"Packaging failed: {exc}")
-        return {"error": str(exc)}
-
-    version   = _read_version()
-    changelog = _read_changelog()
-    chunk_sz  = 32 * 1024  # 32 KB chunks
-
     ws   = entry["ws"]
     name = entry["info"].get("name", token[:8])
-    _update_progress(f"Sending {len(zip_data) / 1024:.0f} KB to {name}…")
     try:
-        await ws.send(json.dumps(make(
-            MSG_UPDATE_BEGIN,
-            version=version,
-            size=len(zip_data),
-            sha256=sha256,
-            changelog=changelog,
-            manifest=manifest,
-        )))
-        for offset in range(0, len(zip_data), chunk_sz):
-            await ws.send(zip_data[offset: offset + chunk_sz])
-        await ws.send(json.dumps(make(MSG_UPDATE_END)))
-        _update_progress(f"Sent to {name}")
-        return {"sent": 1, "version": version}
+        await ws.send(json.dumps(make(MSG_GIT_UPDATE)))
+        log.info("[RemoteServer] Sent MSG_GIT_UPDATE to %s", name)
+        _update_progress(f"Triggered git update on {name}")
+        return {"sent": 1, "version": _read_version()}
     except Exception as exc:
-        _update_progress(f"Failed sending to {name}: {exc}")
-        return {"sent": 0, "version": version, "error": str(exc)}
+        log.warning("[RemoteServer] Failed to send MSG_GIT_UPDATE to %s: %s", name, exc)
+        _update_progress(f"Failed to trigger update on {name}: {exc}")
+        return {"sent": 0, "version": _read_version(), "error": str(exc)}
 
 
 async def request_diagnostics(token: str) -> bool:
@@ -1148,6 +1192,13 @@ def start() -> None:
     global _server_task
     _load_tokens()
     _load_admin_machines()
+    # Re-sign step must happen after _load_tokens(), not at forex_admin.py's
+    # import time -- register_kg_callbacks() runs during that earlier import,
+    # before this module's _allowed_tokens dict has anything loaded into it,
+    # so a resign attempted there always finds zero tokens to act on.
+    resign_result = resign_all_licences()
+    if resign_result.get("resigned"):
+        log.info("[RemoteServer] Licence re-sign on startup: %s", resign_result)
 
     async def _run():
         global _server_obj

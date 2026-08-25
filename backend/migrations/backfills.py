@@ -91,15 +91,115 @@ def _rebrand_source_names(conn) -> None:
         )
 
 
+def _once_marker(conn, key: str) -> bool:
+    """True when this once-only backfill has already run on this database.
+
+    Some corrections cannot be made idempotent by their WHERE clause -- there
+    is no way to tell an already-corrected value from one a user has since
+    typed by hand -- so they are gated on an app_config marker instead and
+    run exactly once, ever. Added by the 2026-08-25 upstream merge."""
+    try:
+        return conn.execute(
+            "SELECT 1 FROM app_config WHERE key=?", (key,)
+        ).fetchone() is not None
+    except sqlite3.OperationalError:
+        return False
+
+
+def _set_once_marker(conn, key: str) -> None:
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)", (key, "1")
+        )
+    except sqlite3.OperationalError:
+        pass
+
+
 def _gd2_instant_entry(conn) -> None:
     """Enable instant_entry for GD2 channel configs bootstrapped before GD2
-    IME support existed (they defaulted to 0)."""
+    IME support existed (they defaulted to 0).
+
+    ONCE, not on every boot (upstream 2026-08-14). This ran unconditionally
+    and run() fires on every app start, so it re-enabled IME for every gd2
+    channel every time -- silently reverting the setting within seconds of it
+    being turned off, which made Immediate Market Entry impossible to disable
+    on a gd2 channel at all, through the UI or otherwise. Found while turning
+    IME off for GOLD DIGGERS INSTITUTIONAL, where market entry backtests at
+    -0.03R against +0.26R for the limit entry the channel actually publishes.
+
+    New rows do not need it: the runtime's auto-bootstrap already defaults
+    gd2 to instant_entry_enabled=1 at first sight."""
+    key = "gd2_ime_backfill_done"
+    if _once_marker(conn, key):
+        return
     execute_tolerant(
         conn,
         "UPDATE channel_parser_config SET instant_entry_enabled=1 "
         "WHERE parser_format='gd2' AND instant_entry_enabled=0",
         "gd2_instant_entry",
     )
+    _set_once_marker(conn, key)
+
+
+def _gd2_channel_rename_heal(conn) -> None:
+    """Fold "Gold Diggers 2.0"'s orphaned rows into GOLD DIGGERS INSTITUTIONAL.
+
+    Those channel_performance / channel_strategy_rec rows predate both the
+    rename cascade and the PK-collision fix in sync_channel_rename, whose
+    plain UPDATE silently no-ops when the canonical row already exists. So
+    they were never folded in and every lookup by the live channel name
+    missed them -- a user-set EA Template override sat here invisibly and the
+    channel silently traded under the global default strategy instead.
+    sync_channel_rename will not re-fire for this pair on its own (the
+    Telegram-side title mismatch that triggered it is long gone), so heal it
+    directly, once, with the same merge-safe helper.
+    Upstream 2026-07-27, re-homed by the 2026-08-25 merge."""
+    try:
+        from backend.src.services.channels.repo import (
+            _fold_renamed_row, _CHANNEL_UNIQUE_TABLES,
+        )
+    except ImportError:
+        log.debug("[backfill gd2_channel_rename_heal] fold helper unavailable")
+        return
+    for tbl, col in (
+        ("channel_parser_config", "channel_name"),
+        ("channel_performance", "source"),
+        ("channel_strategy_rec", "source"),
+    ):
+        try:
+            _fold_renamed_row(
+                conn, tbl, col, "Gold Diggers 2.0", "GOLD DIGGERS INSTITUTIONAL",
+                _CHANNEL_UNIQUE_TABLES.get(tbl, ()),
+            )
+        except sqlite3.OperationalError as e:
+            log.debug("[backfill gd2_channel_rename_heal] %s skipped: %s", tbl, e)
+
+
+def _anchor_tp_pips_units(conn) -> None:
+    """One-off unit fix: Anchor TP ladder tp{n}_pips were raw points, not pips.
+
+    1 pip is 0.10 price on this XAUUSD feed (10 * _Point, _Point=0.01) -- the
+    same conversion ForexTraderBridge.mq5's PipsToPrice() already applied
+    correctly for the Pending ladder. Root-caused live 2026-07-31 (ticket
+    1689710560): tp1_pips=30 sent TP1 to entry+30.0 (300 pips) instead of
+    entry+3.0 (30 pips, what the channel's "+30 PIPS" wording means).
+
+    Fixing the conversion without this backfill would silently move every
+    existing template's TPs 10x closer than they trade today. Marker-gated
+    rather than WHERE-shaped: there is no way to tell an already-migrated 30
+    from a 30 someone deliberately enters after this ships.
+    Upstream 2026-07-31, re-homed by the 2026-08-25 merge."""
+    key = "anchor_tp_pips_migrated_2026_07_31"
+    if _once_marker(conn, key):
+        return
+    for n in range(1, 9):
+        execute_tolerant(
+            conn,
+            f"UPDATE ea_trade_templates SET tp{n}_pips = tp{n}_pips * 10 "
+            f"WHERE tp{n}_pips != 0",
+            f"anchor_tp_pips_units:tp{n}",
+        )
+    _set_once_marker(conn, key)
 
 
 def _strip_instant_prefix(conn) -> None:
@@ -140,6 +240,11 @@ BACKFILLS: list = [
     ("gd2_instant_entry", _gd2_instant_entry),
     ("strip_instant_prefix", _strip_instant_prefix),
     ("dpm_tg_source", _dpm_tg_source),
+    # Re-homed from upstream's core/database.py _apply_schema tail by the
+    # 2026-08-25 merge. Both run after the rebrands, which is where they sat
+    # upstream: the rename heal folds rows the rebrands have already renamed.
+    ("gd2_channel_rename_heal", _gd2_channel_rename_heal),
+    ("anchor_tp_pips_units", _anchor_tp_pips_units),
 ]
 
 

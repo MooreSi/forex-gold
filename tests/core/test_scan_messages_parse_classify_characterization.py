@@ -20,6 +20,10 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src import runtime as engine_mod
 from backend.src.services.signals import scan_parse_classify as pc
 from backend.src.runtime import TradingRuntime
+from backend.src.services.telegram import alerts
+from backend.src.services.broker import ea_templates as ea_templates
+from backend.src.runtime import SimulationEngine
+from backend.src.services.signals.parser import validate_signal
 
 
 def _reset_thread_local_connection():
@@ -360,13 +364,44 @@ def test_tp_parsing_disabled_strips_all_tp_fields(fresh_db):
     assert result[0]["stop_loss"] is not None  # SL untouched by this toggle
 
 
-def test_sl_parsing_disabled_strips_stop_loss(fresh_db):
+def test_sl_parsing_disabled_substitutes_fallback_distance(fresh_db):
+    """SELL zone 4512-4520; OFF replaces the stated 4524 with a stop the
+    configured distance ABOVE the zone's far edge (4520 + 50 pips * 0.10)."""
     _setup_channel("format_ab")
     db.update_risk_settings({"lk_enable_sl_parsing": 0})
     result, uq, alerts = _run([{"id": "b21", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert len(result) == 1
-    assert result[0]["stop_loss"] is None
+    assert result[0]["stop_loss"] == 4525.0
     assert result[0]["tp1"] is not None  # TP untouched by this toggle
+
+
+def test_sl_parsing_disabled_honours_configured_fallback_pips(fresh_db):
+    _setup_channel("format_ab")
+    db.update_risk_settings({"lk_enable_sl_parsing": 0, "lk_fallback_sl_pips": 120.0})
+    result, uq, alerts = _run([{"id": "b21b", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    assert result[0]["stop_loss"] == 4532.0   # 4520 + 120 * 0.10
+
+
+def test_sl_parsing_disabled_substitute_passes_validation(fresh_db):
+    """The substituted stop must satisfy validate_signal's own direction
+    check -- the None it replaced raised TypeError out of that same call."""
+    _setup_channel("format_ab")
+    db.update_risk_settings({"lk_enable_sl_parsing": 0})
+    result, uq, alerts = _run([{"id": "b21c", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    r = result[0]
+    assert validate_signal(
+        r["direction"], r["entry_low"], r["entry_high"], r["stop_loss"],
+        r["tp1"], r["tp2"], r["tp3"], r["tp4"], r["tp5"],
+    ) == []
+
+
+def test_sl_parsing_disabled_prefers_channel_template_sl_pips(fresh_db):
+    _setup_channel("format_ab")
+    db.update_risk_settings({"lk_enable_sl_parsing": 0, "lk_fallback_sl_pips": 120.0})
+    ea_templates.save_ea_template("T1", {"sl_pips": 30.0})
+    db.set_channel_strategy_override("TestChannel", ea_templates.override_for_template("T1"))
+    result, uq, alerts = _run([{"id": "b21d", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    assert result[0]["stop_loss"] == 4523.0   # 4520 + 30 * 0.10, template wins
 
 
 def test_tp_and_sl_parsing_enabled_by_default_unchanged(fresh_db):
@@ -375,3 +410,25 @@ def test_tp_and_sl_parsing_enabled_by_default_unchanged(fresh_db):
     assert len(result) == 1
     assert result[0]["tp1"] is not None
     assert result[0]["stop_loss"] is not None
+
+
+# ── Per-message error isolation ─────────────────────────────────────────────
+
+def test_one_failing_message_does_not_abort_the_batch(fresh_db):
+    """A message that raises mid-scan is skipped; every other message in the
+    same buffer still parses. Before the per-message try/except, the error
+    propagated out of _scan_messages and the whole pass was abandoned."""
+    _setup_channel("format_ab")
+    real = pc.classify_and_parse
+
+    async def boom(tg_id, *a, **k):
+        if tg_id == "b30":
+            raise TypeError("'>=' not supported between instances of 'NoneType' and 'float'")
+        return await real(tg_id, *a, **k)
+
+    with mock.patch.object(engine_mod, "_classify_and_parse_impl", boom):
+        result, uq, alerts = _run([
+            {"id": "b30", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO},
+            {"id": "b31", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO},
+        ])
+    assert [r["tg_message_id"] for r in result] == ["b31"]

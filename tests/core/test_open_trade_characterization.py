@@ -18,9 +18,12 @@ from unittest.mock import patch
 import pytest
 
 from backend.src.db import database as db
+from backend.src.services.broker import ea_bridge
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER
+from backend.src.services.broker import ea_templates as ea_templates
+from backend.src.runtime import SimulationEngine
 
 
 def _reset_thread_local_connection():
@@ -87,7 +90,8 @@ class _FakeEA:
         return self._portable
 
     async def open_trade(self, trade_id, direction, lot_size, stop_loss, tps, strategy,
-                         pcts=None, be_at_pos=None, trail_mode=None, template=None):
+                         pcts=None, be_at_pos=None, trail_mode=None, template=None,
+                         zone_low=None, zone_high=None, timeout=5.0):
         self.open_trade_calls.append(
             {"trade_id": trade_id, "direction": direction, "lot_size": lot_size,
              "stop_loss": stop_loss, "tps": tps, "strategy": strategy}
@@ -299,3 +303,100 @@ def test_remote_forwarding_forwards_when_centralized(fresh_db, engine):
     assert result["trade_id"] == "remote-1"
     assert len(fake_client.send_signal_order_calls) == 1
     assert engine._bridge.place_order_calls == []  # never placed locally
+
+
+# ── initial_sl / initial_risk seed (2026-08-07) ────────────────────────────────
+# Realized R:R needs the stop that was actually placed and the lots behind the
+# WHOLE trade. Neither survives: stop_loss is overwritten in place by every
+# breakeven/trailing path, and lot_size only ever describes the one leg that
+# promotes a grid row. See database.py's initial_sl/initial_risk note.
+
+
+def _row_for(trade_id):
+    with db.db() as conn:
+        return db.row_to_dict(
+            conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?",
+                         (trade_id,)).fetchone()
+        )
+
+
+def test_records_the_stop_actually_placed_and_its_dollar_risk(fresh_db, engine):
+    _insert_signal()
+    result = asyncio.run(SimulationEngine.open_trade(engine, **_open_kwargs()))
+    row = _row_for(result["trade_id"])
+    # Filled at 2400.5 (the fake bridge's fill_price) against a 2390.0 stop:
+    # 10.50 * 0.10 lot * 100 oz = $105.
+    assert row["initial_sl"] == pytest.approx(2390.0)
+    assert row["initial_risk"] == pytest.approx(105.0)
+
+
+def test_a_grid_templates_risk_covers_every_leg_the_ea_placed(fresh_db, engine):
+    """The row's lot_size is the promoting leg alone while core_profit_sync
+    sums all N legs into net_pnl -- so the risk seed has to span the basket
+    or R comes out scaled by the leg count."""
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    ea_templates.save_ea_template("GridRisk", {
+        "mode": "grid", "anchors": 1, "pendings": 2,
+        "lot_anchor": 0.10, "lot_pending": 0.05,
+        "sl_pips": 0.0,  # keep the signal's own stop so the arithmetic is plain
+        "tp1_pips": 20.0, "tp1_pct": 100.0,
+    })
+    ea_bridge.set_instance(_FakeEA(ack={
+        "type": "trade_opened", "ticket": 8001, "fill_price": 2400.0,
+        "legs_placed": 3,
+    }))
+
+    result = asyncio.run(SimulationEngine.open_trade(
+        engine, **_open_kwargs(strategy="template:GridRisk")))
+
+    row = _row_for(result["trade_id"])
+    assert row["lot_size"] == pytest.approx(0.10)          # one leg, as before
+    assert row["grid_legs_total"] == 3
+    # 10.00 from the stop, over 0.10 anchor + 0.05 + 0.05 pending = 0.20 lots.
+    assert row["initial_risk"] == pytest.approx(200.0)
+
+
+def test_only_the_legs_the_ea_actually_placed_are_counted(fresh_db, engine):
+    """legs_placed, not anchors+pendings: a leg the broker rejected never
+    existed and must not appear in the risk."""
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    ea_templates.save_ea_template("GridPartial", {
+        "mode": "grid", "anchors": 1, "pendings": 2,
+        "lot_anchor": 0.10, "lot_pending": 0.05, "sl_pips": 0.0,
+        "tp1_pips": 20.0, "tp1_pct": 100.0,
+    })
+    ea_bridge.set_instance(_FakeEA(ack={
+        "type": "trade_opened", "ticket": 8001, "fill_price": 2400.0,
+        "legs_placed": 2,
+    }))
+
+    result = asyncio.run(SimulationEngine.open_trade(
+        engine, **_open_kwargs(strategy="template:GridPartial")))
+
+    # Anchor legs are staged first, so 2 of 3 is the anchor plus one pending.
+    assert _row_for(result["trade_id"])["initial_risk"] == pytest.approx(150.0)
+
+
+def test_a_zero_entry_placeholder_measures_risk_from_the_tick(fresh_db, engine):
+    """An ack-timeout placeholder row carries entry_price 0. Measuring the
+    stop distance from that books a risk the width of the whole gold price."""
+    _insert_signal()
+    db.update_risk_settings({"ea_bridge_enabled": 1})
+    ea_templates.save_ea_template("GridPlaceholder", {
+        "mode": "grid", "anchors": 1, "pendings": 0,
+        "lot_anchor": 0.10, "lot_pending": 0.10, "sl_pips": 0.0,
+        "tp1_pips": 20.0, "tp1_pct": 100.0,
+    })
+    ea_bridge.set_instance(_FakeEA(ack={
+        "type": "trade_opened", "ticket": 0, "fill_price": 0.0, "legs_placed": 1,
+    }))
+
+    result = asyncio.run(SimulationEngine.open_trade(
+        engine, **_open_kwargs(strategy="template:GridPlaceholder")))
+
+    row = _row_for(result["trade_id"])
+    assert row["entry_price"] == pytest.approx(0.0)
+    # BUY, so measured from the ask (2400.2) not from 0: 10.20 * 0.10 * 100.
+    assert row["initial_risk"] == pytest.approx(102.0)

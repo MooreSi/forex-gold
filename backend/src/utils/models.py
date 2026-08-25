@@ -118,8 +118,29 @@ STRATEGY_ORB_FIXED           = "orb_fixed"
 STRATEGY_ADAPTIVE_RUNNER      = "adaptive_runner"
 STRATEGY_ADAPTIVE_RUNNER_2    = "adaptive_runner_2"
 STRATEGY_LIMIT_RUNNER         = "limit_runner"
+STRATEGY_FIXED_RR             = "fixed_rr"
+
+# Strategies that compute their own SL (and, for Fixed R:R, TP) from the
+# actual fill price and deliberately ignore the signal's own levels.
+#
+# These must not accept a mid-trade SL override pushed by a channel
+# ("SL IS SET TO BE AT 4021", "risk free at ...", "set SL to ..."), because
+# the override replaces the very level the strategy exists to control.
+# Fixed R:R is the sharpest case: its 4pt stop is the measured output of
+# tools/exit_policy_lab.py, and SL-tightening/breakeven moves reduced
+# expectancy in 14 of 14 configurations tested (2026-07-28). Obeying the
+# channel would hand back the edge the strategy was built to capture, and
+# would do it silently, mid-trade.
+#
+# Signal-following strategies are deliberately NOT in this set -- they use
+# the channel's levels by design, so a channel updating those levels is
+# information, not interference.
+STRATEGIES_OWN_SL = frozenset({
+    "conservative", "conservative_trial", "scalp_runner", "fixed_rr",
+})
 
 STRATEGY_NAMES = {
+    STRATEGY_FIXED_RR:           "Fixed R:R",
     STRATEGY_SCALE_OUT:          "Scale Out + Breakeven",
     STRATEGY_BE_RUNNER:          "Breakeven Runner",
     STRATEGY_TRAIL_STOP:         "Trailing Stop",
@@ -138,6 +159,36 @@ STRATEGY_NAMES = {
 }
 
 STRATEGY_DESCRIPTIONS = {
+    STRATEGY_FIXED_RR: (
+        "**Fixed R:R** — one stop, one target, both set at the broker. "
+        "No partial closes, no breakeven move, no trailing.\n\n"
+        "Built from measured trade paths (`tools/exit_policy_lab.py`) rather than "
+        "designed by intuition. Reconstructing the M1 path of every closed trade "
+        "showed the existing exit geometry was upside-down: an average stop of "
+        "7.89 pts against an average best-case move of only 4.29 pts, so even a "
+        "perfect exit capped out near +0.54R.\n\n"
+        "The exploitable detail was in the excursions — **winners only travelled "
+        "2.04 pts against entry before working, while losers travelled 8.55**. A "
+        "stop near 4 pts therefore keeps most winners while cutting losers roughly "
+        "in half.\n\n"
+        "- **SL:** 4 pts adverse from fill (tunable)\n"
+        "- **TP:** 6 pts in profit from fill (tunable)\n"
+        "- **No breakeven move** — deliberate. Moving to BE reduced expectancy in "
+        "every configuration tested (8/8, both halves of the sample), costing "
+        "0.10-0.36R. It converts would-be winners into scratches while losers "
+        "still pay full freight.\n\n"
+        "Lot size is recomputed from the fixed 4 pt stop, so risk per trade is "
+        "constant regardless of what stop distance the signal carried — unless a "
+        "fixed lot override (Global Parameters > Fixed Lot Size) is set, which "
+        "bypasses sizing for every strategy.\n\n"
+        "Both SL and TP are real broker-side orders, so MT5 executes them even if "
+        "the app or EA disconnects. Nothing polls this trade.\n\n"
+        "**Measured:** +0.418R expectancy, bootstrap 95% CI [+0.119, +0.716] — "
+        "versus roughly +0.097R [-0.060, +0.254] for the previous geometry, whose "
+        "interval includes zero. Sample was 67 trades over 3 days; re-run the lab "
+        "as history accumulates.\n\n"
+        "**Signal levels are ignored** apart from direction and entry zone."
+    ),
     STRATEGY_SCALE_OUT: (
         "**Scale Out + Breakeven** — the default, balanced approach.\n\n"
         "Uses a tiered close schedule so the heaviest profit-booking happens early, "

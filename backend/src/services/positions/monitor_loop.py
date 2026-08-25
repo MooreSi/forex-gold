@@ -32,6 +32,14 @@ log = logging.getLogger(__name__)
 
 def check_sl(trade: dict, tick: Any) -> Optional[tuple]:
     direction = trade["direction"].upper()
+    # A row with no entry price has no fill behind it yet -- an EA Template
+    # placeholder waiting for a leg to go live (mt5_ticket=0, entry_price=0,
+    # see ea_bridge._promote_leg_fill). Closing one here recorded a DB-only
+    # "Stop Loss Hit" with a P&L computed off a zero entry while the EA's real
+    # position was still running (live, trade 76687f1a, 2026-07-29). Nothing
+    # about an unfilled placeholder can hit a stop.
+    if not float(trade.get("entry_price") or 0):
+        return None
     sl = float(trade["stop_loss"]) if trade["stop_loss"] else None
     if direction == "BUY":
         if sl and tick.bid <= sl:
@@ -100,6 +108,10 @@ async def check_profit_close_target(trade: dict, tick: Any, profit_close_usd: fl
     against `profit_close_usd`. Returns True if the trade was closed."""
     if profit_close_usd <= 0:
         return False
+    # Same placeholder guard as check_sl() -- unrealised P&L measured from a
+    # zero entry price is contract-value-sized and would trip any target.
+    if not float(trade.get("entry_price") or 0):
+        return False
     cur = tick.bid if trade["direction"].upper() == "BUY" else tick.ask
     unrealized = _pnl(
         trade["direction"], float(trade["entry_price"]),
@@ -146,6 +158,35 @@ async def reclaim_ea_managed_trade(trade: dict, strategy: str) -> bool:
             return True
     except ImportError:
         pass
+
+    # EA Template strategies must NEVER be reclaimed -- Python has no
+    # handler for a "template:<name>" strategy at all (the monitor loop's
+    # own dispatch falls straight through every named elif to the
+    # scale_out default), and a template's grid/single-mode management,
+    # Anchor TP ladder, breakeven, and trailing rules only exist in
+    # ManageTemplate() on the EA side by design (core_ea_templates.py's own
+    # docstring: "a template fully replaces strategy dispatch"). Confirmed
+    # live 2026-07-27: a grid template trade got reclaimed here during a
+    # brief EA reconnect, and the scale_out handler that then ran against
+    # it used its still-zero entry_price (a grid placeholder pending its
+    # first leg fill) against a live tick crossing tp1/tp2/tp3, fabricating
+    # a $40,730 "profit" and closing the DB row with no real broker action
+    # ever taken (mt5_ticket was 0, so the handler's own real-order guard
+    # never fired) -- silently orphaning whatever the EA's actual resting/
+    # filled legs were doing on the real account, with Python now blind to
+    # them. Leaving managed_by as 'ea' here means dispatch keeps skipping
+    # this trade every cycle until the EA reconnects -- no one manages it
+    # in the gap, rather than the wrong thing managing it.
+    from backend.src.services.broker.ea_templates import is_template_override
+    if is_template_override(strategy):
+        log.warning(
+            "[EA] trade=%s ticket=%s strategy=%s EA unhealthy -- template "
+            "strategies have no Python fallback, leaving unmanaged until "
+            "the EA reconnects rather than reclaiming",
+            trade["trade_id"][:8], trade.get("mt5_ticket"), strategy,
+        )
+        return True
+
     log.warning(
         "[EA] trade=%s ticket=%s EA unhealthy — reclaiming "
         "management in Python",

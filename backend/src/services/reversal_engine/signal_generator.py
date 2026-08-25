@@ -73,8 +73,20 @@ def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float) -> di
     """
     Build the 8-level TP cascade matching the reference channel format.
 
-    TPs are placed at fixed offsets from entry mid.
-    Uses the reference channel observed spacing but scales with sl_dist for proportionality.
+    TPs are placed at FIXED point offsets from entry mid -- they do not scale
+    with sl_dist, whatever this docstring used to claim. That has a real
+    consequence worth stating plainly: sl_dist varies 4-7pt by level score
+    while TP1 stays at 3pt, so TP1 is 0.75R on a weak level and 0.43R on a
+    strong one. The better the level, the worse its payoff.
+
+    Left as fixed offsets deliberately, not from inertia: the reach data says
+    only 9.4% of signals ever travel 1.0R (median 0.43R), so scaling the
+    cascade up to a constant R would move every target beyond where price
+    actually goes and cut the win rate from 70.5% to single digits. The edge
+    is a small, high-probability move. Fixing the inversion means narrowing
+    the STOP on strong levels, not widening their targets -- which needs the
+    mae_pts now being recorded (see reversal_engine/database.py) before it can
+    be sized honestly.
     """
     tps = {}
     for i, offset in enumerate(_TP_OFFSETS, start=1):

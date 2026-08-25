@@ -4,13 +4,18 @@ Chart page — live XAUUSD candlestick + RSI chart.
 Architecture (matches the Hummingbot Vantage chart in style/data):
   - Candlestick with EMA 9 / EMA 21 / EMA 50 overlays
   - Bid and Ask mark lines
-  - Entry / SL / TP mark lines from any open trades
+  - Entry mark lines from any open trades (SL/TP lines removed 2026-08-04 --
+    they buried the price action; the numbers live on the trades panel)
+  - Fair Value Gap zones, own timeframe selector (M1/M5/M15), independent
+    of the chart timeframe
   - RSI 14 sub-chart with overbought/oversold zones
   - Fast refresh (3s): tick, last-candle live update, RSI update
   - Slow refresh (10s): full candle batch + all EMAs
 """
 
 import asyncio
+import logging
+from bisect import bisect_right
 from datetime import datetime, timezone
 from typing import Optional, Callable
 
@@ -19,7 +24,11 @@ from nicegui import ui
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 from backend.src.controllers import chart_controller as chart_controller
 from backend.src.controllers import sync_controller as sync_ctl
+from backend.src.services.positions.core_indicators import ema_series, rsi_series
+from backend.src.services.analytics.reporting import is_stuck_placeholder
 from frontend.pages.trading import trade_source_label, trade_channel_label
+
+log = logging.getLogger(__name__)
 
 TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
 TF_MAP     = {"1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",
@@ -40,49 +49,10 @@ _RSI_COL   = "#FF9900"   # orange
 
 # ── Indicator calculations ────────────────────────────────────────────────────
 
-def _ema(values: list[float], period: int) -> list[Optional[float]]:
-    """Wilder/standard EMA — returns a value for every input index."""
-    if not values:
-        return []
-    result: list[Optional[float]] = []
-    alpha = 2.0 / (period + 1)
-    ema: Optional[float] = None
-    warm = 0
-    for v in values:
-        if ema is None:
-            ema  = v
-            warm = 1
-        else:
-            ema  = alpha * v + (1 - alpha) * ema
-            warm += 1
-        result.append(round(ema, 2) if warm >= period else None)
-    return result
-
-
-def _rsi14(closes: list[float], period: int = 14) -> list[Optional[float]]:
-    """RSI using Wilder's EWM smoothing (com = period-1), matching Hummingbot."""
-    if len(closes) < period + 1:
-        return [None] * len(closes)
-
-    gains = [max(0.0, closes[i] - closes[i - 1]) for i in range(1, len(closes))]
-    losses = [max(0.0, closes[i - 1] - closes[i]) for i in range(1, len(closes))]
-
-    # Seed with simple average
-    avg_g = sum(gains[:period]) / period
-    avg_l = sum(losses[:period]) / period
-
-    rsi_vals: list[Optional[float]] = [None] * period  # first 'period' closes have no RSI
-
-    for i in range(period, len(gains)):
-        avg_g = (avg_g * (period - 1) + gains[i]) / period
-        avg_l = (avg_l * (period - 1) + losses[i]) / period
-        if avg_l == 0:
-            rsi_vals.append(100.0)
-        else:
-            rs = avg_g / avg_l
-            rsi_vals.append(round(100.0 - 100.0 / (1.0 + rs), 2))
-
-    return rsi_vals
+# EMA/RSI moved to core_indicators (2026-08-04) so the chart and the signal
+# snapshot capture share one implementation instead of two that can drift.
+_ema   = ema_series
+_rsi14 = rsi_series
 
 
 def _pnl_col(v: float) -> str:
@@ -116,6 +86,14 @@ def render(get_engine: Callable):
         "candles": [],
         "tick":    None,
         "last_candle_refresh": 0.0,
+        # FVG overlay (2026-08-04). Its timeframe is deliberately INDEPENDENT
+        # of the chart's own: the signal provider marks gaps from one
+        # timeframe's structure while you may be looking at another, and an
+        # M15 gap is still the level price reacts to when you zoom into M1.
+        # "off" draws nothing.
+        "fvg_tf":   "15m",
+        "fvgs":     [],
+        "fvg_last": 0.0,
     }
 
     # ── Toolbar ───────────────────────────────────────────────────────────────
@@ -162,6 +140,33 @@ def render(get_engine: Callable):
 
         ui.element("div").classes("w-px bg-gray-700 mx-2 self-stretch")
 
+        # FVG overlay timeframe. Separate from the chart timeframe above --
+        # see _state["fvg_tf"].
+        ui.label("FVG:").classes("text-xs text-gray-500 shrink-0")
+        fvg_sel = ui.select(
+            {"off": "OFF", "1m": "M1", "5m": "M5", "15m": "M15"},
+            value=_state["fvg_tf"],
+        ).props("dense outlined options-dense").classes("w-24 shrink-0").style(
+            "font-size:11px; min-height:0"
+        )
+        fvg_sel.tooltip(
+            "Draw Fair Value Gap zones from this timeframe's candles. Independent "
+            "of the chart timeframe, so an M15 gap stays visible while you look at "
+            "M1. Unfilled gaps are solid, filled ones faded, inverted ones outlined. "
+            "Only the live zones are drawn (untested gaps, plus recent fills and "
+            "inversions), not every historical imbalance."
+        )
+
+        def _on_fvg_tf(e):
+            v = e.value if isinstance(e.value, str) else (e.value or {}).get("value")
+            _state["fvg_tf"] = v or "off"
+            _state["fvg_last"] = 0.0
+            asyncio.create_task(_refresh_fvgs())
+
+        fvg_sel.on("update:model-value", _on_fvg_tf)
+
+        ui.element("div").classes("w-px bg-gray-700 mx-2 self-stretch")
+
         ohlc_lbl = ui.label("XAUUSD").classes("text-xs font-mono text-gray-400 shrink-0")
 
         # EMA legend chips
@@ -191,6 +196,15 @@ def render(get_engine: Callable):
             "markLine": {
                 "silent":    True,
                 "symbol":    ["none", "none"],
+                "animation": False,
+                "data":      [],
+            },
+            # FVG zones. markArea with only yAxis bounds spans the full
+            # chart width, which is what a price zone should do -- the gap
+            # stays relevant to the right of where it formed, and that is
+            # exactly how the provider's own screenshots draw them.
+            "markArea": {
+                "silent":    True,
                 "animation": False,
                 "data":      [],
             },
@@ -427,12 +441,17 @@ def render(get_engine: Callable):
                 },
             })
 
-        tp_cols = ["#4ade80", "#34d399", "#10b981", "#059669", "#047857"]
+        # TP1-TP5 and SL lines for every active trade were removed here
+        # (2026-08-04, explicit request). With several trades open at once
+        # that was up to six dashed lines EACH, which buried the price
+        # action and the FVG zones this chart now draws. Each trade's ENTRY
+        # line is kept: it is one line per position and it is what locates
+        # the trade on the chart at all. The live TP/SL numbers are still
+        # on the trades panel beside the chart, so nothing is lost, it is
+        # just no longer drawn over the candles.
         for t in trades:
             dir_col  = _BULL_COL if t.get("direction", "").upper() == "BUY" else _BEAR_COL
             entry_p  = float(t["entry_price"])
-            sl_p     = float(t["stop_loss"]) if t.get("stop_loss") else None
-
             lines.append({
                 "yAxis": entry_p,
                 "lineStyle": {"color": dir_col, "width": 1.5, "type": "solid"},
@@ -441,28 +460,6 @@ def render(get_engine: Callable):
                     "color": dir_col, "position": "end", "fontSize": 10,
                 },
             })
-            if sl_p:
-                lines.append({
-                    "yAxis": sl_p,
-                    "lineStyle": {"color": "#FF4444", "width": 1, "type": "dashed"},
-                    "label": {
-                        "show": True, "formatter": f"SL {sl_p:.2f}",
-                        "color": "#FF4444", "position": "end", "fontSize": 10,
-                    },
-                })
-            for n in range(1, 6):
-                tp = t.get(f"tp{n}")
-                if tp:
-                    c = tp_cols[n - 1]
-                    lines.append({
-                        "yAxis": float(tp),
-                        "lineStyle": {"color": c, "width": 1, "type": "dashed"},
-                        "label": {
-                            "show": True,
-                            "formatter": f"TP{n} {float(tp):.2f}",
-                            "color": c, "position": "end", "fontSize": 10,
-                        },
-                    })
         return lines
 
     # ── Trades panel renderer ─────────────────────────────────────────────────
@@ -714,6 +711,102 @@ def render(get_engine: Callable):
 
     # ── Candle + indicator refresh (10s) ──────────────────────────────────────
 
+    def _bar_index_for_ts(ts: float) -> int | None:
+        """Index of the chart bar containing `ts`, or None if it predates the
+        visible window. The FVG overlay has its own timeframe, so its bar
+        numbering means nothing on this axis -- only the timestamp does."""
+        bar_ts = _state.get("bar_ts") or []
+        if not bar_ts or ts < bar_ts[0]:
+            return None
+        return max(0, bisect_right(bar_ts, ts) - 1)
+
+    def _build_fvg_areas(fvgs: list[dict]) -> list[list[dict]]:
+        """ECharts markArea data: each zone is a [start, end] pair.
+
+        Each zone starts at the bar where the gap formed and runs to the
+        right edge, which is how a gap actually reads: it is not a level that
+        existed before the imbalance that created it. Leaving the x bound off
+        entirely (the previous behaviour) drew every zone across the whole
+        chart, so a screen of them turned into stacked horizontal bands with
+        all the labels piled up on the left.
+
+        Styled to match the reference MT5 chart: a solid block in the gap's
+        direction, labelled BUY FVG / SELL FVG. Only two states reach here --
+        untested and tested (wicked into but not broken) -- so the tested one
+        is drawn a shade lighter rather than given its own colour scheme.
+        """
+        areas = []
+        for f in fvgs:
+            bullish = f.get("direction") == "bullish"
+            base = "34,197,94" if bullish else "239,68,68"
+            # Tested gaps stay drawn but read as the weaker of the two.
+            alpha = 0.30 if f.get("filled") else 0.55
+            start = {
+                "yAxis": f["bottom"],
+                "itemStyle": {
+                    "color": f"rgba({base},{alpha})",
+                    "borderColor": f"rgba({base},0.9)",
+                    "borderWidth": 1,
+                },
+                "label": {
+                    "show": True,
+                    "formatter": f"{'BUY' if bullish else 'SELL'} FVG",
+                    # insideStartTop centres the text on the zone's left edge,
+                    # which hangs half the label outside the box; align + a
+                    # small offset tucks it inside.
+                    "position": "insideStartTop",
+                    "align": "left",
+                    "verticalAlign": "top",
+                    "offset": [5, 3],
+                    "color": "#e5e7eb",
+                    "fontSize": 10,
+                    "fontWeight": "bold",
+                },
+            }
+            bar = _bar_index_for_ts(f["ts"]) if f.get("ts") else None
+            if bar is not None:
+                # Integer index rather than the axis label: labels repeat
+                # across days (bare "13:45" on two dates), and ECharts would
+                # resolve the duplicate to the first match.
+                start["xAxis"] = bar
+            areas.append([start, {"yAxis": f["top"]}])
+        return areas
+
+    async def _refresh_fvgs():
+        """Recompute the FVG overlay. Deliberately independent of
+        _refresh_candles: the overlay has its own timeframe, so it needs its
+        own candle fetch rather than reusing whatever the chart is showing."""
+        try:
+            tf = _state.get("fvg_tf", "off")
+            if tf == "off":
+                _state["fvgs"] = []
+                chart.options["series"][0]["markArea"]["data"] = []
+                chart.update()
+                return
+            from backend.src.services.reversal_engine.ict_patterns import (
+                detect_fvgs, select_display_fvgs,
+            )
+            mt5_tf = TF_MAP.get(tf, "M15")
+            # Enough history for gaps to be meaningful without dragging the
+            # whole chart's refresh down; FVGs older than this are almost
+            # always long since filled.
+            candles = await engine.get_candles(mt5_tf, 300)
+            if not candles:
+                return
+            # detect_fvgs is exhaustive on purpose (the ML features want every
+            # imbalance); a chart wants only the live ones.
+            fvgs = select_display_fvgs(candles, detect_fvgs(candles))
+            for f in fvgs:
+                # Carry the origin bar's timestamp so the zone can be anchored
+                # on a chart running a different timeframe.
+                f["ts"] = float(candles[f["idx"]].get("ts") or 0)
+            _state["fvgs"] = fvgs
+            _state["fvg_last"] = datetime.now(timezone.utc).timestamp()
+            chart.options["series"][0]["markArea"]["data"] = _build_fvg_areas(fvgs)
+            chart.update()
+        except Exception as e:
+            log.debug("FVG refresh failed: %s", e)
+
     async def _refresh_candles():
         try:
             tf     = _state["tf"]
@@ -723,6 +816,10 @@ def render(get_engine: Callable):
             if not candles:
                 return
             _state["candles"] = candles
+            # Bar timestamps, kept so the FVG overlay (which runs on its own
+            # timeframe and its own candle fetch) can anchor each zone to the
+            # chart bar where the gap actually formed.
+            _state["bar_ts"] = [float(c.get("ts") or 0) for c in candles]
             _state["last_candle_refresh"] = datetime.now(timezone.utc).timestamp()
 
             times:     list[str]   = []
@@ -797,6 +894,7 @@ def render(get_engine: Callable):
         try:
             tick       = await engine.get_tick()
             trades     = await chart_controller.get_open_trades(engine)
+            trades     = [t for t in trades if not is_stuck_placeholder(t)]
             untracked  = await engine.get_untracked_mt5_positions()
             _state["tick"] = tick
 
@@ -836,4 +934,5 @@ def render(get_engine: Callable):
     ui.timer(3.0,  _refresh_fast)
 
     asyncio.ensure_future(_refresh_candles())
+    asyncio.ensure_future(_refresh_fvgs())
     asyncio.ensure_future(_refresh_fast())

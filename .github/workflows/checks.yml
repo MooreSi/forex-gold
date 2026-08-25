@@ -7,6 +7,11 @@ name: checks
 on:
   push:
   pull_request:
+  # Manual trigger. Added 2026-08-25: this repo is a fork created that day,
+  # and GitHub does not run a fork's workflows until Actions is enabled on it
+  # by hand -- so there was no way to ask for a run at all. With this, the
+  # Actions tab gets a "Run workflow" button once that is done.
+  workflow_dispatch:
 
 # One run per ref; cancel a superseded run so two suites never race (CLAUDE.md:
 # two full suites at once produce phantom failures).

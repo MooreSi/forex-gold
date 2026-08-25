@@ -63,7 +63,23 @@ _HOST = "127.0.0.1"
 # its own version on every connection and we check it against the source we
 # were shipped with, so a stale build is a log line instead of a day of
 # fixes that were never loaded.
-_EA_SOURCE = Path(__file__).resolve().parents[2] / "mql5" / "ForexTraderBridge.mq5"
+def _repo_root() -> Path:
+    """The checkout root (the directory holding run.py).
+
+    Walks up for the marker rather than counting parents: upstream counted two
+    from forex_trader/core/, but this module now sits at
+    backend/src/services/broker/, so the fixed index resolved to backend/src
+    and the EA source lookup pointed at a file that does not exist -- the
+    version handshake then reported every EA as stale. Found by
+    tests/core/test_ea_bridge_version_handshake.py in the 2026-08-25 merge."""
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "run.py").exists():
+            return candidate
+    return here.parents[2]
+
+
+_EA_SOURCE = _repo_root() / "mql5" / "ForexTraderBridge.mq5"
 _EA_VERSION_RE = re.compile(r'^\s*#define\s+EA_VERSION\s+"([^"]+)"', re.M)
 # MetaEditor stamps __DATETIME__ in local time, and this compares it to a
 # local mtime -- sound only because the EA and this process always share a

@@ -25,7 +25,7 @@ import time
 
 import pytest
 
-from backend.src.services.trading import profit_sync
+from backend.src.services.trading import profit_sync as core_profit_sync
 from backend.src.db import database as db
 from backend.src.services.trading.sim_account import get_sim_account
 from backend.src.services.broker.ea_bridge import comment_for_trade, find_template_leg_tickets

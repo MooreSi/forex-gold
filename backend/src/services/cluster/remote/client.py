@@ -269,7 +269,8 @@ def _app_version() -> str:
         return __version__
     except Exception:
         pass
-    ver_file = Path(__file__).resolve().parents[4] / "VERSION"
+    from backend.src.utils.os_utils import repo_root
+    ver_file = repo_root() / "VERSION"
     if ver_file.exists():
         return ver_file.read_text(encoding="utf-8").strip()
     return "unknown"

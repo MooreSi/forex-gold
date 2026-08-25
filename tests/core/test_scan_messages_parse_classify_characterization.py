@@ -18,12 +18,15 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src import runtime as engine_mod
+from backend.src.services.signals import scan_messages as _scan_messages_mod
 from backend.src.services.signals import scan_parse_classify as pc
 from backend.src.runtime import TradingRuntime
 from backend.src.services.telegram import alerts
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.runtime import SimulationEngine
 from backend.src.services.signals.parser import validate_signal
+
+_NOW_ISO = datetime.now(timezone.utc).isoformat()
 
 
 def _reset_thread_local_connection():
@@ -426,7 +429,9 @@ def test_one_failing_message_does_not_abort_the_batch(fresh_db):
             raise TypeError("'>=' not supported between instances of 'NoneType' and 'float'")
         return await real(tg_id, *a, **k)
 
-    with mock.patch.object(engine_mod, "_classify_and_parse_impl", boom):
+    # The scan loop moved off the engine into services/signals/scan_messages
+    # during the refactor, and _classify_and_parse_impl is bound there now.
+    with mock.patch.object(_scan_messages_mod, "_classify_and_parse_impl", boom):
         result, uq, alerts = _run([
             {"id": "b30", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO},
             {"id": "b31", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO},

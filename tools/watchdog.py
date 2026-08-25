@@ -18,8 +18,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from forex_trader.core import core_autostart as autostart  # noqa: E402
-from forex_trader.core import platform_utils as _pu  # noqa: E402
 
 from backend.src.services.positions import core_autostart as autostart  # noqa: E402
 from backend.src.utils import os_utils as _pu  # noqa: E402

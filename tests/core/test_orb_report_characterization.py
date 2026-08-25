@@ -22,6 +22,8 @@ from unittest import mock
 
 import pytest
 
+from backend.src.services.trading import orb_execute as orb_exec
+
 from backend.src.db import database as db
 from backend.src.runtime import SimulationEngine
 from backend.src.runtime import TradingRuntime
@@ -158,8 +160,8 @@ def test_auto_execute_not_proceeding_does_not_place_order(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     patcher, m = _patch_open_market()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=False), patcher:
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
+    with patcher:
+        asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, e._bridge, False))
     m.assert_not_called()
 
 
@@ -167,8 +169,8 @@ def test_auto_execute_direction_inside_does_not_place_order(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     patcher, m = _patch_open_market()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), patcher:
-        asyncio.run(SimulationEngine._orb_auto_execute(e, {"direction": "inside"}))
+    with patcher:
+        asyncio.run(orb_exec.orb_auto_execute({"direction": "inside"}, e._bridge, True))
     m.assert_not_called()
 
 
@@ -176,8 +178,8 @@ def test_auto_execute_bullish_places_market_order(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     patcher, m = _patch_open_market()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), patcher:
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
+    with patcher:
+        asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, e._bridge, True))
     m.assert_called_once()
     args, kwargs = m.call_args
     assert args[1] == "BUY"
@@ -193,8 +195,8 @@ def test_auto_execute_uses_orb_lot_size_risk_setting(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     patcher, m = _patch_open_market()
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), patcher:
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))
+    with patcher:
+        asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, e._bridge, True))
     assert m.call_args.kwargs["lot_size"] == 0.05
 
 
@@ -202,7 +204,7 @@ def test_auto_execute_market_order_failure_does_not_raise(fresh_db):
     e = SimulationEngine.__new__(SimulationEngine)
     e._bridge = _FakeBridge()
     patcher, m = _patch_open_market(side_effect=ConnectionError("EA send failed"))
-    with mock.patch.object(SimulationEngine, "_is_active_trader_node", return_value=True), patcher, \
+    with patcher, \
          mock.patch("backend.src.services.telegram.alerts.send_message"):
-        asyncio.run(SimulationEngine._orb_auto_execute(e, _BULLISH_REPORT))  # must not raise
+        asyncio.run(orb_exec.orb_auto_execute(_BULLISH_REPORT, e._bridge, True))  # must not raise
     m.assert_called_once()

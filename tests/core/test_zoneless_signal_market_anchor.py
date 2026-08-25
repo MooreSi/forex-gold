@@ -136,6 +136,6 @@ def test_open_trade_applies_the_conversion_on_the_ea_copy():
     stages from. core_signal_resolution re-reads the template from the DB, so
     adjusting it there would not propagate."""
     import inspect
-    from backend.src.services.trading import open_trade
+    from backend.src.services.trading import open_trade as core_open_trade
     src = inspect.getsource(core_open_trade)
     assert "apply_market_anchor_for_zoneless_signal(" in src

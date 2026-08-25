@@ -20,7 +20,7 @@ from unittest import mock
 
 import pytest
 
-from backend.src.services.ai import provider
+from backend.src.services.ai import provider as ai_provider
 from backend.src.services.positions import core_app_update as cau
 
 

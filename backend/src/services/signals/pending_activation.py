@@ -50,15 +50,27 @@ from backend.src.services.risk import expert_params
 
 log = logging.getLogger(__name__)
 
+_EXPIRY = 120  # 2 minutes -- the shipped default; the live value is expiry_secs()
+
+
 def expiry_secs() -> int:
     """The base expiry for a queued signal: cancel it if its zone is not
-    refilled in time. Was a 2-minute constant (_EXPIRY); it is Settings >
-    Expert Tunables (`pending_signal_expiry_s`, default 120) since the
-    tunables work, and stays a function so a change takes effect without a
-    restart. Only the DEFAULT branch of _resolve_expiry_sec uses it -- every
-    longer window there exists for its own documented reason and is not
-    governed by this."""
-    return int(expert_params.get("pending_signal_expiry_s"))
+    refilled in time.
+
+    Was the bare `_EXPIRY` constant; it is Settings > Expert Tunables
+    (`pending_signal_expiry_s`) since the tunables work, and stays a function
+    so a change takes effect without a restart. `_EXPIRY` remains as the
+    documented shipped default and the fallback if the tunable is unreadable,
+    which is also what upstream's tests compare against.
+
+    Only the DEFAULT branch of _resolve_expiry_sec uses this -- every longer
+    window there exists for its own documented reason and is not governed by
+    it."""
+    try:
+        return int(expert_params.get("pending_signal_expiry_s"))
+    except Exception:
+        return _EXPIRY
+
 # Immediate Market Entry OFF (2026-08-06, explicit user directive). With IME
 # on, a signal is taken at market the moment it lands and never reaches this
 # queue at all. With it off, the signal's whole premise is that price comes

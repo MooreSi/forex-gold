@@ -94,7 +94,7 @@ def test_min_lot_floor_forces_overrisk_on_wide_stops_at_small_balance(monkeypatc
 def test_broker_tp_is_set_for_fixed_rr():
     """MT5 must hold the target itself -- nothing polls this strategy."""
     import inspect
-    from backend.src.services.trading import open_trade
+    from backend.src.services.trading import open_trade as core_open_trade
     src = inspect.getsource(core_open_trade.open_trade)
     assert "STRATEGY_FIXED_RR" in src
     assert "mt5_tp = tp1" in src
@@ -106,7 +106,9 @@ def test_engine_dispatch_has_explicit_branch_not_scale_out_fallthrough():
     partial-closes against tp1/tp2/tp3 using whatever entry_price the row
     holds."""
     import inspect
-    from backend.src import runtime
+    # The strategy dispatch moved off the engine into the monitor cycle
+    # during the refactor; the guard follows it. (2026-08-25 merge.)
+    from backend.src.services.positions import monitor_cycle as engine
     src = inspect.getsource(engine)
     assert "elif strategy == STRATEGY_FIXED_RR:" in src
 

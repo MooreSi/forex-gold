@@ -213,16 +213,29 @@ def test_mins_to_event_is_negative_after_the_event(feed, at_time):
 # ── ML feature ────────────────────────────────────────────────────────────────
 
 def test_proximity_norm_scales_with_distance_to_next_event(feed, at_time):
+    """The norm tracks the distance to the next high-impact event.
+
+    refresh_now() between clock moves because get_news_proximity_norm() is a
+    pure cache read on this branch -- it never fetches inline, which is what
+    keeps ~10s of blocking urllib off the engine's every cycle (backend review
+    2026-08-08 #5, pinned by tests/utils/test_news_calendar_offload.py).
+    Upstream computes it on read instead, so its version of this test needed no
+    refresh; the assertion below is unchanged from upstream's.
+    """
     at_time(_NFP_TS - 120 * 60)
+    nc.refresh_now()
     assert nc.get_news_proximity_norm() == 1.0
     at_time(_NFP_TS - 60 * 60)
+    nc.refresh_now()
     assert nc.get_news_proximity_norm() == 0.5
     at_time(_NFP_TS - 6 * 60)
+    nc.refresh_now()
     assert nc.get_news_proximity_norm() == 0.05
 
 
 def test_proximity_norm_is_safe_when_no_events_remain(feed, at_time):
     at_time(_NFP_TS + 86400)
+    nc.refresh_now()   # pure cache read on this branch -- see the test above
     assert nc.get_news_proximity_norm() == 1.0
 
 
@@ -231,6 +244,7 @@ def test_proximity_norm_ignores_non_gold_currencies(monkeypatch, at_time):
     cad_only = [e for e in _FEED if e["country"] == "CAD"]
     monkeypatch.setattr(nc, "_fetch_raw", lambda: cad_only)
     at_time(_NFP_TS - 10 * 60)
+    nc.refresh_now()   # pure cache read on this branch -- see the test above
     assert nc.get_news_proximity_norm() == 1.0
 
 

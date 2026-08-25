@@ -21,6 +21,8 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.trading import instant_entry as ime
 
+_FRESH_TS = datetime.now(timezone.utc).isoformat()
+
 
 class _FakeBridge:
     def __init__(self, tick=None):

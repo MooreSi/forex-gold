@@ -60,8 +60,23 @@ _PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist
 
 
 def repo_root() -> Path:
-    """The checkout root (the directory holding run.py)."""
-    return Path(__file__).resolve().parent.parent.parent
+    """The checkout root (the directory holding run.py).
+
+    Walks up looking for run.py rather than counting parents. Upstream counted
+    three, correct from forex_trader/core/; this module now lives five levels
+    down at backend/src/services/positions/, so the fixed count silently
+    resolved to backend/src and watchdog_script() pointed at a file that does
+    not exist -- autostart then refused to arm with "Watchdog script missing".
+    Found by tests/core/test_autostart.py in the 2026-08-25 merge. Counting
+    parents breaks again on the next move; looking for the marker does not.
+    """
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "run.py").exists():
+            return candidate
+    # Nothing found (an unusual install layout): fall back to the historical
+    # count rather than raising on import.
+    return here.parent.parent.parent
 
 
 def watchdog_script() -> Path:

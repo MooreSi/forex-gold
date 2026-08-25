@@ -38,7 +38,16 @@ _TOKENS_FILE        = _REMOTE_DIR / "allowed_tokens.json"
 _PENDING_FILE       = _REMOTE_DIR / "pending_registrations.json"
 _REVOKED_FILE       = _REMOTE_DIR / "revoked_tokens.json"
 _ADMIN_MACHINES_FILE = _REMOTE_DIR / "admin_machines.json"
-_CHANGELOG_FILE     = Path(__file__).resolve().parents[4] / "CHANGELOG.md"
+def _repo_root_for_files() -> Path:
+    """Checkout root, found by marker rather than parent count -- this
+    module moved two levels deeper in the refactor and the old fixed
+    index resolved to backend/, so VERSION and CHANGELOG.md were never
+    found and every client reported an unknown version."""
+    from backend.src.utils.os_utils import repo_root
+    return repo_root()
+
+
+_CHANGELOG_FILE     = _repo_root_for_files() / "CHANGELOG.md"
 
 # ── In-memory state ─────────────────────────────────────────────────────────
 
@@ -711,7 +720,7 @@ def _read_version() -> str:
         return __version__
     except Exception:
         pass
-    ver_file = Path(__file__).resolve().parents[4] / "VERSION"
+    ver_file = _repo_root_for_files() / "VERSION"
     if ver_file.exists():
         return ver_file.read_text(encoding="utf-8").strip()
     return "unknown"

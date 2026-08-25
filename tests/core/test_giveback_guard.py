@@ -236,7 +236,7 @@ def test_close_trade_invokes_the_guard_unconditionally():
     """Guards the wiring: sitting inside the governor's `if` would make it
     unavailable to the setup it was written for."""
     import inspect
-    from backend.src.services.trading import close_trade
+    from backend.src.services.trading import close_trade as core_close_trade
     src = inspect.getsource(core_close_trade)
     assert "apply_giveback_guard_on_close" in src
 
@@ -350,7 +350,7 @@ def test_it_does_not_extend_an_existing_pause(fresh_db):
 
 def test_close_trade_invokes_the_loss_ceiling_unconditionally():
     import inspect
-    from backend.src.services.trading import close_trade
+    from backend.src.services.trading import close_trade as core_close_trade
     assert "apply_daily_loss_halt_on_close" in inspect.getsource(core_close_trade)
 
 

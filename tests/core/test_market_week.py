@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.src.services.dpm import engine
+from backend.src.services.dpm import engine as dpm_engine
 
 
 def _utc(year, month, day, hour, minute=0):
@@ -72,7 +72,7 @@ def test_the_stub_reaches_the_gate_the_147_failed_on():
     """Patching dpm_engine alone is not obviously enough -- is_session_allowed
     imports the function inside its own body. This is the assertion that the
     stub actually lands where it matters."""
-    from backend.src.services.risk import risk_settings_repo
+    from backend.src.services.risk import risk_settings_repo as core_db_risk_settings
 
     # Reaching detect_session at all means the weekly-close branch let it past;
     # a real closed week would have short-circuited to "closed" first.

@@ -38,6 +38,7 @@ from backend.src.utils.models import STRATEGY_ADAPTIVE_RUNNER_2
 from backend.src.utils.models import STRATEGY_BE_RUNNER
 from backend.src.utils.models import STRATEGY_CONSERVATIVE
 from backend.src.utils.models import STRATEGY_CONSERVATIVE_TRIAL
+from backend.src.utils.models import STRATEGY_FIXED_RR
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
 from backend.src.utils.models import STRATEGY_NO_SL_SCALE
 from backend.src.utils.models import STRATEGY_ORB_FIXED
@@ -206,6 +207,18 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                         await _handle_no_sl_scale_impl(trade, tick, ctx.bridge, ctx.tp_trigger_cache, close_full_after_tps=ctx.close_full_after_tps)
                     elif strategy == STRATEGY_CONSERVATIVE_TRIAL:
                         await _handle_conservative_trial_impl(trade, tick, ctx.bridge, ctx.tp_trigger_cache, close_full_after_tps=ctx.close_full_after_tps)
+                    elif strategy == STRATEGY_FIXED_RR:
+                        # Nothing to do -- both the stop and the target are
+                        # real broker orders, so MT5 closes this trade itself
+                        # and the reconciliation poller picks it up. An
+                        # explicit branch is REQUIRED: the else below is
+                        # handle_scale_out, which would otherwise partial-close
+                        # against tp1 and fabricate PnL. Ported from upstream
+                        # engine.py by the 2026-08-25 merge -- the strategy did
+                        # not exist at the fork point, so this dispatch had no
+                        # branch for it and a FIXED_RR trade fell straight
+                        # through. Guarded by tests/core/test_fixed_rr_strategy.
+                        pass
                     else:
                         await _handle_scale_out_impl(trade, tick, ctx.bridge, ctx.tp_trigger_cache, ctx.scale_out_last_fail, close_full_after_tps=ctx.close_full_after_tps)
                 except Exception as exc:

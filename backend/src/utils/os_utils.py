@@ -10,6 +10,7 @@ sys.platform checks.
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 # ── Port detection ─────────────────────────────────────────────────────────────
@@ -324,3 +325,22 @@ def restart_app(root) -> None:
 
     from nicegui import app
     app.shutdown()
+
+
+def repo_root() -> Path:
+    """The checkout root -- the directory holding run.py.
+
+    Walks up for the marker instead of counting parents. The 2026-08-25
+    upstream merge found four modules whose fixed parent counts were correct
+    from their pre-refactor homes and silently wrong from their new ones
+    (remote/client.py and remote/server.py resolved VERSION and CHANGELOG.md
+    to backend/, mt5_native.py looked for mt5_bridge.py in backend/src/, and
+    ea_bridge/core_autostart the same) -- so "which commit is this client
+    running" answered "unknown" and the Wine bridge could not be found.
+    Counting parents breaks on the next move; the marker does not.
+    """
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "run.py").exists():
+            return candidate
+    return here.parents[3]

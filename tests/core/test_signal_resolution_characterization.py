@@ -24,6 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
+from backend.src.runtime import SimulationEngine
+
 from backend.src.db import database as db
 from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import (

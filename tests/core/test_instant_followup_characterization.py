@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.src.runtime import SimulationEngine
+
 from backend.src.db import database as db
 from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_BE_RUNNER

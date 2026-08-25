@@ -66,7 +66,8 @@ class NativeMT5Bridge:
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     async def startup(self) -> None:
-        bridge_path = Path(__file__).resolve().parent.parent.parent / "mt5_bridge.py"
+        from backend.src.utils.os_utils import repo_root
+        bridge_path = repo_root() / "mt5_bridge.py"
         if not bridge_path.exists():
             log.error("NativeMT5Bridge: mt5_bridge.py not found at %s", bridge_path)
             return

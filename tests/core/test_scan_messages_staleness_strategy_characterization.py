@@ -23,6 +23,8 @@ from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.runtime import TradingRuntime
 
+_NOW_ISO = datetime.now(timezone.utc).isoformat()
+
 
 def _reset_thread_local_connection():
     conn = getattr(db._thread_local, "conn", None)

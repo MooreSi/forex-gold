@@ -16,6 +16,10 @@ from unittest import mock
 
 import pytest
 
+from backend.src.services.positions.monitor_loop import check_sl
+
+from backend.src.runtime import SimulationEngine
+
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.telegram import alerts as telegram_alerts
@@ -74,11 +78,14 @@ def _make_engine(bridge):
     e = TradingRuntime.__new__(TradingRuntime)
     e._monitor_running = True
     e._bridge = bridge
-    e._sync_cycle = 0
-    e._profit_cycle = 0
-    e._cal_cycle = 0
-    e._pending_revalidate_cycle = 0
-    e._dxy_cycle = 0
+    # The cycle counters and the DXY candle cache live in a single
+    # MonitorState object (M4 B9d) so the monitor cycle -- which lives in
+    # services/positions/monitor_cycle.py now -- can mutate them by reference
+    # and have the counts survive between cycles. Upstream still sets them as
+    # four loose attributes on the engine; the 2026-08-25 merge kept the
+    # refactored shape and carried upstream's new pending_revalidate_cycle
+    # into MonitorState itself.
+    e._monitor_state = _MonitorState()
     e._dpm_candles = None
     e._cfg = {}
     e._tp_trigger_cache = _TPCache()
@@ -192,34 +199,37 @@ def _run_one_cycle(bridge, trade_id, profit_close_usd=None, ea_instance=None,
     }
 
 
-# ── _check_sl (pure) ─────────────────────────────────────────────────────
+# ── check_sl (pure) ──────────────────────────────────────────────────────
+# _check_sl was a pure method on the engine; the refactor moved it to
+# services/positions/monitor_loop.check_sl as a free function. Same logic,
+# same contract -- only the call shape changes. (2026-08-25 merge.)
 
 def test_check_sl_buy_crosses():
     e = SimulationEngine.__new__(SimulationEngine)
     trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2389.0, ask=2389.5)
-    assert e._check_sl(trade, tick) == ("t1", 2390.0, "SL")
+    assert check_sl(trade, tick) == ("t1", 2390.0, "SL")
 
 
 def test_check_sl_sell_crosses():
     e = SimulationEngine.__new__(SimulationEngine)
     trade = {"trade_id": "t1", "direction": "SELL", "stop_loss": 2410.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2409.5, ask=2410.0)
-    assert e._check_sl(trade, tick) == ("t1", 2410.0, "SL")
+    assert check_sl(trade, tick) == ("t1", 2410.0, "SL")
 
 
 def test_check_sl_no_cross():
     e = SimulationEngine.__new__(SimulationEngine)
     trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": 2390.0, "entry_price": 2400.0}
     tick = SimpleNamespace(bid=2395.0, ask=2395.5)
-    assert e._check_sl(trade, tick) is None
+    assert check_sl(trade, tick) is None
 
 
 def test_check_sl_no_stop_loss():
     e = SimulationEngine.__new__(SimulationEngine)
     trade = {"trade_id": "t1", "direction": "BUY", "stop_loss": None}
     tick = SimpleNamespace(bid=2000.0, ask=2000.5)
-    assert e._check_sl(trade, tick) is None
+    assert check_sl(trade, tick) is None
 
 
 # ── SL-hit MT5 reconciliation ────────────────────────────────────────────

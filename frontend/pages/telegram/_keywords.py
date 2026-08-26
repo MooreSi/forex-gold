@@ -70,27 +70,6 @@ _PARSING_CATEGORIES: list[tuple[str, str, list[tuple[str, str, str, int]]]] = [
          "this they are dropped and the setup is lost.", 0),
     ]),
 ]
-_LK_TOGGLES: list[tuple[str, str, str]] = [
-    ("lk_enable_tp_parsing", "Enable TP Parsing",
-     "Use this signal's own stated TP levels when a new entry parses. "
-     "When OFF, TP levels are stripped before execution."),
-    ("lk_enable_close_all_parsing", "Enable CLOSE ALL Parsing",
-     "Automatically close the triggering channel's own open trade when it "
-     "sends a CLOSE ALL trigger phrase."),
-    ("lk_ignore_forwarded_messages", "Ignore Forwarded Messages",
-     "Do not execute trades from messages forwarded from other channels."),
-    ("lk_enable_tp_hit_parsing", "Enable TP HIT Parsing",
-     "Detect and log/notify \"TP1 HIT\"-style messages. Never moves SL or "
-     "closes anything by itself."),
-    ("lk_enable_risk_free_be_parsing", "Enable RISK FREE / BE Parsing",
-     "Move SL to entry price (breakeven) when the channel sends a "
-     "breakeven/risk-free trigger phrase."),
-    ("lk_enable_sl_parsing", "Enable SL Parsing",
-     "Use this signal's own stated Stop Loss when a new entry parses. "
-     "When OFF, Stop Loss is stripped before execution."),
-    ("lk_ignore_media_messages", "Ignore Media Messages",
-     "Ignore messages containing photos, videos, or documents (only parse plain text)."),
-]
 _CARD = "bg-gray-900 p-3 rounded-lg h-full flex flex-col"
 
 
@@ -117,10 +96,6 @@ def _render_toggle_card(key: str, label: str, desc: str, default: int,
 
 
 def _render_parsing_settings_section() -> None:
-    rs = tg_controller.get_risk_settings()
-
-
-def _render_logic_keywords_section() -> None:
     rs = tg_controller.get_risk_settings()
 
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
@@ -188,7 +163,7 @@ def _render_logic_keywords_section() -> None:
                 ui.notify(f"Fallback SL distance set to {val:.0f} pips", type="positive")
             fb_sl_in.on_value_change(_on_fb_sl)
 
-        # ── Lexicon boxes ──────────────────────────────────────────────────
+        # ── Logic Keywords ─────────────────────────────────────────────────
         with ui.row().classes("items-center gap-2 mt-5 mb-2"):
             ui.icon("key", size="sm").classes("text-yellow-400")
             ui.label("Logic Keywords").classes("text-base font-bold text-yellow-300")
@@ -196,76 +171,6 @@ def _render_logic_keywords_section() -> None:
                 "Global, editable trigger phrases used by the Telegram message "
                 "parser — independent of any per-channel learned rules."
             )
-
-        # ── Toggles ────────────────────────────────────────────────────────
-        with ui.grid(columns=3).classes("w-full gap-3 mb-4"):
-            for key, label, tip in _LK_TOGGLES:
-                with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                    sw = ui.switch(label, value=bool(rs.get(key, 1))).classes("text-sm")
-                    ui.label(tip).classes("text-xs text-gray-500 mt-1")
-
-                    def _on_toggle(e, key=key, label=label):
-                        tg_controller.update_risk_settings({key: 1 if e.value else 0})
-                        ui.notify(f"{label} {'enabled' if e.value else 'disabled'}",
-                                 type="positive" if e.value else "info")
-                    sw.on_value_change(_on_toggle)
-
-        # ── Auto-Execution / Immediate Market Buy-Sell / Entry Realignment
-        # (moved here from Trading > Strategy, 2026-07-23; restyled to match
-        # the Logic Keywords toggle cards above, 2026-07-23; no separator
-        # from the toggles above -- sits within the same section, 2026-07-23) ──
-        with ui.grid(columns=3).classes("w-full gap-3 mb-4"):
-            with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                auto_sw = ui.switch(
-                    "Auto-Execution", value=bool(rs.get("auto_execute_signals", 0)),
-                ).classes("text-sm")
-                ui.label(
-                    "Incoming Telegram signals are automatically traded when ON. "
-                    "Manual signals always require explicit execution. Ensure "
-                    "Algo Trading is enabled in the MT5 Terminal — MT5 disables "
-                    "it automatically after restarts or account switches."
-                ).classes("text-xs text-gray-500 mt-1")
-
-                def _on_auto_toggle(e):
-                    tg_controller.update_risk_settings({"auto_execute_signals": 1 if e.value else 0})
-                    ui.notify(f"Auto-execution {'enabled' if e.value else 'disabled'}",
-                             type="positive" if e.value else "info")
-                auto_sw.on_value_change(_on_auto_toggle)
-
-            with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                ime_sw = ui.switch(
-                    "Immediate Market Buy/Sell", value=bool(rs.get("immediate_market_entry", 0)),
-                ).classes("text-sm")
-                ui.label(
-                    "Reads all Telegram channels for bare 'Buy Now'/'Sell Now' "
-                    "messages and enters at current market price immediately. "
-                    "When the follow-up signal with SL and TP levels arrives the "
-                    "open trade is updated automatically. Applies to all strategies."
-                ).classes("text-xs text-gray-500 mt-1")
-
-                def _on_ime_toggle(e):
-                    tg_controller.update_risk_settings({"immediate_market_entry": 1 if e.value else 0})
-                    ui.notify(f"Immediate market entry {'enabled' if e.value else 'disabled'}",
-                             type="positive" if e.value else "info")
-                ime_sw.on_value_change(_on_ime_toggle)
-
-            with ui.card().classes("bg-gray-900 p-3 rounded-lg"):
-                realign_sw = ui.switch(
-                    "Entry Realignment", value=bool(rs.get("lk_entry_realignment", 0)),
-                ).classes("text-sm")
-                ui.label(
-                    "Limit Runner only. If the market has already moved through "
-                    "the signalled zone by the time the order would be placed, "
-                    "enters at current market price instead and shifts SL/TP by "
-                    "the same distance — otherwise the broker rejects a "
-                    "now-invalid limit price and the trade is lost entirely."
-                ).classes("text-xs text-gray-500 mt-1")
-
-                def _on_realign_toggle(e):
-                    tg_controller.update_risk_settings({"lk_entry_realignment": 1 if e.value else 0})
-                    ui.notify(f"Entry realignment {'enabled' if e.value else 'disabled'}",
-                             type="positive" if e.value else "info")
-                realign_sw.on_value_change(_on_realign_toggle)
 
         # ── Lexicon boxes ──────────────────────────────────────────────────
         lexicons = logic_kw.get_all_lexicons()

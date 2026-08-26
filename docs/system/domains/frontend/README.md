@@ -45,6 +45,8 @@ delivered in NiceGUI instead.
 - History at `days=3650` forced the WebSocket buffer from 1MB to 10MB; ping/reconnect tuned in `run.py` for throttled background tabs.
 - `app.py` patches a NiceGUI 3.12.x bug (`parent_slot` dead-weakref `RuntimeError` on client disconnect).
 - MT5 timestamps: use `_uk(ts)` from `pages/trading/_shared.py`; do not roll your own.
+- A page's render tests must pin its *settings*, not only its most eye-catching card. The Parsing tab shipped from the upstream merge (1e383fe) with `_render_parsing_settings_section` an empty stub and its whole body parked in `_render_logic_keywords_section`, which nothing called: every switch on the tab disappeared from the UI while staying fully wired in the backend, so `immediate_market_entry` could not be turned on and a bare "Buy Now" signal was missed. The telegram landmarks in `test_remaining_pages_render.py` pinned only the auth wizard, so nothing went red. Fixed 2026-08-26; `tests/frontend/test_parsing_settings_render.py` now pins the block and asserts every row of `_PARSING_CATEGORIES` reaches the screen.
+- A settings switch that vanishes fails *silently and expensively*: the DB column keeps its default, the backend keeps gating on it, and the page still renders. Deleting a toggle is never a cosmetic change.
 - `test_panel.py` is actually the Bounce engine — named after the service, not what the user calls it.
 - Permanent LOC exemptions with written reasons: `mt5_bridge.py` (separate interpreter) and `runtime.py` (composition root, stopped at 1,310 lines).
 

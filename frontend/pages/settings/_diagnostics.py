@@ -7,7 +7,7 @@ from nicegui import ui
 
 from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.services.positions import core_autostart as _autostart
-from backend.src.utils import os_utils as _pu
+from ._shared import _pu
 
 # Holds Popen (macOS) or _WindowsSleepGuard (Windows). Lives here rather than
 # in the package __init__ because _render_diagnostics is the only reader and

@@ -17,6 +17,8 @@ REPO = Path(__file__).resolve().parents[2]
 
 from frontend.components import empty_state
 
+from tests.frontend._source import module_source
+
 
 def test_every_empty_state_has_a_message_and_a_next_step():
     assert empty_state.EMPTY_STATES, "no empty-state copy defined at all"
@@ -43,7 +45,7 @@ def test_empty_signal_list_shows_next_step():
 
 def test_empty_history_shows_next_step():
     """The Analysis (history) empty periods point at the next action."""
-    src = (REPO / "frontend" / "pages" / "history.py").read_text(encoding="utf-8")
+    src = module_source("frontend/pages/history.py")
     assert "render_empty_state" in src and '"closed_trades"' in src
     assert "No closed trades in this period." not in src
 

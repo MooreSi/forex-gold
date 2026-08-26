@@ -175,9 +175,18 @@ def _connect() -> bool:
             _last_error = "Connected but account_info() returned None"
             log.warning(_last_error)
         else:
+            # Login masked: the diagnostics feature uploads ~3,000 raw log
+            # lines to the admin server, and this line put the account number,
+            # the broker server and the balance into every one of them (Q005 #1
+            # in docs/simon-handover/005-fact-finding.md -- confirmed from real
+            # captured logs). The last 3 digits are enough to tell two accounts
+            # apart in a support conversation. Balance dropped for the same
+            # reason; it is on the dashboard, where it belongs.
+            _login = str(info.login or "")
+            _masked = ("*" * max(0, len(_login) - 3)) + _login[-3:] if len(_login) > 3 else "***"
             log.info(
-                "Connected to MT5. Login: %s, Server: %s, Balance: %.2f %s",
-                info.login, info.server, info.balance, info.currency,
+                "Connected to MT5. Login: %s, Server: %s, Currency: %s",
+                _masked, info.server, info.currency,
             )
 
         with _lock:

@@ -26,13 +26,6 @@
       "reason": "FakeMT5Bridge's deterministic tick engine -- imported only by fake_bridge.py, so it orphans together with it. Same seam, same removal condition."
     },
     {
-      "module": "backend.src.services.channels.rule_generator",
-      "file": "backend/src/services/channels/rule_generator.py",
-      "loc": 275,
-      "class": "unwired-needs-owner-decision",
-      "reason": "Auto deterministic-rule generation the user 'explicitly chose'. Codebase references a differently-named ai_rule_generator.py (database.py:625, parser.py:647) -- may be superseded OR the intended-but-unwired impl. Verify which is live before any delete."
-    },
-    {
       "module": "backend.src.services.breakout_signal.backtest",
       "file": "backend/src/services/breakout_signal/backtest.py",
       "loc": 226,

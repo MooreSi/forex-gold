@@ -802,8 +802,8 @@ class SyncServer:
         self, channel_name: str, rule_type: str, pattern: str, action: str,
         notes: str, source_msg_id: Optional[str],
     ) -> None:
-        """Call after this node's own generate_rule() saves a rule locally,
-        to forward it live to the Mac if connected — best-effort, same as
+        """Call after this node saves a learned rule locally, to forward it
+        live to the Mac if connected — best-effort, same as
         push_own_trade_closed(); a missed delivery just means the Mac keeps
         needing its own AI fallback for this message shape until it
         independently gets and approves the same extraction."""

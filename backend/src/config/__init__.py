@@ -196,12 +196,23 @@ def load() -> dict:
         # Remote-admin fleet client (forex_trader/remote/client.py): connects
         # out to the live app's real admin server (217.155.25.160:8443) and
         # LAN-scans for a beacon, reporting this machine in as a manageable
-        # node that can receive pushed software updates. This checkout is an
-        # isolated fork with no business joining that fleet -- default off
-        # here; the live app's own config.yaml (which never sets this key)
-        # keeps its unrelated True default via base.get() below.
+        # node the admin console can see, licence and update.
+        #
+        # Default ON since 2026-08-26 (Q001 #5, amended). It was off because
+        # this checkout was an isolated fork with no business joining the
+        # fleet, AND because the channel then applied pushed CODE with no
+        # signature check. Both premises changed: the fork was promoted to be
+        # the only app, and upstream 0815cc6 deleted the zip-push entirely --
+        # a push now only asks the client to run its own git pull. Simon uses
+        # the console for licence permissions and to see who is online, so a
+        # client that never connects is a broken feature, not a safe default.
+        #
+        # What is still NOT authenticated: the TLS connection runs CERT_NONE
+        # with no certificate pinning (remote/tls.py), so someone on the
+        # network path can still impersonate the admin server. Cert pinning is
+        # the tracked follow-up; see docs/simon-handover/001-trading-defaults.md.
         "remote_admin_client_enabled": str(_e(
-            "REMOTE_ADMIN_CLIENT_ENABLED", base.get("remote_admin_client_enabled", False)
+            "REMOTE_ADMIN_CLIENT_ENABLED", base.get("remote_admin_client_enabled", True)
         )).lower() == "true",
     }
 

@@ -760,7 +760,11 @@ def validate_signal(direction: str, entry_low: float, entry_high: float,
 
 
 # ── AI-derived learned rules ───────────────────────────────────────────────────
-# Rules approved via Telegram > Reader Logic > AI (see ai_rule_generator.py):
+# Rules approved via Telegram > Reader Logic > AI. The automatic rule-writer
+# that was meant to fill these in (ai_rule_generator.py, later
+# channels/rule_generator.py) was deleted on 2026-08-26 -- it had never been
+# called in either repo. See Q002 #1 in docs/simon-handover/002-unwired-modules.md;
+# recoverable from git history if automatic rule learning is ever wanted.
 # a JSON dict of regex patterns auto-generated from one confirmed AI
 # extraction and self-validated before ever being saved. apply_learned_rule()
 # is the single place both the generator's own validation step and live

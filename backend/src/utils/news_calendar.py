@@ -131,12 +131,42 @@ _DEF_BLACKOUT_IMPACT  = "high"
 _DEF_MINUTES_BEFORE   = 30
 _DEF_MINUTES_AFTER    = 30
 
-# FOMC 2026 announcement dates (UTC), rate decision ~19:00, presser ~19:30.
-# Last-resort fallback used only while the feed is unreachable.
-_FOMC_DATES_2026: set[tuple[int, int]] = {
-    (1, 29), (3, 19), (5, 7), (6, 18),
-    (7, 29), (9, 17), (11, 5), (12, 16),
+# FOMC announcement dates (UTC) by year — rate decision ~19:00, presser ~19:30.
+# Last-resort fallback, used only while the feed is unreachable.
+#
+# Keyed by year on purpose. This was a bare _FOMC_DATES_2026 set, which would
+# have gone stale at midnight on 2027-01-01 and silently dropped FOMC from the
+# fallback -- the same shape of failure as the currency-field bug that stopped
+# the blackout firing at all (see the module history). A missing year now warns
+# loudly and once, rather than quietly answering "no event".
+#
+# The other two arms below (NFP Friday, CPI Tuesday) are rules, not dates, and
+# need no maintenance. ADD NEXT YEAR'S DATES when the Fed publishes them.
+_FOMC_DATES: dict[int, set[tuple[int, int]]] = {
+    2026: {
+        (1, 29), (3, 19), (5, 7), (6, 18),
+        (7, 29), (9, 17), (11, 5), (12, 16),
+    },
 }
+
+_fomc_year_warned: set[int] = set()
+
+
+def _fomc_days_for(year: int) -> set[tuple[int, int]]:
+    """FOMC (month, day) pairs for `year`, warning once if we have none."""
+    days = _FOMC_DATES.get(year)
+    if days is None:
+        if year not in _fomc_year_warned:
+            _fomc_year_warned.add(year)
+            _log.warning(
+                "[NewsCalendar] No FOMC dates on file for %d — the offline "
+                "fallback cannot black out FOMC days this year. Add them to "
+                "_FOMC_DATES in backend/src/utils/news_calendar.py. The live "
+                "feed is unaffected; this only matters while it is unreachable.",
+                year,
+            )
+        return set()
+    return days
 
 
 # ── Fetch + normalise ─────────────────────────────────────────────────────────
@@ -478,7 +508,7 @@ def check_news_blackout() -> tuple[bool, str]:
 def _hardcoded_fallback(now: datetime) -> bool:
     """Feed-free approximation: FOMC days, NFP Friday, CPI Tuesday, top of hour."""
     m, h, dow = now.minute, now.hour, now.weekday()
-    if (now.month, now.day) in _FOMC_DATES_2026 and 12 <= h < 22:
+    if (now.month, now.day) in _fomc_days_for(now.year) and 12 <= h < 22:
         return True
     if dow == 4 and now.day <= 7 and 12 <= h < 16:
         return True

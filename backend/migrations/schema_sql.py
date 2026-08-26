@@ -428,7 +428,9 @@ CREATE TABLE IF NOT EXISTS channel_unrecognised_messages (
 
 -- AI fallback extractions (deterministic parser missed the message) pending
 -- human review in Telegram > Reader Logic > AI tab. Approving one triggers
--- automatic regex-rule generation (see ai_rule_generator.py) so future
+-- automatic regex-rule generation (removed 2026-08-26, Q002 #1 -- the module
+-- was never wired in either repo; rows here are written by hand-approved rules)
+-- so future
 -- messages of the same shape are parsed deterministically, no AI call.
 CREATE TABLE IF NOT EXISTS ai_recovered_signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

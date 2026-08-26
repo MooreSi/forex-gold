@@ -229,22 +229,30 @@ async def _signal_engine_watchdog_loop() -> None:
 def _remote_client_enabled(config) -> bool:
     """Whether to start the outbound remote-admin/update client.
 
-    Default OFF, and it stays off unless explicitly opted in. The channel is
-    unauthenticated (security review 2026-08-08, C2): it finds a server by LAN
-    beacon and applies pushed code with no signature check and no TLS
-    verification. Enabling it is a deliberate, loudly-warned choice — never a
-    silent default — until signed updates + cert pinning land (phase4 security
-    work). Kept as a single predicate so the "is it on?" decision is testable
-    and cannot drift away from the warning.
+    Default ON since 2026-08-26 (Q001 #5, amended). Simon uses the admin
+    console for licence permissions and to see which clients are online, so a
+    client that never connects is a broken feature.
+
+    The old default was OFF because the channel applied pushed CODE with no
+    signature check. That is no longer true: upstream 0815cc6 deleted the
+    zip-streaming push, and an admin "update" now only asks the client to run
+    its own git pull. The warning below describes what is ACTUALLY still
+    unauthenticated, because a warning that names a risk which no longer exists
+    trains people to ignore warnings.
+
+    Kept as a single predicate so the "is it on?" decision is testable and
+    cannot drift away from the warning.
     """
-    if not config.get("remote_admin_client_enabled", False):
+    if not config.get("remote_admin_client_enabled", True):
         return False
     log.warning(
-        "remote_admin_client_enabled=true — starting the UNAUTHENTICATED "
-        "remote-admin/update client. It discovers a server by LAN beacon and "
-        "will APPLY PUSHED CODE, with no signature check and no TLS "
-        "verification. Only enable this on a trusted, isolated network, and "
-        "only until signed updates and certificate pinning are in place."
+        "remote-admin client starting. The link to the admin server runs TLS "
+        "with certificate verification DISABLED and no certificate pinning "
+        "(remote/tls.py), so someone on the network path can impersonate the "
+        "server. What they can trigger is now limited to a git pull from this "
+        "checkout's own remote, not arbitrary code. Set "
+        "remote_admin_client_enabled=false to stay off the fleet; certificate "
+        "pinning is the tracked fix."
     )
     return True
 

@@ -80,3 +80,40 @@ def test_news_filter_delegates_to_the_one_calendar():
     assert news_filter._get_current_event is news_calendar.get_current_event
     assert news_filter._is_high_impact_window is news_calendar.is_high_impact_window
     assert not hasattr(news_filter, "_CACHE"), "news_filter must keep no cache of its own"
+
+
+# ── Offline FOMC fallback (Q004 follow-up) ────────────────────────────────────
+
+def test_a_year_with_no_fomc_dates_warns_instead_of_answering_no_event(caplog):
+    """The 2027 problem, pinned.
+
+    The fallback held a bare 2026 date set, so on 2027-01-01 it would have
+    quietly stopped blacking out FOMC days while still reporting "no event" --
+    the same silent shape as the currency-field bug that stopped the blackout
+    firing on live data at all. A missing year must be loud.
+    """
+    import logging
+    from datetime import datetime, timezone
+    with caplog.at_level(logging.WARNING):
+        # a year deliberately not in the table
+        assert news_calendar._fomc_days_for(2099) == set()
+    assert any("FOMC" in r.getMessage() for r in caplog.records), \
+        "a year with no dates on file must warn"
+
+
+def test_a_known_year_still_returns_its_dates():
+    """Negative control: the lookup is real, not always-empty."""
+    days = news_calendar._fomc_days_for(2026)
+    assert (1, 29) in days and len(days) == 8
+
+
+def test_the_year_warning_fires_once_not_every_call(caplog):
+    """This runs on the news path; warning per call would flood the log."""
+    import logging
+    news_calendar._fomc_year_warned.discard(2098)
+    with caplog.at_level(logging.WARNING):
+        news_calendar._fomc_days_for(2098)
+        news_calendar._fomc_days_for(2098)
+        news_calendar._fomc_days_for(2098)
+    fomc = [r for r in caplog.records if "FOMC" in r.getMessage()]
+    assert len(fomc) == 1, f"warned {len(fomc)} times, expected once"

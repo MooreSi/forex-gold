@@ -344,3 +344,25 @@ def repo_root() -> Path:
         if (candidate / "run.py").exists():
             return candidate
     return here.parents[3]
+
+
+def mask_account(value) -> str:
+    """An account/login number with only its last 3 digits shown.
+
+    The diagnostics feature uploads ~3,000 raw log lines to the admin server,
+    and the MT5 connect line put the login, the broker server and the balance
+    into every one of them -- confirmed from Simon's own captured logs, and
+    recorded as Q005 #1 in docs/simon-handover/005-fact-finding.md. Enough tail
+    is kept to tell two accounts apart in a support conversation; not enough to
+    be the account number.
+    """
+    text = str(value or "")
+    return ("*" * max(0, len(text) - 3)) + text[-3:] if len(text) > 3 else "***"
+
+
+def mask_email(value) -> str:
+    """An address with the local part hidden: ``***@outlook.com``."""
+    text = str(value or "")
+    if "@" not in text:
+        return "***" if text else ""
+    return "***@" + text.split("@", 1)[1]

@@ -14,6 +14,7 @@ from email.mime.text import MIMEText
 from typing import Optional
 
 from backend.src.config import is_debug as _is_debug
+from backend.src.utils.os_utils import mask_email as _mask_email
 from backend.src.services.notifications.email_html import (  # noqa: F401
     _ORB_CHART_CID,
     build_daily_html,
@@ -139,7 +140,7 @@ async def _send_via_resend(
                 headers={"Authorization": f"Bearer {api_key}"},
             )
         if r.status_code in (200, 201):
-            log.info("Resend sent: %r → %s", subject, to_addr)
+            log.info("Resend sent: %r → %s", subject, _mask_email(to_addr))
             return True, ""
         # If domain validation fails despite our check, retry with the shared sender.
         if r.status_code == 403 and "domain" in r.text.lower() and from_addr != "onboarding@resend.dev":
@@ -152,7 +153,7 @@ async def _send_via_resend(
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
             if r.status_code in (200, 201):
-                log.info("Resend sent (fallback sender): %r → %s", subject, to_addr)
+                log.info("Resend sent (fallback sender): %r → %s", subject, _mask_email(to_addr))
                 return True, ""
         return False, f"Resend HTTP {r.status_code}: {r.text[:300]}"
     except Exception as e:
@@ -201,7 +202,7 @@ async def _send_via_mailjet(
             result = r.json()
             sent = result.get("Messages", [{}])[0]
             if sent.get("Status") == "success":
-                log.info("Mailjet sent: %r → %s", subject, to_addr)
+                log.info("Mailjet sent: %r → %s", subject, _mask_email(to_addr))
                 return True, ""
             return False, f"Mailjet status: {sent.get('Status')} — {sent.get('Errors', '')}"
         return False, f"Mailjet HTTP {r.status_code}: {r.text[:200]}"
@@ -307,7 +308,7 @@ async def send_email(
             None,
             lambda: _send_sync(host, port, user, password, use_tls, from_addr, to_addr, msg),
         )
-        log.info("Email sent (SMTP): %r → %s", subject, to_addr)
+        log.info("Email sent (SMTP): %r → %s", subject, _mask_email(to_addr))
         return True, ""
     except Exception as e:
         log.error("SMTP send failed: %s", e)

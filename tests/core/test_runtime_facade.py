@@ -170,3 +170,49 @@ def test_the_close_path_bindings_are_untouched():
     assert hasattr(TradingRuntime, "_make_close_trade_ctx")
     assert hasattr(TradingRuntime, "close_trade")
     assert hasattr(TradingRuntime, "_schedule_profit_sync")
+
+
+def test_close_cmd_delegates_and_does_not_reshape_the_close_path():
+    """`close_cmd` is a public delegate, not a second implementation.
+
+    It exists because the EA panel's CLOSE ALL handler imported a `cmd_close`
+    that this branch had deleted, so the button raised ImportError and reported
+    "CLOSE_ALL FAILED" instead of closing anything. The fix was a delegate
+    rather than renaming `_cmd_close`, because that drives the frozen close path
+    and docs/system/rules/10-golden-rules.md does not allow it to be reshaped.
+
+    So the thing worth asserting is exactly that: the public name forwards, with
+    its arguments untouched, and adds no logic of its own. `_cmd_close` is
+    replaced on the instance, so nothing here can reach a broker.
+    """
+    engine = TradingRuntime.__new__(TradingRuntime)
+    seen = []
+
+    async def _fake_cmd_close(args):
+        seen.append(args)
+        return "closed 3 positions"
+
+    engine._cmd_close = _fake_cmd_close
+
+    result = asyncio.run(engine.close_cmd(["XAUUSD"]))
+
+    assert seen == [["XAUUSD"]], "close_cmd altered or dropped its arguments"
+    assert result == "closed 3 positions", "close_cmd did not return the delegate's result"
+
+
+def test_the_delegate_test_would_notice_a_reimplementation():
+    """Negative control.
+
+    If `close_cmd` ever stopped calling `_cmd_close` -- someone inlining the
+    logic, say -- the assertion above has to fail rather than pass on a
+    coincidentally equal return value.
+    """
+    engine = TradingRuntime.__new__(TradingRuntime)
+
+    async def _never_called(args):
+        raise AssertionError("should not be reached in this control")
+
+    engine._cmd_close = _never_called
+
+    with pytest.raises(AssertionError):
+        asyncio.run(engine.close_cmd([]))

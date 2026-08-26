@@ -28,24 +28,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import pathlib
-
 import pytest
-import pytest_asyncio
-from nicegui.testing.user_simulation import user_simulation
-
-SHIM = pathlib.Path(__file__).parent / "_render" / "main_shim.py"
 
 # Fixed text the header bar builds. Not styling and not data -- these are the
 # panel captions, so they are present whether or not a broker ever answers.
 HEADER_LANDMARKS = ["BID", "ASK", "MT5 BAL", "EQUITY"]
-
-
-@pytest_asyncio.fixture
-async def user(tmp_path, monkeypatch):
-    monkeypatch.setenv("FOREX_RENDER_TEST_DB", str(tmp_path / "render.db"))
-    async with user_simulation(main_file=SHIM) as simulated:
-        yield simulated
 
 
 @pytest.mark.asyncio

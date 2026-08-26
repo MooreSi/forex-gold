@@ -15,7 +15,6 @@
       "backend/src/services/cluster/sync/server.py": 1073,
       "backend/src/services/reversal_engine/reversal_engine_repo.py": 809,
       "frontend/pages/ai_trade_analysis.py": 1250,
-      "frontend/pages/breakout_panel.py": 919,
       "frontend/pages/test_panel.py": 1246,
       "mt5_bridge.py": 1335
     },

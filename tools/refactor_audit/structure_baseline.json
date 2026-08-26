@@ -14,7 +14,6 @@
       "backend/src/services/cluster/sync/client.py": 867,
       "backend/src/services/cluster/sync/server.py": 1073,
       "backend/src/services/reversal_engine/reversal_engine_repo.py": 809,
-      "frontend/app.py": 1633,
       "frontend/pages/ai_trade_analysis.py": 1250,
       "frontend/pages/breakout_panel.py": 919,
       "frontend/pages/chart.py": 839,

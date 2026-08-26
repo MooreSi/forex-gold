@@ -465,7 +465,8 @@ def _refresh_desktop_icon(app_root: Path) -> None:
     Silently skips if the shortcut doesn't exist (e.g. user declined it at
     install time) or if PowerShell fails for any reason.
     """
-    ico_path = app_root / "forex_trader" / "ui" / "static" / "gold_bag.ico"
+    # frontend/static since the refactor; was forex_trader/ui/static.
+    ico_path = app_root / "frontend" / "static" / "gold_bag.ico"
     if not ico_path.exists():
         return
     bat_path = app_root / "Setup & Start FOREX.bat"
@@ -523,7 +524,10 @@ def _do_restart() -> None:
     sees the process exit and skips straight to its own relaunch — harmless
     overlap, not a conflict, since the new process binds the port either way.
     """
-    app_root = Path(__file__).parent.parent.parent
+    # Marker-based: three parents landed in backend/src/services, so the
+    # licence-activation restart relaunched a run.py that is not there.
+    from backend.src.utils.os_utils import repo_root as _repo_root
+    app_root = _repo_root()
     from backend.src.utils.os_utils import delayed_relaunch_cmd, open_restart_log
     from backend.src.config import USER_DATA_DIR as _udata
     log_path = Path(_udata) / "data" / "restart.log"
@@ -594,7 +598,8 @@ async def _apply_git_update() -> None:
 
     log.info("[RemoteClient] Update applied — restarting")
     if sys.platform == "win32":
-        _refresh_desktop_icon(Path(__file__).parent.parent)
+        from backend.src.utils.os_utils import repo_root as _repo_root2
+        _refresh_desktop_icon(_repo_root2())
         # Load the just-deployed client.py from disk so this push's restart
         # logic (exit code 42) takes effect immediately rather than only on
         # the next push.  Without this, _do_restart() in memory is always

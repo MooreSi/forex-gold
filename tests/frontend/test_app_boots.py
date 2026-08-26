@@ -26,7 +26,12 @@ REPO = Path(__file__).resolve().parents[2]
 # The app reads its port from config, and the licence activation screen
 # hardcodes 8888, so this smoke test uses the app's own port and skips
 # when it is busy rather than pretending to control it.
-PORT = 8888
+# A port of its own. 8888 is the app's default, so hardcoding it meant this
+# smoke test either skipped (whenever the developer's app was up) or spawned a
+# SECOND app on the running one's port -- and run.py frees a busy port by
+# killing whoever holds it, so the test could take down the app it was sharing a
+# machine with. Confirmed 2026-08-26.
+PORT = 8899
 BOOT_TIMEOUT = 120   # cold start builds the schema and starts several tasks
 
 
@@ -49,8 +54,13 @@ def running_app(tmp_path_factory):
     env = {
         **os.environ,
         # Keep the smoke test off the developer's real database and config.
-        "FOREX_DATA_DIR": str(data_dir),
-        "FOREX_UI_PORT": str(PORT),
+        # FOREX_TRADER_DATA_DIR is the name config.py actually reads -- the
+        # FOREX_DATA_DIR/FOREX_UI_PORT this used were read by nothing at all,
+        # in this tree or before it, so the "isolated" smoke test had always
+        # booted against the real ~/Library/Application Support/ForexTrader.
+        # The port comes from the config file written below, since run.py takes
+        # it from config, not the environment.
+        "FOREX_TRADER_DATA_DIR": str(data_dir),
     }
     # NiceGUI switches into screen-test mode when it sees pytest in the
     # environment, and then demands NICEGUI_SCREEN_TEST_PORT. The child
@@ -60,6 +70,10 @@ def running_app(tmp_path_factory):
     for leaked in list(env):
         if leaked.startswith("PYTEST") or leaked.startswith("NICEGUI"):
             env.pop(leaked)
+    # run.py reads its port from config.yaml in the data dir.
+    (data_dir / "data").mkdir(parents=True, exist_ok=True)
+    (data_dir / "config.yaml").write_text(f"port: {PORT}\n", encoding="utf-8")
+
     log_path = data_dir / "boot.log"
     with open(log_path, "w") as log_file:
         proc = subprocess.Popen(
@@ -75,7 +89,13 @@ def running_app(tmp_path_factory):
                     f"run.py exited with code {proc.returncode} before serving.\n"
                     f"--- log tail ---\n{_tail(log_path)}"
                 )
-            if _serving(PORT) or "NiceGUI ready" in _read(log_path):
+            # Only an accepting socket counts as ready. NiceGUI prints
+            # "NiceGUI ready to go" BEFORE the listener starts accepting, so
+            # breaking on the log line let the test fetch a port that was not
+            # up yet -- ConnectionRefused, intermittently, and only under the
+            # load of a full suite run (it passed every time in isolation,
+            # which is exactly what made it look like a real failure).
+            if _serving(PORT):
                 break
             time.sleep(1)
         else:

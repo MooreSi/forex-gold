@@ -338,7 +338,11 @@ def _render_ea_update_button():
         from pathlib import Path
         import time as _time
 
-        root = Path(__file__).parent.parent.parent.parent
+        # Marker-based: four parents was right from forex_trader/ui/pages/;
+        # this file is three deep, so it resolved above the repo and the EA
+        # source was never found. (2026-08-26.)
+        from backend.src.utils.os_utils import repo_root as _repo_root
+        root = _repo_root()
         repo_mq5 = root / "mql5" / "ForexTraderBridge.mq5"
         if not repo_mq5.exists():
             ui.notify(f"EA source not found at {repo_mq5}", type="negative")

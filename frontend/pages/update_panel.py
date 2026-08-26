@@ -129,7 +129,10 @@ def _render_github_update_card() -> None:
             ui.notify("Update applied — restarting...", type="positive")
             from backend.src.utils.os_utils import restart_app
             await asyncio.sleep(1)
-            restart_app(Path(__file__).parent.parent.parent.parent)
+            # Marker-based: four parents resolved above the repo, so applying
+            # an update shut the app down and relaunched nothing. (2026-08-26.)
+            from backend.src.utils.os_utils import repo_root as _repo_root
+            restart_app(_repo_root())
 
         ui.label(
             "Pulls directly from the GitHub repository above via git. "

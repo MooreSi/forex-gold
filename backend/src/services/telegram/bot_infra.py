@@ -108,7 +108,12 @@ async def cmd_restart_bridge(
 async def cmd_restart_app(args: list, bot_offset: int) -> str:
     """Restart the FOREX Trader app process (5-second delay so reply can send)."""
     try:
-        root = Path(__file__).parent.parent.parent
+        # Marker-based, not a parent count: this module moved during the refactor
+        # and the fixed count silently resolved inside backend/ instead of the
+        # checkout root. Same bug that made the restart button relaunch a run.py
+        # that does not exist (2026-08-26).
+        from backend.src.utils.os_utils import repo_root as _repo_root
+        root = _repo_root()
         if sys.platform == "win32":
             venv_python = root / ".venv" / "Scripts" / "python.exe"
         else:

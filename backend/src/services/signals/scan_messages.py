@@ -54,7 +54,9 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.telegram.keyword_triggers import try_handle_close_all_trigger
 from backend.src.services.telegram.keyword_triggers import try_handle_risk_free_be_trigger
 from backend.src.services.telegram.keyword_triggers import try_handle_tp_hit_trigger
-from backend.src.services.telegram.keyword_triggers import apply_sl_parsing_override
+from backend.src.services.telegram.keyword_triggers import (
+    apply_sl_parsing_override, apply_mirror_copy,
+)
 
 
 log = logging.getLogger(__name__)
@@ -282,6 +284,21 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             _sl_sub = apply_sl_parsing_override(parsed, rs, channel_name)
             if _sl_sub:
                 log.info("[LogicKeywords] tg_id=%s — %s", tg_id, _sl_sub)
+
+            # ── Parsing Settings: Reverse / Mirror Copy ──────────────────────
+            # Must run BEFORE _record_staleness_or_new_impl below, which writes
+            # `parsed` verbatim into vantage_tg_signals -- that row is what the
+            # UI, the "signal detected" Telegram alert and the audit trail all
+            # read back, so mirroring after it would leave the recorded signal
+            # facing the opposite way to the trade actually placed from it.
+            #
+            # Arrived with the 2026-08-25 merge and was never called: upstream
+            # invokes it here in engine.py, and this loop is engine.py's
+            # relocated body, so the call site did not travel with the module.
+            # The toggle (lk_enable_mirror_copy) therefore did nothing at all.
+            _mirror = apply_mirror_copy(parsed, rs)
+            if _mirror:
+                log.info("[ParsingSettings] Mirror Copy tg_id=%s — %s", tg_id, _mirror)
 
             # Staleness guard — signals are scalps: an entry zone is only valid for
             # minutes. Anything older than 4 minutes at processing time is recorded

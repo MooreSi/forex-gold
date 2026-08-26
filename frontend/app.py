@@ -673,7 +673,15 @@ def main_page():
     ui.add_head_html(THEME_HEAD_CSS)
     ui.add_head_html(f'<script>document.documentElement.setAttribute("data-fx-theme","{get_theme()}")</script>')
 
-    root = Path(__file__).parent.parent.parent
+    # The checkout root, found by marker rather than parent count. Three
+    # parents was correct from forex_trader/ui/app.py; this file is two levels
+    # deep at frontend/app.py, so the fixed count resolved to the directory
+    # ABOVE the repo and the restart button relaunched "/Users/simon/run.py" --
+    # which does not exist, so the app shut down and never came back
+    # (restart.log, 2026-08-26). Same bug class as the five path counts fixed
+    # earlier in this merge; the marker cannot drift on the next move.
+    from backend.src.utils.os_utils import repo_root as _repo_root
+    root = _repo_root()
 
     # ── Power dialog (defined BEFORE header so it renders at root level) ────────
     with ui.dialog() as _power_dialog, ui.card().classes(

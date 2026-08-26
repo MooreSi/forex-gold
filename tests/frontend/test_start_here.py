@@ -71,7 +71,13 @@ def test_fix_this_targets_exist():
     """Every "Fix this ->" jump lands on a tab/section that really exists —
     a renamed Settings tab must fail this test, not silently dead-end the
     user."""
-    settings_src = (REPO / "frontend" / "pages" / "settings.py").read_text(encoding="utf-8")
+    # settings became a package when it outgrew 800 lines; read all of it.
+    _settings = REPO / "frontend" / "pages" / "settings"
+    settings_src = (
+        (REPO / "frontend" / "pages" / "settings.py").read_text(encoding="utf-8")
+        if (REPO / "frontend" / "pages" / "settings.py").exists()
+        else "\n".join(p.read_text(encoding="utf-8") for p in sorted(_settings.rglob("*.py")))
+    )
     app_src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
     settings_tabs = set(re.findall(r'ui\.tab\("([^"]+)"\)', settings_src))
     app_tabs = set(re.findall(r'ui\.tab\("([^"]+)"', app_src))

@@ -76,8 +76,18 @@ def test_resetting_everything_restores_every_default():
 def test_the_page_never_imports_the_service_directly():
     """Guards the boundary this controller exists to provide."""
     from pathlib import Path
-    page = Path(__file__).resolve().parents[2] / "frontend" / "pages" / "settings.py"
-    source = page.read_text(encoding="utf-8")
+    pages = Path(__file__).resolve().parents[2] / "frontend" / "pages"
+    # settings became a package when it outgrew 800 lines; the boundary has
+    # to hold across every module in it, not just the one that used to be
+    # the whole page.
+    module = pages / "settings.py"
+    source = (
+        module.read_text(encoding="utf-8")
+        if module.exists()
+        else "\n".join(
+            f.read_text(encoding="utf-8") for f in sorted((pages / "settings").rglob("*.py"))
+        )
+    )
     assert "risk.expert_params" not in source and "import expert_params" not in source, (
         "settings.py must reach Expert Tunables through the settings "
         "controller, not by importing the service"

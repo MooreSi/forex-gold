@@ -957,8 +957,11 @@ class EABridge:
                     f"{direction} LIMIT {res.get('lot_size', '')} @ {price:.2f}")
 
             elif action == "close_all":
-                from backend.src.services.trading.bot_trading import cmd_close
-                out = await cmd_close(["all"], bridge, starting)
+                # The runtime's own close command, not bot_trading.cmd_close:
+                # that extraction was deleted (2847e32) while the live copy
+                # stayed on the runtime, so the import upstream's panel used
+                # raises ImportError here. Found 2026-08-26.
+                out = await self._engine.close_cmd(["all"])
                 await self.push_panel_log(out.splitlines()[-1] if out else "CLOSE ALL done")
 
             elif action == "cancel_limits":

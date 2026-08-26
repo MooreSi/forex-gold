@@ -1388,6 +1388,25 @@ class TradingRuntime:
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
+    async def close_cmd(self, args: list) -> str:
+        """Public delegate to _cmd_close, for collaborators.
+
+        The EA's on-chart panel has a CLOSE ALL button, and its handler in
+        ea_bridge imported cmd_close out of services/trading/bot_trading --
+        a function this branch deleted (2847e32) as an unwired extraction while
+        the live implementation stayed here. The 2026-08-25 merge brought the
+        panel across without noticing, so that button raised ImportError and
+        reported "CLOSE_ALL FAILED" instead of closing anything.
+
+        A delegate rather than a rename: _cmd_close drives the frozen close
+        path, and tests/core/test_runtime_facade.py forbids a service reaching
+        into a runtime private. Allowlisted in facade_allowlist.json.
+
+        MONEY PATH: this closes real positions. Needs the demo-session sign-off
+        (session-agenda Part B) before it is trusted, like everything else that
+        can close a trade."""
+        return await self._cmd_close(args)
+
     async def _cmd_close(self, args: list) -> str:
         open_trades = self.get_open_trades()
         if not open_trades:

@@ -652,7 +652,6 @@ def main_page():
     import frontend.pages.chart as chart_page
     import frontend.pages.ai_summary as ai_summary_page
     import frontend.pages.test_panel as test_panel
-    import frontend.pages.edge_dashboard as edge_dashboard
 
     ui.query("body").style(
         "background: #0f1117; color: #e0e0e0; font-family: 'Inter', sans-serif; margin:0;"

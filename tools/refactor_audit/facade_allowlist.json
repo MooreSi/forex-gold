@@ -4,6 +4,7 @@
   "build_orb_report",
   "calculate_fees",
   "cancel_signal",
+  "close_cmd",
   "close_trade",
   "compute_mt5_performance",
   "compute_performance",

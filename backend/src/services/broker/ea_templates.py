@@ -163,8 +163,20 @@ DEFAULTS: dict = {
     "max_spread_pips":   6.0,
     "slippage":          20,
     # Harvest trigger in pips (distinct from harvest_threshold, which is
-    # in account currency).
-    "harvest_pips":      1.0,
+    # in account currency). 0 = off, and it must stay off by default.
+    #
+    # The EA harvests on EITHER trigger:
+    #     if(profit >= tplHarvestThreshold || pipsHarvest)
+    # so any positive value here silently overrides the dollar threshold --
+    # the trade closes at that many pips and harvest_threshold can never be
+    # reached. This shipped as 1.0 (here and as migration 17's column
+    # default) while the EA implemented it assuming "0 = off, matches every
+    # template saved before this existed". Nothing had 0, so an opt-in
+    # feature was on for everyone: on 2026-08-26 a template set to harvest
+    # at $30 closed two trades at $1.40. The field is not in the UI, so it
+    # could not be seen or switched off either. Migration 29 clears the
+    # rows this default created.
+    "harvest_pips":      0.0,
     # Ignore a Telegram signal older than this at fill time.
     "signal_max_age_sec": 10,
 

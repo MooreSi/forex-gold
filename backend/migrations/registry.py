@@ -541,6 +541,22 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         # account-currency units. See core_equity_protect.py.
         "ALTER TABLE ea_trade_templates ADD COLUMN basket_harvest_threshold REAL NOT NULL DEFAULT 0.0",
     ]),
+    (29, "harvest_pips was on for everyone (2026-08-26)", [
+        # Migration 17 added harvest_pips as DEFAULT 1.0, and DEFAULTS in
+        # ea_templates.py carried 1.0 too. The EA then implemented the field
+        # (2026-08-04) as a second harvest trigger ORed with the dollar
+        # threshold, assuming "0 = off, matches every template saved before
+        # this existed" -- but no template had ever held 0. Every
+        # harvest-enabled template therefore closed at the first favourable
+        # pip, making harvest_threshold unreachable: live on 2026-08-26, a
+        # template set to $30 harvested two trades at $1.40 each.
+        #
+        # Only 1.0 is cleared -- exactly the value the old column default
+        # produced. A template someone deliberately set to another number
+        # keeps it. (Nothing can have been set deliberately today: the field
+        # is not exposed in the UI. This is written to survive that changing.)
+        "UPDATE ea_trade_templates SET harvest_pips = 0.0 WHERE harvest_pips = 1.0",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

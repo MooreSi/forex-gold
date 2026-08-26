@@ -98,10 +98,10 @@ directories for nothing.
 
 Priority order, from `docs/system/rules/70-file-organisation.md`:
 
-1. `frontend/pages/trading.py` (3,254)
-2. `frontend/pages/settings.py` (3,193)
-3. `frontend/app.py` (1,635)
-4. `frontend/pages/history.py` (1,416)
+1. ~~`frontend/pages/trading.py`~~ (3,254) -- done
+2. ~~`frontend/pages/settings.py`~~ (3,487) -- done
+3. `frontend/app.py` (1,746)
+4. `frontend/pages/history.py` (1,592)
 
 Exempt: `mt5_bridge.py` (runs under a different interpreter),
 `backend/src/runtime.py` (at its design floor).

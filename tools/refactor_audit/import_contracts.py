@@ -218,6 +218,13 @@ def _source_unit(path: str) -> str:
     parts = path.split("/")
     if len(parts) > 3 and parts[0] == "frontend" and parts[1] == "pages":
         return "/".join(parts[:3])
+    # frontend/app.py became frontend/app/ for the same reason, and needs the
+    # same grouping. Named explicitly rather than derived from "is a package":
+    # frontend/components/ is a package of seven independent modules, and
+    # collapsing those into one unit would loosen the gate rather than fix a
+    # miscount.
+    if len(parts) > 2 and parts[0] == "frontend" and parts[1] == "app":
+        return "frontend/app"
     return path
 
 

@@ -180,6 +180,26 @@ def test_contracts_are_counted_by_coupling_not_by_import_statements():
     assert ic._source_unit("backend/src/utils/theme.py") == "backend/src/utils/theme.py"
 
 
+def test_the_app_package_is_one_source_unit_but_components_are_not():
+    """frontend/app.py splits into frontend/app/ for the same reason
+    frontend/pages/trading.py did, and must be grouped the same way -- or the
+    split scores as a regression while coupling is unchanged.
+
+    The grouping is named explicitly rather than derived from "is a package",
+    because frontend/components/ is a package of seven genuinely independent
+    modules. Collapsing those into one unit would not fix a miscount, it
+    would loosen the gate.
+    """
+    assert ic._source_unit("frontend/app/__init__.py") == "frontend/app"
+    assert ic._source_unit("frontend/app/_about.py") == "frontend/app"
+    # The unsplit module keeps its own identity.
+    assert ic._source_unit("frontend/app.py") == "frontend/app.py"
+    # And nothing else under frontend/ gets swept up.
+    assert (ic._source_unit("frontend/components/getting_started.py")
+            == "frontend/components/getting_started.py")
+    assert ic._source_unit("frontend/auth_gate.py") == "frontend/auth_gate.py"
+
+
 def test_the_same_module_imported_twice_in_one_package_counts_once():
     """The property the split exposed, asserted directly rather than
     inferred from the totals."""

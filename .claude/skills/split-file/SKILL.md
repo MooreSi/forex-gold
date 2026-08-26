@@ -98,11 +98,30 @@ directories for nothing.
 
 Priority order, from `docs/system/rules/70-file-organisation.md`:
 
-1. ~~`frontend/pages/trading.py`~~ (3,254) -- done
-2. ~~`frontend/pages/settings.py`~~ (3,487) -- done
-3. ~~`frontend/app.py`~~ (1,746) -- done
-4. ~~`frontend/pages/history.py`~~ (1,592) -- done
+1. ~~`frontend/pages/trading.py`~~ -- done
+2. ~~`frontend/pages/settings.py`~~ -- done
+3. ~~`frontend/app.py`~~ -- done
+4. ~~`frontend/pages/history.py`~~ -- done
+5. ~~`chart.py`, `telegram.py`, `reversal_panel.py`, `breakout_panel.py`~~ -- done
+
+Nothing under `frontend/pages/` is over 800 except two files that are BLOCKED,
+not pending:
+
+- `test_panel.py` (1,245) -- undefined name `ap` (docs/todo/bugs/010)
+- `ai_trade_analysis.py` (1,250) -- undefined name `_SIGNAL_GEN_SYSTEM`
+  (docs/todo/bugs/011)
+
+Both are dead buttons today. Splitting either would turn a latent NameError
+into a failing gate, because `tests/frontend/test_page_packages_are_wired.py`
+resolves every global name a page PACKAGE uses and a flat module escapes it.
+Fix the name first, then split -- the recipe for each is in its bug file.
 
 Exempt: `mt5_bridge.py` (runs under a different interpreter),
 `backend/src/runtime.py` (at its design floor).
-Blocked on tests: `controllers/remote/*`, `controllers/sync/*`.
+Blocked on tests: `services/cluster/remote/*`, `services/cluster/sync/*`
+(4,995 lines, zero tests, token issuance and admin authority).
+
+Backend files still over the ceiling and NOT blocked, in size order --
+`ea_bridge.py` (1,973), `core_bot_panel.py` (1,709), `signals/parser.py` (896),
+`reversal_engine_repo.py` (842). None of these has a render harness, so each
+needs its own tests written first.

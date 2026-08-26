@@ -148,16 +148,17 @@ That was a flaw in the metric, and it was fixed rather than baselined around.
 | ~~`frontend/pages/history.py`~~ | ~~1,592~~ | ✅ **split** into 7 modules, largest 451 |
 | `mt5_bridge.py` | 1,335 | **permanent exemption** — separate interpreter |
 | `backend/src/runtime.py` | 1,310 | at its floor by design — see `30-architecture.md` |
-| `frontend/pages/test_panel.py` | 1,263 | package split |
+| `frontend/pages/test_panel.py` | 1,245 | **blocked: undefined name `ap`** — see docs/todo/bugs/010 |
 | `backend/src/db/database.py` | 1,251 | package split |
-| `frontend/pages/ai_trade_analysis.py` | 1,250 | package split |
+| `frontend/pages/ai_trade_analysis.py` | 1,250 | **blocked: undefined name `_SIGNAL_GEN_SYSTEM`** — see docs/todo/bugs/011 |
 | `services/cluster/remote/server.py` | 1,196 | **blocked: needs tests first** |
 | `services/cluster/sync/server.py` | 1,073 | blocked behind remote/ tests |
-| `frontend/pages/breakout_panel.py` | 928 | package split |
+| ~~`frontend/pages/breakout_panel.py`~~ | ~~918~~ | ✅ **split** into 3 modules, largest 547 |
 | `services/cluster/remote/client.py` | 920 | **blocked: needs tests first** |
 | `services/cluster/sync/client.py` | 867 | blocked behind remote/ tests |
-| `frontend/pages/chart.py` | 842 | package split |
-| `frontend/pages/reversal_panel.py` | 812 | package split |
+| ~~`frontend/pages/telegram.py`~~ | ~~892~~ | ✅ **split** into 4 modules, largest 298 |
+| ~~`frontend/pages/chart.py`~~ | ~~938~~ | ✅ **split** into 3 modules, largest 569 |
+| ~~`frontend/pages/reversal_panel.py`~~ | ~~923~~ | ✅ **split** into 3 modules, largest 611 |
 
 The LOC gate is shrink-only: `structure_gates --check` fails if the count of
 oversized files rises, or any listed file grows.

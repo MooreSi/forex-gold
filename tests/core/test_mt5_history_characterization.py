@@ -153,6 +153,115 @@ def test_compute_mt5_performance_returns_empty_dict_on_bridge_error(fresh_db, en
     assert perf == {}
 
 
+# ── The numbers the Analysis page actually displays ────────────────────────────
+#
+# compute_mt5_performance returns 20-odd keys; the tests above pin five of them.
+# frontend/pages/history reads eight MORE that nothing asserted:
+# profit_factor, max_drawdown_pct, roi_pct and the five daily_* fields.
+#
+# docs/todo/refactor/frontend/restructure/phase2-view-decomposition/030-history.md
+# leads its "What must NOT change" list with exactly these figures and says a
+# characterization test pinned them in test_history_numbers_characterization.py.
+# That file does not exist -- the premise is stale. These are that pin, placed
+# here rather than in a new file so they reuse this module's _FakeBridge and
+# engine fixtures instead of adding another copy of each.
+#
+# The expected values are derived by hand from the formulas in
+# backend/src/services/broker/mt5_performance.py, not copied from a run:
+#
+#   trades, chronological           [+100, -50]
+#   period start = balance - sum    1000 - 50            = 950
+#   equity curve                    950 -> 1050 -> 1000
+#   profit factor = wins / |losses| 100 / 50             = 2.0
+#   max drawdown  = (peak-cum)/peak (1050-1000)/1050*100 = 4.76%
+#   roi           = sum / start     50 / 950 * 100       = 5.26%
+
+
+def _two_trade_bridge(now):
+    """One +100 winner then one -50 loser, both closed inside the day."""
+    return _FakeBridge(
+        account={"balance": 1000.0, "equity": 1050.0},
+        deals=[
+            _deal(position_id=1, entry=0, ts=now - 3600, profit=0.0, volume=0.10),
+            _deal(position_id=1, entry=1, ts=now - 1800, profit=100.0),
+            _deal(position_id=2, entry=0, ts=now - 1700, profit=0.0, volume=0.10),
+            _deal(position_id=2, entry=1, ts=now - 900,  profit=-50.0),
+        ],
+        positions=[],
+    )
+
+
+def test_profit_factor_is_gross_win_over_gross_loss(fresh_db, engine):
+    engine._bridge = _two_trade_bridge(time.time())
+    perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
+    assert perf["profit_factor"] == 2.0
+
+
+def test_max_drawdown_is_measured_from_the_running_peak(fresh_db, engine):
+    """Not from the period start, and not from the final balance.
+
+    The comment in mt5_performance.py explains why the period start is clamped:
+    a zero start makes any win-then-breakeven pair read as 100% drawdown.
+    """
+    engine._bridge = _two_trade_bridge(time.time())
+    perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
+    assert perf["max_drawdown_pct"] == 4.76
+
+
+def test_roi_is_measured_against_the_reconstructed_period_start(fresh_db, engine):
+    """950, not the closing balance of 1000 -- otherwise ROI shrinks as the
+    account grows, which reads as the strategy getting worse."""
+    engine._bridge = _two_trade_bridge(time.time())
+    perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
+    assert perf["roi_pct"] == 5.26
+
+
+def test_the_daily_block_counts_only_todays_closes(fresh_db, engine):
+    """The page's Daily P&L card. daily_pnl_24h is kept as an alias for the
+    email scheduler and must stay equal to daily_pnl."""
+    engine._bridge = _two_trade_bridge(time.time())
+    perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
+    assert perf["daily_closed"] == 2
+    assert perf["daily_pnl"] == 50.0
+    assert perf["daily_pnl_24h"] == perf["daily_pnl"]
+    assert perf["daily_win_rate_pct"] == 50.0
+    assert perf["daily_best"] == 100.0
+    assert perf["daily_worst"] == -50.0
+
+
+def test_profit_factor_is_zero_when_there_are_no_losers(fresh_db, engine):
+    """Deliberate: an all-winners period has no finite profit factor, and the
+    code returns 0.0 rather than infinity. The page prints it as 0.00, which is
+    misleading but is the behaviour being pinned, not endorsed."""
+    now = time.time()
+    engine._bridge = _FakeBridge(
+        account={"balance": 1000.0, "equity": 1000.0},
+        deals=[
+            _deal(position_id=1, entry=0, ts=now - 3600, profit=0.0, volume=0.10),
+            _deal(position_id=1, entry=1, ts=now - 1800, profit=100.0),
+        ],
+        positions=[],
+    )
+    perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
+    assert perf["profit_factor"] == 0.0
+
+
+def test_every_key_the_analysis_page_reads_is_present(fresh_db, engine):
+    """A renamed key would blank a card on the page and raise nothing.
+
+    The page uses .get() with defaults throughout, so a key that disappears
+    shows as 0.00 or --% rather than failing. That is the failure this guards.
+    """
+    engine._bridge = _two_trade_bridge(time.time())
+    perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
+    for key in (
+        "profit_factor", "max_drawdown_pct", "roi_pct",
+        "daily_closed", "daily_pnl", "daily_win_rate_pct",
+        "daily_best", "daily_worst",
+    ):
+        assert key in perf, f"frontend/pages/history reads {key!r} and it is gone"
+
+
 # ── import_mt5_history ─────────────────────────────────────────────────────────
 
 def test_import_mt5_history_no_deals_returns_error(fresh_db, engine):

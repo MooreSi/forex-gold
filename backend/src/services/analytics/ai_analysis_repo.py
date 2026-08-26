@@ -6,9 +6,25 @@ metrics the page always computed.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
+from datetime import datetime, timezone
 from typing import Optional
+
+# Left behind in frontend/pages/ai_trade_analysis.py when the functions below
+# were moved here: _session_from_ts needs datetime/timezone, and
+# _gather_channel_data scans reply chains with these two patterns. Copied
+# verbatim from that file rather than rewritten -- the page still has its own
+# copies, and the two must agree about what counts as a claimed TP or SL hit.
+_TP_HIT_RE = re.compile(
+    r'TP\s*(\d+)\s*(hit|hitt|done|reached|closed|filled|✅|🎯|🤑)',
+    re.IGNORECASE,
+)
+_SL_HIT_RE = re.compile(
+    r'(stop\s*loss|sl|stopped)\s*(hit|hitt|done|reached|triggered)',
+    re.IGNORECASE,
+)
 
 
 def _session_from_ts(ts: Optional[float]) -> str:

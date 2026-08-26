@@ -39,6 +39,8 @@ email + Telegram notification config.
 - `formatting.format_broker_ts` deliberately interprets MT5's UTC+3-encoded epoch naively (yields broker time for display); `broker_ts_to_uk_date` subtracts the offset first.
 
 ## Known things & gotchas
+- **A "moved verbatim" extraction can leave its module-scope dependencies behind.** `analytics/ai_analysis_repo.py` was drained out of `frontend/pages/ai_trade_analysis.py` and arrived without `datetime`/`timezone` or the `_TP_HIT_RE`/`_SL_HIT_RE` patterns its functions use, so `_session_from_ts` raised NameError on every signal with a `parsed_at` and the claimed-TP scan raised too. It imported cleanly and wired up fine; nothing failed until it ran. Found 2026-08-26 by pyflakes, fixed, and pinned by `tests/core/test_ai_analysis_repo_names_resolve.py`. The page keeps its own copies of both patterns and a test asserts the two agree.
+
 
 - One deliberate exception to no-writes: `get_orb_target_multiple` memoises its backtested multiple into `app_config` so the 25-day backtest runs once per day.
 - `signal_lab_repo.py` exists as a named adapter because `db_module.db()` resolves to whatever `init()` last pointed at — folding those queries into the main repo would silently read the *trading* DB.

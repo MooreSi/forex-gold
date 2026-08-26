@@ -145,7 +145,7 @@ That was a flaw in the metric, and it was fixed rather than baselined around.
 | `services/reversal_engine/reversal_engine_repo.py` | 809 | newly over the ceiling |
 | ~~`frontend/pages/settings.py`~~ | ~~3,487~~ | ✅ **split** into 10 modules, largest 685 |
 | ~~`frontend/app.py`~~ | ~~1,746~~ | ✅ **split** into 4 modules, largest 665 |
-| `frontend/pages/history.py` | 1,416 | package split |
+| ~~`frontend/pages/history.py`~~ | ~~1,592~~ | ✅ **split** into 7 modules, largest 451 |
 | `mt5_bridge.py` | 1,335 | **permanent exemption** — separate interpreter |
 | `backend/src/runtime.py` | 1,310 | at its floor by design — see `30-architecture.md` |
 | `frontend/pages/test_panel.py` | 1,263 | package split |

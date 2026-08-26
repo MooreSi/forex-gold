@@ -101,7 +101,7 @@ Priority order, from `docs/system/rules/70-file-organisation.md`:
 1. ~~`frontend/pages/trading.py`~~ (3,254) -- done
 2. ~~`frontend/pages/settings.py`~~ (3,487) -- done
 3. ~~`frontend/app.py`~~ (1,746) -- done
-4. `frontend/pages/history.py` (1,592)
+4. ~~`frontend/pages/history.py`~~ (1,592) -- done
 
 Exempt: `mt5_bridge.py` (runs under a different interpreter),
 `backend/src/runtime.py` (at its design floor).

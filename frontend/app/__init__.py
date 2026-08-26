@@ -76,7 +76,13 @@ from backend.src.app import (          # noqa: E402
     startup as _lifecycle_startup, shutdown as _lifecycle_shutdown,
 )
 
-STATIC_DIR = Path(__file__).parent / "static"
+# Resolved from the repo marker, not by counting parents off __file__:
+# this module moved from frontend/app.py to frontend/app/__init__.py and
+# a fixed .parent silently pointed at frontend/app/static, which does not
+# exist. See os_utils.repo_root for the four other modules this bit.
+from backend.src.utils.os_utils import repo_root as _repo_root  # noqa: E402
+
+STATIC_DIR = _repo_root() / "frontend" / "static"
 app.add_static_files("/static", str(STATIC_DIR))
 
 # Versioned favicon URL — Safari caches favicons in its own database keyed by

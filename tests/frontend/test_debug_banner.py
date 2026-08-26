@@ -11,8 +11,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.frontend._source import module_source
+
 REPO = Path(__file__).resolve().parents[2]
-APP_SRC = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+APP_SRC = module_source("frontend/app.py")
 
 
 def test_banner_only_in_debug():

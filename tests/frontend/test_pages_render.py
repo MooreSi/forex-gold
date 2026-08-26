@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.frontend._source import module_source
+
 REPO = Path(__file__).resolve().parents[2]
 PAGES_DIR = REPO / "frontend" / "pages"
 
@@ -60,27 +62,10 @@ def test_the_app_shell_imports_and_registers_its_route():
     assert hasattr(frontend.app, "__file__")
 
 
-def _page_source(name: str) -> str:
-    """A page's full source, whether it is a module or a package.
-
-    Pages become packages once they outgrow 800 lines (docs/system/rules/
-    70-file-organisation.md), keeping their import path. A test that reads
-    "<name>.py" therefore breaks on the split even though nothing about the
-    page changed -- so read the whole package when there is one.
-    """
-    module = PAGES_DIR / f"{name}.py"
-    if module.exists():
-        return module.read_text(encoding="utf-8")
-    package = PAGES_DIR / name
-    return "\n".join(
-        p.read_text(encoding="utf-8") for p in sorted(package.rglob("*.py"))
-    )
-
-
 def test_the_new_expert_tunables_page_is_wired_into_settings():
     """M7's page is reached from a settings tab; an unreferenced renderer
     would leave the tab blank with no error anywhere."""
-    settings_source = _page_source("settings")
+    settings_source = module_source("frontend/pages/settings.py")
     assert "from frontend.pages.expert_tunables import render" in settings_source
     assert 'ui.tab("Expert Tunables")' in settings_source
 

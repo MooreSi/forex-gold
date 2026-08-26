@@ -16,9 +16,11 @@ REPO = Path(__file__).resolve().parents[2]
 
 from frontend.components import about_home, getting_started
 
+from tests.frontend._source import module_source
+
 
 def _about_section_ids() -> set[str]:
-    src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+    src = module_source("frontend/app.py")
     return set(re.findall(r'(?:el)?if section == "([a-z_]+)"', src))
 
 
@@ -49,5 +51,5 @@ def test_about_home_shares_the_daily_routine_copy():
 
 
 def test_app_shell_renders_about_via_the_component():
-    src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+    src = module_source("frontend/app.py")
     assert "about_home" in src, "app.py still renders the About home inline"

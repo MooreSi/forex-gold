@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.frontend._source import module_source
+
 REPO = Path(__file__).resolve().parents[2]
 
 _DIRECT_SERVICE = re.compile(
@@ -31,7 +33,7 @@ FILES = [
 
 @pytest.mark.parametrize("rel", FILES)
 def test_panels_reach_engines_through_the_controller(rel):
-    src = (REPO / rel).read_text(encoding="utf-8")
+    src = module_source(rel)
     hit = _DIRECT_SERVICE.search(src)
     assert hit is None, f"{rel} still imports an engine service directly: {hit.group(0)}"
     assert "engines_controller" in src, f"{rel} does not use the controller at all"
@@ -54,7 +56,7 @@ def test_the_mode_toggle_import_stays_function_local():
     """app.py's engine access is deliberately deferred past boot — the
     controller import must sit inside _mode_sub_engines, not at module
     level (hoisting it changes startup ordering)."""
-    src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+    src = module_source("frontend/app.py")
     fn = re.search(r"def _mode_sub_engines\(\):\n(.*?)\n\n", src, re.DOTALL)
     assert fn, "_mode_sub_engines gone — the mode toggle lost its engine access"
     assert "engines_controller" in fn.group(1)

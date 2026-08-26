@@ -15,9 +15,11 @@ REPO = Path(__file__).resolve().parents[2]
 
 from frontend.components import tab_labels
 
+from tests.frontend._source import module_source
+
 
 def _app_tab_names() -> list[str]:
-    src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+    src = module_source("frontend/app.py")
     block = re.search(r"with ui\.tabs\(\).*?as tabs:\n(.*?)\n\n", src, re.DOTALL)
     assert block, "cannot find the top-level tab definitions in app.py"
     return re.findall(r'ui\.tab\("([^"]+)"', block.group(1))
@@ -54,5 +56,5 @@ def test_the_subtitle_checker_can_see_a_blank():
 def test_app_shell_applies_the_subtitles():
     """The shell must actually render them (as tab tooltips), not just
     define them."""
-    src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+    src = module_source("frontend/app.py")
     assert "tab_labels" in src and "TAB_SUBTITLES" in src

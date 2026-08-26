@@ -17,6 +17,8 @@ REPO = Path(__file__).resolve().parents[2]
 
 from frontend.components import start_here
 
+from tests.frontend._source import module_source
+
 
 def _status(**overrides):
     base = {
@@ -71,14 +73,8 @@ def test_fix_this_targets_exist():
     """Every "Fix this ->" jump lands on a tab/section that really exists —
     a renamed Settings tab must fail this test, not silently dead-end the
     user."""
-    # settings became a package when it outgrew 800 lines; read all of it.
-    _settings = REPO / "frontend" / "pages" / "settings"
-    settings_src = (
-        (REPO / "frontend" / "pages" / "settings.py").read_text(encoding="utf-8")
-        if (REPO / "frontend" / "pages" / "settings.py").exists()
-        else "\n".join(p.read_text(encoding="utf-8") for p in sorted(_settings.rglob("*.py")))
-    )
-    app_src = (REPO / "frontend" / "app.py").read_text(encoding="utf-8")
+    settings_src = module_source("frontend/pages/settings.py")
+    app_src = module_source("frontend/app.py")
     settings_tabs = set(re.findall(r'ui\.tab\("([^"]+)"\)', settings_src))
     app_tabs = set(re.findall(r'ui\.tab\("([^"]+)"', app_src))
 

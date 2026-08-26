@@ -31,6 +31,8 @@ import re
 from backend.src.config import is_debug as _is_debug
 from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts as telegram_alerts
+from backend.src.services.positions import core_bot_panel as bot_panel
+from backend.src.services.telegram.bot_dispatch import PanelCtx as _PanelCtx
 from backend.src.services.telegram.bot_dispatch import handle_bot_command as _handle_bot_command_impl
 
 
@@ -45,6 +47,80 @@ class BotLoopCtx:
     make_bot_deps: Optional[Callable[[], Any]] = None
     get_bot_offset: Optional[Callable[[], int]] = None
     set_bot_offset: Optional[Callable[[int], None]] = None
+
+
+# ── Control-panel transport (2026-08-26) ──────────────────────────────────────
+# Ported from upstream engine.py's _bot_command_loop, whose body this module is.
+# core_bot_panel decides WHAT the screen says; these two decide how it reaches
+# Telegram. Without them the panel could not render (no inline keyboard on the
+# send) and could not respond (a button tap arrives as a callback_query, which
+# the loop below simply dropped) -- so /panel did nothing at all.
+
+async def _send_panel_screen(client, token: str, chat_id: str,
+                             screen, message_id=None) -> None:
+    base = f"https://api.telegram.org/bot{token}"
+    try:
+        if screen.mode == "noop":
+            return
+        if screen.mode == "delete" and message_id:
+            await client.post(f"{base}/deleteMessage",
+                              json={"chat_id": chat_id, "message_id": message_id},
+                              timeout=8)
+            return
+        if screen.mode == "edit" and message_id:
+            r = await client.post(f"{base}/editMessageText", json={
+                "chat_id":      chat_id,
+                "message_id":   message_id,
+                "text":         screen.text,
+                "parse_mode":   "Markdown",
+                "reply_markup": {"inline_keyboard": screen.keyboard or []},
+            }, timeout=8)
+            # "message is not modified" is the expected response to a tap that
+            # changed nothing visible (a stepper already at its floor, say) --
+            # not an error worth surfacing.
+            if r.status_code != 200 and "not modified" not in r.text:
+                log.warning("Panel edit failed: %s", r.text[:200])
+            return
+        payload = {"chat_id": chat_id, "text": screen.text, "parse_mode": "Markdown"}
+        if screen.mode == "force_reply":
+            payload["reply_markup"] = {"force_reply": True, "selective": True}
+        elif screen.keyboard:
+            payload["reply_markup"] = {"inline_keyboard": screen.keyboard}
+        r = await client.post(f"{base}/sendMessage", json=payload, timeout=8)
+        if r.status_code != 200:
+            # Markdown in a DB-sourced value (an underscore in a template name,
+            # say) can 400 the whole send; retry as plain text so the user still
+            # gets the answer.
+            log.warning("Panel send failed (%s), retrying unformatted", r.text[:200])
+            payload.pop("parse_mode", None)
+            await client.post(f"{base}/sendMessage", json=payload, timeout=8)
+    except Exception as e:
+        log.warning("Panel transport error: %s", e)
+
+
+async def _handle_panel_callback(client, token: str, cbq: dict,
+                                 allowed_chat: str, ctx) -> None:
+    """One inline-button tap."""
+    msg        = cbq.get("message") or {}
+    chat_id    = str(msg.get("chat", {}).get("id", ""))
+    message_id = msg.get("message_id")
+    # Same allowlist the message path enforces -- a callback carries its own
+    # chat, so it must be checked independently, not inherited.
+    if not chat_id or chat_id != allowed_chat:
+        return
+    screen = await bot_panel.handle_callback(cbq.get("data", ""), ctx)
+    # Always answer, even with no toast: Telegram spins on the button until the
+    # callback is acknowledged.
+    try:
+        await client.post(
+            f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+            json={"callback_query_id": cbq.get("id"),
+                  "text": (screen.toast or "")[:200]},
+            timeout=8,
+        )
+    except Exception as e:
+        log.debug("answerCallbackQuery failed: %s", e)
+    await _send_panel_screen(client, token, chat_id, screen, message_id)
 
 
 async def bot_command_loop(ctx: BotLoopCtx) -> None:
@@ -120,6 +196,17 @@ async def bot_command_loop(ctx: BotLoopCtx) -> None:
                             if uid >= ctx.get_bot_offset():
                                 ctx.set_bot_offset(uid + 1)
 
+                            # An inline-keyboard tap arrives as a
+                            # callback_query, not a message -- the panel's
+                            # entire navigation and every settings edit comes
+                            # through here. Dropped silently before this.
+                            cbq = update.get("callback_query")
+                            if cbq:
+                                await _handle_panel_callback(
+                                    _client, token, cbq, allowed_chat,
+                                    _PanelCtx(ctx.make_bot_deps()))
+                                continue
+
                             msg     = update.get("message") or {}
                             chat_id = str(msg.get("chat", {}).get("id", ""))
                             text    = (msg.get("text") or "").strip()
@@ -128,8 +215,23 @@ async def bot_command_loop(ctx: BotLoopCtx) -> None:
                             if not text or not chat_id or chat_id != allowed_chat:
                                 continue
 
+                            # A reply to a panel "Set exact value" prompt.
+                            # Checked before the slash-command dispatch because
+                            # a typed value is not a command and would
+                            # otherwise be dropped.
+                            prompt = ((msg.get("reply_to_message") or {}).get("text") or "")
+                            if bot_panel.parse_prompt(prompt):
+                                screen = await bot_panel.handle_value_reply(prompt, text)
+                                await _send_panel_screen(
+                                    _client, token, chat_id, screen)
+                                continue
+
                             reply = await _handle_bot_command_impl(
                                 text, ctx.make_bot_deps())
+                            if isinstance(reply, bot_panel.Screen):
+                                await _send_panel_screen(
+                                    _client, token, chat_id, reply)
+                                continue
                             if not reply:
                                 continue
 

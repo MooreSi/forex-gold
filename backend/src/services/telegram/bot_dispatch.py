@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
+from backend.src.services.positions import core_bot_panel as bot_panel
 from backend.src.services.telegram import bot_infra, bot_readonly
 from backend.src.services.trading import bot_trading
 
@@ -78,7 +79,42 @@ HANDLERS: dict[str, Callable[[list, BotDeps], Awaitable[str]]] = {
 }
 
 
-async def handle_bot_command(text: str, deps: BotDeps) -> str:
+# ── Telegram control panel (2026-08-26) ───────────────────────────────────────
+# core_bot_panel calls ctx._cmd_status / _cmd_balance / _cmd_trades / _cmd_pause
+# / _cmd_resume / _cmd_dpm_* / _cmd_ime_* / _cmd_activate / _cmd_report, because
+# upstream's panel was handed the engine and reused its bound methods rather than
+# duplicating their formatting. This branch moved every one of those onto
+# bot_readonly/bot_trading as free functions, so the engine no longer has them
+# and the panel would AttributeError on its first non-navigation tap.
+#
+# PanelCtx is the shim: the surface the panel expects, backed by the same
+# functions the command table above calls. One adapter here beats editing 1,700
+# lines of panel code, and it keeps the panel and the typed commands provably on
+# the same implementations.
+
+class PanelCtx:
+    """The `_cmd_*` surface core_bot_panel expects, over a BotDeps."""
+
+    def __init__(self, deps: "BotDeps") -> None:
+        self._d = deps
+
+    async def _cmd_status(self, args):   return await bot_readonly.cmd_status(args, self._d.bridge, self._d.tg_reader)
+    async def _cmd_balance(self, args):  return await bot_readonly.cmd_balance(args, self._d.bridge)
+    async def _cmd_trades(self, args):   return await bot_readonly.cmd_trades(args, self._d.bridge)
+    async def _cmd_pause(self, args):    return await bot_readonly.cmd_pause(args)
+    async def _cmd_resume(self, args):   return await bot_readonly.cmd_resume(args)
+    async def _cmd_dpm_on(self, args):   return await bot_readonly.cmd_dpm_on(args)
+    async def _cmd_dpm_off(self, args):  return await bot_readonly.cmd_dpm_off(args)
+    async def _cmd_ime_on(self, args):   return await bot_readonly.cmd_ime_on(args)
+    async def _cmd_ime_off(self, args):  return await bot_readonly.cmd_ime_off(args)
+    async def _cmd_report(self, args):   return await bot_trading.cmd_report(args, self._d.bridge, self._d.cfg)
+
+    async def _cmd_activate(self, args):
+        return await bot_trading.cmd_activate(
+            args, self._d.bridge, (self._d.cfg or {}).get("starting_balance", 1000.0))
+
+
+async def handle_bot_command(text: str, deps: BotDeps):
     """Route an incoming message to the correct command handler."""
     if not text.startswith("/"):
         return ""
@@ -86,6 +122,13 @@ async def handle_bot_command(text: str, deps: BotDeps) -> str:
     # Strip @BotName suffix Telegram appends in groups
     cmd  = parts[0].lstrip("/").split("@")[0].lower()
     args = parts[1:]
+
+    # The control panel. Returns a Screen, not a string -- bot_loop renders it
+    # with an inline keyboard. Upstream routed these three in engine.py's own
+    # command handler, which this branch relocated here, so they arrived
+    # unrouted and /panel silently did nothing.
+    if cmd in ("panel", "menu", "start"):
+        return bot_panel.root_screen()
 
     handler = HANDLERS.get(cmd)
     if handler:

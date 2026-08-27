@@ -22,7 +22,7 @@ or closes an order**. Bridge use here is read-only (`get_tick`).
 
 - `services/signals/scan_messages.py` — the whole message-scan pipeline (`ScanCtx`): dedup, logic keywords, instant entry, SL adjustment, parse, staleness, strategy resolution, execution, alerting
 - `services/signals/parser.py` — the gold-signal regexes: Format A ("Sell Gold 4520 - 4512"), Format B (`Direction`/`ENTRY`), Format C/GD2 ("XAU USD BUY NOW"), C3 limit-order layout, instant entry, learned-rule application
-- `services/signals/scan_parse_classify.py` — channel-format-based classification/parse + DB recording
+- `services/signals/scan_parse_classify.py` — one channel-agnostic classification/parse pipeline + DB recording
 - `services/signals/scan_edit_reparse.py` — dedup/edit-correction state machine for Telegram edits (same message ID, new text)
 - `services/signals/scan_staleness.py` — staleness guard (`max_signal_age_secs`) and per-channel strategy/skip-reason resolution
 - `services/signals/resolution.py` — front half of `open_trade_from_signal`: gates + resolving strategy / lot size / stop loss (pure computation, read-only)
@@ -51,7 +51,12 @@ or closes an order**. Bridge use here is read-only (`get_tick`).
 ## Known things & gotchas
 
 - Telegram delivers an *edit* as the same message ID with new text; `scan_edit_reparse.py` can **flatten (close) a real open position** via `close_trade_fn` when an instant-entry edit flips direction.
-- The limit-order format ("BUY/SELL LIMITS GOLD @ … AREA") is checked *ahead of* every channel's configured `parser_format`, so it fires for any channel (explicit 2026-07-22 decision).
+- **Parsing is channel-agnostic (2026-08-27, owner directive).** `classify_and_parse` no longer branches on the channel's configured `parser_format` at all: every channel runs learned rules -> second-message merge -> limit-order layout -> currency guard -> Format A/B -> GD2 -> partial -> bare trigger -> AI fallback -> unrecognised queue, in that order. Before this, a `format_ab` channel never ran a single GD2 regex and a `gd2` channel never ran Format A/B, so a well-formed signal in the "wrong" layout for its channel was dropped. `parser_format` still does two things and only two: `'none'`/disabled stops the channel being scanned, and it sets the DEFAULT for that channel's Immediate Market Entry flag.
+- **Immediate Market Entry is channel-agnostic too (same change).** The scan path used to pick the trigger parser from `parser_format`, and the non-gd2 one requires a literal `XAU… BUY NOW`. So on Gold Diggers VIP a market entry worded "Buy Gold Now" / "Buy Zone Now" / "XAU USD BUY" matched nothing at all, while the identical message on a gd2 channel fired. Both trigger parsers now run for every channel, with no substring pre-gate.
+- The limit-order format ("BUY/SELL LIMITS GOLD @ … AREA") is checked *ahead of* every parser, so it fires for any channel (explicit 2026-07-22 decision). **It is still the only thing that places a genuine resting broker order** — every other zone signal is a Python-side wait that fills at market. Whether that should change is Simon's call: [008-zone-signals-and-real-pending-orders.md](../../../simon-handover/008-zone-signals-and-real-pending-orders.md).
+- **A signal row's `source_name` is decorated** — `Telegram Auto (<channel>)` — while `channel_performance` / `channel_strategy_rec` / `channel_parser_config` are keyed on the bare name. `channels/repo._canonical()` strips that wrapper generically since 2026-08-27; before that it only knew the two decorated strings hardcoded in `CANONICAL_CHANNELS`, so any third channel's Channel Strategy pick was silently ignored everywhere a stored signal was read — expiry ladder, grid dispatch, `open_trade_from_signal`'s own strategy resolution, per-channel schedule windows.
+- **The pending watcher's momentum check reads a cache nothing cleared.** `runtime._dpm_candles` was refreshed only while a trade was open, so once the last position closed it froze at that bar — and the watcher defers any signal whose direction disagrees with the last candle it is handed. A frozen bearish bar deferred every queued BUY until it expired. `monitor_cycle` now refreshes it whenever the watcher will read it, and clears it on a failed fetch.
+- **That momentum check only runs at all when DPM is enabled**, because the candle cache is DPM's. With DPM off it is silently skipped. Left as-is — turning it on would decline *more* trades, the opposite of what was reported. See Open questions.
 - Parser tolerances are deliberate: non-breaking spaces, optional colons, en/em-dash/slash/"to" range separators, widened currency capture so `XAU/USD` isn't truncated and wrongly rejected.
 - `max_signal_age_secs` (formerly hardcoded 4 min) is an Expert Tunable — older signals are recorded as *historical* and never executed.
 - Group IDs are remapped by name in `channels/repo.py` (Telegram-side renames keep the same group_id).
@@ -60,6 +65,9 @@ or closes an order**. Bridge use here is read-only (`get_tick`).
 - `scan_messages.py` still carries one piece of engine coupling: `engine_for_eval`, threaded to `evaluate_signal_strategy`.
 
 ## Open questions
+
+- The pending watcher's momentum confirmation is coupled to the DPM toggle by accident: it reads DPM's M5 candle cache, so with DPM off the gate never fires. Should it have its own fetch, or is it meant to be a DPM-only gate?
+- Should a zone signal rest as a real broker order instead of waiting in Python? See [008-zone-signals-and-real-pending-orders.md](../../../simon-handover/008-zone-signals-and-real-pending-orders.md).
 
 - `engine_for_eval` in `scan_messages.py` is named "the one piece of engine coupling this pipeline has left" — visible but not yet removed.
 - `bot_readonly.py` docstring notes a dispatcher rewire deferred to a future pass; `bot_dispatch.py` has since landed, so the docstring is stale rather than contradicted.

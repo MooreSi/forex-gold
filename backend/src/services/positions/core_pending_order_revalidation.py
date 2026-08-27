@@ -28,6 +28,7 @@ import time
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.broker import repo as broker_repo
 from backend.src.services.positions.momentum_exhaustion import check_momentum_exhaustion
 
 log = logging.getLogger(__name__)
@@ -43,12 +44,7 @@ async def revalidate_pending_orders(bridge: Any) -> None:
     if ea is None or not ea.is_ea_healthy():
         return
 
-    def _fetch_working():
-        with db_module.db() as conn:
-            return [db_module.row_to_dict(r) for r in conn.execute(
-                "SELECT * FROM vantage_pending_orders WHERE status='working'"
-            ).fetchall()]
-    orders = await db_module.to_db_thread(_fetch_working)
+    orders = await db_module.to_db_thread(broker_repo.fetch_working_pending_orders)
     if not orders:
         return
 

@@ -43,6 +43,7 @@ import time
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.positions.core_indicators import ema_last, rsi_last
 
 log = logging.getLogger(__name__)
@@ -254,17 +255,8 @@ async def capture_pending_snapshots(bridge: Any, max_age_s: float = 900.0) -> in
     the whole value here is that the reading is contemporaneous.
     """
     def _fetch():
-        cutoff = time.time() - max_age_s
-        marks = ",".join("?" for _ in WATCHED)
-        with db_module.db() as conn:
-            return [
-                db_module.row_to_dict(r) for r in conn.execute(
-                    f"SELECT * FROM vantage_tg_signals "
-                    f"WHERE group_name IN ({marks}) AND parsed_at > ? "
-                    f"ORDER BY parsed_at",
-                    (*WATCHED, cutoff),
-                ).fetchall()
-            ]
+        return positions_repo.fetch_recent_signals_for_groups(
+            list(WATCHED), time.time() - max_age_s)
 
     def _already(msg_id, stage):
         from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus

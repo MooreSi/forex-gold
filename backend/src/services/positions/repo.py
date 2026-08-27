@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 
 from backend.src.db import transaction
-from backend.src.db.database import db
+from backend.src.db.database import db, row_to_dict
 
 log = logging.getLogger(__name__)
 
@@ -138,3 +138,40 @@ def fetch_remaining_lots(trade_id: str):
             "SELECT remaining_lots FROM vantage_simulated_trades WHERE trade_id=?",
             (trade_id,),
         ).fetchone()
+
+
+def fetch_internal_open_exposure(sources: list[str]) -> list[tuple[str, float]]:
+    """[(DIRECTION, lots), ...] for every open trade from an internal generator.
+
+    COALESCE(remaining_lots, lot_size), not lot_size: remaining_lots is the
+    live exposure, and a partially-closed trade no longer carries its original
+    size. Falling back matters for rows written before that column existed.
+    """
+    placeholders = ",".join("?" for _ in sources)
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT direction, COALESCE(remaining_lots, lot_size) AS lots "
+            f"FROM vantage_simulated_trades "
+            f"WHERE status='open' AND tg_source IN ({placeholders})",
+            sources,
+        ).fetchall()
+    return [((r[0] or "").upper(), float(r[1] or 0)) for r in rows]
+
+
+def fetch_recent_signals_for_groups(groups: list[str], cutoff: float) -> list[dict]:
+    """Telegram signals from the watched groups since `cutoff`, oldest first.
+
+    The cutoff is what keeps a snapshot contemporaneous: replaying an old
+    signal against today's market would be worse than having no data, since
+    the whole value of the reading is that it was taken at the time.
+    """
+    marks = ",".join("?" for _ in groups)
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                f"SELECT * FROM vantage_tg_signals "
+                f"WHERE group_name IN ({marks}) AND parsed_at > ? "
+                f"ORDER BY parsed_at",
+                (*groups, cutoff),
+            ).fetchall()
+        ]

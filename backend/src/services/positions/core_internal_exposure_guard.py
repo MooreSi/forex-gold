@@ -38,6 +38,7 @@ from __future__ import annotations
 import logging
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 
 log = logging.getLogger(__name__)
 
@@ -69,15 +70,7 @@ def _open_internal_legs() -> list[tuple[str, float]]:
     to an internal generator. remaining_lots (not lot_size) is the live
     exposure -- a partially-closed trade no longer carries its original
     size."""
-    placeholders = ",".join("?" for _ in _INTERNAL_SOURCES)
-    with db_module.db() as conn:
-        rows = conn.execute(
-            f"SELECT direction, COALESCE(remaining_lots, lot_size) AS lots "
-            f"FROM vantage_simulated_trades "
-            f"WHERE status='open' AND tg_source IN ({placeholders})",
-            _INTERNAL_SOURCES,
-        ).fetchall()
-    return [((r[0] or "").upper(), float(r[1] or 0)) for r in rows]
+    return positions_repo.fetch_internal_open_exposure(list(_INTERNAL_SOURCES))
 
 
 def net_internal_exposure() -> float:

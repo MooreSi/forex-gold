@@ -69,3 +69,27 @@ def close_db(namespace: str = _DEFAULT_NAMESPACE) -> None:
     adapter = _adapters.pop(namespace, None)
     if adapter is not None and hasattr(adapter, "close"):
         adapter.close()
+
+
+def close_all() -> None:
+    """Close every namespace's adapter, not just the default one.
+
+    init_db() already closes the namespace it is about to replace -- see its
+    docstring for the fd leak that fixed. But this cache is keyed by
+    NAMESPACE, and the three engines each carry their own
+    (reversal_engine_repo, breakout_signal_repo, test_signal_repo all call
+    init_db with a private one). Re-pointing the default namespace therefore
+    leaves every engine adapter untouched, still holding an open connection to
+    whatever file it was last given.
+
+    On POSIX that is invisible: the file unlinks anyway. On Windows it pins
+    the file, which is how it was found -- Windows CI run 33117372693 reported
+    connections to *previous tests'* temp databases still alive, accumulating
+    as the run went on.
+
+    Also worth knowing outside tests: the demo/live env switch re-inits the
+    default namespace only, so the engine adapters keep their connection to
+    the old environment's file until the process restarts.
+    """
+    for namespace in list(_adapters):
+        close_db(namespace)

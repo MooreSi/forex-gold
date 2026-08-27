@@ -12,6 +12,7 @@ import pytest
 
 from backend.src.services.test_signal import test_signal_repo as repo
 from backend.src.services.test_signal.test_signal_repo import get_db
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def fresh_repo():
     repo.init(path)
     yield repo
     repo.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 def _sig(**overrides) -> dict:

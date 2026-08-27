@@ -15,6 +15,7 @@ import pytest
 
 from backend.src.services.reversal_engine import reversal_engine_repo as repo
 from backend.src.services.reversal_engine.reversal_engine_repo import get_db
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -24,7 +25,7 @@ def fresh_repo():
     repo.init(path)
     yield repo
     repo.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 def test_close_signal_rolls_back_status_and_balance_together_on_mid_write_failure(fresh_repo):

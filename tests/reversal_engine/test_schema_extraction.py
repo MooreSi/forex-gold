@@ -19,6 +19,7 @@ import tempfile
 import pytest
 
 from backend.src.services.reversal_engine import reversal_engine_repo as repo
+from tests.conftest import remove_db_file
 
 # Every table the reversal engine's own database carries.
 EXPECTED_TABLES = {
@@ -85,4 +86,4 @@ def test_the_schema_check_would_notice_a_dropped_table():
         conn.close()
         assert EXPECTED_TABLES - names == EXPECTED_TABLES
     finally:
-        os.remove(path)
+        remove_db_file(path)

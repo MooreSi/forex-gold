@@ -288,6 +288,16 @@ def remove_db_file(path: str) -> None:
     import gc
     import sqlite3
 
+    from backend.src.db import connection as _conn_mod
+
+    # Close EVERY namespace, not just the default. The three engines
+    # (reversal_engine, breakout_signal, test_signal) each cache their own
+    # adapter under a private namespace, so re-pointing the main database
+    # leaves theirs holding an open connection to the previous test's file.
+    # That is what Windows CI run 33117372693 caught: connections to earlier
+    # tests' temp databases, still alive and accumulating.
+    _conn_mod.close_all()
+
     try:
         os.remove(path)
         return

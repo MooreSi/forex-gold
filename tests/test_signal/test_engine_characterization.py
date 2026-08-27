@@ -17,6 +17,7 @@ from backend.src.services.test_signal.test_signal_service import TestSignalEngin
 from backend.src.services.test_signal.test_signal_generate import _calc_lot_size
 from backend.src.services.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
 from backend.src.services.test_signal.test_signal_velocity import _compute_swing_levels
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def fresh_db():
     # `db` here is test_signal_repo, whose adapter holds the file open until
     # released; Windows cannot unlink while a handle is live.
     db.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 @pytest.fixture

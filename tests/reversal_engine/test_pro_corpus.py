@@ -20,6 +20,7 @@ import pytest
 
 from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
 from backend.src.services.reversal_engine import reversal_engine_repo as re_repo
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def corpus():
     # never owned a reference to. Sibling *_repo_transactions fixtures
     # already do this; these two were missed.
     re_repo.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 def snapshot(msg_id="msg-1", stage="complete", **over):

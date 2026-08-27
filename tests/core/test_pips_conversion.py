@@ -17,6 +17,7 @@ import pytest
 
 from backend.src.db import database as db
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD, pips_to_price
+from tests.conftest import remove_db_file
 
 
 def _reset_thread_local_connection():
@@ -37,7 +38,7 @@ def fresh_db_path():
     yield path
     _reset_thread_local_connection()
     db._db_executor.submit(_reset_thread_local_connection).result()
-    os.remove(path)
+    remove_db_file(path)
 
 
 def test_conversion_matches_the_channels_own_wording():

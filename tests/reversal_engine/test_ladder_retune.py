@@ -20,6 +20,7 @@ import pytest
 from backend.src.services.reversal_engine import reversal_engine_manage as manage
 from backend.src.services.reversal_engine import reversal_engine_repo as db
 from backend.src.services.reversal_engine.reversal_engine_service import ReversalEngine
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def fresh_db():
     db.init(path)
     yield db
     db.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 @pytest.fixture

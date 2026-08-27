@@ -26,6 +26,7 @@ import pytest
 
 from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus, pro_model
 from backend.src.services.reversal_engine import reversal_engine_repo as re_repo
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def corpus():
     # one and test_pro_corpus were missed, and between them produced 26 of the
     # 50 teardown errors in the first Windows CI run.
     re_repo.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 def _row(msg_id, stage, rsi, adx, direction="BUY", fvg=1.0):

@@ -17,6 +17,7 @@ import pytest
 
 from backend.src.services.breakout_signal import breakout_signal_repo as db
 from backend.src.services.breakout_signal.breakout_signal_service import BreakoutEngine
+from tests.conftest import remove_db_file
 
 
 @pytest.fixture
@@ -26,7 +27,7 @@ def fresh_db():
     db.init(path)
     yield db
     db.close_db()
-    os.remove(path)
+    remove_db_file(path)
 
 
 @pytest.fixture

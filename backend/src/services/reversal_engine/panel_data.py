@@ -82,15 +82,5 @@ async def get_realised_pnl() -> dict:
     lot, whether or not the trade was ever placed. Only rows here in
     vantage_simulated_trades correspond to orders that really went to MT5.
     """
-    def _read() -> dict:
-        with _core_db.db() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) n, COALESCE(SUM(net_pnl), 0) total "
-                "FROM vantage_simulated_trades "
-                "WHERE status='closed' AND tg_source='Reversal Engine'"
-            ).fetchone()
-        n = int(row[0] or 0)
-        total = float(row[1] or 0.0)
-        return {"n": n, "total": total, "per_trade": (total / n) if n else 0.0}
-
-    return await to_db_thread(_read)
+    from backend.src.services.analytics import read_repo as _reads
+    return await to_db_thread(_reads.realised_pnl_for_source, "Reversal Engine")

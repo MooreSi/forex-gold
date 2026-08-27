@@ -383,13 +383,8 @@ def _day_realized_pnl(now: datetime) -> float:
     across every window -- the daily cumulative target's denominator, as
     opposed to _block_realized_pnl's single-window one."""
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    with db() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "
-            "WHERE status='closed' AND open_time >= ?",
-            (day_start.timestamp(),),
-        ).fetchone()
-    return float(row[0] or 0.0)
+    from backend.src.services.analytics import read_repo as _reads
+    return _reads.realised_pnl_opened_since(day_start.timestamp())
 
 
 def _block_realized_pnl(block: dict, now: datetime) -> float:

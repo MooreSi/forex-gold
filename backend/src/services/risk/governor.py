@@ -208,13 +208,9 @@ def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
     """
     if day_start is None:
         day_start = rg_day_start_ts()
-    with db_module.db() as conn:
-        rows = conn.execute(
-            "SELECT net_pnl FROM vantage_simulated_trades "
-            "WHERE close_time >= ? ORDER BY close_time", (day_start,),
-        ).fetchall()
+    from backend.src.services.analytics import read_repo as _reads
     running = peak = 0.0
-    for (pnl,) in rows:
+    for pnl in _reads.closed_pnls_since(day_start):
         running += float(pnl or 0.0)
         peak = max(peak, running)
     return running, peak

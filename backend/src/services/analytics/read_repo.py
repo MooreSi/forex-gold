@@ -260,3 +260,35 @@ def realised_pnl_for_source(source: str) -> dict:
     n = int(row[0] or 0)
     total = float(row[1] or 0.0)
     return {"n": n, "total": total, "per_trade": (total / n) if n else 0.0}
+
+
+def closed_pnls_since(close_time_from: float) -> list[float]:
+    """Every closed trade's net P&L since a timestamp, oldest first.
+
+    Keyed on CLOSE time, so a trade opened yesterday and closed today counts.
+    The risk governor replays these in order to rebuild the day's running total
+    and its high-water mark -- see day_pnl_and_peak, which deliberately
+    recomputes rather than persisting a counter that can drift.
+    """
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT net_pnl FROM vantage_simulated_trades "
+            "WHERE close_time >= ? ORDER BY close_time", (close_time_from,),
+        ).fetchall()
+    return [float(r[0] or 0.0) for r in rows]
+
+
+def realised_pnl_opened_since(open_time_from: float) -> float:
+    """Total net P&L of CLOSED trades OPENED since a timestamp.
+
+    Keyed on OPEN time, unlike closed_pnls_since above -- the trading
+    schedule's daily target counts a day's own trades, so one opened yesterday
+    and closed today belongs to yesterday. The two predicates look
+    interchangeable and are not.
+    """
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "
+            "WHERE status='closed' AND open_time >= ?", (open_time_from,),
+        ).fetchone()
+    return float(row[0] or 0.0)

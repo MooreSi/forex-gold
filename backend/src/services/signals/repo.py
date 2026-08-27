@@ -194,3 +194,48 @@ def set_signal_commentary(signal_id: str, commentary_json: str) -> None:
             "UPDATE vantage_signals SET claude_commentary=? WHERE signal_id=?",
             (commentary_json, signal_id),
         )
+
+
+# Columns the gap-fire adjustment is allowed to rewrite. The caller builds the
+# column list from a dict it constructs itself, but that dict reaches SQL as
+# identifiers rather than parameters, so the set is pinned here instead of
+# trusted: this is a money path, and a signal's levels are what the order is
+# built from.
+_ADJUSTABLE_LEVEL_COLS = frozenset(
+    {"entry_low", "entry_high", "stop_loss"} | {f"tp{i}" for i in range(1, 9)}
+)
+
+
+def apply_signal_levels(signal_id: str, levels: dict) -> None:
+    """Rewrite a pending signal's entry/stop/TP levels.
+
+    Used by the IME gap-fire in PendingWatcher for both halves of the
+    anti-compounding fix: applying the gap-adjusted levels immediately before
+    activation, and putting the channel's original levels back if that
+    activation fails. Without the second call each cycle re-measures the gap
+    from the previous cycle's shifted levels and shifts again -- live that
+    walked one signal's stop 110 pips over 80 passes.
+
+    An empty `levels` is a no-op rather than a malformed UPDATE.
+    """
+    if not levels:
+        return
+    unknown = set(levels) - _ADJUSTABLE_LEVEL_COLS
+    if unknown:
+        raise ValueError(f"not adjustable signal level columns: {sorted(unknown)}")
+    assignments = ", ".join(f"{col}=?" for col in levels)
+    with db_module.db() as conn:
+        conn.execute(
+            f"UPDATE vantage_signals SET {assignments} WHERE signal_id=?",
+            (*levels.values(), signal_id),
+        )
+
+
+def has_pending_order(signal_id: str) -> bool:
+    """Whether a broker pending (limit) order was recorded for this signal."""
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM vantage_pending_orders WHERE signal_id=? LIMIT 1",
+            (signal_id,),
+        ).fetchone()
+    return row is not None

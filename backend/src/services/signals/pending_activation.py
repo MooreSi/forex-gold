@@ -169,12 +169,7 @@ def _is_limit_signal(signal_id: str | None) -> bool:
     if not signal_id:
         return False
     try:
-        with db_module.db() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM vantage_pending_orders WHERE signal_id=? LIMIT 1",
-                (signal_id,),
-            ).fetchone()
-        return row is not None
+        return signals_repo.has_pending_order(signal_id)
     except Exception:
         return False
 
@@ -511,12 +506,7 @@ async def try_activate_pending_signals(
         # compounding); three of the four expired without ever opening, at
         # levels bearing no relation to what the channel actually sent.
         if _pw_updates is not None:
-            with db_module.db() as conn:
-                conn.execute(
-                    f"UPDATE vantage_signals SET "
-                    f"{', '.join(f'{k}=?' for k in _pw_updates)} WHERE signal_id=?",
-                    (*_pw_updates.values(), sig["signal_id"]),
-                )
+            signals_repo.apply_signal_levels(sig["signal_id"], _pw_updates)
             log.info(
                 "[PendingWatcher] Signal %s gap-adjusted market entry (IME): "
                 "zone %.2f-%.2f, market %.2f, gap=%.2f pts -> SL %.2f",
@@ -572,12 +562,7 @@ async def try_activate_pending_signals(
             # exactly the case that previously left a drifted row behind.
             if _pw_updates is not None and _pw_original is not None:
                 try:
-                    with db_module.db() as conn:
-                        conn.execute(
-                            f"UPDATE vantage_signals SET "
-                            f"{', '.join(f'{k}=?' for k in _pw_original)} WHERE signal_id=?",
-                            (*_pw_original.values(), sig["signal_id"]),
-                        )
+                    signals_repo.apply_signal_levels(sig["signal_id"], _pw_original)
                     log.info(
                         "[PendingWatcher] Signal %s gap-fire reverted to original "
                         "levels after failed activation",
@@ -616,11 +601,7 @@ async def try_activate_pending_signals(
             # Give up rather than keep re-attempting until expiry. Each
             # attempt can leave real orders at the broker before it fails,
             # so "retry until the window closes" is not a safe default.
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_signals SET status='expired' WHERE signal_id=?",
-                    (sig["signal_id"],),
-                )
+            signals_repo.expire_signal(sig["signal_id"])
             retry_after.pop(sig["signal_id"], None)
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
             log.error("[PendingWatcher] Signal %s abandoned after %d failed "

@@ -23,7 +23,22 @@ from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
 from backend.src.runtime import TradingRuntime
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+def _now_iso() -> str:
+    """A timestamp for "this message just arrived", evaluated PER CALL.
+
+    It used to be a module-level constant, and that made these tests a
+    stopwatch race. Module bodies run during pytest collection, at the very
+    start of the run, but scan_staleness discards any message older than
+    max_signal_age_s (default 240s) -- so the constant aged as the suite ran
+    and eventually every message here was skipped as historical, leaving
+    result empty and the assertions indexing off the end of it.
+
+    It survived on macOS only by luck: that suite takes 239 seconds against a
+    240-second window. Windows CI takes 1,388s and fails five of these
+    outright (run 33111402669). Reproduced on macOS by backdating this value
+    10 minutes -- exactly the same four tests fail.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _reset_thread_local_connection():
@@ -245,7 +260,7 @@ def test_high_risk_does_not_override_an_assigned_ea_template(fresh_db):
         "TestChannel", et.override_for_template("Test Template"), auto=False,
     )
     text_hr = _GD2_FULL + "\nHIGH RISK TRADE"
-    result, calls, alerts = _run([{"id": "c11b", "group_id": "g1", "text": text_hr, "timestamp": _NOW_ISO}])
+    result, calls, alerts = _run([{"id": "c11b", "group_id": "g1", "text": text_hr, "timestamp": _now_iso()}])
     assert calls[0]["strategy_name"] == "Template: Test Template"
 
 

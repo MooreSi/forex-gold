@@ -26,7 +26,22 @@ from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.runtime import SimulationEngine
 from backend.src.services.signals.parser import validate_signal
 
-_NOW_ISO = datetime.now(timezone.utc).isoformat()
+def _now_iso() -> str:
+    """A timestamp for "this message just arrived", evaluated PER CALL.
+
+    It used to be a module-level constant, and that made these tests a
+    stopwatch race. Module bodies run during pytest collection, at the very
+    start of the run, but scan_staleness discards any message older than
+    max_signal_age_s (default 240s) -- so the constant aged as the suite ran
+    and eventually every message here was skipped as historical, leaving
+    result empty and the assertions indexing off the end of it.
+
+    It survived on macOS only by luck: that suite takes 239 seconds against a
+    240-second window. Windows CI takes 1,388s and fails five of these
+    outright (run 33111402669). Reproduced on macOS by backdating this value
+    10 minutes -- exactly the same four tests fail.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _reset_thread_local_connection():
@@ -401,7 +416,7 @@ def test_sl_parsing_disabled_substitutes_fallback_distance(fresh_db):
 def test_sl_parsing_disabled_honours_configured_fallback_pips(fresh_db):
     _setup_channel("format_ab")
     db.update_risk_settings({"lk_enable_sl_parsing": 0, "lk_fallback_sl_pips": 120.0})
-    result, uq, alerts = _run([{"id": "b21b", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b21b", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert result[0]["stop_loss"] == 4532.0   # 4520 + 120 * 0.10
 
 
@@ -410,7 +425,7 @@ def test_sl_parsing_disabled_substitute_passes_validation(fresh_db):
     check -- the None it replaced raised TypeError out of that same call."""
     _setup_channel("format_ab")
     db.update_risk_settings({"lk_enable_sl_parsing": 0})
-    result, uq, alerts = _run([{"id": "b21c", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b21c", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     r = result[0]
     assert validate_signal(
         r["direction"], r["entry_low"], r["entry_high"], r["stop_loss"],
@@ -423,7 +438,7 @@ def test_sl_parsing_disabled_prefers_channel_template_sl_pips(fresh_db):
     db.update_risk_settings({"lk_enable_sl_parsing": 0, "lk_fallback_sl_pips": 120.0})
     ea_templates.save_ea_template("T1", {"sl_pips": 30.0})
     db.set_channel_strategy_override("TestChannel", ea_templates.override_for_template("T1"))
-    result, uq, alerts = _run([{"id": "b21d", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO}])
+    result, uq, alerts = _run([{"id": "b21d", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()}])
     assert result[0]["stop_loss"] == 4523.0   # 4520 + 30 * 0.10, template wins
 
 
@@ -453,7 +468,7 @@ def test_one_failing_message_does_not_abort_the_batch(fresh_db):
     # during the refactor, and _classify_and_parse_impl is bound there now.
     with mock.patch.object(_scan_messages_mod, "_classify_and_parse_impl", boom):
         result, uq, alerts = _run([
-            {"id": "b30", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO},
-            {"id": "b31", "group_id": "g1", "text": _FORMAT_A, "timestamp": _NOW_ISO},
+            {"id": "b30", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()},
+            {"id": "b31", "group_id": "g1", "text": _FORMAT_A, "timestamp": _now_iso()},
         ])
     assert [r["tg_message_id"] for r in result] == ["b31"]

@@ -16,7 +16,9 @@ from typing import Optional
 from nicegui import ui
 
 from backend.src.services.backtest import engine as bt
-from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.controllers.trading_controller import (
+    STRATEGY_NAMES,
+)
 
 _STRATEGY_LABELS = dict(STRATEGY_NAMES)
 

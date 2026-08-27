@@ -7,7 +7,9 @@ from nicegui import ui
 
 from backend.src.controllers import history_controller as history_ctl
 from backend.src.runtime import _apply_fee
-from backend.src.utils.models import CONTRACT_SIZE
+from backend.src.controllers.history_controller import (
+    CONTRACT_SIZE,
+)
 
 from ._shared import _entry_deal_comments
 

@@ -490,9 +490,41 @@ _FIXED_ENGINE_CHANNELS = [
 ]
 
 
+_TG_AUTO_OPEN = "telegram auto ("
+
+
+def _strip_tg_auto_wrapper(source: str) -> str:
+    """Undo the "Telegram Auto (<channel>)" decoration a stored signal's
+    source_name carries.
+
+    Every signal row written by the Telegram scan path is stamped
+    `Telegram Auto (<channel>)`, while channel_performance,
+    channel_strategy_rec and channel_parser_config are all keyed on the bare
+    channel name. CANONICAL_CHANNELS carries an explicit decorated entry for
+    the two channels that existed when it was written, so those two resolved
+    and every other channel silently did not: get_channel_strategy_override()
+    returned None for a third channel's queued signals, so its Channel
+    Strategy pick was ignored on the whole stored-signal path -- the pending
+    watcher's expiry ladder and grid dispatch, open_trade_from_signal's own
+    strategy resolution, and the per-channel Trading Schedule windows all
+    fell back to the global Active Strategy instead.
+
+    Stripping the wrapper generically fixes every one of those at once. The
+    explicit dict entries are still consulted first, so nothing that already
+    resolved changes.
+    """
+    src = (source or "").strip()
+    if src.lower().startswith(_TG_AUTO_OPEN) and src.endswith(")"):
+        return src[len(_TG_AUTO_OPEN):-1].strip()
+    return src
+
+
 def _canonical(source: str) -> str:
     """Return the canonical channel name for a raw tg_source / source string."""
-    return CANONICAL_CHANNELS.get(source, source)
+    if source in CANONICAL_CHANNELS:
+        return CANONICAL_CHANNELS[source]
+    bare = _strip_tg_auto_wrapper(source)
+    return CANONICAL_CHANNELS.get(bare, bare)
 
 
 def canonical_channel_name(source: str) -> str:
@@ -690,7 +722,10 @@ def get_open_trade_count_for_channel(source: str) -> int:
     canon = _canonical(source)
     variants = [s for s, c in CANONICAL_CHANNELS.items() if c == canon]
     if not variants:
-        variants = [source]
+        # A channel with no explicit dict entry: count under both the bare
+        # canonical name (what open_trade stamps on tg_source) and whatever
+        # was passed in.
+        variants = sorted({canon, source})
     placeholders = ",".join("?" * len(variants))
     try:
         with db() as conn:

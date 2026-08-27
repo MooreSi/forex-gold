@@ -3,7 +3,7 @@ and EA templates."""
 import json
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
-from backend.src.utils.models import (
+from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
     STRATEGY_SCALE_OUT,
 )
@@ -11,18 +11,24 @@ from frontend.pages.settings import render_risk_card
 
 # Strategy id short-aliases, used by the comparison tables.
 from backend.src.services.risk import strategy_params as _sp
-from backend.src.utils.models import (
-    STRATEGY_SCALE_OUT as _SO, STRATEGY_BE_RUNNER as _BE,
-    STRATEGY_TRAIL_STOP as _TS, STRATEGY_PROTECTED_SCALE as _PS,
-    STRATEGY_CONSERVATIVE as _CO, STRATEGY_NO_SL_SCALE as _NSS,
-    STRATEGY_CONSERVATIVE_TRIAL as _CT, STRATEGY_SCALP_RUNNER as _SR,
+from backend.src.controllers.trading_controller import (
+    STRATEGY_SCALE_OUT as _SO,
+    STRATEGY_BE_RUNNER as _BE,
+    STRATEGY_TRAIL_STOP as _TS,
+    STRATEGY_PROTECTED_SCALE as _PS,
+    STRATEGY_CONSERVATIVE as _CO,
+    STRATEGY_NO_SL_SCALE as _NSS,
+    STRATEGY_CONSERVATIVE_TRIAL as _CT,
+    STRATEGY_SCALP_RUNNER as _SR,
     STRATEGY_SIGNAL_CLIMBER as _SC,
     STRATEGY_REVERSAL_RUNNER as _RVR,
     STRATEGY_ADAPTIVE_RUNNER as _AR,
     STRATEGY_ADAPTIVE_RUNNER_2 as _AR2,
 )
 from ._ea_templates import _render_ea_templates_card
-from backend.src.utils.models import STRATEGY_ORB_FIXED
+from backend.src.controllers.trading_controller import (
+    STRATEGY_ORB_FIXED,
+)
 from ._strategy_cards import (
     _render_channel_strategy_card,
     _render_global_parameters_card,

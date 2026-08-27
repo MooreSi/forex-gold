@@ -23,6 +23,10 @@ from backend.src.services.channels import performance as _channels
 from backend.src.services.positions import spread_cache as _spread
 from backend.src.services.risk import app_config as _config
 
+# Lot -> contract conversion for the closed-trades table; see the note in
+# trading_controller about why constants come through this layer.
+from backend.src.utils.models import CONTRACT_SIZE  # noqa: F401
+
 __all__ = [
     "parse_reason", "format_broker_ts", "format_duration", "to_date",
     "broker_ts_to_uk_date", "strategy_display_label", "trade_source_label",
@@ -35,6 +39,7 @@ __all__ = [
     "get_app_config", "set_app_config",
     "recompute_channel_performance", "get_channel_scorecard",
     "get_channel_performance_map", "set_channel_paused",
+    "CONTRACT_SIZE",
 ]
 
 

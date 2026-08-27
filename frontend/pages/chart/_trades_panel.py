@@ -7,8 +7,12 @@ the body is unchanged.
 from nicegui import ui
 
 from backend.src.controllers import chart_controller
-from backend.src.utils.models import STRATEGY_NAMES
-from backend.src.utils.models import STRATEGY_SCALE_OUT
+from backend.src.controllers.trading_controller import (
+    STRATEGY_NAMES,
+)
+from backend.src.controllers.trading_controller import (
+    STRATEGY_SCALE_OUT,
+)
 from datetime import datetime
 from backend.src.controllers import sync_controller as sync_ctl
 from datetime import timezone

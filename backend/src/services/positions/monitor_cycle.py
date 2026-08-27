@@ -161,12 +161,31 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                         log.debug("Orphan reconcile failed", exc_info=True)
             rs = await db_module.to_db_thread(db_module.get_risk_settings)
             profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
-            # Refresh candle cache once per cycle (shared by all DPM trade handlers)
-            if bool(rs.get("dpm_enabled", 0)) and open_trades:
+            # Will the pending-signal watcher run at the end of this cycle?
+            # Computed here because it also decides whether the candle cache
+            # below needs refreshing -- see the comment there.
+            _pending_watch = bool(rs.get("auto_execute_signals", 0))
+            # Refresh candle cache once per cycle (shared by all DPM trade
+            # handlers AND the pending watcher's momentum check).
+            #
+            # The `open_trades` half of this condition used to be the whole of
+            # it, and that quietly broke zone-fill activation (2026-08-27).
+            # The cache is a plain list on the runtime that nothing ever
+            # clears, so once the last trade closed it froze at whatever the
+            # final M5 bar was -- and the pending watcher defers any signal
+            # whose direction disagrees with the last candle it is handed.
+            # A frozen bearish bar therefore deferred every queued BUY, on
+            # every cycle, until it expired: "the price came back into the
+            # zone and nothing happened". Refresh whenever the watcher is
+            # going to read it, so what it scores is this cycle's momentum.
+            if bool(rs.get("dpm_enabled", 0)) and (open_trades or _pending_watch):
                 try:
                     ctx.set_dpm_candles(await ctx.get_candles("M5", 30))
                 except Exception:
-                    pass
+                    # A failed fetch must not leave the previous cycle's bar
+                    # in place for the watcher to score against. DPM handlers
+                    # already tolerate an empty list.
+                    ctx.set_dpm_candles([])
                 # DXY candles refreshed every ~60s (12 cycles × 5s)
                 ctx.state.dxy_cycle += 1
                 if ctx.state.dxy_cycle >= 12:
@@ -265,7 +284,7 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                     log.warning("Strategy handler [%s] error: %s", strategy, exc)
 
             # ── Pending signal watcher ───────────────────────────────
-            if bool(rs.get("auto_execute_signals", 0)) and not await db_module.to_db_thread(ctx.is_trading_paused):
+            if _pending_watch and not await db_module.to_db_thread(ctx.is_trading_paused):
                 try:
                     ctx.state.has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, ctx.bridge, ctx.pending_activation_retry_after, ctx.get_dpm_candles(), starting_balance=ctx.cfg.get('starting_balance', 1000.0), background_open_commentary=ctx.background_open_commentary)
                 except Exception as exc:

@@ -40,11 +40,16 @@ from backend.src.services.trading.open_from_signal import open_trade_from_signal
 from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.utils.models import (
-    STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
-    STRATEGY_FIXED_RR,
-    STRATEGY_SIGNAL_CLIMBER, STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_SCALE_OUT,
+    STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
     STRATEGY_ADAPTIVE_RUNNER_2,
     Tick,
+)
+# One source of truth for "this strategy's own levels replace the signal's,
+# so scoring the signal's R:R would decline trades on numbers it never uses"
+# -- shared with the fresh-signal scan path so the two cannot drift apart.
+from backend.src.services.trading.scan_auto_execute import (
+    _PRE_TRADE_FILTER_BYPASS_STRATEGIES,
 )
 from backend.src.services.risk import expert_params
 
@@ -174,6 +179,25 @@ def _is_limit_signal(signal_id: str | None) -> bool:
         return False
 
 
+def _resolve_effective_strategy(source_name: str | None, current_strategy: str) -> str:
+    """The strategy a queued signal from `source_name` would actually run
+    under: channel override > Auto's current recommendation > the global
+    Active Strategy.
+
+    Extracted 2026-08-27 because this function had two different answers to
+    that question -- an `override or global` one driving the expiry ladder
+    and the grid dispatch, and a three-tier one driving the R:R bypass. They
+    disagreed for exactly the case that matters most: a channel on Auto,
+    which is the default.
+    """
+    src = source_name or ""
+    override = db_module.get_channel_strategy_override(src)
+    if override == "auto":
+        rec = db_module.get_channel_strategy_rec(src)
+        return (rec.get("strategy") or "").strip() or current_strategy
+    return override or current_strategy
+
+
 def _resolve_expiry_sec(sig: dict, rs: dict, effective_strategy: str) -> float:
     """How long this queued signal is allowed to wait for its zone.
 
@@ -267,8 +291,16 @@ async def try_activate_pending_signals(
 
     for sig in pending:
         # Expire signals that did not fill within the allowed window
-        channel_strategy = db_module.get_channel_strategy_override(sig.get("source_name"))
-        effective_strategy = channel_strategy or current_strategy
+        # Resolve the strategy this signal would actually run under, once,
+        # and use the same answer everywhere below. This used to be
+        # `override or global` here and a separate three-tier resolution
+        # further down, so a channel left on Auto -- the default -- had the
+        # literal string "auto" scored against the expiry ladder and the grid
+        # dispatch: never a runner strategy, never a template, so it fell to
+        # the shortest default window regardless of what Auto had actually
+        # picked for it.
+        effective_strategy = _resolve_effective_strategy(
+            sig.get("source_name"), current_strategy)
         # GD2 signals are published after the provider enters — price typically needs
         # time to pull back to the zone.  Give them 15 min instead of 2 min so brief
         # retracements are not missed.  Reversal Runner, Adaptive Runner, and Adaptive
@@ -394,29 +426,29 @@ async def try_activate_pending_signals(
             break
 
         # Pre-trade filters: R:R and directional cap.
-        # Resolve channel override here (same 3-tier logic as open_trade_from_signal)
-        # so the R:R skip matches the strategy that will actually be used.
+        #
+        # The bypass list is imported from the fresh-signal scan path rather
+        # than kept as a second local copy (2026-08-27). The local copy had
+        # drifted: it was missing Scalp Runner, every EA Template, and the
+        # IME exemption, so the identical signal that executes on arrival was
+        # refused on zone re-entry -- scored against a stop the strategy or
+        # template will not use. A queued signal must face the same gate its
+        # fresh counterpart faces, or it can only ever sit until it expires.
+        #
+        # Grid templates skip it for the reason
+        # resolve_open_trade_params already exempts every template
+        # (core_signal_resolution.py): the levels the trade actually runs on
+        # come from the template, not from the signal's own TP1.
         _pw_src = sig.get("source_name") or ""
-        _pw_ov  = db_module.get_channel_strategy_override(_pw_src)
-        if _pw_ov == "auto":
-            _pw_rec = db_module.get_channel_strategy_rec(_pw_src)
-            _pw_strategy = _pw_rec.get("strategy") or current_strategy
-        elif _pw_ov:
-            _pw_strategy = _pw_ov
-        else:
-            _pw_strategy = current_strategy
-        _self_mgd = {STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
-                     STRATEGY_SIGNAL_CLIMBER, STRATEGY_FIXED_RR,
-                     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
-                     STRATEGY_ADAPTIVE_RUNNER_2}
+        _pw_strategy = effective_strategy
         _act_px = tick.ask if sig["direction"].upper() == "BUY" else tick.bid
-        # Grid templates skip the R:R filter for the same reason
-        # resolve_open_trade_params already exempts every template from it
-        # (core_signal_resolution.py) -- the levels the trade actually runs
-        # on come from the template, not from the signal's own TP1, so
-        # scoring the signal's R:R against a price nowhere near the zone
-        # would decline trades on numbers the EA never uses.
-        filter_err = None if (_grid_tpl is not None or _pw_strategy in _self_mgd) else check_pre_trade_filters(
+        _bypass_rr = (
+            _grid_tpl is not None
+            or _pw_strategy in _PRE_TRADE_FILTER_BYPASS_STRATEGIES
+            or ea_templates.is_template_override(_pw_strategy)
+            or _ime_enabled_for_source(rs, sig.get("source_name"))
+        )
+        filter_err = None if _bypass_rr else check_pre_trade_filters(
             sig["direction"], float(sig["entry_low"]), float(sig["entry_high"]),
             float(sig["stop_loss"]), sig.get("tp1"),
             actual_price=_act_px,

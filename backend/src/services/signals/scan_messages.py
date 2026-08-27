@@ -45,7 +45,6 @@ from backend.src.services.signals.scan_staleness import resolve_strategy_and_ski
 from backend.src.services.signals import tg_repo as _tg_repo
 from backend.src.services.signals.parser import check_sl_adjustment_rules
 from backend.src.db import database as db_module
-from backend.src.services.signals.parser import is_gd2_message
 from backend.src.services.signals.parser import parse_gd2_instant_entry
 from backend.src.services.signals.parser import parse_instant_entry
 from backend.src.services.telegram.keyword_triggers import should_skip_for_exclusion
@@ -211,21 +210,25 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                 # rather than reusing the edit-time reparse.
 
             # ── Instant Market Entry ────────────────────────────────────────
-            # format_ab: fires on "XAUUSD Buy Now" / "XAU Sell Now" (requires NOW).
-            # gd2: fires on "XAU USD BUY [NOW]" / "XAU USD SELL [NOW]" with or
-            #      without "NOW", or the newer "Buy/Sell Zone Now" bare trigger
-            #      (see is_gd2_message — a plain "XAU" substring check missed
-            #      this format entirely, since none of its messages mention
-            #      XAU anywhere, silently disabling IME for GD2 on 2026-07-06
-            #      even with the setting on and correctly synced).  GD2
-            #      messages that already carry SL/TP are excluded (they go
-            #      through parse_gd2_signal as full signals).
-            _ime_gate = is_gd2_message(text) if parser_fmt == 'gd2' else "XAU" in text.upper()
-            if bool(rs.get("immediate_market_entry", 0)) and _ime_gate and ime_enabled:
-                if parser_fmt == 'gd2':
-                    _instant = parse_gd2_instant_entry(text)
-                else:
-                    _instant = parse_instant_entry(text)
+            # Both trigger layouts, every channel (2026-08-27). This used to
+            # branch on parser_fmt: a gd2 channel got is_gd2_message + the GD2
+            # trigger parser, and every other channel got a bare
+            # `"XAU" in text` gate plus parse_instant_entry, which requires a
+            # literal "XAU... BUY NOW". So on a format_ab channel -- Gold
+            # Diggers VIP -- a market entry worded "Buy Gold Now", "Buy Zone
+            # Now" or "XAU USD BUY" (no NOW) matched nothing and was never
+            # executed at all, while the identical message on a gd2 channel
+            # fired. Same complaint as the 2026-07-06 GD2 outage, opposite
+            # direction.
+            #
+            # No pre-gate: each parser already gates itself (parse_instant_
+            # entry needs XAU + NOW, parse_gd2_instant_entry needs "XAU USD
+            # BUY/SELL" or "Buy/Sell Zone|Gold Now"), and the substring gate
+            # was only ever a cheap filter that could disagree with them.
+            # Both refuse a message that already carries SL/TP -- that is a
+            # full signal and goes through the parsers below.
+            if bool(rs.get("immediate_market_entry", 0)) and ime_enabled:
+                _instant = parse_instant_entry(text) or parse_gd2_instant_entry(text)
                 if _instant:
                     _instant_dir, _instant_px = _instant
                     await _process_instant_entry_impl(msg, tg_id, group_id, channel_name, text, _instant_dir, _instant_px, rs, auto_execute, ctx.bridge, ctx.dpm_candles, ctx.cfg.get('starting_balance', 1000.0))

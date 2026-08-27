@@ -1,7 +1,14 @@
-"""Channel-format-based signal parsing/classification block -- extracted
-verbatim (no logic changes) from core/engine.py's SimulationEngine._scan_messages
-(lines 6601-6807), as part of the core/engine.py migration series. See
+"""Signal parsing/classification for an incoming Telegram message.
+
+Originally extracted verbatim from core/engine.py's
+SimulationEngine._scan_messages (lines 6601-6807) -- see
 docs/todo/refactor/core-scan-messages-parse-classify-migration/020-*.md.
+
+Reshaped 2026-08-27: the three-way branch on the channel's configured
+`parser_format` is gone. Every channel now runs the same parsers in the
+same order. The branching meant a signal in the "wrong" layout for its
+channel was never measured against the parser that would have read it --
+a Format A/B channel never tried a single GD2 regex and vice versa.
 
 Parsing/classification and DB recording only -- no MT5 order is ever
 placed, closed, or modified.
@@ -32,6 +39,7 @@ from backend.src.services.signals.parser import (
     parse_gold_signal, parse_gd2_signal, parse_gd2_partial,
     is_gd2_message, is_format_ab_signal, parse_with_learned_rules, _CURRENCY_RE,
     parse_limit_order_signal, parse_partial_any_format, parse_tp_sl_only,
+    parse_format_ab_partial,
 )
 from backend.src.services.risk import expert_params
 
@@ -95,140 +103,141 @@ async def classify_and_parse(
         if _partial_any:
             return hold_or_resolve(tg_id, channel_name, _partial_any, rs)
 
-    # Limit Runner's "BUY/SELL [LIMITS] GOLD @ high/low AREA" layout -- any
-    # channel, format-matched only, checked ahead of the parser_fmt
-    # branching below so a channel configured for format_ab (whose branch
-    # never tries GD2-shaped parsing at all) doesn't silently miss it. See
-    # core_limit_order_signal.py for what happens with the returned dict's
-    # `tp_open` marker.
+    # Limit Runner's "BUY/SELL [LIMITS] GOLD @ high/low AREA" layout --
+    # every channel, format-matched only. See core_limit_order_signal.py for
+    # what happens with the returned dict's `tp_open` marker.
     _limit_parsed = parse_limit_order_signal(text)
     if _limit_parsed:
         return _limit_parsed
 
-    if parser_fmt == "format_ab":
-        _ai_recovered = False
-        if not is_format_ab_signal(text, sig_prefix):
-            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
-            if not parsed:
-                return None
-            _ai_recovered = True
-            cm = None
-        else:
-            cm = _CURRENCY_RE.search(text)
-        if cm and cm.group(1).upper().replace("/", "").replace("-", "") != "XAUUSD":
-            currency = cm.group(1).upper()
-            msg_ts_str = msg.get("timestamp") or ""
-            _is_stale = False
-            if msg_ts_str:
-                try:
-                    from datetime import datetime as _dt
-                    _tg_dt = _dt.fromisoformat(msg_ts_str.replace("Z", "+00:00"))
-                    if _tg_dt.tzinfo is None:
-                        from datetime import timezone as _tz
-                        _tg_dt = _tg_dt.replace(tzinfo=_tz.utc)
-                    _is_stale = time.time() - _tg_dt.timestamp() > 2 * 3600
-                except Exception:
-                    pass
-            else:
-                _is_stale = True
-            import re
-            _dir_m = re.search(r'\bDirection\s+(BUY|SELL)\b', text, re.IGNORECASE)
-            _dir = _dir_m.group(1).upper() if _dir_m else None
-            _dup_found = False
-            _was_new, _recent_rows = tg_repo.record_unsupported_currency(
-                tg_id, group_id, channel_name,
-                msg.get("sender_name", ""), msg_ts_str, text,
-                _dir, recent_dup_window(),
-            )
-            _norm_currency = currency.replace("/", "").replace("-", "")
-            for (_prior_text,) in _recent_rows:
-                _prior_cm = _CURRENCY_RE.search(_prior_text or "")
-                if _prior_cm and _prior_cm.group(1).upper().replace("/", "").replace("-", "") == _norm_currency:
-                    _dup_found = True
-                    break
-            log.info("[%s] Non-XAUUSD signal tg_id=%s currency=%s stale=%s dup=%s",
-                     channel_name, tg_id, currency, _is_stale, _dup_found)
-            if _was_new and not _is_stale and not _dup_found:
-                asyncio.create_task(
-                    telegram_alerts.send_message(
-                        f"Signal received from {channel_name}\n"
-                        f"Currency: {currency} — app handles XAUUSD only, not executed.\n"
-                        f"Direction: {_dir or '?'}",
-                        tg_id, "signal_currency_skipped",
-                    )
-                )
-            return None
-        if not _ai_recovered:
-            parsed = parse_gold_signal(text)
-            if not parsed:
-                parsed = await _gated_ai_fallback(text, channel_name, tg_id)
-                if not parsed:
-                    queue_unrecognised_fn(tg_id, channel_name, text)
-                    return None
+    # ── One parsing pipeline for every channel (2026-08-27) ─────────────
+    # This used to branch three ways on the channel's configured
+    # `parser_format`: a "format_ab" channel never tried a single GD2-shaped
+    # parser and a "gd2" channel never tried Format A/B, so a well-formed
+    # signal in the "wrong" layout for its channel was dropped on the floor
+    # -- AI fallback at best, silence at worst. Only the third branch
+    # ('auto') ever tried both. Owner directive: parsing rules apply exactly
+    # the same to every Telegram channel.
+    #
+    # `parser_fmt` is deliberately no longer read here. It still decides two
+    # things elsewhere and they are unaffected: 'none'/disabled stops the
+    # channel being scanned at all (scan_messages.py), and it sets the
+    # DEFAULT for that channel's Immediate Market Entry flag. What it must
+    # not do is decide which regexes a message is allowed to be measured
+    # against.
+    _looks_like_signal = is_format_ab_signal(text, sig_prefix) or is_gd2_message(text)
+
+    # Currency guard. Was inside the format_ab branch only, so a non-XAUUSD
+    # signal arriving on a gd2-configured channel was never recorded or
+    # reported. Still gated on the message being signal-shaped, so ordinary
+    # chat that happens to name a pair does not raise an alert.
+    cm = _CURRENCY_RE.search(text) if _looks_like_signal else None
+    if cm and cm.group(1).upper().replace("/", "").replace("-", "") != "XAUUSD":
+        return _record_unsupported_currency(
+            tg_id, group_id, channel_name, text, msg, cm.group(1).upper(),
+        )
+
+    # Deterministic parsers, in one fixed order, for every channel.
+    parsed = None
+    if is_format_ab_signal(text, sig_prefix):
+        parsed = parse_gold_signal(text)
+    if not parsed and is_gd2_message(text):
+        parsed = parse_gd2_signal(text)
+    if parsed:
         return parsed
 
-    elif parser_fmt == "gd2":
-        _ai_recovered = False
-        if not is_gd2_message(text):
-            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
-            if not parsed:
-                return None
-            _ai_recovered = True
-        if not _ai_recovered:
-            parsed = parse_gd2_signal(text)
-        if not parsed:
-            _partial = parse_gd2_partial(text)
-            if _partial:
-                msg_ts_str = msg.get("timestamp") or ""
-                tg_repo.insert_tg_signal_if_new(
-                    tg_id, group_id, channel_name, msg.get("sender_name", ""),
-                    msg_ts_str, text, _partial, "pending_followup",
-                )
-                log.info(
-                    "[%s] Partial GD2 tg_id=%s %s entry %s-%s — awaiting SL/TP edit",
-                    channel_name, tg_id, _partial["direction"],
-                    _partial["entry_low"], _partial["entry_high"],
-                )
-                return None
-            from backend.src.services.signals.parser import parse_gd2_instant_entry
-            _ime_trigger = parse_gd2_instant_entry(text)
-            if _ime_trigger:
-                log.info(
-                    "[%s] GD2 bare direction tg_id=%s (%s) — silently skipped "
-                    "(awaiting follow-up with full levels)",
-                    channel_name, tg_id, _ime_trigger[0],
-                )
-                return None
-            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
-            if not parsed:
-                queue_unrecognised_fn(tg_id, channel_name, text)
-                return None
-        return parsed
+    # Direction + entry with the levels still to come. Recorded as a
+    # pending_followup so the Telegram edit / second message that carries
+    # SL/TP can complete it. Format A/B's own partial parser is tried
+    # alongside GD2's -- pairing them the same way parse_partial_any_format
+    # does -- since a format_ab channel previously had no partial path at
+    # all and its split signals were simply lost.
+    _partial = parse_gd2_partial(text) or parse_format_ab_partial(text)
+    if _partial:
+        msg_ts_str = msg.get("timestamp") or ""
+        tg_repo.insert_tg_signal_if_new(
+            tg_id, group_id, channel_name, msg.get("sender_name", ""),
+            msg_ts_str, text, _partial, "pending_followup",
+        )
+        log.info(
+            "[%s] Partial signal tg_id=%s %s entry %s-%s — awaiting SL/TP",
+            channel_name, tg_id, _partial["direction"],
+            _partial["entry_low"], _partial["entry_high"],
+        )
+        return None
 
+    # A bare direction trigger with no entry at all ("XAU USD BUY",
+    # "Buy Zone Now"). Immediate Market Entry has already had its chance at
+    # this message upstream; if it did not take it there is nothing to
+    # execute yet, so stay quiet rather than queue it as unrecognised.
+    from backend.src.services.signals.parser import parse_gd2_instant_entry
+    _ime_trigger = parse_gd2_instant_entry(text)
+    if _ime_trigger:
+        log.info(
+            "[%s] Bare direction tg_id=%s (%s) — silently skipped "
+            "(awaiting follow-up with full levels)",
+            channel_name, tg_id, _ime_trigger[0],
+        )
+        return None
+
+    # Nothing deterministic matched. AI fallback, then the unrecognised
+    # queue -- but only for a message that looked like a signal in the first
+    # place, so a chatty channel does not fill the queue with noise.
+    parsed = await _gated_ai_fallback(text, channel_name, tg_id)
+    if parsed:
+        return parsed
+    if _looks_like_signal:
+        queue_unrecognised_fn(tg_id, channel_name, text)
+    return None
+
+
+def _record_unsupported_currency(
+    tg_id: str, group_id: str, channel_name: str, text: str, msg: dict,
+    currency: str,
+) -> None:
+    """Record (and, when it is new, fresh and not a repeat, announce) a
+    signal for a pair this app does not trade. Extracted unchanged from the
+    format_ab branch of classify_and_parse when that branching was removed.
+    Always returns None -- the caller treats this message as handled."""
+    import re as _re
+
+    msg_ts_str = msg.get("timestamp") or ""
+    _is_stale = False
+    if msg_ts_str:
+        try:
+            from datetime import datetime as _dt
+            _tg_dt = _dt.fromisoformat(msg_ts_str.replace("Z", "+00:00"))
+            if _tg_dt.tzinfo is None:
+                from datetime import timezone as _tz
+                _tg_dt = _tg_dt.replace(tzinfo=_tz.utc)
+            _is_stale = time.time() - _tg_dt.timestamp() > 2 * 3600
+        except Exception:
+            pass
     else:
-        # 'auto' — try format_ab first (if prefix configured), then gd2
-        if sig_prefix and is_format_ab_signal(text, sig_prefix):
-            cm = _CURRENCY_RE.search(text)
-            if not cm or cm.group(1).upper().replace("/", "").replace("-", "") == "XAUUSD":
-                parsed = parse_gold_signal(text)
-        if not parsed and is_gd2_message(text):
-            parsed = parse_gd2_signal(text)
-            if not parsed:
-                _partial = parse_gd2_partial(text)
-                if _partial:
-                    msg_ts_str = msg.get("timestamp") or ""
-                    tg_repo.insert_tg_signal_if_new(
-                        tg_id, group_id, channel_name, msg.get("sender_name", ""),
-                        msg_ts_str, text, _partial, "pending_followup",
-                    )
-                    log.info(
-                        "[%s] Partial GD2 tg_id=%s %s entry %s-%s — awaiting SL/TP edit",
-                        channel_name, tg_id, _partial["direction"],
-                        _partial["entry_low"], _partial["entry_high"],
-                    )
-                    return None
-        if not parsed:
-            parsed = await _gated_ai_fallback(text, channel_name, tg_id)
-        if not parsed:
-            return None  # auto-format channel — skip silently when nothing matches
-        return parsed
+        _is_stale = True
+    _dir_m = _re.search(r'\bDirection\s+(BUY|SELL)\b', text, _re.IGNORECASE)
+    _dir = _dir_m.group(1).upper() if _dir_m else None
+    _dup_found = False
+    _was_new, _recent_rows = tg_repo.record_unsupported_currency(
+        tg_id, group_id, channel_name,
+        msg.get("sender_name", ""), msg_ts_str, text,
+        _dir, recent_dup_window(),
+    )
+    _norm_currency = currency.replace("/", "").replace("-", "")
+    for (_prior_text,) in _recent_rows:
+        _prior_cm = _CURRENCY_RE.search(_prior_text or "")
+        if _prior_cm and _prior_cm.group(1).upper().replace("/", "").replace("-", "") == _norm_currency:
+            _dup_found = True
+            break
+    log.info("[%s] Non-XAUUSD signal tg_id=%s currency=%s stale=%s dup=%s",
+             channel_name, tg_id, currency, _is_stale, _dup_found)
+    if _was_new and not _is_stale and not _dup_found:
+        asyncio.create_task(
+            telegram_alerts.send_message(
+                f"Signal received from {channel_name}\n"
+                f"Currency: {currency} — app handles XAUUSD only, not executed.\n"
+                f"Direction: {_dir or '?'}",
+                tg_id, "signal_currency_skipped",
+            )
+        )
+    return None

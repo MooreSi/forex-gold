@@ -2,7 +2,9 @@
 from datetime import datetime, timezone
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
-from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.controllers.trading_controller import (
+    STRATEGY_NAMES,
+)
 
 # Sibling sections of this page.
 

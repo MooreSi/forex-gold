@@ -2,7 +2,7 @@
 import asyncio
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
-from backend.src.utils.models import (
+from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
     STRATEGY_SCALE_OUT,
 )

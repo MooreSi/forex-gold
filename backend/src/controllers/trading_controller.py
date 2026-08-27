@@ -10,6 +10,31 @@ from backend.src.services.risk import settings as _risk
 from backend.src.services.signals import commentary as _commentary
 from backend.src.services.trading import engine_reads as _reads
 
+# The strategy vocabulary, re-exported so pages do not reach into
+# backend.src.utils.models directly. Constants are not a service, but the
+# frontend's doorway is this layer either way, and a renamed id now has one
+# place to change rather than thirteen import sites.
+from backend.src.utils.models import (  # noqa: F401
+    STRATEGY_ADAPTIVE_RUNNER,
+    STRATEGY_ADAPTIVE_RUNNER_2,
+    STRATEGY_BE_RUNNER,
+    STRATEGY_CONSERVATIVE,
+    STRATEGY_CONSERVATIVE_TRIAL,
+    STRATEGY_DESCRIPTIONS,
+    STRATEGY_FIXED_RR,
+    STRATEGY_LIMIT_RUNNER,
+    STRATEGY_NAMES,
+    STRATEGY_NO_SL_SCALE,
+    STRATEGY_ORB_FIXED,
+    STRATEGY_PROTECTED_SCALE,
+    STRATEGY_RE,
+    STRATEGY_REVERSAL_RUNNER,
+    STRATEGY_SCALE_OUT,
+    STRATEGY_SCALP_RUNNER,
+    STRATEGY_SIGNAL_CLIMBER,
+    STRATEGY_TRAIL_STOP,
+)
+
 __all__ = [
     "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
     "get_app_config", "set_app_config", "get_circuit_breaker_state",
@@ -18,6 +43,24 @@ __all__ = [
     "set_channel_strategy_override", "get_channel_strategy_recs",
     "get_signal", "set_signal_commentary", "delete_tg_signal_row",
     "get_open_trades", "get_signals", "get_tg_signals",
+    "STRATEGY_ADAPTIVE_RUNNER",
+    "STRATEGY_ADAPTIVE_RUNNER_2",
+    "STRATEGY_BE_RUNNER",
+    "STRATEGY_CONSERVATIVE",
+    "STRATEGY_CONSERVATIVE_TRIAL",
+    "STRATEGY_DESCRIPTIONS",
+    "STRATEGY_FIXED_RR",
+    "STRATEGY_LIMIT_RUNNER",
+    "STRATEGY_NAMES",
+    "STRATEGY_NO_SL_SCALE",
+    "STRATEGY_ORB_FIXED",
+    "STRATEGY_PROTECTED_SCALE",
+    "STRATEGY_RE",
+    "STRATEGY_REVERSAL_RUNNER",
+    "STRATEGY_SCALE_OUT",
+    "STRATEGY_SCALP_RUNNER",
+    "STRATEGY_SIGNAL_CLIMBER",
+    "STRATEGY_TRAIL_STOP",
 ]
 
 

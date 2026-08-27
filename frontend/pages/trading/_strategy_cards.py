@@ -5,7 +5,9 @@ from datetime import datetime
 from nicegui import ui
 from backend.src.services.ai import provider as ai_provider
 from backend.src.controllers import trading_controller as trading_ctl
-from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.controllers.trading_controller import (
+    STRATEGY_NAMES,
+)
 
 
 def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:

@@ -219,7 +219,13 @@ def test_format_ab_matches_parses_cleanly(fresh_db):
     assert result[0]["direction"] == "SELL"
 
 
-def test_format_ab_matches_parse_fails_ai_fails_queues_unrecognised(fresh_db):
+def test_format_ab_direction_and_entry_with_no_levels_is_held_as_a_partial(fresh_db):
+    """CHANGED 2026-08-27, deliberately. This message is direction + entry
+    with the SL/TP still to come -- a partial. A gd2 channel has always held
+    that as `pending_followup` so the edit/second message can complete it; a
+    format_ab channel queued it as unrecognised instead, because the
+    format_ab branch had no partial path at all. One pipeline now, so it is
+    held here too."""
     _setup_channel("format_ab")
     bad_text = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
                 "Direction BUY\nENTRY: 4510-4508\n")
@@ -227,7 +233,21 @@ def test_format_ab_matches_parse_fails_ai_fails_queues_unrecognised(fresh_db):
         [{"id": "b6", "group_id": "g1", "text": bad_text, "timestamp": _now_iso()}], ai_return=None,
     )
     assert result == []
-    assert uq == [("b6", "TestChannel")]
+    assert uq == []
+    assert _get_tg_row("b6")["status"] == "pending_followup"
+
+
+def test_a_signal_shaped_message_that_is_not_a_partial_still_queues_unrecognised(fresh_db):
+    """The unrecognised queue is what surfaces a layout nobody has taught the
+    app yet, so it must survive the pipeline merge."""
+    _setup_channel("format_ab")
+    text = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
+            "Setup forming, levels to follow shortly.\n")
+    result, uq, alerts = _run(
+        [{"id": "b6b", "group_id": "g1", "text": text, "timestamp": _now_iso()}], ai_return=None,
+    )
+    assert result == []
+    assert uq == [("b6b", "TestChannel")]
 
 
 def test_gd2_no_match_ai_fails_dropped(fresh_db):

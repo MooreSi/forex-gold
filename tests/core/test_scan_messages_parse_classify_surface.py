@@ -162,12 +162,23 @@ def test_format_ab_matches_parses_cleanly(fresh_db):
     assert result["direction"] == "SELL"
 
 
-def test_format_ab_matches_parse_fails_ai_fails_queues_unrecognised(fresh_db):
+def test_format_ab_direction_and_entry_with_no_levels_is_held_as_a_partial(fresh_db):
+    """CHANGED 2026-08-27, deliberately -- see the characterization file's
+    copy of this test for why. Direction + entry with no levels is a partial
+    on every channel now, not only on a gd2-configured one."""
     bad_text = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
                 "Direction BUY\nENTRY: 4510-4508\n")
     result, uq, alerts = _call("b6", bad_text, "format_ab", ai_return=None)
     assert result is None
-    assert uq == [("b6", "TestChannel")]
+    assert uq == []
+
+
+def test_a_signal_shaped_message_that_is_not_a_partial_still_queues_unrecognised(fresh_db):
+    text = ("This is not financial advice. Use appropriate risk management if you're going to trade.\n"
+            "Setup forming, levels to follow shortly.\n")
+    result, uq, alerts = _call("b6b", text, "format_ab", ai_return=None)
+    assert result is None
+    assert uq == [("b6b", "TestChannel")]
 
 
 def test_gd2_no_match_ai_fails_dropped(fresh_db):

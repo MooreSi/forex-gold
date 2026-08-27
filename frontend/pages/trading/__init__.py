@@ -174,11 +174,15 @@ def render(get_engine: Callable, get_tg_reader: Callable):
 
 # ── Strategy comparison data ───────────────────────────────────────────────────
 
-from backend.src.utils.models import (
-    STRATEGY_SCALE_OUT as _SO, STRATEGY_BE_RUNNER as _BE,
-    STRATEGY_TRAIL_STOP as _TS, STRATEGY_PROTECTED_SCALE as _PS,
-    STRATEGY_CONSERVATIVE as _CO, STRATEGY_NO_SL_SCALE as _NSS,
-    STRATEGY_CONSERVATIVE_TRIAL as _CT, STRATEGY_SCALP_RUNNER as _SR,
+from backend.src.controllers.trading_controller import (
+    STRATEGY_SCALE_OUT as _SO,
+    STRATEGY_BE_RUNNER as _BE,
+    STRATEGY_TRAIL_STOP as _TS,
+    STRATEGY_PROTECTED_SCALE as _PS,
+    STRATEGY_CONSERVATIVE as _CO,
+    STRATEGY_NO_SL_SCALE as _NSS,
+    STRATEGY_CONSERVATIVE_TRIAL as _CT,
+    STRATEGY_SCALP_RUNNER as _SR,
     STRATEGY_SIGNAL_CLIMBER as _SC,
     STRATEGY_REVERSAL_RUNNER as _RVR,
     STRATEGY_ADAPTIVE_RUNNER as _AR,

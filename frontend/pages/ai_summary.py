@@ -13,7 +13,9 @@ from nicegui import ui
 import backend.src.config as cfg_module
 from backend.src.controllers import settings_controller as settings_controller
 from backend.src.services.analytics import read_repo
-from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.controllers.trading_controller import (
+    STRATEGY_NAMES,
+)
 from backend.src.services.positions import core_strategy_catalogue as strategy_catalogue
 
 def _uk_time() -> str:

@@ -1,5 +1,13 @@
 """Shared storage for the reference-channel learning corpus (2026-08-06).
 
+Named `*_repo` because that is what it is: every function here is CRUD on the
+single `pro_snapshots` table -- create_schema, insert, exists, rows,
+unresolved, set_cursor, set_outcome, counts, migrate_from_core. SQL belongs in
+the data layer and the structure gate identifies that partly by filename, so a
+storage module called `pro_corpus` reported seven statements as SQL leaking
+into a service. Renamed 2026-08-27; no behaviour changed and every caller keeps
+its `pro_corpus` alias.
+
 WHY THIS LIVES IN reversal_engine.db AND NOT THE CORE DB
 --------------------------------------------------------
 core_signal_snapshot.py originally wrote tg_signal_snapshots into the CORE

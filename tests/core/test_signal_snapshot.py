@@ -165,7 +165,7 @@ def test_the_timeframes_and_depth_are_what_the_indicators_need():
 
 @pytest.fixture
 def pro_corpus_db(tmp_path):
-    from backend.src.services.reversal_engine import pro_corpus
+    from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
     from backend.src.services.reversal_engine import reversal_engine_repo as re_repo
 
     # Mirrors real startup: backend/src/app.py opens the reversal-engine db and

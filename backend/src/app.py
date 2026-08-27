@@ -309,7 +309,7 @@ async def startup() -> None:
     # THIS environment already collected -- so demo and live train on the
     # same history. See reversal_engine/pro_corpus.py.
     try:
-        from backend.src.services.reversal_engine import pro_corpus as _pro_corpus
+        from backend.src.services.reversal_engine import pro_corpus_repo as _pro_corpus
         _pro_corpus.init()
     except Exception as _e:
         log.error("[startup] Pro corpus init failed: %s", _e)

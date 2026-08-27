@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-from backend.src.services.reversal_engine import pro_corpus
+from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
 from backend.src.services.reversal_engine import reversal_engine_repo as re_repo
 
 

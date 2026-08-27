@@ -54,7 +54,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from backend.src.services.reversal_engine import pro_corpus
+from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
 from backend.src.services.reversal_engine.pro_profile import (
     _MIN_NEGATIVES, _MIN_POSITIVES, _MIN_RSI_SPREAD,
 )

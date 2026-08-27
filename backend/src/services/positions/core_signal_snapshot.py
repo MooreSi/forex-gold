@@ -189,7 +189,7 @@ async def capture_snapshot(bridge: Any, row: dict,
     }
 
     def _write():
-        from backend.src.services.reversal_engine import pro_corpus
+        from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
         return pro_corpus.insert(record)
 
     if not await db_module.to_db_thread(_write):
@@ -267,7 +267,7 @@ async def capture_pending_snapshots(bridge: Any, max_age_s: float = 900.0) -> in
             ]
 
     def _already(msg_id, stage):
-        from backend.src.services.reversal_engine import pro_corpus
+        from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
         return pro_corpus.exists(msg_id, stage)
 
     try:

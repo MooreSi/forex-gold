@@ -38,7 +38,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from backend.src.services.reversal_engine import pro_corpus
+from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
 
 log = logging.getLogger(__name__)
 

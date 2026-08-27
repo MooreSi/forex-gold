@@ -73,7 +73,7 @@ _CACHE_TTL = 600.0
 def _rows(background: bool):
     """Corpus rows from the Reversal Engine's shared database. Moved off the
     per-environment core db on 2026-08-06 -- see pro_corpus.py's docstring."""
-    from backend.src.services.reversal_engine import pro_corpus
+    from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
     return [(r.get("direction"), r.get("indicators_json"), r.get("fvg_json"))
             for r in pro_corpus.rows(background=background)]
 

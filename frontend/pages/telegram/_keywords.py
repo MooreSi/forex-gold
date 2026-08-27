@@ -176,8 +176,12 @@ def _render_parsing_settings_section() -> None:
         lexicons = logic_kw.get_all_lexicons()
         boxes: dict[str, object] = {}
         with ui.grid(columns=2).classes("w-full gap-4 items-stretch"):
-            for category in ("symbol_tokens", "close_all", "risk_free_be",
-                             "exclusion", "buy_orders", "limit_orders"):
+            # Driven off DEFAULT_LEXICONS rather than a hand-written tuple:
+            # a lexicon missing from this list is one the user cannot edit,
+            # and since 2026-08-27 buy_orders/sell_orders are live market-
+            # entry triggers -- an invisible one is a trigger nobody can
+            # turn off. Pinned by tests/frontend/test_parsing_settings_render.
+            for category in logic_kw.DEFAULT_LEXICONS:
                 with ui.column().classes("gap-1 h-full"):
                     ui.label(logic_kw.LEXICON_LABELS[category]).classes(
                         "text-sm font-semibold text-cyan-300"

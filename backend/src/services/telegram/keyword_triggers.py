@@ -30,7 +30,10 @@ from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.db import database as db_module
 from backend.src.services.telegram import repo as telegram_repo
 from backend.src.services.telegram import alerts as telegram_alerts
-from backend.src.services.telegram.keywords import claim_trigger, get_lexicon, text_matches_any
+from backend.src.services.telegram.keywords import (
+    claim_trigger, get_lexicon, text_has_number, text_line_matches_any,
+    text_matches_any,
+)
 from backend.src.services.telegram import alerts
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
 
@@ -86,6 +89,15 @@ def should_skip_for_exclusion(text: str, rs: dict) -> Optional[str]:
     return None
 
 
+# The lexicons the AI-fallback gate below combines into its "does this look
+# at all like a trading signal" pre-filter. Named rather than listed inline
+# so a test can prove "every box cleared disables the gate" against whatever
+# the set actually is -- two tests had gone stale enumerating three of them
+# by hand when sell_orders was added (2026-08-27).
+AI_FALLBACK_GATE_LEXICONS = ("symbol_tokens", "buy_orders", "sell_orders",
+                             "limit_orders")
+
+
 def should_skip_ai_fallback_for_no_signal_candidate(text: str, rs: dict) -> Optional[str]:
     """Gates only the AI-fallback last-resort recovery path (every
     ai_fallback_fn call site inside core_scan_messages_parse_classify.
@@ -112,12 +124,54 @@ def should_skip_ai_fallback_for_no_signal_candidate(text: str, rs: dict) -> Opti
     the gate entirely rather than blocking every AI-fallback call forever --
     an accidental empty save must never silently kill the app's last-resort
     signal-recovery path."""
-    phrases = get_lexicon("symbol_tokens") + get_lexicon("buy_orders") + get_lexicon("limit_orders")
+    phrases = [p for cat in AI_FALLBACK_GATE_LEXICONS for p in get_lexicon(cat)]
     if not phrases:
         return None
     if text_matches_any(text, phrases):
         return None
     return "no symbol/buy/limit keyword matched (Logic Keywords) — AI fallback skipped"
+
+
+def parse_lexicon_direction_trigger(text: str) -> Optional[tuple]:
+    """A bare BUY/SELL heads-up named by the Logic Keywords lexicons.
+
+    Returns ("BUY"|"SELL", None) -- the same (direction, price) shape
+    parse_instant_entry/parse_gd2_instant_entry return, so the scan pipeline
+    treats it identically: entered at market when Immediate Market Entry is
+    on for that channel, held quietly otherwise.
+
+    Added 2026-08-27. `buy_orders` fed exactly one thing before this, the
+    AI-fallback allow-gate above, so a phrase saved in that box could not
+    make the app act on anything. Reported live: GOLD DIGGERS INSTITUTIONAL
+    sent "PREPARE FOR A BUY" with that phrase in the box and nothing
+    happened. `sell_orders` did not exist at all.
+
+    Three refusals, all deliberate (see core_logic_keywords' module
+    docstring):
+
+      * the match is per-LINE and exact, not substring -- the shipped list
+        contains the bare word "BUY", which as a substring would fire on
+        most of what a gold channel says in a day;
+      * a message stating any number is refused outright: it is a signal or
+        part of one, and belongs to the per-format parsers rather than to a
+        market order that would ignore the levels it quotes;
+      * a message naming both directions is refused rather than guessed at.
+
+    This runs for every channel, like every other Logic Keyword.
+    """
+    if not text or text_has_number(text):
+        return None
+    buy = text_line_matches_any(text, get_lexicon("buy_orders"))
+    sell = text_line_matches_any(text, get_lexicon("sell_orders"))
+    if bool(buy) == bool(sell):
+        # Neither matched, or the message says both -- nothing to act on.
+        if buy and sell:
+            log.info(
+                "[LogicKeywords] direction trigger ambiguous — %r and %r both "
+                "matched; message ignored", buy, sell,
+            )
+        return None
+    return ("BUY" if buy else "SELL", None)
 
 
 def apply_mirror_copy(parsed: dict, rs: dict) -> Optional[str]:

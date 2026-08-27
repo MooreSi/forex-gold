@@ -167,11 +167,16 @@ async def classify_and_parse(
         return None
 
     # A bare direction trigger with no entry at all ("XAU USD BUY",
-    # "Buy Zone Now"). Immediate Market Entry has already had its chance at
-    # this message upstream; if it did not take it there is nothing to
-    # execute yet, so stay quiet rather than queue it as unrecognised.
+    # "Buy Zone Now", or whatever the user has typed into Parsing > Logic
+    # Keywords' BUY/SELL Orders boxes). Immediate Market Entry has already
+    # had its chance at this message upstream; if it did not take it there
+    # is nothing to execute yet, so stay quiet rather than queue it as
+    # unrecognised.
     from backend.src.services.signals.parser import parse_gd2_instant_entry
-    _ime_trigger = parse_gd2_instant_entry(text)
+    from backend.src.services.telegram.keyword_triggers import (
+        parse_lexicon_direction_trigger,
+    )
+    _ime_trigger = parse_gd2_instant_entry(text) or parse_lexicon_direction_trigger(text)
     if _ime_trigger:
         log.info(
             "[%s] Bare direction tg_id=%s (%s) — silently skipped "

@@ -266,11 +266,13 @@ def test_ai_fallback_proceeds_when_symbol_token_present(fresh_db):
     assert calls == ["c2"]
 
 
-def test_ai_fallback_gate_disabled_when_all_three_lexicons_emptied(fresh_db):
+def test_ai_fallback_gate_disabled_when_every_lexicon_is_emptied(fresh_db):
     from backend.src.services.telegram import keywords as logic_kw
-    logic_kw.set_lexicon("symbol_tokens", [])
-    logic_kw.set_lexicon("buy_orders", [])
-    logic_kw.set_lexicon("limit_orders", [])
+    from backend.src.services.telegram.keyword_triggers import (
+        AI_FALLBACK_GATE_LEXICONS,
+    )
+    for category in AI_FALLBACK_GATE_LEXICONS:
+        logic_kw.set_lexicon(category, [])
     calls = []
     result, uq, alerts = _call(
         "c3", "no trading vocabulary here at all", "auto",

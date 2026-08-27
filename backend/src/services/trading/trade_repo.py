@@ -675,3 +675,93 @@ def set_open_commentary(trade_id: str, commentary_json: str) -> None:
             "UPDATE vantage_simulated_trades SET claude_open=? WHERE trade_id=?",
             (commentary_json, trade_id),
         )
+
+
+# ── Profit sync ───────────────────────────────────────────────────────────────
+#
+# Moved out of services/trading/profit_sync.py so the SQL sits in the data
+# layer. The statements and their order are unchanged; the reasoning that made
+# them safe is repeated on apply_profit_sync because it is the part a future
+# edit is most likely to break.
+
+def fetch_trade_strategy_and_sl(trade_id: str) -> dict:
+    """strategy / direction / initial_sl for one trade, or {}."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT strategy, direction, initial_sl "
+            "FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
+        ).fetchone()
+        return row_to_dict(row) if row else {}
+
+
+def fetch_synced_profit(trade_id: str):
+    """The mt5_profit stamp, or None while legs are still settling. The retry
+    ladder in schedule_profit_sync stops on this being non-NULL."""
+    with db() as conn:
+        return conn.execute(
+            "SELECT mt5_profit FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
+        ).fetchone()
+
+
+def fetch_unsynced_closed_trades(close_time_from: float) -> list:
+    """Closed trades whose broker P&L was never recorded, plus recent
+    zero-profit rows -- a real zero and a failed sync look identical, so the
+    sweep re-checks the recent ones."""
+    with db() as conn:
+        return conn.execute(
+            """SELECT trade_id,mt5_ticket FROM vantage_simulated_trades
+               WHERE status='closed' AND mt5_ticket IS NOT NULL
+                 AND (mt5_profit IS NULL OR (mt5_profit=0.0 AND close_time>?))""",
+            (close_time_from,),
+        ).fetchall()
+
+
+def apply_profit_sync(trade_id: str, mt5_profit: float, risk_total: float,
+                      all_settled: bool) -> tuple[float, float] | None:
+    """Correct the account balance and the trade row against the broker's
+    numbers. Returns (our_estimate, correction) when a correction was applied,
+    else None, so the caller can log it.
+
+    One transaction, because the balance adjustment and the net_pnl it
+    accounts for must land together.
+
+    mt5_profit stays NULL until all_settled, so the first branch runs on every
+    retry while sibling legs are still closing -- our_estimate is always what
+    the LAST call wrote, so the correction is exactly the increment a
+    newly-closed leg added, never the same money twice.
+
+    initial_risk is an absolute, not an increment, so re-running it as later
+    legs settle converges on the full basket instead of accumulating. It is
+    written on every pass so the R:R matches whatever P&L the row currently
+    shows, over the same set of legs.
+    """
+    applied = None
+    with transaction() as conn:
+        existing = row_to_dict(conn.execute(
+            "SELECT mt5_profit, net_pnl FROM vantage_simulated_trades WHERE trade_id=?",
+            (trade_id,),
+        ).fetchone())
+        if existing and existing.get("mt5_profit") is None:
+            our_estimate = float(existing.get("net_pnl") or 0)
+            correction = round(mt5_profit - our_estimate, 4)
+            if abs(correction) >= 0.01:
+                conn.execute(
+                    "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
+                    (correction,),
+                )
+                conn.execute(
+                    "UPDATE vantage_simulated_trades SET net_pnl=? WHERE trade_id=?",
+                    (mt5_profit, trade_id),
+                )
+                applied = (our_estimate, correction)
+        if risk_total > 0:
+            conn.execute(
+                "UPDATE vantage_simulated_trades SET initial_risk=? WHERE trade_id=?",
+                (round(risk_total, 4), trade_id),
+            )
+        if all_settled:
+            conn.execute(
+                "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",
+                (mt5_profit, trade_id),
+            )
+    return applied

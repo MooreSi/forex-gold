@@ -55,6 +55,7 @@ from backend.src.services.telegram.keyword_triggers import try_handle_risk_free_
 from backend.src.services.telegram.keyword_triggers import try_handle_tp_hit_trigger
 from backend.src.services.telegram.keyword_triggers import (
     apply_sl_parsing_override, apply_mirror_copy,
+    parse_lexicon_direction_trigger,
 )
 
 
@@ -227,8 +228,15 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             # was only ever a cheap filter that could disagree with them.
             # Both refuse a message that already carries SL/TP -- that is a
             # full signal and goes through the parsers below.
+            # parse_lexicon_direction_trigger is last of the three: the two
+            # built-in parsers recognise a named layout, the lexicon one
+            # recognises whatever the user typed into Parsing > Logic
+            # Keywords, so a built-in match must win rather than depend on
+            # what happens to be in a box.
             if bool(rs.get("immediate_market_entry", 0)) and ime_enabled:
-                _instant = parse_instant_entry(text) or parse_gd2_instant_entry(text)
+                _instant = (parse_instant_entry(text)
+                            or parse_gd2_instant_entry(text)
+                            or parse_lexicon_direction_trigger(text))
                 if _instant:
                     _instant_dir, _instant_px = _instant
                     await _process_instant_entry_impl(msg, tg_id, group_id, channel_name, text, _instant_dir, _instant_px, rs, auto_execute, ctx.bridge, ctx.dpm_candles, ctx.cfg.get('starting_balance', 1000.0))

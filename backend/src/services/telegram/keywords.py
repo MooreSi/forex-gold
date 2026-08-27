@@ -14,26 +14,42 @@ message's text:
   risk_free_be   -- moves that same trade's SL to its own entry price
                     (breakeven) -- delegates to core_ai_signal_fallback.
                     apply_sl_adjustment for the actual move/dedup/alert.
-  buy_orders     -- reference list only (not itself matched against
-                    anything) -- the words this app's own direction-
-                    detection regexes already respond to across its
-                    several channel formats, shown here so they're
-                    editable/extendable rather than buried in regex.
-  limit_orders   -- same, for the pending-order ("BUY LIMITS GOLD @ x/y
-                    AREA") layout specifically.
+  buy_orders     -- phrases that name a BUY with no levels of their own
+  sell_orders    -- the same, for a SELL
+  limit_orders   -- reference list for the pending-order ("BUY LIMITS GOLD
+                    @ x/y AREA") layout, matched only by the AI-fallback
+                    gate below.
 
-buy_orders/limit_orders are informational/extensible reference lists, not
-literal regex replacements -- this app's actual direction/limit-order
-detection stays in signal_parser.py's per-format regexes (Format A/B, GD2,
-GD2-limits, instant-entry); editing these boxes does not rewrite those
-regexes. They exist here as an editable, visible summary of what those
-regexes currently key off, and a place for a future generic keyword-hint
-layer to read from.
+buy_orders/sell_orders are **live direction triggers** (2026-08-27). A
+message with a line that IS one of these phrases, and no numbers anywhere,
+is a bare direction heads-up: it takes the same path as the built-in bare
+triggers ("XAU USD BUY", "Buy Zone Now") -- entered at market when
+Immediate Market Entry is on for that channel, otherwise held quietly until
+the message carrying the levels arrives.
+
+They were reference lists until then: nothing matched them as a trigger, so
+a phrase typed into the box bought nothing but permission to spend an AI
+call. Reported live -- GOLD DIGGERS INSTITUTIONAL sent "PREPARE FOR A BUY"
+with that exact phrase saved in the box and the app did nothing.
+
+**Matching is per-line and exact, not substring**, unlike every other
+lexicon here. The shipped default list contains the bare word "BUY"; as a
+substring that would open a market order on any message that mentions
+buying at all ("we are watching for a buy setup later"). Line-exact means
+"BUY" fires on a message whose line is BUY and on nothing else. The
+no-numbers rule is the second half of the same guard: anything stating a
+level is a signal, or a fragment of one, and belongs to signal_parser.py's
+per-format regexes rather than to a market order that would ignore what it
+said.
+
+Full-signal and limit-order detection is unchanged and still lives entirely
+in those regexes -- these boxes do not rewrite them.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Optional
 
@@ -57,12 +73,18 @@ DEFAULT_LEXICONS: dict[str, list[str]] = {
         "LOCK IN", "LOCK ENTRY", "LOCK PROFITS", "LOCKING PROFITS",
     ],
     "exclusion": ["ALERT", "RESULT", "EDUCATION", "SUMMARY"],
-    # Extracted from signal_parser.py's own direction-detection regexes
+    # Seeded from signal_parser.py's own direction-detection regexes
     # (_DIRECTION_RE, _DIRECTION_B_RE, _GD2_DIRECTION_RE, _GD2_ZONE_DIRECTION_RE,
-    # parse_instant_entry) -- see module docstring above.
+    # parse_instant_entry). Live triggers -- see the module docstring for why
+    # the bare "BUY"/"SELL" entries are safe here and would not be as
+    # substrings.
     "buy_orders": [
         "BUY", "BUY NOW", "BUY GOLD", "BUY ZONE", "BUY ZONE NOW",
         "BUY GOLD NOW", "XAU USD BUY", "XAUUSD BUY", "DIRECTION BUY",
+    ],
+    "sell_orders": [
+        "SELL", "SELL NOW", "SELL GOLD", "SELL ZONE", "SELL ZONE NOW",
+        "SELL GOLD NOW", "XAU USD SELL", "XAUUSD SELL", "DIRECTION SELL",
     ],
     # Extracted from _GD2_LIMITS_DIRECTION_RE / is_limit_order_signal.
     "limit_orders": [
@@ -77,6 +99,7 @@ LEXICON_LABELS: dict[str, str] = {
     "risk_free_be": "RISK FREE / BE Trigger Lexicon",
     "exclusion": "Exclusion Keywords / Filter",
     "buy_orders": "BUY Orders",
+    "sell_orders": "SELL Orders",
     "limit_orders": "LIMIT Orders",
 }
 
@@ -85,7 +108,8 @@ LEXICON_HELP: dict[str, str] = {
     "close_all": "Comma-separated exit command phrases. E.g. CLOSE ALL, CLOSE NOW, CLOSE TRADE",
     "risk_free_be": "Comma-separated breakeven safety phrases. E.g. RISK FREE, SET BE, MOVE TO BE",
     "exclusion": "Messages containing these keywords will be ignored. E.g. ALERT, RESULT, EDUCATION",
-    "buy_orders": "Comma-separated phrases this app's own parsers already treat as a BUY signal.",
+    "buy_orders": "Comma-separated phrases that mean BUY on their own, with no levels. A message whose line is one of these, and that contains no numbers, is entered at market when Immediate Market Entry is on for that channel.",
+    "sell_orders": "The same, for SELL.",
     "limit_orders": "Comma-separated phrases this app's own parsers already treat as a pending LIMIT order.",
 }
 
@@ -138,6 +162,43 @@ def text_matches_any(text: str, phrases: list[str]) -> Optional[str]:
         if phrase and phrase.upper() in upper:
             return phrase
     return None
+
+
+_DECORATION_RE = re.compile(r"[^A-Z0-9 ]+")
+_HAS_DIGIT_RE = re.compile(r"\d")
+
+
+def _normalise_line(line: str) -> str:
+    """A line reduced to the words it actually says: markdown, emoji and
+    punctuation stripped, whitespace collapsed, upper-cased. "**🔥 Prepare
+    for a Buy! 🔥**" and "PREPARE FOR A BUY" normalise to the same string."""
+    return " ".join(_DECORATION_RE.sub(" ", (line or "").upper()).split())
+
+
+def text_line_matches_any(text: str, phrases: list[str]) -> Optional[str]:
+    """The first phrase that some LINE of `text` is, normalised -- or None.
+
+    Deliberately not text_matches_any's substring test. See the module
+    docstring: these phrases become market orders, and "BUY" as a substring
+    matches most of what a gold channel says all day.
+    """
+    if not text or not phrases:
+        return None
+    lines = {_normalise_line(l) for l in text.splitlines()}
+    lines.discard("")
+    if not lines:
+        return None
+    for phrase in phrases:
+        norm = _normalise_line(phrase)
+        if norm and norm in lines:
+            return phrase
+    return None
+
+
+def text_has_number(text: str) -> bool:
+    """True if `text` states any digit at all -- so it is a signal or part of
+    one, not a bare direction heads-up."""
+    return bool(_HAS_DIGIT_RE.search(text or ""))
 
 
 def claim_trigger(tg_message_id: str, trigger_type: str) -> bool:

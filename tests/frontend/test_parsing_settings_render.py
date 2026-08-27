@@ -40,6 +40,19 @@ async def test_the_parsing_settings_block_is_on_the_page(user, landmark):
 
 
 @pytest.mark.asyncio
+async def test_every_logic_keyword_box_reaches_the_page(user):
+    """Same reasoning as the toggle grid below, for the lexicon boxes. A box
+    that is not on screen is a lexicon the user cannot edit -- and since
+    2026-08-27 the BUY/SELL Orders boxes are live market-entry triggers, not
+    reference lists, so an invisible one is a trigger nobody can turn off."""
+    from backend.src.services.telegram import keywords as logic_kw
+
+    await user.open("/")
+    for category in logic_kw.DEFAULT_LEXICONS:
+        await user.should_see(logic_kw.LEXICON_LABELS[category])
+
+
+@pytest.mark.asyncio
 async def test_every_parsing_toggle_key_reaches_the_page(user):
     """The grid is data-driven, so pin the data as well as the render: every
     key in _PARSING_CATEGORIES must put its label on screen. A row silently

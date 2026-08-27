@@ -25,6 +25,7 @@ from backend.src.db import database as db_module
 from backend.src.services.telegram import alerts
 from backend.src.services.trading.close_trade import CloseTradeContext, record_close
 from backend.src.utils.models import CONTRACT_SIZE
+from backend.src.services.trading import trade_repo
 
 log = logging.getLogger(__name__)
 
@@ -60,14 +61,7 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
     so it is invisible to find_template_leg_tickets and cannot block
     "settled" -- there is nothing yet to wait for.
     """
-    def _fetch_strategy():
-        with db_module.db() as conn:
-            row = conn.execute(
-                "SELECT strategy, direction, initial_sl "
-                "FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-            ).fetchone()
-            return db_module.row_to_dict(row) if row else {}
-    _row = await db_module.to_db_thread(_fetch_strategy)
+    _row = await db_module.to_db_thread(trade_repo.fetch_trade_strategy_and_sl, trade_id)
     strategy   = _row.get("strategy")
     initial_sl = _row.get("initial_sl")
 
@@ -126,63 +120,22 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
         return None
     mt5_profit = round(total, 2)
 
-    def _apply_profit_sync():
-        with db_module.db() as conn:
-            existing = db_module.row_to_dict(conn.execute(
-                "SELECT mt5_profit, net_pnl FROM vantage_simulated_trades WHERE trade_id=?",
-                (trade_id,),
-            ).fetchone())
-            # mt5_profit stays NULL until all_settled (see below), so this
-            # branch runs on every retry while sibling legs are still
-            # closing -- our_estimate is always what the LAST call wrote,
-            # so the correction applied is exactly the incremental amount
-            # a newly-closed leg added, never a re-application of the same
-            # money twice.
-            if existing and existing.get("mt5_profit") is None:
-                our_estimate = float(existing.get("net_pnl") or 0)
-                correction = round(mt5_profit - our_estimate, 4)
-                if abs(correction) >= 0.01:
-                    conn.execute(
-                        "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                        (correction,),
-                    )
-                    conn.execute(
-                        "UPDATE vantage_simulated_trades SET net_pnl=? WHERE trade_id=?",
-                        (mt5_profit, trade_id),
-                    )
-                    log.info(
-                        "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
-                        trade_id, our_estimate, mt5_profit, correction,
-                    )
-            # Absolute value, not an increment, so re-running it as later
-            # legs settle is idempotent -- it just converges on the full
-            # basket the same way net_pnl above does. Written on every pass
-            # rather than only at all_settled so R:R matches whatever P&L
-            # the row is currently showing, over the same set of legs.
-            if risk_total > 0:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET initial_risk=? WHERE trade_id=?",
-                    (round(risk_total, 4), trade_id),
-                )
-            if all_settled:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",
-                    (mt5_profit, trade_id),
-                )
-    await db_module.to_db_thread(_apply_profit_sync)
+    _applied = await db_module.to_db_thread(
+        trade_repo.apply_profit_sync, trade_id, mt5_profit, risk_total, all_settled)
+    if _applied:
+        _estimate, _correction = _applied
+        log.info(
+            "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
+            trade_id, _estimate, mt5_profit, _correction,
+        )
     return mt5_profit if all_settled else None
 
 
 async def schedule_profit_sync(trade_id: str, mt5_ticket: int, bridge: Any) -> None:
-    def _fetch_profit():
-        with db_module.db() as conn:
-            return conn.execute(
-                "SELECT mt5_profit FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-            ).fetchone()
     for delay in (0, 10, 60, 300, 1800):
         if delay:
             await asyncio.sleep(delay)
-        row = await db_module.to_db_thread(_fetch_profit)
+        row = await db_module.to_db_thread(trade_repo.fetch_synced_profit, trade_id)
         if row and row[0] is not None:
             return
         result = await sync_profit(trade_id, mt5_ticket, bridge)
@@ -192,15 +145,7 @@ async def schedule_profit_sync(trade_id: str, mt5_ticket: int, bridge: Any) -> N
 
 async def profit_sweep(bridge: Any) -> None:
     cutoff = time.time() - 86400
-    def _fetch_unsynced():
-        with db_module.db() as conn:
-            return conn.execute(
-                """SELECT trade_id,mt5_ticket FROM vantage_simulated_trades
-                   WHERE status='closed' AND mt5_ticket IS NOT NULL
-                     AND (mt5_profit IS NULL OR (mt5_profit=0.0 AND close_time>?))""",
-                (cutoff,),
-            ).fetchall()
-    rows = await db_module.to_db_thread(_fetch_unsynced)
+    rows = await db_module.to_db_thread(trade_repo.fetch_unsynced_closed_trades, cutoff)
     for row in rows:
         try:
             await sync_profit(row[0], int(row[1]), bridge)

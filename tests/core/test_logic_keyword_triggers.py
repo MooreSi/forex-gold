@@ -115,10 +115,17 @@ def test_ai_fallback_gate_proceeds_on_limit_orders_token(fresh_db):
 
 
 def test_ai_fallback_gate_disabled_when_all_lexicons_empty(fresh_db):
-    lk.set_lexicon("symbol_tokens", [])
-    lk.set_lexicon("buy_orders", [])
-    lk.set_lexicon("limit_orders", [])
+    """An accidental empty save must not silently kill the last-resort
+    recovery path. Driven off the gate's own category list rather than a
+    hand-written one, so adding a lexicon cannot leave this passing for the
+    wrong reason."""
+    for category in trig.AI_FALLBACK_GATE_LEXICONS:
+        lk.set_lexicon(category, [])
     assert trig.should_skip_ai_fallback_for_no_signal_candidate("literally anything", {}) is None
+
+
+def test_ai_fallback_gate_proceeds_on_sell_orders_token(fresh_db):
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate("looks like a SELL setup", {}) is None
 
 
 # ── try_handle_close_all_trigger ────────────────────────────────────────────

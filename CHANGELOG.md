@@ -1,3 +1,53 @@
+## Unreleased — Upstream merge + structural sweep (2026-08-25 → 2026-08-27)
+
+Merges `MooreSi/forex` main into the refactored tree, then repairs what the
+merge cost and finishes two structural gates.
+
+### Fixed — money path (all UNVERIFIED against a broker; demo session required)
+- **Harvest closed trades at the wrong threshold.** `harvest_pips` (pips) was
+  being conflated with `harvest_threshold` (account currency), and shipped
+  defaulted to `1.0` rather than off. Two live trades closed at ~C$1.40 against
+  a $30 setting. Default is now `0.0` (off), with migration 29 clearing the
+  stale `1.0` from existing templates.
+- **The Telegram panel's IME button could turn Immediate Market Entry on but
+  never off** — the two reads used different config keys, so the "off" write
+  landed somewhere the "on" read never looked
+  (docs/todo/bugs/012).
+- **The anti-compounding revert in `PendingWatcher` had no test.** Its absence
+  had previously walked one signal's stop 110 pips over 80 passes. Now pinned.
+
+### Structural gates
+- **SQL gate: 56 statements across 22 files → 0.** Every remaining inline
+  statement moved into a repo, each behind a test written first and confirmed
+  by mutation. Four byte-identical copies of `trade_repo.get_trade` and three
+  of `broker_repo.fetch_working_pending_orders` were deleted rather than moved.
+- **Coverage ratchet green again** — `runtime.py` 63.9% → 77.7%,
+  `services/positions` 75.8% → 87.4%, `services/trading` 86.4% → 88.2%, with
+  the floors untouched (docs/todo/testing/011).
+- Import contracts, transaction boundaries and fixture-dedup back to baseline.
+
+### Decomposition
+- `ea_bridge.py` 1,947 → 715, split into `_events` / `_panel` / `_restore` /
+  `_version` / `_ids`
+- `core_bot_panel.py` 1,689 → 604; `settings.py` → 11 modules; `app.py`,
+  `history.py`, `chart`, `telegram`, `reversal_panel`, `breakout_panel` split
+- Two runtime loop bodies relocated into their services with 20 new tests
+
+### Baselines raised (owner sign-off, 2026-08-27)
+- `runtime.py` 1310 → 1509, `cluster/remote/server.py` 1196 → 1256,
+  `cluster/sync/server.py` 1073 → 1085, `mt5_bridge.py` 1335 → 1344, facade
+  method count 79 → 88. Each recorded in `structure_baseline.json` with its
+  reason. Three other entries were **tightened** in the same pass —
+  `db/database.py` had 794 lines of unnoticed headroom and was removed from the
+  section entirely.
+
+### Tooling
+- Repo-wide scanners now exclude `.claude/` — an agent worktree is a complete
+  second checkout, and one background task took four gates red with ~370
+  phantom findings.
+
+**Suite: 3,622 passing, 0 failures. `python -m tools.checks all`: 8/8.**
+
 ## Unreleased — Road to Handoff (stage-2 sweep, 2026-08-11)
 
 ### Onboarding & usability

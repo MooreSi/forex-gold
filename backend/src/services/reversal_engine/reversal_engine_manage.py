@@ -480,15 +480,8 @@ class _ManagementMixin:
                 comment_for_trade, trade_id_prefix_from_comment,
             )
 
-            def _trade_id():
-                with _cdb.db() as conn:
-                    row = conn.execute(
-                        "SELECT trade_id, strategy FROM vantage_simulated_trades "
-                        "WHERE signal_id=?", (vsig,),
-                    ).fetchone()
-                    return (row[0], row[1]) if row else (None, None)
-
-            trade_id, strategy = await _cdb.to_db_thread(_trade_id)
+            trade_id, strategy = await _cdb.to_db_thread(
+                re_db.fetch_trade_id_and_strategy_for_signal, vsig)
             if not trade_id or not (strategy or "").startswith("template:"):
                 return legs
 

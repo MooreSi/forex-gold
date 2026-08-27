@@ -38,6 +38,7 @@ import time
 from typing import Optional
 
 from backend.src.db import database as core_db
+from backend.src.services.reversal_engine import reversal_engine_repo
 
 log = logging.getLogger(__name__)
 
@@ -82,17 +83,8 @@ def find_ref_confirmation(direction: str, entry_mid: float, rs: dict,
     now = at_ts or time.time()
     window = confirmation_window_s(rs)
     try:
-        with core_db.db() as conn:
-            row = conn.execute(
-                "SELECT tg_message_id, group_name, direction, entry_low, entry_high, parsed_at "
-                "FROM vantage_tg_signals "
-                f"WHERE group_name IN ({_ENABLED_CHANNELS_SQL}) AND direction=? "
-                "  AND parsed_at BETWEEN ? AND ? "
-                "  AND entry_low IS NOT NULL AND entry_high IS NOT NULL "
-                "  AND ABS((entry_low + entry_high) / 2.0 - ?) <= ? "
-                "ORDER BY parsed_at DESC LIMIT 1",
-                (direction.upper(), now - window, now, float(entry_mid), _PRICE_DELTA),
-            ).fetchone()
+        row = reversal_engine_repo.find_confirming_signal(
+            direction, float(entry_mid), now - window, now, _PRICE_DELTA)
     except Exception as exc:
         log.warning("[RefConfirm] lookup failed: %s", exc)
         return None

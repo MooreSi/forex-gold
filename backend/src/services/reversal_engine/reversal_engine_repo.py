@@ -712,3 +712,56 @@ def fetch_ref_cadence(ref_group_id):
         return (last_row["parsed_at"] if last_row else None), today_count
     finally:
         con.close()
+
+
+# ── REF confirmation lookup (ref_confirmation) ───────────────────────────────
+
+# Which channels count as confirmation is read from channel_parser_config
+# rather than hardcoded (reversal_engine_correlate still pins two group IDs as
+# literals, which silently ignores any channel added since). Enabled channels
+# only: a channel switched off in Parsing Settings must not be able to
+# greenlight a live trade.
+_ENABLED_CHANNELS_SQL = (
+    "SELECT channel_name FROM channel_parser_config WHERE enabled=1"
+)
+
+
+def find_confirming_signal(
+    direction: str, entry_mid: float, since: float, until: float,
+    price_delta: float,
+) -> Optional[dict]:
+    """The most recent Telegram signal from an enabled channel that agrees
+    with a Reversal Engine setup, or None.
+
+    Same direction, inside the confirmation window, and priced within
+    `price_delta` of the setup's entry mid -- "the same level", not "a nearby
+    level". Rows with no entry zone are excluded rather than treated as a
+    match at 0.
+
+    Newest first: if a channel posted twice inside the window, the later
+    message is the one that reflects what it currently thinks.
+    """
+    from backend.src.db import database as db_module
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT tg_message_id, group_name, direction, entry_low, entry_high, parsed_at "
+            "FROM vantage_tg_signals "
+            f"WHERE group_name IN ({_ENABLED_CHANNELS_SQL}) AND direction=? "
+            "  AND parsed_at BETWEEN ? AND ? "
+            "  AND entry_low IS NOT NULL AND entry_high IS NOT NULL "
+            "  AND ABS((entry_low + entry_high) / 2.0 - ?) <= ? "
+            "ORDER BY parsed_at DESC LIMIT 1",
+            (direction.upper(), since, until, float(entry_mid), price_delta),
+        ).fetchone()
+    return db_module.row_to_dict(row) if row else None
+
+
+def fetch_trade_id_and_strategy_for_signal(signal_id: str) -> tuple:
+    """(trade_id, strategy) for a signal's trade, or (None, None)."""
+    from backend.src.db import database as db_module
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT trade_id, strategy FROM vantage_simulated_trades "
+            "WHERE signal_id=?", (signal_id,),
+        ).fetchone()
+        return (row[0], row[1]) if row else (None, None)

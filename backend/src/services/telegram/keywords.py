@@ -33,14 +33,18 @@ call. Reported live -- GOLD DIGGERS INSTITUTIONAL sent "PREPARE FOR A BUY"
 with that exact phrase saved in the box and the app did nothing.
 
 **Matching is per-line and exact, not substring**, unlike every other
-lexicon here. The shipped default list contains the bare word "BUY"; as a
-substring that would open a market order on any message that mentions
-buying at all ("we are watching for a buy setup later"). Line-exact means
-"BUY" fires on a message whose line is BUY and on nothing else. The
-no-numbers rule is the second half of the same guard: anything stating a
-level is a signal, or a fragment of one, and belongs to signal_parser.py's
-per-format regexes rather than to a market order that would ignore what it
-said.
+lexicon here -- these phrases become market orders, and as substrings they
+would fire on most of what a gold channel says in a day ("we are watching
+for a buy setup later"). The no-numbers rule is the second half of the same
+guard: anything stating a level is a signal, or a fragment of one, and
+belongs to signal_parser.py's per-format regexes rather than to a market
+order that would ignore what it said.
+
+The shipped lists carry no one-word phrase for the same reason. A bare
+"BUY" would still be line-exact, and a channel posting a lone "BUY" as
+commentary is not distinguishable from one posting it as an instruction.
+Every default names the pair, the zone or the action. A bare word can be
+added in the UI, but it has to be a decision someone made.
 
 Full-signal and limit-order detection is unchanged and still lives entirely
 in those regexes -- these boxes do not rewrite them.
@@ -75,15 +79,19 @@ DEFAULT_LEXICONS: dict[str, list[str]] = {
     "exclusion": ["ALERT", "RESULT", "EDUCATION", "SUMMARY"],
     # Seeded from signal_parser.py's own direction-detection regexes
     # (_DIRECTION_RE, _DIRECTION_B_RE, _GD2_DIRECTION_RE, _GD2_ZONE_DIRECTION_RE,
-    # parse_instant_entry). Live triggers -- see the module docstring for why
-    # the bare "BUY"/"SELL" entries are safe here and would not be as
-    # substrings.
+    # parse_instant_entry). Live triggers -- see the module docstring.
+    # No bare "BUY"/"SELL" here, on purpose (2026-08-27, owner directive).
+    # A one-word phrase makes any message whose line is just that word a
+    # market order, and channels post bare "BUY" as commentary as often as
+    # they post it as an instruction. Every entry below names the pair, the
+    # zone or the action, so it cannot be mistaken for either. Add a bare
+    # word in the UI if you want it -- deliberately, not by default.
     "buy_orders": [
-        "BUY", "BUY NOW", "BUY GOLD", "BUY ZONE", "BUY ZONE NOW",
+        "BUY NOW", "BUY GOLD", "BUY ZONE", "BUY ZONE NOW",
         "BUY GOLD NOW", "XAU USD BUY", "XAUUSD BUY", "DIRECTION BUY",
     ],
     "sell_orders": [
-        "SELL", "SELL NOW", "SELL GOLD", "SELL ZONE", "SELL ZONE NOW",
+        "SELL NOW", "SELL GOLD", "SELL ZONE", "SELL ZONE NOW",
         "SELL GOLD NOW", "XAU USD SELL", "XAUUSD SELL", "DIRECTION SELL",
     ],
     # Extracted from _GD2_LIMITS_DIRECTION_RE / is_limit_order_signal.

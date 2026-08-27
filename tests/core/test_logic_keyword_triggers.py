@@ -107,7 +107,8 @@ def test_ai_fallback_gate_proceeds_on_symbol_token(fresh_db):
 
 
 def test_ai_fallback_gate_proceeds_on_buy_orders_token(fresh_db):
-    assert trig.should_skip_ai_fallback_for_no_signal_candidate("looks like a BUY setup", {}) is None
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate(
+        "looks like a BUY NOW setup", {}) is None
 
 
 def test_ai_fallback_gate_proceeds_on_limit_orders_token(fresh_db):
@@ -125,7 +126,8 @@ def test_ai_fallback_gate_disabled_when_all_lexicons_empty(fresh_db):
 
 
 def test_ai_fallback_gate_proceeds_on_sell_orders_token(fresh_db):
-    assert trig.should_skip_ai_fallback_for_no_signal_candidate("looks like a SELL setup", {}) is None
+    assert trig.should_skip_ai_fallback_for_no_signal_candidate(
+        "looks like a SELL NOW setup", {}) is None
 
 
 # ── try_handle_close_all_trigger ────────────────────────────────────────────

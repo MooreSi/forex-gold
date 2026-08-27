@@ -183,3 +183,34 @@ def test_the_ai_fallback_gate_also_sees_the_sell_box(fresh_db):
     lk.set_lexicon("sell_orders", ["PREPARE FOR A SELL"])
     assert kt.should_skip_ai_fallback_for_no_signal_candidate(
         "PREPARE FOR A SELL", {}) is None
+
+
+# ── The shipped defaults ─────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("category", ["buy_orders", "sell_orders"])
+def test_no_shipped_default_is_a_single_bare_word(category):
+    """Owner directive 2026-08-27, after the bare "BUY"/"SELL" entries shipped
+    briefly. These phrases open market orders. Line-exact matching stops a
+    one-word phrase firing on a sentence, but not on a channel posting a lone
+    "BUY" as commentary -- which is indistinguishable from one posting it as
+    an instruction. Every default must name the pair, the zone or the action.
+    A bare word is still addable in the UI; it just cannot arrive by default.
+    """
+    for phrase in lk.DEFAULT_LEXICONS[category]:
+        assert len(phrase.split()) > 1, (
+            f"{category} ships {phrase!r}: a one-word direction trigger fires "
+            f"on any message whose line is just that word"
+        )
+
+
+def test_a_bare_word_still_works_when_someone_chooses_to_add_it(fresh_db):
+    """Removing it from the defaults must not remove the capability -- the
+    box is the control."""
+    lk.set_lexicon("buy_orders", ["BUY"])
+    assert _run_scan("BUY") == ("BUY", None)
+
+
+def test_the_defaults_alone_do_not_fire_on_a_lone_direction_word(fresh_db):
+    """The point of the change, stated as behaviour rather than as a list."""
+    assert _run_scan("BUY") is None
+    assert _run_scan("SELL") is None

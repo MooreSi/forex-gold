@@ -55,118 +55,98 @@ from backend.src.db import database as db_module
 from backend.src.utils.models import STRATEGY_NAMES
 from backend.src.services.positions import panel_repo
 
+# The panel's own modules. Split for the 800-line ceiling; the dispatch
+# table below still names every screen and action, which is the point.
+# Re-exported wholesale rather than only what this module calls: core_bot_panel
+# is the name every caller and test already imports, and a partial surface just
+# moves the breakage to whoever reaches for the rest.
+from backend.src.services.positions._panel_registration import (  # noqa: F401
+    _REG_DURATION_LABELS,
+    _approve_registration,
+    _record_licence_issued,
+    _reject_registration,
+    _resolve_pending_token,
+)
+from backend.src.services.positions._panel_schedule import (  # noqa: F401
+    _DAY_ABBR,
+    _SCHED_FIELDS,
+    _TIME_RE,
+    _save_block,
+    _sched_block,
+    _sched_blocks,
+    _schedule_value_reply,
+    _telegram_channel_names,
+    _toggle_schedule_enabled,
+    _toggle_window_channel,
+    _toggle_window_flag,
+    _window_channel_enabled,
+    schedule_channels_screen,
+    schedule_day_screen,
+    schedule_prompt_text,
+    schedule_screen,
+    schedule_window_screen,
+)
+from backend.src.services.positions._panel_settings import (  # noqa: F401
+    FIELDS,
+    GLOBAL_FIELDS,
+    _active_btn,
+    _adjust_field,
+    _basic_settings_screen,
+    _choices,
+    _clamp,
+    _coerce,
+    _field_btn,
+    _field_parent,
+    _fmt_value,
+    _meta,
+    _parent_screen,
+    _read_value,
+    _set_choice,
+    _set_strategy,
+    _template_settings_screen,
+    _toggle_field,
+    _write_value,
+    choice_screen,
+    field_screen,
+    strategy_screen,
+    tp_ladder_screen,
+    tp_menu_screen,
+)
+from backend.src.services.positions._panel_shared import (  # noqa: F401
+    CB,
+    MANUAL,
+    MANUAL_SOURCE,
+    SEP,
+    Screen,
+    _btn,
+    _cb,
+    _channel,
+    _channel_open_trades,
+    _channel_rec,
+    _dot,
+    _money,
+    _short,
+    _slug,
+    _strategy_label,
+    _trade_push_sl_pips,
+    channel_list,
+)
+from backend.src.services.positions._panel_trade_ops import (  # noqa: F401
+    _close_all,
+    _close_channel,
+    _close_many,
+    _close_one,
+    _delete_pending,
+    _market_order,
+    _push_sl_one,
+    _risk_free,
+)
+
 log = logging.getLogger(__name__)
-
-CB = "p"          # callback-data namespace
-SEP = "|"
-
-# The panel's own pseudo-channel for orders placed by hand rather than from
-# any signal source. Matches open_manual_market_order's default source tag so
-# manual trades opened here land in the bucket the rest of the app already
-# reports them under.
-MANUAL = "Manual"
-MANUAL_SOURCE = "manual_market"
-
-
-class Screen:
-    """What engine.py should do with the result of a panel interaction.
-
-    mode:
-      'edit'         -- replace the panel message in place (normal navigation)
-      'send'         -- post a new message, leaving the panel intact
-      'force_reply'  -- post a reply-prompt for a typed value
-      'delete'       -- remove the panel message
-      'noop'         -- nothing but the toast
-    """
-
-    __slots__ = ("text", "keyboard", "toast", "mode")
-
-    def __init__(self, text: str = "", keyboard: Optional[list] = None,
-                 toast: str = "", mode: str = "edit"):
-        self.text = text
-        self.keyboard = keyboard
-        self.toast = toast
-        self.mode = mode
-
 
 # ── Callback-data helpers ─────────────────────────────────────────────────────
 
-def _cb(*parts) -> str:
-    """Build callback data. Telegram hard-caps this at 64 bytes and silently
-    rejects the whole keyboard if any button exceeds it, so assert rather
-    than ship a panel whose buttons do nothing."""
-    data = SEP.join([CB] + [str(p) for p in parts])
-    if len(data.encode()) > 64:
-        raise ValueError(f"callback data too long ({len(data.encode())}B): {data}")
-    return data
-
-
-def _btn(text: str, *parts) -> dict:
-    return {"text": text, "callback_data": _cb(*parts)}
-
-
 # ── Channels ──────────────────────────────────────────────────────────────────
-
-def _slug(name: str) -> str:
-    return hashlib.md5((name or "").encode()).hexdigest()[:8]
-
-
-def _channel_rec(name: str, strategy: Optional[str]) -> dict:
-    template = None
-    if ea_templates.is_template_override(strategy):
-        template = ea_templates.template_name_from_override(strategy)
-    paused = False
-    try:
-        _, paused = db_module.get_channel_lot_mult(name)
-    except Exception:
-        pass
-    return {
-        "name":     name,
-        "slug":     _slug(name),
-        "strategy": strategy,
-        "template": template,
-        "paused":   bool(paused),
-    }
-
-
-def channel_list() -> list[dict]:
-    """Every channel the panel can act on, in the same order as the app's own
-    Channel Strategy tab, with Manual appended."""
-    recs: list[dict] = []
-    try:
-        for name, info in db_module.get_all_channel_strategy_overrides().items():
-            recs.append(_channel_rec(name, info.get("strategy")))
-    except Exception as e:
-        log.warning("[Panel] channel list failed: %s", e)
-    try:
-        rs = db_module.get_risk_settings()
-        manual_strategy = rs.get("trade_strategy")
-    except Exception:
-        manual_strategy = None
-    recs.append(_channel_rec(MANUAL, manual_strategy))
-    return recs
-
-
-def _channel(slug: str) -> Optional[dict]:
-    return next((c for c in channel_list() if c["slug"] == slug), None)
-
-
-def _short(name: str, limit: int = 18) -> str:
-    """Channel names run long ('GOLD DIGGERS INSTITUTIONAL'); Telegram button
-    labels get clipped mid-word by the client, so clip deliberately instead."""
-    name = name or "?"
-    return name if len(name) <= limit else name[: limit - 1].rstrip() + "…"
-
-
-def _strategy_label(strategy: Optional[str]) -> str:
-    if not strategy:
-        return "inherit global"
-    if strategy == "auto":
-        return "Auto (AI)"
-    if ea_templates.is_template_override(strategy):
-        return f"Template: {ea_templates.template_name_from_override(strategy)}"
-    return STRATEGY_NAMES.get(strategy, strategy)
-
 
 # ── Template field metadata ───────────────────────────────────────────────────
 #
@@ -174,33 +154,6 @@ def _strategy_label(strategy: Optional[str]) -> str:
 # Only fields worth driving from a phone are listed -- the full set stays in
 # Settings > EA Templates. Adding a field here is enough to make it editable;
 # the generic field editor handles the rest.
-
-FIELDS: dict[str, dict] = {
-    "anchors":       {"emoji": "⚓", "label": "Anchors",      "kind": "int",   "step": 1},
-    "lot_anchor":    {"emoji": "\U0001f4b0", "label": "Lot (Anchor)",  "kind": "float", "step": 0.01, "dp": 2},
-    "pendings":      {"emoji": "\U0001f4ca", "label": "Layers",        "kind": "int",   "step": 1},
-    "lot_pending":   {"emoji": "\U0001f4b0", "label": "Lot (Pending)", "kind": "float", "step": 0.01, "dp": 2},
-    "risk_pct":      {"emoji": "\U0001f3af", "label": "Risk %",        "kind": "float", "step": 0.1,  "dp": 2},
-    "grid_step_pts": {"emoji": "\U0001f4cf", "label": "Ladder Step",   "kind": "float", "step": 1.0,  "dp": 1},
-    "sl_pips":       {"emoji": "\U0001f4cf", "label": "SL Pips",       "kind": "float", "step": 5.0,  "dp": 1},
-    "harvest_enabled": {"emoji": "\U0001f33e", "label": "Harvest",     "kind": "bool"},
-    "mode":          {"emoji": "\U0001fa9c", "label": "Grid Mode",     "kind": "choice"},
-    "tpsl_mode":     {"emoji": "\U0001f3c1", "label": "TP Mode",       "kind": "choice"},
-    "anc_shave":     {"emoji": "\U0001f528", "label": "Anchor Shave",  "kind": "bool"},
-    "be_mode":       {"emoji": "\U0001f4cd", "label": "BE Mode",       "kind": "choice"},
-    "cancel_pending_level": {"emoji": "\U0001f6ab", "label": "Delete Pending", "kind": "int", "step": 1,
-                             "zero": "OFF", "prefix": "TP"},
-    "be_trigger":    {"emoji": "⚡", "label": "BreakEven",     "kind": "int",   "step": 1, "prefix": "TP"},
-    "trail_mode":    {"emoji": "⏰", "label": "Trail",         "kind": "choice"},
-    "sig_guard":     {"emoji": "\U0001f6e1", "label": "SIG GUARD",  "kind": "bool"},
-    "late_guard_pips": {"emoji": "\U0001f6e1", "label": "Late Guard Pips", "kind": "float", "step": 5.0,
-                        "dp": 1, "zero": "OFF"},
-    "equity_protect": {"emoji": "\U0001f6df", "label": "Equity Protect $", "kind": "float", "step": 10.0,
-                       "dp": 0, "zero": "OFF"},
-    "max_spread_pips": {"emoji": "\U0001f4d0", "label": "Max Spread", "kind": "float", "step": 1.0, "dp": 1},
-    "tp_from_telegram":     {"emoji": "\U0001f4e5", "label": "TP from Telegram", "kind": "bool"},
-    "tp_pen_from_telegram": {"emoji": "\U0001f4e5", "label": "TP from Telegram", "kind": "bool"},
-}
 
 # TP ladder fields are generated rather than listed -- 32 near-identical
 # entries would bury the ones above.
@@ -214,110 +167,7 @@ for _n in range(1, ea_templates.MAX_TP_LEVELS + 1):
     FIELDS[f"tp_pen{_n}_pct"] = {"emoji": "\U0001f3c1", "label": f"TP{_n} close % (pending)",
                                  "kind": "float", "step": 5.0, "dp": 0, "zero": "OFF"}
 
-# Global (non-template) settings the slim screen edits, stored in risk
-# settings rather than on a template.
-GLOBAL_FIELDS: dict[str, dict] = {
-    "risk_per_trade_pct": {"emoji": "\U0001f3af", "label": "Risk % (global)", "kind": "float",
-                           "step": 0.1, "dp": 2},
-    "strategy_lot_size":  {"emoji": "\U0001f4b0", "label": "Lot (global)", "kind": "float",
-                           "step": 0.01, "dp": 2, "zero": "AUTO"},
-    "strategy_lot_size_grid": {"emoji": "\U0001f4b0", "label": "Lot (grid legs)", "kind": "float",
-                               "step": 0.01, "dp": 2, "zero": "OFF"},
-}
-
-
-def _active_btn(chan: dict) -> dict:
-    """The channel on/off row. Built here rather than inline because the label
-    needs an emoji literal chosen by a conditional, which cannot live inside
-    an f-string expression on Python 3.11 (the repo's floor)."""
-    dot = "\U0001f534" if chan["paused"] else "\U0001f7e2"
-    state = "Paused" if chan["paused"] else "Active"
-    return _btn(f"{dot} Channel {state}", "pause", chan["slug"])
-
-
-def _meta(field: str) -> dict:
-    return FIELDS.get(field) or GLOBAL_FIELDS.get(field) or {
-        "emoji": "⚙", "label": field, "kind": "float", "step": 1.0, "dp": 2}
-
-
-def _fmt_value(field: str, value) -> str:
-    m = _meta(field)
-    kind = m["kind"]
-    if kind == "bool":
-        return "ON" if value else "OFF"
-    if kind == "choice":
-        return str(value).upper()
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if not num and m.get("zero"):
-        return m["zero"]
-    if kind == "int":
-        return f"{m.get('prefix', '')}{int(num)}"
-    return f"{num:.{m.get('dp', 2)}f}"
-
-
-def _choices(field: str) -> tuple:
-    return ea_templates._CHOICES.get(field, ())
-
-
 # ── Value storage ─────────────────────────────────────────────────────────────
-
-def _read_value(chan: dict, field: str):
-    if field in GLOBAL_FIELDS:
-        return db_module.get_risk_settings().get(field, 0)
-    tpl = ea_templates.get_ea_template(chan["template"]) if chan.get("template") else None
-    if tpl is None:
-        return ea_templates.DEFAULTS.get(field, 0)
-    return tpl.get(field, ea_templates.DEFAULTS.get(field, 0))
-
-
-def _write_value(chan: dict, field: str, value) -> None:
-    """Persist one field. Template writes go through save_ea_template, which
-    rewrites every column from DEFAULTS -- so the current row must be loaded
-    and merged first, or every other field silently resets to its default."""
-    if field in GLOBAL_FIELDS:
-        db_module.update_risk_settings({field: value})
-        return
-    name = chan.get("template")
-    if not name:
-        raise ValueError("This channel is not bound to an EA Template.")
-    current = ea_templates.get_ea_template(name)
-    if current is None:
-        raise ValueError(f"Template {name!r} no longer exists.")
-    fields = dict(current)
-    fields[field] = value
-    ea_templates.save_ea_template(name, fields)
-
-
-def _coerce(field: str, raw) -> Any:
-    m = _meta(field)
-    kind = m["kind"]
-    if kind == "bool":
-        return bool(raw)
-    if kind == "choice":
-        return str(raw)
-    if kind == "int":
-        return int(round(float(raw)))
-    return round(float(raw), 4)
-
-
-def _clamp(field: str, value):
-    """Keep steppers inside the same bounds _clean_fields enforces, so a tap
-    that would be silently corrected shows the corrected value immediately
-    rather than appearing to do nothing."""
-    m = _meta(field)
-    if m["kind"] in ("bool", "choice"):
-        return value
-    if field in ("be_trigger", "tp1_trigger_level"):
-        return max(1, min(ea_templates.MAX_TP_LEVELS, value))
-    if field == "cancel_pending_level":
-        return max(0, min(ea_templates.MAX_TP_LEVELS, value))
-    if field in ("anchors", "pendings"):
-        return max(0, min(20, value))
-    return max(0, value) if m["kind"] == "int" else max(0.0, value)
-
 
 # ── Screens ───────────────────────────────────────────────────────────────────
 
@@ -373,185 +223,6 @@ def channel_settings_screen(slug: str) -> Screen:
     return _basic_settings_screen(chan)
 
 
-def _field_btn(chan: dict, field: str) -> dict:
-    m = _meta(field)
-    value = _fmt_value(field, _read_value(chan, field))
-    kind = m["kind"]
-    if kind == "bool":
-        act = "fb"
-    elif kind == "choice":
-        act = "fc"
-    else:
-        act = "f"
-    return _btn(f"{m['emoji']} {m['label']}: {value}", act, chan["slug"], field)
-
-
-def _template_settings_screen(chan: dict) -> Screen:
-    s = chan["slug"]
-    tpl = ea_templates.get_ea_template(chan["template"])
-    if tpl is None:
-        return Screen(toast=f"Template {chan['template']!r} is missing.", mode="noop")
-    rows = [
-        [_btn("\U0001f4cb Current Settings", "cur", s)],
-        [_field_btn(chan, "anchors"), _field_btn(chan, "lot_anchor")],
-        [_field_btn(chan, "pendings"), _field_btn(chan, "lot_pending")],
-        [_field_btn(chan, "risk_pct")],
-        [_field_btn(chan, "grid_step_pts"), _field_btn(chan, "sl_pips")],
-        [_btn("\U0001f3af TP & Pcts Settings", "tpm", s)],
-        [_field_btn(chan, "harvest_enabled"), _field_btn(chan, "mode")],
-        [_field_btn(chan, "tpsl_mode"), _field_btn(chan, "anc_shave")],
-        [_field_btn(chan, "be_mode"), _field_btn(chan, "cancel_pending_level")],
-        [_field_btn(chan, "be_trigger"), _field_btn(chan, "trail_mode")],
-        [_field_btn(chan, "sig_guard"), _field_btn(chan, "late_guard_pips")],
-        [_field_btn(chan, "equity_protect"), _field_btn(chan, "max_spread_pips")],
-        [_active_btn(chan)],
-        [_btn("\U0001f39b️ Change Strategy", "strat", s)],
-        [_btn("← Back to Main Menu", "root")],
-    ]
-    text = (f"⚙️ *{chan['name']}* settings\n"
-            f"Template: `{chan['template']}`")
-    return Screen(text, rows)
-
-
-def _basic_settings_screen(chan: dict) -> Screen:
-    """A channel on a built-in strategy has none of the template's grid
-    fields, so it gets the settings it actually has, plus a route to bind it
-    to a template if the full grid is what's wanted."""
-    s = chan["slug"]
-    rows = [
-        [_btn("\U0001f4cb Current Settings", "cur", s)],
-        [_btn(f"\U0001f39b️ Strategy: {_short(_strategy_label(chan['strategy']), 22)}", "strat", s)],
-        [_field_btn(chan, "risk_per_trade_pct")],
-        [_field_btn(chan, "strategy_lot_size"), _field_btn(chan, "strategy_lot_size_grid")],
-        [_active_btn(chan)],
-        [_btn("← Back to Main Menu", "root")],
-    ]
-    text = (
-        f"⚙️ *{chan['name']}* settings\n"
-        f"Strategy: {_strategy_label(chan['strategy'])}\n\n"
-        f"_This channel runs a built-in strategy, so the grid fields "
-        f"(anchors, layers, ladder, TP pips) do not apply. Bind it to an EA "
-        f"Template via Strategy to get those._"
-    )
-    return Screen(text, rows)
-
-
-def field_screen(slug: str, field: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    m = _meta(field)
-    value = _read_value(chan, field)
-    step = m.get("step", 1)
-    step_label = f"{step:g}"
-    rows = [
-        [_btn(f"− {step_label}", "fa", slug, field, "d"),
-         _btn(_fmt_value(field, value), "noop"),
-         _btn(f"+ {step_label}", "fa", slug, field, "u")],
-        [_btn("✏️ Set exact value", "fx", slug, field)],
-        [_btn("← Back", *_field_parent(slug, field))],
-    ]
-    return Screen(f"{m['emoji']} *{m['label']}*\n{chan['name']}\n\n"
-                  f"Current: `{_fmt_value(field, value)}`", rows)
-
-
-def _field_parent(slug: str, field: str) -> tuple:
-    if field == "tp_pen_from_telegram" or re.fullmatch(r"tp_pen\d+_(pips|pct)", field):
-        return ("tpl", slug, "p")
-    if field == "tp_from_telegram" or re.fullmatch(r"tp\d+_(pips|pct)", field):
-        return ("tpl", slug, "a")
-    return ("cs", slug)
-
-
-async def _parent_screen(slug: str, field: str) -> "Screen":
-    """Re-render whichever screen a field lives on, so an edit returns the
-    user to where they were rather than always bouncing to the channel root."""
-    action, *args = _field_parent(slug, field)
-    return await _dispatch(action, args, None)
-
-
-def choice_screen(slug: str, field: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    m = _meta(field)
-    current = _read_value(chan, field)
-    rows = [[_btn(f"{'✅ ' if str(current) == c else ''}{c.upper()}", "fs", slug, field, c)]
-            for c in _choices(field)]
-    rows.append([_btn("← Back", "cs", slug)])
-    return Screen(f"{m['emoji']} *{m['label']}*\n{chan['name']}\n\n"
-                  f"Current: `{str(current).upper()}`", rows)
-
-
-def tp_menu_screen(slug: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    rows = [
-        [_btn("⚓ Anchor ladder", "tpl", slug, "a")],
-        [_btn("\U0001f4ca Pending ladder", "tpl", slug, "p")],
-        [_btn("← Back", "cs", slug)],
-    ]
-    return Screen(f"\U0001f3af *TP & Pcts* — {chan['name']}\n\n"
-                  f"The anchor leg and the resting legs carry separate ladders.", rows)
-
-
-def tp_ladder_screen(slug: str, which: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    prefix = "tp_pen" if which == "p" else "tp"
-    tg_field = "tp_pen_from_telegram" if which == "p" else "tp_from_telegram"
-    from_tg = bool(_read_value(chan, tg_field))
-    rows = [[_field_btn(chan, tg_field)]]
-    for n in range(1, ea_templates.MAX_TP_LEVELS + 1):
-        pips_f, pct_f = f"{prefix}{n}_pips", f"{prefix}{n}_pct"
-        pips_label = f"TP{n} pips: {_fmt_value(pips_f, _read_value(chan, pips_f))}"
-        if from_tg:
-            # The pips are still live for internal-generator trades, so they
-            # stay editable -- marked, not hidden, so it is obvious which
-            # column a Telegram trade will actually use.
-            pips_label = f"({pips_label})"
-        rows.append([
-            _btn(pips_label, "f", slug, pips_f),
-            _btn(f"%: {_fmt_value(pct_f, _read_value(chan, pct_f))}", "f", slug, pct_f),
-        ])
-    rows.append([_btn("← Back", "tpm", slug)])
-    label = "Pending" if which == "p" else "Anchor"
-    note = (
-        "_Telegram signals take these levels from the message. The pips in "
-        "brackets still apply to internal signals (Reversal, Breakout, "
-        "Bounce, ORB), which have no message._"
-        if from_tg else
-        "_Pips are measured from the fill; % is how much of the position "
-        "closes at that level._"
-    )
-    return Screen(f"\U0001f3af *{label} TP ladder* — {chan['name']}\n\n{note}", rows)
-
-
-def strategy_screen(slug: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    rows, pair = [], []
-    for name in [t["name"] for t in ea_templates.list_ea_templates()]:
-        key = ea_templates.override_for_template(name)
-        mark = "✅ " if chan["strategy"] == key else ""
-        rows.append([_btn(f"{mark}\U0001f4d0 Template: {_short(name, 22)}", "sset", slug, f"t:{name}")])
-    for key, label in STRATEGY_NAMES.items():
-        mark = "✅ " if chan["strategy"] == key else ""
-        pair.append(_btn(f"{mark}{_short(label, 20)}", "sset", slug, key))
-        if len(pair) == 2:
-            rows.append(pair)
-            pair = []
-    if pair:
-        rows.append(pair)
-    rows.append([_btn("↩️ Inherit global", "sset", slug, "-")])
-    rows.append([_btn("← Back", "cs", slug)])
-    return Screen(f"\U0001f39b️ *Strategy* — {chan['name']}\n\n"
-                  f"Current: {_strategy_label(chan['strategy'])}", rows)
-
-
 def trades_screen(slug: str) -> Screen:
     chan = _channel(slug)
     if not chan:
@@ -567,35 +238,6 @@ def trades_screen(slug: str) -> Screen:
     ]
     return Screen(f"\U0001f3af *{chan['name']}* — trade operations\n"
                   f"Strategy: {_strategy_label(chan['strategy'])}", rows)
-
-
-def _channel_open_trades(chan: dict) -> list[dict]:
-    """Open trades belonging to this channel.
-
-    Matches the channel name and the 'Telegram Auto (<name>)' variant the
-    auto-execution path writes, the same pair get_channel_trust checks -- a
-    channel's trades are split across both spellings, and closing only one
-    set would leave live positions behind while reporting 'all closed'."""
-    name = chan["name"]
-    variants = [name, f"Telegram Auto ({name})"]
-    if name == MANUAL:
-        variants = [MANUAL_SOURCE, "Manual Signal"]
-    marks = ",".join("?" for _ in variants)
-    return panel_repo.open_trades_for_sources(variants)
-
-
-def _trade_push_sl_pips(t: dict) -> float:
-    """manual_sl_push_pips for this trade's template, or 0 if it isn't a
-    template trade, the template has bot commands off (tg_cmd_enabled), or
-    no push amount is configured -- any of which hides the Push SL button
-    rather than showing one that would just refuse when tapped."""
-    strategy = t.get("strategy") or ""
-    if not ea_templates.is_template_override(strategy):
-        return 0.0
-    tpl = ea_templates.get_ea_template(ea_templates.template_name_from_override(strategy))
-    if not tpl or not tpl.get("tg_cmd_enabled"):
-        return 0.0
-    return float(tpl.get("manual_sl_push_pips") or 0)
 
 
 def trade_list_screen(slug: str) -> Screen:
@@ -797,276 +439,6 @@ def _pause_custom_reply(raw: str) -> Screen:
 # next to the backtest numbers on the Trading page. The screens below say
 # when a window carries one so it is never a silent surprise.
 
-_DAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-_SCHED_FIELDS = {
-    "start":  {"label": "Start time", "hint": "24h time, e.g. 08:30"},
-    "end":    {"label": "End time",   "hint": "24h time, e.g. 17:00"},
-    "target": {"label": "Profit target ($)", "hint": "0 turns the target off"},
-    "daily":  {"label": "Daily profit target ($)", "hint": "0 turns the target off"},
-}
-
-
-def _dot(flag) -> str:
-    return "\U0001f7e2" if flag else "\U0001f534"
-
-
-def _money(value) -> str:
-    return f"${float(value or 0):g}"
-
-
-def _sched_blocks(day: int) -> Optional[list]:
-    if day < 0 or day >= len(schedule_mod.DAY_NAMES):
-        return None
-    return schedule_mod.get_trading_schedule().get(schedule_mod.DAY_NAMES[day])
-
-
-def _sched_block(day: int, idx: int) -> tuple[Optional[dict], Optional[dict]]:
-    """(whole schedule, one window) -- both, because every write has to save
-    the entire schedule back, not just the window that changed."""
-    if day < 0 or day >= len(schedule_mod.DAY_NAMES):
-        return None, None
-    full = schedule_mod.get_trading_schedule()
-    blocks = full.get(schedule_mod.DAY_NAMES[day]) or []
-    if idx < 0 or idx >= len(blocks):
-        return None, None
-    return full, blocks[idx]
-
-
-def _save_block(full: dict, day: int, idx: int, changes: dict) -> None:
-    full[schedule_mod.DAY_NAMES[day]][idx].update(changes)
-    schedule_mod.set_trading_schedule(full)
-
-
-def schedule_screen() -> Screen:
-    enabled = schedule_mod.is_trading_schedule_enabled()
-    daily = schedule_mod.get_daily_profit_target()
-    today = datetime.now().weekday()
-
-    rows = [
-        [_btn(f"{_dot(enabled)} Schedule: {'ON' if enabled else 'OFF'}", "sch2", "en")],
-        [_btn(f"\U0001f3af Daily target: {_money(daily) if daily > 0 else 'OFF'}",
-              "schx", 0, 0, "daily")],
-    ]
-    pair = []
-    for day in range(len(schedule_mod.DAY_NAMES)):
-        blocks = _sched_blocks(day) or []
-        live = sum(1 for b in blocks if b.get("enabled"))
-        mark = "▶ " if day == today else ""
-        pair.append(_btn(f"{mark}{_DAY_ABBR[day]} ({live}/{len(blocks)})", "schd", day))
-        if len(pair) == 3:
-            rows.append(pair)
-            pair = []
-    if pair:
-        rows.append(pair)
-    rows.append([_btn("← Back to Main Menu", "root")])
-
-    if enabled:
-        allowed, reason = schedule_mod.check_trading_schedule()
-        state = "Trading window open" if allowed else f"Blocked — {reason}"
-    else:
-        state = "Off — automated entries are never gated by time."
-    text = (f"\U0001f5d3️ *Trading Schedule*\n\n{state}\n\n"
-            f"_Gates automated entries only. Manual orders placed from this "
-            f"panel are never blocked. Each day has "
-            f"{schedule_mod.BLOCKS_PER_DAY} windows._")
-    return Screen(text, rows)
-
-
-def schedule_day_screen(day: int) -> Screen:
-    blocks = _sched_blocks(day)
-    if blocks is None:
-        return Screen(toast="Unknown day.", mode="noop")
-    rows = []
-    for i, b in enumerate(blocks):
-        target = float(b.get("target") or 0)
-        label = (f"{_dot(b.get('enabled'))} W{i + 1}  {b.get('start')}–{b.get('end')}"
-                 f"{f'  {_money(target)}' if target > 0 else ''}")
-        rows.append([_btn(label, "schw", day, i)])
-    rows.append([_btn("← Back", "sch")])
-    return Screen(f"\U0001f5d3️ *{schedule_mod.DAY_NAMES[day].title()}*\n\n"
-                  f"Pick a window to edit its hours, profit target and which "
-                  f"sources may trade in it.", rows)
-
-
-def schedule_window_screen(day: int, idx: int) -> Screen:
-    _full, block = _sched_block(day, idx)
-    if block is None:
-        return Screen(toast="Unknown window.", mode="noop")
-    target = float(block.get("target") or 0)
-    rows = [
-        [_btn(f"{_dot(block.get('enabled'))} Window: "
-              f"{'ON' if block.get('enabled') else 'OFF'}", "scht", day, idx, "enabled")],
-        [_btn(f"\U0001f552 Start: {block.get('start')}", "schx", day, idx, "start"),
-         _btn(f"\U0001f556 End: {block.get('end')}", "schx", day, idx, "end")],
-        [_btn(f"\U0001f3af Target: {_money(target) if target > 0 else 'OFF'}",
-              "schx", day, idx, "target")],
-        [_btn("\U0001f4e2 Telegram channels", "schc", day, idx)],
-    ]
-    for key in schedule_mod.ENGINE_SOURCE_KEYS:
-        label = key.replace("_", " ").title()
-        rows.append([_btn(f"{_dot(block.get(key, True))} {label}", "scht", day, idx, key)])
-    rows.append([_btn("← Back", "schd", day)])
-
-    overrides = [f"{k.replace('_', ' ').title()} → {block.get(f'{k}_override')}"
-                 for k in schedule_mod.ENGINE_SOURCE_KEYS if block.get(f"{k}_override")]
-    note = ("\n\n_Strategy overrides on this window: "
-            + "; ".join(overrides) + ". Change those on the Trading page._"
-            if overrides else "")
-    return Screen(f"\U0001f5d3️ *{schedule_mod.DAY_NAMES[day].title()} — "
-                  f"Window {idx + 1}*\n"
-                  f"{block.get('start')}–{block.get('end')}{note}", rows)
-
-
-def _window_channel_enabled(block: dict, name: str) -> bool:
-    cfg = (block.get("telegram_channels") or {}).get(name)
-    if cfg is not None:
-        return bool(cfg.get("enabled", True))
-    return bool(block.get("telegram_default_enabled", True))
-
-
-def _telegram_channel_names() -> list[str]:
-    from backend.src.services.channels.repo import get_telegram_channel_names
-    return get_telegram_channel_names()
-
-
-def schedule_channels_screen(day: int, idx: int) -> Screen:
-    _full, block = _sched_block(day, idx)
-    if block is None:
-        return Screen(toast="Unknown window.", mode="noop")
-    names = _telegram_channel_names()
-    rows = []
-    for name in names:
-        on = _window_channel_enabled(block, name)
-        rows.append([_btn(f"{_dot(on)} {_short(name, 24)}", "schtc", day, idx, _slug(name))])
-    default_on = bool(block.get("telegram_default_enabled", True))
-    rows.append([_btn(f"{_dot(default_on)} Default (unlisted channels): "
-                      f"{'ON' if default_on else 'OFF'}", "scht", day, idx, "tgdef")])
-    rows.append([_btn("← Back", "schw", day, idx)])
-    body = ("Which channels may trade in this window."
-            if names else "No Telegram channels are configured yet.")
-    return Screen(f"\U0001f4e2 *{schedule_mod.DAY_NAMES[day].title()} — "
-                  f"Window {idx + 1}*\n{block.get('start')}–{block.get('end')}\n\n{body}", rows)
-
-
-def _toggle_schedule_enabled() -> Screen:
-    enabled = not schedule_mod.is_trading_schedule_enabled()
-    schedule_mod.set_trading_schedule_enabled(enabled)
-    screen = schedule_screen()
-    screen.toast = f"Trading Schedule {'ON' if enabled else 'OFF'}"
-    return screen
-
-
-def _toggle_window_flag(day: int, idx: int, key: str) -> Screen:
-    """`key` is 'enabled', 'tgdef' (the window's telegram_default_enabled) or
-    an ENGINE_SOURCE_KEYS member."""
-    full, block = _sched_block(day, idx)
-    if block is None:
-        return Screen(toast="Unknown window.", mode="noop")
-    field = "telegram_default_enabled" if key == "tgdef" else key
-    if field not in ("enabled", "telegram_default_enabled") \
-            and field not in schedule_mod.ENGINE_SOURCE_KEYS:
-        return Screen(toast="Unknown setting.", mode="noop")
-    # Only `enabled` defaults off -- every source toggle defaults on, same as
-    # _default_block, so a window missing the key isn't read as blocking.
-    value = not bool(block.get(field, field != "enabled"))
-    _save_block(full, day, idx, {field: value})
-    screen = (schedule_channels_screen(day, idx) if key == "tgdef"
-              else schedule_window_screen(day, idx))
-    screen.toast = f"{field.replace('_', ' ')} = {'ON' if value else 'OFF'}"
-    return screen
-
-
-def _toggle_window_channel(day: int, idx: int, slug: str) -> Screen:
-    full, block = _sched_block(day, idx)
-    if block is None:
-        return Screen(toast="Unknown window.", mode="noop")
-    name = next((n for n in _telegram_channel_names() if _slug(n) == slug), None)
-    if name is None:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    channels = dict(block.get("telegram_channels") or {})
-    cfg = dict(channels.get(name) or {})
-    value = not _window_channel_enabled(block, name)
-    cfg["enabled"] = value
-    # Preserve any strategy override this window already carries for the
-    # channel -- it is not editable here, so a toggle must not clear it.
-    cfg.setdefault("strategy_override", "")
-    channels[name] = cfg
-    _save_block(full, day, idx, {"telegram_channels": channels})
-    screen = schedule_channels_screen(day, idx)
-    screen.toast = f"{name}: {'ON' if value else 'OFF'}"[:190]
-    return screen
-
-
-def schedule_prompt_text(day: int, idx: int, field: str) -> str:
-    meta = _SCHED_FIELDS.get(field) or {"label": field, "hint": ""}
-    if field == "daily":
-        where = "the whole day (every window combined)"
-        token = "sch.daily"
-    else:
-        where = (f"{schedule_mod.DAY_NAMES[day].title()} window {idx + 1}")
-        token = f"sch.{day}.{idx}"
-    return (f"Send the new {meta['label']} for {where}.\n"
-            f"{meta['hint']}\n[{field}@{token}]")
-
-
-_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-
-
-def _schedule_value_reply(field: str, token: str, raw: str) -> Screen:
-    """A typed reply to one of the schedule's 'set exact value' prompts."""
-    if field == "daily":
-        try:
-            value = max(0.0, float(raw.lstrip("$")))
-        except ValueError:
-            return Screen(f"`{raw}` is not a number.", mode="send")
-        schedule_mod.set_daily_profit_target(value)
-        return Screen(f"✅ Daily profit target set to "
-                      f"{_money(value) if value > 0 else 'OFF'}.", mode="send")
-
-    parts = token.split(".")
-    if len(parts) != 3:
-        return Screen(mode="noop")
-    try:
-        day, idx = int(parts[1]), int(parts[2])
-    except ValueError:
-        return Screen(mode="noop")
-    full, block = _sched_block(day, idx)
-    if block is None:
-        return Screen("That window no longer exists.", mode="send")
-
-    if field in ("start", "end"):
-        match = _TIME_RE.match(raw.strip())
-        if not match:
-            return Screen(f"`{raw}` is not a 24-hour time. Use HH:MM, e.g. 08:30.",
-                          mode="send")
-        value = f"{int(match.group(1)):02d}:{match.group(2)}"
-        other = block.get("end" if field == "start" else "start")
-        start, end = (value, other) if field == "start" else (other, value)
-        # An end at or before its start matches no minute of the day, so the
-        # window would silently never open -- refuse rather than save a
-        # window that looks configured and does nothing.
-        try:
-            if schedule_mod._parse_hm(start) >= schedule_mod._parse_hm(end):
-                return Screen(f"Start ({start}) must be before end ({end}).", mode="send")
-        except Exception:
-            pass
-    elif field == "target":
-        try:
-            value = max(0.0, float(raw.lstrip("$")))
-        except ValueError:
-            return Screen(f"`{raw}` is not a number.", mode="send")
-    else:
-        return Screen(mode="noop")
-
-    _save_block(full, day, idx, {field: value})
-    label = _SCHED_FIELDS[field]["label"]
-    shown = _money(value) if field == "target" else value
-    if field == "target" and not float(value):
-        shown = "OFF"
-    return Screen(f"✅ {label} for {schedule_mod.DAY_NAMES[day].title()} "
-                  f"window {idx + 1} set to `{shown}`.", mode="send")
-
-
 # ── force_reply prompt tokens ─────────────────────────────────────────────────
 
 # [field@target]. `target` is either a channel's 8-hex slug or one of the
@@ -1229,76 +601,6 @@ async def _dispatch(action: str, args: list, ctx: Any) -> Screen:
 
 # ── Setting mutations ─────────────────────────────────────────────────────────
 
-def _adjust_field(slug: str, field: str, direction: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    m = _meta(field)
-    step = m.get("step", 1)
-    current = float(_read_value(chan, field) or 0)
-    value = _clamp(field, _coerce(field, current + (step if direction == "u" else -step)))
-    try:
-        _write_value(chan, field, value)
-    except Exception as e:
-        return Screen(toast=f"Error: {e}"[:190], mode="noop")
-    screen = field_screen(slug, field)
-    screen.toast = f"{m['label']} = {_fmt_value(field, value)}"
-    return screen
-
-
-async def _toggle_field(slug: str, field: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    value = not bool(_read_value(chan, field))
-    try:
-        _write_value(chan, field, value)
-    except Exception as e:
-        return Screen(toast=f"Error: {e}"[:190], mode="noop")
-    screen = await _parent_screen(slug, field)
-    screen.toast = f"{_meta(field)['label']} = {'ON' if value else 'OFF'}"
-    return screen
-
-
-def _set_choice(slug: str, field: str, value: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    if value not in _choices(field):
-        return Screen(toast="Unknown option.", mode="noop")
-    try:
-        _write_value(chan, field, value)
-    except Exception as e:
-        return Screen(toast=f"Error: {e}"[:190], mode="noop")
-    screen = channel_settings_screen(slug)
-    screen.toast = f"{_meta(field)['label']} = {value.upper()}"
-    return screen
-
-
-def _set_strategy(slug: str, key: str) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    if key.startswith("t:"):
-        strategy = ea_templates.override_for_template(key[2:])
-    elif key == "-":
-        strategy = None
-    else:
-        strategy = key
-    if chan["name"] == MANUAL:
-        # Manual has no channel_performance override -- its strategy IS the
-        # app's global Active Strategy, so set that instead of writing a
-        # per-channel row the rest of the app would never read.
-        if strategy is None:
-            return Screen(toast="Manual always uses the global strategy.", mode="noop")
-        db_module.update_risk_settings({"trade_strategy": strategy})
-    else:
-        db_module.set_channel_strategy_override(chan["name"], strategy, auto=False)
-    screen = channel_settings_screen(slug)
-    screen.toast = f"Strategy = {_strategy_label(strategy)}"[:190]
-    return screen
-
-
 def _toggle_pause(slug: str) -> Screen:
     chan = _channel(slug)
     if not chan:
@@ -1317,109 +619,6 @@ def _toggle_pause(slug: str) -> Screen:
 # Lives here rather than in remote/server.py because this module is the one
 # place that owns Telegram Screen/keyboard construction; server.py just holds
 # the pending-registration/approval state these handlers read and mutate.
-
-_REG_DURATION_LABELS = {"6m": "6 Months", "1y": "1 Year", "2y": "2 Years",
-                        "3y": "3 Years", "perp": "Perpetual"}
-
-
-def _resolve_pending_token(short: str):
-    """Pending registrations are addressed by their token's own first 8 hex
-    chars in callback_data (a full token is 64 hex chars — far too long for
-    Telegram's 64-byte cap). Resolve back to the real token here."""
-    from backend.src.services.cluster.remote import server as _remote_server
-    for tok in _remote_server._pending:
-        if tok.startswith(short):
-            return tok
-    return None
-
-
-def _record_licence_issued(token: str) -> None:
-    """Mirror forex_admin.py's own post-approval step so a Telegram approval
-    shows up in the admin console's Licence Manager the same way a WS-console
-    approval does. No-ops cleanly if KeyGen's DB callbacks aren't registered
-    (e.g. this instance isn't the one running the admin console)."""
-    from backend.src.services.cluster.remote import server as _remote_server
-    if not _remote_server._kg_insert_fn:
-        return
-    tok_meta   = _remote_server._allowed_tokens.get(token, {})
-    lic_key    = tok_meta.get("licence_key", "")
-    machine_id = tok_meta.get("machine_id", "")
-    if not (lic_key and machine_id):
-        return
-    try:
-        already = False
-        if _remote_server._kg_get_all_fn:
-            already = any(r.get("licence_key") == lic_key
-                          for r in _remote_server._kg_get_all_fn())
-        if already:
-            return
-        plat = tok_meta.get("platform", "")
-        os_str = ("macOS" if plat == "darwin" else
-                  "Windows" if "win" in plat.lower() else plat or "Unknown")
-        _remote_server._kg_insert_fn({
-            "email":           tok_meta.get("email", ""),
-            "registration_id": machine_id,
-            "sha256":          "",
-            "machine_model":   os_str,
-            "hostname":        tok_meta.get("hostname", ""),
-            "macos_version":   os_str,
-            "licence_key":     lic_key,
-            "expiry_date":     tok_meta.get("expiry_date", ""),
-            "licence_type":    tok_meta.get("subscription_type", ""),
-            "notes":           "Auto-issued via Telegram approval",
-        })
-        import asyncio
-        asyncio.create_task(_remote_server._push_licences_to_all_admins())
-    except Exception as exc:
-        log.warning("[Panel] licence DB insert failed for %s: %s", token[:8], exc)
-
-
-def _approve_registration(short: str, duration_code: str) -> Screen:
-    import asyncio
-    from backend.src.services.cluster.remote import server as _remote_server
-
-    token = _resolve_pending_token(short)
-    if not token:
-        return Screen(toast="Request no longer pending — maybe already handled.", mode="noop")
-
-    pending      = _remote_server._pending.get(token, {})
-    sub_type     = _REG_DURATION_LABELS.get(duration_code, "Perpetual")
-    display_name = pending.get("nickname") or pending.get("hostname") or token[:8]
-
-    ok = _remote_server.approve_registration(token, display_name, sub_type)
-    if not ok:
-        return Screen(toast="Approval failed — request may have expired.", mode="noop")
-
-    _record_licence_issued(token)
-    asyncio.create_task(_remote_server._push_pending_to_all_admins())
-    asyncio.create_task(_remote_server._push_clients_to_all_admins())
-
-    tok_meta = _remote_server._allowed_tokens.get(token, {})
-    warn = "" if tok_meta.get("licence_key") else \
-        "\n⚠️ Licence key generation failed — check the signing key is registered."
-    return Screen(
-        text=f"✅ Approved — {display_name}\nSubscription: {sub_type}{warn}",
-        keyboard=[],
-        toast=f"Approved ({sub_type})",
-        mode="edit",
-    )
-
-
-def _reject_registration(short: str) -> Screen:
-    from backend.src.services.cluster.remote import server as _remote_server
-    import asyncio
-
-    token = _resolve_pending_token(short)
-    if not token:
-        return Screen(toast="Request no longer pending — maybe already handled.", mode="noop")
-
-    pending = _remote_server._pending.pop(token, None) or {}
-    _remote_server._save_pending()
-    asyncio.create_task(_remote_server._push_pending_to_all_admins())
-
-    name = pending.get("nickname") or pending.get("hostname") or token[:8]
-    return Screen(text=f"❌ Rejected — {name}", keyboard=[], toast="Rejected", mode="edit")
-
 
 def _current_settings(slug: str) -> Screen:
     chan = _channel(slug)
@@ -1490,200 +689,3 @@ async def _system_action(act: str, ctx: Any) -> Screen:
 
 # ── Trade operations ──────────────────────────────────────────────────────────
 
-async def _market_order(slug: str, direction: str, ctx: Any) -> Screen:
-    from backend.src.services.trading.manual_market_order import open_manual_market_order
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    tick = await ctx.get_tick()
-    if tick is None:
-        return Screen("No price available — is the MT5 bridge connected?", mode="send")
-
-    # A market order needs a stop. A template channel states one (sl_pips); a
-    # built-in-strategy channel does not, so fall back to the same DPM/ATR
-    # path open_manual_market_order already uses when stop_loss is None
-    # rather than inventing a distance here.
-    stop_loss = None
-    strategy = chan["strategy"]
-    if chan["template"]:
-        tpl = ea_templates.get_ea_template(chan["template"]) or {}
-        sl_pips = float(tpl.get("sl_pips") or 0)
-        if sl_pips > 0:
-            price = tick.ask if direction == "BUY" else tick.bid
-            stop_loss = price - sl_pips if direction == "BUY" else price + sl_pips
-    try:
-        result = await open_manual_market_order(
-            ctx._bridge, direction,
-            stop_loss=stop_loss,
-            strategy=strategy or None,
-            source_name=chan["name"] if chan["name"] != MANUAL else MANUAL_SOURCE,
-            starting_balance=ctx._cfg.get("starting_balance", 1000.0),
-            background_open_commentary=ctx._background_open_commentary,
-        )
-    except Exception as e:
-        return Screen(f"*{direction} failed* — {e}", mode="send")
-    entry = float(result.get("entry_price") or 0)
-    return Screen(
-        f"*{direction} placed* — {chan['name']}\n"
-        f"Entry: {entry:.2f}  |  Lots: {result.get('lot_size', '?')}\n"
-        f"MT5 Ticket: {result.get('mt5_ticket') or 'pending'}",
-        mode="send")
-
-
-async def _delete_pending(slug: str, ctx: Any) -> Screen:
-    from backend.src.services.broker import ea_bridge as ea_mod
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    variants = [chan["name"], f"Telegram Auto ({chan['name']})"]
-    marks = ",".join("?" for _ in variants)
-    rows = panel_repo.working_pending_orders_for_sources(variants)
-    if not rows:
-        return Screen(toast="No working pending orders on this channel.", mode="noop")
-    ea = ea_mod.get_instance()
-    done, failed = 0, 0
-    for row in rows:
-        try:
-            ok = await ea.cancel_pending_order(
-                row["trade_id"], int(row.get("mt5_ticket") or 0), "panel_delete_pending")
-            done += 1 if ok else 0
-            failed += 0 if ok else 1
-        except Exception as e:
-            log.warning("[Panel] cancel pending %s failed: %s", row.get("trade_id"), e)
-            failed += 1
-    return Screen(f"*Delete pending* — {chan['name']}\n"
-                  f"Cancelled: {done}"
-                  f"{f'  |  Failed: {failed}' if failed else ''}", mode="send")
-
-
-async def _risk_free(slug: str, ctx: Any) -> Screen:
-    """Move every open position on this channel to breakeven (SL = entry)."""
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    trades = _channel_open_trades(chan)
-    if not trades:
-        return Screen(toast="No open trades on this channel.", mode="noop")
-    moved, skipped = [], 0
-    for t in trades:
-        ticket = int(t.get("mt5_ticket") or 0)
-        entry = float(t.get("entry_price") or 0)
-        if not ticket or not entry:
-            skipped += 1          # still a staged template leg, nothing at the broker yet
-            continue
-        try:
-            res = await ctx._bridge.modify_order(ticket, entry, None)
-            if res.get("error"):
-                skipped += 1
-                continue
-            panel_repo.record_stop_loss(t["trade_id"], entry)
-            moved.append(ticket)
-        except Exception as e:
-            log.warning("[Panel] risk-free %s failed: %s", ticket, e)
-            skipped += 1
-    return Screen(f"*Risk free* — {chan['name']}\n"
-                  f"SL moved to entry on {len(moved)} position(s)"
-                  f"{f', {skipped} skipped' if skipped else ''}.", mode="send")
-
-
-async def _close_channel(slug: str, ctx: Any) -> Screen:
-    chan = _channel(slug)
-    if not chan:
-        return Screen(toast="That channel no longer exists.", mode="noop")
-    trades = _channel_open_trades(chan)
-    if not trades:
-        return Screen(toast="No open trades on this channel.", mode="noop")
-    return Screen(await _close_many(trades, ctx, chan["name"]), mode="send")
-
-
-async def _close_all(ctx: Any) -> Screen:
-    from backend.src.services.analytics.reporting import get_open_trades
-    trades = get_open_trades()
-    if not trades:
-        return Screen(toast="No open trades.", mode="noop")
-    return Screen(await _close_many(trades, ctx, "all channels"), mode="send")
-
-
-async def _close_many(trades: list, ctx: Any, label: str) -> str:
-    lines = [f"*Closing {len(trades)} trade(s)* — {label}"]
-    total = 0.0
-    for t in trades:
-        try:
-            res = await ctx.close_trade(t["trade_id"], "manual_close")
-            pnl = float(res.get("net_pnl", 0))
-            total += pnl
-            lines.append(f"{t.get('direction')} {t.get('lot_size')} @ "
-                         f"{float(res.get('close_price', 0)):.2f}  "
-                         f"P&L: {'+' if pnl >= 0 else ''}{pnl:.2f}")
-        except Exception as e:
-            lines.append(f"Failed {t.get('mt5_ticket') or t['trade_id'][:8]}: {e}")
-    lines.append(f"Total P&L: {'+' if total >= 0 else ''}${total:.2f}")
-    return "\n".join(lines)
-
-
-async def _close_one(trade_prefix: str, ctx: Any) -> Screen:
-    row = panel_repo.open_trade_by_prefix(trade_prefix)
-    if not row:
-        return Screen(toast="That trade is no longer open.", mode="noop")
-    try:
-        res = await ctx.close_trade(row["trade_id"], "manual_close")
-    except Exception as e:
-        return Screen(f"Close failed: {e}", mode="send")
-    pnl = float(res.get("net_pnl", 0))
-    return Screen(f"*Closed* {row.get('direction')} {row.get('lot_size')} @ "
-                  f"{float(res.get('close_price', 0)):.2f}\n"
-                  f"P&L: {'+' if pnl >= 0 else ''}${pnl:.2f}", mode="send")
-
-
-async def _push_sl_one(trade_prefix: str, ctx: Any) -> Screen:
-    """manual_sl_push_pips / tg_cmd_enabled (2026-08-04 -- existed as
-    template fields with no bot-command infrastructure to wire into at all;
-    the old typed /commands were retired in favour of this button panel, so
-    this is that panel's version rather than a new typed command). Nudges
-    an EA Template trade's live broker SL by the template's own configured
-    pip amount, same direct-modify pattern _risk_free above already uses
-    for its own manual SL move, gated on tg_cmd_enabled per template."""
-    row = panel_repo.open_trade_by_prefix(trade_prefix)
-    if not row:
-        return Screen(toast="That trade is no longer open.", mode="noop")
-
-    push_pips = _trade_push_sl_pips(row)
-    if push_pips <= 0:
-        return Screen(toast="Push SL isn't available for this trade.", mode="noop")
-
-    ticket = int(row.get("mt5_ticket") or 0)
-    if not ticket:
-        return Screen(toast="That leg hasn't filled yet.", mode="noop")
-
-    positions = await ctx._bridge.get_positions()
-    pos = next((p for p in positions if int(p.get("ticket") or 0) == ticket), None)
-    if not pos:
-        return Screen(toast="Couldn't read this position from the broker.", mode="noop")
-
-    from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
-    direction  = row.get("direction", "BUY")
-    cur_sl     = float(pos.get("sl") or 0)
-    cur_price  = float(pos.get("current_price") or 0)
-    push_dist  = push_pips * PIPS_TO_PRICE_XAUUSD
-    new_sl     = (cur_sl + push_dist) if direction == "BUY" else (cur_sl - push_dist)
-
-    # A push that would land at or past current price is an invalid stop,
-    # not a tighter one -- refuse rather than send a request the broker
-    # would reject anyway (or, worse, one it fills as an instant close).
-    landed_past_price = (
-        (direction == "BUY" and new_sl >= cur_price) or
-        (direction == "SELL" and new_sl <= cur_price)
-    )
-    if cur_sl <= 0 or landed_past_price:
-        return Screen(toast="Push SL would land at/past current price — refused.", mode="noop")
-
-    try:
-        res = await ctx._bridge.modify_order(ticket, round(new_sl, 2), None)
-        if res.get("error"):
-            return Screen(f"Push SL failed: {res['error']}", mode="send")
-    except Exception as e:
-        return Screen(f"Push SL failed: {e}", mode="send")
-
-    panel_repo.record_stop_loss(row["trade_id"], round(new_sl, 2))
-    return Screen(f"*SL pushed* {row.get('direction')} {row.get('lot_size')} — "
-                  f"new SL ${new_sl:.2f} (+{push_pips:.1f} pips)", mode="send")

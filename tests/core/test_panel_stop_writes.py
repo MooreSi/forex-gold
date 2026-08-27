@@ -24,6 +24,10 @@ import uuid
 import pytest
 
 from backend.src.services.positions import core_bot_panel as panel
+# _push_sl_one lives in _panel_trade_ops and binds _trade_push_sl_pips at
+# import, so a patch has to land there -- patching the name re-exported from
+# core_bot_panel does not reach the module that calls it.
+from backend.src.services.positions import _panel_trade_ops
 
 
 def _bridge(*, modify=None, positions=(), raises=False):
@@ -141,7 +145,7 @@ def test_push_sl_refuses_a_stop_at_or_past_current_price(fresh_db, monkeypatch):
     instant close."""
     with fresh_db.db() as conn:
         tid = _trade(conn, ticket=111, entry=2400.0, sl=2404.0)
-    monkeypatch.setattr(panel, "_trade_push_sl_pips", lambda t: 50.0)
+    monkeypatch.setattr(_panel_trade_ops, "_trade_push_sl_pips", lambda t: 50.0)
 
     bridge = _bridge(modify={}, positions=[_pos(sl=2404.0, price=2405.0)])
     screen = asyncio.run(panel._push_sl_one(tid[:8], _ctx(bridge)))
@@ -154,7 +158,7 @@ def test_push_sl_refuses_a_stop_at_or_past_current_price(fresh_db, monkeypatch):
 def test_push_sl_does_not_record_a_stop_the_broker_refused(fresh_db, monkeypatch):
     with fresh_db.db() as conn:
         tid = _trade(conn, ticket=111, entry=2400.0, sl=2390.0)
-    monkeypatch.setattr(panel, "_trade_push_sl_pips", lambda t: 1.0)
+    monkeypatch.setattr(_panel_trade_ops, "_trade_push_sl_pips", lambda t: 1.0)
 
     bridge = _bridge(modify={"error": "invalid stops"}, positions=[_pos()])
     asyncio.run(panel._push_sl_one(tid[:8], _ctx(bridge)))
@@ -165,7 +169,7 @@ def test_push_sl_does_not_record_a_stop_the_broker_refused(fresh_db, monkeypatch
 def test_push_sl_records_the_stop_the_broker_accepted(fresh_db, monkeypatch):
     with fresh_db.db() as conn:
         tid = _trade(conn, ticket=111, entry=2400.0, sl=2390.0)
-    monkeypatch.setattr(panel, "_trade_push_sl_pips", lambda t: 1.0)
+    monkeypatch.setattr(_panel_trade_ops, "_trade_push_sl_pips", lambda t: 1.0)
 
     bridge = _bridge(modify={}, positions=[_pos()])
     asyncio.run(panel._push_sl_one(tid[:8], _ctx(bridge)))
@@ -179,7 +183,7 @@ def test_push_sl_records_the_stop_the_broker_accepted(fresh_db, monkeypatch):
 def test_push_sl_is_unavailable_without_a_configured_push(fresh_db, monkeypatch):
     with fresh_db.db() as conn:
         tid = _trade(conn, ticket=111)
-    monkeypatch.setattr(panel, "_trade_push_sl_pips", lambda t: 0.0)
+    monkeypatch.setattr(_panel_trade_ops, "_trade_push_sl_pips", lambda t: 0.0)
 
     screen = asyncio.run(panel._push_sl_one(tid[:8], _ctx(_bridge())))
     assert screen.mode == "noop"

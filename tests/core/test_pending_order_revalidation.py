@@ -33,6 +33,12 @@ def fresh_db():
     db.init(path)
     yield db
     _reset_thread_local_connection()
+    # The code under test reaches the database through
+    # db_module.to_db_thread(broker_repo.fetch_working_pending_orders), which
+    # caches a connection on the DB WORKER thread -- a different thread-local
+    # from the caller's. Resetting only the caller's left that one open, which
+    # is the single surviving handle the Windows probe reported.
+    db._db_executor.submit(_reset_thread_local_connection).result()
     remove_db_file(path)
 
 

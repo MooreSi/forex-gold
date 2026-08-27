@@ -377,7 +377,10 @@ def _run_re_limit_order(monkeypatch):
         result = asyncio.run(_LiveExecuteMixin()._try_re_limit_order(
             {"id": 1, "signal_ref": "RE-1"}, "vsig-1", None))
     finally:
-        os.remove(re_path)
+        # The engine's own database, opened under the reversal_engine
+        # namespace. remove_db_file closes every namespace first; a bare
+        # os.remove leaves that adapter holding the file on Windows.
+        remove_db_file(re_path)
     return result, fake
 
 

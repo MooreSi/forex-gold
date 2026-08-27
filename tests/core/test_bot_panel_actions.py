@@ -250,3 +250,223 @@ def test_one_failure_does_not_stop_the_rest_or_corrupt_the_total(fresh_db):
 
     assert "Failed 1: nope" in text, "the failure must be reported, by ticket"
     assert "Total P&L: +$5.50" in text, "and must not be counted in the total"
+
+
+# ── Registration approval ─────────────────────────────────────────────────────
+#
+# The Telegram approval path for a remote client's licence request. Entirely
+# uncovered before this. It reaches into remote.server's module state, so the
+# tests replace that state rather than a fake object -- and every handler fires
+# asyncio.create_task, so they have to run inside a loop.
+
+
+@pytest.fixture
+def remote(monkeypatch):
+    """remote.server's registration state, replaced wholesale."""
+    from backend.src.services.cluster.remote import server as rs
+
+    approved = []
+
+    def approve_registration(token, display_name, sub_type):
+        approved.append((token, display_name, sub_type))
+        return True
+
+    async def _noop_push():
+        return None
+
+    monkeypatch.setattr(rs, "_pending", {}, raising=False)
+    monkeypatch.setattr(rs, "_allowed_tokens", {}, raising=False)
+    monkeypatch.setattr(rs, "_kg_insert_fn", None, raising=False)
+    monkeypatch.setattr(rs, "_kg_get_all_fn", None, raising=False)
+    monkeypatch.setattr(rs, "approve_registration", approve_registration, raising=False)
+    monkeypatch.setattr(rs, "_save_pending", lambda: None, raising=False)
+    monkeypatch.setattr(rs, "_push_pending_to_all_admins", _noop_push, raising=False)
+    monkeypatch.setattr(rs, "_push_clients_to_all_admins", _noop_push, raising=False)
+    monkeypatch.setattr(rs, "_push_licences_to_all_admins", _noop_push, raising=False)
+    rs.approved = approved
+    return rs
+
+
+def _in_loop(fn, *args):
+    """These handlers are sync but call asyncio.create_task, so they need a
+    running loop underneath them."""
+    async def _run():
+        out = fn(*args)
+        await asyncio.sleep(0)      # let the fire-and-forget pushes run
+        return out
+    return asyncio.run(_run())
+
+
+TOKEN = "abcd1234" + "0" * 56          # a real token is 64 hex chars
+
+
+def test_approving_a_request_that_is_gone_is_a_toast(fresh_db, remote):
+    """The keyboard may be stale -- the request could have been handled from
+    the admin console since it was drawn."""
+    screen = _in_loop(panel._approve_registration, "deadbeef", "1y")
+
+    assert screen.mode == "noop"
+    assert "no longer pending" in (screen.toast or "")
+    assert remote.approved == []
+
+
+def test_a_request_is_addressed_by_the_first_eight_characters(fresh_db, remote):
+    """callback_data cannot carry a 64-hex-char token -- Telegram's cap is 64
+    BYTES for the whole payload -- so the short form has to resolve back."""
+    remote._pending[TOKEN] = {"nickname": "Simon's VPS"}
+
+    screen = _in_loop(panel._approve_registration, "abcd1234", "1y")
+
+    assert remote.approved == [(TOKEN, "Simon's VPS", "1 Year")]
+    assert screen.mode == "edit"
+    assert "Simon's VPS" in screen.text
+
+
+@pytest.mark.parametrize("code,label", [
+    ("6m", "6 Months"), ("1y", "1 Year"), ("2y", "2 Years"),
+    ("3y", "3 Years"), ("perp", "Perpetual"),
+])
+def test_each_duration_button_approves_for_that_term(fresh_db, remote, code, label):
+    """Approving for the wrong term is a licence that expires at the wrong
+    time, which nobody notices until it does."""
+    remote._pending[TOKEN] = {"hostname": "vps-1"}
+
+    _in_loop(panel._approve_registration, "abcd1234", code)
+
+    assert remote.approved[0][2] == label
+
+
+def test_an_unknown_duration_falls_back_to_perpetual(fresh_db, remote):
+    remote._pending[TOKEN] = {"hostname": "vps-1"}
+    _in_loop(panel._approve_registration, "abcd1234", "nonsense")
+    assert remote.approved[0][2] == "Perpetual"
+
+
+def test_the_display_name_prefers_nickname_then_hostname_then_the_token(fresh_db, remote):
+    remote._pending[TOKEN] = {"nickname": "Nick", "hostname": "Host"}
+    assert remote.approved == [] or True
+    _in_loop(panel._approve_registration, "abcd1234", "1y")
+    assert remote.approved[-1][1] == "Nick"
+
+    remote._pending[TOKEN] = {"hostname": "Host"}
+    _in_loop(panel._approve_registration, "abcd1234", "1y")
+    assert remote.approved[-1][1] == "Host"
+
+    remote._pending[TOKEN] = {}
+    _in_loop(panel._approve_registration, "abcd1234", "1y")
+    assert remote.approved[-1][1] == TOKEN[:8]
+
+
+def test_a_failed_approval_says_so(fresh_db, remote, monkeypatch):
+    from backend.src.services.cluster.remote import server as rs
+    monkeypatch.setattr(rs, "approve_registration", lambda *a: False, raising=False)
+    remote._pending[TOKEN] = {"hostname": "vps-1"}
+
+    screen = _in_loop(panel._approve_registration, "abcd1234", "1y")
+
+    assert screen.mode == "noop"
+    assert "Approval failed" in (screen.toast or "")
+
+
+def test_an_approval_with_no_licence_key_warns_on_screen(fresh_db, remote):
+    """Silent success here means a client that thinks it is licensed and is
+    not. The warning is the only sign the signing key is unregistered."""
+    remote._pending[TOKEN] = {"hostname": "vps-1"}
+    # _allowed_tokens left empty -> no licence_key was generated
+
+    screen = _in_loop(panel._approve_registration, "abcd1234", "1y")
+
+    assert "Licence key generation failed" in screen.text
+
+
+def test_a_successful_approval_does_not_warn(fresh_db, remote):
+    remote._pending[TOKEN] = {"hostname": "vps-1"}
+    remote._allowed_tokens[TOKEN] = {"licence_key": "KEY-123", "machine_id": "M1"}
+
+    screen = _in_loop(panel._approve_registration, "abcd1234", "1y")
+
+    assert "Licence key generation failed" not in screen.text
+    assert "✅ Approved" in screen.text
+
+
+def test_rejecting_removes_the_request(fresh_db, remote):
+    remote._pending[TOKEN] = {"nickname": "Spam VPS"}
+
+    screen = _in_loop(panel._reject_registration, "abcd1234")
+
+    assert TOKEN not in remote._pending, "a rejected request must not linger"
+    assert screen.mode == "edit"
+    assert "Spam VPS" in screen.text
+
+
+def test_rejecting_something_already_gone_is_a_toast(fresh_db, remote):
+    screen = _in_loop(panel._reject_registration, "deadbeef")
+    assert screen.mode == "noop"
+    assert "no longer pending" in (screen.toast or "")
+
+
+# ── Mirroring the approval into the admin console ─────────────────────────────
+
+def test_nothing_is_recorded_when_this_instance_has_no_licence_db(fresh_db, remote):
+    """Only the instance running the admin console has the KeyGen callbacks
+    registered; everywhere else this must no-op rather than raise."""
+    remote._allowed_tokens[TOKEN] = {"licence_key": "K", "machine_id": "M"}
+    _in_loop(panel._record_licence_issued, TOKEN)      # _kg_insert_fn is None
+
+
+def test_an_approval_without_a_key_or_machine_id_is_not_recorded(fresh_db, remote, monkeypatch):
+    from backend.src.services.cluster.remote import server as rs
+    inserted = []
+    monkeypatch.setattr(rs, "_kg_insert_fn", inserted.append, raising=False)
+    remote._allowed_tokens[TOKEN] = {"licence_key": "", "machine_id": "M"}
+
+    _in_loop(panel._record_licence_issued, TOKEN)
+
+    assert inserted == [], "a half-formed licence must not reach the console"
+
+
+def test_the_licence_row_carries_the_approval_details(fresh_db, remote, monkeypatch):
+    from backend.src.services.cluster.remote import server as rs
+    inserted = []
+    monkeypatch.setattr(rs, "_kg_insert_fn", inserted.append, raising=False)
+    remote._allowed_tokens[TOKEN] = {
+        "licence_key": "KEY-123", "machine_id": "M1", "email": "s@example.com",
+        "hostname": "vps-1", "platform": "darwin", "expiry_date": "2027-01-01",
+        "subscription_type": "1 Year",
+    }
+
+    _in_loop(panel._record_licence_issued, TOKEN)
+
+    assert len(inserted) == 1
+    row = inserted[0]
+    assert row["licence_key"] == "KEY-123"
+    assert row["registration_id"] == "M1"
+    assert row["macos_version"] == "macOS", "darwin should read as macOS"
+    assert row["notes"] == "Auto-issued via Telegram approval"
+
+
+def test_a_windows_client_is_labelled_windows(fresh_db, remote, monkeypatch):
+    from backend.src.services.cluster.remote import server as rs
+    inserted = []
+    monkeypatch.setattr(rs, "_kg_insert_fn", inserted.append, raising=False)
+    remote._allowed_tokens[TOKEN] = {
+        "licence_key": "K", "machine_id": "M", "platform": "win32"}
+
+    _in_loop(panel._record_licence_issued, TOKEN)
+    assert inserted[0]["macos_version"] == "Windows"
+
+
+def test_an_already_issued_licence_is_not_recorded_twice(fresh_db, remote, monkeypatch):
+    """A second approval of the same key would show up twice in the Licence
+    Manager."""
+    from backend.src.services.cluster.remote import server as rs
+    inserted = []
+    monkeypatch.setattr(rs, "_kg_insert_fn", inserted.append, raising=False)
+    monkeypatch.setattr(rs, "_kg_get_all_fn",
+                        lambda: [{"licence_key": "KEY-123"}], raising=False)
+    remote._allowed_tokens[TOKEN] = {"licence_key": "KEY-123", "machine_id": "M1"}
+
+    _in_loop(panel._record_licence_issued, TOKEN)
+
+    assert inserted == []
+

@@ -760,15 +760,12 @@ def _render_main() -> None:
                                             with ui.element("td").classes("px-1 py-0.5 text-gray-600 font-mono"):
                                                 ui.label(dflt_str)
 
-                    with ui.row().classes("gap-2 mt-2"):
-                        def _reset_params():
-                            ap.reset_to_defaults()
-                            asyncio.create_task(_render_ap())
-                            ui.notify("Parameters reset to defaults", type="info")
-
-                        ui.button("Reset to Defaults", on_click=_reset_params).classes(
-                            "bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-2 py-1"
-                        )
+                    # A "Reset to Defaults" button sat here until 2026-08-27.
+                    # Removed, not repaired, on the owner's instruction: it had
+                    # never worked (NameError on every click), and making it work
+                    # would put an unconfirmed wipe of all ~50 learned Bounce
+                    # values -- no undo -- on an engine that places real orders.
+                    # Full reasoning: docs/todo/bugs/010.
 
                     # Recent parameter change log
                     if param_changes:

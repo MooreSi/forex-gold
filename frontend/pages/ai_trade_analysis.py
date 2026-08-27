@@ -417,7 +417,7 @@ async def run_signal_generator_analysis(
         return {"error": "AI provider not configured."}
     try:
         prompt = _build_signal_generator_prompt(data)
-        raw = await ai_provider.complete(cfg, _SIGNAL_GEN_SYSTEM, prompt, max_tokens=2048, timeout=timeout)
+        raw = await ai_provider.complete(cfg, ai_ctl.signal_generator_system_prompt(), prompt, max_tokens=2048, timeout=timeout)
         if raw.startswith("```"):
             parts = raw.split("```")
             raw = parts[1] if len(parts) > 1 else raw

@@ -7,7 +7,8 @@ from backend.src.services.analytics import ai_analysis as _analysis
 from backend.src.services.risk import app_config as _config
 
 __all__ = ["gather_channel_data", "gather_strategy_dpm_data",
-           "gather_signal_generator_data", "get_app_config", "set_app_config"]
+           "gather_signal_generator_data", "signal_generator_system_prompt",
+           "get_app_config", "set_app_config"]
 
 
 def gather_channel_data(db_path: str, days: int) -> list[dict]:
@@ -20,6 +21,10 @@ def gather_strategy_dpm_data(db_path: str, days: int) -> dict:
 
 def gather_signal_generator_data(db_path: str, days: int) -> dict:
     return _analysis.signal_generator_data(db_path, days)
+
+
+def signal_generator_system_prompt() -> str:
+    return _analysis.signal_generator_system_prompt()
 
 
 def get_app_config(key: str) -> Optional[str]:

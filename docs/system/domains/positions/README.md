@@ -41,6 +41,9 @@ shaped around "no behaviour change".
 
 ## Known things & gotchas
 
+- **A settings key that does not exist reads as None and fails silently.** `core_bot_panel` read `rs.get("ime_enabled")` in two places; the column is `immediate_market_entry`. `on = not bool(None)` is always True, so the Telegram panel could switch Immediate Market Entry ON and never OFF, and the System menu always displayed OFF. Found 2026-08-26, fixed 2026-08-27, pinned by `tests/core/test_bot_panel_actions.py`. This codebase has hit "IME cannot be turned off" before from a different cause (a backfill re-running every boot, see `tests/conftest.py`) -- when a control seems stuck on, suspect the read before the write.
+
+
 - `reconcile_sl_hit` does not trust a local SL crossing: it checks MT5's live position volume first and returns `"deferred"` / `"partial"` / `"closed"` accordingly.
 - Close detection requires a **miss streak**: a ticket must be absent from MT5 for `miss_threshold` (default 2) consecutive cycles before the trade is believed closed.
 - The monitor loop's sleep is adaptive (1s vs 5s) driven by `has_open_trades` / `has_pending_signals`, which deliberately keep their previous value when a tick comes back empty.

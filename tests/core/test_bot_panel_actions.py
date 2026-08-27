@@ -91,39 +91,14 @@ def test_the_dpm_button_toggles_against_the_current_setting(fresh_db):
     assert [c[0] for c in ctx.calls] == ["dpm_off"]
 
 
-def test_the_ime_button_reads_a_key_that_does_not_exist(fresh_db):
-    """BUG, pinned as it stands. See docs/todo/bugs/012.
+def test_the_ime_button_toggles_against_the_current_setting(fresh_db):
+    """Was docs/todo/bugs/012: the panel read rs["ime_enabled"], which is not a
+    column, so `on = not bool(None)` was always True and Immediate Market Entry
+    could be switched on from Telegram but never off. The key is
+    immediate_market_entry, which is what every other call site uses.
 
-    The panel reads `rs.get("ime_enabled")`. There is no such key: the column
-    is `immediate_market_entry`, which is what every other call site uses
-    (scan_messages.py:224 among them). `.get()` returns None, so the toggle
-    computes `on = not False` every single time.
-
-    The button therefore turns Immediate Market Entry ON and can never turn it
-    OFF, and the System menu's status line always reads OFF regardless.
-
-    This test documents the broken behaviour rather than the intended one,
-    because fixing it changes when orders are placed at market and that needs
-    the owner's sign-off. The test below it is the one that flips when it is
-    fixed.
+    Both directions asserted, because only one of them was ever broken.
     """
-    db.update_risk_settings({"immediate_market_entry": 1})   # IME genuinely ON
-    ctx = _ctx()
-    asyncio.run(panel._system_action("ime", ctx))
-
-    assert [c[0] for c in ctx.calls] == ["ime_on"], (
-        "if this now says ime_off, the key has been fixed -- see the xfail below"
-    )
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "docs/todo/bugs/012: core_bot_panel reads rs['ime_enabled'], which does not "
-    "exist; the column is immediate_market_entry. Fixing it changes when orders "
-    "are placed at market, so it needs the owner's sign-off. When that lands, "
-    "this xfail turns into an XPASS failure -- remove the marker and delete the "
-    "broken-behaviour test above it."
-))
-def test_the_ime_button_should_toggle_against_the_real_setting(fresh_db):
     db.update_risk_settings({"immediate_market_entry": 0})
     ctx = _ctx()
     asyncio.run(panel._system_action("ime", ctx))
@@ -135,6 +110,31 @@ def test_the_ime_button_should_toggle_against_the_real_setting(fresh_db):
     assert [c[0] for c in ctx.calls] == ["ime_off"], (
         "IME is on, so the button must offer to turn it off"
     )
+
+
+def _button_labels(screen) -> str:
+    """The state a System button shows lives in its label, not the screen text."""
+    return " | ".join(b.get("text", "") for row in (screen.keyboard or []) for b in row)
+
+
+def test_the_system_menu_reports_the_real_ime_state(fresh_db):
+    """The other half of the same bug: the status line read the same missing
+    key, so it said OFF no matter what the setting was."""
+    db.update_risk_settings({"immediate_market_entry": 1, "dpm_enabled": 0})
+    assert "IME: ON" in _button_labels(panel.system_screen())
+
+    db.update_risk_settings({"immediate_market_entry": 0})
+    assert "IME: OFF" in _button_labels(panel.system_screen())
+
+
+def test_the_system_menu_reports_the_real_dpm_state(fresh_db):
+    """The neighbouring toggle, which was always correct -- asserted so the two
+    stay readable side by side."""
+    db.update_risk_settings({"dpm_enabled": 1})
+    assert "DPM: ON" in _button_labels(panel.system_screen())
+
+    db.update_risk_settings({"dpm_enabled": 0})
+    assert "DPM: OFF" in _button_labels(panel.system_screen())
 
 
 def test_an_unknown_system_action_does_nothing_at_all(fresh_db):

@@ -637,7 +637,10 @@ def system_screen() -> Screen:
     except Exception:
         pass
     dpm = "ON" if rs.get("dpm_enabled") else "OFF"
-    ime = "ON" if rs.get("ime_enabled") else "OFF"
+    # immediate_market_entry, not ime_enabled: the latter is not a column and
+    # rs.get() returned None for it, so this line always said OFF and the
+    # toggle below could only ever switch IME on. docs/todo/bugs/012.
+    ime = "ON" if rs.get("immediate_market_entry") else "OFF"
     rows = [
         [_btn("⏸️ Pause 30m", "sys2", "pause"), _btn("▶️ Resume", "sys2", "resume")],
         [_btn(f"\U0001f504 DPM: {dpm}", "sys2", "dpm"), _btn(f"⚡ IME: {ime}", "sys2", "ime")],
@@ -1473,7 +1476,7 @@ async def _system_action(act: str, ctx: Any) -> Screen:
         on = not bool(rs.get("dpm_enabled"))
         return Screen(await (ctx._cmd_dpm_on([]) if on else ctx._cmd_dpm_off([])), mode="send")
     if act == "ime":
-        on = not bool(rs.get("ime_enabled"))
+        on = not bool(rs.get("immediate_market_entry"))
         return Screen(await (ctx._cmd_ime_on([]) if on else ctx._cmd_ime_off([])), mode="send")
     if act == "activate":
         return Screen(await ctx._cmd_activate([]), mode="send")

@@ -43,6 +43,8 @@ getting a tuned entry of its own.
 from __future__ import annotations
 
 import logging
+import time
+from dataclasses import dataclass
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -272,3 +274,84 @@ def describe_cell(source: str, regime: str) -> str:
         return (f"{ch} in a {regime} market has no configuration with a positive "
                 f"expectancy in backtest (best available -0.08R) -- stand down")
     return f"{ch} in a {regime} market -> {choice.split(':', 1)[-1]}"
+
+
+@dataclass
+class AutoTemplateState:
+    """What one auto-template tick has to remember from the last one.
+
+    Held by the caller rather than at module level so the loop's state cannot
+    be shared or left behind between runs -- runtime.py creates one before its
+    loop and passes it in.
+    """
+    last_regime: Optional[str] = None
+    last_ai: float = 0.0
+
+
+AI_INTERVAL_S = 15 * 60
+
+
+async def run_auto_template_cycle(
+    state: AutoTemplateState, candles, cfg: dict, runtime,
+    now: Optional[float] = None,
+) -> None:
+    """One tick of auto template management.
+
+    Two cadences, deliberately split by cost. Detection is free and
+    deterministic, so it runs every tick and a regime flip is acted on
+    immediately. AI review costs money, so it is bounded to a regime CHANGE or
+    AI_INTERVAL_S, whichever comes first -- roughly 4-8 calls an hour instead
+    of one a minute.
+
+    That split exists because of a scar: the Channel Strategy AI used to be a
+    page-level ui.timer that respawned on every browser reconnect and burned
+    Anthropic credits (see runtime._channel_ai_auto_eval_loop).
+
+    The baseline is only FORCED on the first pass and on an actual regime
+    change. apply_baselines(force=True) re-asserts the backtested pick, so
+    forcing it every tick reverts an AI override within 60s of it being made.
+
+    Does nothing at all when no source is set to Auto, so the default
+    configuration pays neither cost.
+
+    Exceptions from the AI review are swallowed here on purpose: the
+    deterministic baseline is already written, so a failed review degrades to
+    backtested behaviour rather than to no management at all. last_ai is
+    advanced BEFORE the call, so an outage does not turn into a retry every
+    tick.
+    """
+    from backend.src.services.ai import provider as ai_provider
+
+    now = time.time() if now is None else now
+    sources = auto_enabled_sources()
+    if not sources:
+        return
+
+    regime = regime_from_candles(candles)
+    regime_flipped = (state.last_regime is not None and regime != state.last_regime)
+    changed = apply_baselines(
+        regime, sources,
+        force=(regime_flipped or state.last_regime is None),
+    )
+    if regime_flipped or changed:
+        log.info(
+            "[AutoTemplate] regime=%s%s%s", regime,
+            f" (was {state.last_regime})" if regime_flipped else "",
+            "".join(f" | {s}: {a or 'none'} -> {b}" for s, (a, b) in changed.items()),
+        )
+    state.last_regime = regime
+
+    if not (regime_flipped or now - state.last_ai >= AI_INTERVAL_S):
+        return
+    if not ai_provider.is_configured(cfg):
+        return
+
+    state.last_ai = now
+    try:
+        from backend.src.services.channels import strategy_ai as _csai
+        await _csai.evaluate_channels(runtime, cfg)
+        log.info("[AutoTemplate] AI review complete (trigger=%s)",
+                 "regime change" if regime_flipped else "interval")
+    except Exception as e:
+        log.warning("[AutoTemplate] AI review failed, keeping backtested "
+                    "baseline: %s", e)

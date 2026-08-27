@@ -1142,76 +1142,26 @@ class TradingRuntime:
             await asyncio.sleep(self._REF_BACKFILL_INTERVAL)
 
     async def _auto_template_loop(self) -> None:
-        """Auto template management (2026-08-14).
+        """Supervise auto template management. One tick per minute.
 
-        Two cadences, deliberately split by cost:
+        The tick itself -- regime detection, baseline forcing and the paid AI
+        review cadence -- is core_auto_template.run_auto_template_cycle. It
+        lives there rather than here because it is decision logic with a live
+        scar behind it (forcing the baseline every tick reverts an AI override
+        within 60s), and because in here it had no test.
 
-          every 60s   detect the live regime from the M5 window the monitor
-                      loop already keeps, and write the BACKTESTED baseline
-                      pick for each Auto channel. Free, deterministic, and
-                      immediate -- a regime flip is acted on within a minute
-                      instead of waiting for the next AI cycle.
-
-          AI review   on a regime CHANGE, or every 15 minutes, whichever
-                      comes first. This is the only part that costs money,
-                      and it is bounded to ~4-8 calls/hour rather than the
-                      per-minute rate the detection loop runs at.
-
-        The split exists because engine.py already carries a scar here: the
-        Channel Strategy AI used to be a page-level ui.timer that respawned
-        on every browser reconnect and "was burning Anthropic API credits"
-        (see _channel_ai_auto_eval_loop). Frequent *detection* is cheap;
-        frequent *inference* is not, so only the former runs per minute.
-
-        Does nothing at all when no source is set to Auto, so the default
-        configuration pays neither cost.
+        State is created here and passed in, so nothing about this loop
+        persists at module level in the service.
         """
         from backend.src.services.positions import core_auto_template as _auto
 
         await asyncio.sleep(90)   # let the first M5 window populate
-        last_regime: Optional[str] = None
-        last_ai = 0.0
-        AI_INTERVAL = 15 * 60
+        state = _auto.AutoTemplateState()
 
         while self._monitor_running:
             try:
-                sources = _auto.auto_enabled_sources()
-                if sources:
-                    regime = _auto.regime_from_candles(self._dpm_candles)
-                    regime_flipped = (last_regime is not None and regime != last_regime)
-                    # Only re-assert the baseline when the regime actually
-                    # moved (or on the very first pass). Otherwise just fill
-                    # sources that have no pick yet -- see apply_baselines'
-                    # `force` note: forcing every tick reverts the AI's
-                    # override within 60s of it being made.
-                    changed = _auto.apply_baselines(
-                        regime, sources,
-                        force=(regime_flipped or last_regime is None),
-                    )
-                    if regime_flipped or changed:
-                        log.info(
-                            "[AutoTemplate] regime=%s%s%s", regime,
-                            f" (was {last_regime})" if regime_flipped else "",
-                            "".join(f" | {s}: {a or 'none'} -> {b}"
-                                    for s, (a, b) in changed.items()),
-                        )
-                    last_regime = regime
-
-                    now = time.time()
-                    if (regime_flipped or now - last_ai >= AI_INTERVAL) and \
-                            ai_provider.is_configured(self._cfg):
-                        last_ai = now
-                        try:
-                            from backend.src.services.channels import strategy_ai as _csai
-                            await _csai.evaluate_channels(self, self._cfg)
-                            log.info("[AutoTemplate] AI review complete (trigger=%s)",
-                                     "regime change" if regime_flipped else "15m interval")
-                        except Exception as e:
-                            # The deterministic baseline is already written, so
-                            # a failed review degrades to backtested behaviour
-                            # rather than to no management at all.
-                            log.warning("[AutoTemplate] AI review failed, keeping "
-                                        "backtested baseline: %s", e)
+                await _auto.run_auto_template_cycle(
+                    state, self._dpm_candles, self._cfg, self)
             except asyncio.CancelledError:
                 break
             except Exception as e:

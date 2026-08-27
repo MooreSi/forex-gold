@@ -123,6 +123,20 @@ Each of these cost real time in a past session:
   controller-boundary contract** — existing sites are baselined, new ones
   regress it. Inject config values from `frontend/app.py` (already a
   baselined site) instead.
+- **A test fixture that opens a database must close it before `os.remove`.**
+  POSIX lets you unlink a file that still has an open handle; Windows does
+  not, and raises `PermissionError: [WinError 32] The process cannot access
+  the file because it is being used by another process`. The first Windows
+  CI run this repo ever completed (2026-08-27) produced **50 teardown errors**
+  from exactly this, in fixtures that had passed on macOS since the day they
+  were written. Use `re_repo.close_db()` for an engine repo, or
+  `reset_thread_local_connection()` + `reset_db_worker_thread_connection()`
+  for the shared `db` module — `db.init()` leaves a handle on the calling
+  thread AND on the `to_db_thread` worker. `tests/conftest.py`'s `fresh_db`
+  is the reference; local copies of it are where this keeps going wrong.
+- **The suite is ~7x slower on Windows CI than on macOS** — 28m48s against
+  239s, for the same 3,623 tests. Budget for it: the workflow's
+  `timeout-minutes` is 60, and every push to `main` costs a full run.
 - **Repo-wide scripts must exclude** `.git`, `.venv`, `__pycache__`,
   `.claude/` (agent worktrees), `docs/todo/refactor/stage0/` (audit trail)
   and `docs/reviews/` (point-in-time snapshots).

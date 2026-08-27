@@ -37,6 +37,12 @@ def corpus():
     pro_model._state.update(model=None, scaler=None, auc=None, n=0,
                             fitted_at=0.0, rows_at_fit=-1, reason="not fitted")
     yield pro_corpus
+    # Close before unlink: Windows refuses to delete a file with a live handle
+    # (WinError 32), and re_repo.init() opens one this fixture never held a
+    # reference to. Sibling *_repo_transactions fixtures already do this; this
+    # one and test_pro_corpus were missed, and between them produced 26 of the
+    # 50 teardown errors in the first Windows CI run.
+    re_repo.close_db()
     os.remove(path)
 
 

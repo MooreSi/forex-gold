@@ -29,6 +29,11 @@ def corpus():
     re_repo.init(path)
     pro_corpus.create_schema()
     yield pro_corpus
+    # Close before unlink: Windows refuses to delete a file with a live
+    # handle (WinError 32), and re_repo.init() opens one this fixture
+    # never owned a reference to. Sibling *_repo_transactions fixtures
+    # already do this; these two were missed.
+    re_repo.close_db()
     os.remove(path)
 
 

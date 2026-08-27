@@ -12,6 +12,10 @@ import tempfile
 import pytest
 
 from backend.src.db import database as db
+from tests.conftest import (
+    reset_db_worker_thread_connection,
+    reset_thread_local_connection,
+)
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_equity_protect import check_equity_protect, check_basket_harvest
 
@@ -22,6 +26,12 @@ def fresh_db():
     os.close(fd)
     db.init(path)
     yield db
+    # Drop the cached connections before unlinking. Windows refuses to delete a
+    # file that still has a live handle (WinError 32), and db.init() leaves one
+    # on this thread plus one on the to_db_thread worker. The shared fresh_db in
+    # tests/conftest.py has always done this; this local copy omitted it.
+    reset_thread_local_connection()
+    reset_db_worker_thread_connection()
     os.remove(path)
 
 

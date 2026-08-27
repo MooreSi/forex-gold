@@ -116,9 +116,45 @@ def run(check: Check) -> bool:
         return True
     print(f"FAIL ({elapsed:.1f}s)")
     print(f"      {check.why}")
-    for line in (result.stdout + result.stderr).strip().splitlines()[-25:]:
+    for line in _failure_report(result.stdout + result.stderr):
         print(f"      {line}")
     return False
+
+
+# How many FAILED/ERROR lines to name before summarising the rest. High enough
+# to cover a bad day, low enough that the tail below stays visible.
+_MAX_NAMED = 40
+_TAIL_LINES = 25
+
+
+def _failure_report(output: str) -> list[str]:
+    """The lines worth showing from a failed check.
+
+    A blind tail is not enough. CI run 33105642212 reported "12 failed, 3611
+    passed, 50 errors" and then named none of the 12: pytest lists errors after
+    failures in its short summary, so all 25 tail lines were ERROR lines and
+    every FAILED name fell off the top. The gate reported failures and hid
+    them, which is the guardrail-that-prints-all-good problem this repo exists
+    to avoid.
+
+    So name the failures explicitly first, then still show the tail -- the tail
+    carries the counts line and any traceback fragment, which the summary lines
+    do not.
+    """
+    lines = output.strip().splitlines()
+    named = [ln for ln in lines if ln.lstrip().startswith(("FAILED", "ERROR"))]
+
+    report: list[str] = []
+    if named:
+        shown = named[:_MAX_NAMED]
+        report.extend(shown)
+        if len(named) > _MAX_NAMED:
+            report.append(f"... and {len(named) - _MAX_NAMED} more FAILED/ERROR lines")
+        report.append("")
+
+    tail = [ln for ln in lines[-_TAIL_LINES:] if ln not in set(named)]
+    report.extend(tail)
+    return report
 
 
 def main() -> int:

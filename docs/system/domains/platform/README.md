@@ -39,6 +39,9 @@ allowed to call.
 
 ## Known things & gotchas
 
+- **`os_utils.shutdown_ui()` is the only place the backend stops the NiceGUI server.** `no-nicegui-in-the-backend` counts source units, not calls, and `restart_app` plus `services/telegram/bot_infra._delayed_app_shutdown` were doing the identical `nicegui.app.shutdown()` in two of them -- one unit over baseline for no behavioural reason. It never raises: callers are mid-restart with the relaunch subprocess already spawned, so an exception there would abort the relaunch and leave nothing running. Headless mode does not call it at all -- there is no server to stop, and the relaunch was spawned separately.
+
+
 - Default ports here are offset from the live app: UI 8890 (live 8888), EA bridge 9111 (live 9000). `_free_port()` kills whatever is listening before starting.
 - On native Windows the app imports `MetaTrader5` in-process and skips the bridge subprocess; on macOS the bridge runs under Wine Python.
 - `run.py` must set `BRIDGE_CREDS_PATH` for the bridge subprocess — without it every cold boot connects with no credentials, masked as a normal startup delay because the watchdog's restart path sets it correctly.

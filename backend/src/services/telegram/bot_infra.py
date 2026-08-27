@@ -41,11 +41,11 @@ async def _delayed_app_shutdown(delay_seconds: int) -> None:
         import os as _os
         _os._exit(0)
         return
-    try:
-        from nicegui import app as _nicegui_app
-        _nicegui_app.shutdown()
-    except Exception as _e:
-        log.warning("App shutdown after /restartapp failed: %s", _e)
+    # Through os_utils rather than importing nicegui here: the backend must
+    # stay runnable without a UI framework, and doing this in two places put
+    # no-nicegui-in-the-backend over its baseline for an identical call.
+    from backend.src.utils.os_utils import shutdown_ui
+    shutdown_ui()
 
 
 async def cmd_restart_bridge(

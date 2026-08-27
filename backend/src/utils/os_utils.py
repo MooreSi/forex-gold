@@ -7,10 +7,13 @@ has a macOS path and a Windows path; the correct one is chosen at runtime via
 sys.platform checks.
 """
 
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 # ── Port detection ─────────────────────────────────────────────────────────────
@@ -323,8 +326,31 @@ def restart_app(root) -> None:
                 stderr=_restart_log,
             )
 
-    from nicegui import app
-    app.shutdown()
+    shutdown_ui()
+
+
+def shutdown_ui() -> bool:
+    """Ask the running NiceGUI server to stop. Returns False if it could not.
+
+    The one place in the backend that knows how the UI is stopped.
+    `no-nicegui-in-the-backend` is a counted contract -- the backend must be
+    runnable, testable and schedulable without a UI framework present -- and
+    this used to be done here AND again by hand in
+    services/telegram/bot_infra for /restartapp, which put the count over its
+    baseline for a call that is identical in both places.
+
+    Never raises. Callers are mid-restart or mid-update with the relaunch
+    subprocess already spawned; an exception here would abort that and leave
+    nothing running at all. A headless instance, or one whose server has
+    already stopped, is a False rather than a failure.
+    """
+    try:
+        from nicegui import app
+        app.shutdown()
+        return True
+    except Exception as exc:
+        log.warning("UI shutdown failed (relaunch, if any, is unaffected): %s", exc)
+        return False
 
 
 def repo_root() -> Path:

@@ -37,6 +37,8 @@ import logging
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repair_repo
+from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 
 log = logging.getLogger(__name__)
@@ -50,16 +52,9 @@ def _comment_prefix(trade_id: str) -> str:
     return comment_for_trade(trade_id)
 
 
-def _fetch_placeholders() -> list:
-    with db_module.db() as conn:
-        return [db_module.row_to_dict(r) for r in conn.execute(
-            # entry_price=0 is the defect signature: a row with no ticket but a
-            # real entry price is a legitimately ticket-less simulated trade,
-            # not an unpromoted EA Template placeholder.
-            "SELECT * FROM vantage_simulated_trades "
-            "WHERE status='open' AND (mt5_ticket IS NULL OR mt5_ticket=0) "
-            "AND (entry_price IS NULL OR entry_price=0)"
-        ).fetchall()]
+# _fetch_placeholders / _fetch_row are gone: the first is
+# repair_repo.fetch_template_placeholders, the second was a byte-identical
+# duplicate of trade_repo.get_trade.
 
 
 async def repair_template_placeholders(bridge: Any) -> int:
@@ -69,7 +64,7 @@ async def repair_template_placeholders(bridge: Any) -> int:
     try:
         if not bridge.is_configured():
             return 0
-        rows = await db_module.to_db_thread(_fetch_placeholders)
+        rows = await db_module.to_db_thread(repair_repo.fetch_template_placeholders)
         if not rows:
             return 0
         positions = await bridge.get_positions()
@@ -119,15 +114,8 @@ async def _adopt_live_position(row: dict, pos: dict) -> bool:
     if not ticket or entry <= 0 or lots <= 0:
         return False
 
-    def _apply():
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,"
-                "entry_low=?,entry_high=?,lot_size=?,remaining_lots=? "
-                "WHERE trade_id=? AND status='open' AND (mt5_ticket IS NULL OR mt5_ticket=0)",
-                (ticket, entry, entry, entry, lots, lots, trade_id),
-            )
-    await db_module.to_db_thread(_apply)
+    await db_module.to_db_thread(
+        repair_repo.adopt_placeholder_onto_leg, trade_id, ticket, entry, lots)
     log.warning(
         "[TemplateRepair] adopted orphaned placeholder trade=%s onto live leg "
         "ticket=%s @ %.2f %.2f lots (comment=%r) — its fill event never reached "
@@ -169,20 +157,12 @@ async def _close_from_deals(row: dict, open_deal: dict, deals: list,
         "MT5_sync_TP" if ("tp" in comment or "take" in comment) else "MT5_close"
     )
 
-    def _apply():
-        with db_module.db() as conn:
-            # Write the real fill onto the row FIRST so record_close() below
-            # computes against a genuine entry price (and so mt5_profit is the
-            # authoritative figure for the P&L and the Telegram message).
-            conn.execute(
-                "UPDATE vantage_simulated_trades SET mt5_ticket=?,entry_price=?,"
-                "entry_low=?,entry_high=?,lot_size=?,remaining_lots=?,mt5_profit=? "
-                "WHERE trade_id=?",
-                (ticket or pos_id, entry, entry, entry,
-                 lots or row["lot_size"], lots or row["remaining_lots"],
-                 profit, trade_id),
-            )
-    await db_module.to_db_thread(_apply)
+    # The real fill is written FIRST so record_close() below computes against
+    # a genuine entry price rather than fabricating one from a zero entry.
+    await db_module.to_db_thread(
+        repair_repo.record_placeholder_fill, trade_id,
+        ticket or pos_id, entry,
+        lots or row["lot_size"], lots or row["remaining_lots"], profit)
 
     ctx = CloseTradeContext(bridge)
     result = await record_close(trade_id, close_px, reason, ctx)
@@ -191,7 +171,7 @@ async def _close_from_deals(row: dict, open_deal: dict, deals: list,
         "history: position=%s entry %.2f -> exit %.2f, realised $%.2f (%s)",
         trade_id[:8], pos_id, entry, close_px, profit, reason,
     )
-    closed_row = await db_module.to_db_thread(_fetch_row, trade_id)
+    closed_row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
     account = None
     try:
         account = await bridge.get_account()
@@ -204,8 +184,4 @@ async def _close_from_deals(row: dict, open_deal: dict, deals: list,
     return True
 
 
-def _fetch_row(trade_id: str) -> Optional[dict]:
-    with db_module.db() as conn:
-        return db_module.row_to_dict(conn.execute(
-            "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,),
-        ).fetchone())
+

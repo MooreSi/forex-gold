@@ -71,11 +71,17 @@ def test_a_legacy_port_held_by_something_else_is_not_fatal(monkeypatch):
         bridge = ea_bridge.EABridge(engine=None)
         await bridge.start()
         assert bridge.listening_ports() == [primary]
-        return bridge
+        # Stop inside the SAME loop that started it, as the sibling test above
+        # already does. Splitting them across two asyncio.run() calls leaves
+        # the server objects bound to a loop that has since been closed; macOS
+        # tolerates that, Windows' Proactor loop does not and stop() died with
+        # "'NoneType' object has no attribute '_stop_serving'" (CI run
+        # 33111402669). The squatter is on a port this bridge never bound, so
+        # closing it after the loop changes nothing.
+        await bridge.stop()
 
-    bridge = asyncio.run(_run())
+    asyncio.run(_run())
     squatter.close()
-    asyncio.run(bridge.stop())
 
 
 def test_failing_to_bind_the_configured_port_still_raises(monkeypatch):

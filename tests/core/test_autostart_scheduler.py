@@ -54,6 +54,17 @@ def sandbox(monkeypatch, tmp_path):
 
     monkeypatch.setattr(au, "_launchctl", _lc)
     monkeypatch.setattr(au, "_schtasks", _st)
+
+    # These tests simulate a platform by patching au.sys.platform rather than
+    # by skipping, so the macOS path is exercised on every host -- which is the
+    # right call, and the reason it must be simulated COMPLETELY. os.getuid is
+    # POSIX-only: on a Windows runner the darwin tests reached _mac_install()
+    # and died with "module 'os' has no attribute 'getuid'". Four failures in
+    # CI run 33111402669, all this one line.
+    #
+    # raising=False because on Windows there is no attribute to replace.
+    monkeypatch.setattr(au.os, "getuid", lambda: 501, raising=False)
+
     return types.SimpleNamespace(calls=calls, tmp=tmp_path)
 
 

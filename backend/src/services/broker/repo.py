@@ -329,3 +329,48 @@ def import_direct_mt5_position(trade_id: str, ticket, direction: str,
                 initial_sl, initial_risk,
             ),
         )
+
+
+def fetch_open_ea_managed_trades() -> list[dict]:
+    """The trades handed back to the EA on "hello" (see
+    EABridge._restore_open_trades / restore_trade).
+
+    Every arm of the WHERE clause is a reason NOT to restore: a closed trade
+    would put management back on a position that no longer exists, a
+    python-managed one is not the EA's to trail, and a row with no ticket has
+    no broker position behind it yet -- restoring that is how a grid
+    placeholder becomes a ghost the EA reports on forever.
+    """
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                "SELECT * FROM vantage_simulated_trades "
+                "WHERE status='open' AND managed_by='ea' "
+                "AND mt5_ticket IS NOT NULL AND mt5_ticket > 0"
+            ).fetchall()
+        ]
+
+
+def incr_grid_leg_cancelled(trade_id: str) -> int:
+    """Atomically bump grid_legs_cancelled and return the NEW count.
+
+    Post-increment, deliberately: the caller compares the return against the
+    grid's leg total to decide whether every leg has now cancelled unfilled
+    and the $0 placeholder should be closed. Off by one either closes a grid
+    that still has a resting leg or leaves a dead one open forever.
+
+    Unknown trade_id returns 0 rather than raising -- this runs inside a
+    cancel handler, and raising would abandon the rest of that path over a
+    row that has already gone.
+    """
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades SET grid_legs_cancelled=grid_legs_cancelled+1 "
+            "WHERE trade_id=?",
+            (trade_id,),
+        )
+        row = conn.execute(
+            "SELECT grid_legs_cancelled FROM vantage_simulated_trades WHERE trade_id=?",
+            (trade_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0

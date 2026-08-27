@@ -982,13 +982,7 @@ class EABridge:
         """
         from backend.src.db import database as db_module
 
-        def _rows() -> list[dict]:
-            with db_module.db() as conn:
-                return [db_module.row_to_dict(r) for r in conn.execute(
-                    "SELECT * FROM vantage_pending_orders WHERE status='working'"
-                ).fetchall()]
-
-        rows = await db_module.to_db_thread(_rows)
+        rows = await db_module.to_db_thread(broker_repo.fetch_working_pending_orders)
         done = 0
         for row in rows:
             try:
@@ -1165,16 +1159,7 @@ class EABridge:
         _restore_pending_orders. See restore_trade()."""
         from backend.src.db import database as db_module
 
-        def _fetch():
-            with db_module.db() as conn:
-                return [
-                    db_module.row_to_dict(r) for r in conn.execute(
-                        "SELECT * FROM vantage_simulated_trades "
-                        "WHERE status='open' AND managed_by='ea' "
-                        "AND mt5_ticket IS NOT NULL AND mt5_ticket > 0"
-                    ).fetchall()
-                ]
-        rows = await db_module.to_db_thread(_fetch)
+        rows = await db_module.to_db_thread(broker_repo.fetch_open_ea_managed_trades)
         if not rows:
             return
         for row in rows:
@@ -1820,19 +1805,8 @@ class EABridge:
         """Atomically bump grid_legs_cancelled and return the new count."""
         from backend.src.db import database as db_module
 
-        def _apply():
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET grid_legs_cancelled=grid_legs_cancelled+1 "
-                    "WHERE trade_id=?",
-                    (trade_id,),
-                )
-                row = conn.execute(
-                    "SELECT grid_legs_cancelled FROM vantage_simulated_trades WHERE trade_id=?",
-                    (trade_id,),
-                ).fetchone()
-                return int(row[0]) if row else 0
-        return await db_module.to_db_thread(_apply)
+        return await db_module.to_db_thread(
+            broker_repo.incr_grid_leg_cancelled, trade_id)
 
     async def _close_dead_grid_placeholder(self, row: dict, reason: str) -> None:
         """Every leg this grid ever placed has now cancelled unfilled -- no

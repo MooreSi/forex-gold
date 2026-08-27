@@ -31,6 +31,7 @@ import time
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import second_message_repo
 
 log = logging.getLogger(__name__)
 
@@ -52,12 +53,7 @@ def is_enabled(rs: dict) -> bool:
 
 
 def _get_hold(tg_id: str) -> Optional[dict]:
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT * FROM vantage_second_message_holds WHERE tg_message_id=? AND status='waiting'",
-            (tg_id,),
-        ).fetchone()
-    return db_module.row_to_dict(row) if row else None
+    return second_message_repo.get_waiting_hold(tg_id)
 
 
 def attach_followup(channel_name: str, levels: dict) -> Optional[str]:
@@ -70,22 +66,13 @@ def attach_followup(channel_name: str, levels: dict) -> Optional[str]:
     back to back, a single follow-up belongs to the most recent one, and
     fanning it out across both would invent levels for a signal that never
     got any."""
-    with db_module.db() as conn:
-        row = conn.execute(
-            "SELECT tg_message_id FROM vantage_second_message_holds "
-            "WHERE channel_name=? AND status='waiting' AND levels_json IS NULL "
-            "ORDER BY first_seen_at DESC LIMIT 1",
-            (channel_name,),
-        ).fetchone()
-        if not row:
-            return None
-        conn.execute(
-            "UPDATE vantage_second_message_holds SET levels_json=? WHERE tg_message_id=?",
-            (json.dumps(levels), row[0]),
-        )
+    tg_id = second_message_repo.attach_followup_levels(
+        channel_name, json.dumps(levels))
+    if tg_id is None:
+        return None
     log.info("[SecondMessage] %s — follow-up levels attached to held signal tg_id=%s",
-             channel_name, row[0])
-    return row[0]
+             channel_name, tg_id)
+    return tg_id
 
 
 def hold_or_resolve(
@@ -99,13 +86,8 @@ def hold_or_resolve(
     this cycle and picks it up again on the next one."""
     hold = _get_hold(tg_id)
     if hold is None:
-        with db_module.db() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO vantage_second_message_holds "
-                "(tg_message_id, channel_name, partial_json, first_seen_at, status) "
-                "VALUES (?,?,?,?,'waiting')",
-                (tg_id, channel_name, json.dumps(partial), time.time()),
-            )
+        second_message_repo.insert_hold(
+            tg_id, channel_name, json.dumps(partial), time.time())
         log.info("[SecondMessage] %s — holding bare %s signal tg_id=%s (entry %s-%s) for up to %ds",
                  channel_name, partial.get("direction"), tg_id,
                  partial.get("entry_low"), partial.get("entry_high"), match_window_sec(rs))
@@ -149,8 +131,4 @@ def hold_or_resolve(
 
 
 def _resolve(tg_id: str) -> None:
-    with db_module.db() as conn:
-        conn.execute(
-            "UPDATE vantage_second_message_holds SET status='resolved' WHERE tg_message_id=?",
-            (tg_id,),
-        )
+    second_message_repo.mark_resolved(tg_id)

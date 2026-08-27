@@ -27,15 +27,12 @@ ALLOWED = {
     # the alias without a cycle. Runs once at startup; its writes are
     # CREATE TABLE statements, not trading data.
     "backend/src/db/database.py": ["_apply_schema"],
-    # Private helper that never opens a connection: it executes on the one its
-    # caller hands it, inside that caller's boundary. Both callers declare one --
-    # sync_channel_rename() uses transaction() (changed from db() by the
-    # 2026-08-25 merge, so a half-applied rename cascade can no longer strand
-    # rows), and backfills.run() executes under _apply_schema's. Arrived with
-    # that merge, from upstream's core_db_channel. The gate reads one function
-    # at a time and cannot see an inherited boundary, which is what this entry
-    # records.
-    "backend/src/services/channels/repo.py": ["_fold_renamed_row"],
+    # (channels/repo.py::_fold_renamed_row was here until 2026-08-27. It took
+    # its caller's connection and relied on an inherited boundary, which this
+    # gate reads one function at a time and cannot see. It opens its own
+    # transaction now -- nesting participates in the caller's, so it is the
+    # same single commit, but the guarantee is local to the function that needs
+    # it rather than a property of every future caller remembering.)
     # (The per-engine research-database clones that were recorded here were
     # deleted 2026-08-10 — dead code, superseded by their *_repo.py.)
 }

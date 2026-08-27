@@ -167,8 +167,10 @@ def _gd2_channel_rename_heal(conn) -> None:
         ("channel_strategy_rec", "source"),
     ):
         try:
+            # No conn: the helper opens its own transaction, which nests into
+            # whatever this backfill is already inside.
             _fold_renamed_row(
-                conn, tbl, col, "Gold Diggers 2.0", "GOLD DIGGERS INSTITUTIONAL",
+                tbl, col, "Gold Diggers 2.0", "GOLD DIGGERS INSTITUTIONAL",
                 _CHANNEL_UNIQUE_TABLES.get(tbl, ()),
             )
         except sqlite3.OperationalError as e:

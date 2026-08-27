@@ -6,22 +6,11 @@ machinery (unchanged, already correct -- this is a pure file-size split,
 not a connection-layer migration). Re-exported from database.py so every
 existing `db_module.<name>` call site works completely unchanged.
 """
-import asyncio
-import json
 import logging
-import os
-import sqlite3
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
-from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.db.database import db, _schedule_coro
 # `transaction` is db() under its boundary-declaring name (see backend/src/db/__init__).
 from backend.src.db.database import db as transaction  # noqa: E402
 from backend.src.services.cluster.sync_repo import _ensure_sync_tables  # noqa: E402
@@ -86,26 +75,33 @@ _CHANNEL_UNIQUE_TABLES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _fold_renamed_row(conn, table: str, col: str, old_val: str, new_val: str,
-                       carry_cols: tuple[str, ...] = ()) -> None:
+def _fold_renamed_row(table: str, col: str, old_val: str, new_val: str,
+                      carry_cols: tuple[str, ...] = ()) -> None:
     """Merge a PK-unique table's row keyed by old_val into new_val's row --
     renaming in place if new_val has no row yet, otherwise carrying the
     given columns over (only when the old row actually set them) and
     dropping the old row. See _CHANNEL_UNIQUE_TABLES for why plain UPDATE
-    isn't safe here."""
-    old_row = conn.execute(f"SELECT * FROM {table} WHERE {col}=?", (old_val,)).fetchone()
-    if old_row is None:
-        return
-    exists = conn.execute(f"SELECT 1 FROM {table} WHERE {col}=?", (new_val,)).fetchone()
-    if exists is None:
-        conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new_val, old_val))
-        return
-    old = dict(old_row)
-    if carry_cols and old.get(carry_cols[0]) is not None:
-        assign = ", ".join(f"{c}=?" for c in carry_cols)
-        conn.execute(f"UPDATE {table} SET {assign} WHERE {col}=?",
-                     (*(old[c] for c in carry_cols), new_val))
-    conn.execute(f"DELETE FROM {table} WHERE {col}=?", (old_val,))
+    isn't safe here.
+
+    Opens its own transaction rather than taking the caller's connection: the
+    carry-over UPDATE and the DELETE must land together, and nesting
+    participates in the caller's, so it is the same single commit either way."""
+    with transaction() as conn:
+        old_row = conn.execute(
+            f"SELECT * FROM {table} WHERE {col}=?", (old_val,)).fetchone()
+        if old_row is None:
+            return
+        exists = conn.execute(
+            f"SELECT 1 FROM {table} WHERE {col}=?", (new_val,)).fetchone()
+        if exists is None:
+            conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new_val, old_val))
+            return
+        old = dict(old_row)
+        if carry_cols and old.get(carry_cols[0]) is not None:
+            assign = ", ".join(f"{c}=?" for c in carry_cols)
+            conn.execute(f"UPDATE {table} SET {assign} WHERE {col}=?",
+                         (*(old[c] for c in carry_cols), new_val))
+        conn.execute(f"DELETE FROM {table} WHERE {col}=?", (old_val,))
 
 
 def sync_channel_rename(old_name: str, new_name: str) -> None:
@@ -144,9 +140,9 @@ def sync_channel_rename(old_name: str, new_name: str) -> None:
             try:
                 if tbl in _CHANNEL_UNIQUE_TABLES:
                     carry = _CHANNEL_UNIQUE_TABLES[tbl]
-                    _fold_renamed_row(conn, tbl, col, old_name, new_name, carry)
+                    _fold_renamed_row(tbl, col, old_name, new_name, carry)
                     if old_canon != old_name:
-                        _fold_renamed_row(conn, tbl, col, old_canon, new_name, carry)
+                        _fold_renamed_row(tbl, col, old_canon, new_name, carry)
                 else:
                     conn.execute(
                         f"UPDATE {tbl} SET {col}=? WHERE {col} IN (?, ?)",

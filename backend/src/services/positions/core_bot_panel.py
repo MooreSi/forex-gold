@@ -53,6 +53,7 @@ from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk import schedule as schedule_mod
 from backend.src.db import database as db_module
 from backend.src.utils.models import STRATEGY_NAMES
+from backend.src.services.positions import panel_repo
 
 log = logging.getLogger(__name__)
 
@@ -580,13 +581,7 @@ def _channel_open_trades(chan: dict) -> list[dict]:
     if name == MANUAL:
         variants = [MANUAL_SOURCE, "Manual Signal"]
     marks = ",".join("?" for _ in variants)
-    with db_module.db() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM vantage_simulated_trades "
-            f"WHERE status='open' AND tg_source IN ({marks}) ORDER BY open_time",
-            variants,
-        ).fetchall()
-    return [db_module.row_to_dict(r) for r in rows]
+    return panel_repo.open_trades_for_sources(variants)
 
 
 def _trade_push_sl_pips(t: dict) -> float:
@@ -1542,13 +1537,7 @@ async def _delete_pending(slug: str, ctx: Any) -> Screen:
         return Screen(toast="That channel no longer exists.", mode="noop")
     variants = [chan["name"], f"Telegram Auto ({chan['name']})"]
     marks = ",".join("?" for _ in variants)
-    with db_module.db() as conn:
-        rows = [db_module.row_to_dict(r) for r in conn.execute(
-            f"SELECT p.* FROM vantage_pending_orders p "
-            f"JOIN vantage_signals s ON s.signal_id = p.signal_id "
-            f"WHERE p.status='working' AND s.source_name IN ({marks})",
-            variants,
-        ).fetchall()]
+    rows = panel_repo.working_pending_orders_for_sources(variants)
     if not rows:
         return Screen(toast="No working pending orders on this channel.", mode="noop")
     ea = ea_mod.get_instance()
@@ -1587,9 +1576,7 @@ async def _risk_free(slug: str, ctx: Any) -> Screen:
             if res.get("error"):
                 skipped += 1
                 continue
-            with db_module.db() as conn:
-                conn.execute("UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                             (entry, t["trade_id"]))
+            panel_repo.record_stop_loss(t["trade_id"], entry)
             moved.append(ticket)
         except Exception as e:
             log.warning("[Panel] risk-free %s failed: %s", ticket, e)
@@ -1635,11 +1622,7 @@ async def _close_many(trades: list, ctx: Any, label: str) -> str:
 
 
 async def _close_one(trade_prefix: str, ctx: Any) -> Screen:
-    with db_module.db() as conn:
-        row = db_module.row_to_dict(conn.execute(
-            "SELECT * FROM vantage_simulated_trades WHERE trade_id LIKE ? AND status='open'",
-            (trade_prefix + "%",),
-        ).fetchone())
+    row = panel_repo.open_trade_by_prefix(trade_prefix)
     if not row:
         return Screen(toast="That trade is no longer open.", mode="noop")
     try:
@@ -1660,11 +1643,7 @@ async def _push_sl_one(trade_prefix: str, ctx: Any) -> Screen:
     an EA Template trade's live broker SL by the template's own configured
     pip amount, same direct-modify pattern _risk_free above already uses
     for its own manual SL move, gated on tg_cmd_enabled per template."""
-    with db_module.db() as conn:
-        row = db_module.row_to_dict(conn.execute(
-            "SELECT * FROM vantage_simulated_trades WHERE trade_id LIKE ? AND status='open'",
-            (trade_prefix + "%",),
-        ).fetchone())
+    row = panel_repo.open_trade_by_prefix(trade_prefix)
     if not row:
         return Screen(toast="That trade is no longer open.", mode="noop")
 
@@ -1705,8 +1684,6 @@ async def _push_sl_one(trade_prefix: str, ctx: Any) -> Screen:
     except Exception as e:
         return Screen(f"Push SL failed: {e}", mode="send")
 
-    with db_module.db() as conn:
-        conn.execute("UPDATE vantage_simulated_trades SET stop_loss=? WHERE trade_id=?",
-                     (round(new_sl, 2), row["trade_id"]))
+    panel_repo.record_stop_loss(row["trade_id"], round(new_sl, 2))
     return Screen(f"*SL pushed* {row.get('direction')} {row.get('lot_size')} — "
                   f"new SL ${new_sl:.2f} (+{push_pips:.1f} pips)", mode="send")

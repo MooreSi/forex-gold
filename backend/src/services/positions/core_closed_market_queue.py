@@ -22,6 +22,7 @@ import time
 from typing import Awaitable, Callable
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import queue_repo
 from backend.src.services.dpm.engine import is_weekly_market_closed
 
 log = logging.getLogger(__name__)
@@ -42,14 +43,8 @@ def queue_closed_market_limit(
     message gets re-scanned every cycle -- without the INSERT OR IGNORE the
     same signal would pile up once per second until the market reopened)."""
     try:
-        with db_module.db() as conn:
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO vantage_closed_market_queue "
-                "(tg_message_id, channel_name, source_label, parsed_json, queued_at, status) "
-                "VALUES (?,?,?,?,?,'queued')",
-                (tg_id, channel_name, source_label, json.dumps(parsed), time.time()),
-            )
-            return cur.rowcount > 0
+        return queue_repo.insert_queued_signal(
+            tg_id, channel_name, source_label, json.dumps(parsed), time.time())
     except Exception as exc:
         log.warning("[ClosedMarketQueue] failed to queue tg_id=%s: %s", tg_id, exc)
         return False
@@ -57,12 +52,7 @@ def queue_closed_market_limit(
 
 def get_queued_limits() -> list[dict]:
     try:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT * FROM vantage_closed_market_queue WHERE status='queued' "
-                "ORDER BY queued_at ASC"
-            ).fetchall()
-        return [db_module.row_to_dict(r) for r in rows]
+        return queue_repo.fetch_queued_signals()
     except Exception as exc:
         log.warning("[ClosedMarketQueue] failed to read queue: %s", exc)
         return []
@@ -70,11 +60,7 @@ def get_queued_limits() -> list[dict]:
 
 def _mark(tg_id: str, status: str) -> None:
     try:
-        with db_module.db() as conn:
-            conn.execute(
-                "UPDATE vantage_closed_market_queue SET status=? WHERE tg_message_id=?",
-                (status, tg_id),
-            )
+        queue_repo.set_queued_status(tg_id, status)
     except Exception as exc:
         log.warning("[ClosedMarketQueue] failed to mark tg_id=%s as %s: %s", tg_id, status, exc)
 

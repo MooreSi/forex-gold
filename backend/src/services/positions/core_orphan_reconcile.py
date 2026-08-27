@@ -33,6 +33,7 @@ import time
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repair_repo
 
 log = logging.getLogger(__name__)
 
@@ -44,18 +45,7 @@ _MIN_AGE_S = 120.0
 
 async def reconcile_orphaned_trades(bridge: Any, close_trade_fn) -> int:
     """Returns how many rows were repaired. Safe to call on a timer."""
-    def _fetch():
-        with db_module.db() as conn:
-            return [
-                db_module.row_to_dict(r) for r in conn.execute(
-                    "SELECT trade_id, mt5_ticket, direction, entry_price, "
-                    "       remaining_lots, open_time, strategy, tg_source "
-                    "FROM vantage_simulated_trades "
-                    "WHERE status='open' AND mt5_ticket IS NOT NULL AND mt5_ticket > 0"
-                ).fetchall()
-            ]
-
-    rows = await db_module.to_db_thread(_fetch)
+    rows = await db_module.to_db_thread(repair_repo.fetch_reconcilable_trades)
     if not rows:
         return 0
 
@@ -113,16 +103,10 @@ async def reconcile_orphaned_trades(bridge: Any, close_trade_fn) -> int:
         # app's own fee model, which is an estimate. The broker's own deal
         # P&L is the truth, so overwrite with it -- otherwise a repaired row
         # reports a subtly different number from the account statement.
-        def _apply_real(tid=row["trade_id"], net=real_net, cp=close_price):
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_simulated_trades "
-                    "SET net_pnl=?, mt5_profit=?, close_price=?, exit_reason=? "
-                    "WHERE trade_id=?",
-                    (net, net, cp, "reconciled_broker_closed", tid),
-                )
         try:
-            await db_module.to_db_thread(_apply_real)
+            await db_module.to_db_thread(
+                repair_repo.apply_broker_close_pnl,
+                row["trade_id"], real_net, close_price)
         except Exception as e:
             log.warning("[OrphanReconcile] wrote close but could not apply real P&L "
                         "for trade=%s: %s", str(row["trade_id"])[:8], e)

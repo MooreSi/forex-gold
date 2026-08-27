@@ -74,3 +74,41 @@ def record_placeholder_fill(
             "WHERE trade_id=?",
             (ticket, entry, entry, entry, lot_size, remaining_lots, profit, trade_id),
         )
+
+
+# ── orphan reconciliation (core_orphan_reconcile) ────────────────────────────
+
+def fetch_reconcilable_trades() -> list[dict]:
+    """Open rows that have a broker ticket, for checking against the terminal.
+
+    A ticket-less open row is a template placeholder, not an orphan: it has
+    its own repair path above, with its own guard. This scan must not pick
+    those up as well.
+    """
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                "SELECT trade_id, mt5_ticket, direction, entry_price, "
+                "       remaining_lots, open_time, strategy, tg_source "
+                "FROM vantage_simulated_trades "
+                "WHERE status='open' AND mt5_ticket IS NOT NULL AND mt5_ticket > 0"
+            ).fetchall()
+        ]
+
+
+def apply_broker_close_pnl(
+    trade_id: str, net: float, close_price: float,
+) -> None:
+    """Overwrite a reconciled row's P&L with the broker's own figure.
+
+    record_close prices the remaining lots using the app's fee model, which is
+    an estimate. The broker's deal P&L is the truth -- without this the
+    repaired row reports a subtly different number from the account statement.
+    """
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_simulated_trades "
+            "SET net_pnl=?, mt5_profit=?, close_price=?, exit_reason=? "
+            "WHERE trade_id=?",
+            (net, net, close_price, "reconciled_broker_closed", trade_id),
+        )

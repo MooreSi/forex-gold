@@ -132,3 +132,29 @@ class TestRecordPlaceholderFill:
             _trade(conn, "t2")
         repair_repo.record_placeholder_fill("t1", 4242, 4000.75, 0.05, 0.05, -12.34)
         assert _row("t2")["entry_price"] == 0.0
+
+
+class TestFetchReconcilableTrades:
+    """Which rows the orphan reconciler even looks at. The existing suite
+    covered what it does with a row once it has one, but not the selection --
+    replacing the WHERE clause with `1=1` left it green, so the filter is
+    pinned here."""
+
+    def test_finds_an_open_trade_with_a_broker_ticket(self, fresh_db):
+        with fresh_db.db() as conn:
+            _trade(conn, "t1", mt5_ticket=555, entry_price=4000.5)
+        assert [r["trade_id"] for r in repair_repo.fetch_reconcilable_trades()] == ["t1"]
+
+    @pytest.mark.parametrize("why, over", [
+        # Already closed -- reconciling it would rewrite a settled P&L.
+        ("closed",      {"status": "closed", "mt5_ticket": 555}),
+        # No broker position to reconcile against. These are the template
+        # placeholders, and they have their own repair path with its own
+        # guard; this scan must not pick them up as well.
+        ("no ticket",   {"mt5_ticket": None}),
+        ("zero ticket", {"mt5_ticket": 0}),
+    ])
+    def test_excludes(self, fresh_db, why, over):
+        with fresh_db.db() as conn:
+            _trade(conn, "t1", **over)
+        assert repair_repo.fetch_reconcilable_trades() == [], why

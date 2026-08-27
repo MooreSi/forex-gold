@@ -1,4 +1,11 @@
-"""The reversal engine's own tables.
+"""The reversal engine's own tables -- the schema half of its repo.
+
+Named `_repo_schema` rather than `_schema` deliberately: the structure gate
+identifies the data layer partly by filename (`*_repo.py`, `backend/src/db/`,
+`backend/migrations/`), and SQL is allowed there and nowhere else. Splitting
+DDL out under a name the gate does not recognise as data layer would have
+reported it as SQL leaking into a service, which is exactly what that gate is
+for. It is repo code, so it says so.
 
 Lifted out of reversal_engine_repo.py, which sat 42 lines over the 800-line
 ceiling with 127 of them here. Pure DDL: one blob, one caller.

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 from backend.src.config import get as cfg_get
 from backend.src.db import connection as _conn_mod
-from backend.src.services.reversal_engine import _schema
+from backend.src.services.reversal_engine import _repo_schema
 
 _NAMESPACE = "reversal_engine"
 
@@ -52,7 +52,7 @@ _STARTING_BALANCE = 1000.0
 
 def init(db_path: str) -> None:
     init_db(db_path)
-    _schema.create_schema(get_db)
+    _repo_schema.create_schema(get_db)
     _run_migrations()
     reconcile_balance_with_trades()
 

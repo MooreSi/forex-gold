@@ -8,6 +8,15 @@ import logging
 import re
 from typing import Optional
 
+# Re-exported so every existing caller keeps importing these from parser.
+from backend.src.services.signals._tp_autocorrect import _autocorrect_tps  # noqa: F401
+from backend.src.services.signals._learned_rules import (  # noqa: F401
+    apply_learned_rule,
+    apply_sl_adjustment_rule,
+    check_sl_adjustment_rules,
+    parse_with_learned_rules,
+)
+
 _log = logging.getLogger(__name__)
 
 # Currency guard — capture a wider token (allows "XAU/USD", "XAU-USD") and
@@ -191,81 +200,6 @@ def is_format_ab_signal(text: str, prefix: Optional[str] = None) -> bool:
 
 def _f(s: str) -> float:
     return float(str(s).replace(",", "").strip())
-
-
-def _autocorrect_tps(direction: str, entry_low: float, entry_high: float,
-                     raw: dict) -> dict:
-    """
-    Detect and fix malformed TP levels in a freshly parsed signal dict.
-
-    Three classes of problem corrected:
-    1. TPs on the wrong side of the entry zone (below entry for BUY, above for
-       SELL) — dropped.
-    2. TPs out of monotonic order — re-sorted into the correct direction.
-    3. Gaps left after dropping invalid TPs — extrapolated forward using the
-       step between the last two valid TPs.
-
-    Returns the (possibly modified) dict.  Logs a WARNING for every channel
-    that sent a malformed signal so the correction is visible in the app log.
-    """
-    is_buy   = direction.upper() == "BUY"
-    ref      = entry_high if is_buy else entry_low
-    keys     = [f"tp{i}" for i in range(1, 9)]
-    provided = [(k, raw[k]) for k in keys if raw.get(k) is not None]
-
-    if not provided:
-        return raw
-
-    fixes: list[str] = []
-
-    # ── 1. Drop TPs on the wrong side of entry ────────────────────────────────
-    valid: list[float] = []
-    for k, v in provided:
-        if (is_buy and v <= ref) or (not is_buy and v >= ref):
-            fixes.append(f"{k}={v:.2f} dropped (wrong side of entry {ref:.2f})")
-        else:
-            valid.append(v)
-
-    if not valid:
-        if fixes:
-            _log.warning("[SignalParser] TP autocorrect: all TPs invalid — %s", "; ".join(fixes))
-        return raw  # nothing salvageable; leave as-is so validate_signal surfaces the error
-
-    # ── 2. Sort + deduplicate ─────────────────────────────────────────────────
-    seen: set[float] = set()
-    ordered: list[float] = []
-    for v in sorted(valid, reverse=(not is_buy)):
-        if v not in seen:
-            seen.add(v)
-            ordered.append(v)
-
-    original = [v for _, v in provided]
-    if ordered != original:
-        fixes.append(
-            f"reordered {[f'{v:.2f}' for v in original]} "
-            f"-> {[f'{v:.2f}' for v in ordered]}"
-        )
-
-    # ── 3. Extrapolate to restore the original TP count ───────────────────────
-    target = len(provided)
-    while len(ordered) < target and len(ordered) >= 2:
-        step    = ordered[-1] - ordered[-2]
-        new_val = round(ordered[-1] + step, 2)
-        slot    = f"tp{len(ordered) + 1}"
-        fixes.append(f"{slot} extrapolated as {new_val:.2f} (step {step:+.2f})")
-        ordered.append(new_val)
-
-    if fixes:
-        _log.warning(
-            "[SignalParser] TP autocorrect on %s signal — %s",
-            direction, "; ".join(fixes),
-        )
-
-    # ── 4. Write corrected values back ────────────────────────────────────────
-    corrected = dict(raw)
-    for i, k in enumerate(keys):
-        corrected[k] = ordered[i] if i < len(ordered) else None
-    return corrected
 
 
 def parse_instant_entry(text: str) -> Optional[tuple]:
@@ -771,126 +705,3 @@ def validate_signal(direction: str, entry_low: float, entry_high: float,
 # message parsing use to actually run a rule, so there is exactly one
 # implementation of "how a rule turns into extracted values" to keep correct.
 
-_TP_NUMBER_RE = re.compile(r"\d+\.?\d*")
-_RULE_PATTERN_MAX_LEN = 300
-
-
-def _safe_compile_rule_pattern(pattern: str):
-    if not pattern or len(pattern) > _RULE_PATTERN_MAX_LEN:
-        return None
-    try:
-        return re.compile(pattern, re.IGNORECASE | re.DOTALL)
-    except re.error:
-        return None
-
-
-def apply_learned_rule(rule: dict, text: str) -> Optional[dict]:
-    """Run one AI-derived rule (gate/direction/entry/sl/tp_block patterns)
-    against text. Returns a parse_gold_signal()-shaped dict, or None if the
-    rule doesn't match this text at all (a normal, expected outcome — most
-    rules only apply to messages of the one shape they were derived from)."""
-    gate = _safe_compile_rule_pattern(rule.get("gate_pattern", ""))
-    direction_p = _safe_compile_rule_pattern(rule.get("direction_pattern", ""))
-    entry_p = _safe_compile_rule_pattern(rule.get("entry_pattern", ""))
-    sl_p = _safe_compile_rule_pattern(rule.get("sl_pattern", ""))
-    tp_p = _safe_compile_rule_pattern(rule.get("tp_block_pattern", ""))
-    if not all([gate, direction_p, entry_p, sl_p, tp_p]):
-        return None
-    if not gate.search(text):
-        return None
-
-    dm = direction_p.search(text)
-    if not dm or dm.lastindex != 1:
-        return None
-    direction = dm.group(1).upper()
-    if direction not in ("BUY", "SELL"):
-        return None
-
-    em = entry_p.search(text)
-    if not em or em.lastindex != 2:
-        return None
-    try:
-        e1, e2 = float(em.group(1)), float(em.group(2))
-    except ValueError:
-        return None
-
-    slm = sl_p.search(text)
-    if not slm or slm.lastindex != 1:
-        return None
-    try:
-        sl_val = float(slm.group(1))
-    except ValueError:
-        return None
-
-    tpm = tp_p.search(text)
-    if not tpm or tpm.lastindex != 1:
-        return None
-    tps = [float(m) for m in _TP_NUMBER_RE.findall(tpm.group(1))][:8]
-    if not tps:
-        return None
-
-    raw = {
-        "direction": direction,
-        "entry_low": min(e1, e2),
-        "entry_high": max(e1, e2),
-        "stop_loss": sl_val,
-    }
-    for i in range(1, 9):
-        raw[f"tp{i}"] = tps[i - 1] if i <= len(tps) else None
-    return _autocorrect_tps(direction, raw["entry_low"], raw["entry_high"], raw)
-
-
-def parse_with_learned_rules(text: str, channel_name: str) -> Optional[dict]:
-    """Try every AI-derived rule saved for this channel (most recent first)
-    before the caller ever needs to fall back to a live AI call — the whole
-    point of the approve-and-learn workflow. Returns None if no saved rule
-    matches, in which case the caller proceeds exactly as before."""
-    from backend.src.db import database as _db
-    for rule_row in _db.get_learned_parser_rules(channel_name):
-        try:
-            rule = json.loads(rule_row.get("pattern") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            continue
-        parsed = apply_learned_rule(rule, text)
-        if parsed and parsed.get("tp1") is not None:
-            return parsed
-    return None
-
-
-def apply_sl_adjustment_rule(rule: dict, text: str) -> Optional[float]:
-    """Run one AI-derived SL-adjustment rule (gate_pattern, sl_value_pattern)
-    against text — the sibling of apply_learned_rule() for follow-up "Adjust
-    SL to X" style messages rather than new entry signals. Returns the new
-    stop-loss value, or None if the rule doesn't match (expected for most
-    messages — each rule only applies to the one channel/wording it was
-    derived from)."""
-    gate = _safe_compile_rule_pattern(rule.get("gate_pattern", ""))
-    sl_p = _safe_compile_rule_pattern(rule.get("sl_value_pattern", ""))
-    if not gate or not sl_p:
-        return None
-    if not gate.search(text):
-        return None
-    m = sl_p.search(text)
-    if not m or m.lastindex != 1:
-        return None
-    try:
-        return float(m.group(1))
-    except ValueError:
-        return None
-
-
-def check_sl_adjustment_rules(text: str, channel_name: str) -> Optional[float]:
-    """Try every approved ai_derived_sl_adjust rule for this channel before
-    the caller falls back to a live AI classification call — same
-    approve-and-learn shortcut as parse_with_learned_rules(), for the
-    SL-adjustment message category instead of new entries."""
-    from backend.src.db import database as _db
-    for rule_row in _db.get_learned_rules_by_type(channel_name, "ai_derived_sl_adjust"):
-        try:
-            rule = json.loads(rule_row.get("pattern") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            continue
-        result = apply_sl_adjustment_rule(rule, text)
-        if result is not None:
-            return result
-    return None

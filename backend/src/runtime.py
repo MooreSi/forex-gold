@@ -1257,42 +1257,32 @@ class TradingRuntime:
     # ── Email scheduler ───────────────────────────────────────────────────────
 
     async def _signal_snapshot_loop(self) -> None:
-        """Log a full market snapshot for every Gold Diggers VIP / Institutional
-        signal, so their entry logic can be studied from evidence rather than
-        inferred from screenshots. See core_signal_snapshot.
+        """Supervise the signal-snapshot research log. One tick per 5s.
+
+        The tick -- the per-signal capture plus the 15-minute background
+        negatives and the 60s pro-outcome resolve, each isolated from the
+        others' failures -- is core_signal_snapshot.run_snapshot_cycle.
 
         Polls rather than hooking the parser: vantage_tg_signals has seven
         separate INSERT sites, and a research log must not be able to break
         signal processing. 5s keeps capture lag small enough that the
         candle-derived indicators are effectively contemporaneous.
         """
+        from backend.src.services.positions import core_signal_snapshot as _snap
+
         await asyncio.sleep(20)   # let the bridge settle after startup
+        state = _snap.SnapshotState()
+
         while self._monitor_running:
             try:
-                await _capture_signal_snapshots_impl(self._bridge)
+                await _snap.run_snapshot_cycle(
+                    state, self._bridge,
+                    capture=_capture_signal_snapshots_impl,
+                    background=_capture_background_snapshot_impl)
+            except asyncio.CancelledError:
+                break
             except Exception:
-                log.debug("Signal snapshot capture failed", exc_info=True)
-            # Background negatives every 15 min -- see
-            # core_signal_snapshot.capture_background_snapshot for why the
-            # study is unusable without them.
-            _now_bg = time.time()
-            if _now_bg - getattr(self, "_last_bg_snapshot", 0.0) > 900.0:
-                self._last_bg_snapshot = _now_bg
-                try:
-                    await _capture_background_snapshot_impl(self._bridge)
-                except Exception:
-                    log.debug("Background snapshot failed", exc_info=True)
-            # Walk captured reference signals forward against their own stated
-            # levels, so the corpus records whether each call actually worked
-            # -- see reversal_engine/pro_outcome.py. Every 60s: it resolves
-            # from a cursor, so a slower cadence costs nothing but latency.
-            if _now_bg - getattr(self, "_last_pro_resolve", 0.0) > 60.0:
-                self._last_pro_resolve = _now_bg
-                try:
-                    from backend.src.services.reversal_engine import pro_outcome as _pro_out
-                    await _pro_out.resolve_pending(self._bridge)
-                except Exception:
-                    log.debug("Pro outcome resolve failed", exc_info=True)
+                log.debug("Signal snapshot cycle failed", exc_info=True)
             await asyncio.sleep(5)
     # ── Email scheduler ───────────────────────────────────────────────────────
 

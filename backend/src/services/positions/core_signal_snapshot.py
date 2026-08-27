@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
@@ -280,3 +281,68 @@ async def capture_pending_snapshots(bridge: Any, max_age_s: float = 900.0) -> in
             # Never let a research log interfere with anything.
             log.debug("[SigSnap] capture failed for %s: %s", row.get("tg_message_id"), e)
     return n
+
+
+@dataclass
+class SnapshotState:
+    """What one snapshot tick remembers from the last. Held by the caller --
+    runtime.py creates one before its loop -- so nothing persists at module
+    level between runs."""
+    last_background: float = 0.0
+    last_pro_resolve: float = 0.0
+
+
+BACKGROUND_INTERVAL_S = 900.0
+PRO_RESOLVE_INTERVAL_S = 60.0
+
+
+async def run_snapshot_cycle(
+    state: "SnapshotState", bridge: Any, now: Optional[float] = None, *,
+    capture=None, background=None, resolve=None,
+) -> None:
+    """One tick of the signal-snapshot research log.
+
+    Three cadences share it. The per-signal capture runs every tick, which the
+    caller paces at 5s so the candle-derived indicators stay effectively
+    contemporaneous with the signal. Background negatives run every 15 minutes
+    (see capture_background_snapshot for why the study is unusable without
+    them). The pro-outcome resolve runs every 60s; it walks from a cursor, so a
+    slower cadence costs latency and nothing else.
+
+    Each of the three is caught separately, and a failing slow cadence still
+    advances its own clock. Both matter: this is a research log, and the reason
+    it polls rather than hooking the parser is that it must never be able to
+    break signal processing -- so it must not be able to break itself into a
+    tight retry either.
+
+    The three actions are injectable. runtime.py passes its own module-level
+    aliases, which is the seam tests/runtime/test_background_loops.py patches
+    to drive the loop -- calling the module functions directly here would take
+    a reference that patch never reaches.
+    """
+    now = time.time() if now is None else now
+    _capture = capture or capture_pending_snapshots
+    _background = background or capture_background_snapshot
+
+    try:
+        await _capture(bridge)
+    except Exception:
+        log.debug("Signal snapshot capture failed", exc_info=True)
+
+    if now - state.last_background > BACKGROUND_INTERVAL_S:
+        state.last_background = now
+        try:
+            await _background(bridge)
+        except Exception:
+            log.debug("Background snapshot failed", exc_info=True)
+
+    if now - state.last_pro_resolve > PRO_RESOLVE_INTERVAL_S:
+        state.last_pro_resolve = now
+        try:
+            if resolve is not None:
+                await resolve(bridge)
+            else:
+                from backend.src.services.reversal_engine import pro_outcome as _pro_out
+                await _pro_out.resolve_pending(bridge)
+        except Exception:
+            log.debug("Pro outcome resolve failed", exc_info=True)

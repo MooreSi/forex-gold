@@ -49,6 +49,10 @@ ALLOWLIST_PATH = Path(__file__).parent / "orphan_module_allowlist.json"
 EXCLUDED_DIRS = {"tests", ".git", ".venv", "venv", "docs", "installer", "mql5",
                  "__pycache__", "tools", "latest_logs", "archived_logs",
                  "scratchpad", "build", "dist",
+                 # Agent worktrees are full second checkouts -- see the note in
+                 # orphan_detector.EXCLUDED_DIRS and
+                 # tests/refactor/test_scanners_ignore_worktrees.py.
+                 ".claude",
                  "notebooks"}  # offline data-science lab: standalone scripts, never imported by the app
 
 # The roots of the production import graph. Every module the running app (or a

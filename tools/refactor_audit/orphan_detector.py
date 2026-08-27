@@ -38,6 +38,12 @@ ALLOWLIST_PATH = Path(__file__).parent / "orphan_allowlist.json"
 # module reachable only from its own test is exactly what we're hunting for.
 EXCLUDED_DIRS = {"tests", ".git", ".venv", "venv", "docs", "installer", "mql5",
                  "__pycache__", "tools",
+                 # Agent worktrees live under .claude/worktrees/<name>/ and are
+                 # COMPLETE second checkouts of this repo. Without this, one
+                 # background task doubles every scan and turns four gates red
+                 # with several hundred phantom findings, none actionable.
+                 # See tests/refactor/test_scanners_ignore_worktrees.py.
+                 ".claude",
                  "notebooks"}  # offline data-science lab: standalone scripts, never imported by the app
 
 

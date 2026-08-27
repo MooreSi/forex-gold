@@ -3,19 +3,127 @@
     "Shrink-only ratchet. Every number here may fall and may not rise;",
     "a file absent from a section may not appear in it.",
     "Regenerate with: python -m tools.refactor_audit.structure_gates",
-    "--update-baseline, and only when the totals have gone DOWN."
+    "--update-baseline, and only when the totals have gone DOWN.",
+    "",
+    "EXCEPTION: four loc entries were raised once, on 2026-08-27, with the",
+    "owner's sign-off. Each rise is recorded in _raised below with the reason",
+    "and the number it replaced. A rise with no entry there is a regression,",
+    "not a decision -- put the lines back rather than editing this file."
   ],
+  "_raised": {
+    "_when": "2026-08-27",
+    "_why": [
+      "The upstream merge (1e383fe) added nine supervised subsystems plus a",
+      "set of upstream features. Four baselined files grew. The alternative",
+      "to raising these four was moving close-path code (close_trade and its",
+      "callers in runtime.py), which is frozen and needs a demo session.",
+      "The owner chose the raise.",
+      "Every other file in this ratchet still holds its original floor, and",
+      "ea_bridge.py was SPLIT rather than baselined (1947 -> 715) instead of",
+      "being added here. The sql section went 56 statements -> 0 in the same",
+      "series. This is four recorded exceptions, not a general reset."
+    ],
+    "backend/src/runtime.py": {
+      "was": 1310,
+      "now": 1509,
+      "why": [
+        "The merge added nine methods to TradingRuntime: six supervisor loops",
+        "(_auto_template, _closed_market_queue, _ea_link_watchdog,",
+        "_ref_backfill, _signal_snapshot, _revalidate_pending_orders) plus",
+        "close_cmd, schedule_profit_sync and _await_trade_promotion.",
+        "The class is 88 methods averaging 12 lines, so returning to 1310",
+        "means deleting ~16 whole methods. The largest remaining are",
+        "_close_full_after_tps (53) and _cmd_close (45), both close-path.",
+        "Two loop bodies WERE relocated into their services first",
+        "(auto-template and signal snapshot, 1569 -> 1509) with 20 new tests",
+        "on logic that had none. The rest is not reachable without touching",
+        "frozen code.",
+        "facade_baseline.json rose from 79 to 88 for the same nine methods --",
+        "the two numbers are one fact stated twice and must move together."
+      ]
+    },
+    "mt5_bridge.py": {
+      "was": 1335,
+      "now": 1344,
+      "why": [
+        "A PII fix, not growth. The MT5 connect log carried the account",
+        "number, the broker server and the balance, and the diagnostics",
+        "feature uploads ~3,000 raw log lines to the admin server -- so every",
+        "one of them carried it (Q005 #1 in",
+        "docs/simon-handover/005-fact-finding.md, confirmed from real",
+        "captured logs). Seven of the nine lines are the comment recording",
+        "that. Deleting them to satisfy a line count would be the wrong",
+        "trade. The file is exempt from splitting anyway: it runs under a",
+        "different interpreter."
+      ]
+    },
+    "backend/src/services/cluster/sync/server.py": {
+      "was": 1073,
+      "now": 1085,
+      "why": [
+        "Three execution-affecting settings joined the cross-node sync list:",
+        "internal_hedge_mode, internal_net_exposure_max_lots and",
+        "re_learn_from_ref_signals. Whichever node is the active trader reads",
+        "these before executing, so a flag set on one side that never reaches",
+        "the other is a live divergence between what the operator set and",
+        "what actually trades. Each entry carries its own comment."
+      ]
+    },
+    "backend/src/services/cluster/remote/server.py": {
+      "was": 1196,
+      "now": 1256,
+      "why": [
+        "THE LEAST COMFORTABLE OF THE FOUR, recorded as such deliberately.",
+        "This is licence-key issuance (Ed25519 signing through a",
+        "KeyGen-registered callback), the Telegram approve-registration",
+        "buttons, and per-client build tracking.",
+        "It has ZERO tests. That is also why it sits on the blocked-on-tests",
+        "list in docs/system/rules/70-file-organisation.md rather than in the",
+        "split queue.",
+        "Raising this baseline buys nothing but a green gate. It does not",
+        "make the file safer, and it removes the one signal that would have",
+        "flagged the next unreviewed growth in the code that issues licences",
+        "and grants admin authority.",
+        "The tests are deferred, not cancelled -- docs/todo/testing/012.",
+        "When they land, this entry should come back down."
+      ]
+    }
+  },
+  "_tightened": {
+    "_when": "2026-08-27",
+    "_why": [
+      "Found while checking that the four raises above sat exactly on reality",
+      "rather than leaving slack. Three entries had drifted the OTHER way:",
+      "the files shrank and nobody lowered their number, so the ratchet was",
+      "holding a ceiling well above the code and could not have caught",
+      "regrowth up to it. Lowering is always permitted by the rule at the top",
+      "of this file, so these needed no sign-off.",
+      "",
+      "  backend/src/db/database.py            1251 -> removed (now 457)",
+      "  backend/src/services/cluster/remote/client.py  920 -> 894",
+      "  frontend/pages/test_panel.py         1246 -> 1245",
+      "",
+      "database.py is DELETED from the section rather than lowered: at 457 it",
+      "is under the 800 ceiling entirely, so it is no longer a violation, and",
+      "a file absent from a section may not reappear in it. That is stricter",
+      "than any number would be -- it can never cross 800 again without",
+      "failing the gate. It had 794 lines of headroom before this.",
+      "",
+      "The lesson is the one CLAUDE.md already states: green output is not",
+      "evidence. This gate was green on those three files because its ceiling",
+      "was too high to touch, not because the files were healthy."
+    ]
+  },
   "baseline": {
     "loc": {
-      "backend/src/db/database.py": 1251,
-      "backend/src/runtime.py": 1310,
-      "backend/src/services/cluster/remote/client.py": 920,
-      "backend/src/services/cluster/remote/server.py": 1196,
+      "backend/src/runtime.py": 1509,
+      "backend/src/services/cluster/remote/client.py": 894,
+      "backend/src/services/cluster/remote/server.py": 1256,
       "backend/src/services/cluster/sync/client.py": 867,
-      "backend/src/services/cluster/sync/server.py": 1073,
+      "backend/src/services/cluster/sync/server.py": 1085,
       "frontend/pages/ai_trade_analysis.py": 1250,
-      "frontend/pages/test_panel.py": 1246,
-      "mt5_bridge.py": 1335
+      "frontend/pages/test_panel.py": 1245,
+      "mt5_bridge.py": 1344
     },
     "sql": {},
     "transaction": {

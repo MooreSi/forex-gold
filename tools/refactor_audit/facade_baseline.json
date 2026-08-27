@@ -1,3 +1,24 @@
 {
-  "method_count": 79
+  "_comment": [
+    "The TradingRuntime class only shrinks. Raise this only with the owner's",
+    "sign-off and a recorded reason, the same rule structure_baseline.json",
+    "carries -- these two numbers describe the same class and move together.",
+    "",
+    "Raised once, 2026-08-27, from 79 to 88. The upstream merge (1e383fe)",
+    "added nine methods: six supervisor loops (_auto_template_loop,",
+    "_closed_market_queue_loop, _ea_link_watchdog_loop, _ref_backfill_loop,",
+    "_signal_snapshot_loop, _revalidate_pending_orders) plus close_cmd,",
+    "schedule_profit_sync and _await_trade_promotion.",
+    "",
+    "None of them is a leaked implementation of the kind M4 B3-B9 deleted --",
+    "the public surface still matches facade_allowlist.json exactly, and six",
+    "of the nine are loops a supervisor is supposed to own. Getting back to",
+    "79 means removing whole responsibilities, and the biggest ones left",
+    "(_close_full_after_tps, _cmd_close) are close-path and frozen.",
+    "",
+    "Two of the nine loop BODIES were relocated into their services before",
+    "this rise, with 20 new tests. That is the shape any future reduction",
+    "should take: the method stays, the decision logic leaves."
+  ],
+  "method_count": 88
 }

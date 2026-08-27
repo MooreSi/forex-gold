@@ -124,8 +124,16 @@ Each of these cost real time in a past session:
   regress it. Inject config values from `frontend/app.py` (already a
   baselined site) instead.
 - **Repo-wide scripts must exclude** `.git`, `.venv`, `__pycache__`,
-  `docs/todo/refactor/stage0/` (audit trail) and `docs/reviews/`
-  (point-in-time snapshots).
+  `.claude/` (agent worktrees), `docs/todo/refactor/stage0/` (audit trail)
+  and `docs/reviews/` (point-in-time snapshots).
+- **`.claude/worktrees/<name>/` is a COMPLETE second checkout.** Spawning one
+  background task took four gates from green to red with ~370 duplicated
+  files: the LOC gate reported the worktree's `runtime.py` as a new
+  violation, the orphan gate reported ~300 unrecorded orphans, and the
+  duplicate-implementation detector found every function twice. None of it
+  was real. Both scanner `EXCLUDED_DIRS` sets now carry `.claude`; if you add
+  a third scanner, it needs the same. Pinned by
+  `tests/refactor/test_scanners_ignore_worktrees.py`.
 - **PS 5.1 `;` chains continue past failures** (no `&&`) — verify state
   after multi-step git chains.
 - Check doc links after moving files: `python tools/check_doc_links.py`.

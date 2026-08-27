@@ -24,7 +24,6 @@ from backend.src.utils.models import (
 from backend.src.services.broker.mt5_client import MT5BridgeClient
 from backend.src.services.broker.mt5_native import NativeMT5Bridge, is_available as _native_bridge_available
 from backend.src.services.broker.debug_guard import reject_real_bridge_in_debug as _reject_real_bridge_in_debug
-from backend.src.services.signals.parser import is_gd2_message
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.ai import provider as ai_provider

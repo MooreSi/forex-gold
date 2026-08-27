@@ -129,6 +129,20 @@ Each of these cost real time in a past session:
 - **PS 5.1 `;` chains continue past failures** (no `&&`) — verify state
   after multi-step git chains.
 - Check doc links after moving files: `python tools/check_doc_links.py`.
+- **After restoring a mutated source file, delete `__pycache__`.** Python
+  invalidates bytecode on mtime + size. A mutation that swaps two things of
+  the same length (`(sl, tp, id)` -> `(tp, sl, id)`) restored with `cp` in the
+  same second leaves BOTH unchanged, so the interpreter reuses the *mutated*
+  `.pyc`. This reports the mutant as survived and then runs the rest of the
+  session against code that is not on disk. Cost: one wrong "this test is
+  vacuous" conclusion, found only because a later test failed in a way the
+  source could not explain.
+  ```bash
+  find . -name '__pycache__' -type d -not -path './.venv/*' -exec rm -rf {} +
+  ```
+  Note the asymmetry: a stale `.pyc` can only turn a KILLED mutant into a
+  survivor, never the reverse. A mutant that failed a test is always a real
+  result; a mutant that "survived" a same-length edit is not.
 
 ## Do not
 

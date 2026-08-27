@@ -20,6 +20,7 @@ from typing import Any
 
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
+from backend.src.services.signals import tg_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.update_signal import update_signal
 from backend.src.utils.models import (
@@ -72,12 +73,7 @@ async def apply_followup_to_instant_trade(
             trade_id[:8], instant_trade.get("strategy"),
         )
         if signal_id:
-            with db_module.db() as conn:
-                conn.execute(
-                    "UPDATE vantage_tg_signals SET status='followup_applied', signal_id=?"
-                    " WHERE tg_message_id=?",
-                    (signal_id, tg_id),
-                )
+            tg_repo.mark_followup_applied(tg_id, signal_id)
         return
 
     # Strategies that calculate their own SL/TP from the actual fill price must

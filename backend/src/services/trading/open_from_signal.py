@@ -178,14 +178,7 @@ async def open_trade_from_signal(
         _fr_fill = float(result.get("entry_price", _entry_mid))
         exact_sl = round(_fr_fill - _sign * _fr_p["sl_pt"], 2)
         exact_tp = round(_fr_fill + _sign * _fr_p["tp_pt"], 2)
-        with db_module.db() as conn:
-            conn.execute(
-                """UPDATE vantage_simulated_trades
-                   SET stop_loss=?, tp1=?, tp2=NULL, tp3=NULL, tp4=NULL,
-                       tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
-                   WHERE trade_id=?""",
-                (exact_sl, exact_tp, result["trade_id"]),
-            )
+        trade_repo.apply_fixed_rr_levels(result["trade_id"], exact_sl, exact_tp)
         mt5_tkt = result.get("mt5_ticket")
         if mt5_tkt:
             try:

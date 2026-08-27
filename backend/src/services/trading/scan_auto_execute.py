@@ -38,6 +38,7 @@ from typing import Any, Awaitable, Callable, Optional
 from backend.src.db import database as db_module
 from backend.src.services.broker import ea_bridge
 from backend.src.services.trading import trade_repo
+from backend.src.services.signals import repo as signals_repo
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading.open_trade import open_trade as _real_open_trade
 from backend.src.services.risk.strategy_params import get_strategy_params
@@ -348,27 +349,18 @@ async def execute_auto_signal(
                             _tpl_grid = bool(_tpl) and _tpl.get("mode") == "grid"
 
                         if _tpl_grid:
-                            with db_module.db() as conn:
-                                conn.execute(
-                                    """INSERT INTO vantage_signals
-                                       (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
-                                        tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
-                                        lot_size,notes,status,created_at,activated_at)
-                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (signal_id, f"Telegram Auto ({source_label})",
-                                     direction, el, eh, float(parsed["stop_loss"]),
-                                     parsed["tp1"], parsed["tp2"], parsed["tp3"],
-                                     parsed["tp4"], parsed["tp5"],
-                                     parsed.get("tp6"), parsed.get("tp7"), parsed.get("tp8"),
-                                     lot,
-                                     f"Grid template pending order from Telegram {tg_id} ({source_label})",
-                                     "active", time.time(), time.time()),
-                                )
-                                conn.execute(
-                                    "UPDATE vantage_tg_signals SET status='activated',signal_id=?"
-                                    " WHERE tg_message_id=?",
-                                    (signal_id, tg_id),
-                                )
+                            signals_repo.insert_activated_grid_signal(
+                                signal_id, tg_id,
+                                f"Telegram Auto ({source_label})",
+                                direction, el, eh, float(parsed["stop_loss"]),
+                                (parsed["tp1"], parsed["tp2"], parsed["tp3"],
+                                 parsed["tp4"], parsed["tp5"],
+                                 parsed.get("tp6"), parsed.get("tp7"),
+                                 parsed.get("tp8")),
+                                lot,
+                                f"Grid template pending order from Telegram "
+                                f"{tg_id} ({source_label})",
+                            )
                             try:
                                 trade_result = await open_trade_fn(
                                     signal_id=signal_id, direction=direction,

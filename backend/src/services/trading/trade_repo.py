@@ -765,3 +765,23 @@ def apply_profit_sync(trade_id: str, mt5_profit: float, risk_total: float,
                 (mt5_profit, trade_id),
             )
     return applied
+
+
+def apply_fixed_rr_levels(trade_id: str, stop_loss: float, take_profit: float) -> None:
+    """Replace a Fixed R:R trade's SL and TP ladder with the two exact levels
+    computed from the actual fill.
+
+    tp2..tp8 are explicitly NULLed rather than left alone: the pre-fill proxy
+    row may carry the signal's own ladder, and this strategy is deliberately
+    unmanaged after open -- a stale tp2 would be a target nothing is watching.
+    The caller pushes the same two levels to the broker; see open_from_signal
+    for why its return value has to be checked rather than trusted.
+    """
+    with db() as conn:
+        conn.execute(
+            """UPDATE vantage_simulated_trades
+               SET stop_loss=?, tp1=?, tp2=NULL, tp3=NULL, tp4=NULL,
+                   tp5=NULL, tp6=NULL, tp7=NULL, tp8=NULL
+               WHERE trade_id=?""",
+            (stop_loss, take_profit, trade_id),
+        )

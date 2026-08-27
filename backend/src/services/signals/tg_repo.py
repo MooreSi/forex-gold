@@ -191,3 +191,19 @@ def get_tg_signal_meta(tg_id):
             "SELECT id, direction, status, raw_text, entry_low FROM vantage_tg_signals "
             "WHERE tg_message_id=?", (tg_id,)
         ).fetchone()
+
+
+def mark_followup_applied(tg_id, signal_id: str) -> None:
+    """Acknowledge a follow-up message without applying it.
+
+    Used when the trade is EA-managed: the follow-up's raw levels must NOT
+    overwrite the template's own SL/TP (confirmed live on trade 86576593),
+    but the row still has to leave 'pending' or the IME watchdog waits on it
+    forever.
+    """
+    with db_module.db() as conn:
+        conn.execute(
+            "UPDATE vantage_tg_signals SET status='followup_applied', signal_id=?"
+            " WHERE tg_message_id=?",
+            (signal_id, tg_id),
+        )

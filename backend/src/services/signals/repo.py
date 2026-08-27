@@ -16,6 +16,7 @@ import time
 import uuid
 from typing import Optional
 
+from backend.src.db import transaction
 from backend.src.db import database as db_module
 from backend.src.services.signals.parser import validate_signal
 
@@ -239,3 +240,42 @@ def has_pending_order(signal_id: str) -> bool:
             (signal_id,),
         ).fetchone()
     return row is not None
+
+
+def insert_activated_grid_signal(
+    signal_id: str, tg_id, source_name: str, direction: str,
+    entry_low: float, entry_high: float, stop_loss: float,
+    tps: tuple, lot_size: float, notes: str,
+) -> None:
+    """Record a grid-template signal that is being placed immediately, and
+    mark the Telegram row that produced it activated.
+
+    One transaction, because the two halves are one fact: a signal row with no
+    activated tg row gets re-scanned and placed a second time, and an
+    activated tg row with no signal row leaves the grid legs resting at the
+    broker with nothing in the app pointing at them.
+
+    Written as 'active' with activated_at already set -- unlike every other
+    strategy this path does not queue and wait for price to re-enter the zone.
+    The resting grid legs ARE the wait, watched by MT5 rather than by a Python
+    poll (see scan_auto_execute for the live incident behind that).
+
+    `tps` is tp1..tp8 in order; short tuples are padded with None.
+    """
+    tp = (tuple(tps) + (None,) * 8)[:8]
+    now = time.time()
+    with transaction() as conn:
+        conn.execute(
+            """INSERT INTO vantage_signals
+               (signal_id,source_name,direction,entry_low,entry_high,stop_loss,
+                tp1,tp2,tp3,tp4,tp5,tp6,tp7,tp8,
+                lot_size,notes,status,created_at,activated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (signal_id, source_name, direction, entry_low, entry_high, stop_loss,
+             *tp, lot_size, notes, "active", now, now),
+        )
+        conn.execute(
+            "UPDATE vantage_tg_signals SET status='activated',signal_id=?"
+            " WHERE tg_message_id=?",
+            (signal_id, tg_id),
+        )

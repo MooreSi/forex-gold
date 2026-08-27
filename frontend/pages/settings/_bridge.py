@@ -17,8 +17,8 @@ def _wine_bin() -> str:
     """Wine binary — reads from config (wine_bin key).
     Defaults to CrossOver's binary which ships on this machine; update config.yaml
     to /opt/homebrew/bin/wine after installing a system Wine via Homebrew."""
-    import backend.src.config as _cfg
-    return (_cfg.get("wine_bin") or "").strip() or \
+    from backend.src.controllers import settings_controller as _cfg
+    return (_cfg.get_config("wine_bin") or "").strip() or \
         "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
 
 
@@ -27,8 +27,8 @@ def _mt5_bottle_path() -> str:
     After running setup_wine_bridge.sh this is ~/.wine_mt5 — an independent
     prefix that does not require CrossOver to be installed."""
     import os as _os
-    import backend.src.config as _cfg
-    return (_cfg.get("mt5_bottle_path") or "").strip() or \
+    from backend.src.controllers import settings_controller as _cfg
+    return (_cfg.get_config("mt5_bottle_path") or "").strip() or \
         _os.path.expanduser("~/.wine_mt5")
 
 
@@ -42,7 +42,7 @@ def _render_bridge_control(engine):
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mb-4"):
         ui.label("MT5 Bridge Control").classes("font-bold text-yellow-300 mb-3")
 
-        _cfg_now = cfg_module.load()
+        _cfg_now = cfg_module.load_config()
 
         # ── Backend selector (macOS only — Wine/CrossOver not needed on Windows) ─
         if sys.platform != "win32":
@@ -62,7 +62,7 @@ def _render_bridge_control(engine):
                 )
 
                 def _save_backend():
-                    cfg_module.save_to_yaml({"bridge_backend": backend_sel.value})
+                    cfg_module.save_config({"bridge_backend": backend_sel.value})
                     _update_backend_hint()
                     ui.notify(f"Backend set to {backend_sel.value}", type="positive")
 
@@ -105,7 +105,7 @@ def _render_bridge_control(engine):
             )
 
         def _save_bridge_url():
-            cfg_module.save_to_yaml({"mt5_bridge_url": bridge_url_inp.value.strip()})
+            cfg_module.save_config({"mt5_bridge_url": bridge_url_inp.value.strip()})
             ui.notify("Bridge URL saved", type="positive")
 
         ui.button("Save URL", icon="save", on_click=_save_bridge_url).classes(
@@ -154,7 +154,7 @@ def _render_bridge_control(engine):
                 bridge_log_lbl.classes(replace="text-xs text-red-400 font-mono whitespace-pre-wrap")
                 return
 
-            env = cfg_module.get("account_env", "demo")
+            env = cfg_module.get_config("account_env", "demo")
             ok  = settings_ctl.sync_bridge_credentials_file(env)
             if not ok:
                 bridge_log_lbl.text = (
@@ -167,10 +167,10 @@ def _render_bridge_control(engine):
             try:
                 # ── Windows: run bridge natively without Wine ─────────────────
                 if sys.platform == "win32":
-                    from backend.src.config import USER_DATA_DIR
+                    from backend.src.controllers.settings_controller import USER_DATA_DIR
                     from urllib.parse import urlparse as _urlparse
                     _creds_path  = str(USER_DATA_DIR / "bridge_credentials.json")
-                    _bridge_port = _urlparse(cfg_module.get("mt5_bridge_url", "")).port or 9010
+                    _bridge_port = _urlparse(cfg_module.get_config("mt5_bridge_url", "")).port or 9010
                     _env_vars   = {
                         **os.environ,
                         "MT5_BRIDGE_PORT":   str(_bridge_port),
@@ -279,11 +279,11 @@ def _render_bridge_control(engine):
                 # file from this checkout's own USER_DATA_DIR (config.py) --
                 # NOT the live app's shared ~/Library/Application Support/
                 # ForexTrader/ folder.
-                import backend.src.config as _cfg_mod
+                from backend.src.controllers import settings_controller as _cfg_mod
                 _mac_creds = str(_cfg_mod.USER_DATA_DIR / "bridge_credentials.json")
                 _win_creds = "Z:" + _mac_creds.replace("/", "\\")
                 from urllib.parse import urlparse as _urlparse
-                _bridge_port = _urlparse(_cfg_mod.get("mt5_bridge_url", "")).port or 9010
+                _bridge_port = _urlparse(_cfg_mod.get_config("mt5_bridge_url", "")).port or 9010
                 env_vars = {
                     **os.environ,
                     "WINEPREFIX":        _bottle,

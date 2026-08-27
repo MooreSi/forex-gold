@@ -6,7 +6,7 @@ from typing import Optional
 
 from nicegui import ui
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import dpm_controller as dpm_controller
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

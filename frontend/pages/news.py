@@ -98,7 +98,7 @@ def render() -> None:
             ).classes("text-xs text-gray-500")
 
         def _save_settings():
-            cfg_module.save_to_yaml({
+            cfg_module.save_config({
                 "news_blackout_enabled":        bool(blackout_sw.value),
                 "news_blackout_impact":         str(impact_sel.value),
                 "news_blackout_minutes_before": int(before_in.value or 0),

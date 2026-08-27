@@ -5,7 +5,7 @@ from typing import Callable
 
 from nicegui import ui
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from frontend.pages import ai_trade_analysis as _ai_analysis
 
 # Imported and unused, deliberately, and only until someone unpicks it:
@@ -42,7 +42,7 @@ __all__ = [
 
 def render(get_engine: Callable):
     engine  = get_engine()
-    cfg     = cfg_module.load()
+    cfg     = cfg_module.load_config()
     cur_env = cfg.get("account_env", "demo")
     # ── Performance summary cards (live from MT5) ─────────────────────────────
     def _perf_card(label: str, init: str = "—", val_cls: str = "text-white"):

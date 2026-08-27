@@ -76,7 +76,7 @@ def _render_heatmap(engine):
         import asyncio as _asyncio
         import json as _json
         from datetime import datetime as _dt
-        from backend.src.config import load as _cfg_load
+        from backend.src.controllers.settings_controller import load_config as _cfg_load
         _analysis_body = _refs["analysis_body"]
 
         stored = history_ctl.get_app_config("heatmap_analysis_cache")

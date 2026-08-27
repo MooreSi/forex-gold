@@ -49,7 +49,7 @@ def _render_ai(engine):
     """AI provider settings: Claude / DeepSeek sub-tabs plus which one is active
     across the app (trade commentary, market analysis, channel strategy AI,
     breakout/test-signal review gates, the strategy builder)."""
-    cfg = cfg_module.load()
+    cfg = cfg_module.load_config()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 border border-purple-600 p-4 rounded-lg mb-4"):
         ui.label("AI Provider").classes("text-base font-bold text-yellow-300 mb-2")
@@ -64,7 +64,7 @@ def _render_ai(engine):
         ).props("inline")
 
         async def _save_provider():
-            cfg_module.save_to_yaml({"ai_provider": provider_radio.value})
+            cfg_module.save_config({"ai_provider": provider_radio.value})
             engine._cfg["ai_provider"] = provider_radio.value
             await _push_ai_config_to_vps({"ai_provider": provider_radio.value})
             ui.notify(f"AI provider set to {provider_radio.value.title()}", type="positive")
@@ -86,7 +86,7 @@ def _render_ai(engine):
 
 def _render_claude_card(engine):
     from backend.src.services.ai import provider as ai_provider
-    cfg = cfg_module.load()
+    cfg = cfg_module.load_config()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
         ui.label("Claude Integration").classes("text-base font-bold text-yellow-300 mb-3")
@@ -124,7 +124,7 @@ def _render_claude_card(engine):
             models = await ai_provider.fetch_available_models("claude", api_key_in.value)
             claude_model_in.set_options(models)
             now = __import__("time").time()
-            cfg_module.save_to_yaml({"claude_models_cache": models, "ai_models_last_refreshed": now})
+            cfg_module.save_config({"claude_models_cache": models, "ai_models_last_refreshed": now})
             engine._cfg["claude_models_cache"]      = models
             engine._cfg["ai_models_last_refreshed"] = now
             refresh_lbl.text = f"Model list last refreshed: {_fmt_last_refresh(now)}"
@@ -154,7 +154,7 @@ def _render_claude_card(engine):
                 test_result.classes(replace="text-sm mt-1 text-red-400")
 
         async def save_config():
-            cfg_module.save_to_yaml({
+            cfg_module.save_config({
                 "anthropic_api_key": api_key_in.value,
                 "claude_model":      claude_model_in.value,
             })
@@ -181,7 +181,7 @@ def _render_claude_card(engine):
 
 def _render_deepseek_card(engine):
     from backend.src.services.ai import provider as ai_provider
-    cfg = cfg_module.load()
+    cfg = cfg_module.load_config()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
         ui.label("DeepSeek Integration").classes("text-base font-bold text-yellow-300 mb-3")
@@ -218,7 +218,7 @@ def _render_deepseek_card(engine):
             models = await ai_provider.fetch_available_models("deepseek", api_key_in.value)
             deepseek_model_in.set_options(models)
             now = __import__("time").time()
-            cfg_module.save_to_yaml({"deepseek_models_cache": models, "ai_models_last_refreshed": now})
+            cfg_module.save_config({"deepseek_models_cache": models, "ai_models_last_refreshed": now})
             engine._cfg["deepseek_models_cache"]    = models
             engine._cfg["ai_models_last_refreshed"] = now
             refresh_lbl.text = f"Model list last refreshed: {_fmt_last_refresh(now)}"
@@ -248,7 +248,7 @@ def _render_deepseek_card(engine):
                 test_result.classes(replace="text-sm mt-1 text-red-400")
 
         async def save_config():
-            cfg_module.save_to_yaml({
+            cfg_module.save_config({
                 "deepseek_api_key": api_key_in.value,
                 "deepseek_model":   deepseek_model_in.value,
             })

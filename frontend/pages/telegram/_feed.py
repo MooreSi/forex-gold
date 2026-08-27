@@ -152,7 +152,7 @@ def _ts_uk(s) -> str:
 
 def _render_stored_messages():
     """Collapsible section showing the last 100 messages stored in telegram_messages."""
-    import backend.src.config as _cfg
+    from backend.src.controllers import settings_controller as _cfg
 
     def _query_messages(limit: int = 100) -> tuple[list[dict], int]:
         return tg_controller.fetch_stored_messages(limit)

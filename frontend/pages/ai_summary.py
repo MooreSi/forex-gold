@@ -10,7 +10,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import settings_controller as settings_controller
 from backend.src.services.analytics import read_repo
 from backend.src.controllers.trading_controller import (
@@ -396,7 +396,7 @@ def render(get_engine: Callable):
 
         try:
             import backend.src.services.ai.claude_ai as claude_ai
-            config  = cfg_module.load()
+            config  = cfg_module.load_config()
             tick    = await engine.get_tick()
             candles = await engine.get_candles("M5", 50)
 

@@ -14,8 +14,8 @@ from ._feed import (
 
 
 def _render_send_code_step(reader, on_done: Callable):
-    import backend.src.config as cfg_module
-    cfg = cfg_module.load()
+    from backend.src.controllers import settings_controller as cfg_module
+    cfg = cfg_module.load_config()
 
     ui.label("Step 1: Send login code").classes("text-sm font-semibold text-gray-300 mb-2")
     api_id   = ui.input("API ID",   value=str(cfg.get("telegram_api_id", "") or "")).classes("w-full")

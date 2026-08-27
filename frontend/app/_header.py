@@ -16,7 +16,7 @@ from typing import Optional
 
 from nicegui import ui
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.app import ADMIN_AVAILABLE, admin_open_fn as _admin_open_fn, get_engine
 from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.utils.version_history import __version__ as _APP_VERSION
@@ -252,7 +252,7 @@ def build_header(*, power_dialog, pause_dialog, root):
 
         acct_lbl    = ui.label(
             "XAUUSD Gold Live"
-            if cfg_module.get("account_env", "demo") == "live"
+            if cfg_module.get_config("account_env", "demo") == "live"
             else "XAUUSD Simulation"
         ).classes("text-xs text-gray-500 px-2 shrink-0")
         conn_badge  = ui.badge("MT5 —", color="grey").classes("text-xs shrink-0")
@@ -568,7 +568,7 @@ def build_header(*, power_dialog, pause_dialog, root):
 
             await _refresh_mode_btn()
 
-            cfg = cfg_module.load()
+            cfg = cfg_module.load_config()
             env = cfg.get("account_env", "demo")
             acct_lbl.text = (
                 "XAUUSD Gold Live" if env == "live" else "XAUUSD Simulation"

@@ -114,7 +114,7 @@ def _render_diagnostics(engine):
         # ── Telegram → execution latency from DB ───────────────────────────
         tg_latency: dict = {}
         try:
-            from backend.src.config import DATA_DIR as _ddir, load as _cfg_load
+            from backend.src.controllers.settings_controller import DATA_DIR as _ddir, load_config as _cfg_load
             _env = _cfg_load().get("account_env", "demo")
             _db_path = str(_ddir / f"forex_trader_{_env}.db")
             try:

@@ -11,7 +11,7 @@ This is a seam, not a fix. The contract wants these values injected from
 frontend/app.py (see docs/system/rules/30-architecture.md); when someone
 does that, this file is the single place to change.
 """
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.utils import os_utils as _pu
 
 __all__ = ["cfg_module", "_pu"]

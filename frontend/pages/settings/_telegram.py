@@ -8,7 +8,7 @@ from ._shared import cfg_module
 
 def _render_tg_bot():
     tg_cfg = settings_ctl.get_telegram_config()
-    cfg    = cfg_module.load()
+    cfg    = cfg_module.load_config()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
         ui.label("Telegram Bot Alerts").classes("text-lg font-bold text-yellow-300 mb-4")
@@ -101,7 +101,7 @@ def _render_tg_bot():
             )
 
         def save_tg_reader():
-            cfg_module.save_to_yaml({
+            cfg_module.save_config({
                 "telegram_api_id":   tg_api_id.value,
                 "telegram_api_hash": tg_api_hash.value,
                 "telegram_phone":    tg_phone.value,

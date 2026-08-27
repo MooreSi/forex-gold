@@ -130,7 +130,7 @@ def _render_cred_card(engine, creds: dict, env: str, status_lbl) -> tuple:
 def _render_mt5(engine):
     import time as _t
 
-    cfg = cfg_module.load()
+    cfg = cfg_module.load_config()
     # Always read credentials from the master (demo) DB — env-independent
     creds = settings_ctl.get_mt5_credentials()
 
@@ -171,7 +171,7 @@ def _render_mt5(engine):
                         settings_ctl.save_mt5_credentials(updates)
 
                         # Keep bridge_credentials.json in sync if this env is active
-                        current_env = cfg_module.get("account_env", "demo")
+                        current_env = cfg_module.get_config("account_env", "demo")
                         if _env == current_env:
                             settings_ctl.sync_bridge_credentials_file(current_env)
 
@@ -295,7 +295,7 @@ def _render_ea_update_button():
     # show what happened is reading back the detached script's own log on
     # the NEXT page load — there's no live handler left to report through.
     try:
-        from backend.src.config import USER_DATA_DIR
+        from backend.src.controllers.settings_controller import USER_DATA_DIR
         _result_log = USER_DATA_DIR / "data" / "ea_update_result.log"
         if _result_log.exists():
             _lines = _result_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
@@ -380,7 +380,7 @@ def _render_ea_update_button():
         # that survives that, mirroring the existing Restart button's own
         # self-relaunch pattern (ui/app.py's _do_restart) but with the MT5
         # terminal restart sandwiched in between stop and relaunch.
-        from backend.src.config import USER_DATA_DIR as _ea_user_data_dir
+        from backend.src.controllers.settings_controller import USER_DATA_DIR as _ea_user_data_dir
         script = _EA_RESTART_PS1_TEMPLATE.format(
             terminal_id=terminal_id, data_folder=_ea_user_data_dir.name,
         )
@@ -388,7 +388,7 @@ def _render_ea_update_button():
         script_path.write_text(script, encoding="utf-8")
 
         from backend.src.utils.os_utils import open_restart_log
-        from backend.src.config import USER_DATA_DIR
+        from backend.src.controllers.settings_controller import USER_DATA_DIR
         log_path = USER_DATA_DIR / "data" / "ea_update_restart.log"
         with open_restart_log(log_path) as _restart_log:
             subprocess.Popen(

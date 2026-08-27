@@ -58,7 +58,7 @@ from nicegui import core as _nicegui_core
 _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 # ── end patch ──────────────────────────────────────────────────────────────────
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import settings_controller as settings_ctl
 from frontend.pages import backtest as backtest_page
 from frontend.pages import news as news_page
@@ -290,7 +290,7 @@ def main_page():
 
 
     # ── Demo / Live env-switch ────────────────────────────────────────────────
-    _cur_env   = cfg_module.get("account_env", "demo")
+    _cur_env   = cfg_module.get_config("account_env", "demo")
     _is_live   = [_cur_env == "live"]   # mutable — updated after confirmed switch
     _reverting = [False]                # guards against recursive toggle events
 
@@ -390,9 +390,9 @@ def main_page():
             return
 
         # 1. Swap DB and persist new env immediately
-        from backend.src.config import DATA_DIR as _DATA_DIR
+        from backend.src.controllers.settings_controller import DATA_DIR as _DATA_DIR
         settings_ctl.switch_environment_db(str(_DATA_DIR / f"forex_trader_{new_env}.db"))
-        cfg_module.save_to_yaml({"account_env": new_env})
+        cfg_module.save_config({"account_env": new_env})
         _is_live[0] = (new_env == "live")
 
         # 2. Write bridge_credentials.json so bridge connects correctly on restart
@@ -502,7 +502,7 @@ def main_page():
             # NiceGUI 3.x on_value_change gives ValueChangeEventArguments with .value
             new_live = bool(e.value)
             new_env  = "live" if new_live else "demo"
-            if new_env == cfg_module.get("account_env", "demo"):
+            if new_env == cfg_module.get_config("account_env", "demo"):
                 return
             if new_live:
                 _live_confirm_dialog.open()
@@ -653,7 +653,7 @@ def main_page():
     open_start_here = _start_here.attach(
         tabs, {"Trading": tab_trading, "Settings": tab_settings},
         get_engine, get_tg_reader,
-        lambda: cfg_module.get("account_env", "demo") != "live",
+        lambda: cfg_module.get_config("account_env", "demo") != "live",
     )
     if _start_here.should_show(app.storage.user):
         asyncio.ensure_future(open_start_here())

@@ -11,6 +11,7 @@ from backend.src.services.notifications import config as _notify
 from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import retention as _retention
 from backend.src.services.risk import settings as _risk
+import backend.src.config as _cfg_file
 
 __all__ = [
     "get_app_config", "set_app_config", "get_risk_settings",
@@ -24,6 +25,8 @@ __all__ = [
     "live_log_lines",
     "get_expert_param_catalogue", "save_expert_params",
     "reset_expert_param", "reset_all_expert_params",
+    "load_config", "get_config", "save_config", "is_debug",
+    "DATA_DIR", "USER_DATA_DIR",
 ]
 
 
@@ -141,3 +144,30 @@ def reset_expert_param(key: str) -> dict:
 def reset_all_expert_params() -> dict:
     from backend.src.services.risk import expert_params
     return expert_params.reset_all()
+
+# -- App config (the YAML file, distinct from the app_config DB table above) --
+#
+# The frontend used to import backend.src.config in eight of its fifteen source
+# units, which CLAUDE.md calls out by name as counting against the
+# controller-boundary contract. It only ever needed these four things.
+
+def load_config() -> dict:
+    return _cfg_file.load()
+
+
+def get_config(key: str, default=None):
+    return _cfg_file.get(key, default)
+
+
+def save_config(values: dict) -> None:
+    _cfg_file.save_to_yaml(values)
+
+
+def is_debug() -> bool:
+    return _cfg_file.is_debug()
+
+# The two data-directory paths pages need for log export, diagnostics and the
+# EA file drop. Constants, re-exported for the same reason as the config
+# accessors above.
+DATA_DIR = _cfg_file.DATA_DIR
+USER_DATA_DIR = _cfg_file.USER_DATA_DIR

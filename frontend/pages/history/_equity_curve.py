@@ -3,7 +3,7 @@ import asyncio
 
 from nicegui import ui
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import history_controller as history_ctl
 
 
@@ -68,8 +68,8 @@ def _render_equity_curve(engine):
 
         async def refresh_chart():
             try:
-                env = cfg_module.get("account_env", "demo")
-                starting = float(cfg_module.get("starting_balance", 1000.0))
+                env = cfg_module.get_config("account_env", "demo")
+                starting = float(cfg_module.get_config("starting_balance", 1000.0))
                 env_label = "⚡ LIVE" if env == "live" else "DEMO"
                 env_lbl.text = env_label
 

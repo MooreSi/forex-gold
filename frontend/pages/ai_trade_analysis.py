@@ -15,7 +15,7 @@ from typing import Callable, Optional
 
 from nicegui import ui
 
-import backend.src.config as cfg_module
+from backend.src.controllers import settings_controller as cfg_module
 from backend.src.services.ai import claude_ai as ai_module
 from backend.src.services.ai import provider as ai_provider
 from backend.src.controllers import ai_analysis_controller as ai_ctl
@@ -667,9 +667,9 @@ def render(get_engine: Callable):  # noqa: C901
         run_btn.disable()
         status_lbl.text = "Gathering data..."
 
-        cfg = cfg_module.load()
+        cfg = cfg_module.load_config()
         env = cfg.get("account_env", "demo")
-        from backend.src.config import DATA_DIR
+        from backend.src.controllers.settings_controller import DATA_DIR
         db_path   = str(DATA_DIR / f"forex_trader_{env}.db")
         days      = int(days_sel.value)
 

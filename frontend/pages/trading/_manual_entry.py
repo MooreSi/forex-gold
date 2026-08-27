@@ -559,9 +559,9 @@ def _render_orb_report(engine):
     ui.timer(60.0, refresh)
 async def _background_commentary(engine, signal_id: str):
     try:
-        import backend.src.config as cfg_module
+        from backend.src.controllers import settings_controller as cfg_module
         import backend.src.services.ai.claude_ai as claude_ai
-        config = cfg_module.load()
+        config = cfg_module.load_config()
         row = trading_ctl.get_signal(signal_id)
         tick    = await engine.get_tick()
         candles = await engine.get_candles("M5", 20)

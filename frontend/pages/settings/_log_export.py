@@ -55,7 +55,7 @@ async def export_logs(export_lbl) -> None:
 
     try:
         # ── Collect log files (current + rotated backups) ─────────────────
-        from backend.src.config import DATA_DIR as _log_data_dir
+        from backend.src.controllers.settings_controller import DATA_DIR as _log_data_dir
         log_base = _Path(_log_data_dir) / "forex_trader.log"
         if not log_base.exists():
             export_lbl.text = "No log file found — restart the app first to begin writing logs."

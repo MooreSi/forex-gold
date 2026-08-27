@@ -114,11 +114,15 @@ def _keys_in(source: str) -> set[str]:
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call):
             fn = node.func
-            if isinstance(fn, ast.Attribute) and fn.attr in ("get", "setdefault"):
+            # get_config/save_config are the controller-fronted accessors the
+            # page moved onto when backend.src.config stopped being imported
+            # directly; the keys are the same, the door changed.
+            if isinstance(fn, ast.Attribute) and fn.attr in ("get", "setdefault", "get_config"):
                 if node.args and isinstance(node.args[0], ast.Constant) \
                         and isinstance(node.args[0].value, str):
                     found.add(node.args[0].value)
-            if isinstance(fn, ast.Attribute) and fn.attr in ("save_to_yaml", "save", "update"):
+            if isinstance(fn, ast.Attribute) and fn.attr in (
+                    "save_to_yaml", "save", "update", "save_config"):
                 for arg in node.args:
                     if isinstance(arg, ast.Dict):
                         found |= {

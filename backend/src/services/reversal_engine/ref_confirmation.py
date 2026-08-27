@@ -48,14 +48,8 @@ log = logging.getLogger(__name__)
 _PRICE_DELTA = 3.0
 _DEFAULT_WINDOW_MIN = 60
 
-# Which channels count as confirmation is read from channel_parser_config
-# rather than hardcoded (reversal_engine_correlate still pins two group IDs
-# as literals, which silently ignores any channel added since). Enabled
-# channels only: a channel switched off in Parsing Settings shouldn't be
-# able to greenlight a live trade.
-_ENABLED_CHANNELS_SQL = (
-    "SELECT channel_name FROM channel_parser_config WHERE enabled=1"
-)
+# The enabled-channel subquery moved with the lookup it belonged to; it now
+# lives beside the statement that uses it, in reversal_engine_repo.
 
 
 def confirmation_window_s(rs: dict) -> int:

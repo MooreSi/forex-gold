@@ -175,3 +175,55 @@ def fetch_recent_signals_for_groups(groups: list[str], cutoff: float) -> list[di
                 (*groups, cutoff),
             ).fetchall()
         ]
+
+
+def fetch_unparsed_telegram_messages(cutoff_iso: str, limit: int) -> list[dict]:
+    """Stored Telegram messages since `cutoff_iso` that never became a signal
+    row -- the backfill's input.
+
+    The LEFT JOIN ... IS NULL is what makes this a backfill rather than a
+    re-parse: a message that already has a vantage_tg_signals row has been
+    handled, and re-recording it would double-count it in every lead/lag
+    measurement built on this table.
+    """
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                "SELECT m.telegram_message_id, m.group_id, m.group_name, m.sender_name, "
+                "       m.timestamp, m.received_at, m.text "
+                "FROM telegram_messages m "
+                "LEFT JOIN vantage_tg_signals s "
+                "       ON s.tg_message_id = m.telegram_message_id "
+                "      AND s.group_id = m.group_id "
+                "WHERE m.received_at > ? AND s.id IS NULL AND m.text IS NOT NULL "
+                "ORDER BY m.received_at ASC LIMIT ?",
+                (cutoff_iso, limit),
+            ).fetchall()
+        ]
+
+
+def insert_backfilled_signals(records: list[tuple]) -> int:
+    """Record backfilled signal rows. Returns how many were actually new.
+
+    One transaction for the whole batch, matching the single connection block
+    the service used to hold open across its parse loop: a partial backfill
+    that reported a count it did not write would corrupt the correlation data
+    this exists to produce.
+
+    OR IGNORE because the scan can overlap a previous run's window.
+    """
+    if not records:
+        return 0
+    recorded = 0
+    with transaction() as conn:
+        for rec in records:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO vantage_tg_signals "
+                "(tg_message_id, group_id, group_name, sender_name, message_ts, "
+                " raw_text, parsed_at, direction, entry_low, entry_high, stop_loss, "
+                " tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rec,
+            )
+            recorded += cur.rowcount
+    return recorded

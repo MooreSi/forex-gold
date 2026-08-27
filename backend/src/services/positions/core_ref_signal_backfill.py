@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import repo as positions_repo
 from backend.src.services.signals.parser import (
     is_format_ab_signal, is_gd2_message, parse_gd2_signal, parse_gold_signal,
     parse_limit_order_signal, _CURRENCY_RE,
@@ -111,60 +112,46 @@ def backfill_ref_signals(lookback_hours: int = _DEFAULT_LOOKBACK_H,
 
     scanned = recorded = 0
     try:
-        with db_module.db() as conn:
-            rows = conn.execute(
-                "SELECT m.telegram_message_id, m.group_id, m.group_name, m.sender_name, "
-                "       m.timestamp, m.received_at, m.text "
-                "FROM telegram_messages m "
-                "LEFT JOIN vantage_tg_signals s "
-                "       ON s.tg_message_id = m.telegram_message_id "
-                "      AND s.group_id = m.group_id "
-                "WHERE m.received_at > ? AND s.id IS NULL AND m.text IS NOT NULL "
-                "ORDER BY m.received_at ASC LIMIT ?",
-                (cutoff_iso, limit),
-            ).fetchall()
+        rows = positions_repo.fetch_unparsed_telegram_messages(cutoff_iso, limit)
 
-            # Channel parser formats, read once rather than per message.
-            cfgs: dict[str, dict] = {}
-            for r in rows:
-                name = r["group_name"] or ""
-                if name not in cfgs:
-                    cfgs[name] = db_module.get_channel_parser_config(name) or {}
+        # Channel parser formats, read once rather than per message.
+        cfgs: dict[str, dict] = {}
+        for r in rows:
+            name = r["group_name"] or ""
+            if name not in cfgs:
+                cfgs[name] = db_module.get_channel_parser_config(name) or {}
 
-            for r in rows:
-                scanned += 1
-                cfg = cfgs.get(r["group_name"] or "", {})
-                parsed = parse_stored_message(
-                    r["text"],
-                    cfg.get("parser_format", "auto"),
-                    cfg.get("signal_prefix", "") or "",
-                )
-                if not parsed:
-                    continue
+        records = []
+        for r in rows:
+            scanned += 1
+            cfg = cfgs.get(r["group_name"] or "", {})
+            parsed = parse_stored_message(
+                r["text"],
+                cfg.get("parser_format", "auto"),
+                cfg.get("signal_prefix", "") or "",
+            )
+            if not parsed:
+                continue
 
-                # The message's own time, not now -- correlation compares this
-                # against the Reversal Engine signal's created_at to decide
-                # who fired first, so a wrong value here silently corrupts
-                # every lead/lag measurement it produces.
-                parsed_at = (_to_epoch(r["timestamp"])
-                             or _to_epoch(r["received_at"])
-                             or cutoff_epoch)
+            # The message's own time, not now -- correlation compares this
+            # against the Reversal Engine signal's created_at to decide
+            # who fired first, so a wrong value here silently corrupts
+            # every lead/lag measurement it produces.
+            parsed_at = (_to_epoch(r["timestamp"])
+                         or _to_epoch(r["received_at"])
+                         or cutoff_epoch)
 
-                cur = conn.execute(
-                    "INSERT OR IGNORE INTO vantage_tg_signals "
-                    "(tg_message_id, group_id, group_name, sender_name, message_ts, "
-                    " raw_text, parsed_at, direction, entry_low, entry_high, stop_loss, "
-                    " tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8, status) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (str(r["telegram_message_id"]), str(r["group_id"]), r["group_name"],
-                     r["sender_name"] or "", str(r["timestamp"] or ""), r["text"],
-                     parsed_at, parsed.get("direction"),
-                     parsed.get("entry_low"), parsed.get("entry_high"),
-                     parsed.get("stop_loss"),
-                     *[parsed.get(f"tp{i}") for i in range(1, 9)],
-                     _BACKFILL_STATUS),
-                )
-                recorded += cur.rowcount
+            records.append((
+                str(r["telegram_message_id"]), str(r["group_id"]), r["group_name"],
+                r["sender_name"] or "", str(r["timestamp"] or ""), r["text"],
+                parsed_at, parsed.get("direction"),
+                parsed.get("entry_low"), parsed.get("entry_high"),
+                parsed.get("stop_loss"),
+                *[parsed.get(f"tp{i}") for i in range(1, 9)],
+                _BACKFILL_STATUS,
+            ))
+
+        recorded = positions_repo.insert_backfilled_signals(records)
     except Exception as exc:
         log.warning("[RefBackfill] failed: %s", exc)
         return {"scanned": scanned, "recorded": recorded, "already_present": 0}

@@ -824,16 +824,10 @@ class TradingRuntime:
         """
         deadline = time.monotonic() + timeout
 
-        def _read():
-            with db_module.db() as conn:
-                return db_module.row_to_dict(conn.execute(
-                    "SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (trade_id,)
-                ).fetchone())
-
-        row = await db_module.to_db_thread(_read)
+        row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
         while row and not row.get("mt5_ticket") and time.monotonic() < deadline:
             await asyncio.sleep(1.0)
-            row = await db_module.to_db_thread(_read)
+            row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
         return row
 
     async def background_open_commentary(self, trade_id: str, sig: dict, tick: Tick) -> None:

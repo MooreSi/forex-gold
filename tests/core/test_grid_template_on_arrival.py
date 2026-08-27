@@ -21,6 +21,7 @@ from backend.src.services.broker import ea_templates as et
 from backend.src.services.positions import core_grid_template_dispatch as gtd
 from backend.src.services.signals import pending_activation as pa
 from backend.src.db import database as db
+from tests.conftest import remove_db_file
 
 
 def _reset_thread_local_connection():
@@ -48,7 +49,7 @@ def fresh_db():
     pa._ACTIVATION_FAILURES.clear()
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
-    os.remove(path)
+    remove_db_file(path)
 
 
 class _Tick:
@@ -231,7 +232,7 @@ def re_repo_db():
     os.close(fd)
     re_repo.init(path)
     yield re_repo
-    os.remove(path)
+    remove_db_file(path)
 
 
 @pytest.fixture
@@ -241,7 +242,7 @@ def bo_repo_db():
     os.close(fd)
     bo_repo.init(path)
     yield bo_repo
-    os.remove(path)
+    remove_db_file(path)
 
 
 def _re_mixin(calls):

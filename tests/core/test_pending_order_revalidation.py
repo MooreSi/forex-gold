@@ -12,6 +12,7 @@ import time
 import pytest
 
 from backend.src.db import database as db
+from tests.conftest import remove_db_file
 from backend.src.services.positions import core_pending_order_revalidation as por
 
 
@@ -32,7 +33,7 @@ def fresh_db():
     db.init(path)
     yield db
     _reset_thread_local_connection()
-    os.remove(path)
+    remove_db_file(path)
 
 
 def _insert_working_order(conn, trade_id, direction, created_at, ticket=555):

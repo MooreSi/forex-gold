@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 
 import pytest
 
@@ -102,7 +103,7 @@ def fresh_db():
     yield db
     reset_thread_local_connection()
     reset_db_worker_thread_connection()
-    os.remove(path)
+    remove_db_file(path)
 
 
 @pytest.fixture
@@ -258,3 +259,59 @@ def _never_write_to_the_apps_log():
         print(f"\n[conftest] detached {len(removed)} handler(s) writing to the "
               f"app's data dir: {sorted(set(removed))}")
     yield
+
+
+def remove_db_file(path: str) -> None:
+    """Delete a temp database file, tolerating Windows' handle semantics.
+
+    POSIX unlinks a file whether or not anything still has it open. Windows
+    refuses, with `PermissionError: [WinError 32]`. The first Windows CI run
+    this repo ever completed turned that difference into 50 teardown errors,
+    and a second run left 16 of them in fixtures that already close both the
+    thread-local connection AND the db-worker's -- so the remaining handles
+    belong to something those resets do not reach.
+
+    The most likely candidate is a sqlite3.Connection caught in a reference
+    cycle. CPython frees most objects the moment their refcount drops, but a
+    cycle waits for the collector, so the connection stays open for an
+    unpredictable while. On POSIX nobody ever noticed, because the unlink
+    succeeded anyway.
+
+    So: collect, then retry. If that clears it, the cause really was a cycle.
+    If it does not, raise with the details -- how many connections are still
+    alive and which files they point at -- because "the process cannot access
+    the file" on its own costs a 25-minute CI round trip to learn nothing.
+
+    Deliberately NOT a bare `except OSError: pass`. A leaked connection is a
+    real defect; this makes it legible instead of silent.
+    """
+    import gc
+    import sqlite3
+
+    try:
+        os.remove(path)
+        return
+    except PermissionError:
+        pass
+
+    gc.collect()
+    for _ in range(10):
+        try:
+            os.remove(path)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+
+    live = []
+    for obj in gc.get_objects():
+        if isinstance(obj, sqlite3.Connection):
+            try:
+                row = obj.execute("PRAGMA database_list").fetchone()
+                live.append(row[2] if row else "<unknown>")
+            except Exception as exc:
+                live.append(f"<unreadable: {type(exc).__name__}>")
+
+    raise AssertionError(
+        f"could not delete {path} after gc + retries. "
+        f"{len(live)} sqlite connection(s) still alive: {live}"
+    )

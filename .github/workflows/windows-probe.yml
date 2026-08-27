@@ -1,0 +1,68 @@
+name: windows probe
+
+# A DIAGNOSTIC, not a gate. Read this before adding anything to it.
+#
+# checks.yml is the gate: it runs the exact command a developer runs
+# (`python -m tools.checks all`) so local-green and CI-green cannot disagree.
+# That is the right design for a gate and the wrong one for a question. It
+# takes ~25 minutes on Windows, and we spent five of those runs -- over two
+# hours -- asking things like "does this one fixture still leak a file handle",
+# a question about two files and 30 tests.
+#
+# This workflow exists to answer that kind of question in about two minutes.
+# It is manual only, it targets whatever you point it at, and it runs no
+# coverage (the --cov instrumentation is a large part of the suite's cost).
+#
+# It must never become a second gate. Nothing here runs on push, and nothing
+# here is allowed to be the reason a change is considered verified -- if it
+# disagrees with checks.yml, checks.yml is right and this is a lead. Adding an
+# `on: push` trigger to this file would recreate the slow duplicate it exists
+# to avoid.
+#
+# Why Windows at all: the app ships to Windows, mt5_bridge.py is win32-only,
+# and the suite had never once run there before 2026-08-27. That first run
+# found three classes of latent test bug (WinError 32 on unclosed DB handles,
+# POSIX-only os.getuid in a platform simulation, and start/stop straddling two
+# asyncio loops). None of them were reproducible on macOS.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "pytest targets (space-separated paths, or -k expressions)"
+        required: false
+        default: >-
+          tests/core/test_grid_template_on_arrival.py
+          tests/core/test_pending_order_revalidation.py
+      pytest_args:
+        description: "extra pytest args, e.g. -x --tb=long --durations=25"
+        required: false
+        default: "-q --tb=short"
+
+# Its own group, so a probe never cancels a real checks.yml run and vice versa.
+concurrency:
+  group: windows-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    # Generous for a probe but far under checks.yml's 60: if a targeted run
+    # takes longer than this, the target is too broad -- use checks.yml.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run the targeted tests
+        run: python -m pytest ${{ inputs.tests }} ${{ inputs.pytest_args }}

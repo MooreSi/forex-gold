@@ -18,26 +18,7 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.positions import handle_conservative as hc
 from backend.src.services.positions.tp_tracking import TPCache
-
-
-class _FakeBridge:
-    def __init__(self, partial_close_result=None):
-        self._result = partial_close_result or {"success": True, "close_price": None, "lots_closed": None}
-        self.partial_close_calls = []
-        self.modify_order_calls = []
-
-    async def partial_close(self, ticket, lots):
-        self.partial_close_calls.append({"ticket": ticket, "lots": lots})
-        result = dict(self._result)
-        if result.get("lots_closed") is None:
-            result["lots_closed"] = lots
-        if result.get("close_price") is None:
-            result.pop("close_price", None)
-        return result
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+from tests._fakes import _FakeBridge
 
 
 def _tick(bid: float, ask: float):

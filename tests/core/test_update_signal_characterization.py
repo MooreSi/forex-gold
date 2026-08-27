@@ -19,6 +19,7 @@ from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
     STRATEGY_SCALP_RUNNER, STRATEGY_BE_RUNNER,
 )
+from tests._fakes import _FakeBridge
 
 
 def _reset_thread_local_connection():
@@ -48,15 +49,6 @@ def fresh_db():
     _reset_db_worker_thread_connection()
     os.remove(path)
     ea_bridge.set_instance(None)
-
-
-class _FakeBridge:
-    def __init__(self):
-        self.modify_order_calls = []
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
 
 
 class _FakeEA:

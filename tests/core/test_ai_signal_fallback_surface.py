@@ -19,15 +19,7 @@ from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.db import database as db
 from backend.src.services.trading import ai_signal_fallback as fb
-
-
-class _FakeBridge:
-    def __init__(self):
-        self.modify_order_calls = []
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+from tests._fakes import _FakeBridge
 
 
 class _RaisingBridge:

@@ -4,10 +4,16 @@
 `_FakeBridge` in 69. Every DB-internal change then breaks dozens of files
 at once, and ad-hoc fakes drift from the real bridge surface. The
 canonical `fresh_db` lives in tests/conftest.py; 35 byte-equivalent copies
-were migrated onto it (2026-08-11). The remaining locals are genuine
-variants — they may only shrink, never grow, until each is read, migrated
-and deleted. When phase-5's shared FakeMT5Bridge lands, new tests use it
-instead of another local `_FakeBridge`.
+were migrated onto it (2026-08-11), and the remaining 29 equivalents on
+2026-08-27, which is why the fresh_db baseline sits at 66. The locals left
+are genuine variants — they may only shrink, never grow, until each is
+read, migrated and deleted.
+
+The shared bridge fake this file anticipated now exists, in tests/_fakes.py.
+Fifteen files carried one of two identical shapes and use it instead; it is
+still named `_FakeBridge` so this ratchet keeps counting it. The 49 that
+remain are genuine variants — fakes that raise, return particular ticks, or
+model a broker quirk one test needs.
 
 Also pins the MT5-safety invariant: no test module imports MetaTrader5.
 """
@@ -21,7 +27,7 @@ TESTS = REPO / "tests"
 
 # Shrinking baselines — lower them as migrations land; never raise them.
 FRESH_DB_LOCAL_DEFS_MAX = 66
-FAKE_BRIDGE_CLASSES_MAX = 56
+FAKE_BRIDGE_CLASSES_MAX = 50
 
 
 def _count(pattern: str, glob: str) -> int:

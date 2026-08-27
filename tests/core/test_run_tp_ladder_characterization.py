@@ -21,26 +21,7 @@ from backend.src.services.risk import strategy_params as sp
 from backend.src.services.positions.tp_tracking import TPCache as _TPCache
 from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
-
-
-class _FakeBridge:
-    def __init__(self, partial_close_result=None):
-        self._result = partial_close_result or {"success": True, "close_price": None, "lots_closed": None}
-        self.partial_close_calls = []
-        self.modify_order_calls = []
-
-    async def partial_close(self, ticket, lots):
-        self.partial_close_calls.append({"ticket": ticket, "lots": lots})
-        result = dict(self._result)
-        if result.get("lots_closed") is None:
-            result["lots_closed"] = lots
-        if result.get("close_price") is None:
-            result.pop("close_price", None)
-        return result
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+from tests._fakes import _FakeBridge
 
 
 @pytest.fixture

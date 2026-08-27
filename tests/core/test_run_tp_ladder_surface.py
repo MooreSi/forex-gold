@@ -21,6 +21,7 @@ from backend.src.services.positions import tp_ladder as ladder
 from backend.src.services.risk import strategy_params as sp
 from backend.src.services.positions.tp_tracking import TPCache
 from backend.src.utils.models import STRATEGY_SIGNAL_CLIMBER
+from tests._fakes import _FakeBridge
 
 
 def _reset_thread_local_connection():
@@ -51,26 +52,6 @@ def fresh_db():
     _reset_thread_local_connection()
     _reset_db_worker_thread_connection()
     os.remove(path)
-
-
-class _FakeBridge:
-    def __init__(self, partial_close_result=None):
-        self._result = partial_close_result or {"success": True, "close_price": None, "lots_closed": None}
-        self.partial_close_calls = []
-        self.modify_order_calls = []
-
-    async def partial_close(self, ticket, lots):
-        self.partial_close_calls.append({"ticket": ticket, "lots": lots})
-        result = dict(self._result)
-        if result.get("lots_closed") is None:
-            result["lots_closed"] = lots
-        if result.get("close_price") is None:
-            result.pop("close_price", None)
-        return result
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
 
 
 def _tick(bid: float, ask: float):

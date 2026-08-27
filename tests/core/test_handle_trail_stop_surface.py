@@ -18,15 +18,7 @@ import pytest
 from backend.src.db import database as db
 from backend.src.services.positions import handle_trail_stop as hts
 from backend.src.services.positions.tp_tracking import TPCache
-
-
-class _FakeBridge:
-    def __init__(self):
-        self.modify_order_calls = []
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+from tests._fakes import _FakeBridge
 
 
 def _tick(bid: float, ask: float):

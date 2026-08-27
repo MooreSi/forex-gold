@@ -25,15 +25,7 @@ from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.trading import ai_signal_fallback as core_ai_signal_fallback
 from backend.src.db import database as db
 from backend.src.runtime import TradingRuntime
-
-
-class _FakeBridge:
-    def __init__(self):
-        self.modify_order_calls = []
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+from tests._fakes import _FakeBridge
 
 
 class _RaisingBridge:

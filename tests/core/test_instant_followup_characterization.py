@@ -19,15 +19,7 @@ from backend.src.runtime import SimulationEngine
 from backend.src.db import database as db
 from backend.src.runtime import TradingRuntime
 from backend.src.utils.models import STRATEGY_BE_RUNNER
-
-
-class _FakeBridge:
-    def __init__(self):
-        self.modify_order_calls = []
-
-    async def modify_order(self, ticket, sl=None, tp=None):
-        self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+from tests._fakes import _FakeBridge
 
 
 @pytest.fixture

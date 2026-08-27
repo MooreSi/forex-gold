@@ -17,8 +17,6 @@ the stale pre-rename name as a dead ghost entry after every restart, while
 the real channel never appeared at all). Fixed by dropping the in-memory
 array entirely -- see _dynamic_channel_bucket_order()'s own docstring.
 """
-import os
-import tempfile
 
 import pytest
 
@@ -33,23 +31,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 @pytest.fixture

@@ -1,7 +1,5 @@
 """core_ea_templates.py -- EA Template CRUD, and the resolve_open_trade_params
 routing/Sig Guard behaviour a saved template drives in core_signal_resolution.py."""
-import os
-import tempfile
 import time
 
 import pytest
@@ -17,23 +15,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def test_save_returns_defaults_merged_with_overrides(fresh_db):

@@ -10,12 +10,9 @@ malformed.
 
 Read-only: nothing here places, closes or modifies an order.
 """
-import os
-import tempfile
 import time
 from types import SimpleNamespace
 
-import pytest
 
 from backend.src.services.positions import core_bot_channel_status as status
 from backend.src.services.broker import ea_templates as et
@@ -30,23 +27,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def _channel(name: str, at: float = 0.0) -> str:

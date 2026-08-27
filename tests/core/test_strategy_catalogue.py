@@ -11,11 +11,8 @@ provider is faked, so nothing leaves the process.
 """
 import asyncio
 import json
-import os
-import tempfile
 from unittest import mock
 
-import pytest
 
 from backend.src.services.ai import claude_ai
 from backend.src.services.broker import ea_templates as et
@@ -31,23 +28,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def _key_of(entries, key):

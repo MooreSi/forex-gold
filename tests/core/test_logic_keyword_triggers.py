@@ -8,11 +8,8 @@ apply_sl_adjustment against a fake bridge -- no real or demo MT5 order is
 ever placed, closed, or modified here.
 """
 import asyncio
-import os
-import tempfile
 import time
 
-import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import keywords as lk
@@ -26,23 +23,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 _RS_ALL_ON = {

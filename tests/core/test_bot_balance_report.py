@@ -9,8 +9,6 @@ like errors on screen -- they look like a bad week. So the tests below fix
 Read-only: nothing here places, closes or modifies an order.
 """
 import asyncio
-import os
-import tempfile
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -27,25 +25,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 # Wednesday 12 Aug 2026, mid-afternoon. Fixed so week/month boundaries are

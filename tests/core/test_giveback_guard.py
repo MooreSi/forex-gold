@@ -14,8 +14,6 @@ takes over position sizing and adds its own pre-trade gates, and this account
 runs with it off -- which is exactly why its configured 3% daily-loss limit sat
 inert through both losing days.
 """
-import os
-import tempfile
 import time
 
 import pytest
@@ -31,27 +29,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 _seq = [0]

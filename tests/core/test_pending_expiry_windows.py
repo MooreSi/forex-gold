@@ -10,10 +10,7 @@ Covers the 2026-07-28 fixes:
     to Limit Runner, they landed on that same 120s default and expired
     unfilled every time.
 """
-import os
-import tempfile
 
-import pytest
 
 from backend.src.db import database as db
 from backend.src.services.signals import pending_activation as psa
@@ -27,23 +24,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 # ── _channel_parser_format: rename-proof channel resolution ──────────────

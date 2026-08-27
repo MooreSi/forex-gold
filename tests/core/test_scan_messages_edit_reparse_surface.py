@@ -8,12 +8,9 @@ class. The instant-entry-flip-flatten path can close a real open position
 via close_trade_fn -- always faked here.
 """
 import asyncio
-import os
-import tempfile
 import time
 from unittest import mock
 
-import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as telegram_alerts
@@ -27,23 +24,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def _insert_tg_signal(tg_id, group_id="g1", channel_name="TestChannel", raw_text="old text",

@@ -9,8 +9,6 @@ No real or demo MT5 order is ever placed, closed, or modified -- this
 module's function never calls an order-placing collaborator at all.
 """
 import asyncio
-import os
-import tempfile
 from datetime import datetime
 
 import pytest
@@ -27,23 +25,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def test_not_2200_no_pipeline_call_no_dedup_write(fresh_db):

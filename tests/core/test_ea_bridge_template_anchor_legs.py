@@ -13,12 +13,9 @@ and Python's own SL check eventually closed it locally with a P&L computed
 off the zero entry (-$16,086 reported for a real -$15.63 loss).
 """
 import asyncio
-import os
-import tempfile
 import time
 from unittest import mock
 
-import pytest
 
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge
@@ -31,25 +28,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def _insert_placeholder(trade_id="tpl1", strategy="template:Sig Gen Grid",

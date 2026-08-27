@@ -7,13 +7,10 @@ Same assertions as 010, called through the new module instead of the
 class. Every order-placing collaborator is faked in every test here.
 """
 import asyncio
-import os
-import tempfile
 import time
 from types import SimpleNamespace
 from unittest import mock
 
-import pytest
 
 from backend.src.db import database as db
 from backend.src.services.broker import ea_bridge as ea_bridge
@@ -29,23 +26,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def _insert_open_trade(trade_id, direction="BUY", stop_loss=2380.0, mt5_ticket=555,

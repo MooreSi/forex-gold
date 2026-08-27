@@ -8,12 +8,9 @@ Neither target method places, closes, or modifies an MT5 order -- both are
 read-only candle fetches plus DB writes to max_tp_hit.
 """
 import asyncio
-import os
-import tempfile
 import time
 from unittest import mock
 
-import pytest
 
 from backend.src.db import database as db
 from backend.src.runtime import TradingRuntime, _tp_level_from_extreme
@@ -26,23 +23,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 class _FakeBridge:

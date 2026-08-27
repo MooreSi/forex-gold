@@ -3,8 +3,6 @@ column. Covers the 2026-07-24 fix: realized R (actual net_pnl relative to
 the dollar risk taken at entry) instead of a static TP1-vs-SL plan ratio
 that showed the same number for every trade regardless of strategy or how
 far the trade actually ran."""
-import os
-import tempfile
 
 import pytest
 
@@ -19,23 +17,6 @@ def _reset_thread_local_connection():
         del db._thread_local.conn
     if hasattr(db._thread_local, "depth"):
         del db._thread_local.depth
-
-
-def _reset_db_worker_thread_connection():
-    db._db_executor.submit(_reset_thread_local_connection).result()
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    _reset_db_worker_thread_connection()
-    os.remove(path)
 
 
 def _insert_trade(trade_id, direction="BUY", entry_price=2400.0, stop_loss=2390.0,

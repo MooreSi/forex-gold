@@ -24,7 +24,24 @@ jobs:
     # Windows to match the dev + production environment (MetaTrader5 is a win32
     # dependency; the suite fakes MT5 and never connects a terminal).
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 60, raised from 30 on 2026-08-27 as a DIAGNOSTIC, not a fix.
+    #
+    # The first run this repo ever completed (33102563650) passed all six fast
+    # gates on Windows and was then killed at 30m00s with the suite still
+    # running. It had been in pytest for 28 minutes; the same suite takes 239
+    # seconds locally on macOS.
+    #
+    # We do not yet know whether that is slow or hung, and the two need
+    # different fixes. Boot smoke was only 1.7x slower than local (5.2s vs
+    # 3.1s), so the runner is not uniformly 7x slower -- but every test builds
+    # and deletes its own temp SQLite file via the fresh_db fixture, and
+    # thousands of file create/delete cycles past Windows Defender is a known
+    # pathological case.
+    #
+    # If a run completes inside 60, the number it reports is the real cost and
+    # this becomes a decision about optimising the suite. If it times out
+    # again, something hangs and raising this further is the wrong answer.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 

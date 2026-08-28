@@ -29,9 +29,17 @@ class _FakeBridge:
     is what the handlers under test expect to receive back.
     """
 
-    def __init__(self, partial_close_result=None):
+    def __init__(self, partial_close_result=None, *,
+                 modify_order_result=None, modify_order_raises=False):
         self._result = partial_close_result or {
             "success": True, "close_price": None, "lots_closed": None}
+        # modify_order defaults to success, which is what every existing caller
+        # expects. The overrides exist because the broker reports a REFUSAL by
+        # returning an error dict rather than raising -- see
+        # tests/core/test_fixed_rr_post_fill_override.py, and the live incident
+        # its source comment points at.
+        self._modify_result = modify_order_result or {"success": True}
+        self._modify_raises = modify_order_raises
         self.partial_close_calls = []
         self.modify_order_calls = []
 
@@ -46,4 +54,6 @@ class _FakeBridge:
 
     async def modify_order(self, ticket, sl=None, tp=None):
         self.modify_order_calls.append({"ticket": ticket, "sl": sl, "tp": tp})
-        return {"success": True}
+        if self._modify_raises:
+            raise RuntimeError("bridge died mid-call")
+        return dict(self._modify_result)

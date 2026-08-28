@@ -3,7 +3,9 @@ from typing import Optional
 
 from nicegui import ui
 
-from backend.src.utils.version_history import __version__ as _APP_VERSION
+from backend.src.controllers.system_controller import app_version as _app_version
+
+_APP_VERSION = _app_version()
 
 
 def _render_about(nav: Optional[dict] = None):
@@ -356,7 +358,8 @@ def _render_about(nav: Optional[dict] = None):
                 elif section == "version":
                     _sub_header("Version History", "history")
 
-                    from backend.src.utils.version_history import RELEASES as releases
+                    from backend.src.controllers.system_controller import releases as _releases
+                    releases = _releases()
 
                     for ver, title, badge_colour, badge_label, changes in releases:
                         # Auto-mark whichever entry matches the running version as Current

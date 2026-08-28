@@ -164,7 +164,7 @@ def _render_email():
         schedule_test_lbl = ui.label("").classes("text-sm mt-3")
 
         async def test_scheduled_email():
-            from backend.src.services.notifications import email_service
+            from backend.src.controllers import notifications_controller as email_service
             provider = send_provider_sel.value or "resend"
             fresh = settings_ctl.get_email_config()
             to_addr = (fresh.get("to_addr") or "").strip()
@@ -191,7 +191,7 @@ def _render_email():
 
         async def test_orb_email():
             from datetime import datetime as _dt
-            from backend.src.services.notifications import email_service
+            from backend.src.controllers import notifications_controller as email_service
             fresh = settings_ctl.get_email_config()
             to_addr = (fresh.get("to_addr") or "").strip()
             if not to_addr:
@@ -214,7 +214,7 @@ def _render_email():
             )
             ok, err = await email_service.send_email(
                 "FOREX Trader — London Open ORB Report (test)", html, fresh,
-                image_bytes=chart_png, image_cid=email_service._ORB_CHART_CID,
+                image_bytes=chart_png, image_cid=email_service.ORB_CHART_CID,
             )
             if ok:
                 schedule_test_lbl.text = f"ORB test sent to {to_addr}"
@@ -287,7 +287,7 @@ def _render_email():
             async def test_resend():
                 rs_result.text = "Testing Resend..."
                 rs_result.classes(replace="text-sm text-gray-400")
-                from backend.src.services.notifications import email_service
+                from backend.src.controllers import notifications_controller as email_service
                 _fresh = settings_ctl.get_email_config()
                 cfg_snap = {
                     "resend_api_key": rs_key.value,
@@ -623,7 +623,7 @@ def _render_email():
             test_result.text = "Connecting to SMTP server..."
             test_result.classes(replace="text-sm mt-3 text-gray-400 leading-relaxed")
             try:
-                from backend.src.services.notifications import email_service
+                from backend.src.controllers import notifications_controller as email_service
                 cfg_snap = {
                     "smtp_host":     smtp_host.value,
                     "smtp_port":     int(smtp_port.value or 587),

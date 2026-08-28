@@ -19,7 +19,9 @@ from nicegui import ui
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.app import ADMIN_AVAILABLE, admin_open_fn as _admin_open_fn, get_engine
 from backend.src.controllers import settings_controller as settings_ctl
-from backend.src.utils.version_history import __version__ as _APP_VERSION
+from backend.src.controllers.system_controller import app_version as _app_version
+
+_APP_VERSION = _app_version()
 
 from ._shared import _CASH_REGISTER_JS, STATIC_DIR
 

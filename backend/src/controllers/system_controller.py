@@ -1,14 +1,19 @@
-"""OS and process operations the UI needs.
+"""The app's own environment, as the UI needs to see it.
 
-Restarting the app, finding the checkout root, and the port/process handling
-the MT5 bridge panel uses to see and clear a stuck bridge.
+Restarting, where it is installed, which build it is, and the port/process
+handling the MT5 bridge panel uses to see and clear a stuck bridge.
+
+Version sits here rather than in its own module because "what build am I" and
+"where am I installed" are the same question asked twice, and the About screen
+and the log export both want the answer.
 
 Here rather than in settings_controller because these are not settings. That
 file already carries config, credentials, retention and expert params; adding
 process-killing to it would make it the place everything goes when nobody
 decided where it belonged.
 
-Every function forwards to backend.src.utils.os_utils unchanged. Nothing here
+Every function forwards to backend.src.utils (os_utils, version_history)
+unchanged. Nothing here
 decides anything -- the point is only that the frontend reaches it through a
 controller, so a page cannot be rewired by a change to a utility's signature
 without this file noticing first.
@@ -18,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.src.utils import os_utils as _os
+from backend.src.utils import version_history as _vh
 
 __all__ = [
     "repo_root",
@@ -31,6 +37,8 @@ __all__ = [
     "start_prevent_sleep",
     "stop_prevent_sleep",
     "is_preventing_sleep",
+    "app_version",
+    "releases",
 ]
 
 
@@ -87,3 +95,13 @@ def kill_matching(pattern: str, force: bool = False) -> int:
     app.
     """
     return _os.kill_matching(pattern, force=force)
+
+
+def app_version() -> str:
+    """The running build's version string."""
+    return _vh.__version__
+
+
+def releases() -> list:
+    """The changelog entries the About screen lists, newest first."""
+    return _vh.RELEASES

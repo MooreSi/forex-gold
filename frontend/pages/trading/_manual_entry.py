@@ -357,7 +357,7 @@ def _render_orb_report(engine):
     resulting risk (auto-executed as a genuine market order once
     confirmed) with an informational-only 3x level shown alongside it."""
     import base64
-    from backend.src.services.notifications import email_service
+    from backend.src.controllers import notifications_controller as email_service
 
     ui.button("Refresh", icon="refresh", on_click=lambda: refresh()).props("flat").classes(
         "text-gray-400 mb-2"

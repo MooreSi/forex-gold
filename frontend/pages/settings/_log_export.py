@@ -136,7 +136,8 @@ async def export_logs(export_lbl) -> None:
             _lic_email = _lic_type = _lic_expiry = _machine_id = "—"
 
         try:
-            from backend.src.utils.version_history import __version__ as _app_ver
+            from backend.src.controllers.system_controller import app_version
+            _app_ver = app_version()
         except Exception:
             _app_ver = "—"
 

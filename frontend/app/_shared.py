@@ -5,7 +5,7 @@ back out of frontend/app/__init__.py without a cycle. The two audio blobs
 stay together: the comment above them explains why one depends on the other,
 and splitting them would strand it.
 """
-from backend.src.utils.os_utils import repo_root as _repo_root
+from backend.src.controllers.system_controller import repo_root as _repo_root
 
 # Resolved from the repo marker, not by counting parents off __file__ -- this
 # package was frontend/app.py until it was split, and a fixed .parent then

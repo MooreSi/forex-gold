@@ -129,7 +129,7 @@ def build_header(*, power_dialog, pause_dialog, root):
                     _update_dialog_status.classes(replace="text-xs text-red-400 mt-2")
                     return
                 ui.notify("Update applied — restarting...", type="positive")
-                from backend.src.utils.os_utils import restart_app
+                from backend.src.controllers.system_controller import restart_app
                 await asyncio.sleep(1)
                 restart_app(root)
 

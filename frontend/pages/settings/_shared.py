@@ -12,6 +12,6 @@ frontend/app.py (see docs/system/rules/30-architecture.md); when someone
 does that, this file is the single place to change.
 """
 from backend.src.controllers import settings_controller as cfg_module
-from backend.src.utils import os_utils as _pu
+from backend.src.controllers import system_controller as _pu
 
 __all__ = ["cfg_module", "_pu"]

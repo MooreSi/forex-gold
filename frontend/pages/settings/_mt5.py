@@ -319,7 +319,7 @@ def _render_ea_update_button():
         # Marker-based: four parents was right from forex_trader/ui/pages/;
         # this file is three deep, so it resolved above the repo and the EA
         # source was never found. (2026-08-26.)
-        from backend.src.utils.os_utils import repo_root as _repo_root
+        from backend.src.controllers.system_controller import repo_root as _repo_root
         root = _repo_root()
         repo_mq5 = root / "mql5" / "ForexTraderBridge.mq5"
         if not repo_mq5.exists():
@@ -387,7 +387,7 @@ def _render_ea_update_button():
         script_path = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "ea_update_restart.ps1"
         script_path.write_text(script, encoding="utf-8")
 
-        from backend.src.utils.os_utils import open_restart_log
+        from backend.src.controllers.system_controller import open_restart_log
         from backend.src.controllers.settings_controller import USER_DATA_DIR
         log_path = USER_DATA_DIR / "data" / "ea_update_restart.log"
         with open_restart_log(log_path) as _restart_log:

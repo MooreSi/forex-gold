@@ -146,7 +146,7 @@ def main_page():
     # which does not exist, so the app shut down and never came back
     # (restart.log, 2026-08-26). Same bug class as the five path counts fixed
     # earlier in this merge; the marker cannot drift on the next move.
-    from backend.src.utils.os_utils import repo_root as _repo_root
+    from backend.src.controllers.system_controller import repo_root as _repo_root
     root = _repo_root()
 
     # ── Power dialog (defined BEFORE header so it renders at root level) ────────
@@ -161,7 +161,7 @@ def main_page():
         async def _do_restart():
             _power_dialog.close()
             ui.notify("Restarting — browser will reconnect in ~5 seconds...", type="info")
-            from backend.src.utils.os_utils import restart_app
+            from backend.src.controllers.system_controller import restart_app
             await asyncio.sleep(1)
             restart_app(root)
 

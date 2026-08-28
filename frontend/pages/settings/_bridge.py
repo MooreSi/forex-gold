@@ -143,7 +143,7 @@ def _render_bridge_control(engine):
             _bridge_starting[0] = True
 
             # Bridge script lives in the FOREX project root
-            from backend.src.utils.os_utils import repo_root as _repo_root
+            from backend.src.controllers.system_controller import repo_root as _repo_root
             _forex_root   = _repo_root()
             _bridge_macos = _forex_root / "mt5_bridge.py"
             if not _bridge_macos.exists():

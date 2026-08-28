@@ -18,7 +18,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     """
     import asyncio as _aio
     from backend.src.services.channels import strategy_ai as _csai
-    from backend.src.services.broker import ea_templates as _et
+    from backend.src.controllers import broker_controller as _et
     from backend.src.services.risk import schedule as _csched
 
     # Schedule Override banner (2026-08-06). While the Trading Schedule is
@@ -519,10 +519,8 @@ def _render_global_parameters_card(rs: dict) -> None:
                 "risk_per_trade_pct":            float(risk_pct.value or 0),
                 "max_risk_per_trade_pct":        float(max_risk_pct.value or 0),
             })
-            from backend.src.services.broker import ea_bridge as _ea_mod
-            _ea = _ea_mod.get_instance()
-            if _ea is not None:
-                asyncio.create_task(_ea.push_global_config())
+            from backend.src.controllers import broker_controller as _ea_mod
+            asyncio.create_task(_ea_mod.push_global_config())
             ui.notify("Global Parameters saved", type="positive")
         except Exception as ex:
             ui.notify(str(ex), type="negative")

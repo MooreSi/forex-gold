@@ -202,7 +202,7 @@ def _render_schedule():
     # _render_channel_strategy_card's strat_opts, minus "Inherit Global"/
     # "Auto (Claude)" (those describe a per-channel fallback that doesn't
     # map onto a time window).
-    from backend.src.services.broker import ea_templates as _sched_et
+    from backend.src.controllers import broker_controller as _sched_et
     from backend.src.services.channels.repo import get_telegram_channel_names
     # "Auto (AI)" sits directly under "No Override" because it is the option
     # most likely to be wanted (2026-08-14). Picking it hands this channel's

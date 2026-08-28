@@ -25,7 +25,7 @@ def _render_ea_templates_card() -> None:
     signal didn't supply, pct always wins over the signal (which never
     states a close percentage) -- see core_open_trade.py's EA-handoff block.
     """
-    from backend.src.services.broker import ea_templates as et
+    from backend.src.controllers import broker_controller as et
 
     with ui.row().classes("items-center gap-2 mb-2"):
         ui.label("EA Templates").classes("text-base font-bold text-yellow-300")
@@ -73,9 +73,8 @@ def _render_ea_templates_card() -> None:
         button: it pushes now, so an adjustment can be made mid-session
         without waiting for a new trade. No-ops harmlessly when the EA is
         not connected."""
-        from backend.src.services.broker import ea_bridge as _eab
-        ea = _eab.get_instance()
-        if ea is None or not ea.is_ea_healthy():
+        from backend.src.controllers import broker_controller as _eab
+        if not _eab.ea_is_healthy():
             ui.notify("EA not connected — values saved, will apply on next signal",
                       type="warning")
             return
@@ -84,7 +83,7 @@ def _render_ea_templates_card() -> None:
             ui.notify("Save the template first, then Send", type="warning")
             return
         try:
-            _eab.schedule_push_template(ea, name, _current_values())
+            _eab.push_template(name, _current_values())
             ui.notify(f"Sent '{name}' to the EA", type="positive")
         except Exception as exc:
             ui.notify(f"Send failed: {exc}", type="negative")

@@ -159,7 +159,7 @@ def _render_diagnostics(engine):
                         elif trade_allowed is True:
                             ui.badge("AutoTrading ON", color="green")
 
-                    from backend.src.services.broker import ea_bridge as _ea_bridge_mod
+                    from backend.src.controllers import broker_controller as _ea_bridge_mod
                     _ea_ok, _ea_scope = _ea_bridge_mod.get_effective_ea_status()
                     ui.badge(
                         f"EA {'Connected' if _ea_ok else 'Not Connected'}"
@@ -170,11 +170,11 @@ def _render_diagnostics(engine):
                     ui.label(f"Last error: {health['last_error']}").classes("text-red-300 text-sm mt-1")
                 if not _ea_ok:
                     if _ea_scope == "this node":
-                        _ea = _ea_bridge_mod.get_instance()
+                        _ea_age = _ea_bridge_mod.ea_seconds_since_last_seen()
                         _ea_hint = (
                             "No MQL5 EA has ever connected this session."
-                            if _ea is None or _ea._last_seen == 0 else
-                            f"EA connection lost {round(_time_mod.time() - _ea._last_seen)}s ago."
+                            if _ea_age is None else
+                            f"EA connection lost {round(_ea_age)}s ago."
                         )
                     else:
                         _ea_hint = f"The {_ea_scope} (active trader) has no EA connected."

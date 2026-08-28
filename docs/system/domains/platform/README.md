@@ -53,6 +53,24 @@ allowed to call.
 - Remote users can run normally when the admin server is offline; only updates are unavailable.
 - The installer no longer bundles Python: it downloads the 3.11 embeddable runtime at install time, creates a venv under `%LOCALAPPDATA%\FOREX Trader\.venv\`, and adds firewall rules (requires internet).
 
+- **`node_roles` is one exclusion expressed twice, and exactly one side must
+  answer True.** `is_bot_command_authority()` decides who long-polls the
+  Telegram bot token; two True answers is the 409-Conflict cycle where each
+  side's `deleteWebhook` kicks the other. The VPS branch keys off
+  `get_app_config("sync_server_enabled") == "1"` -- **the string**, since
+  app_config stores text and an int `1` falls through to the client branch,
+  finds no host and answers True unconditionally, which is the loop again.
+  `tests/core/test_node_roles.py` asserts the pair-wide property directly for
+  both switch positions rather than only the four branches.
+- **`is_active_trader_node()` does NOT fail open, despite its docstring
+  saying it does.** Both try blocks catch `ImportError` only, so a database
+  error out of `get_active_trader()` propagates. Its caller wraps it, so the
+  observed effect is the paid AI fallback being skipped -- fail-CLOSED, the
+  opposite of what is written. Pinned by a test named for the mismatch. The
+  sibling `is_bot_command_authority()` catches broad `Exception` and does fail
+  open as described; the asymmetry looks unintended but changing an error path
+  on a live gate was left as its own decision.
+
 ## Open questions
 
 - `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).

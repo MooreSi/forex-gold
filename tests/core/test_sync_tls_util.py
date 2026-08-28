@@ -1,19 +1,21 @@
 """Self-signed TLS for the Local/Remote sync channel.
 
 The Mac talks to the VPS over TLS with no CA and no hostname check. That is a
-deliberate choice for a fixed-IP box with no real certificate, and it is safe
-for exactly one reason: the client pins the server's SHA-256 fingerprint. Take
-the pinning away and this becomes an unauthenticated channel that merely looks
-encrypted.
+defensible choice for a fixed-IP box with no real certificate -- PROVIDED the
+client pins the server's SHA-256 fingerprint.
+
+It does not. Writing these tests is how that was found; see
+docs/todo/bugs/014. The channel is encrypted but unauthenticated today.
 
 Two things therefore matter more than anything else here, and both are easy to
 break without noticing:
 
-  * client_ssl_context() has verify_mode CERT_NONE and check_hostname False.
-    A test asserts that ON PURPOSE, so anyone "fixing" it has to read why.
+  * client_ssl_context() has verify_mode CERT_NONE and check_hostname False,
+    with nothing pinning the certificate. The test below records that as it
+    stands rather than asserting a safety it does not have.
   * ensure_cert() must NOT regenerate when a cert already exists. A new cert
-    is a new fingerprint, and the Mac is pinning the old one -- silently
-    regenerating breaks the link the moment the VPS restarts.
+    is a new fingerprint, which matters both for the value shown on the Remote
+    Node screen and for any pinning added later.
 
 Every path is redirected into tmp_path; nothing touches USER_DATA_DIR and no
 socket is opened.
@@ -46,9 +48,9 @@ class TestEnsureCert:
         assert b"PRIVATE KEY" in key.read_bytes()
 
     def test_it_does_not_regenerate_when_one_already_exists(self):
-        """THE load-bearing property. The Mac pins this fingerprint; a fresh
-        cert on every call (or every VPS restart) would break the sync link
-        with a mismatch the user has no obvious way to diagnose."""
+        """A fresh cert on every call -- or every VPS restart -- changes the
+        fingerprint the Remote Node screen tells the user to record, and would
+        break any pinning added under 014."""
         cert, key = tls_util.ensure_cert("203.0.113.10")
         first_cert = cert.read_bytes()
         first_fp = tls_util.cert_fingerprint()
@@ -103,16 +105,23 @@ class TestSslContexts:
         ctx = tls_util.server_ssl_context("203.0.113.10")
         assert isinstance(ctx, ssl.SSLContext)
 
-    def test_the_client_context_deliberately_does_not_verify(self):
-        """DELIBERATE, and load-bearing. There is no CA and no DNS name for a
-        bare VPS IP, so the client cannot do a normal check. Authentication
-        comes from the caller comparing the presented cert's SHA-256 against
-        the pinned value -- see client.py's _verify_fingerprint.
+    def test_the_client_context_does_not_verify_and_NOTHING_PINS_THE_CERT(self):
+        """Records a real gap. Read docs/todo/bugs/014 before touching this.
 
-        Turning verification back on here without removing the pinning would
-        not make this safer, it would just stop the link working. Removing the
-        pinning while leaving this off would make it unauthenticated.
-        """
+        The context disables CA and hostname checks, which the module's own
+        docstring says is safe because "the caller is responsible for checking
+        the fingerprint ... see client.py's _verify_fingerprint".
+
+        That function does not exist. Searched the whole tree: the only
+        references to the name are that docstring and this test. Nothing calls
+        getpeercert(), and cert_fingerprint() is used in exactly two places --
+        a log line on server start, and the Remote Node screen that displays
+        it. No code ever compares a presented certificate to a pinned value.
+
+        So the channel is encrypted but UNAUTHENTICATED. This test asserts the
+        current state so the gap is visible in the suite rather than resting on
+        a docstring that promises a safeguard nobody wrote. It is not an
+        endorsement, and it should be changed when 014 is."""
         ctx = tls_util.client_ssl_context()
         assert ctx.check_hostname is False
         assert ctx.verify_mode == ssl.CERT_NONE

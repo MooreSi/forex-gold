@@ -171,3 +171,16 @@ def is_debug() -> bool:
 # accessors above.
 DATA_DIR = _cfg_file.DATA_DIR
 USER_DATA_DIR = _cfg_file.USER_DATA_DIR
+
+
+# ── Internal-engine exposure modes ───────────────────────────────────────────
+# The vocabulary the Risk settings radio group offers. Constants rather than a
+# service call, re-exported so the page does not reach into
+# services.positions.core_internal_exposure_guard for three strings.
+from backend.src.services.positions import (  # noqa: E402
+    core_internal_exposure_guard as _ieg,
+)
+
+MODE_OFF = _ieg.MODE_OFF
+MODE_NET_EXPOSURE = _ieg.MODE_NET_EXPOSURE
+MODE_SELF_HEDGE = _ieg.MODE_SELF_HEDGE

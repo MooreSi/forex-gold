@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.src.services.cluster import node as _node
+from backend.src.services.positions import core_indicators as _ind
 from backend.src.services.risk import settings as _risk
 
 __all__ = ["get_active_trader", "get_risk_settings", "get_open_trades"]
@@ -22,3 +23,13 @@ async def get_open_trades(engine: Any) -> list[dict]:
     off the loop by the positions service."""
     from backend.src.services.trading import engine_reads as _reads
     return await _reads.open_trades(engine)
+
+
+def ema_series(*args, **kwargs):
+    """Exponential moving average over a candle series. Pure maths, no I/O."""
+    return _ind.ema_series(*args, **kwargs)
+
+
+def rsi_series(*args, **kwargs):
+    """RSI over a candle series. Pure maths, no I/O."""
+    return _ind.rsi_series(*args, **kwargs)

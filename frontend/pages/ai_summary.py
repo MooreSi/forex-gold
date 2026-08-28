@@ -16,7 +16,7 @@ from backend.src.controllers import history_controller as _hist
 from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
 )
-from backend.src.services.positions import core_strategy_catalogue as strategy_catalogue
+from backend.src.controllers import trading_controller as strategy_catalogue
 
 def _uk_time() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -295,8 +295,8 @@ def render(get_engine: Callable):
             # Older stored analyses have neither, hence the live lookup.
             strat_name = strat_label
             if not strat_name:
-                _label, _summary = strategy_catalogue.describe(
-                    strat_rec, strategy_catalogue.build_catalogue(include_hidden=True)
+                _label, _summary = strategy_catalogue.describe_strategy(
+                    strat_rec, strategy_catalogue.build_strategy_catalogue(include_hidden=True)
                 )
                 strat_name  = _label
                 strat_blurb = strat_blurb or _summary
@@ -414,7 +414,7 @@ def render(get_engine: Callable):
             # Built fresh on every run so an EA template saved seconds ago is
             # already recommendable — that is the whole point of reading it
             # here rather than holding a list built at import time.
-            strategies = strategy_catalogue.build_catalogue()
+            strategies = strategy_catalogue.build_strategy_catalogue()
 
             data = await claude_ai.request_market_analysis(
                 tick=tick,

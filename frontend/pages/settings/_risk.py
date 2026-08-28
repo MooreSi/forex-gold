@@ -303,7 +303,7 @@ def _render_toxic_hour_subcard(rs: dict) -> None:
 
 
 def _render_internal_exposure_subcard(rs: dict) -> None:
-    from backend.src.services.positions import core_internal_exposure_guard as _ieg
+    from backend.src.controllers import settings_controller as _ieg
 
     with ui.card().classes(_RISK_SUBCARD_CLASSES):
         with ui.row().classes("items-center gap-2 mb-1"):

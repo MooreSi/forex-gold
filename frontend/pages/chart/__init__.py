@@ -22,7 +22,7 @@ from typing import Callable
 from nicegui import ui
 
 from backend.src.controllers import chart_controller as chart_controller
-from backend.src.services.positions.core_indicators import ema_series, rsi_series
+from backend.src.controllers.chart_controller import ema_series, rsi_series
 from backend.src.controllers.trading_controller import is_stuck_placeholder
 
 from ._overlays import _build_fvg_areas, _build_mark_lines

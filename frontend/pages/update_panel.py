@@ -36,7 +36,7 @@ def _render_github_update_card() -> None:
     from https://github.com/MooreSi/forex via git, client-initiated, rather
     than waiting for an administrator to push a build. See
     core_app_update.py for the git fetch/pull implementation."""
-    from backend.src.services.positions import core_app_update
+    from backend.src.controllers import system_controller as core_app_update
 
     with ui.card().classes("w-full bg-gray-800 border border-gray-700 p-4 rounded-lg"):
         with ui.row().classes("items-center gap-2 mb-3"):

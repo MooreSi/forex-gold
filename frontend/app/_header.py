@@ -124,7 +124,7 @@ def build_header(*, power_dialog, pause_dialog, root):
             async def _do_apply_update():
                 _update_dialog_status.text = "Updating — pulling latest code, reinstalling dependencies..."
                 _update_dialog_status.classes(replace="text-xs text-orange-300 mt-2")
-                from backend.src.services.positions import core_app_update
+                from backend.src.controllers import system_controller as core_app_update
                 result = await core_app_update.apply_update()
                 if not result["ok"]:
                     _update_dialog_status.text = f"Update failed: {result['error']}"
@@ -174,7 +174,7 @@ def build_header(*, power_dialog, pause_dialog, root):
             remote_sha = _update_summary_target()
             _update_summary_seq[0] += 1
             seq = _update_summary_seq[0]
-            from backend.src.services.positions import core_app_update
+            from backend.src.controllers import system_controller as core_app_update
             try:
                 bullets, error = await core_app_update.summarise_changes(
                     _pending_update.get("local_sha", ""), remote_sha,
@@ -223,7 +223,7 @@ def build_header(*, power_dialog, pause_dialog, root):
         update_badge.on("click", _open_update_dialog)
 
         async def _check_github_update():
-            from backend.src.services.positions import core_app_update
+            from backend.src.controllers import system_controller as core_app_update
             try:
                 result = await core_app_update.check_for_update()
             except Exception:

@@ -7,7 +7,7 @@ import sys
 from nicegui import ui
 
 from backend.src.controllers import settings_controller as settings_ctl
-from backend.src.services.positions import core_autostart as _autostart
+from backend.src.controllers import system_controller as _autostart
 from ._log_export import export_logs
 from ._shared import _pu
 
@@ -392,7 +392,7 @@ def _render_diagnostics(engine):
         ).classes("w-full text-sm"):
             ui.markdown(
                 f"When **ON**, {_os_label} checks every "
-                f"{_autostart.CHECK_INTERVAL_SECS // 60} minutes that the app is "
+                f"{_autostart.AUTOSTART_CHECK_INTERVAL_SECS // 60} minutes that the app is "
                 "still serving on its port, and starts it again if it is not. "
                 "It also runs that check at login/boot, so the app comes back by "
                 "itself after a reboot.\n\n"
@@ -411,18 +411,18 @@ def _render_diagnostics(engine):
             ).classes("text-gray-300")
 
         def _refresh_autostart_lbl():
-            if not _autostart.is_supported():
+            if not _autostart.autostart_is_supported():
                 _autostart_lbl.text = f"Not supported on this platform ({sys.platform})."
                 _autostart_lbl.classes(replace="text-xs mt-1 text-gray-500")
                 return
             if not auto_restart_sw.value:
                 _autostart_lbl.text = "Off — nothing will restart the app if it stops."
                 _autostart_lbl.classes(replace="text-xs mt-1 text-gray-500")
-            elif _autostart.is_installed():
+            elif _autostart.autostart_is_installed():
                 _autostart_lbl.text = (
                     f"Active — checking every "
-                    f"{_autostart.CHECK_INTERVAL_SECS // 60} min."
-                    + ("" if _autostart.is_armed() else " Currently paused (app stopped).")
+                    f"{_autostart.AUTOSTART_CHECK_INTERVAL_SECS // 60} min."
+                    + ("" if _autostart.autostart_is_armed() else " Currently paused (app stopped).")
                 )
                 _autostart_lbl.classes(replace="text-xs mt-1 text-green-400")
             else:
@@ -446,7 +446,7 @@ def _render_diagnostics(engine):
             if _autostart_reverting["active"]:
                 return
             want = bool(e.value)
-            if want and not _autostart.is_supported():
+            if want and not _autostart.autostart_is_supported():
                 ui.notify(
                     f"Auto-restart is not supported on {sys.platform}",
                     type="warning", position="top",
@@ -455,9 +455,9 @@ def _render_diagnostics(engine):
                 return
             try:
                 if want:
-                    _autostart.enable()
+                    _autostart.autostart_enable()
                 else:
-                    _autostart.disable()
+                    _autostart.autostart_disable()
             except Exception as exc:
                 # Leave the stored setting alone when the OS refused — a toggle
                 # showing ON with no scheduler entry behind it is exactly the

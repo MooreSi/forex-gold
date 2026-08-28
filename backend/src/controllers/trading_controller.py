@@ -9,6 +9,7 @@ from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import settings as _risk
 from backend.src.services.signals import commentary as _commentary
 from backend.src.services.analytics import reporting as _reporting
+from backend.src.services.positions import core_strategy_catalogue as _catalogue
 from backend.src.services.trading import engine_reads as _reads
 
 # The strategy vocabulary, re-exported so pages do not reach into
@@ -157,3 +158,12 @@ def is_stuck_placeholder(trade: dict) -> bool:
     own docstring, which is where that reasoning lives.
     """
     return _reporting.is_stuck_placeholder(trade)
+
+
+def build_strategy_catalogue(*args, **kwargs):
+    """The strategy list the AI summary describes. Read-only."""
+    return _catalogue.build_catalogue(*args, **kwargs)
+
+
+def describe_strategy(*args, **kwargs):
+    return _catalogue.describe(*args, **kwargs)

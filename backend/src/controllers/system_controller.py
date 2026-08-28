@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from backend.src.services.positions import core_app_update as _update
+from backend.src.services.positions import core_autostart as _autostart
 from backend.src.utils import os_utils as _os
 from backend.src.utils import version_history as _vh
 
@@ -39,7 +41,19 @@ __all__ = [
     "is_preventing_sleep",
     "app_version",
     "releases",
+    "check_for_update",
+    "summarise_changes",
+    "apply_update",
+    "autostart_is_supported",
+    "autostart_is_installed",
+    "autostart_is_armed",
+    "autostart_enable",
+    "autostart_disable",
+    "AUTOSTART_CHECK_INTERVAL_SECS",
 ]
+
+# How often the watchdog checks the app is still up.
+AUTOSTART_CHECK_INTERVAL_SECS = _autostart.CHECK_INTERVAL_SECS
 
 
 def start_prevent_sleep():
@@ -105,3 +119,50 @@ def app_version() -> str:
 def releases() -> list:
     """The changelog entries the About screen lists, newest first."""
     return _vh.RELEASES
+
+
+# ── Updating this install ────────────────────────────────────────────────────
+
+async def check_for_update() -> dict:
+    """Look for a newer build. Read-only: fetches, changes nothing."""
+    return await _update.check_for_update()
+
+
+def summarise_changes(*args, **kwargs):
+    """Human-readable summary of what an update would bring in."""
+    return _update.summarise_changes(*args, **kwargs)
+
+
+async def apply_update() -> dict:
+    """Update this install, and read the service's docstring before calling it.
+
+    DESTRUCTIVE. It force-checks-out origin/<branch>, which discards local
+    modifications in the checkout, then reinstalls requirements.txt into the
+    venv and clears __pycache__. Routed here unchanged -- the Settings Update
+    button and the admin console's already both converge on it -- but nothing
+    else on this module throws work away, so this one is called out.
+    """
+    return await _update.apply_update()
+
+
+# ── Launch at login ──────────────────────────────────────────────────────────
+
+def autostart_is_supported() -> bool:
+    return _autostart.is_supported()
+
+
+def autostart_is_installed() -> bool:
+    return _autostart.is_installed()
+
+
+def autostart_is_armed() -> bool:
+    return _autostart.is_armed()
+
+
+def autostart_enable(*args, **kwargs):
+    """Register the login item (launchd on macOS, schtasks on Windows)."""
+    return _autostart.enable(*args, **kwargs)
+
+
+def autostart_disable(*args, **kwargs):
+    return _autostart.disable(*args, **kwargs)

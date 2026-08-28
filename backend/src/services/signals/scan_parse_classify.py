@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
@@ -178,11 +179,12 @@ async def classify_and_parse(
     )
     _ime_trigger = parse_gd2_instant_entry(text) or parse_lexicon_direction_trigger(text)
     if _ime_trigger:
-        log.info(
-            "[%s] Bare direction tg_id=%s (%s) — silently skipped "
-            "(awaiting follow-up with full levels)",
-            channel_name, tg_id, _ime_trigger[0],
-        )
+        if _note_bare_direction(tg_id):
+            log.info(
+                "[%s] Bare direction tg_id=%s (%s) — silently skipped "
+                "(awaiting follow-up with full levels)",
+                channel_name, tg_id, _ime_trigger[0],
+            )
         return None
 
     # Nothing deterministic matched. AI fallback, then the unrecognised
@@ -194,6 +196,39 @@ async def classify_and_parse(
     if _looks_like_signal:
         queue_unrecognised_fn(tg_id, channel_name, text)
     return None
+
+
+# ── Bare-direction log suppression (bugs/015) ────────────────────────────────
+# This branch is the one terminal path in classify_and_parse that records
+# nothing, so nothing marks the message as seen and the scan loop handles it
+# again roughly once a second for as long as it stays in the reader's fetch
+# window. One 15-character message produced 8,319 identical lines in under
+# three hours on 2026-08-28 and was still going.
+#
+# This suppresses the repeated LOGGING only. The message is still re-parsed
+# every cycle -- recording it would change signal-parsing behaviour and is the
+# owner's call (see docs/todo/bugs/015). An operator wants to see this once.
+#
+# Insertion-ordered and bounded: this is module state in a process that runs
+# for weeks, and eviction must drop the OLDEST, since dropping the newest would
+# restore the every-cycle spam for the message currently in the window.
+_BARE_LOG_MEMORY = 512
+_bare_direction_logged: "OrderedDict[str, None]" = OrderedDict()
+
+
+def _note_bare_direction(tg_id: str) -> bool:
+    """True the first time this message is seen, False on every rescan."""
+    if tg_id in _bare_direction_logged:
+        return False
+    _bare_direction_logged[tg_id] = None
+    while len(_bare_direction_logged) > _BARE_LOG_MEMORY:
+        _bare_direction_logged.popitem(last=False)
+    return True
+
+
+def reset_bare_direction_log_memory() -> None:
+    """Test seam. Module state would otherwise leak between tests."""
+    _bare_direction_logged.clear()
 
 
 def _record_unsupported_currency(

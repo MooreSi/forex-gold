@@ -125,9 +125,9 @@ async def export_logs(export_lbl) -> None:
 
         # ── Gather user and system info ────────────────────────────────────
         try:
-            from backend.src.config.licence import store as _lic_store
-            from backend.src.config.licence.fingerprint import get_fingerprint as _fp
-            _lic_data    = _lic_store.load() or {}
+            from backend.src.controllers import auth_controller as _lic_store
+            from backend.src.controllers.auth_controller import get_fingerprint as _fp
+            _lic_data    = _lic_store.load_licence() or {}
             _lic_email   = _lic_data.get("email", "—")
             _lic_type    = _lic_data.get("licence_type", "—")
             _lic_expiry  = _lic_data.get("expiry_date", "—")

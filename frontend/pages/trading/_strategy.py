@@ -10,7 +10,7 @@ from backend.src.controllers.trading_controller import (
 from frontend.pages.settings import render_risk_card
 
 # Strategy id short-aliases, used by the comparison tables.
-from backend.src.services.risk import strategy_params as _sp
+from backend.src.controllers import strategy_controller as _sp
 from backend.src.controllers.trading_controller import (
     STRATEGY_SCALE_OUT as _SO,
     STRATEGY_BE_RUNNER as _BE,

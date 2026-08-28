@@ -87,3 +87,18 @@ async def reversal_realised_pnl() -> dict:
     """The Reversal Engine's REAL closed P&L -- the trades it actually placed,
     read from the core trade ledger rather than the engine's own virtual one."""
     return await reversal.get_realised_pnl()
+
+
+# ── Reversal Engine: the pro-likeness sub-model ──────────────────────────────
+
+def pro_model_status() -> dict:
+    """Whether the model is fitted and usable, and why not if it is not."""
+    from backend.src.services.reversal_engine import pro_model as _pm
+    return _pm.status()
+
+
+def pro_model_fit(*args, **kwargs):
+    """Refit from the captured corpus. Expensive; the panel offers it as an
+    explicit button rather than running it on render."""
+    from backend.src.services.reversal_engine import pro_model as _pm
+    return _pm.fit(*args, **kwargs)

@@ -150,8 +150,8 @@ def render() -> None:
                 learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
                 return
             try:
-                from backend.src.services.reversal_engine import pro_model
-                st = pro_model.status()
+                from backend.src.controllers import engines_controller as pro_model
+                st = pro_model.pro_model_status()
                 c = st.get("corpus") or {}
                 base = (f"corpus {c.get('pos', 0)} pro / {c.get('neg', 0)} background · "
                         f"outcomes {c.get('wins', 0)}W-{c.get('losses', 0)}L "
@@ -171,8 +171,8 @@ def render() -> None:
                 {"re_learn_from_ref_signals": 1 if e.value else 0})
             if e.value:
                 try:
-                    from backend.src.services.reversal_engine import pro_model
-                    pro_model.fit(force=True)
+                    from backend.src.controllers import engines_controller as pro_model
+                    pro_model.pro_model_fit(force=True)
                 except Exception as exc:
                     # Toggling the setting still succeeded; only the immediate
                     # refit failed, and it retrains on its own schedule anyway.

@@ -4,7 +4,7 @@ import asyncio
 from nicegui import ui
 
 from backend.src.controllers import history_controller as history_ctl
-from backend.src.services.telegram import alerts as telegram_alerts
+from backend.src.controllers import telegram_controller as telegram_alerts
 from frontend.components.empty_state import render_empty_state
 
 

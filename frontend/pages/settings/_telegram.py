@@ -45,7 +45,7 @@ def _render_tg_bot():
             ui.notify("Telegram config saved", type="positive")
 
         async def test_tg():
-            import backend.src.services.telegram.alerts as alerts
+            from backend.src.controllers import telegram_controller as alerts
             ok = await alerts.send_message(
                 "*FOREX Trader — Test Alert*\nTelegram alerts are working.",
                 event_type="test",

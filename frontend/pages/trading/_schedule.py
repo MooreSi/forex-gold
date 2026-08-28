@@ -18,7 +18,7 @@ def _render_schedule():
     Engine/Breakout Engine (2026-07-24) -- e.g. Reversal Engine performs
     well overnight but loses during London/NY, the opposite of the Telegram
     channels, so a single blanket switch isn't enough."""
-    from backend.src.services.risk import schedule as sched
+    from backend.src.controllers import schedule_controller as sched
 
     schedule = sched.get_trading_schedule()
     enabled_now = sched.is_trading_schedule_enabled()
@@ -392,8 +392,8 @@ def _render_schedule():
                 for w in rows:
                     start_val = str(w["start"].value or "00:00").strip()
                     end_val   = str(w["end"].value or "23:59").strip()
-                    sched._parse_hm(start_val)  # validates HH:MM, raises on bad input
-                    sched._parse_hm(end_val)
+                    sched.parse_hm(start_val)  # validates HH:MM, raises on bad input
+                    sched.parse_hm(end_val)
 
                     def _sel_val(widget):
                         v = widget.value

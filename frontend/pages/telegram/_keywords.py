@@ -2,7 +2,7 @@
 from nicegui import ui
 
 from backend.src.controllers import telegram_controller as tg_controller
-from backend.src.services.telegram import keywords as logic_kw
+from backend.src.controllers import telegram_controller as logic_kw
 # (toggle_key, label, description, default) grouped by category -- persisted
 # immediately on change, matching the existing Toxic-Hour Blocklist toggle's
 # convention (Risk Settings tab), not the Logic Keywords lexicon boxes below

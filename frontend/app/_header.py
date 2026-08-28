@@ -450,7 +450,7 @@ def build_header(*, power_dialog, pause_dialog, root):
                         _news_in_window[0]      = True
                         _news_alerted_window[0] = _ws
                         try:
-                            from backend.src.services.telegram import alerts as _tg
+                            from backend.src.controllers import telegram_controller as _tg
                             import datetime as _dt2
                             _ev_time = _dt2.datetime.fromtimestamp(
                                 _news_ev["event_ts"], tz=_dt2.timezone.utc

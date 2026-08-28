@@ -4,7 +4,7 @@ from typing import Callable
 
 from nicegui import ui
 
-from backend.src.services.telegram.reader import (
+from backend.src.controllers.telegram_controller import (
     AUTH_DISCONNECTED, AUTH_AWAITING_CODE, AUTH_AWAITING_2FA,
     AUTH_CONNECTED, AUTH_RECONNECTING, AUTH_FAILED,
 )

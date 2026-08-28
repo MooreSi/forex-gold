@@ -412,7 +412,7 @@ def render(get_engine: Callable):
                 chart.options["series"][0]["markArea"]["data"] = []
                 chart.update()
                 return
-            from backend.src.services.reversal_engine.ict_patterns import (
+            from backend.src.controllers.chart_controller import (
                 detect_fvgs, select_display_fvgs,
             )
             mt5_tf = TF_MAP.get(tf, "M15")

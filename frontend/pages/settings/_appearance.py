@@ -60,10 +60,10 @@ def _render_theme():
 
 def _render_registration():
     """Settings → Registration tab — shows stored licence / account details."""
-    from backend.src.config.licence import store as _store
-    from backend.src.config.licence.fingerprint import get_fingerprint
+    from backend.src.controllers import auth_controller as _store
+    from backend.src.controllers.auth_controller import get_fingerprint
 
-    data       = _store.load()
+    data       = _store.load_licence()
     email      = data.get("email", "") if data else ""
     raw_key    = data.get("licence_key", "") if data else ""
     machine_id = get_fingerprint()

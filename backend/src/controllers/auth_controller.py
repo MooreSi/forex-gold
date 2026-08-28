@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from backend.src import config as _config
+from backend.src.config.licence import fingerprint as _fingerprint
+from backend.src.config.licence import store as _lic
 from backend.src.services.auth import dashboard_auth as _auth
 
 __all__ = ["verify", "is_set", "set_password", "is_debug",
@@ -32,3 +34,19 @@ def create_initial_password(password: str) -> bool:
 
 def set_password(password: str) -> None:
     _auth.set_password(password)
+
+
+# ── Licence ──────────────────────────────────────────────────────────────────
+
+def load_licence() -> dict:
+    """The stored licence record, or None/{} if this install has none.
+
+    Read-only. Two settings panels show the licence holder and expiry; neither
+    validates here -- that happens in the guard, not the UI.
+    """
+    return _lic.load()
+
+
+def get_fingerprint() -> str:
+    """This machine's hardware fingerprint, which a licence is issued against."""
+    return _fingerprint.get_fingerprint()

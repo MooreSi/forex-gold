@@ -12,7 +12,7 @@ from backend.src.controllers.history_controller import (  # noqa: E402,F401
 )
 
 # Sibling sections of this page.
-from backend.src.services.analytics.reporting import is_stuck_placeholder
+from backend.src.controllers.trading_controller import is_stuck_placeholder
 from ._shared import (
     _pnl_colour,
     _stat_cell,

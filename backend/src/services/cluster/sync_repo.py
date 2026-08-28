@@ -303,11 +303,20 @@ def mirror_insert_signal_if_absent(signal_id, kwargs: dict) -> None:
 
 
 def find_latest_instant_trade(channel_name: str) -> Optional[dict]:
+    """VPS-side twin of trade_repo.find_latest_instant_trade -- same
+    ime_followup_timeout_s age bound, for the same reason (2026-08-28 live
+    miss). The two must stay in step: under centralized signal generation a
+    forwarded follow-up is matched here instead of locally, so an unbounded
+    copy on this side would swallow signals exactly as the local one did. The
+    cutoff is computed here rather than passed because this side has exactly
+    one caller (sync/server.py's MSG_SIGNAL_FOLLOWUP handler)."""
+    from backend.src.services.trading.instant_followup import ime_timeout_secs
+    open_since = time.time() - ime_timeout_secs()
     with db() as conn:
         _irow = conn.execute(
             "SELECT * FROM vantage_simulated_trades "
-            "WHERE status='open' AND tg_source IN (?,?) "
+            "WHERE status='open' AND tg_source IN (?,?) AND open_time >= ? "
             "ORDER BY open_time DESC LIMIT 1",
-            (channel_name, f"instant:{channel_name}"),
+            (channel_name, f"instant:{channel_name}", open_since),
         ).fetchone()
         return row_to_dict(_irow) if _irow else None

@@ -317,7 +317,12 @@ async def find_and_apply_instant_followup(
     except ImportError:
         pass
 
-    _irow = trade_repo.find_latest_instant_trade(channel_name)
+    # Bounded by ime_followup_timeout_s: past that the watchdog has stopped
+    # expecting a follow-up, so nothing older may claim one. See
+    # trade_repo.find_latest_instant_trade for the 2026-08-28 live miss.
+    _irow = trade_repo.find_latest_instant_trade(
+        channel_name, time.time() - ime_timeout_secs(),
+    )
     _instant = db_module.row_to_dict(_irow) if _irow else None
     if not _instant or _instant.get("direction", "").upper() != direction.upper():
         return False

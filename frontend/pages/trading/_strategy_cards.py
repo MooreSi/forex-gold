@@ -3,7 +3,7 @@ Parameters, and the global parameter set."""
 import asyncio
 from datetime import datetime
 from nicegui import ui
-from backend.src.services.ai import provider as ai_provider
+from backend.src.controllers import ai_controller as ai_provider
 from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,

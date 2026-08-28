@@ -49,14 +49,22 @@ def get_open_trade_for_signal(signal_id: str) -> dict:
         )
 
 
-def find_latest_instant_trade(channel_name: str):
-    """Most recent open trade from a channel (direct or instant-prefixed)."""
+def find_latest_instant_trade(channel_name: str, open_since: float):
+    """Most recent open trade from a channel (direct or instant-prefixed) that
+    opened at or after `open_since` -- one that could still plausibly be
+    waiting for its follow-up signal.
+
+    `open_since` is required, not defaulted: unbounded, this swallowed an
+    unrelated signal 28 minutes later as a "follow-up" (2026-08-28 live miss,
+    tg_id 19832). `tp1 IS NULL` is NOT an adequate substitute -- see
+    docs/system/domains/trading/README.md.
+    """
     with db() as conn:
         return conn.execute(
             "SELECT * FROM vantage_simulated_trades "
-            "WHERE status='open' AND tg_source IN (?,?) "
+            "WHERE status='open' AND tg_source IN (?,?) AND open_time >= ? "
             "ORDER BY open_time DESC LIMIT 1",
-            (channel_name, f"instant:{channel_name}"),
+            (channel_name, f"instant:{channel_name}", open_since),
         ).fetchone()
 
 

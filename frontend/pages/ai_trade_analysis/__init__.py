@@ -16,8 +16,8 @@ from typing import Callable, Optional
 from nicegui import ui
 
 from backend.src.controllers import settings_controller as cfg_module
-from backend.src.services.ai import claude_ai as ai_module
-from backend.src.services.ai import provider as ai_provider
+from backend.src.controllers import ai_controller as ai_module
+from backend.src.controllers import ai_controller as ai_provider
 from backend.src.controllers import ai_analysis_controller as ai_ctl
 
 from . import _panels

@@ -85,7 +85,7 @@ def _render_ai(engine):
 
 
 def _render_claude_card(engine):
-    from backend.src.services.ai import provider as ai_provider
+    from backend.src.controllers import ai_controller as ai_provider
     cfg = cfg_module.load_config()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 p-6 rounded-lg"):
@@ -180,7 +180,7 @@ def _render_claude_card(engine):
 
 
 def _render_deepseek_card(engine):
-    from backend.src.services.ai import provider as ai_provider
+    from backend.src.controllers import ai_controller as ai_provider
     cfg = cfg_module.load_config()
 
     with ui.card().classes("w-full max-w-xl bg-gray-800 p-6 rounded-lg"):

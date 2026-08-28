@@ -196,3 +196,27 @@ def compute_performance(starting_balance: float) -> dict:
         "daily_best":         round(max(_daily_pnls), 2) if _daily_pnls else 0.0,
         "daily_worst":        round(min(_daily_pnls), 2) if _daily_pnls else 0.0,
     }
+
+
+# ── Read-side wrappers for the UI ────────────────────────────────────────────
+# The AI summary and the Heat Map used to import these repos directly from the
+# page. That broke the frontend-through-controllers contract, and routing them
+# straight into a controller only moved the break, because controllers may not
+# import a repo either. They belong on a service, which is this one.
+
+def recent_tg_signals(*args, **kwargs):
+    """Recent parsed Telegram signals, for the AI summary page."""
+    from backend.src.services.analytics import read_repo as _read_repo
+    return _read_repo.recent_tg_signals(*args, **kwargs)
+
+
+def signal_lab_is_available() -> bool:
+    """Whether the signal-lab tables exist. The Heat Map hides itself when
+    they do not, rather than erroring on a fresh install."""
+    from backend.src.services.analytics import signal_lab_repo as _lab
+    return _lab.is_available()
+
+
+def signal_lab_adx_and_bias_samples(*args, **kwargs):
+    from backend.src.services.analytics import signal_lab_repo as _lab
+    return _lab.adx_and_bias_samples(*args, **kwargs)

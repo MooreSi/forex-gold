@@ -7,7 +7,7 @@ through the trading controller -- see docs/system/rules/20-trading-safety.md.
 import asyncio
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
-from backend.src.services.analytics.reporting import is_stuck_placeholder
+from backend.src.controllers.trading_controller import is_stuck_placeholder
 from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
     STRATEGY_SCALE_OUT,
@@ -560,7 +560,7 @@ def _render_orb_report(engine):
 async def _background_commentary(engine, signal_id: str):
     try:
         from backend.src.controllers import settings_controller as cfg_module
-        import backend.src.services.ai.claude_ai as claude_ai
+        from backend.src.controllers import ai_controller as claude_ai
         config = cfg_module.load_config()
         row = trading_ctl.get_signal(signal_id)
         tick    = await engine.get_tick()

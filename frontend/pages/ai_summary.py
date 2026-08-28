@@ -12,7 +12,7 @@ from nicegui import ui
 
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import settings_controller as settings_controller
-from backend.src.services.analytics import read_repo
+from backend.src.controllers import history_controller as _hist
 from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
 )
@@ -395,7 +395,7 @@ def render(get_engine: Callable):
         _render_loading()
 
         try:
-            import backend.src.services.ai.claude_ai as claude_ai
+            from backend.src.controllers import ai_controller as claude_ai
             config  = cfg_module.load_config()
             tick    = await engine.get_tick()
             candles = await engine.get_candles("M5", 50)
@@ -403,7 +403,7 @@ def render(get_engine: Callable):
             # Recent signals (last 24h)
             import time as _time
             cutoff = _time.time() - 86400
-            recent_sigs = read_repo.recent_tg_signals(cutoff)
+            recent_sigs = _hist.recent_tg_signals(cutoff)
 
             perf = {}
             try:

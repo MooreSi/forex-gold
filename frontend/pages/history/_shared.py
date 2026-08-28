@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from backend.src.controllers import history_controller as history_ctl
-from backend.src.services.analytics import signal_lab_repo
+from backend.src.controllers import history_controller as _hist_ctl
 
 _BROKER_OFFSET = 10800  # broker stores UTC+3 timestamps as-if-UTC
 
@@ -81,7 +81,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
     """
     result: dict[date, tuple[str, str]] = {}
     try:
-        if not signal_lab_repo.is_available():
+        if not _hist_ctl.signal_lab_is_available():
             return result
 
         if month == 12:
@@ -92,7 +92,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
         ts_start = datetime.combine(date(year, month, 1), datetime.min.time()).timestamp()
         ts_end   = datetime.combine(next_month_first,     datetime.min.time()).timestamp()
 
-        rows = signal_lab_repo.adx_and_bias_samples(ts_start, ts_end)
+        rows = _hist_ctl.signal_lab_adx_and_bias_samples(ts_start, ts_end)
 
         # Group ADX + bias samples by date
         day_adx:  dict[date, list[float]] = {}

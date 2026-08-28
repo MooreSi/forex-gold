@@ -150,7 +150,7 @@ def _render_heatmap(engine):
                 "Plain text only, no JSON, under 400 words."
             )
             try:
-                from backend.src.services.ai import provider as _aip
+                from backend.src.controllers import ai_controller as _aip
                 result_text = await _aip.complete(
                     cfg,
                     "You are a professional XAUUSD trading analyst. "

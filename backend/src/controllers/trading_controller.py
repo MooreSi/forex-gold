@@ -8,6 +8,7 @@ from backend.src.services.channels import performance as _channels
 from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import settings as _risk
 from backend.src.services.signals import commentary as _commentary
+from backend.src.services.analytics import reporting as _reporting
 from backend.src.services.trading import engine_reads as _reads
 
 # The strategy vocabulary, re-exported so pages do not reach into
@@ -144,3 +145,15 @@ async def get_signals(engine, status=None) -> list[dict]:
 
 async def get_tg_signals(engine, limit: int = 50) -> list[dict]:
     return await _reads.tg_signals(engine, limit)
+
+
+def is_stuck_placeholder(trade: dict) -> bool:
+    """True for an open row that never got a real ticket or entry and has been
+    open too long to still be an in-flight fill.
+
+    DISPLAY ONLY. Three pages grey these rows out; nothing in trading or risk
+    branches on it, and the real open-trade counts, duplicate checks and TP
+    Safety Net all still see them -- they may yet resolve. See the service's
+    own docstring, which is where that reasoning lives.
+    """
+    return _reporting.is_stuck_placeholder(trade)

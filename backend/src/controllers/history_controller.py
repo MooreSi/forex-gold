@@ -15,6 +15,7 @@ from datetime import date
 from typing import Optional
 
 from backend.src.services.analytics import formatting as _fmt
+from backend.src.services.analytics import reporting as _reporting
 from backend.src.services.analytics import labels as _labels
 from backend.src.services.analytics import pnl as _pnl
 from backend.src.services.analytics import ticket_maps as _maps
@@ -163,3 +164,17 @@ async def template_group_map(leg_comments: dict) -> dict:
 async def comment_attribution_maps(leg_comments: dict) -> tuple:
     """(source, strategy, max_tp) maps keyed by ticket, from EA order comments."""
     return await _maps.comment_attribution_maps(leg_comments)
+
+
+def signal_lab_is_available() -> bool:
+    """Whether the signal-lab tables exist. The Heat Map hides itself when not."""
+    return _reporting.signal_lab_is_available()
+
+
+def signal_lab_adx_and_bias_samples(*args, **kwargs):
+    return _reporting.signal_lab_adx_and_bias_samples(*args, **kwargs)
+
+
+def recent_tg_signals(*args, **kwargs):
+    """Recent parsed Telegram signals, for the AI summary page."""
+    return _reporting.recent_tg_signals(*args, **kwargs)

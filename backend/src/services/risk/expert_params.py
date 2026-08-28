@@ -146,6 +146,21 @@ EXPERT_PARAMS: list[ExpertParam] = [
 
     # ── Broker reconciliation ────────────────────────────────────────────
     ExpertParam(
+        key="placeholder_no_fill_expiry_s", label="Unfilled placeholder expiry",
+        default=86400, min=3600, max=518400, unit="s",
+        domain="Broker reconciliation", integer=True,
+        desc="How long an EA Template placeholder with no broker position and "
+             "no broker deal is kept open before it is written off as never "
+             "filled (no P&L -- nothing was ever opened). Below this it is "
+             "left alone, because its legs may still be resting as pending "
+             "orders. Set too low, a resting order that was about to fill is "
+             "closed out from under itself; too high, a dead row keeps "
+             "consuming one of your max-open-trades slots. The ceiling is "
+             "under the 7-day broker deal-history lookback on purpose: past "
+             "that, 'no deal' stops meaning 'never filled' and starts meaning "
+             "'too old to see'.",
+    ),
+    ExpertParam(
         key="mt5_sync_miss_threshold", label="Broker-close miss threshold",
         default=2, min=1, max=20, unit="cycles", domain="Broker reconciliation",
         integer=True,

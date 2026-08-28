@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
@@ -55,6 +56,13 @@ def _comment_prefix(trade_id: str) -> str:
 # _fetch_placeholders / _fetch_row are gone: the first is
 # repair_repo.fetch_template_placeholders, the second was a byte-identical
 # duplicate of trade_repo.get_trade.
+
+
+def placeholder_no_fill_expiry_secs() -> int:
+    """How long a placeholder with no broker evidence at all is kept before it
+    is written off as never filled. Settings > Expert Tunables."""
+    from backend.src.services.risk import expert_params
+    return expert_params.get("placeholder_no_fill_expiry_s")
 
 
 async def repair_template_placeholders(bridge: Any) -> int:
@@ -97,12 +105,77 @@ async def repair_template_placeholders(bridge: Any) -> int:
                  and int(d.get("entry", 0) or 0) == 0), None,
             )
             if open_deal is None:
-                continue  # legs may still be resting as pending orders
+                # No live leg and no opening deal: the broker has never heard
+                # of this trade. Below the expiry that is not conclusive --
+                # its legs may still be resting as pending orders -- so it is
+                # left alone, exactly as before.
+                #
+                # Past the expiry nothing is coming, and leaving it open is
+                # not free: open_trade()'s max-open-trades gate counts open
+                # rows without asking the broker, so a dead row permanently
+                # consumes one of the user's slots (bugs/016 -- 26 hours and
+                # one slot in five, on the live demo account).
+                #
+                # Neither event-driven path can rescue this row. The fill
+                # never arrived, so _promote_leg_fill never ran; and the EA's
+                # open ack never arrived either, leaving grid_legs_total NULL,
+                # which _on_grid_leg_cancelled's own expiry explicitly
+                # declines to act on ("unknown, don't touch"). Polling by age
+                # is the only thing left that can tell "never existed" from
+                # "still resting".
+                if await _expire_never_filled(row, bridge):
+                    repaired += 1
+                continue
             if await _close_from_deals(row, open_deal, deals, bridge):
                 repaired += 1
         except Exception as e:
             log.warning("[TemplateRepair] %s failed: %s", trade_id[:8], e)
     return repaired
+
+
+async def _expire_never_filled(row: dict, bridge: Any) -> bool:
+    """Write off a placeholder the broker has no record of, once it is old
+    enough that nothing can still be coming.
+
+    Uses record_close() with a 0.0 price and the SAME "no_fill_expired" reason
+    the event-driven path already uses for a grid whose every leg cancelled
+    unfilled (ea_bridge._events._close_dead_grid_placeholder) -- this is that
+    close reached by polling instead of by event, not a new kind of close.
+
+    record_close() makes no broker call and its entry_price==0 guard records
+    P&L from mt5_profit rather than computing one from a zero entry, so this
+    cannot fabricate a figure and cannot touch a real position. There is no
+    real position: that is the precondition for getting here.
+    """
+    from backend.src.services.trading.close_trade import CloseTradeContext, record_close
+
+    trade_id = row["trade_id"]
+    age_s = time.time() - float(row.get("open_time") or 0)
+    if age_s < placeholder_no_fill_expiry_secs():
+        return False
+
+    try:
+        ctx = CloseTradeContext(bridge)
+        await record_close(trade_id, 0.0, "no_fill_expired", ctx)
+    except Exception as e:
+        log.warning("[TemplateRepair] failed to expire never-filled placeholder "
+                    "trade=%s: %s", trade_id[:8], e)
+        return False
+
+    log.warning(
+        "[TemplateRepair] expired never-filled placeholder trade=%s after %.1fh "
+        "— no broker position and no broker deal in 7 days of history, so no "
+        "leg was ever filled. Closed at $0 P&L; it was holding a trade slot.",
+        trade_id[:8], age_s / 3600.0,
+    )
+    asyncio.create_task(telegram_alerts.send_message(
+        f"EA Template placeholder written off — {row['direction']} "
+        f"{row.get('tg_source', '')} never filled and the broker has no record "
+        f"of it after {age_s / 3600.0:.0f}h. No position was ever opened and "
+        f"there is no P&L. It was holding one of your open-trade slots.",
+        trade_id, "template_placeholder_no_fill_expired",
+    ))
+    return True
 
 
 async def _adopt_live_position(row: dict, pos: dict) -> bool:

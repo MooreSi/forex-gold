@@ -66,6 +66,7 @@ EXPECTED_DEFAULTS = {
     "pending_signal_expiry_s": 120,    # pending_activation._EXPIRY
     "max_signal_age_s":        240,    # scan_staleness._MAX_SIGNAL_AGE_SECS
     "duplicate_window_s":      900,    # scan_parse_classify._RECENT_DUP_WINDOW
+    "placeholder_no_fill_expiry_s": 86400,
     "mt5_sync_miss_threshold": 2,      # runtime.MT5_SYNC_MISS_THRESHOLD
 }
 

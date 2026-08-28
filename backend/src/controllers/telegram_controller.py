@@ -88,3 +88,14 @@ AUTH_RECONNECTING = _reader.AUTH_RECONNECTING
 AUTH_AWAITING_CODE = _reader.AUTH_AWAITING_CODE
 AUTH_AWAITING_2FA = _reader.AUTH_AWAITING_2FA
 AUTH_FAILED = _reader.AUTH_FAILED
+
+
+def get_telegram_channel_names(*args, **kwargs):
+    """The channel names the schedule page offers per-source rows for.
+
+    The page was importing services.channels.repo for this -- a repo, which is
+    a sharper break than reaching a service. Routed through here, and the
+    controller reaches the repo through its service, not directly.
+    """
+    from backend.src.services.channels import performance as _perf
+    return _perf.get_telegram_channel_names(*args, **kwargs)

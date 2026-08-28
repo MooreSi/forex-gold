@@ -17,7 +17,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     psychology icon to avoid stacking extra height.
     """
     import asyncio as _aio
-    from backend.src.services.channels import strategy_ai as _csai
+    from backend.src.controllers import trading_controller as _csai
     from backend.src.controllers import broker_controller as _et
     from backend.src.controllers import schedule_controller as _csched
 

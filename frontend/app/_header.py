@@ -434,7 +434,7 @@ def build_header(*, power_dialog, pause_dialog, root):
 
             # News event badge — check live calendar; send one Telegram alert on entry
             try:
-                from backend.src.services.test_signal.news_filter import get_current_event as _get_news_event
+                from backend.src.controllers.news_controller import get_current_event as _get_news_event
                 _news_ev = _get_news_event()
                 if _news_ev:
                     import datetime as _dt_news

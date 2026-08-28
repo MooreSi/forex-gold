@@ -89,3 +89,15 @@ async def pending_unrecognised(limit: int = 20) -> list[dict]:
 
 def update_unrecognised(*args, **kwargs):
     return _unrecognised.update_unrecognised_message(*args, **kwargs)
+
+
+def get_telegram_channel_names() -> list[str]:
+    """Distinct channel names seen in stored Telegram messages.
+
+    Service-level wrapper so the schedule page can reach this through a
+    controller. The page was importing channels.repo directly, and pointing a
+    controller at the repo instead would only move the break -- controllers may
+    not import a repo either.
+    """
+    from backend.src.services.channels import repo as _repo
+    return _repo.get_telegram_channel_names()

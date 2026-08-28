@@ -46,7 +46,7 @@ def _render_schedule():
         def _compute_session_label() -> tuple[str, str]:
             """Return (label, badge_color) based on clock + enabled sessions."""
             from datetime import datetime, timezone as _tz
-            from backend.src.services.dpm.engine import is_weekly_market_closed
+            from backend.src.controllers.trading_controller import is_weekly_market_closed
             if is_weekly_market_closed():
                 return "Markets Closed", "grey"
             h = datetime.now(_tz.utc).hour
@@ -203,7 +203,7 @@ def _render_schedule():
     # "Auto (Claude)" (those describe a per-channel fallback that doesn't
     # map onto a time window).
     from backend.src.controllers import broker_controller as _sched_et
-    from backend.src.services.channels.repo import get_telegram_channel_names
+    from backend.src.controllers.telegram_controller import get_telegram_channel_names
     # "Auto (AI)" sits directly under "No Override" because it is the option
     # most likely to be wanted (2026-08-14). Picking it hands this channel's
     # template choice to the auto-manage layer: a backtested regime->template

@@ -13,7 +13,7 @@ from backend.src.controllers.trading_controller import (
     STRATEGY_SCALE_OUT,
     STRATEGY_ORB_FIXED,
 )
-from backend.src.services.signals.parser import validate_signal
+from backend.src.controllers.trading_controller import validate_signal
 from backend.src.controllers import sync_controller as sync_ctl
 
 # Sibling sections of this page.

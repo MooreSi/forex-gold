@@ -15,7 +15,7 @@ from typing import Optional
 
 from nicegui import ui
 
-from backend.src.services.backtest import engine as bt
+from backend.src.controllers import backtest_controller as bt
 from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
 )
@@ -320,7 +320,7 @@ def render(get_engine) -> None:
                 candles_cache.clear()
                 candles_cache.extend(raw)
                 from datetime import datetime, timezone
-                from backend.src.services.backtest.engine import _BROKER_TZ_OFFSET
+                from backend.src.controllers.backtest_controller import BROKER_TZ_OFFSET as _BROKER_TZ_OFFSET
                 # Candle ts is UTC+3; subtract offset for UTC display
                 first_dt = datetime.fromtimestamp(raw[0]["ts"] - _BROKER_TZ_OFFSET, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
                 last_dt  = datetime.fromtimestamp(raw[-1]["ts"] - _BROKER_TZ_OFFSET, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")

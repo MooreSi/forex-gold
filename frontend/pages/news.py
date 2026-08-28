@@ -13,8 +13,8 @@ from datetime import datetime, timezone
 
 from nicegui import ui
 
-from backend.src import config as cfg_module
-from backend.src.utils import news_calendar as nc
+from backend.src.controllers import settings_controller as cfg_module
+from backend.src.controllers import news_controller as nc
 
 # Impact -> (chip colour, text colour, label)
 _IMPACT_STYLE: dict[str, tuple[str, str, str]] = {

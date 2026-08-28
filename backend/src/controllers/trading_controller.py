@@ -167,3 +167,22 @@ def build_strategy_catalogue(*args, **kwargs):
 
 def describe_strategy(*args, **kwargs):
     return _catalogue.describe(*args, **kwargs)
+
+
+async def evaluate_channels(*args, **kwargs):
+    """Ask the AI to re-pick each Auto channel's template. Billable."""
+    from backend.src.services.channels import strategy_ai as _csai
+    return await _csai.evaluate_channels(*args, **kwargs)
+
+
+def is_weekly_market_closed(*args, **kwargs):
+    """True over the weekend break. Read-only."""
+    from backend.src.services.dpm import engine as _dpm
+    return _dpm.is_weekly_market_closed(*args, **kwargs)
+
+
+def validate_signal(*args, **kwargs):
+    """Check a manually entered signal's levels are self-consistent.
+    Returns a list of complaints; empty means valid."""
+    from backend.src.services.signals.parser import validate_signal as _vs
+    return _vs(*args, **kwargs)

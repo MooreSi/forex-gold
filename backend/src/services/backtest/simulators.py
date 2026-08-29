@@ -69,11 +69,18 @@ def _simulate_conservative(
                 new_sl = min(round(c["close"] + trail_dist, 2), fill_price)
                 current_sl = min(current_sl, new_sl)
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = partial_pnl
+    trade.pnl_pts       = move
+    trade.pnl_usd       = partial_pnl + move * remaining_lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 
@@ -132,11 +139,18 @@ def _simulate_ct(
                 trade.outcome       = "tp3_direct"
                 return trade
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = partial_pnl
+    trade.pnl_pts       = move
+    trade.pnl_usd       = partial_pnl + move * remaining_lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 
@@ -189,11 +203,18 @@ def _simulate_nss(
                 if tp1 is not None:
                     current_sl = tp1
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = partial_pnl
+    trade.pnl_pts       = move
+    trade.pnl_usd       = partial_pnl + move * remaining_lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 
@@ -246,11 +267,18 @@ def _simulate_be_runner(
                 trade.outcome       = "tp1_tp3"
                 return trade
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = 0.0
+    trade.pnl_pts       = move
+    trade.pnl_usd       = move * lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 
@@ -312,11 +340,18 @@ def _simulate_scale_out(
                 trade.outcome       = "tp1_tp3"
                 return trade
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = partial_pnl
+    trade.pnl_pts       = move
+    trade.pnl_usd       = partial_pnl + move * remaining_lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 
@@ -370,11 +405,18 @@ def _simulate_protected_scale(
                 trade.outcome       = "tp1_tp3"
                 return trade
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = partial_pnl
+    trade.pnl_pts       = move
+    trade.pnl_usd       = partial_pnl + move * remaining_lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 
@@ -416,11 +458,18 @@ def _simulate_trail_stop(
                 new_sl = min(round(c["close"] + _TRAIL_DIST_PTS, 2), fill_price)
                 current_sl = min(current_sl, new_sl)
 
-    trade.close_price   = fill_price
+    # Out of bars with the position still open. Priced at the MARKET,
+    # not at the fill: closing at fill_price reports every timed-out
+    # trade as break-even, which flatters any strategy whose trades run
+    # long and drift. _run_ladder_strategy always did it this way; the
+    # other simulators did not (bugs/017).
+    last_close = candles[end_bar - 1]["close"]
+    move       = (last_close - fill_price) if is_buy else (fill_price - last_close)
+    trade.close_price   = last_close
     trade.close_bar_idx = end_bar - 1
     trade.hold_bars     = end_bar - 1 - fill_bar
-    trade.pnl_pts       = 0.0
-    trade.pnl_usd       = 0.0
+    trade.pnl_pts       = move
+    trade.pnl_usd       = move * lot * _USD_PER_PT_PER_LOT
     trade.outcome       = "timeout"
     return trade
 

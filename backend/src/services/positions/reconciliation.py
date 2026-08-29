@@ -289,6 +289,15 @@ async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
         log.debug("[reconcile] skipped — broker read failed: %s", e)
         return None
 
+    # An abandoned activation claim is invisible to everything else -- the
+    # scheduler only selects 'pending' -- so this pass, which already exists to
+    # find state nobody is looking at, is the natural place to release it.
+    try:
+        await db_module.to_db_thread(
+            _signal_state_repo.release_stranded_activations)
+    except Exception as e:
+        log.debug("[reconcile] stranded-claim sweep failed: %s", e)
+
     try:
         db_open = await db_module.to_db_thread(_reporting.get_open_trades)
         unknown = await db_module.to_db_thread(

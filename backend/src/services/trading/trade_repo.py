@@ -14,6 +14,7 @@ depth 1 always committed the whole block).
 from __future__ import annotations
 
 import logging
+import time as _time
 
 from backend.src.db import transaction
 from backend.src.db import database as db_module
@@ -386,17 +387,8 @@ def reset_simulation_data(starting_balance: float, now: float) -> None:
 
 # ── vantage_signals: activation lifecycle ────────────────────────────────────
 
-def claim_signal_activation(signal_id: str) -> int:
-    """Atomic claim: only one caller flips pending/active -> activating."""
-    with db() as conn:
-        return conn.execute(
-            "UPDATE vantage_signals SET status='activating' "
-            "WHERE signal_id=? AND status IN ('pending','active')",
-            (signal_id,),
-        ).rowcount
-
-
 from backend.src.services.trading.signal_state_repo import (  # noqa: E402
+    claim_signal_activation,
     restore_signal_after_failed_open, reset_signal_to_pending,
     park_signal_pending, park_signal_unknown,
 )

@@ -73,6 +73,10 @@ from backend.src.services.positions.core_equity_protect import (
 from backend.src.services.positions.core_orphan_reconcile import (
     reconcile_orphaned_trades as _reconcile_orphaned_trades_impl,
 )
+from backend.src.services.positions.reconciliation import (
+    collect_and_report as _collect_and_report_impl,
+    _REPORT_EVERY_CYCLES as _RECONCILE_EVERY_CYCLES,
+)
 from backend.src.services.positions.core_template_placeholder_repair import (
     repair_template_placeholders as _repair_template_placeholders_impl,
 )
@@ -318,6 +322,19 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
             await _repair_template_placeholders_impl(ctx.bridge)
         except Exception as e:
             log.debug("Template placeholder repair error: %s", e)
+
+    # stage3/030, report-only. Reads both sides and logs what disagrees --
+    # a live position nothing is managing, a DB row the broker has never heard
+    # of, or a signal 020 parked as unknown. It repairs nothing yet, so it is
+    # safe wherever it sits in the cycle.
+    _rc = getattr(ctx.state, "reconcile_cycle", 0) + 1
+    if _rc >= _RECONCILE_EVERY_CYCLES:
+        _rc = 0
+        try:
+            await _collect_and_report_impl(ctx.bridge)
+        except Exception as e:
+            log.debug("Reconciliation report error: %s", e)
+    ctx.state.reconcile_cycle = _rc
 
     ctx.state.profit_cycle += 1
     if ctx.state.profit_cycle >= 24:

@@ -67,3 +67,16 @@ def park_signal_pending(signal_id: str) -> None:
             "UPDATE vantage_signals SET status='pending' WHERE signal_id=?",
             (signal_id,),
         )
+
+
+def fetch_unknown_signals() -> list[dict]:
+    """Signals stage3/020 parked because their send got no answer.
+
+    Only reconciliation reads these: they are deliberately invisible to the
+    scheduler, which selects status='pending'.
+    """
+    from backend.src.db.database import row_to_dict
+    with db() as conn:
+        return [row_to_dict(r) for r in conn.execute(
+            "SELECT signal_id, notes FROM vantage_signals WHERE status='unknown'"
+        ).fetchall()]

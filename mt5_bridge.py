@@ -722,7 +722,7 @@ def _place_order(direction: str, lots: float, sl: float | None,
             request["type_filling"] = filling
             result = mt5.order_send(request)
             if result is None:
-                continue
+                break  # stage3/020: lost response != nothing filled (C3 double-fill)
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 return {
                     "success":     True,
@@ -736,8 +736,8 @@ def _place_order(direction: str, lots: float, sl: float | None,
             if result.retcode not in _FILL_ERRORS:
                 break  # non-filling error — retrying with another mode won't help
 
-        if result is None:
-            return {"error": f"order_send returned None: {mt5.last_error()}"}
+        if result is None:  # unknown, NOT a rejection -- see stage3/020
+            return {"error": f"order_send returned None: {mt5.last_error()}", "unknown": True}
 
         # Clear messages for known retcodes
         if result.retcode == 10027:

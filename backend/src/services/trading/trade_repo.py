@@ -379,30 +379,10 @@ def claim_signal_activation(signal_id: str) -> int:
         ).rowcount
 
 
-def restore_signal_after_failed_open(signal_id: str) -> None:
-    with db() as conn:
-        conn.execute(
-            "UPDATE vantage_signals SET status='pending' "
-            "WHERE signal_id=? AND status='activating'",
-            (signal_id,),
-        )
-
-
-def reset_signal_to_pending(signal_id: str) -> None:
-    with db() as conn:
-        conn.execute(
-            "UPDATE vantage_signals SET status='pending', activated_at=NULL"
-            " WHERE signal_id=?",
-            (signal_id,),
-        )
-
-
-def park_signal_pending(signal_id: str) -> None:
-    with db() as conn:
-        conn.execute(
-            "UPDATE vantage_signals SET status='pending' WHERE signal_id=?",
-            (signal_id,),
-        )
+from backend.src.services.trading.signal_state_repo import (  # noqa: E402
+    restore_signal_after_failed_open, reset_signal_to_pending,
+    park_signal_pending, park_signal_unknown,
+)
 
 
 def update_signal_fields(signal_id: str, fields: dict) -> dict:

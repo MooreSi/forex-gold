@@ -47,6 +47,29 @@ from backend.src.utils.models import (
 log = logging.getLogger(__name__)
 
 
+def _route_failed_open(signal_id: str, exc: BaseException) -> None:
+    """Decide whether a failed open leaves the signal retryable (stage3/020).
+
+    A broker rejection means nothing filled, so the signal goes back to
+    'pending' exactly as before. A timeout, a lost response or a dead socket
+    means nobody knows -- the order may be on the book -- so the signal parks
+    in 'unknown' and only reconciliation may resolve it. Restoring one of
+    those to 'pending' is what turns a filled-but-unrecorded order into two.
+    """
+    from backend.src.services.trading.send_dedup import send_outcome_is_unknown
+
+    if send_outcome_is_unknown(exc):
+        log.error(
+            "[open] signal %s: send outcome UNKNOWN (%s) — parking, NOT retrying. "
+            "The order may already be live; reconciliation resolves this.",
+            signal_id, exc,
+        )
+        trade_repo.park_signal_unknown(signal_id, str(exc) or type(exc).__name__)
+        return
+    trade_repo.restore_signal_after_failed_open(signal_id)
+
+
+
 async def open_trade_from_signal(
     bridge: Any,
     signal_id: str,
@@ -93,9 +116,9 @@ async def open_trade_from_signal(
             lot_size=lot_size, tick=tick, strategy=strategy,
             tg_source=sig.get("source_name") or None,
         )
-    except Exception:
-        # Restore so a transient failure (e.g. MT5 reject) stays retryable.
-        trade_repo.restore_signal_after_failed_open(signal_id)
+    except Exception as _open_exc:
+        # A rejection stays retryable; a lost response parks as 'unknown'.
+        _route_failed_open(signal_id, _open_exc)
         raise
 
     _entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2

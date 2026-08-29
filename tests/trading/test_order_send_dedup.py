@@ -383,29 +383,26 @@ class TestTheFallbackGate:
 
         assert decision.send is True, "the gate ran when no EA order was attempted"
 
-    async def test_an_UNKNOWN_broker_still_sends_FOR_NOW(self):
-        """Records today's deliberate limit, and it is a limit, not a
-        decision I am happy with.
+    async def test_an_UNKNOWN_broker_PARKS_rather_than_sending(self):
+        """This test used to assert the opposite, and said so: while 010 stood
+        alone there was nowhere safe to put a signal we could not resolve, so
+        it sent and logged loudly. Refusing would have left the signal
+        'pending' and PendingWatcher would have re-activated it every 20s --
+        the failure that turned 5 signals into ~133 opens on 2026-07-30.
 
-        An unreachable broker has not said the trade is absent. Refusing to
-        send here would be safer against duplication -- but for a NON-template
-        strategy there is no placeholder row to reconcile from, so the signal
-        would stay 'pending' and PendingWatcher would re-activate it every 20
-        seconds. That is the failure that turned 5 signals into ~133 opens on
-        2026-07-30, and it is worse than the duplicate this gate exists to
-        stop.
-
-        Handling UNKNOWN properly needs the recorded-as-unknown state that
-        stage3/020 introduces. Until then this logs loudly and sends, and this
-        test exists so the behaviour is visible rather than assumed."""
+        stage3/020 added the 'unknown' park, so the safe answer is now
+        available: an unreachable broker has not said the trade is absent, and
+        we stop instead of guessing."""
         from backend.src.services.trading import open_trade as ot
+        from backend.src.services.trading.send_dedup import SendOutcomeUnknown
 
         class _Broken(_GateBridge):
             async def get_positions(self):
                 raise RuntimeError("bridge down")
 
-        decision = await ot._resolve_fallback_send(_Broken(), TRADE_ID,
-                                                   ea_attempted=True)
+        broken = _Broken()
 
-        assert decision.send is True
-        assert decision.unknown is True
+        with pytest.raises(SendOutcomeUnknown):
+            await ot._resolve_fallback_send(broken, TRADE_ID, ea_attempted=True)
+
+        assert broken.placed == [], "an order was sent while the broker was unreachable"

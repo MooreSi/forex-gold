@@ -16,6 +16,35 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+# ── Lost responses (stage3/020) ──────────────────────────────────────────────
+
+class SendOutcomeUnknown(RuntimeError):
+    """The send got no usable answer, so nobody knows whether it filled.
+
+    Deliberately NOT a subclass of the rejection paths. A broker retcode
+    saying no is information: nothing filled, and retrying is safe. A timeout,
+    a None, or a dead socket is the absence of information, and treating the
+    two alike is what puts a possibly-filled signal back in the queue.
+    """
+
+
+# Exception types that mean the request may have reached the broker even
+# though no answer came back. asyncio.TimeoutError and TimeoutError are the
+# same object on 3.11+, but both names are listed because that is not obvious
+# to a reader and the tuple is the thing people will edit.
+_NO_ANSWER_ERRORS: tuple[type[BaseException], ...] = (
+    SendOutcomeUnknown,
+    TimeoutError,
+    ConnectionError,
+    OSError,          # covers socket-level failures ConnectionError misses
+)
+
+
+def send_outcome_is_unknown(exc: BaseException) -> bool:
+    """True when `exc` means "no answer", not "the broker said no"."""
+    return isinstance(exc, _NO_ANSWER_ERRORS)
+
+
 @dataclass(frozen=True)
 class _FallbackDecision:
     """Whether the Python-bridge fallback may send, and what to adopt if not."""
@@ -65,19 +94,18 @@ async def _resolve_fallback_send(bridge, trade_id: str,
                                  detail=res.detail)
 
     if res.unknown:
-        # Deliberate, and a known limit rather than a decision I am happy
-        # with. Refusing here is safer against duplication, but a non-template
-        # strategy has no placeholder row to reconcile from, so the signal
-        # would stay 'pending' and PendingWatcher would re-activate it every
-        # 20s -- the failure that turned 5 signals into ~133 opens on
-        # 2026-07-30, which is worse than the duplicate this gate stops.
-        # Handling UNKNOWN properly needs the recorded-as-unknown state that
-        # stage3/020 introduces.
+        # An unreachable broker has NOT said the trade is absent, so sending
+        # would be a guess. While 010 stood alone this sent anyway, because
+        # refusing left the signal 'pending' and PendingWatcher re-activated
+        # it every 20s -- the failure that turned 5 signals into ~133 opens on
+        # 2026-07-30. stage3/020 added the 'unknown' park, so stopping is now
+        # the safe answer rather than the dangerous one.
         log.error(
             "[dedup] could not confirm whether %s is already at the broker (%s) "
-            "— sending anyway. See stage3/020.", trade_id[:8], res.detail,
+            "— REFUSING to send. The signal parks as unknown for reconciliation.",
+            trade_id[:8], res.detail,
         )
-        return _FallbackDecision(send=True, unknown=True, detail=res.detail)
+        raise SendOutcomeUnknown(
+            f"could not confirm whether the order was already placed: {res.detail}")
 
     return _FallbackDecision(send=True, detail=res.detail)
-

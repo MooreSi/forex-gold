@@ -29,6 +29,7 @@ from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.trading.send_dedup import (
     _FallbackDecision, _bridge_order_comment, _resolve_fallback_send,
+    SendOutcomeUnknown,
 )
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
@@ -249,6 +250,18 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
                 for n, price in enumerate(msg_tps[:ea_templates.MAX_TP_LEVELS], start=1)
             }
     return tps, pcts, pending_pips
+
+
+def _raise_if_send_unknown(mt5_result: dict) -> None:
+    """A send whose response was lost is not a rejection (stage3/020).
+
+    mt5_bridge marks these with unknown=True. Letting them fall through to the
+    generic "MT5 order rejected" path would restore the signal to pending and
+    hand a possibly-filled order straight back to the scheduler.
+    """
+    if isinstance(mt5_result, dict) and mt5_result.get("unknown"):
+        raise SendOutcomeUnknown(
+            f"broker gave no usable answer: {mt5_result.get('error')}")
 
 
 async def open_trade(
@@ -693,6 +706,7 @@ async def open_trade(
         else:
             mt5_result  = await bridge.place_order(direction, lot_size, stop_loss, mt5_tp,
                                                    _bridge_order_comment(trade_id, signal_id))
+            _raise_if_send_unknown(mt5_result)
             mt5_error   = mt5_result.get("error")
 
             # Raise immediately — do NOT record a phantom trade if MT5 rejected the order

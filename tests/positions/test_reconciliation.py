@@ -98,7 +98,7 @@ class TestBrokerOnly:
         d = rec.diff_snapshots(broker_positions=[_pos(ticket=111)],
                                broker_deals=[], db_open_trades=[])
 
-        assert _kinds(d) == ["broker_only"]
+        assert _kinds(d) == ["broker_only_manual"]
         assert d.needs_attention is True
 
     def test_it_carries_the_ticket_so_it_can_be_adopted(self):
@@ -116,7 +116,7 @@ class TestBrokerOnly:
                                broker_deals=[],
                                db_open_trades=[_db(ticket=111, status="closed")])
 
-        assert "broker_only" in _kinds(d)
+        assert "broker_only_manual" in _kinds(d)
 
 
 class TestDbOnly:
@@ -306,7 +306,7 @@ class TestTheReport:
 
         text = rec.report(d)
 
-        assert "broker_only" in text
+        assert "broker_only_manual" in text
         assert "db_only_no_evidence" in text
 
     def test_a_clean_reconciliation_says_so(self):
@@ -342,7 +342,7 @@ class TestThePeriodicPass:
         d = await rec.collect_and_report(_RecBridge(positions=[_pos(ticket=111)]))
 
         assert d is not None
-        assert "broker_only" in _kinds(d)
+        assert "broker_only_manual" in _kinds(d)
 
     async def test_a_FAILED_BROKER_READ_reports_NOTHING(self, fresh_db):
         """Half a picture is worse than none. If the broker read fails and we
@@ -393,3 +393,90 @@ class TestThePeriodicPass:
         d = await rec.collect_and_report(_RecBridge(positions=[]))
 
         assert [e.signal_id for e in d.entries if e.signal_id] == ["sig-parked"]
+
+
+# ── whose position is it? ────────────────────────────────────────────────────
+#
+# Simon's answer to 001-trading-defaults #6 (25 Aug, AFTER this spec was
+# written) overrides the spec's "adopt it as recovered":
+#
+#   "A -- Watch it only: show it, track its profit, never touch it. Manual MT5
+#    trades stay Simon's; the app still counts them toward exposure and the
+#    risk limits, but never moves a stop or closes one."
+#
+# But "broker position with no DB row" is two different situations wearing the
+# same shape:
+#
+#   * a trade SIMON placed by hand in MT5 -- his, watch only;
+#   * a trade THE APP placed and then crashed before recording -- the app's
+#     own orphan, and the crash-recovery case this whole task exists for.
+#
+# stage3/010 made them distinguishable: every order the app sends now carries
+# "ea:" or "py:" plus the trade id. A position with neither is not ours.
+# Collapsing the two would either abandon the app's own orphans or take over
+# Simon's manual trades, and he has said in writing which of those he wants.
+
+class TestWhoseOrphanIsIt:
+    def test_a_position_with_OUR_comment_is_ours(self):
+        from backend.src.services.broker.dedup import comment_for_bridge_order
+
+        d = rec.diff_snapshots(
+            broker_positions=[_pos(ticket=111,
+                                   comment=comment_for_bridge_order(TRADE_ID))],
+            broker_deals=[], db_open_trades=[])
+
+        assert _kinds(d) == ["broker_only_ours"]
+
+    def test_an_EA_leg_with_no_db_row_is_ours_too(self):
+        d = rec.diff_snapshots(
+            broker_positions=[_pos(ticket=111, comment=f"ea:{TRADE_ID[:10]}a1")],
+            broker_deals=[], db_open_trades=[])
+
+        assert _kinds(d) == ["broker_only_ours"]
+
+    def test_a_position_with_NO_comment_is_MANUAL(self):
+        """Simon's own trade. Watch only."""
+        d = rec.diff_snapshots(broker_positions=[_pos(ticket=111, comment="")],
+                               broker_deals=[], db_open_trades=[])
+
+        assert _kinds(d) == ["broker_only_manual"]
+
+    @pytest.mark.parametrize("comment", [
+        "", "[sl 4046.50]", "batchClose", "my manual trade", None,
+    ])
+    def test_anything_not_ours_is_manual(self, comment):
+        d = rec.diff_snapshots(
+            broker_positions=[_pos(ticket=111, comment=comment)],
+            broker_deals=[], db_open_trades=[])
+
+        assert _kinds(d) == ["broker_only_manual"]
+
+    def test_a_manual_position_is_flagged_NEVER_TOUCH(self):
+        """The detail text is what a human reads before acting on the report.
+        It has to say which of the two this is."""
+        d = rec.diff_snapshots(broker_positions=[_pos(ticket=111, comment="")],
+                               broker_deals=[], db_open_trades=[])
+
+        assert "never" in d.entries[0].detail.lower()
+
+    def test_BOTH_still_need_attention(self):
+        """Watch-only does not mean ignore. A manual position still counts
+        toward exposure and the risk limits, which is exactly why the report
+        must show it."""
+        ours = rec.diff_snapshots([_pos(ticket=1, comment=f"ea:{TRADE_ID[:10]}a1")],
+                                  [], [])
+        manual = rec.diff_snapshots([_pos(ticket=2, comment="")], [], [])
+
+        assert ours.needs_attention is True
+        assert manual.needs_attention is True
+
+    def test_the_report_distinguishes_them(self):
+        d = rec.diff_snapshots(
+            broker_positions=[_pos(ticket=1, comment=f"py:{TRADE_ID[:10]}"),
+                              _pos(ticket=2, comment="")],
+            broker_deals=[], db_open_trades=[])
+
+        text = rec.report(d)
+
+        assert "broker_only_ours" in text
+        assert "broker_only_manual" in text

@@ -35,7 +35,18 @@ log = logging.getLogger(__name__)
 
 
 # Kinds, in the order a reader should care about them.
-BROKER_ONLY = "broker_only"                  # live position nothing manages
+# A broker position with no DB row is TWO situations wearing one shape, and
+# Simon's answer to 001-trading-defaults #6 (25 Aug, after this spec was
+# written) treats them oppositely: "Watch it only... Manual MT5 trades stay
+# Simon's; the app still counts them toward exposure and the risk limits, but
+# never moves a stop or closes one."
+#
+# stage3/010 made them separable -- every order the app sends carries "ea:" or
+# "py:" plus the trade id, and a position with neither is not ours. Collapsing
+# them would either abandon the app's own crash orphans or take over Simon's
+# manual trades.
+BROKER_ONLY_OURS = "broker_only_ours"        # we placed it, then lost the row
+BROKER_ONLY_MANUAL = "broker_only_manual"    # not ours -- watch, never touch
 DB_ONLY_CLOSED = "db_only_closed"            # gone from the broker, deal explains it
 DB_ONLY_NO_EVIDENCE = "db_only_no_evidence"  # gone, and nothing explains it
 UNKNOWN_FILLED = "unknown_filled"            # a parked signal that did fill
@@ -48,8 +59,10 @@ MATCHED = "matched"
 # window, not two that can drift apart.
 _DEAL_DAYS = 1
 
+# Watch-only does not mean ignore: a manual position still counts toward
+# exposure and the risk limits, which is exactly why the report must show it.
 _ATTENTION_KINDS = frozenset({
-    BROKER_ONLY, DB_ONLY_CLOSED, DB_ONLY_NO_EVIDENCE,
+    BROKER_ONLY_OURS, BROKER_ONLY_MANUAL, DB_ONLY_CLOSED, DB_ONLY_NO_EVIDENCE,
     UNKNOWN_FILLED, UNKNOWN_NOT_FILLED,
 })
 
@@ -93,6 +106,19 @@ def _id_prefixes(trade_id: str) -> tuple[str, ...]:
 def _comment_matches(comment: Any, prefixes: tuple[str, ...]) -> bool:
     text = str(comment or "")
     return bool(prefixes) and any(text.startswith(p) for p in prefixes)
+
+
+def _is_ours(comment: Any) -> bool:
+    """Did this app place the order that opened this position?
+
+    Any trade id, not a particular one: the question here is ownership, not
+    which trade. "ea:" is the EA's, "py:" is the Python bridge's (stage3/010).
+    Everything else -- a blank comment, MT5's own "[sl 4046.50]" or
+    "batchClose", or whatever a human typed -- is not ours.
+    """
+    from backend.src.services.broker.dedup import BRIDGE_COMMENT_PREFIX
+    text = str(comment or "")
+    return text.startswith("ea:") or text.startswith(BRIDGE_COMMENT_PREFIX)
 
 
 def _closing_deals(deals: Iterable[dict], ticket: Optional[int]) -> list:
@@ -173,10 +199,16 @@ def diff_snapshots(broker_positions: Iterable[dict],
         ticket = int(pos.get("ticket") or 0)
         if ticket in claimed_tickets:
             continue
+        ours = _is_ours(pos.get("comment"))
         entries.append(DiffEntry(
-            kind=BROKER_ONLY, ticket=ticket or None,
+            kind=BROKER_ONLY_OURS if ours else BROKER_ONLY_MANUAL,
+            ticket=ticket or None,
             entry_price=float(pos.get("open_price") or 0),
-            detail="live at the broker, unknown to the database — nothing is managing it"))
+            detail=(
+                "we placed this and then lost its row — nothing is managing it"
+                if ours else
+                "not placed by this app (no order id in its comment) — counts "
+                "toward exposure, but never touch it: no stop moved, no close")))
 
     for sig in (unknown_signals or []):
         trade_id = sig.get("trade_id") or ""
@@ -200,8 +232,8 @@ def report(diff: ReconcileDiff) -> str:
         return "Reconciliation: no differences between the broker and the database."
 
     lines = ["Reconciliation found differences:"]
-    for kind in (BROKER_ONLY, DB_ONLY_CLOSED, DB_ONLY_NO_EVIDENCE,
-                 UNKNOWN_FILLED, UNKNOWN_NOT_FILLED):
+    for kind in (BROKER_ONLY_OURS, BROKER_ONLY_MANUAL, DB_ONLY_CLOSED,
+                 DB_ONLY_NO_EVIDENCE, UNKNOWN_FILLED, UNKNOWN_NOT_FILLED):
         found = diff.of_kind(kind)
         if not found:
             continue

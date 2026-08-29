@@ -4,15 +4,19 @@ The Mac talks to the VPS over TLS with no CA and no hostname check. That is a
 defensible choice for a fixed-IP box with no real certificate -- PROVIDED the
 client pins the server's SHA-256 fingerprint.
 
-It does not. Writing these tests is how that was found; see
-docs/todo/bugs/014. The channel is encrypted but unauthenticated today.
+It did not, and writing these tests is how that was found (docs/todo/bugs/014).
+It does now: the caller pins on first use and refuses a mismatch before sending
+the token -- see verify_or_pin/peer_fingerprint below and
+tests/core/test_sync_cert_pinning.py, which owns that behaviour.
 
 Two things therefore matter more than anything else here, and both are easy to
 break without noticing:
 
-  * client_ssl_context() has verify_mode CERT_NONE and check_hostname False,
-    with nothing pinning the certificate. The test below records that as it
-    stands rather than asserting a safety it does not have.
+  * client_ssl_context() still has verify_mode CERT_NONE and check_hostname
+    False, and that is correct: there is no CA and the server is a bare IP.
+    The authentication comes from pinning instead, which is why the test below
+    now asserts BOTH halves -- the context does not verify, AND something
+    checks the fingerprint. Asserting only the first is what let 014 hide.
   * ensure_cert() must NOT regenerate when a cert already exists. A new cert
     is a new fingerprint, which matters both for the value shown on the Remote
     Node screen and for any pinning added later.
@@ -105,26 +109,33 @@ class TestSslContexts:
         ctx = tls_util.server_ssl_context("203.0.113.10")
         assert isinstance(ctx, ssl.SSLContext)
 
-    def test_the_client_context_does_not_verify_and_NOTHING_PINS_THE_CERT(self):
-        """Records a real gap. Read docs/todo/bugs/014 before touching this.
+    def test_the_client_context_does_not_verify_ON_ITS_OWN(self):
+        """Unchanged, and correct: no CA, bare IP. What changed is that this
+        is no longer the whole story -- see the companion test below.
 
-        The context disables CA and hostname checks, which the module's own
-        docstring says is safe because "the caller is responsible for checking
-        the fingerprint ... see client.py's _verify_fingerprint".
-
-        That function does not exist. Searched the whole tree: the only
-        references to the name are that docstring and this test. Nothing calls
-        getpeercert(), and cert_fingerprint() is used in exactly two places --
-        a log line on server start, and the Remote Node screen that displays
-        it. No code ever compares a presented certificate to a pinned value.
-
-        So the channel is encrypted but UNAUTHENTICATED. This test asserts the
-        current state so the gap is visible in the suite rather than resting on
-        a docstring that promises a safeguard nobody wrote. It is not an
-        endorsement, and it should be changed when 014 is."""
+        This test used to be named ..._and_NOTHING_PINS_THE_CERT, and it
+        recorded bugs/014: the module docstring promised the caller checked
+        the fingerprint via `client.py::_verify_fingerprint`, and that function
+        did not exist anywhere in the tree. Fixed 2026-08-28; the name and the
+        pairing below are the record of it."""
         ctx = tls_util.client_ssl_context()
         assert ctx.check_hostname is False
         assert ctx.verify_mode == ssl.CERT_NONE
+
+    def test_and_SOMETHING_PINS_THE_CERTIFICATE(self):
+        """The half whose absence was 014. CERT_NONE is only safe when the
+        caller compares the presented certificate against one it already
+        knows, so these two tests belong together -- asserting the first
+        without the second is exactly what made a missing safeguard look
+        deliberate for months.
+
+        The behaviour itself is owned by tests/core/test_sync_cert_pinning.py.
+        This is the link between the two, so that anyone reading the CERT_NONE
+        assertion above finds out immediately that something else does the
+        verifying, and where."""
+        assert callable(getattr(tls_util, "verify_or_pin", None)), (
+            "nothing pins the sync certificate — see docs/todo/bugs/014")
+        assert callable(getattr(tls_util, "peer_fingerprint", None))
 
     def test_the_client_context_is_a_client_context(self):
         ctx = tls_util.client_ssl_context()

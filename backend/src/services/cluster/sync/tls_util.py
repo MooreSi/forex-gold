@@ -104,3 +104,113 @@ def cert_fingerprint() -> str:
     if _FPRINT_FILE.exists():
         return _FPRINT_FILE.read_text(encoding="utf-8").strip()
     return ""
+
+# ── Certificate pinning (bugs/014) ───────────────────────────────────────────
+# The client context above deliberately does not verify: there is no CA and the
+# server is a bare IP. That is only safe if the caller compares the presented
+# certificate against one it already knows, and until 2026-08-28 nothing did --
+# this module's docstring named a `client.py::_verify_fingerprint` that never
+# existed. The token is sent on the first frame after the handshake, so an
+# unverified peer was handed it.
+#
+# Trust-on-first-use: the first fingerprint seen for a host is stored and
+# accepted, and every later connection must match it. TOFU keeps an
+# already-paired Mac/VPS working across this change -- it pins whatever they
+# are already talking to -- at the cost of leaving that first connection
+# exposed. That limit is real and is recorded in 014.
+
+def _pin_key(host: str) -> str:
+    return f"sync_pinned_fp_{host}"
+
+
+def pinned_fingerprint(host: str) -> str:
+    """The fingerprint this node has committed to for `host`, or ""."""
+    from backend.src.db import database as db_module
+    try:
+        return db_module.get_app_config(_pin_key(host)) or ""
+    except Exception:
+        return ""
+
+
+def clear_pin(host: str) -> None:
+    """Forget the pin for `host`, so the next connection pins afresh.
+
+    The recovery path for a genuinely reissued certificate. Without one, a
+    legitimately rotated cert would lock the user out with no route back --
+    and ensure_cert() never rotates on its own, so this should be rare.
+    """
+    from backend.src.db import database as db_module
+    try:
+        db_module.set_app_config(_pin_key(host), "")
+    except Exception as e:
+        log.warning("[TLS] could not clear pinned fingerprint for %s: %s", host, e)
+
+
+def peer_fingerprint(ws) -> str:
+    """SHA-256 of the certificate the peer actually presented, or "".
+
+    Reaches through the websockets connection to the live SSL object. That
+    path is a library internal, so it is proved against a real handshake in
+    tests/core/test_sync_cert_pinning.py rather than mocked -- a mock here
+    would pass while the real attribute path was wrong, which is precisely how
+    014 went unnoticed.
+
+    Returns "" rather than raising: this is called on the connect path, and a
+    caller that cannot read a certificate must refuse the connection, not
+    crash the reconnect loop.
+    """
+    import hashlib
+    try:
+        ssl_object = ws.transport.get_extra_info("ssl_object")
+        der = ssl_object.getpeercert(binary_form=True)
+        if not der:
+            return ""
+        digest = hashlib.sha256(der).hexdigest()
+        # Colon-separated hex, matching cert_fingerprint()'s own format so the
+        # pinned value and the value shown on the Remote Node screen are
+        # directly comparable by eye.
+        return ":".join(digest[i:i + 2] for i in range(0, 64, 2))
+    except Exception as e:
+        log.warning("[TLS] could not read the peer certificate: %s", e)
+        return ""
+
+
+def verify_or_pin(host: str, presented: str) -> tuple[bool, str]:
+    """Check a presented fingerprint against the pin, or set the pin.
+
+    Returns (ok, reason). A refusal never overwrites the stored pin -- doing
+    so would let a second attempt from the same wrong peer succeed.
+
+    Plain equality is correct here: a certificate fingerprint is a public
+    value, not a secret, so there is nothing for a timing comparison to leak.
+    The shared token is the secret, and that is compared with compare_digest
+    on the server side.
+    """
+    from backend.src.db import database as db_module
+
+    if not presented:
+        return False, ("the server presented no readable certificate — refusing "
+                       "before sending the token")
+
+    stored = pinned_fingerprint(host)
+    if not stored:
+        try:
+            db_module.set_app_config(_pin_key(host), presented)
+        except Exception as e:
+            return False, f"could not store the certificate fingerprint: {e}"
+        log.warning(
+            "[TLS] pinned %s on first connection: %s. Every later connection "
+            "must present this same certificate.", host, presented,
+        )
+        return True, "pinned on first connection"
+
+    if stored == presented:
+        return True, "certificate matches the pinned fingerprint"
+
+    return False, (
+        f"certificate fingerprint does not match the pinned value for {host}. "
+        f"Expected {stored}, got {presented}. Refusing to send the sync token. "
+        f"If the VPS certificate was genuinely reissued, re-enter the "
+        f"connection details in Settings > Remote Node to pair again."
+    )
+

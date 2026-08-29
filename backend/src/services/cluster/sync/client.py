@@ -18,6 +18,7 @@ from typing import Callable, Optional
 
 from backend.src.db import database as db_module
 from backend.src.services.cluster.sync import tls_util
+from backend.src.services.cluster.sync._pending_store import PendingStoreMixin
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
@@ -55,7 +56,7 @@ _LEDGER_PULL_INTERVAL_S = 120
 _LIVENESS_PING_INTERVAL_S = 20
 
 
-class SyncClient:
+class SyncClient(PendingStoreMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
         self.last_error: str = ""
@@ -115,72 +116,6 @@ class SyncClient:
         self._in_model_download = False
         self._pending_upload_bytes: Optional[bytes] = None
 
-    # ── Pending-settings durability ──────────────────────────────────────────
-
-    @staticmethod
-    def _load_pending() -> dict:
-        try:
-            raw = db_module.get_app_config("sync_pending_settings")
-            return json.loads(raw) if raw else {}
-        except Exception:
-            return {}
-
-    def _persist_pending(self) -> None:
-        try:
-            db_module.set_app_config("sync_pending_settings", json.dumps(self._pending_settings))
-        except Exception as e:
-            log.debug("[SyncClient] failed to persist pending settings: %s", e)
-
-    @staticmethod
-    def _load_pending_channel_strategy() -> dict:
-        try:
-            raw = db_module.get_app_config("sync_pending_channel_strategy")
-            return json.loads(raw) if raw else {}
-        except Exception:
-            return {}
-
-    def _persist_pending_channel_strategy(self) -> None:
-        try:
-            db_module.set_app_config(
-                "sync_pending_channel_strategy", json.dumps(self._pending_channel_strategy)
-            )
-        except Exception as e:
-            log.debug("[SyncClient] failed to persist pending channel strategy: %s", e)
-
-    @staticmethod
-    def _load_pending_trading_schedule() -> Optional[dict]:
-        try:
-            raw = db_module.get_app_config("sync_pending_trading_schedule")
-            return json.loads(raw) if raw else None
-        except Exception:
-            return None
-
-    def _persist_pending_trading_schedule(self) -> None:
-        try:
-            db_module.set_app_config(
-                "sync_pending_trading_schedule",
-                json.dumps(self._pending_trading_schedule) if self._pending_trading_schedule else "",
-            )
-        except Exception as e:
-            log.debug("[SyncClient] failed to persist pending trading schedule: %s", e)
-
-    @staticmethod
-    def _load_pending_strategy_params() -> Optional[dict]:
-        try:
-            raw = db_module.get_app_config("sync_pending_strategy_params")
-            return json.loads(raw) if raw else None
-        except Exception:
-            return None
-
-    def _persist_pending_strategy_params(self) -> None:
-        try:
-            db_module.set_app_config(
-                "sync_pending_strategy_params",
-                json.dumps(self._pending_strategy_params) if self._pending_strategy_params else "",
-            )
-        except Exception as e:
-            log.debug("[SyncClient] failed to persist pending strategy params: %s", e)
-
     # ── Config ───────────────────────────────────────────────────────────────
 
     def configure(self, host: str, port: int, token: str) -> None:
@@ -188,6 +123,14 @@ class SyncClient:
         at rest via core.secrets, the same Fernet-in-keychain pattern used for
         the MT5 password — so the Mac can auto-reconnect on app restart
         without the user re-pasting the token every session."""
+        # Re-entering the connection details is the user saying "pair with
+        # this VPS again", so drop any pinned certificate for it. Without
+        # this, a genuinely reissued cert would leave them with no route back:
+        # the pin would refuse the very server they had just pointed at, and
+        # nothing else clears it. See tls_util.verify_or_pin (bugs/014).
+        if self._host and self._host != host:
+            tls_util.clear_pin(self._host)
+        tls_util.clear_pin(host)
         self._host, self._port, self._token = host, port, token
         from backend.src.config import secrets as _sec
         db_module.set_app_config("sync_remote_host", host)
@@ -248,6 +191,19 @@ class SyncClient:
         # 15-90s for hours). 60s gives real headroom without materially
         # slowing detection of an actually-dead connection.
         async with websockets.connect(uri, ssl=ctx, ping_interval=20, ping_timeout=60) as ws:
+            # bugs/014: the context above does not verify the peer, so this is
+            # the only thing standing between an intercepted connection and
+            # the shared token. It MUST come before the send below -- pinning
+            # after the token has left is worth nothing, the attacker already
+            # has it. Trust-on-first-use, so an already-paired Mac/VPS keeps
+            # working; every later connection must match.
+            _ok, _why = tls_util.verify_or_pin(self._host, tls_util.peer_fingerprint(ws))
+            if not _ok:
+                self.conn_state = CONN_REJECTED
+                self.last_error = _why
+                log.error("[SyncClient] REFUSING to connect to %s: %s", self._host, _why)
+                return
+
             self._ws = ws
             await ws.send(json.dumps(make(MSG_HELLO, token=self._token)))
             hello_reply = json.loads(await asyncio.wait_for(ws.recv(), timeout=10.0))

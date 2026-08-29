@@ -20,22 +20,86 @@ from backend.src.db.database import db
 log = logging.getLogger(__name__)
 
 
+# The cap and the claim are ONE statement on purpose (stage1 phase2/030).
+#
+# open_trade reads count_open_trades(), compares it to max_open_trades, then
+# awaits a tick, the EA handoff and place_order before inserting the row. Two
+# signals arriving together both saw "under the cap" and both placed.
+#
+# Counting `activating` in a separate check does NOT fix it: with a cap of 1
+# and two simultaneous claims, each sees the other and both refuse. A tie
+# between equals cannot be broken by counting. Putting the cap inside the
+# UPDATE's WHERE works because SQLite serialises writers, so the second claim
+# genuinely sees the first has already taken the slot.
+_CLAIM_SQL = """
+    UPDATE vantage_signals SET status='activating', activated_at=?
+     WHERE signal_id=? AND status IN ('pending','active')
+       AND (SELECT COUNT(*) FROM vantage_simulated_trades WHERE status='open')
+         + (SELECT COUNT(*) FROM vantage_signals WHERE status='activating')
+         < ?
+"""
+
+
+def _max_open_trades(conn) -> int:
+    """The same cap open_trade's backstop uses, read on this connection so the
+    claim cannot act on a value that changed underneath it."""
+    row = conn.execute(
+        "SELECT max_open_trades FROM vantage_risk_settings WHERE id=1").fetchone()
+    try:
+        return int(row[0]) if row and row[0] is not None else 1
+    except (TypeError, ValueError):
+        return 1
+
+
 def claim_signal_activation(signal_id: str) -> int:
-    """Atomic claim: only one caller flips pending/active -> activating.
+    """Atomically claim a signal for opening, if a trade slot is free.
+
+    Returns 1 when the claim is won, 0 otherwise -- and 0 now means one of two
+    things, which `explain_failed_claim` tells apart: someone else is already
+    opening this signal, or the account is at max_open_trades.
 
     Stamps activated_at with the CLAIM time, which is what lets
-    signal_state_repo.release_stranded_activations tell an abandoned claim
-    from one still in flight. created_at cannot do that job: a signal may sit
-    pending for hours before anyone claims it, so its age says nothing about
-    how long the open has been running. On success repo.mark_signal_active
-    overwrites this with the real activation time.
+    release_stranded_activations tell an abandoned claim from one still in
+    flight. created_at cannot do that job: a signal may sit pending for hours
+    before anyone claims it. On success repo.mark_signal_active overwrites it
+    with the real activation time.
+
+    The claim holds a slot until the signal moves on -- to 'active' on
+    success, 'pending' on a rejection, or 'unknown' for a no-answer send. A
+    leaked claim would hold one forever, which is why
+    release_stranded_activations exists and had to land first.
     """
     with db() as conn:
         return conn.execute(
-            "UPDATE vantage_signals SET status='activating', activated_at=? "
-            "WHERE signal_id=? AND status IN ('pending','active')",
-            (time.time(), signal_id),
+            _CLAIM_SQL, (time.time(), signal_id, _max_open_trades(conn)),
         ).rowcount
+
+
+def explain_failed_claim(signal_id: str) -> str:
+    """Why a claim was refused, for the caller's error message.
+
+    Only ever called on the failure path, so the extra read costs nothing in
+    the normal case. It is a best-effort explanation, not a second gate -- the
+    claim above is the only thing that decides.
+    """
+    with db() as conn:
+        row = conn.execute(
+            "SELECT status FROM vantage_signals WHERE signal_id=?",
+            (signal_id,)).fetchone()
+        if row is None:
+            return f"Signal {signal_id} not found"
+        if row[0] not in ("pending", "active"):
+            return (f"Signal {signal_id} is already being opened "
+                    f"(status {row[0]}) — duplicate suppressed")
+        cap = _max_open_trades(conn)
+        open_now = conn.execute(
+            "SELECT COUNT(*) FROM vantage_simulated_trades WHERE status='open'"
+        ).fetchone()[0]
+        claiming = conn.execute(
+            "SELECT COUNT(*) FROM vantage_signals WHERE status='activating'"
+        ).fetchone()[0]
+    return (f"Max open trades reached ({cap}) — {open_now} open, "
+            f"{claiming} being opened right now")
 
 
 def restore_signal_after_failed_open(signal_id: str) -> None:

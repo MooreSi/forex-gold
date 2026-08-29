@@ -98,9 +98,15 @@ async def open_trade_from_signal(
     # window before any trade row exists. Claim the signal with a single
     # conditional UPDATE; SQLite's writer lock guarantees only one caller
     # flips 'pending'/'active' → 'activating'. The loser bails out here.
+    # The claim also enforces max_open_trades, in the same statement
+    # (stage1 phase2/030) -- open_trade's own check below is several awaits
+    # away, which is long enough for two signals to both pass it. So a refusal
+    # here now means one of two things, and they read very differently to
+    # whoever sees the error.
     _claimed = trade_repo.claim_signal_activation(signal_id)
     if not _claimed:
-        raise ValueError(f"Signal {signal_id} is already being opened — duplicate suppressed")
+        from backend.src.services.trading import signal_state_repo as _ssr
+        raise ValueError(_ssr.explain_failed_claim(signal_id))
 
     try:
         result = await open_trade(

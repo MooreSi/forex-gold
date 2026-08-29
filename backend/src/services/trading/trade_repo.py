@@ -203,15 +203,32 @@ def apply_full_close(trade_id: str, now: float, close_price: float, reason: str,
                      gross_pnl: float, realised_total: float, net_pnl_total: float,
                      net_delta: float, signal_id) -> None:
     with transaction() as conn:
-        conn.execute(
+        # Only an OPEN trade may become closed (stage1 phase2/040). Without
+        # `AND status='open'` this block could run twice, and the balance
+        # statement below is `balance = balance + ?` -- a duplicate call pays
+        # the same profit out again and feeds the breaker the same outcome
+        # twice. Five callers can race here; see
+        # tests/trading/test_close_idempotency.py for which and why.
+        # The compare-and-set IS the WHERE clause, so there is no window
+        # between checking and acting.
+        cur = conn.execute(
             """UPDATE vantage_simulated_trades
                SET status=?,close_time=?,close_price=?,exit_reason=?,
                    gross_pnl=?,realised_pnl=?,swap_est=?,net_pnl=?,remaining_lots=0
-               WHERE trade_id=?""",
+               WHERE trade_id=? AND status='open'""",
             ("closed", now, close_price, reason,
              gross_pnl, realised_total,
              0.0, net_pnl_total, trade_id),
         )
+        if cur.rowcount == 0:
+            # Already closed, cancelled, or no such trade. Someone else got
+            # here first (or never should have): change nothing else.
+            log.info(
+                "apply_full_close %s: no open trade to close — already "
+                "settled, so no balance change and no signal update",
+                trade_id,
+            )
+            return
         conn.execute(
             "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
             (net_delta,),

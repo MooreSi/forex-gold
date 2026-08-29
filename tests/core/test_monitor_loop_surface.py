@@ -228,24 +228,43 @@ def test_profit_close_disabled_returns_false(fresh_db):
     assert closed is False
 
 
-def test_profit_target_hit_mt5_close_rejected_falls_back_to_tick_price(fresh_db):
+# ── CHANGED under stage3/040 — these two tests HAD ENSHRINED THE BUG ─────────
+#
+# They were named ..._falls_back_to_tick_price and asserted that when the
+# broker REFUSED the close (or raised), the trade was still recorded closed in
+# the database, at the local tick price. That is the phantom close review
+# backend Critical #3 describes: the database says closed, MT5 says open, the
+# app stops managing a position that is still live and moving, and the P&L
+# booked never happened.
+#
+# They were characterization tests -- they recorded what the code did, not what
+# it should do -- so they passed for as long as the bug existed. Rewritten to
+# assert the corrected behaviour, and renamed so the change is visible in the
+# test list rather than hidden in a diff. Flagged to the owner in
+# docs/todo/refactor/stage3/040 and the handover note; not rewritten silently.
+
+def test_profit_target_hit_mt5_close_REJECTED_records_no_close(fresh_db):
     _insert_open_trade("t-mt5fail", stop_loss=2380.0, mt5_ticket=555, remaining_lots=0.10, entry_price=2400.0)
     trade = _trade_row("t-mt5fail")
     bridge = _FakeBridge(close_result={"success": False, "error": "requote"})
     ctx, sched_calls, commentary_calls = _make_ctx(bridge)
     closed = asyncio.run(ml.check_profit_close_target(trade, _PROFIT_TICK, 1.0, bridge, ctx))
-    assert closed is True
-    assert _trade_row("t-mt5fail")["close_price"] == 2410.0
+    assert closed is False
+    row = _trade_row("t-mt5fail")
+    assert row["status"] == "open", "a broker-refused close was recorded in the database"
+    assert not row["close_price"]
 
 
-def test_profit_target_hit_close_position_raises_falls_back_to_tick_price(fresh_db):
+def test_profit_target_hit_close_position_RAISES_records_no_close(fresh_db):
     _insert_open_trade("t-mt5raise", stop_loss=2380.0, mt5_ticket=555, remaining_lots=0.10, entry_price=2400.0)
     trade = _trade_row("t-mt5raise")
     bridge = _FakeBridge(close_raises=True)
     ctx, sched_calls, commentary_calls = _make_ctx(bridge)
     closed = asyncio.run(ml.check_profit_close_target(trade, _PROFIT_TICK, 1.0, bridge, ctx))
-    assert closed is True
-    assert _trade_row("t-mt5raise")["close_price"] == 2410.0
+    assert closed is False
+    row = _trade_row("t-mt5raise")
+    assert row["status"] == "open"
+    assert not row["close_price"]
 
 
 # ── reclaim_ea_managed_trade ─────────────────────────────────────────────

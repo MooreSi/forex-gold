@@ -102,6 +102,32 @@ async def reconcile_sl_hit(trade: dict, tick: Any, price: float, reason: str,
     return "closed"
 
 
+def _report_close_refused(trade: dict, detail: str) -> None:
+    """A broker close that did not happen must not become a database close.
+
+    Loud, because the old behaviour was a debug/warning line and then a
+    phantom close row -- which looks exactly like a normal successful close in
+    every screen that reads the database. Never raises: this runs inside the
+    monitor loop, and losing position management is worse than losing an
+    alert.
+    """
+    log.error(
+        "[Close] trade=%s ticket=%s NOT closed — %s. Leaving it open in the "
+        "database; reconciliation will settle it.",
+        str(trade.get("trade_id", ""))[:8], trade.get("mt5_ticket"), detail,
+    )
+    try:
+        asyncio.create_task(telegram_alerts.send_message(
+            f"*Close refused by the broker*\n"
+            f"Ticket {trade.get('mt5_ticket')} was not closed: {detail}\n"
+            f"The trade is still open and still managed. Nothing has been "
+            f"recorded as closed.",
+            str(trade.get("trade_id", "")), "close_refused",
+        ))
+    except Exception:
+        pass
+
+
 async def check_profit_close_target(trade: dict, tick: Any, profit_close_usd: float,
                                      bridge: Any, ctx: CloseTradeContext) -> bool:
     """Cumulative-P&L (realised partials + unrealised open) threshold check
@@ -131,12 +157,26 @@ async def check_profit_close_target(trade: dict, tick: Any, profit_close_usd: fl
     mt5_ticket = trade.get("mt5_ticket")
     close_price = cur
     if mt5_ticket:
+        # stage3/040. record_close used to run whatever happened here: a
+        # success=False was never checked at all, and an exception was caught
+        # and warned. Either way the database said closed while MT5 still held
+        # the position -- the worst shape of wrong, because the app then stops
+        # managing a trade that is still open and moving, and books a P&L that
+        # never happened.
+        #
+        # Only a CONFIRMED broker close may be recorded. Anything else leaves
+        # the row open, says so loudly, and lets reconciliation (030) settle
+        # it -- the trade stays managed in the meantime.
         try:
             mt5_res = await bridge.close_position(int(mt5_ticket))
-            if mt5_res.get("success"):
-                close_price = float(mt5_res.get("close_price", cur))
         except Exception as _e:
-            log.warning("Profit-close MT5 error: %s", _e)
+            _report_close_refused(trade, f"broker close raised: {_e}")
+            return False
+        if not (mt5_res or {}).get("success"):
+            _report_close_refused(
+                trade, f"broker refused the close: {(mt5_res or {}).get('error')}")
+            return False
+        close_price = float(mt5_res.get("close_price", cur))
     result = await record_close(trade["trade_id"], close_price, "profit_close_target", ctx)
     if mt5_ticket:
         asyncio.create_task(ctx.schedule_profit_sync(trade["trade_id"], int(mt5_ticket)))

@@ -142,9 +142,21 @@ def test_happy_path_places_order_and_inserts_trade(fresh_db, engine):
 
     assert result["managed_by"] == "python"
     assert result["mt5_ticket"] == 999
-    assert engine._bridge.place_order_calls == [
-        {"direction": "BUY", "lots": 0.10, "sl": 2390.0, "tp": None, "comment": "sig:sig-1"}
-    ]
+    # The comment changed deliberately under stage3/010: it used to carry the
+    # SIGNAL id ("sig:sig-1") while the EA stamps the TRADE id, so the two send
+    # paths could never be correlated and no duplicate-order check was
+    # possible. Asserted structurally against the trade id this call actually
+    # returned, rather than against a new literal -- a literal here would only
+    # say "the code emits what the code emits".
+    assert len(engine._bridge.place_order_calls) == 1
+    _call = engine._bridge.place_order_calls[0]
+    assert {k: _call[k] for k in ("direction", "lots", "sl", "tp")} == {
+        "direction": "BUY", "lots": 0.10, "sl": 2390.0, "tp": None}
+    assert result["trade_id"][:10] in _call["comment"], (
+        "the bridge order does not carry the trade id, so a duplicate send "
+        "could not be detected")
+    assert not _call["comment"].startswith("ea:"), (
+        "a bridge order must not be mistakable for an EA template leg")
     with db.db() as conn:
         row = db.row_to_dict(
             conn.execute("SELECT * FROM vantage_simulated_trades WHERE trade_id=?", (result["trade_id"],)).fetchone()

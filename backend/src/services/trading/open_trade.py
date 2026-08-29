@@ -22,10 +22,14 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
+from backend.src.services.trading.send_dedup import (
+    _FallbackDecision, _bridge_order_comment, _resolve_fallback_send,
+)
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
 from backend.src.services.risk.governor import is_trading_paused, price_in_entry_range
@@ -399,6 +403,10 @@ async def open_trade(
     managed_by = "python"
     mt5_ticket = None
     entry_price = None
+    # True from the moment the EA is actually asked to open. Only in that
+    # window can an order exist at the broker without this process knowing,
+    # and only then does the fallback below need to check (stage3/010).
+    _ea_attempted = False
     # The TP levels an EA Template resolved to, so the row below can record
     # what the trade is ACTUALLY running instead of the signal's own levels.
     # Stays None for every non-template strategy, which keeps writing the
@@ -562,6 +570,7 @@ async def open_trade(
                     _legs = (int(_ea_template.get("anchors", 0) or 0)
                              + int(_ea_template.get("pendings", 0) or 0))
                     _ack_timeout = min(60.0, 10.0 + 5.0 * max(1, _legs))
+                _ea_attempted = True
                 try:
                     ea_ack = await _ea.open_trade(
                         trade_id, direction.upper(), _ea_lot, stop_loss, _tps, strategy,
@@ -663,20 +672,39 @@ async def open_trade(
         raise RuntimeError("EA Template strategy resolved with no EA management — refusing to open")
 
     if managed_by != "ea":
-        mt5_result  = await bridge.place_order(direction, lot_size, stop_loss, mt5_tp,
-                                               f"sig:{signal_id[:8]}")
-        mt5_error   = mt5_result.get("error")
+        # stage3/010. A slow EA is not a failed EA: its ack can time out after
+        # it has already put the order on the book, and this fallback would
+        # then place a second one. Ask the broker first, using the trade id
+        # both send paths now stamp.
+        _fb = await _resolve_fallback_send(bridge, trade_id, _ea_attempted)
+        if not _fb.send:
+            mt5_ticket  = _fb.ticket
+            # A deal-sourced match may carry no price. Fall back to the tick
+            # the stop was measured from rather than writing entry_price=0,
+            # which is the $0-entry placeholder shape behind bugs/016.
+            entry_price = float(_fb.entry_price or
+                                (tick.ask if direction.upper() == "BUY" else tick.bid))
+            if _fb.by_ea:
+                managed_by = "ea"
+            log.warning(
+                "[dedup] adopted existing broker order for %s (ticket=%s, %s) "
+                "instead of sending a duplicate", trade_id[:8], mt5_ticket, _fb.detail,
+            )
+        else:
+            mt5_result  = await bridge.place_order(direction, lot_size, stop_loss, mt5_tp,
+                                                   _bridge_order_comment(trade_id, signal_id))
+            mt5_error   = mt5_result.get("error")
 
-        # Raise immediately — do NOT record a phantom trade if MT5 rejected the order
-        if mt5_error:
-            log.error("MT5 order failed: %s", mt5_error)
-            raise RuntimeError(f"MT5 order rejected: {mt5_error}")
+            # Raise immediately — do NOT record a phantom trade if MT5 rejected the order
+            if mt5_error:
+                log.error("MT5 order failed: %s", mt5_error)
+                raise RuntimeError(f"MT5 order rejected: {mt5_error}")
 
-        mt5_ticket  = mt5_result.get("ticket")
-        entry_price = float(mt5_result.get("fill_price") or
-                            (tick.ask if direction.upper() == "BUY" else tick.bid))
-        log.info("MT5 order placed: ticket=%s dir=%s lots=%s @ %s",
-                 mt5_ticket, direction, lot_size, entry_price)
+            mt5_ticket  = mt5_result.get("ticket")
+            entry_price = float(mt5_result.get("fill_price") or
+                                (tick.ask if direction.upper() == "BUY" else tick.bid))
+            log.info("MT5 order placed: ticket=%s dir=%s lots=%s @ %s",
+                     mt5_ticket, direction, lot_size, entry_price)
 
     # Record the levels the trade is actually running. For an EA Template these
     # are the template's (or, with "Use TP Levels from Telegram" on, the

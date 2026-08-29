@@ -167,3 +167,24 @@ Also blocked on tests: `services/cluster/remote/server.py` and `client.py`. The
 auth *decisions* are now covered (`tests/controllers/test_remote_server_auth.py`,
 `test_remote_admin_password.py`), but the websocket handler and TLS setup are
 not, and those are the bulk of both files.
+
+## The one file that stays over the ceiling, on purpose
+
+`backend/src/services/cluster/remote/server.py` (1,177 after its stateless
+halves were extracted, 2026-08-29).
+
+It keeps ten module-level mutable containers and rebinds several with `global`.
+Splitting code that touches those forks the state, which is the hazard
+`/split-file` names. Moving the state to a shared module is the documented
+alternative, and it is not done because of the cost: ~125 reference rewrites,
+plus **five test files that patch those names directly to isolate themselves**.
+
+Silently changing where those tests patch risks one of them no longer isolating
+anything while still passing -- on the module that issues licences and holds
+admin authority. That is the "green output is not evidence" failure this
+codebase already had once.
+
+The stateless sections (LAN beacon, version/changelog) moved to
+`_beacon_version.py`, which lowers the shrink-only baseline without touching
+any of it. Revisit if the state is ever consolidated for its own reasons; do
+not do it *in order to* hit the line count.

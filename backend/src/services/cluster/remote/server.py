@@ -52,6 +52,33 @@ _CHANGELOG_FILE     = _repo_root_for_files() / "CHANGELOG.md"
 # ── In-memory state ─────────────────────────────────────────────────────────
 
 # {token: {"name": str, "registered_at": float, "added_by": "admin"}}
+
+# ── Why this file is still over the 800-line ceiling ─────────────────────────
+#
+# It keeps ten module-level mutable containers -- _allowed_tokens, _pending,
+# _revoked_tokens, _connected, _admin_machines, _admin_clients, _auth_failures,
+# _server_task, _server_obj -- and rebinds several of them with `global`.
+# /split-file is explicit about this shape: splitting code that touches such
+# state FORKS it, each module getting its own copy with writes landing in the
+# wrong one.
+#
+# Moving the state into a shared module would work, and is the documented
+# alternative. It is not done here because of what it costs: ~125 reference
+# rewrites in this file, plus FIVE test files that patch these names directly
+# to isolate themselves (tests/remote/test_licence_lifecycle.py,
+# test_admin_commands.py, test_commit_reporting.py,
+# tests/controllers/test_remote_server_auth.py,
+# tests/core/test_bot_panel_actions.py). Silently changing where those tests
+# patch risks one of them no longer isolating anything while still passing --
+# on the module that issues licences and holds admin authority. That is the
+# exact "green output is not evidence" failure this repo's CLAUDE.md opens
+# with.
+#
+# The stateless halves (LAN beacon, version/changelog) have been moved to
+# _beacon_version.py, which lowers the shrink-only baseline without touching
+# any of the above. The rest is a deliberate, recorded decision rather than an
+# oversight -- see docs/system/rules/70-file-organisation.md.
+
 _allowed_tokens: dict[str, dict] = {}
 
 # {token: {"name": str, "platform": str, "version": str, "ts": float}}
@@ -710,29 +737,11 @@ def _record_failure(ip: str) -> None:
     _auth_failures[ip] = lst
 
 
-def _read_version() -> str:
-    # version_history.py's RELEASES[0] is the single source of truth — see
-    # the matching comment in remote/client.py::_app_version() for why this
-    # must not fall back to parsing CHANGELOG.md (free-text notes, drifts
-    # independently — confirmed 3 releases stale).
-    try:
-        from backend.src.utils.version_history import __version__
-        return __version__
-    except Exception:
-        pass
-    ver_file = _repo_root_for_files() / "VERSION"
-    if ver_file.exists():
-        return ver_file.read_text(encoding="utf-8").strip()
-    return "unknown"
+from backend.src.services.cluster.remote._beacon_version import (  # noqa: E402
+    _LAN_BEACON_PORT, _get_local_ip, _lan_beacon_loop, _read_changelog,
+    _read_version, _send_udp_broadcast,
+)
 
-
-def _read_changelog() -> list[str]:
-    if _CHANGELOG_FILE.exists():
-        return _CHANGELOG_FILE.read_text(encoding="utf-8").splitlines()[:40]
-    return []
-
-
-# ── WebSocket handler ─────────────────────────────────────────────────────────
 
 async def _handler(websocket) -> None:
     import websockets
@@ -1057,67 +1066,6 @@ async def _ping_loop() -> None:
 
 
 # ── LAN beacon — lets same-network clients skip NAT hairpinning ───────────────
-
-_LAN_BEACON_PORT = 8444
-
-
-def _get_local_ip() -> str:
-    """Return this machine's LAN IP (the interface used to reach the internet)."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except Exception:
-        return ""
-
-
-def _send_udp_broadcast(payload: bytes) -> None:
-    """Blocking UDP broadcast — runs in a thread executor."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            s.sendto(payload, ("255.255.255.255", _LAN_BEACON_PORT))
-    except OSError:
-        pass
-
-
-async def _lan_beacon_loop() -> None:
-    """
-    Broadcast local IP every 5 s so LAN clients can find the server without
-    going via the WAN IP (which fails on most home routers due to NAT hairpinning).
-    5-second interval + 6-second client probe window = guaranteed discovery on first attempt.
-    """
-    loop = asyncio.get_event_loop()
-    _logged_once = False
-    while True:
-        local_ip = _get_local_ip()
-        if local_ip:
-            payload = json.dumps({
-                "type": "forex_admin_beacon",
-                "ip":   local_ip,
-                "port": SERVER_PORT,
-            }).encode()
-            await loop.run_in_executor(None, _send_udp_broadcast, payload)
-            if not _logged_once:
-                log.info("[RemoteServer] LAN beacon started — local IP %s port %s",
-                         local_ip, _LAN_BEACON_PORT)
-                _logged_once = True
-            else:
-                log.debug("[RemoteServer] LAN beacon (local IP: %s)", local_ip)
-        await asyncio.sleep(5)
-
-
-# ── Push update to connected clients ────────────────────────────────────────
-# Both functions just tell the client to self-update via git
-# (core_app_update.apply_update(), the same code the client's own
-# Settings > Update button runs) rather than streaming a zip built from
-# this machine's local files. Keeping exactly one update implementation —
-# on the client — means the admin-triggered path and the client's own
-# self-service path can never drift out of sync with each other: the old
-# zip push wrote files straight to disk with no git awareness at all,
-# which left every client's working tree "dirty" and broke its own next
-# git-based update (confirmed live — see the "Fix self-update apply_update()
-# failing when the working tree has drifted" commit).
 
 async def push_update(progress_cb=None) -> dict:
     """Trigger a git self-update on every connected client.

@@ -97,7 +97,7 @@ def _render_risk_settings_subcard(rs: dict) -> None:
 
         with ui.row().classes("w-full items-center gap-1"):
             max_tot_dd = ui.number(
-                "Max total drawdown (%)", value=float(rs.get("max_total_drawdown_pct", 8.0)),
+                "Max total drawdown (%)", value=float(rs.get("max_total_drawdown_pct", 10.0)),
                 min=0.1, max=100, step=1.0, format="%.1f",
             ).classes("flex-1")
             ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(

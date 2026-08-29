@@ -462,7 +462,12 @@ def rg_check_halt(rs: dict, balance: float) -> Optional[str]:
     realised_today = risk_repo.sum_realised_pnl_since(day_start)
 
     # (C) Daily loss limit — base off balance before today's realised P&L.
-    max_daily = float(rs.get("max_daily_loss_pct", 20.0) or 0)
+    # 3.0, matching the schema default and Settings > Risk. It was 20.0: an
+    # absent key gave six times the intended loss allowance, in the one
+    # function that decides whether trading stops. A fallback that is looser
+    # than the configured default silently widens the limit exactly when the
+    # configuration is incomplete (stage3/050).
+    max_daily = float(rs.get("max_daily_loss_pct", 3.0) or 0)
     if max_daily > 0:
         day_base = balance - realised_today
         limit    = day_base * (max_daily / 100.0)
@@ -473,7 +478,9 @@ def rg_check_halt(rs: dict, balance: float) -> Optional[str]:
             )
 
     # (D) Total account drawdown from peak balance watermark.
-    max_total_dd = float(rs.get("max_total_drawdown_pct", 20.0) or 0)
+    # 10.0 -- Simon's confirmed number (001-trading-defaults, 2026-08-25) and
+    # the schema default. Same reasoning as the daily-loss fallback above.
+    max_total_dd = float(rs.get("max_total_drawdown_pct", 10.0) or 0)
     if max_total_dd > 0 and balance > 0:
         peak_str  = db_module.get_app_config("peak_balance") or "0"
         peak_bal  = float(peak_str or 0)

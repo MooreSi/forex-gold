@@ -138,6 +138,38 @@ async def close_trade(trade_id: str, reason: str, ctx: CloseTradeContext) -> dic
     return result
 
 
+def _notify_halt_check_failed(which: str, detail: str) -> None:
+    """Report a failed post-close halt check loudly, and never raise.
+
+    These checks decide whether a live loss reaches the protective halts.
+    Swallowed at DEBUG (as they were until stage3/050) a broken check is
+    invisible in a log this size: the halts simply appear never to fire, which
+    is indistinguishable from not having lost enough yet.
+
+    NOTHING HERE MAY ESCAPE. It is called from inside record_close, which is
+    frozen, and a close that raised because its alerting failed would be far
+    worse than the missed alert. Every part is wrapped, including the import.
+    """
+    log.error("[%s] post-close halt check FAILED: %s — protective halts may "
+              "not have seen this trade", which, detail)
+    try:
+        import asyncio as _asyncio
+        from backend.src.services.telegram import alerts as _alerts
+
+        _asyncio.get_running_loop()
+        _asyncio.create_task(_alerts.send_message(
+            f"*Protective halt check failed*\n"
+            f"A post-close safety check ({which}) did not run: {detail}\n"
+            f"The trade closed normally, but the daily-loss, drawdown and "
+            f"circuit-breaker checks may not have seen it. Worth a look.",
+            "", f"halt_check_failed_{which.lower()}",
+        ))
+    except Exception:
+        # No loop, no telegram, no anything: the error log above is the floor,
+        # and it has already happened.
+        pass
+
+
 async def record_close(trade_id: str, close_price: float, reason: str, ctx: CloseTradeContext) -> dict:
     row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
     direction   = row["direction"]
@@ -273,7 +305,9 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
         )
         await db_module.to_db_thread(apply_daily_loss_halt_on_close, _rg_rs, _dl_balance)
     except Exception as _rg_e:
-        log.debug("[RG] post-close halt check skipped: %s", _rg_e)
+        # Was log.debug. See _notify_halt_check_failed: the close itself is
+        # untouched, only the reporting changed (stage3/050).
+        _notify_halt_check_failed("RG", str(_rg_e))
 
     # Global circuit breaker — only count live MT5 trade outcomes.
     if row.get("mt5_ticket"):
@@ -296,7 +330,9 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
                     row.get("trade_id", ""), "circuit_breaker_triggered",
                 ))
         except Exception as _cb_e:
-            log.debug("[CB] outcome recording skipped: %s", _cb_e)
+            # Was log.debug. A live losing streak that never reaches the
+            # breaker is the failure this makes visible (stage3/050).
+            _notify_halt_check_failed("CB", str(_cb_e))
 
     return result
 

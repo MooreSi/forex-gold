@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS vantage_risk_settings (
     risk_per_trade_pct            REAL    NOT NULL DEFAULT 0.5,
     max_risk_per_trade_pct        REAL    NOT NULL DEFAULT 1.0,
     max_daily_loss_pct            REAL    NOT NULL DEFAULT 3.0,
-    max_total_drawdown_pct        REAL    NOT NULL DEFAULT 8.0,
+    max_total_drawdown_pct        REAL    NOT NULL DEFAULT 10.0,
     max_open_trades               INTEGER NOT NULL DEFAULT 1,
     max_pending_signals           INTEGER NOT NULL DEFAULT 10,
     default_lot_size              REAL    NOT NULL DEFAULT 0.01,

@@ -177,3 +177,63 @@ class TestTheClaimRecordsWhenItHappened:
                 "SELECT activated_at FROM vantage_signals WHERE signal_id='sig-1'"
             ).fetchone()[0]
         assert time.time() - stamped > 7000
+
+
+class TestTheReversalEnginesClaimIsSweptSafely:
+    """A second claim path exists, and the sweep has to be safe against it.
+
+    `reversal_engine_repo.claim_vantage_signal_activation` is a near-copy of
+    the canonical claim -- its own comment says "same pattern
+    core_open_trade_from_signal uses" -- and it drifted the moment the
+    canonical one started stamping `activated_at`.
+
+    That drift is dangerous in a specific way. The sweep releases a claim whose
+    `activated_at` is NULL, on the reasoning that a claim with no recorded time
+    cannot be one this process is running. A claim path that never stamps one
+    produces exactly that shape, so a reversal-engine open still in flight
+    would be released back into the queue on the next reconciliation pass --
+    and the signal opened twice. The sweep would cause the failure the claim
+    exists to prevent.
+    """
+
+    def test_the_reversal_engine_claim_records_when_it_happened(self, fresh_db):
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+        from backend.src.db.database import db
+
+        _insert(status="pending", age_s=7200.0, created_age_s=7200.0)
+        before = time.time()
+
+        assert re_db.claim_vantage_signal_activation("sig-1") == 1
+
+        with db() as conn:
+            stamped = conn.execute(
+                "SELECT activated_at FROM vantage_signals WHERE signal_id='sig-1'"
+            ).fetchone()[0]
+        assert stamped is not None, (
+            "the reversal engine's claim left activated_at NULL — the sweep "
+            "would release it mid-open")
+        assert stamped >= before
+
+    def test_a_fresh_reversal_engine_claim_is_NOT_swept(self, fresh_db):
+        """The interaction, end to end."""
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+
+        _insert(status="pending", age_s=7200.0, created_age_s=7200.0)
+        re_db.claim_vantage_signal_activation("sig-1")
+
+        assert ssr.release_stranded_activations() == 0
+        assert _status() == "activating"
+
+    def test_an_ABANDONED_reversal_engine_claim_is_still_swept(self, fresh_db):
+        """The other half: it must not become un-sweepable either."""
+        from backend.src.db.database import db
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+
+        _insert(status="pending", age_s=0.0)
+        re_db.claim_vantage_signal_activation("sig-1")
+        with db() as conn:
+            conn.execute("UPDATE vantage_signals SET activated_at=? WHERE signal_id='sig-1'",
+                         (time.time() - ssr.STRANDED_ACTIVATION_SECS - 60,))
+
+        assert ssr.release_stranded_activations() == 1
+        assert _status() == "pending"

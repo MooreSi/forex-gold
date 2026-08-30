@@ -610,12 +610,31 @@ def get_analysis_log(limit: int = 50) -> list[dict]:
 #    db_module -- not this engine's own file -- exactly as the callers did.
 
 def claim_vantage_signal_activation(signal_id) -> int:
+    """Claim a vantage_signals row for this engine's pending-order path.
+
+    Stamps activated_at with the claim time, and that is not cosmetic:
+    signal_state_repo.release_stranded_activations releases any 'activating'
+    row whose activated_at is NULL, on the reasoning that a claim with no
+    recorded time cannot be one a live process is running. Leaving it NULL
+    here meant a claim still in flight was released on the next reconciliation
+    pass and the signal opened twice -- the sweep causing the exact failure the
+    claim exists to prevent.
+
+    NOTE (2026-08-30): this does NOT enforce max_open_trades, unlike the
+    canonical claim in signal_state_repo. That is deliberate and unresolved,
+    not an oversight -- this path places a RESTING pending order rather than
+    opening a position, and whether a resting order should consume a trade slot
+    is a money decision for the owner. See the open question in
+    docs/simon-handover/. Until it is answered this path can still over-open
+    against the cap on its own.
+    """
+    import time as _t
     from backend.src.db import database as db_module
     with db_module.db() as conn:
         return conn.execute(
-            "UPDATE vantage_signals SET status='activating' "
+            "UPDATE vantage_signals SET status='activating', activated_at=? "
             "WHERE signal_id=? AND status IN ('pending','active')",
-            (signal_id,),
+            (_t.time(), signal_id),
         ).rowcount
 
 

@@ -1,5 +1,5 @@
 """Surface test for the task-030 decomposition -- catches a dropped or
-mis-wired method on TestSignalEngine after splitting engine.py across
+mis-wired method on BounceEngine after splitting engine.py across
 test_signal_service.py + the four mixin files. See
 docs/todo/refactor/test-signal-migration/030-*.md.
 """
@@ -8,7 +8,15 @@ from backend.src.services.test_signal.test_signal_generate import _GenerateMixin
 from backend.src.services.test_signal.test_signal_learn import _LearnMixin
 from backend.src.services.test_signal.test_signal_live_execute import _LiveExecuteMixin
 from backend.src.services.test_signal.test_signal_manage import _ManagementMixin
-from backend.src.services.test_signal.test_signal_service import TestSignalEngine
+# Imported under an alias on purpose. This is PRODUCTION code -- the Bounce
+# engine, whose package is misleadingly named test_signal -- and pytest
+# collects any module-level name matching Test* as a test class. It is only
+# saved from being instantiated and "run" by having an __init__, which
+# pytest reports as a warning on every single run. Aliasing removes both the
+# warning and the latent hazard of production code being executed as a test.
+from backend.src.services.test_signal.test_signal_service import (
+    TestSignalEngine as BounceEngine,
+)
 from backend.src.services.test_signal.test_signal_velocity import _VelocityMixin
 
 EXPECTED_METHODS = [
@@ -25,23 +33,23 @@ EXPECTED_PROPERTIES = ["is_running", "status", "status_detail", "last_cycle_at"]
 
 
 def test_every_expected_method_is_defined_and_callable():
-    missing = [name for name in EXPECTED_METHODS if not hasattr(TestSignalEngine, name)]
+    missing = [name for name in EXPECTED_METHODS if not hasattr(BounceEngine, name)]
     assert not missing, f"methods dropped in the split: {missing}"
-    not_callable = [name for name in EXPECTED_METHODS if not callable(getattr(TestSignalEngine, name))]
+    not_callable = [name for name in EXPECTED_METHODS if not callable(getattr(BounceEngine, name))]
     assert not not_callable, f"attributes present but not callable: {not_callable}"
 
 
 def test_every_expected_property_is_defined():
-    missing = [name for name in EXPECTED_PROPERTIES if not isinstance(getattr(TestSignalEngine, name, None), property)]
+    missing = [name for name in EXPECTED_PROPERTIES if not isinstance(getattr(BounceEngine, name, None), property)]
     assert not missing, f"properties dropped in the split: {missing}"
 
 
 def test_testsignalengine_composes_all_five_mixins():
-    assert issubclass(TestSignalEngine, _GenerateMixin)
-    assert issubclass(TestSignalEngine, _ManagementMixin)
-    assert issubclass(TestSignalEngine, _VelocityMixin)
-    assert issubclass(TestSignalEngine, _LiveExecuteMixin)
-    assert issubclass(TestSignalEngine, _LearnMixin)
+    assert issubclass(BounceEngine, _GenerateMixin)
+    assert issubclass(BounceEngine, _ManagementMixin)
+    assert issubclass(BounceEngine, _VelocityMixin)
+    assert issubclass(BounceEngine, _LiveExecuteMixin)
+    assert issubclass(BounceEngine, _LearnMixin)
 
 
 def test_module_level_singleton_functions_present():

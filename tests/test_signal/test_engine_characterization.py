@@ -1,4 +1,4 @@
-"""Characterizes the testable surface of TestSignalEngine before task 030
+"""Characterizes the testable surface of BounceEngine before task 030
 splits it -- see docs/todo/refactor/test-signal-migration/010-*.md.
 
 Scope note (same as the other two packs): async orchestration
@@ -13,7 +13,15 @@ import tempfile
 import pytest
 
 from backend.src.services.test_signal import test_signal_repo as db
-from backend.src.services.test_signal.test_signal_service import TestSignalEngine
+# Imported under an alias on purpose. This is PRODUCTION code -- the Bounce
+# engine, whose package is misleadingly named test_signal -- and pytest
+# collects any module-level name matching Test* as a test class. It is only
+# saved from being instantiated and "run" by having an __init__, which
+# pytest reports as a warning on every single run. Aliasing removes both the
+# warning and the latent hazard of production code being executed as a test.
+from backend.src.services.test_signal.test_signal_service import (
+    TestSignalEngine as BounceEngine,
+)
 from backend.src.services.test_signal.test_signal_generate import _calc_lot_size
 from backend.src.services.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
 from backend.src.services.test_signal.test_signal_velocity import _compute_swing_levels
@@ -34,7 +42,7 @@ def fresh_db():
 
 @pytest.fixture
 def engine(fresh_db):
-    return TestSignalEngine(bridge=None)
+    return BounceEngine(bridge=None)
 
 
 def _sig(**overrides) -> dict:

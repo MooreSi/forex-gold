@@ -96,32 +96,25 @@ directories for nothing.
 
 ## Current queue
 
-Priority order, from `docs/system/rules/70-file-organisation.md`:
+**Measured 2026-08-31.** Three files in the tree exceed 800 lines, and two are
+permanently exempt:
 
-1. ~~`frontend/pages/trading.py`~~ -- done
-2. ~~`frontend/pages/settings.py`~~ -- done
-3. ~~`frontend/app.py`~~ -- done
-4. ~~`frontend/pages/history.py`~~ -- done
-5. ~~`chart.py`, `telegram.py`, `reversal_panel.py`, `breakout_panel.py`~~ -- done
+| File | Lines | |
+|---|---|---|
+| `backend/src/runtime.py` | 1,508 | exempt — at its design floor |
+| `mt5_bridge.py` | 1,344 | exempt — separate interpreter |
+| `backend/src/services/cluster/remote/server.py` | 1,204 | the only one left |
 
-Nothing under `frontend/pages/` is over 800 except two files that are BLOCKED,
-not pending:
+Everything the old version of this list named is done. `frontend/pages/trading.py`,
+`settings.py`, `app.py` and `history.py` are all packages, and no file under
+`frontend/` exceeds 800 lines. `backend/src/controllers/remote/` and
+`controllers/sync/` do not exist.
 
-- `test_panel.py` (1,245) -- undefined name `ap` (docs/todo/bugs/010)
-- `ai_trade_analysis.py` (1,250) -- undefined name `_SIGNAL_GEN_SYSTEM`
-  (docs/todo/bugs/011)
+`cluster/remote/server.py` is **not** blocked on tests any more — it is at 58%
+coverage and its connection front door is tested
+(`tests/remote/test_connection_auth.py`). It is blocked on the "check for
+module-level state" step above: it rebinds six sets of globals and five test
+files patch that state, so a split would fork it. Move the state into one
+module both halves import, with its own tests, before moving any code.
 
-Both are dead buttons today. Splitting either would turn a latent NameError
-into a failing gate, because `tests/frontend/test_page_packages_are_wired.py`
-resolves every global name a page PACKAGE uses and a flat module escapes it.
-Fix the name first, then split -- the recipe for each is in its bug file.
-
-Exempt: `mt5_bridge.py` (runs under a different interpreter),
-`backend/src/runtime.py` (at its design floor).
-Blocked on tests: `services/cluster/remote/*`, `services/cluster/sync/*`
-(4,995 lines, zero tests, token issuance and admin authority).
-
-Backend files still over the ceiling and NOT blocked, in size order --
-`ea_bridge.py` (1,973), `core_bot_panel.py` (1,709), `signals/parser.py` (896),
-`reversal_engine_repo.py` (842). None of these has a render harness, so each
-needs its own tests written first.
+See `docs/system/rules/70-file-organisation.md` for the full status.

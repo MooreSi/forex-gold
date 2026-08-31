@@ -139,26 +139,48 @@ That was a flaw in the metric, and it was fixed rather than baselined around.
 
 ## Current status
 
+Measured 2026-08-31, not remembered. **Three files exceed the 800-line ceiling
+in the whole tree, and two of them are permanently exempt.**
+
 | File | Lines | Plan |
 |---|---|---|
-| ~~`frontend/pages/trading.py`~~ | ~~3,254~~ | ✅ **split** into 10 modules, largest 561 |
-| `services/reversal_engine/reversal_engine_repo.py` | 809 | newly over the ceiling |
-| ~~`frontend/pages/settings.py`~~ | ~~3,487~~ | ✅ **split** into 10 modules, largest 685 |
-| ~~`frontend/app.py`~~ | ~~1,746~~ | ✅ **split** into 4 modules, largest 665 |
-| ~~`frontend/pages/history.py`~~ | ~~1,592~~ | ✅ **split** into 7 modules, largest 451 |
-| `mt5_bridge.py` | 1,335 | **permanent exemption** — separate interpreter |
-| `backend/src/runtime.py` | 1,310 | at its floor by design — see `30-architecture.md` |
-| `frontend/pages/test_panel.py` | 1,245 | **blocked: undefined name `ap`** — see docs/todo/bugs/010 |
-| `backend/src/db/database.py` | 1,251 | package split |
-| `frontend/pages/ai_trade_analysis.py` | 1,250 | **blocked: undefined name `_SIGNAL_GEN_SYSTEM`** — see docs/todo/bugs/011 |
-| `services/cluster/remote/server.py` | 1,196 | **blocked: needs tests first** |
-| `services/cluster/sync/server.py` | 1,073 | blocked behind remote/ tests |
-| ~~`frontend/pages/breakout_panel.py`~~ | ~~918~~ | ✅ **split** into 3 modules, largest 547 |
-| `services/cluster/remote/client.py` | 920 | **blocked: needs tests first** |
-| `services/cluster/sync/client.py` | 867 | blocked behind remote/ tests |
-| ~~`frontend/pages/telegram.py`~~ | ~~892~~ | ✅ **split** into 4 modules, largest 298 |
-| ~~`frontend/pages/chart.py`~~ | ~~938~~ | ✅ **split** into 3 modules, largest 569 |
-| ~~`frontend/pages/reversal_panel.py`~~ | ~~923~~ | ✅ **split** into 3 modules, largest 611 |
+| `backend/src/runtime.py` | 1,508 | **exempt** — at its floor by design, see `30-architecture.md` |
+| `mt5_bridge.py` | 1,344 | **exempt** — runs under a separate interpreter |
+| `services/cluster/remote/server.py` | 1,204 | the only real one left. See below. |
+
+Everything else that was ever on this list is done: `frontend/pages/trading.py`
+(3,254), `settings.py` (3,487), `app.py` (1,746), `history.py` (1,592),
+`test_panel.py` (1,245), `ai_trade_analysis.py` (1,250), `breakout_panel.py`
+(918), `telegram.py` (892), `chart.py` (938), `reversal_panel.py` (923) are all
+packages now, and `db/database.py` is 457. The four cluster files came down
+under the ceiling on 2026-08-29/30 (`sync/server` 1,085 → 732, `remote/client`
+894 → 732, `sync/client` 867 → 709).
+
+### The one that is left
+
+`services/cluster/remote/server.py` is 1,204 lines of token issuance, licence
+delivery and admin authority. It was listed for years as "blocked: needs tests
+first". That was true when written and is **no longer the reason to leave it
+alone**: as of 2026-08-31 it is at 58% coverage, and its connection front door
+(`_handler`, the largest block in the file) went from 145 uncovered lines to
+65 — see `tests/remote/test_connection_auth.py`.
+
+The reason it stays whole is now a different one, and it is worth stating so
+nobody "unblocks" it by writing more tests. Measured 2026-08-31: the module
+carries **six `global` rebinding statements** covering `_allowed_tokens`,
+`_pending`, `_revoked_tokens`, `_admin_machines`, the six KeyGen callbacks and
+the server task/object, and **five test files reach in and patch that state**
+(`tests/remote/test_connection_auth.py`, `test_admin_commands.py`,
+`test_licence_lifecycle.py`, `test_commit_reporting.py`, and
+`tests/core/test_bot_panel_actions.py`).
+
+Splitting a module that rebinds globals forks that state -- each half gets its
+own copy and writes land in the wrong one. That is the "check for module-level
+state" step of the procedure above, and here it says stop.
+
+Splitting it needs the state moved into one small module both halves import,
+as a deliberate change with its own tests, ahead of any file movement. Until
+someone does that, the ceiling loses to "can we tell if this broke".
 
 The LOC gate is shrink-only: `structure_gates --check` fails if the count of
 oversized files rises, or any listed file grows.

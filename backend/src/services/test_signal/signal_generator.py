@@ -472,6 +472,12 @@ def _macd_fading_for_buy(m15_candles: list[dict]) -> bool:
     OR not strongly negative) — valid condition for a BUY bounce at support.
     False when bearish momentum is ACCELERATING — wrong time to buy.
     """
+    # Imported here rather than at module level: this module and
+    # signal_indicators are mutually dependent, and the top-level import
+    # made that cycle resolve in only one order (see the __getattr__ note
+    # at the bottom of this file). By call time both modules are built.
+    from backend.src.services.test_signal.signal_indicators import compute_macd_hist
+
     closes = [float(c.get("close", 0) or 0) for c in m15_candles]
     if len(closes) < 38:
         return True
@@ -487,6 +493,12 @@ def _macd_fading_for_sell(m15_candles: list[dict]) -> bool:
     OR not strongly positive) — valid condition for a SELL bounce at resistance.
     False when bullish momentum is ACCELERATING — wrong time to sell.
     """
+    # Imported here rather than at module level: this module and
+    # signal_indicators are mutually dependent, and the top-level import
+    # made that cycle resolve in only one order (see the __getattr__ note
+    # at the bottom of this file). By call time both modules are built.
+    from backend.src.services.test_signal.signal_indicators import compute_macd_hist
+
     closes = [float(c.get("close", 0) or 0) for c in m15_candles]
     if len(closes) < 38:
         return True
@@ -531,6 +543,12 @@ def check_entry_trigger(
     Direction must align with HTF bias unless allow_counter_bias or session-aware logic permits it.
     Liquidity sweep is exempt from the counter-bias block — sweeps ARE the institutional move.
     """
+    # Imported here rather than at module level: this module and
+    # signal_indicators are mutually dependent, and the top-level import
+    # made that cycle resolve in only one order (see the __getattr__ note
+    # at the bottom of this file). By call time both modules are built.
+    from backend.src.services.test_signal.signal_indicators import _counter_bias_allowed
+
     if len(m15_candles) < 4 or atr < 1.0:
         return None
 
@@ -732,10 +750,30 @@ def check_entry_trigger(
 # ── M2 file-size split ────────────────────────────────────────────────────────
 # Risk levels, H4 bias, ADX, MACD, regime detection and the M5 scalp trigger
 # moved verbatim to signal_indicators.py; re-exported here so every existing
-# importer keeps addressing signal_generator.<name>. Imported lazily at the
-# bottom because signal_indicators imports this module's candle helpers.
-from backend.src.services.test_signal.signal_indicators import (  # noqa: E402,F401
-    calculate_risk_levels, calculate_scalp_risk_levels,
-    check_scalp_trigger, compute_adx, compute_h4_bias, compute_macd_hist,
-    detect_regime, _counter_bias_allowed,
-)
+# importer keeps addressing signal_generator.<name>.
+#
+# Resolved on first ACCESS rather than at import (PEP 562), because the two
+# modules depend on each other: signal_indicators needs this module's candle
+# helpers, and this module re-exports what moved out of it. A plain import at
+# the bottom made that cycle resolve in exactly one order -- importing
+# signal_generator first worked, importing signal_indicators first raised
+# "cannot import name ... from partially initialized module". It never failed
+# in production only because the engine happens to import the generator early,
+# so the whole thing rested on import order that nothing declared and nothing
+# checked. See tests/test_signal/test_import_order.py.
+#
+# `from ... import name` falls back to module __getattr__ (3.7+), so every
+# existing call site is unchanged, and the objects handed out are the ones
+# signal_indicators defines -- not copies.
+_MOVED_TO_INDICATORS = frozenset({
+    "calculate_risk_levels", "calculate_scalp_risk_levels",
+    "check_scalp_trigger", "compute_adx", "compute_h4_bias",
+    "compute_macd_hist", "detect_regime", "_counter_bias_allowed",
+})
+
+
+def __getattr__(name: str):
+    if name in _MOVED_TO_INDICATORS:
+        from backend.src.services.test_signal import signal_indicators as _si
+        return getattr(_si, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

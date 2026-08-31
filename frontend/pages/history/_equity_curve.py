@@ -6,6 +6,10 @@ from nicegui import ui
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import history_controller as history_ctl
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _render_equity_curve(engine):
     with ui.card().classes("w-full bg-gray-800 p-0 rounded-lg mb-4 overflow-hidden"):
@@ -103,8 +107,8 @@ def _render_equity_curve(engine):
                             for d in pos_deals
                         ), 2)
                         rows.append((close_ts, pnl))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log.debug("[history] equity-curve row build failed: %s", e)
 
                 if not rows:
                     chart.options["xAxis"]["data"]     = []
@@ -132,8 +136,8 @@ def _render_equity_curve(engine):
                 chart.options["xAxis"]["data"]     = x_data
                 chart.options["series"][0]["data"] = y_data
                 chart.update()
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[history] equity-curve chart update failed: %s", e)
 
         ui.timer(15.0, refresh_chart)
         asyncio.ensure_future(refresh_chart())

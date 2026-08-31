@@ -9,6 +9,10 @@ from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
 )
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     """
@@ -182,8 +186,8 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
                 _rec_icons[src].tooltip(tip or "No recommendation yet")
             ts = __import__("datetime").datetime.now().strftime("%H:%M")
             eval_status.text = f"Updated {ts}"
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[trading] strategy tooltip refresh failed: %s", e)
 
     def _apply_and_close(res: dict, dialog) -> None:
         for src, r in res.items():

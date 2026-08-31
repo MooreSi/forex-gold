@@ -9,6 +9,10 @@ from ._shared import (
     _uk,
 )
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _render_pending_signals(engine):
     container = ui.column().classes("w-full gap-3")
@@ -46,8 +50,8 @@ def _render_pending_signals(engine):
                         if _btn[0]:
                             try:
                                 _btn[0].props(remove="loading disabled")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                _log.debug("[trading] restoring the open-trade button state failed: %s", e)
 
                 def cancel_sig(sid=signal_id):
                     engine.cancel_signal(sid)

@@ -20,6 +20,10 @@ from backend.src.controllers import sync_controller as sync_ctl
 from . import _sections
 from ._shared import _fmt_ts, _pnl_color, _pnl_str
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 _STARTING_BALANCE = 1000.0
 
 
@@ -563,8 +567,8 @@ def _render_main() -> None:
                     detail_lbl.set_text(
                         f"Last cycle: {_fmt_ts(last)}  |  {detail}"
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[bounce panel] status line refresh failed: %s", e)
 
     # ── Control handlers ──────────────────────────────────────────────────────
 

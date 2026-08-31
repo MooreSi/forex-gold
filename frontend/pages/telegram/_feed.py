@@ -9,6 +9,10 @@ from nicegui import ui
 
 from backend.src.controllers import telegram_controller as tg_controller
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _ts(s) -> str:
     if not s:
@@ -215,8 +219,8 @@ def _render_pending_question(row: dict, refresh: Callable) -> None:
     if analysis_raw:
         try:
             analysis = json.loads(analysis_raw)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[telegram] decoding a stored AI analysis payload failed: %s", e)
 
     summary    = analysis.get("summary", "Analysing...") if analysis else "Analysing..."
     suggested  = analysis.get("suggested_action", "review_manually")

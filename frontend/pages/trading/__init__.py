@@ -88,8 +88,8 @@ def render(get_engine: Callable, get_tg_reader: Callable):
                 open_lbl.text    = f"Open: {local['open_trades']}  Closed: {local['closed_trades']}"
                 wr_lbl.text      = f"Win rate: {local['win_rate_pct']:.1f}%  PF: {local['profit_factor']:.2f}"
                 src_lbl.text     = "local"
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("[trading] account summary refresh failed: %s", e)
         # Circuit breaker badge (right-aligned)
         try:
             _cb = trading_ctl.get_circuit_breaker_state()
@@ -100,8 +100,8 @@ def render(get_engine: Callable, get_tg_reader: Callable):
                 cb_lbl.set_visibility(True)
             else:
                 cb_lbl.set_visibility(False)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("[trading] circuit-breaker banner refresh failed: %s", e)
 
     ui.timer(5.0, _refresh_account)
     asyncio.ensure_future(_refresh_account())

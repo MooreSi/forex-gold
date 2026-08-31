@@ -19,6 +19,10 @@ from datetime import timezone
 from frontend.pages.trading import trade_channel_label
 from frontend.pages.trading import trade_source_label
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 _BEAR_COL  = "#FF4444"   # bright red   (matches old app)
 _BULL_COL  = "#00CC88"   # bright green (matches old app)
 
@@ -101,8 +105,8 @@ async def _refresh_trades_panel(
                 elapsed = (f"{secs // 60}m {secs % 60}s"
                            if secs < 3600 else
                            f"{secs // 3600}h {(secs % 3600) // 60}m")
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[chart] open-trades panel row failed: %s", e)
 
             with ui.card().classes("w-full bg-gray-800 rounded-lg p-0 overflow-hidden mb-2"):
                 with ui.row().classes(
@@ -202,8 +206,8 @@ async def _refresh_trades_panel(
                 elapsed = (f"{secs // 60}m {secs % 60}s"
                            if secs < 3600 else
                            f"{secs // 3600}h {(secs % 3600) // 60}m")
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[chart] closed-trades panel row failed: %s", e)
 
             triggered = await engine.get_triggered_tps(t["trade_id"])
             dir_col   = _BULL_COL if direction == "BUY" else _BEAR_COL

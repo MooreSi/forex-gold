@@ -15,6 +15,10 @@ from backend.src.controllers import sync_controller as sync_ctl
 from ._sections import _render_history, _render_ml
 from ._shared import _bo_type_badge, _dir_color, _fmt_ts, _pnl_color, _pnl_str
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 # Local/Remote switching now lives in the breakout panel_data service:
 # in Remote mode these read the VPS's mirrored stats instead of this
 # node's own, and the page cannot tell the difference.
@@ -461,8 +465,8 @@ def render() -> None:
                     detail_lbl.set_text(
                         f"Last: {_fmt_ts(eng.last_cycle_at)}  {eng.status_detail or ''}"
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[breakout panel] status line refresh failed: %s", e)
 
     # ── Control handlers ──────────────────────────────────────────────────────
 

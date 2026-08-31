@@ -9,6 +9,10 @@ from backend.src.controllers import settings_controller as settings_ctl
 
 from ._shared import _pu, cfg_module
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 _bridge_proc     = [None]   # holds the Popen for the bridge subprocess
 _bridge_starting = [False]  # True while start_bridge() is in the startup window
 
@@ -135,8 +139,8 @@ def _render_bridge_control(engine):
             # Re-enable auto-reconnect whenever the user manually starts the bridge
             try:
                 engine.set_bridge_inhibit_reconnect(False)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[settings] clearing the bridge reconnect inhibit on start failed: %s", e)
             if _bridge_running() or _bridge_starting[0]:
                 bridge_log_lbl.text = "Bridge is already running or starting."
                 return
@@ -342,8 +346,8 @@ def _render_bridge_control(engine):
             # Tell the engine watchdog not to auto-reconnect after a manual stop
             try:
                 engine.set_bridge_inhibit_reconnect(True)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[settings] setting the bridge reconnect inhibit on stop failed: %s", e)
             pids = _pu.pids_listening_on(9000)
             if pids:
                 for pid in pids:

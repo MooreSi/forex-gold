@@ -11,6 +11,10 @@ from backend.src.controllers import system_controller as _autostart
 from ._log_export import export_logs
 from ._shared import _pu
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 # Holds Popen (macOS) or _WindowsSleepGuard (Windows). Lives here rather than
 # in the package __init__ because _render_diagnostics is the only reader and
 # the only writer: split the two and each module silently gets its own copy.
@@ -134,8 +138,8 @@ def _render_diagnostics(engine):
                     }
             finally:
                 pass
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[settings] diagnostics cleanup failed: %s", e)
 
         diag_container.clear()
         with diag_container:

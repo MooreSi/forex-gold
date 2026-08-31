@@ -514,8 +514,8 @@ def render(get_engine: Callable):
                 rsi_lbl.text = f"RSI: {last_rsi:.1f}"
                 rsi_lbl.style(f"color:{col}")
 
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("[chart] candle/indicator refresh failed: %s", e)
 
     # ── Fast refresh (3s): tick, last-candle live update ──────────────────────
 
@@ -557,8 +557,8 @@ def render(get_engine: Callable):
             now = datetime.now().strftime("%H:%M:%S")
             update_lbl.text = f"Live · {now}"
 
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("[chart] live price tick refresh failed: %s", e)
 
     # ── Wire timers ───────────────────────────────────────────────────────────
     ui.timer(10.0, _refresh_candles)

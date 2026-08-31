@@ -22,6 +22,10 @@ from backend.src.controllers import ai_analysis_controller as ai_ctl
 
 from . import _panels
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 # ── Regex for channel update message scanning ─────────────────────────────────
 _TP_HIT_RE = re.compile(
     r'TP\s*(\d+)\s*(hit|hitt|done|reached|closed|filled|✅|🎯|🤑)',
@@ -504,8 +508,8 @@ def render(get_engine: Callable):  # noqa: C901
                 "sg_analysis":   sg_analysis,
             })
             ai_ctl.set_app_config("ai_trade_analysis_last", payload)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[ai trade analysis] saving the last-analysis payload failed: %s", e)
         return run_at
 
     def _load_stored() -> None:

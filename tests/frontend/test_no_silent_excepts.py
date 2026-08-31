@@ -17,10 +17,18 @@ FRONTEND = REPO / "frontend"
 
 # Shrinking baseline — lower it as swallows are converted to logged
 # handlers; never raise it.
-# 40 -> 38 (2026-08-25 merge): the two upstream swallows in reversal_panel
-# now log, and two more left frontend/pages/history.py with the SQL that
-# moved down to the analytics repo. Ratchets only ever fall.
-SILENT_EXCEPT_PASS_MAX = 38
+# 44 -> 40 -> 38 (2026-08-25 merge) -> 0 (2026-08-31).
+#
+# The remaining 38 were converted in one pass: every one is now
+# `except Exception as e:` followed by a debug log naming the page and what
+# was being refreshed. None was deleted or narrowed away, and none changed
+# behaviour — a swallowed failure is still swallowed, it just says so now.
+#
+# At zero this stops being a ratchet and becomes a rule: the frontend does not
+# silently swallow exceptions. Which is the point — a live-money dashboard
+# showing stale-but-plausible numbers with no log and no indicator is the
+# failure mode this gate was created for.
+SILENT_EXCEPT_PASS_MAX = 0
 
 
 def _silent_except_passes(root: Path) -> list[str]:

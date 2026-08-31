@@ -10,6 +10,10 @@ from typing import Optional
 from backend.src.controllers import history_controller as history_ctl
 from backend.src.controllers import history_controller as _hist_ctl
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 _BROKER_OFFSET = 10800  # broker stores UTC+3 timestamps as-if-UTC
 
 # Session key -> the label shown in the day-detail breakdown. Ordered
@@ -130,7 +134,7 @@ def _get_market_type_map(year: int, month: int) -> dict:
             else:
                 result[d] = (f"Ranging{arrow}",      "#2dd4bf")
 
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("[history] market-type map lookup failed: %s", e)
 
     return result

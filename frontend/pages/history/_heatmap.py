@@ -5,6 +5,10 @@ from nicegui import ui
 from backend.src.controllers import history_controller as history_ctl
 from frontend.components.empty_state import render_empty_state
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _render_heatmap(engine):
     """Grid of average net P&L by UTC hour (columns) × weekday (rows).
@@ -87,8 +91,8 @@ def _render_heatmap(engine):
                 if age_h < 20:
                     _render_heatmap_analysis(obj.get("result", {}), obj.get("ts", 0))
                     return
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[history] cached heatmap render failed: %s", e)
 
         cfg = _cfg_load()
 
@@ -184,8 +188,8 @@ def _render_heatmap(engine):
                     ui.label(_dt.fromtimestamp(ts).strftime("Updated %d %b %H:%M")).classes(
                         "text-xs text-gray-600 mb-1"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log.debug("[history] heatmap analysis render failed: %s", e)
             text = result.get("text", "No analysis available.")
             for para in text.split("\n\n"):
                 para = para.strip()

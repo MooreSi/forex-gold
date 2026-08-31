@@ -5,6 +5,10 @@ from nicegui import ui
 from backend.src.controllers import sync_controller as sync_ctl
 
 from ._shared import cfg_module
+
+import logging
+
+_log = logging.getLogger(__name__)
 # Current Claude model catalogue — update when Anthropic releases new versions
 # claude-fable-5, claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5-20251001
 CLAUDE_MODELS = [
@@ -41,8 +45,8 @@ async def _push_ai_config_to_vps(updates: dict) -> None:
     UI you happened to save it on."""
     try:
         await sync_ctl.push_ai_config(updates)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("[settings] pushing the AI config to the VPS failed: %s", e)
 
 
 def _render_ai(engine):

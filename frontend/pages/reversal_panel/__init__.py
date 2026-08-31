@@ -388,8 +388,8 @@ def render() -> None:
             pnl_lbl.classes(replace=f"text-lg font-bold font-mono {_pnl_color(pnl)}")
             pnl_pct_lbl.text = f"Total P&L ({pnl / _STARTING_BALANCE * 100:+.1f}%)"
             dd_lbl.text = f"${dd:,.2f}"
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[reversal panel] balance/P&L banner refresh failed: %s", e)
 
         # Realised P&L -- the trades this engine actually placed, read from
         # the core trade ledger rather than the engine's own virtual one.
@@ -429,8 +429,8 @@ def render() -> None:
             )
             wr_lbl.text = f"{stats['win_rate']:.1f}%"
             wr_sub_lbl.text = f"Win Rate ({stats['wins']}W / {stats['losses']}L)"
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[reversal panel] signal stat cards refresh failed: %s", e)
 
         # Active levels from engine cache
         levels_container.clear()
@@ -455,8 +455,8 @@ def render() -> None:
                     ui.label("No candidate levels — engine not running or no price data").classes(
                         "text-xs text-gray-600 italic"
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[reversal panel] candidate levels list refresh failed: %s", e)
 
         # Open signals
         open_container.clear()
@@ -495,8 +495,8 @@ def render() -> None:
             else:
                 with open_container:
                     ui.label("No open signals").classes("text-xs text-gray-600 italic")
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[reversal panel] open signals list refresh failed: %s", e)
 
         # Signal history — same column set/shape as Bounce (test_panel.py) and
         # Breakout (breakout_panel.py)'s history tables, adapted to Reversal Engine's
@@ -549,8 +549,8 @@ def render() -> None:
                 _perf_table("By Level Type", by_level,   "level_type")
                 if not (by_session or by_bias or by_level):
                     ui.label("No closed signals yet").classes("text-xs text-gray-600 italic")
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[reversal panel] performance breakdown tables refresh failed: %s", e)
 
         # Cycle log
         log_container.clear()
@@ -585,8 +585,8 @@ def render() -> None:
                         reason = entry.get("reason")
                         if reason:
                             ui.label(reason).classes("text-xs text-gray-600 italic")
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[reversal panel] cycle analysis log refresh failed: %s", e)
 
     def _safe_refresh():
         # The engine's own refresh callback is invoked synchronously

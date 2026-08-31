@@ -11,6 +11,10 @@ from backend.src.controllers import settings_controller as settings_ctl
 
 from ._bridge import _render_bridge_control
 from ._shared import cfg_module
+
+import logging
+
+_log = logging.getLogger(__name__)
 # Detached PowerShell sequence launched by _render_ea_update_button's handler
 # right before this Python process exits — see that function's own comment
 # for why this can't just run inline. Hand-validated manually (2026-07-17)
@@ -301,8 +305,8 @@ def _render_ea_update_button():
             _lines = _result_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
             if _lines:
                 ui.label(f"Last update: {_lines[-1]}").classes("text-xs text-gray-500")
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("[settings] reading the EA update log failed: %s", e)
 
     async def _update_and_reload_ea():
         if sys.platform != "win32":

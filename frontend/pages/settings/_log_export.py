@@ -9,6 +9,10 @@ from nicegui import ui
 
 from backend.src.controllers import settings_controller as settings_ctl
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 async def export_logs(export_lbl) -> None:
     import base64 as _b64
@@ -86,12 +90,12 @@ async def export_logs(export_lbl) -> None:
                             ts = _dt.strptime(stripped[:23], "%Y-%m-%d %H:%M:%S,%f").timestamp()
                             if ts < cutoff:
                                 continue
-                        except Exception:
-                            pass  # non-timestamped lines (tracebacks etc) — keep
+                        except Exception as e:
+                            _log.debug("[settings] parsing a log line timestamp during export failed: %s", e)  # non-timestamped lines (tracebacks etc) — keep
                         if _keep_line(stripped):
                             lines.append(stripped)
-            except Exception:
-                pass  # skip unreadable rotation files
+            except Exception as e:
+                _log.debug("[settings] reading a rotated log file during export failed: %s", e)  # skip unreadable rotation files
 
         if not lines:
             export_lbl.text = (

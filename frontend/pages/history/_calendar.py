@@ -17,6 +17,10 @@ from ._shared import (
     _get_market_type_map,
 )
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _render_calendar(engine):
     _state = {"year": datetime.now(_ZoneInfo("Europe/London")).year, "month": datetime.now(_ZoneInfo("Europe/London")).month}
@@ -82,8 +86,8 @@ def _render_calendar(engine):
                         _dir_by_ticket[str(ticket)] = (
                             "BUY" if int(open_deal.get("type", 0)) == 0 else "SELL"
                         )
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[history] day-map direction lookup failed: %s", e)
 
         # Same comment-based attribution the Closed Trades table performs --
         # without it every EA Template sibling leg (the bulk of a grid trade's

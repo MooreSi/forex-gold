@@ -337,8 +337,8 @@ def _render_market_order_form(engine):
                         else "text-amber-300 text-xs font-semibold mb-3"
                 mode_lbl.text = f"Active mode: {m_txt}"
                 mode_lbl.classes(replace=m_col)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("[trading] manual-entry price refresh failed: %s", e)
 
         ui.timer(3.0, _refresh_price)
 

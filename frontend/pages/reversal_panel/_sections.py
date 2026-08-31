@@ -6,8 +6,12 @@ they render into -- so they lift out as functions of that container without
 turning twenty closure variables into twenty parameters. Bodies are verbatim,
 dedented one level.
 """
+import logging
+
 from backend.src.controllers import engines_controller as engines_controller
 from nicegui import ui
+
+_log = logging.getLogger(__name__)
 
 from ._shared import (
     _dir_color,
@@ -119,8 +123,8 @@ async def _render_history_section(history_container) -> None:
         else:
             with history_container:
                 ui.label("No closed signals yet").classes("text-xs text-gray-600 italic")
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("[reversal panel] signal history table refresh failed: %s", e)
 
 async def _render_ml_section(ml_container) -> None:
     try:
@@ -268,5 +272,5 @@ async def _render_ml_section(ml_container) -> None:
             ui.label("Features:").classes("text-xs text-gray-500 mt-2")
             feat_txt = ", ".join(ml_sum.get("features", []))
             ui.label(feat_txt).classes("text-xs text-gray-600 leading-relaxed")
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("[reversal panel] ML status section refresh failed: %s", e)

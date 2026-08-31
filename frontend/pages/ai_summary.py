@@ -18,6 +18,10 @@ from backend.src.controllers.trading_controller import (
 )
 from backend.src.controllers import trading_controller as strategy_catalogue
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 def _uk_time() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
@@ -408,8 +412,8 @@ def render(get_engine: Callable):
             perf = {}
             try:
                 perf = await engine.compute_mt5_performance(90)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("[ai summary] MT5 performance fetch for the research prompt failed: %s", e)
 
             # Built fresh on every run so an EA template saved seconds ago is
             # already recommendable — that is the whole point of reading it

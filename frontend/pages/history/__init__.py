@@ -30,6 +30,10 @@ from ._shared import (
 )
 from ._trade_table import _render_trade_table
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 # render() is the page. The four clock/session names are re-exported because
 # tests/ui/test_history_session_attribution.py imports them off the package
 # root, and they were public there before the split.
@@ -105,8 +109,8 @@ def render(get_engine: Callable):
                     "text-base font-bold font-mono leading-none "
                     + ("text-green-400" if d_wr >= 50 else "text-red-400")
                 ))
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("[history] performance summary refresh failed: %s", e)
 
     ui.timer(15.0, refresh_perf)
     asyncio.ensure_future(refresh_perf())

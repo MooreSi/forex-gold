@@ -8,6 +8,10 @@ from frontend.components.empty_state import render_empty_state
 # Sibling sections of this page.
 from ._shared import _uk
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 def _render_tg_signals(engine):
     container = ui.column().classes("w-full gap-1")
@@ -127,8 +131,8 @@ def _render_tg_signals(engine):
                             if _btn[0]:
                                 try:
                                     _btn[0].props(remove="loading disabled")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    _log.debug("[trading] restoring the execute button state failed: %s", e)
 
                     exec_btn_ref[0] = ui.button(
                         "Execute", on_click=execute_sig,

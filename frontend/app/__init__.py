@@ -36,8 +36,8 @@ def _safe_timer_cleanup(self):
             slot = self._parent_slot() if self._parent_slot else None
             if slot is not None:
                 slot.parent.remove(self)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("[shell] removing a stale timer slot failed: %s", e)
 
 
 _UITimer._get_context = _safe_timer_get_context

@@ -18,6 +18,36 @@ from backend.src.utils.models import Tick, SYMBOL, POINT_SIZE, DIGITS
 
 log = logging.getLogger(__name__)
 
+
+# ── Transport failures on a SEND (stage3/020) ─────────────────────────────────
+#
+# "The broker said no" and "nobody knows" are different answers, and the
+# difference decides whether a signal is retried. mt5_bridge already flags the
+# lost-answer case INSIDE the bridge process (order_send returning None). This
+# is the other half: an answer lost between this app and the bridge.
+#
+# httpx tells the two apart. Nothing left this machine on a connect failure or
+# a pool timeout, so nothing was placed and retrying is safe -- marking those
+# unknown would park a signal every time the bridge is restarted, and only
+# reconciliation could release it. Everything else at transport level happened
+# with the request already on the wire, which means the bridge may have called
+# order_send and only the reply was lost.
+#
+# Anything that is not recognisably a never-sent failure is treated as unknown.
+# That is the conservative direction: a wrongly-parked signal waits for
+# reconciliation, a wrongly-retried one can become two live orders.
+_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
+def _send_failure(exc: Exception) -> dict:
+    """Shape a transport failure on a send path, marking it unknown unless the
+    request provably never left."""
+    out = {"error": str(exc) or type(exc).__name__}
+    if not isinstance(exc, _NEVER_SENT):
+        out["unknown"] = True
+    return out
+
+
 _tick_cache:    Optional[Tick] = None
 _tick_cache_ts: float = 0.0
 _candle_cache:  dict = {}
@@ -302,7 +332,7 @@ class MT5BridgeClient:
                     return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
             return r.json()
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def close_position(self, ticket: int) -> dict:
         if not self._url:
@@ -316,7 +346,7 @@ class MT5BridgeClient:
                     return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
             return r.json()
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def partial_close(self, ticket: int, lots: float) -> dict:
         if not self._url:
@@ -331,7 +361,7 @@ class MT5BridgeClient:
                     return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
             return r.json()
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def modify_order(self, ticket: int, sl: Optional[float], tp: Optional[float]) -> dict:
         if not self._url:
@@ -346,7 +376,7 @@ class MT5BridgeClient:
                     return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
             return r.json()
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def send_credentials(self, login: int, password: str, server: str) -> dict:
         if not self._url:

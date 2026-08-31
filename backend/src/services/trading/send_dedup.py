@@ -39,9 +39,32 @@ _NO_ANSWER_ERRORS: tuple[type[BaseException], ...] = (
     OSError,          # covers socket-level failures ConnectionError misses
 )
 
+# httpx's exceptions inherit from none of the above -- `httpx.ReadTimeout` is
+# not a builtin TimeoutError -- so one escaping the bridge client used to be
+# read as an ordinary rejection and the signal retried. The client normally
+# returns a dict rather than raising (see mt5_client._send_failure), but this
+# is the backstop for any path that does not, and for anything added later.
+#
+# The same never-sent / no-answer split as the client, and for the same reason:
+# a connect failure means the bridge is down and nothing was placed, so parking
+# there would strand a signal every time it restarts.
+try:
+    import httpx as _httpx
+    _HTTP_NEVER_SENT: tuple[type[BaseException], ...] = (
+        _httpx.ConnectError, _httpx.ConnectTimeout, _httpx.PoolTimeout,
+    )
+    _HTTP_NO_ANSWER: tuple[type[BaseException], ...] = (_httpx.TransportError,)
+except Exception:                      # httpx absent: nothing to classify
+    _HTTP_NEVER_SENT = ()
+    _HTTP_NO_ANSWER = ()
+
 
 def send_outcome_is_unknown(exc: BaseException) -> bool:
     """True when `exc` means "no answer", not "the broker said no"."""
+    if _HTTP_NEVER_SENT and isinstance(exc, _HTTP_NEVER_SENT):
+        return False
+    if _HTTP_NO_ANSWER and isinstance(exc, _HTTP_NO_ANSWER):
+        return True
     return isinstance(exc, _NO_ANSWER_ERRORS)
 
 

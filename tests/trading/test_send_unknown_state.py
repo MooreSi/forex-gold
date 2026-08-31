@@ -481,3 +481,44 @@ class TestParkingWorksFromBothInFlightStates:
         trade_repo.park_signal_unknown("sig-u1", "no answer")
 
         assert _status() == status
+
+
+class TestHttpxErrorsAreClassifiedToo:
+    """Found 2026-08-31. `httpx.ReadTimeout` is not a builtin `TimeoutError`,
+    and httpx's exception tree inherits from none of the types
+    `_NO_ANSWER_ERRORS` lists -- so one escaping the bridge client was read as
+    an ordinary rejection and the signal handed back to the scheduler.
+
+    The client normally returns a dict rather than raising, so this is a
+    backstop. It exists because the classification lived in exactly one place
+    and that place did not know about the transport library actually in use.
+    """
+
+    def _exc(self, name):
+        import httpx
+        return getattr(httpx, name)("boom")
+
+    @pytest.mark.parametrize("name", [
+        "ReadTimeout", "ReadError", "WriteTimeout", "WriteError",
+        "RemoteProtocolError",
+    ])
+    def test_a_lost_answer_is_unknown(self, name):
+        from backend.src.services.trading.send_dedup import send_outcome_is_unknown
+
+        assert send_outcome_is_unknown(self._exc(name)) is True
+
+    @pytest.mark.parametrize("name", ["ConnectError", "ConnectTimeout",
+                                      "PoolTimeout"])
+    def test_a_failure_to_CONNECT_stays_retryable(self, name):
+        """The bridge being down must not park signals -- it restarts often,
+        and only reconciliation could release them."""
+        from backend.src.services.trading.send_dedup import send_outcome_is_unknown
+
+        assert send_outcome_is_unknown(self._exc(name)) is False
+
+    def test_an_ordinary_rejection_is_still_retryable(self):
+        """Control: the change must not turn every failure into unknown."""
+        from backend.src.services.trading.send_dedup import send_outcome_is_unknown
+
+        assert send_outcome_is_unknown(ValueError("Invalid stops")) is False
+        assert send_outcome_is_unknown(RuntimeError("retcode 10016")) is False

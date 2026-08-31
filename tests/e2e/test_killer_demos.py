@@ -559,3 +559,60 @@ def test_030_control_a_recorded_trade_is_matched_not_flagged(fresh_db, monkeypat
     assert not diff.of_kind(rec.BROKER_ONLY_OURS)
     assert not diff.of_kind(rec.DB_ONLY_NO_EVIDENCE)
     assert diff.needs_attention is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 020, second route: an answer lost between the app and the bridge
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_020_a_lost_BRIDGE_response_also_parks_the_signal(fresh_db, caplog):
+    """
+    Found 2026-08-31 while testing the HTTP client. 020's lost-answer rule was
+    implemented inside `mt5_bridge` (order_send returning None). An answer lost
+    between the APP and the bridge -- a read timeout on the HTTP call, after
+    the bridge already had the request -- came back as a plain `{"error": ...}`
+    and `open_trade` turned it into "MT5 order rejected", which is retryable.
+
+    So a Python-bridge install with no EA could send the order, lose the reply,
+    and send it again. The dedup gate does not help here: it only consults the
+    broker when the EA was actually asked.
+
+    Terminal demo this stands in for: pause or firewall the bridge process
+    mid-send. Expect the signal to show `unknown`, not `pending`.
+    """
+    clock = {"now": BASE}
+    engine, reader = _runtime(clock, [[0, 2400.5]])
+    fresh_db.update_risk_settings({
+        "auto_execute_signals": 1, "accept_tg_signals": 1,
+    })
+    reader.feed_due(now=1.0)
+
+    # Faithful to the real chain: the REAL http client, with its request
+    # raising the way a read timeout does. Stubbing the fake bridge to raise
+    # httpx errors directly would test a shape production never produces --
+    # the client always returns a dict.
+    import httpx
+    from backend.src.services.broker.mt5_client import MT5BridgeClient
+
+    real_client = MT5BridgeClient.__new__(MT5BridgeClient)
+    real_client._url = "http://127.0.0.1:5001"
+    real_client._http = None
+
+    async def _timeout(*_a, **_kw):
+        raise httpx.ReadTimeout("no response from the bridge")
+    real_client._request = _timeout         # type: ignore[method-assign]
+    engine._bridge.place_order = real_client.place_order  # type: ignore[method-assign]
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(engine._scan_messages())
+
+    with fresh_db.db() as conn:
+        signal = conn.execute("SELECT status FROM vantage_signals").fetchone()
+        trades = conn.execute(
+            "SELECT COUNT(*) c FROM vantage_simulated_trades").fetchone()["c"]
+
+    assert signal["status"] == "unknown", (
+        "a lost bridge response was treated as a rejection and handed the "
+        "signal back to the scheduler"
+    )
+    assert trades == 0

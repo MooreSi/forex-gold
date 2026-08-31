@@ -164,8 +164,11 @@ def render_signals_card() -> None:
                     )
 
                 # Sync badge to live state on each page refresh (30s timer)
-                def _sync_bo_badge(badge=bo_live_badge):
-                    _live = bool(trading_ctl.get_risk_settings().get("bo_live_execution", 0))
+                async def _sync_bo_badge(badge=bo_live_badge):
+                    # async: get_risk_settings() is a synchronous SQLite read, and a
+                    # sync timer callback would do it on the event loop.
+                    _rs = await trading_ctl.get_risk_settings_async()
+                    _live = bool(_rs.get("bo_live_execution", 0))
                     badge.text = "BO LIVE ON" if _live else "BO LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
                 ui.timer(30, _sync_bo_badge)
@@ -250,8 +253,11 @@ def render_signals_card() -> None:
                         type="positive" if new else "warning",
                     )
 
-                def _sync_re_badge(badge=re_live_badge):
-                    _live = bool(trading_ctl.get_risk_settings().get("re_live_execution", 0))
+                async def _sync_re_badge(badge=re_live_badge):
+                    # async: get_risk_settings() is a synchronous SQLite read, and a
+                    # sync timer callback would do it on the event loop.
+                    _rs = await trading_ctl.get_risk_settings_async()
+                    _live = bool(_rs.get("re_live_execution", 0))
                     badge.text = "RE LIVE ON" if _live else "RE LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
                 ui.timer(30, _sync_re_badge)

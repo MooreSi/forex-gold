@@ -155,7 +155,9 @@ def render(get_engine=None) -> None:
                 ui.button("Save & Connect", on_click=_save_and_connect).props("color=primary")
                 ui.button("Disconnect", on_click=_disconnect).props("outline")
 
-            def _tick_status():
+            async def _tick_status():
+                # async for consistency with the other backend-reading timers;
+                # link_state() itself is an in-memory read.
                 _link = sync_ctl.link_state()
                 conn_status_lbl.text = f"status: {_link['conn_state']}" + (
                     f" ({_link['last_error']})"

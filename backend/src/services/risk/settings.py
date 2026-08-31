@@ -47,6 +47,17 @@ def circuit_breaker_state() -> dict:
     return _breaker.get_circuit_breaker_state()
 
 
+async def circuit_breaker_state_async() -> dict:
+    """The same state, read off the event loop.
+
+    It reaches `get_risk_settings()`, which is a synchronous SQLite read. The
+    app shell polls this every 5s for the header badge, so on the sync path
+    every tick stalls the whole dashboard for the duration of that read. Same
+    relationship as `get()` / `get_async()` above.
+    """
+    return await to_db_thread(_breaker.get_circuit_breaker_state)
+
+
 def reset_circuit_breaker(*args, **kwargs):
     return _breaker.reset_circuit_breaker(*args, **kwargs)
 

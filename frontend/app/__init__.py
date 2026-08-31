@@ -545,9 +545,12 @@ def main_page():
                 "text-xs font-semibold leading-none text-green-400"
             )
 
-        def _refresh_cb_badge():
+        async def _refresh_cb_badge():
+            # async on purpose: this reaches a synchronous SQLite read, and a
+            # sync timer callback runs inline on the event loop -- stalling
+            # every page and every websocket for the duration, every 5s.
             try:
-                cb = settings_ctl.get_circuit_breaker_state()
+                cb = await settings_ctl.get_circuit_breaker_state_async()
             except Exception:
                 return
             if cb.get("is_active"):

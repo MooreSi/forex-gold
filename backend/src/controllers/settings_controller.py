@@ -102,6 +102,10 @@ def get_circuit_breaker_state() -> dict:
     return _risk.circuit_breaker_state()
 
 
+async def get_circuit_breaker_state_async() -> dict:
+    return await _risk.circuit_breaker_state_async()
+
+
 def switch_environment_db(db_path: str) -> None:
     """Re-point the shared connection at another environment's DB file."""
     _retention.switch_environment(db_path)

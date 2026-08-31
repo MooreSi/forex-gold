@@ -23,7 +23,7 @@ async def get_untracked_mt5_positions(bridge: Any) -> list[dict]:
     if not bridge.is_configured():
         return []
     try:
-        live = await bridge.get_positions()
+        live = await bridge.get_positions() or []
     except Exception:
         return []
     if not live:

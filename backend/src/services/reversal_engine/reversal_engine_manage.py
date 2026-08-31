@@ -517,7 +517,7 @@ class _ManagementMixin:
         sig_id = sig["id"]
         ticket = int(sig["mt5_ticket"])
         try:
-            live_positions = await self._bridge.get_positions()
+            live_positions = await self._bridge.get_positions() or []
         except Exception as exc:
             _log.debug("[RE-Engine] live reconcile: get_positions failed ticket=%s: %s", ticket, exc)
             return

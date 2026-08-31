@@ -55,7 +55,7 @@ async def _group_floating_totals(
     if not by_group:
         return None, None
     try:
-        positions = await bridge.get_positions()
+        positions = await bridge.get_positions() or []
     except Exception:
         return None, None
     by_ticket = {int(p["ticket"]): p for p in (positions or []) if p.get("ticket")}

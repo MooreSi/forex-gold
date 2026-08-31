@@ -62,7 +62,7 @@ async def compute_mt5_performance(bridge: Any, days: int = 90) -> dict:
     """Compute performance stats directly from MT5 bridge deal history."""
     try:
         account = await bridge.get_account()
-        deals   = await bridge.get_deal_history(days)
+        deals   = await bridge.get_deal_history(days) or []
 
         by_pos: dict[int, list] = {}
         for d in deals:
@@ -108,7 +108,7 @@ async def compute_mt5_performance(bridge: Any, days: int = 90) -> dict:
 
         balance = float((account or {}).get("balance", 0) or 0)
         equity  = float((account or {}).get("equity",  0) or 0)
-        open_positions = await bridge.get_positions()
+        open_positions = await bridge.get_positions() or []
         open_pnl = sum(float(p.get("profit", 0)) for p in open_positions)
 
         winners  = [p for p in trades_pnl if p > 0]

@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 async def import_mt5_history(bridge: Any, days: int = 90) -> dict:
     """Pull closed deals from MT5 bridge, reconstruct positions, insert any missing into DB."""
-    deals = await bridge.get_deal_history(days)
+    deals = await bridge.get_deal_history(days) or []
     if not deals:
         return {"imported": 0, "skipped": 0, "error": "No deals returned from bridge"}
 

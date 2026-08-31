@@ -75,7 +75,7 @@ async def repair_template_placeholders(bridge: Any) -> int:
         rows = await db_module.to_db_thread(repair_repo.fetch_template_placeholders)
         if not rows:
             return 0
-        positions = await bridge.get_positions()
+        positions = await bridge.get_positions() or []
         if positions is None:
             return 0
         deals = await bridge.get_deal_history(7) or []

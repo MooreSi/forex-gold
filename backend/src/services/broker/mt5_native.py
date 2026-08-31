@@ -37,6 +37,22 @@ from backend.src.utils.models import Tick, SYMBOL, POINT_SIZE, DIGITS
 log = logging.getLogger(__name__)
 
 
+# ── "Could not look" is not "nothing there" (stage3/010) ──────────────────────
+#
+# Same rule as the HTTP client, and the same bug: `dedup.find_trade` branches on
+# `positions is None` ("could not look") versus `[]` ("nothing there"), and
+# neither real client could ever produce the None. Every failure came back as an
+# empty list, so a failed position query read as "the broker has no record of
+# this trade" and the order was sent again -- defeating the guard on the only
+# clients production actually uses.
+#
+# Note `_call(...) or []` swallowed it twice over: an exception AND a genuine
+# None from the bridge function both became [].
+#
+# Callers that do not care use `or []` at the call site, which is exactly
+# today's behaviour. The ones that must know now get told.
+
+
 # ── Transport failures on a SEND (stage3/020) ─────────────────────────────────
 #
 # The same rule the HTTP client applies, and here the timeout case is stronger.
@@ -278,11 +294,14 @@ class NativeMT5Bridge:
         except Exception:
             return None
 
-    async def get_positions(self) -> list[dict]:
+    async def get_positions(self) -> Optional[list[dict]]:
+        if self._mod is None:
+            return None      # not started: we cannot look
         try:
-            return await self._call("_get_positions") or []
+            rows = await self._call("_get_positions")
         except Exception:
-            return []
+            return None
+        return list(rows) if rows is not None else None
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
@@ -350,17 +369,23 @@ class NativeMT5Bridge:
         except Exception as e:
             return {"enabled": False, "error": str(e)}
 
-    async def get_deal_history(self, days: int = 7) -> list[dict]:
+    async def get_deal_history(self, days: int = 7) -> Optional[list[dict]]:
+        if self._mod is None:
+            return None      # not started: we cannot look
         try:
-            return await self._call("_get_history", days) or []
+            rows = await self._call("_get_history", days)
         except Exception:
-            return []
+            return None
+        return list(rows) if rows is not None else None
 
-    async def get_position_history(self, ticket: int) -> list[dict]:
+    async def get_position_history(self, ticket: int) -> Optional[list[dict]]:
+        if self._mod is None:
+            return None      # not started: we cannot look
         try:
-            return await self._call("_get_history_by_position", ticket) or []
+            rows = await self._call("_get_history_by_position", ticket)
         except Exception:
-            return []
+            return None
+        return list(rows) if rows is not None else None
 
     async def get_tick_at(self, ts: float) -> Optional[dict]:
         try:

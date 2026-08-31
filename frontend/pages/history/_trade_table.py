@@ -158,7 +158,7 @@ def _render_trade_table(engine):
             order_type_map = await history_ctl.ticket_order_type_map(_days_now)
             comm_rate  = await history_ctl.platform_fee_rate()
             try:
-                deals = await engine._bridge.get_deal_history(int(days_sel.value))
+                deals = await engine._bridge.get_deal_history(int(days_sel.value)) or []
                 if deals:
                     by_pos: dict[int, list] = {}
                     for d in deals:

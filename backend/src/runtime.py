@@ -758,7 +758,7 @@ class TradingRuntime:
             # let this fire a false "closed" alert while MT5 still held a
             # residual position open.
             try:
-                live = await self._bridge.get_positions()
+                live = await self._bridge.get_positions() or []
                 residual = next(
                     (p for p in live if int(p.get("ticket", -1)) == int(mt5_ticket)
                      and float(p.get("volume", 0)) > 0.0001),

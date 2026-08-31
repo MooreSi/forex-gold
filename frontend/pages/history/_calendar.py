@@ -49,7 +49,7 @@ def _render_calendar(engine):
             today_d   = datetime.now(_ZoneInfo("Europe/London")).date()
             first     = date(year, month, 1)
             days_back = max((today_d - first).days + 35, 35)
-            deals     = await engine._bridge.get_deal_history(int(days_back))
+            deals     = await engine._bridge.get_deal_history(int(days_back)) or []
 
             if deals:
                 by_pos: dict[int, list] = {}

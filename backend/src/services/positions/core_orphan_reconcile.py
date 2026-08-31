@@ -55,7 +55,7 @@ async def reconcile_orphaned_trades(bridge: Any, close_trade_fn) -> int:
         return 0
 
     try:
-        positions = await bridge.get_positions()
+        positions = await bridge.get_positions() or []
     except Exception as e:
         log.debug("[OrphanReconcile] could not read positions: %s", e)
         return 0
@@ -74,7 +74,7 @@ async def reconcile_orphaned_trades(bridge: Any, close_trade_fn) -> int:
             continue
 
         try:
-            hist = await bridge.get_position_history(ticket)
+            hist = await bridge.get_position_history(ticket) or []
         except Exception:
             continue
         exits = [d for d in (hist or []) if d.get("entry") == 1]

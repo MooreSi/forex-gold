@@ -36,7 +36,7 @@ async def get_total_deposits(bridge: Any) -> float:
         except Exception:
             pass
     try:
-        deals = await bridge.get_deal_history(3650)  # effectively whole account life
+        deals = await bridge.get_deal_history(3650) or []  # effectively whole account life
         total = round(sum(
             float(d.get("profit", 0)) for d in deals if not d.get("position_id")
         ), 2)

@@ -99,12 +99,19 @@ async def sync_closed_mt5_positions(ctx: PositionSyncCtx) -> None:
         return
     live_positions = await ctx.bridge.get_positions()
 
-    # get_positions() returns [] both when the bridge is offline and when
-    # there are genuinely no open positions.  Before treating an empty list
-    # as "all positions closed", confirm the bridge is actually connected.
-    # If MT5 is unreachable (terminal closed, maintenance, bridge restart)
-    # an empty list is ambiguous — skip the sync to avoid falsely closing
-    # live trades and misfiring Telegram alerts.
+    # None means the read itself failed -- see the note in mt5_client.py. This
+    # function decides whether a trade has CLOSED, so a failed read must never
+    # be mistaken for "no positions": that closes every live trade in the
+    # database and fires a Telegram alert for each.
+    #
+    # Until 2026-08-31 the clients could not report a failed read at all, and
+    # the health check below was the workaround for the ambiguity. It stays,
+    # because a genuinely empty list from a disconnected-but-responding bridge
+    # is still ambiguous.
+    if live_positions is None:
+        log.debug("MT5 sync: skipping — the position read failed")
+        return
+
     if not live_positions:
         health = await ctx.bridge.get_health()
         if not health.get("connected", False):
@@ -113,7 +120,7 @@ async def sync_closed_mt5_positions(ctx: PositionSyncCtx) -> None:
 
     live_tickets = {int(p["ticket"]) for p in live_positions}
     deals_by_pos: dict[int, list] = {}
-    all_deals = await ctx.bridge.get_deal_history(7)
+    all_deals = await ctx.bridge.get_deal_history(7) or []
     for d in all_deals:
         pid = d.get("position_id")
         if pid:  # excludes None and 0
@@ -140,7 +147,7 @@ async def sync_closed_mt5_positions(ctx: PositionSyncCtx) -> None:
             )
             continue
 
-        deals = await ctx.bridge.get_position_history(ticket)
+        deals = await ctx.bridge.get_position_history(ticket) or []
         if not deals:
             deals = deals_by_pos.get(ticket, [])
         close_price = None

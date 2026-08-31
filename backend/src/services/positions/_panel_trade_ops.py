@@ -180,7 +180,7 @@ async def _push_sl_one(trade_prefix: str, ctx: Any) -> Screen:
     if not ticket:
         return Screen(toast="That leg hasn't filled yet.", mode="noop")
 
-    positions = await ctx._bridge.get_positions()
+    positions = await ctx._bridge.get_positions() or []
     pos = next((p for p in positions if int(p.get("ticket") or 0) == ticket), None)
     if not pos:
         return Screen(toast="Couldn't read this position from the broker.", mode="noop")

@@ -62,7 +62,7 @@ async def reconcile_sl_hit(trade: dict, tick: Any, price: float, reason: str,
     mt5_ticket = trade.get("mt5_ticket")
     if mt5_ticket and bridge.is_configured():
         try:
-            live_pos = await bridge.get_positions()
+            live_pos = await bridge.get_positions() or []
             live_vol = {int(p["ticket"]): round(float(p.get("volume", 0)), 4)
                        for p in live_pos}
             if int(mt5_ticket) in live_vol:

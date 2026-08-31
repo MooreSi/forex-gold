@@ -93,10 +93,10 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
     # initial_sl is NULL (every row opened before that column existed).
     risk_total = 0.0
     for t in sorted(ticket_set):
-        deals = await bridge.get_position_history(t)
+        deals = await bridge.get_position_history(t) or []
         if not deals:
             if all_deals_cache is None:
-                all_deals_cache = await bridge.get_deal_history(90)
+                all_deals_cache = await bridge.get_deal_history(90) or []
             deals = [d for d in all_deals_cache if str(d.get("position_id", "")) == str(t)]
         if not deals:
             if t == int(mt5_ticket) or t in live_tickets:

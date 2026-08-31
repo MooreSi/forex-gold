@@ -87,7 +87,7 @@ def _render_equity_curve(engine):
                 # calendar use the fee-adjusted figure instead since their job is
                 # showing realistic net-of-cost P&L per trade, a different purpose.
                 try:
-                    deals = await engine._bridge.get_deal_history(365)
+                    deals = await engine._bridge.get_deal_history(365) or []
                     by_pos: dict[int, list] = {}
                     for d in deals:
                         pid = d.get("position_id")

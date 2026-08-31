@@ -19,6 +19,24 @@ from backend.src.utils.models import Tick, SYMBOL, POINT_SIZE, DIGITS
 log = logging.getLogger(__name__)
 
 
+# ── "Could not look" is not "nothing there" (stage3/010) ──────────────────────
+#
+# `dedup.find_trade`'s own docstring states the contract: "None means 'could
+# not look'; [] means 'nothing there'. Treating them alike is the mistake this
+# whole module exists to prevent." It branches on both -- and until 2026-08-31
+# neither real client could ever produce the None. Every failure came back as
+# an empty list, so a failed position query read as "the broker has no record
+# of this trade" and the order was sent again.
+#
+# The dedup unit tests passed throughout because their fake bridge raises or
+# returns None. Production never produces either shape.
+#
+# Callers that genuinely do not care use `or []` at the call site, which is
+# byte-for-byte today's behaviour. The ones that must know the difference --
+# dedup and reconciliation -- already branch on None and now get told.
+
+
+
 # ── Transport failures on a SEND (stage3/020) ─────────────────────────────────
 #
 # "The broker said no" and "nobody knows" are different answers, and the
@@ -300,16 +318,16 @@ class MT5BridgeClient:
             pass
         return None
 
-    async def get_positions(self) -> list[dict]:
+    async def get_positions(self) -> Optional[list[dict]]:
         if not self._url:
-            return []
+            return None      # not configured: we cannot look
         try:
             r = await self._request("get", f"{self._url}/positions", timeout=4.0)
             if r.status_code == 200:
                 return r.json().get("positions", [])
         except Exception:
-            pass
-        return []
+            return None
+        return None
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
@@ -407,29 +425,29 @@ class MT5BridgeClient:
         except Exception as e:
             return {"enabled": False, "error": str(e)}
 
-    async def get_deal_history(self, days: int = 7) -> list[dict]:
+    async def get_deal_history(self, days: int = 7) -> Optional[list[dict]]:
         if not self._url:
-            return []
+            return None      # not configured: we cannot look
         try:
             r = await self._request("get", f"{self._url}/history",
                                     timeout=12.0, params={"days": days})
             if r.status_code == 200:
                 return r.json().get("history", [])
         except Exception:
-            pass
-        return []
+            return None
+        return None
 
-    async def get_position_history(self, ticket: int) -> list[dict]:
+    async def get_position_history(self, ticket: int) -> Optional[list[dict]]:
         if not self._url:
-            return []
+            return None      # not configured: we cannot look
         try:
             r = await self._request("get", f"{self._url}/history/position/{ticket}",
                                     timeout=12.0)
             if r.status_code == 200:
                 return r.json().get("history", [])
         except Exception:
-            pass
-        return []
+            return None
+        return None
 
     async def get_tick_at(self, ts: float) -> Optional[dict]:
         if not self._url:

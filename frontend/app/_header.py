@@ -507,7 +507,7 @@ def build_header(*, power_dialog, pause_dialog, root):
                 now_m = _t2.monotonic()
                 if _net_deposited[0] is None or now_m - _deposit_fetch_at[0] > 300:
                     try:
-                        all_deals = await engine._bridge.get_deal_history(3650)
+                        all_deals = await engine._bridge.get_deal_history(3650) or []
                         credits = sum(
                             float(d.get("profit", 0))
                             for d in all_deals

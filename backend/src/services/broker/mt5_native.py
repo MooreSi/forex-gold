@@ -36,6 +36,32 @@ from backend.src.utils.models import Tick, SYMBOL, POINT_SIZE, DIGITS
 
 log = logging.getLogger(__name__)
 
+
+# ── Transport failures on a SEND (stage3/020) ─────────────────────────────────
+#
+# The same rule the HTTP client applies, and here the timeout case is stronger.
+# `_call` runs the MetaTrader5 function as
+# `asyncio.wait_for(asyncio.to_thread(fn, ...))`. `wait_for` cancels the AWAIT;
+# it cannot stop the thread. After the timeout fires the MT5 call is still
+# running to completion -- so a timeout on place_order means an order that is
+# very likely still on its way to the broker, not one that failed.
+#
+# The one failure that provably never ran is a missing function name: `getattr`
+# raises before anything is dispatched. That stays retryable, because parking a
+# signal over a plain programming error is not conservatism, it is a second
+# bug. Everything else is unknown.
+_NEVER_RAN = (AttributeError,)
+
+
+def _send_failure(exc: Exception) -> dict:
+    """Shape a failure on a send path, marking it unknown unless the call
+    provably never reached the terminal."""
+    out = {"error": str(exc) or type(exc).__name__}
+    if not isinstance(exc, _NEVER_RAN):
+        out["unknown"] = True
+    return out
+
+
 TICK_CACHE_TTL = 1.0
 CANDLE_CACHE_TTL = 5.0
 
@@ -270,7 +296,7 @@ class NativeMT5Bridge:
                 "_place_order", direction, lots, sl, tp, comment or "ForexTrader",
             )
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def close_position(self, ticket: int) -> dict:
         if self._mod is None:
@@ -278,7 +304,7 @@ class NativeMT5Bridge:
         try:
             return await self._call("_close_position", ticket)
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def partial_close(self, ticket: int, lots: float) -> dict:
         if self._mod is None:
@@ -286,7 +312,7 @@ class NativeMT5Bridge:
         try:
             return await self._call("_partial_close", ticket, lots)
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def modify_order(self, ticket: int, sl: Optional[float], tp: Optional[float]) -> dict:
         if self._mod is None:
@@ -294,7 +320,7 @@ class NativeMT5Bridge:
         try:
             return await self._call("_modify_position", ticket, sl, tp)
         except Exception as e:
-            return {"error": str(e)}
+            return _send_failure(e)
 
     async def send_credentials(self, login: int, password: str, server: str) -> dict:
         if self._mod is None:

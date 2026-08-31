@@ -10,8 +10,17 @@ On macOS, MAC address and boot-volume UUID are excluded: both can change across
 OS updates without any hardware change.  On Windows, hostname and NIC MAC are
 excluded for the same reason; we use BIOS/UEFI UUIDs which survive OS reinstalls.
 
-The wildcard fingerprint "TEST_WILDCARD_000000000000000000000000" is reserved
-for internal testing and bypasses all hardware checks.
+`TEST_WILDCARD` and `is_test_wildcard()` are defined below and **nothing in
+this application consults either of them** (checked across the whole tree,
+2026-08-31). The docstring here used to say the wildcard "bypasses all hardware
+checks", which described a capability this codebase does not have and reads as
+an invitation to add one. A licence bound to the wildcard would work on every
+machine, so wiring it up is a licence bypass and needs the owner's sign-off.
+
+They are kept rather than deleted because KeyGen may mirror the constant; the
+question is recorded in docs/simon-handover/014. `tests/licence/
+test_fingerprint.py::TestTheWildcardIsNotWired` fails if anything starts
+consulting them.
 """
 import hashlib
 import platform

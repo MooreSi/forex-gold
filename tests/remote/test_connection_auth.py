@@ -73,6 +73,16 @@ class _Ws:
     async def close(self):
         self.closed = True
 
+    def __aiter__(self):
+        """The authenticated session loop reads with `async for`."""
+        return self
+
+    async def __anext__(self):
+        if not self._frames:
+            raise StopAsyncIteration
+        frame = self._frames.pop(0)
+        return frame if isinstance(frame, (str, bytes)) else json.dumps(frame)
+
     def types(self) -> list[str]:
         return [m.get("type") for m in self.sent]
 
@@ -469,3 +479,271 @@ class TestTheTimeoutsAreActuallyBounded:
 
         assert auth_wait <= 10.0
         assert follow_up_wait >= 15.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The authenticated session
+# ─────────────────────────────────────────────────────────────────────────────
+
+from backend.src.services.cluster.remote.protocol import (   # noqa: E402
+    MSG_LICENCE, MSG_STATUS, MSG_VERSION_INFO,
+)
+
+
+@pytest.fixture
+def known_client(monkeypatch):
+    """One approved token, and the admin fan-out silenced."""
+    monkeypatch.setattr(rs, "_allowed_tokens", {
+        "GOOD": {"name": "Simon's VPS", "email": "a@b.c",
+                 "subscription_type": "Annual", "expiry_date": "2027-01-01"},
+    })
+
+    async def _noop(*_a, **_kw):
+        return None
+    monkeypatch.setattr(rs, "_push_clients_to_all_admins", _noop)
+    return rs._allowed_tokens["GOOD"]
+
+
+class TestTheWelcomeSequence:
+    """This is the path bugs/018 broke.
+
+    `_read_changelog` is called here, on every successful connection. When the
+    2026-08-30 split left `_CHANGELOG_FILE` behind, this raised NameError after
+    the welcome and the licence had already been sent -- so a client was
+    welcomed, licensed, and then dropped before it learned what version to
+    update to. These tests exist so that cannot happen unnoticed again; the
+    static gate (tests/refactor/test_undefined_names.py) is the other half.
+    """
+
+    async def test_a_known_token_gets_welcome_then_version_info(self, known_client):
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD", "hostname": "vps-1"}])
+
+        await rs._handler(ws)
+
+        assert ws.types() == [MSG_WELCOME, MSG_VERSION_INFO]
+
+    async def test_the_version_info_carries_a_version_and_a_changelog(
+            self, known_client):
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}])
+
+        await rs._handler(ws)
+
+        info = next(m for m in ws.sent if m["type"] == MSG_VERSION_INFO)
+        assert info["latest"], "no version advertised -- clients cannot self-update"
+        assert isinstance(info["changelog"], list)
+
+    async def test_the_welcome_carries_the_subscription_the_token_holds(
+            self, known_client):
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}])
+
+        await rs._handler(ws)
+
+        welcome = ws.sent[0]
+        assert welcome["subscription_type"] == "Annual"
+        assert welcome["expiry_date"] == "2027-01-01"
+        assert welcome["email"] == "a@b.c"
+
+    async def test_a_licence_is_delivered_when_the_token_has_one(
+            self, known_client):
+        known_client["licence_key"] = "LICENCE-XYZ"
+        known_client["machine_id"] = "MACHINE-9"
+
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}])
+
+        await rs._handler(ws)
+
+        assert ws.types() == [MSG_WELCOME, MSG_LICENCE, MSG_VERSION_INFO]
+        licence = ws.sent[1]
+        assert licence["licence_key"] == "LICENCE-XYZ"
+        assert licence["machine_id"] == "MACHINE-9"
+
+    async def test_no_licence_frame_when_the_token_has_none(self, known_client):
+        """Control for the test above -- otherwise a handler that always sent
+        a licence frame, empty or not, would look correct."""
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}])
+
+        await rs._handler(ws)
+
+        assert MSG_LICENCE not in ws.types()
+
+    async def test_an_admin_machine_is_told_it_is_one(self, known_client,
+                                                      monkeypatch):
+        monkeypatch.setattr(rs, "is_admin_machine_uuid", lambda u: u == "UUID-1")
+
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD", "machine_uuid": "UUID-1"}])
+
+        await rs._handler(ws)
+
+        assert ws.sent[0]["is_remote_admin"] is True
+
+    async def test_an_ordinary_machine_is_not(self, known_client, monkeypatch):
+        monkeypatch.setattr(rs, "is_admin_machine_uuid", lambda u: False)
+
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD", "machine_uuid": "UUID-9"}])
+
+        await rs._handler(ws)
+
+        assert ws.sent[0]["is_remote_admin"] is False
+
+
+class TestTheSessionIsRegisteredAndCleanedUp:
+
+    async def test_a_disconnect_removes_the_client(self, known_client):
+        """The `finally` block. A session left in `_connected` after the socket
+        dies shows the client as online forever on every admin screen."""
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD", "hostname": "vps-1"}])
+
+        await rs._handler(ws)
+
+        assert "GOOD" not in rs._connected
+
+    async def test_the_connection_is_registered_while_it_lasts(
+            self, known_client, monkeypatch):
+        """Positive control for the cleanup test: proves the entry was ever
+        there. Captured mid-session, since by the time _handler returns the
+        `finally` has already removed it."""
+        seen: list = []
+
+        async def _capture(*_a, **_kw):
+            seen.append(dict(rs._connected))
+        monkeypatch.setattr(rs, "_push_clients_to_all_admins", _capture)
+
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD", "hostname": "vps-1"}])
+
+        await rs._handler(ws)
+
+        assert seen and "GOOD" in seen[0]
+        assert seen[0]["GOOD"]["info"]["hostname"] == "vps-1"
+        assert seen[0]["GOOD"]["info"]["online"] is True
+
+    async def test_the_tokens_last_seen_is_stamped(self, known_client):
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}])
+
+        await rs._handler(ws)
+
+        assert rs._allowed_tokens["GOOD"]["last_seen"] > 0
+
+
+class TestTheStatusHeartbeat:
+
+    async def test_it_updates_what_the_admin_screens_show(self, known_client):
+        """A client that updates itself mid-session reports the new build on
+        its next heartbeat, not on a fresh HELLO -- so the admin list has to
+        pick it up from here or it shows the old version until reconnect."""
+        snapshots: list = []
+
+        class _Watching(_Ws):
+            async def __anext__(self):
+                # Snapshot BEFORE serving the next frame, so the effect of the
+                # previous one is visible while the session still exists.
+                entry = rs._connected.get("GOOD")
+                if entry:
+                    snapshots.append(dict(entry["info"]))
+                return await super().__anext__()
+
+        ws = _Watching([
+            {"type": MSG_HELLO, "token": "GOOD", "version": "1.0.0"},
+            {"type": MSG_STATUS, "version": "1.1.0", "trades_open": 3,
+             "bridge_connected": True, "uptime_s": 120},
+        ])
+        ws._frames.insert(0, {"type": MSG_HELLO, "token": "GOOD",
+                              "version": "1.0.0"})
+
+        await rs._handler(ws)
+
+        assert snapshots, "the session was never registered"
+        before, after = snapshots[0], snapshots[-1]
+        assert before["version"] == "1.0.0"
+        assert after["version"] == "1.1.0", "a mid-session self-update was not picked up"
+        assert after["trades_open"] == 3
+        assert after["bridge_connected"] is True
+        assert after["uptime_s"] == 120
+
+    async def test_the_uptime_accumulator_caps_a_long_gap(self, known_client,
+                                                          monkeypatch):
+        """A missed heartbeat, or a reconnect after the machine slept, must not
+        book hours of "online" that never happened. The cap is 90 seconds per
+        gap, and this figure is persisted and shown to the operator."""
+        clock = {"t": 1_000_000.0}
+        monkeypatch.setattr(rs.time, "time", lambda: clock["t"])
+
+        class _Jumpy(_Ws):
+            """A full day passes between the two heartbeats."""
+            async def __anext__(self):
+                frame = await super().__anext__()
+                clock["t"] += 86400.0
+                return frame
+
+        ws = _Jumpy([
+            {"type": MSG_HELLO, "token": "GOOD"},
+            {"type": MSG_STATUS},      # first: sets the baseline, adds nothing
+            {"type": MSG_STATUS},      # second: a day later
+        ])
+
+        await rs._handler(ws)
+
+        total = rs._allowed_tokens["GOOD"].get("total_uptime_s", 0)
+        assert total > 0, "no uptime was accumulated at all -- test proves nothing"
+        assert total <= 90.0, (
+            f"booked {total}s from a one-day gap. The 90s cap is what stops a "
+            f"sleeping machine inflating its recorded time online."
+        )
+
+    async def test_a_normal_gap_is_counted_in_full(self, known_client,
+                                                   monkeypatch):
+        """Control for the cap: an ordinary ~60s heartbeat interval must be
+        added whole. A cap that clamped everything would pass the test above
+        and make the figure useless."""
+        clock = {"t": 1_000_000.0}
+        monkeypatch.setattr(rs.time, "time", lambda: clock["t"])
+
+        class _Ticking(_Ws):
+            async def __anext__(self):
+                frame = await super().__anext__()
+                clock["t"] += 60.0
+                return frame
+
+        ws = _Ticking([
+            {"type": MSG_HELLO, "token": "GOOD"},
+            {"type": MSG_STATUS},
+            {"type": MSG_STATUS},
+        ])
+
+        await rs._handler(ws)
+
+        assert rs._allowed_tokens["GOOD"].get("total_uptime_s") == 60.0
+
+    async def test_a_binary_frame_is_ignored(self, known_client):
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}, b"\\x00\\x01"])
+
+        await rs._handler(ws)   # must not raise
+
+        assert ws.types() == [MSG_WELCOME, MSG_VERSION_INFO]
+
+    async def test_malformed_json_mid_session_is_ignored(self, known_client):
+        ws = _Ws([{"type": MSG_HELLO, "token": "GOOD"}, "{broken"])
+
+        await rs._handler(ws)   # must not raise
+
+        assert "GOOD" not in rs._connected
+
+
+class TestRevocationMidSession:
+    async def test_a_token_revoked_while_connected_does_not_crash_the_loop(
+            self, known_client):
+        """`_allowed_tokens[token]` is indexed on every message, and an admin
+        can revoke between two of them."""
+        class _Revoking(_Ws):
+            async def __anext__(self):
+                rs._allowed_tokens.pop("GOOD", None)
+                return await super().__anext__()
+
+        ws = _Revoking([
+            {"type": MSG_HELLO, "token": "GOOD"},
+            {"type": MSG_STATUS},
+        ])
+        ws._frames.insert(0, {"type": MSG_HELLO, "token": "GOOD"})
+
+        await rs._handler(ws)   # must not raise
+
+        assert "GOOD" not in rs._connected

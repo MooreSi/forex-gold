@@ -1,3 +1,86 @@
+## Unreleased — Money-path hardening + a bug class closed (2026-08-28 → 2026-08-31)
+
+**Nothing in the "money path" section below is verified against a broker.**
+Every item there is written, tested and mutation-tested, and none is finished.
+Finishing each one needs Simon at a demo terminal:
+`docs/simon-handover/013-the-five-demos-runbook.md`.
+
+### Money path — IMPLEMENTED, NOT SIGNED OFF (demo required for every item)
+- **A slow EA no longer causes a second order.** When the EA's acknowledgement
+  timed out, the fallback placed another order for a trade the EA may already
+  have on the book — and the two send paths stamped different identifiers, so
+  no check was even possible. Both now carry the trade id, and the fallback
+  asks the broker before sending. On 2026-07-30 this turned five signals into
+  roughly 133 opens (stage3/010).
+- **A send that gets no answer parks the signal as `unknown`** instead of
+  returning it to `pending`, which the scheduler re-activates every 20 seconds.
+  A rejection still stays retryable — the broker saying "no" is information;
+  a timeout is the absence of it (stage3/020).
+- **A refused broker close no longer becomes a database close.** `success=False`
+  was never checked, so a refused close was recorded at the app's own local
+  price while MT5 still held the position — the app then stopped managing a
+  live trade and booked a profit that never happened. Two existing tests had
+  enshrined that behaviour and were rewritten (stage3/040).
+- **Broker↔database reconciliation** reports positions the app placed and lost
+  the row for, and rows with no broker record. Read-only, asserted so by a
+  structural test. **The repairers are deliberately not built** — they would
+  write, through the frozen close path (stage3/030).
+- **Protective halt numbers now agree with each other.** The risk governor fell
+  back to 20% for both the daily-loss and drawdown limits while the schema said
+  3%/8%; all three sources now say 3%/10%. Both post-close halt checks are loud
+  on failure instead of swallowed at debug level (stage3/050).
+- **Closing a trade twice no longer pays out twice.** `apply_full_close` ran
+  `balance = balance + ?` with no guard; it is now a compare-and-set that only
+  an `open` trade satisfies (stage1 2/040).
+- **The trade-slot cap is enforced inside the atomic claim**, closing a race
+  where two signals could both pass the check. A stranded-claim sweep releases
+  a claim abandoned by a crash, keyed on when the claim was made — keying it on
+  the signal's age would have released in-flight opens and opened them twice
+  (stage1 2/030).
+
+### Fixed
+- **A phantom trade held one of five trade slots.** A placeholder row with
+  `grid_legs_total IS NULL` could never satisfy the existing expiry condition,
+  so it sat open at a fabricated P&L indefinitely (docs/todo/bugs/016).
+- **One malformed Telegram message produced 8,319 log lines**, rescanned
+  forever (docs/todo/bugs/015 — the log half; the recording half is deferred,
+  see the ticket).
+- **Backtests scored every timed-out trade as break-even.** Seven of eight
+  simulators marked a time-stopped trade out at its entry price rather than the
+  price it was actually cut at, so every strategy's timeout behaviour looked
+  free (docs/todo/bugs/017).
+- **Four cluster modules referred to 15 names that did not exist** after being
+  split out of the two cluster servers. `_read_changelog` runs on every
+  successful remote client connection, so a client would have been welcomed,
+  licensed, then dropped before it learned what version to update to; the LAN
+  discovery beacon raised on its first iteration (docs/todo/bugs/018).
+
+### Security
+- **The cluster sync channel now authenticates the server it connects to.**
+  `tls_util`'s docstring promised a fingerprint check against a function that
+  did not exist anywhere in the tree, and nothing called `getpeercert()` — so
+  the "TLS" was encryption without authentication. Trust-on-first-use pinning,
+  with the token sent only after the pin verifies (docs/todo/bugs/014).
+  The licence channel is deliberately NOT pinned yet: unlike sync it has no
+  recovery route if a pin goes wrong.
+
+### Gates
+- **New: undefined names.** A name a module uses but never defines — the shape
+  a file split leaves behind. Four bugs in this repo have taken it, all found
+  by reading rather than by a test. `tools.checks all` is now nine checks.
+- Test coverage where it was thinnest and matters most: the remote server's
+  connection front door (registration, licence delivery, token auth) 45% → 65%,
+  the update-application path 17% → 80%.
+
+### Documentation
+- `docs/guides/install-from-scratch.md` — Windows and macOS, with the failure
+  modes taken from the real branches in `Setup & Start FOREX.bat`.
+- `docs/simon-handover/013-the-five-demos-runbook.md` — the demo session, step
+  by step, so it is a confirmation rather than an exploration.
+- The split-file queue in `docs/system/rules/70-file-organisation.md` was badly
+  stale — every frontend file it listed is a package now. Rewritten from
+  measurement.
+
 ## Unreleased — Upstream merge + structural sweep (2026-08-25 → 2026-08-27)
 
 Merges `MooreSi/forex` main into the refactored tree, then repairs what the

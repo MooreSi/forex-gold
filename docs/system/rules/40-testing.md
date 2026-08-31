@@ -142,3 +142,48 @@ than a threshold nobody can hit.
 Coverage measures *lines executed*, not *behaviour verified*. A file at 90%
 with no assertions is untested. Use it to find the zero-coverage holes, not to
 declare victory.
+
+## Gates fail closed
+
+A gate that cannot run must **fail**, never pass quietly. This is not a style
+preference — it is the specific failure this repo was rebuilt after: a
+guardrail script scanned a directory that had been deleted and printed "all
+good" on every run for months.
+
+So: a missing entrypoint, an unreadable baseline, absent coverage data or a
+scanner that finds nothing to scan are all failures. Negative controls live in
+`tests/refactor/test_gates_fail_closed.py`, and every gate has one.
+
+The corollary for anything you add: **prove the gate can go red before you
+trust it green.** Plant the violation, watch it fail, remove it. A gate whose
+red path has never been seen is a gate that has never been tested.
+
+## `fresh_db` lives in `tests/conftest.py`
+
+There is one canonical `fresh_db` fixture. Use it.
+
+Local copies are where the Windows teardown failures keep coming from: POSIX
+lets you unlink a file that still has an open handle, and Windows does not.
+`db.init()` leaves a handle on the calling thread **and** on the `to_db_thread`
+worker, so both must be closed before `os.remove`. The first Windows CI run
+this repo ever completed produced 50 teardown errors from exactly this, in
+fixtures that had passed on macOS since the day they were written.
+
+A shrinking baseline in `tests/refactor/test_fixture_dedup.py` tracks the
+remaining local copies. It may go down.
+
+## After moving code between modules, check it can still see what it uses
+
+A verbatim move takes the function **body**. The module-level constants and
+imports it reads stay behind, and nothing fails until that exact line runs.
+
+```bash
+python -m tools.refactor_audit.undefined_names backend frontend tools
+```
+
+Also the fifth check in `python -m tools.checks all`. Four bugs in this repo
+have been this exact shape — `docs/todo/bugs/010`, `011` and `018`, the last
+of which left 15 names behind across four files and stayed green for two days.
+
+A green suite is evidence about the lines that ran. A move changes which lines
+*can* run.

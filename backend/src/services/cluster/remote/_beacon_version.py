@@ -19,6 +19,12 @@ import socket
 import asyncio
 from pathlib import Path
 
+# The port the server listens on, advertised in the beacon payload. Imported
+# rather than duplicated -- `remote/tls.py` is the one definition, and a second
+# copy here would drift silently. (Left behind by the 2026-08-30 split; the
+# beacon loop raised NameError on its first iteration.)
+from backend.src.services.cluster.remote.tls import SERVER_PORT
+
 log = logging.getLogger(__name__)
 
 
@@ -45,8 +51,17 @@ def _read_version() -> str:
 
 
 def _read_changelog() -> list[str]:
-    if _CHANGELOG_FILE.exists():
-        return _CHANGELOG_FILE.read_text(encoding="utf-8").splitlines()[:40]
+    """The changelog sent with MSG_VERSION_INFO on every successful connect.
+
+    Resolved per call rather than at import: `server.py` computes its own
+    `_CHANGELOG_FILE` at module level, and the 2026-08-30 split moved this
+    function out without it, so every welcomed client hit a NameError here.
+    Computing it here keeps the two files independent -- importing it back
+    from `server.py` would be circular, since `server.py` imports this module.
+    """
+    changelog = _repo_root_for_files() / "CHANGELOG.md"
+    if changelog.exists():
+        return changelog.read_text(encoding="utf-8").splitlines()[:40]
     return []
 
 

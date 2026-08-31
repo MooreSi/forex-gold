@@ -56,6 +56,13 @@ GATES = [
         "whole modules nothing imports (fails closed if an entrypoint is missing)",
     ),
     Check(
+        "undefined names",
+        [PY, "-m", "tools.refactor_audit.undefined_names",
+         "backend", "frontend", "tools", "run.py", "mt5_bridge.py"],
+        "a name a module uses but never defines -- the shape a split leaves "
+        "behind, which four bugs in this repo have taken",
+    ),
+    Check(
         "boot smoke",
         [PY, "-c", "import backend.src.app"],
         "the composition root still imports",

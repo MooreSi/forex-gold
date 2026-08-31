@@ -21,8 +21,34 @@ import time
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.cluster.sync.protocol import (
+    MSG_SIGNAL_GEN_STATS, MSG_STATUS_HEARTBEAT, TRADER_REMOTE_VPS, make,
+)
 
 log = logging.getLogger(__name__)
+
+
+# These live here rather than in server.py because the loops below are their
+# only readers. They were left behind by the 2026-08-30 split -- see
+# tests/refactor/test_undefined_names.py for the gate that now catches that.
+_HEARTBEAT_INTERVAL_S = 3.0
+_SIGNAL_GEN_STATS_INTERVAL_S = 15.0
+# Comfortably above the 60s ping_timeout (start()) so a genuine drop is
+# distinguished from an ordinary stall-tolerant gap between pings, and above
+# the reconnect backoff cap (_RECONNECT_BACKOFF_S in sync/client.py) so a
+# normal reconnect cycle doesn't false-positive.
+_LIVENESS_ALERT_THRESHOLD_S = 90.0
+_LIVENESS_CHECK_INTERVAL_S = 30.0
+# A flapping Mac connection (brief drop/reconnect cycles, e.g. from its own
+# periodic restarts) resets _liveness_alerted on every reconnect, so a series
+# of short outages can each independently cross _LIVENESS_ALERT_THRESHOLD_S
+# and re-alert — confirmed live: 6+ "Mac unreachable" emails within 20 minutes
+# on 2026-07-13 despite the debounce, because each brief reconnect cleared the
+# flag before the next drop. This floor caps re-alerts regardless of how many
+# separate outage episodes occur, so a flapping link degrades to one alert
+# per window instead of spamming the inbox.
+_LIVENESS_MIN_REALERT_INTERVAL_S = 600.0
+
 
 
 def _get_resource_usage() -> dict:

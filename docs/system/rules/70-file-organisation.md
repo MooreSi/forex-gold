@@ -137,6 +137,19 @@ That was a flaw in the metric, and it was fixed rather than baselined around.
 
 ---
 
+## After any split, check the moved code can still see what it uses
+
+A verbatim move takes the function body and leaves the module-level constants
+and imports it reads behind. Nothing fails until that line runs.
+
+```bash
+python -m tools.refactor_audit.undefined_names backend frontend tools
+```
+
+It is the fifth check in `python -m tools.checks all`, so a full run covers it.
+Four splits in this repo have shipped this bug —
+`docs/todo/bugs/010`, `011` and `018`.
+
 ## Current status
 
 Measured 2026-08-31, not remembered. **Three files exceed the 800-line ceiling

@@ -82,6 +82,16 @@ surface silently becomes everything it contains.
 python -m tools.checks all
 ```
 
+The check that matters most for a split is **undefined names**. Moving code
+verbatim moves its *body*, not the module-level constants and imports it reads.
+Those stay behind, and nothing fails until that exact line runs — see
+`docs/todo/bugs/018`, where four cluster splits left 15 names behind and the
+suite stayed green for two days. To run it alone:
+
+```bash
+python -m tools.refactor_audit.undefined_names backend frontend tools
+```
+
 The LOC gate should now show one fewer oversized file. If it shows the same
 count, the split did not actually reduce anything and you have added
 directories for nothing.

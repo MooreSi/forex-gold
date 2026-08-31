@@ -16,6 +16,8 @@ tests/core/test_sync_peer_data.py, which owns that behaviour.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import json
 import logging
 

@@ -44,23 +44,8 @@ from backend.src.services.cluster.sync.protocol import (
 
 log = logging.getLogger("sync")
 
-_HEARTBEAT_INTERVAL_S = 3.0
-_SIGNAL_GEN_STATS_INTERVAL_S = 15.0
-# Comfortably above the 60s ping_timeout (start()) so a genuine drop is
-# distinguished from an ordinary stall-tolerant gap between pings, and above
-# the reconnect backoff cap (_RECONNECT_BACKOFF_S in sync/client.py) so a
-# normal reconnect cycle doesn't false-positive.
-_LIVENESS_ALERT_THRESHOLD_S = 90.0
-_LIVENESS_CHECK_INTERVAL_S = 30.0
-# A flapping Mac connection (brief drop/reconnect cycles, e.g. from its own
-# periodic restarts) resets _liveness_alerted on every reconnect, so a series
-# of short outages can each independently cross _LIVENESS_ALERT_THRESHOLD_S
-# and re-alert — confirmed live: 6+ "Mac unreachable" emails within 20 minutes
-# on 2026-07-13 despite the debounce, because each brief reconnect cleared the
-# flag before the next drop. This floor caps re-alerts regardless of how many
-# separate outage episodes occur, so a flapping link degrades to one alert
-# per window instead of spamming the inbox.
-_LIVENESS_MIN_REALERT_INTERVAL_S = 600.0
+# The heartbeat/liveness intervals moved to _telemetry.py with the loops
+# that are their only readers -- see the note there.
 
 
 _SYNCED_SETTINGS_KEYS = (

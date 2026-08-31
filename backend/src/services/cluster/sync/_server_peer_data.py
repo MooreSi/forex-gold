@@ -14,6 +14,8 @@ do without rather than writing a half-row.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import json
 import logging
 

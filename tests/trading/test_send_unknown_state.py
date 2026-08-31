@@ -397,3 +397,87 @@ class TestTheRestorePathIsGuardedToo:
         trade_repo.restore_signal_after_failed_open("sig-u1")
 
         assert _status() == "unknown"
+
+
+class TestTheOTHERResetPathIsGuardedToo:
+    """Found on 2026-08-31 by driving the 020 killer demo end-to-end.
+
+    There are TWO functions that put a signal back in the queue, and 020 only
+    guarded one of them. `restore_signal_after_failed_open` is guarded (above);
+    `reset_signal_to_pending` was not, and it is the one the Telegram
+    auto-execute path calls -- on EVERY exception, including the
+    `SendOutcomeUnknown` that `_route_failed_open` had just parked the signal
+    for one frame below.
+
+    So on the main signal path the park was written and then immediately
+    overwritten, leaving the signal 'pending' -- the exact state PendingWatcher
+    re-activates every 20 seconds. Every unit test passed, because none of them
+    ran the caller.
+    """
+
+    def test_it_resets_an_activating_signal(self, fresh_db):
+        _insert_signal(status="activating")
+
+        trade_repo.reset_signal_to_pending("sig-u1")
+
+        assert _status() == "pending"
+
+    def test_it_resets_an_active_signal(self, fresh_db):
+        """The stood-down path resets a signal that is merely 'active'."""
+        _insert_signal(status="active")
+
+        trade_repo.reset_signal_to_pending("sig-u1")
+
+        assert _status() == "pending"
+
+    def test_it_does_NOT_resurrect_an_unknown_signal(self, fresh_db):
+        """The bug. A signal parked because nobody knows whether it filled must
+        not be handed back to the scheduler by the generic error handler that
+        runs on the way out."""
+        _insert_signal(status="unknown")
+
+        trade_repo.reset_signal_to_pending("sig-u1")
+
+        assert _status() == "unknown"
+
+
+class TestParkingWorksFromBothInFlightStates:
+    """Also found by the 020 killer demo, 2026-08-31.
+
+    `park_signal_unknown` was guarded on status='activating' only. That is the
+    status `open_trade_from_signal` leaves a signal in while it opens -- but
+    the fresh-Telegram-signal path does NOT go through `open_trade_from_signal`
+    at all (it calls `core_open_trade.open_trade` directly), and on that path
+    the signal is 'active' when the send fails.
+
+    So on the primary signal path the park was a silent no-op: the UPDATE
+    matched no row, and the signal stayed re-claimable, since the activation
+    claim accepts `status IN ('pending','active')`.
+
+    Both in-flight states must park. Nothing else may.
+    """
+
+    def test_it_parks_an_activating_signal(self, fresh_db):
+        _insert_signal(status="activating")
+
+        trade_repo.park_signal_unknown("sig-u1", "no answer")
+
+        assert _status() == "unknown"
+
+    def test_it_parks_an_ACTIVE_signal(self, fresh_db):
+        """The gap. This is the state the Telegram path is actually in."""
+        _insert_signal(status="active")
+
+        trade_repo.park_signal_unknown("sig-u1", "no answer")
+
+        assert _status() == "unknown"
+
+    @pytest.mark.parametrize("status", ["closed", "cancelled", "pending", "failed"])
+    def test_it_does_not_park_anything_else(self, fresh_db, status):
+        """The guard still has a job: a late error must not reach back and
+        park a signal that is already finished, or one that never started."""
+        _insert_signal(status=status)
+
+        trade_repo.park_signal_unknown("sig-u1", "no answer")
+
+        assert _status() == status

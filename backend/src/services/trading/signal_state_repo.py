@@ -112,10 +112,24 @@ def restore_signal_after_failed_open(signal_id: str) -> None:
 
 
 def reset_signal_to_pending(signal_id: str) -> None:
+    """Hand a signal back to the scheduler after a failed attempt.
+
+    Excludes 'unknown' (stage3/020, guard added 2026-08-31). This is the
+    SECOND door back into the queue -- `restore_signal_after_failed_open` is
+    the other -- and it is the one `scan_auto_execute` calls on its way out of
+    EVERY exception, including the SendOutcomeUnknown that `_route_failed_open`
+    has just parked the signal for one frame below. Without this clause the
+    park was written and then immediately overwritten, leaving the signal
+    'pending' on the main Telegram path: exactly the state PendingWatcher
+    re-activates every 20 seconds, for an order that may already be live.
+
+    Found by driving 020's killer demo end to end; every unit test passed
+    because none of them ran the caller.
+    """
     with db() as conn:
         conn.execute(
             "UPDATE vantage_signals SET status='pending', activated_at=NULL"
-            " WHERE signal_id=?",
+            " WHERE signal_id=? AND status != 'unknown'",
             (signal_id,),
         )
 
@@ -128,9 +142,17 @@ def park_signal_unknown(signal_id: str, reason: str) -> None:
     straight back to the scheduler, which is how a filled order becomes two.
     Only reconciliation (stage3/030) may resolve 'unknown', from broker truth.
 
-    Guarded on status='activating' for the same reason every other transition
-    here is -- only the in-flight claim may be parked, or a closed or
-    cancelled signal could be resurrected by a late error.
+    Guarded to the two IN-FLIGHT statuses for the same reason every other
+    transition here is -- a closed or cancelled signal must not be resurrected
+    by a late error, and a signal that never started must not be parked.
+
+    Both of them, since 2026-08-31. It was 'activating' alone, which is what
+    `open_trade_from_signal` leaves a signal in. But the fresh-Telegram-signal
+    path does not go through `open_trade_from_signal` at all -- it calls
+    `core_open_trade.open_trade` directly -- and there the signal is 'active'
+    when the send fails. So on the PRIMARY signal path this UPDATE matched no
+    row and the park was a silent no-op, leaving the signal re-claimable
+    (`claim_signal_activation` accepts `status IN ('pending','active')`).
 
     The reason is appended to notes rather than overwriting them: the
     reconciler needs to know what happened, and whatever was already recorded
@@ -142,7 +164,7 @@ def park_signal_unknown(signal_id: str, reason: str) -> None:
             "SET status='unknown', "
             "    notes = CASE WHEN notes IS NULL OR notes='' THEN ? "
             "                 ELSE notes || ' | ' || ? END "
-            "WHERE signal_id=? AND status='activating'",
+            "WHERE signal_id=? AND status IN ('activating','active')",
             (f"send outcome unknown: {reason}",
              f"send outcome unknown: {reason}", signal_id),
         )

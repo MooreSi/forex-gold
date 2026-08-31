@@ -41,6 +41,7 @@ from backend.src.services.trading import trade_repo
 from backend.src.services.signals import repo as signals_repo
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading.open_trade import open_trade as _real_open_trade
+from backend.src.services.trading.send_dedup import send_outcome_is_unknown
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.schedule import check_trading_schedule
@@ -583,7 +584,27 @@ async def execute_auto_signal(
                                     log.warning("[CB] TG trade blocked for %s: %s", source_label, e_str)
                                 else:
                                     log.error("[%s] Auto-exec failed: %s", source_label, e)
-                                trade_repo.reset_signal_to_pending(signal_id)
+                                # stage3/020, wired here 2026-08-31. This path
+                                # opens via core_open_trade.open_trade directly
+                                # and so never reaches open_from_signal's
+                                # _route_failed_open, where 020's routing lives.
+                                # Every failure -- including a send that got no
+                                # answer at all -- was reset to 'pending', which
+                                # is precisely the state PendingWatcher
+                                # re-activates every 20s, for an order that may
+                                # already be on the book. Found by driving 020's
+                                # killer demo end to end; the unit tests all
+                                # passed because none of them ran this caller.
+                                if send_outcome_is_unknown(e):
+                                    log.error(
+                                        "[%s] send outcome UNKNOWN (%s) — parking "
+                                        "signal %s, NOT retrying. The order may "
+                                        "already be live; reconciliation resolves it.",
+                                        source_label, e_str, signal_id,
+                                    )
+                                    trade_repo.park_signal_unknown(signal_id, e_str)
+                                else:
+                                    trade_repo.reset_signal_to_pending(signal_id)
                                 skip_reason = e_str if is_cb else f"Auto-execution failed: {e_str}"
 
     return {"executed": executed, "exec_lot": exec_lot, "exec_price": exec_price,

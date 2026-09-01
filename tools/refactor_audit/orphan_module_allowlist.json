@@ -38,6 +38,29 @@
       "loc": 51,
       "class": "unwired-needs-owner-decision",
       "reason": "Password protection for the TEST module (PBKDF2 + hardware-fingerprint salt). Zero references -- appears disconnected. Owner: intentionally removed, or a dropped wire?"
+    },
+    {
+      "module": "backend.src.services.cluster.remote.ca",
+      "file": "backend/src/services/cluster/remote/ca.py",
+      "loc": 250,
+      "class": "staged-rollout",
+      "reason": [
+        "The private CA for the licence/admin channel (docs/todo/bugs/014),",
+        "landed 2026-09-01 as stage one of three. Nothing in the app imports it",
+        "YET, and that is deliberate: enforcing verification before the admin",
+        "server has a CA-signed certificate would lock every client -- including",
+        "the owner's own admin console -- out of the machine they would need to",
+        "fix it from.",
+        "",
+        "Stage one (this entry): the CA, the issuing tool, and the tests, none of",
+        "it wired. Stage two: the client verifies against the bundled CA on the",
+        "internet path and TOFU-pins on the LAN path. Stage three: the server",
+        "serves the CA-signed certificate, after the owner has generated the",
+        "authority and deployed a certificate to the VPS.",
+        "",
+        "DELETE THIS ENTRY when stage two wires it. Used today by",
+        "tools/make_remote_ca.py and tests/remote/test_remote_ca.py."
+      ]
     }
   ]
 }

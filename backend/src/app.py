@@ -265,7 +265,17 @@ async def startup() -> None:
     # dedicated worker thread (to_db_thread) can still schedule a sync
     # coroutine back onto it — see set_main_event_loop's docstring.
     import asyncio as _asyncio
-    db_module.set_main_event_loop(_asyncio.get_running_loop())
+    _loop = _asyncio.get_running_loop()
+    db_module.set_main_event_loop(_loop)
+
+    # Hold a strong reference to every fire-and-forget task until it finishes.
+    # asyncio.create_task is called 183 times here with the result discarded --
+    # alerts, profit syncs, admin pushes -- and the event loop keeps only WEAK
+    # references, so any of them can be collected mid-execution. Nothing raises
+    # when that happens; the alert just never arrives. One factory covers every
+    # call site, including ones written later.
+    from backend.src.utils import background_tasks as _background_tasks
+    _background_tasks.install(_loop)
 
     # Ensure bridge_credentials.json matches the active env so the bridge
     # connects to the right MT5 account on (re)start.

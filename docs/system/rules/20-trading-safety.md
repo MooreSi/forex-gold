@@ -158,3 +158,36 @@ database every 12 monitor cycles. Two things about it are deliberate:
 A position carrying no order id in its comment is `BROKER_ONLY_MANUAL`: it
 counts toward exposure, and the app must never touch it — no stop moved, no
 close.
+
+
+## Fire-and-forget tasks are held until they finish
+
+`asyncio.create_task(...)` is used 183 times here with the result discarded —
+Telegram alerts, profit syncs, admin pushes. The event loop keeps only **weak**
+references to tasks, so CPython's documentation warns that one which is not
+referenced elsewhere "may get garbage collected at any time, even before it's
+done".
+
+Nothing raises when that happens. The close alert simply never arrives, or the
+P&L never syncs, and there is no trace of either.
+
+`backend/src/utils/background_tasks.install()` is called from `app.startup()`,
+before the engine is built, and holds a strong reference to every task on the
+loop from creation until completion. That covers all 183 call sites and every
+one written afterwards, through `loop.set_task_factory` — a documented API
+rather than a per-call-site convention people have to remember.
+
+It changes nothing else. Results, exceptions, names, contexts, cancellation and
+`gather` behave exactly as before, each asserted in
+`tests/utils/test_background_tasks.py`, because this sits underneath every
+await in the application.
+
+Two things worth knowing if you touch it:
+
+- The reference is released on completion. A keep-alive that never lets go is
+  a leak with a nicer name, and that is tested for success, exception and
+  cancellation.
+- `loop.create_task` applies `name=` **after** the factory returns, so a
+  factory that dropped its kwargs would still name tasks correctly and lose
+  `context` silently. That is why the passthrough is pinned by a contextvars
+  test rather than a name one.

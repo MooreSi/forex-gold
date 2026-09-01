@@ -134,49 +134,56 @@ class TestFieldExtraction:
         assert fp._run("anything") == ""
 
 
-class TestTheWildcardIsNotWired:
-    """`TEST_WILDCARD` and `is_test_wildcard()` exist, and the module docstring
-    says the wildcard "bypasses all hardware checks".
+class TestThereIsNoMasterFingerprint:
+    """`TEST_WILDCARD` and `is_test_wildcard()` were removed on 2026-09-01, on
+    the owner's instruction: *"there should be no master key, the keygen is kept
+    in a separate folder purposely"*.
 
-    **Nothing in this repository consults either of them.** Checked across the
-    whole tree on 2026-08-31: the only occurrences are the definition and the
-    docstring. So there is no bypass in this codebase -- but there is a
-    ready-made hook for one, described in a docstring as supported, which is a
-    trap for whoever reads it next and decides to "restore" the behaviour.
+    Nothing had ever consulted them, so no bypass existed — but the module
+    docstring described the wildcard as bypassing all hardware checks, which is
+    an invitation to restore behaviour that was never there. See
+    docs/simon-handover/014.
 
-    This test makes wiring it up a deliberate act that has to go red first.
-    Raised for the owner as docs/simon-handover/014.
+    This test replaces the earlier "not wired" one. It is stronger: rather than
+    checking nothing *uses* the hook, it checks the hook does not exist, and
+    that no equivalent has been added under another name.
     """
 
-    def test_nothing_in_the_app_consults_the_wildcard(self):
-        import pathlib
+    def test_the_wildcard_constant_is_gone(self):
+        assert not hasattr(fp, "TEST_WILDCARD")
 
-        repo = pathlib.Path(__file__).resolve().parents[2]
-        hits = []
+    def test_the_predicate_is_gone(self):
+        assert not hasattr(fp, "is_test_wildcard")
+
+    def test_nothing_in_the_app_defines_a_replacement(self):
+        """A different name for the same idea is the same problem. Anything
+        that looks like a fixed, shared machine id would work on every
+        install."""
+        import pathlib as _pl
+
+        repo = _pl.Path(__file__).resolve().parents[2]
+        offenders = []
         for root in ("backend", "frontend", "tools", "run.py"):
             base = repo / root
             paths = [base] if base.is_file() else [
-                p for p in base.rglob("*.py") if "__pycache__" not in p.parts
+                q for q in base.rglob("*.py") if "__pycache__" not in q.parts
             ]
-            for p in paths:
-                text = p.read_text(encoding="utf-8", errors="replace")
-                if "TEST_WILDCARD" in text or "is_test_wildcard" in text:
-                    rel = str(p.relative_to(repo)).replace("\\", "/")
-                    if rel != "backend/src/config/licence/fingerprint.py":
-                        hits.append(rel)
+            for q in paths:
+                text = q.read_text(encoding="utf-8", errors="replace")
+                for marker in ("TEST_WILDCARD", "is_test_wildcard",
+                               "MASTER_FINGERPRINT", "WILDCARD_MACHINE"):
+                    if marker in text and "fingerprint.py" not in str(q):
+                        offenders.append(f"{q.relative_to(repo)}: {marker}")
 
-        assert hits == [], (
-            f"the test wildcard is now consulted by: {hits}. A licence bound "
-            f"to TEST_WILDCARD would work on every machine. If this is "
-            f"deliberate, it needs the owner's sign-off -- it is a licence "
-            f"bypass, which this project forbids adding."
+        assert offenders == [], (
+            f"a master-fingerprint hook has reappeared: {offenders}. A licence "
+            f"bound to a fixed id would work on every machine, which this "
+            f"project forbids."
         )
 
-    def test_a_real_fingerprint_is_never_the_wildcard(self, stable):
-        assert fp.is_test_wildcard(fp.get_fingerprint()) is False
+    def test_a_real_fingerprint_is_still_machine_specific(self, stable):
+        """The positive side of the same property."""
+        first = fp.get_fingerprint()
+        stable["value"] = "SOMEONE-ELSES-MACHINE|X|Y|Z"
 
-    def test_the_predicate_still_works_as_written(self):
-        """Not an endorsement -- just so that if it IS wired up one day, its
-        behaviour is known rather than assumed."""
-        assert fp.is_test_wildcard(fp.TEST_WILDCARD) is True
-        assert fp.is_test_wildcard("FOREX-AAAAAAAA-BBBBBBBB-CCCCCCCC-DDDDDDDD") is False
+        assert fp.get_fingerprint() != first

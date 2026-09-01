@@ -10,26 +10,20 @@ On macOS, MAC address and boot-volume UUID are excluded: both can change across
 OS updates without any hardware change.  On Windows, hostname and NIC MAC are
 excluded for the same reason; we use BIOS/UEFI UUIDs which survive OS reinstalls.
 
-`TEST_WILDCARD` and `is_test_wildcard()` are defined below and **nothing in
-this application consults either of them** (checked across the whole tree,
-2026-08-31). The docstring here used to say the wildcard "bypasses all hardware
-checks", which described a capability this codebase does not have and reads as
-an invitation to add one. A licence bound to the wildcard would work on every
-machine, so wiring it up is a licence bypass and needs the owner's sign-off.
-
-They are kept rather than deleted because KeyGen may mirror the constant; the
-question is recorded in docs/simon-handover/014. `tests/licence/
-test_fingerprint.py::TestTheWildcardIsNotWired` fails if anything starts
-consulting them.
+There is no wildcard or master fingerprint, by design. A constant named
+TEST_WILDCARD and an is_test_wildcard() predicate lived here until
+2026-09-01, documented as bypassing all hardware checks. Nothing consulted
+either of them, so no bypass ever existed -- but a ready-made hook for one,
+described as supported, is an invitation to restore behaviour that was
+never here. Removed on the owner's instruction: "there should be no master
+key". KeyGen is kept in a separate folder on purpose and does not need a
+counterpart in the app. See docs/simon-handover/014.
 """
 import hashlib
 import platform
 import re
 import subprocess
 import sys
-
-TEST_WILDCARD = "TEST_WILDCARD_000000000000000000000000"
-
 
 # ── macOS data collectors ─────────────────────────────────────────────────────
 
@@ -199,6 +193,3 @@ def get_sha256() -> str:
         import uuid
         return hashlib.sha256(str(uuid.getnode()).encode()).hexdigest().upper()
 
-
-def is_test_wildcard(fingerprint: str) -> bool:
-    return fingerprint == TEST_WILDCARD

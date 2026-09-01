@@ -28,7 +28,7 @@ _SESSION_LABELS = (
 )
 
 
-def _broker_ts_to_uk_date(ts) -> Optional[date]:
+def _broker_ts_to_local_date(ts) -> Optional[date]:
     """UK local calendar date for a broker timestamp (UTC+3 stored as-if-UTC).
 
     A thin delegate: the conversion itself lives in the formatting service and
@@ -38,13 +38,13 @@ def _broker_ts_to_uk_date(ts) -> Optional[date]:
     _broker_ts_to_utc_hour below -- the two must never be derived from two
     different readings of the same clock.
     """
-    return history_ctl.broker_ts_to_uk_date(ts)
+    return history_ctl.broker_ts_to_local_date(ts)
 
 
 def _broker_ts_to_utc_hour(ts) -> Optional[int]:
     """UTC hour-of-day for a broker timestamp, for session attribution.
 
-    Uses the same _BROKER_OFFSET unwind as _broker_ts_to_uk_date so a trade's
+    Uses the same _BROKER_OFFSET unwind as _broker_ts_to_local_date so a trade's
     calendar day and its session can never be derived from two different
     readings of the same clock. UTC because that is what _session_for_hour
     expects -- the session boundaries are defined in UTC and the heatmap on

@@ -90,7 +90,7 @@ def test_parse_reason_is_case_insensitive():
 # ── broker timestamp handling ─────────────────────────────────────────────────
 # The subtle one. MT5 stores UTC+3 wall-clock as if it were a Unix epoch, so
 # format_broker_ts reads it as UTC on purpose (that yields broker time), while
-# broker_ts_to_uk_date must remove the offset first or the monthly calendar
+# broker_ts_to_local_date must remove the offset first or the monthly calendar
 # files trades under the wrong day.
 
 def test_format_broker_ts_reads_as_utc_to_give_broker_time():
@@ -98,14 +98,20 @@ def test_format_broker_ts_reads_as_utc_to_give_broker_time():
     assert history.format_broker_ts(1784642400) == "07-21 14:00"
 
 
-def test_broker_ts_to_uk_date_removes_the_three_hour_offset():
-    """A trade stamped 01:00 broker time is still the previous UK day."""
+def test_broker_ts_to_local_date_removes_the_three_hour_offset():
+    """A trade stamped 01:00 broker time is still the previous local day.
+
+    The offset is passed rather than resolved: +60 is British Summer Time,
+    which is what the hardcoded Europe/London gave here before the day moved
+    onto the trading clock, so this stays the same assertion it always was --
+    and stops depending on where the machine running it happens to be.
+    """
     # 2026-07-22 01:00 "broker" -> 2026-07-21 22:00 real UTC -> 23:00 UK (BST).
     from datetime import date
-    assert history.broker_ts_to_uk_date(1784682000) == date(2026, 7, 21)
+    assert history.broker_ts_to_local_date(1784682000, 60) == date(2026, 7, 21)
 
 
 def test_broker_ts_helpers_return_placeholders_on_junk():
     assert history.format_broker_ts(None) == "—"
-    assert history.broker_ts_to_uk_date("not-a-timestamp") is None
+    assert history.broker_ts_to_local_date("not-a-timestamp") is None
     assert history.to_date("not-a-timestamp") is None

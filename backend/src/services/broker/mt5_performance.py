@@ -11,13 +11,42 @@ MT5BridgeClient's real shape) instead of reading self._bridge.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from backend.src.db import database as db_module
+from backend.src.utils.trading_clock import local_from, local_timestamp
 
 log = logging.getLogger(__name__)
+
+BROKER_OFFSET = 10800  # the broker stores UTC+3 timestamps as-if-UTC
+
+# "No offset given, resolve it" as distinct from an explicit None, which means
+# "this machine's own clock" and is a real answer rather than a missing one.
+_UNSET = object()
+
+
+def broker_day_cutoff(offset_minutes=_UNSET, now: datetime = None) -> float:
+    """Local midnight, expressed in the broker-timestamp space deals carry.
+
+    "Today's P&L" has to begin at the user's midnight. It was Europe/London's
+    until 2026-09-01, which is right for the owner and wrong for anyone else:
+    in Sydney "today" began at 09:00 or 10:00 local and swept in most of the
+    previous afternoon.
+
+    Deals carry broker time (real UTC + 3h), so the answer is converted back
+    into that space rather than the caller converting each deal out of it.
+
+    Both parameters are for tests; the real call site passes neither.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if offset_minutes is _UNSET:
+        from backend.src.services.risk import clock as _clock
+        offset_minutes = _clock.offset_minutes()
+    local = local_from(now, offset_minutes)
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_timestamp(midnight, offset_minutes) + BROKER_OFFSET
 
 
 def _platform_fee_rate() -> float:
@@ -70,13 +99,8 @@ async def compute_mt5_performance(bridge: Any, days: int = 90) -> dict:
             if pid:  # excludes None and 0 (balance/deposit ops)
                 by_pos.setdefault(int(pid), []).append(d)
 
-        # UK-midnight cutoff in broker_ts space.
-        # Broker timestamps are UTC+3-stored-as-UTC, so broker_ts = real_utc + 10800.
-        # To get "today since UK midnight": find UK midnight in real UTC, then +10800.
-        _uk_midnight = datetime.now(ZoneInfo("Europe/London")).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        _broker_day_cutoff = _uk_midnight.timestamp() + 10800
+        # "Today" starts at the user's own midnight -- see broker_day_cutoff.
+        _broker_day_cutoff = broker_day_cutoff()
 
         # Collect (close_time, pnl) so we can sort chronologically before drawdown calc
         _trade_rows: list[tuple[float, float]] = []

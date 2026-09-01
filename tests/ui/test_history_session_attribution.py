@@ -18,7 +18,7 @@ from backend.src.db import database as db
 from frontend.pages.history import (
     _BROKER_OFFSET,
     _SESSION_LABELS,
-    _broker_ts_to_uk_date,
+    _broker_ts_to_local_date,
     _broker_ts_to_utc_hour,
 )
 
@@ -58,10 +58,18 @@ def test_hours_map_to_the_sessions_the_rest_of_the_app_uses(utc_hour, expected):
 
 def test_session_and_calendar_day_are_read_from_the_same_clock():
     """A trade must not be able to land on one day in the grid and a session
-    belonging to a different day's clock."""
+    belonging to a different day's clock.
+
+    "The same clock" is the broker-offset unwind, not the same timezone: the
+    session is a UTC hour (London and New York open when they open, wherever
+    the user is), while the day is the user's own calendar day. Both start by
+    removing the same 3 hours from the same stamp, and that is what this
+    checks. The two have never shared a timezone -- the day was Europe/London
+    against a UTC hour before it followed the trading clock.
+    """
     for utc_hour in (0, 5, 12, 21, 23):
         ts = _broker_ts(datetime(2026, 8, 18, utc_hour, 30))
-        assert _broker_ts_to_uk_date(ts) is not None
+        assert _broker_ts_to_local_date(ts) is not None
         assert _broker_ts_to_utc_hour(ts) == utc_hour
 
 

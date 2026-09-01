@@ -22,12 +22,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from backend.src.services.risk import clock as _clock
 from backend.src.services.positions import core_app_update as _update
 from backend.src.services.positions import core_autostart as _autostart
 from backend.src.utils import os_utils as _os
 from backend.src.utils import version_history as _vh
 
 __all__ = [
+    "local_now", "local_today",
     "repo_root",
     "restart_app",
     "open_restart_log",
@@ -166,3 +168,19 @@ def autostart_enable(*args, **kwargs):
 
 def autostart_disable(*args, **kwargs):
     return _autostart.disable(*args, **kwargs)
+
+
+# The app's own clock. Here rather than on history_controller because "what
+# day is it" is not a history question -- the calendar was simply the first
+# surface to need it, and history_controller has 10 lines of headroom against
+# a ceiling enforced with no baseline.
+
+def local_now():
+    """Now, on the trading clock."""
+    return _clock.now()
+
+
+def local_today():
+    """Today, on the trading clock. Not the machine's date when an offset is
+    configured, which is the whole point on a VPS."""
+    return _clock.now().date()

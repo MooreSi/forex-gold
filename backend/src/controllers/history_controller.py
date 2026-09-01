@@ -30,7 +30,7 @@ from backend.src.utils.models import CONTRACT_SIZE  # noqa: F401
 
 __all__ = [
     "parse_reason", "format_broker_ts", "format_duration", "to_date",
-    "broker_ts_to_uk_date", "strategy_display_label", "trade_source_label",
+    "broker_ts_to_local_date", "strategy_display_label", "trade_source_label",
     "trade_channel_label",
     "ticket_source_map", "ticket_strategy_map", "ticket_max_tp_map",
     "ticket_rr_map", "ticket_order_type_map", "ticket_group_map",
@@ -75,8 +75,10 @@ def to_date(ts) -> Optional[date]:
     return _fmt.to_date(ts)
 
 
-def broker_ts_to_uk_date(ts) -> Optional[date]:
-    return _fmt.broker_ts_to_uk_date(ts)
+def broker_ts_to_local_date(ts, offset_minutes=None) -> Optional[date]:
+    if offset_minutes is None:
+        return _fmt.broker_ts_to_local_date(ts)
+    return _fmt.broker_ts_to_local_date(ts, offset_minutes)
 
 
 # -- Per-ticket lookup maps --------------------------------------------------

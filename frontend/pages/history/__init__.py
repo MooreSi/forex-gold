@@ -14,7 +14,7 @@ from ._equity_curve import _render_equity_curve
 from ._heatmap import _render_heatmap
 from ._shared import (
     _BROKER_OFFSET, _SESSION_LABELS,
-    _broker_ts_to_uk_date, _broker_ts_to_utc_hour,
+    _broker_ts_to_local_date, _broker_ts_to_utc_hour,
     _entry_deal_comments, _get_market_type_map,
 )
 from ._trade_table import _render_trade_table
@@ -29,7 +29,7 @@ _log = logging.getLogger(__name__)
 __all__ = [
     "render",
     "_BROKER_OFFSET", "_SESSION_LABELS",
-    "_broker_ts_to_uk_date", "_broker_ts_to_utc_hour",
+    "_broker_ts_to_local_date", "_broker_ts_to_utc_hour",
     "_entry_deal_comments", "_get_market_type_map",
 ]
 

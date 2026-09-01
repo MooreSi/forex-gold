@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 from nicegui import ui
 
 from backend.src.controllers import history_controller as history_ctl
+from backend.src.controllers import system_controller as sys_ctl
 from frontend.components.empty_state import render_empty_state
 
 from ._shared import (
@@ -22,7 +23,11 @@ _log = logging.getLogger(__name__)
 
 
 def _render_calendar(engine):
-    _state = {"year": datetime.now(_ZoneInfo("Europe/London")).year, "month": datetime.now(_ZoneInfo("Europe/London")).month}
+    # The user's own today, not London's -- the squares below are
+    # filled by the same clock, and a calendar opening on a month the
+    # data does not agree with is worse than either alone.
+    _today = sys_ctl.local_today()
+    _state = {"year": _today.year, "month": _today.month}
 
     header_row  = ui.row().classes("w-full items-center gap-3 mb-3")
     stats_lbl   = ui.label("Loading...").classes("text-sm text-gray-400")
@@ -45,7 +50,7 @@ def _render_calendar(engine):
         _leg_comments: dict = {}
 
         try:
-            today_d   = datetime.now(_ZoneInfo("Europe/London")).date()
+            today_d   = sys_ctl.local_today()
             first     = date(year, month, 1)
             days_back = max((today_d - first).days + 35, 35)
             deals     = await engine._bridge.get_deal_history(int(days_back)) or []
@@ -67,7 +72,7 @@ def _render_calendar(engine):
                     close_ts = close_deal.get("time")
                     if not close_ts:
                         continue
-                    d_date = history_ctl.broker_ts_to_uk_date(close_ts)
+                    d_date = history_ctl.broker_ts_to_local_date(close_ts)
                     if not d_date or d_date.year != year or d_date.month != month:
                         continue
                     # Net P&L including estimated fees (apply_fee), matching the
@@ -261,7 +266,7 @@ def _render_calendar(engine):
                     )
 
             cal   = _sun_cal.monthdayscalendar(year, month)
-            today = datetime.now(_ZoneInfo("Europe/London")).date()
+            today = sys_ctl.local_today()
 
             for week in cal:
                 with ui.grid(columns=7).classes("w-full gap-1.5 mb-1.5"):

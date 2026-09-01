@@ -228,6 +228,7 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
                 pass
             return
 
+        self._apply_peer_clock_offset(msg)
         self._clients.add(ws)
         self._last_seen_ts = time.time()
         self._liveness_alerted = False
@@ -285,6 +286,9 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
     async def _dispatch(self, ws, msg: dict) -> None:
         t = msg.get("type")
         if t == MSG_PING:
+            # Carries the Mac's current UTC offset, so a link that stays up
+            # across a clock change still follows it.
+            self._apply_peer_clock_offset(msg)
             await ws.send(json.dumps(make(MSG_PONG)))
         elif t == MSG_SETTINGS_PROPOSE:
             await self._handle_settings_propose(ws, msg)

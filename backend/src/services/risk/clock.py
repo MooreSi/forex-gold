@@ -17,9 +17,11 @@ from typing import Optional
 
 from backend.src.utils.trading_clock import (
     configured_offset_minutes, local_from_timestamp, local_now, local_timestamp,
+    machine_offset_minutes,
 )
 
-__all__ = ["offset_minutes", "now", "from_timestamp", "to_timestamp"]
+__all__ = ["offset_minutes", "effective_offset_minutes", "now",
+           "from_timestamp", "to_timestamp"]
 
 
 def _rs() -> dict:
@@ -50,3 +52,15 @@ def from_timestamp(epoch: float) -> datetime:
 def to_timestamp(wall: datetime) -> float:
     """The epoch second for a naive trading-clock time."""
     return local_timestamp(wall, offset_minutes())
+
+
+def effective_offset_minutes() -> int:
+    """This node's trading-clock offset as a definite number.
+
+    `offset_minutes()` returns None for "use the machine's own clock", which is
+    the right answer locally and useless to tell someone else. This resolves it,
+    so the Mac can report what time it actually is where the user is and the
+    VPS can follow.
+    """
+    configured = offset_minutes()
+    return machine_offset_minutes() if configured is None else configured

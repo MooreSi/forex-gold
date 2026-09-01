@@ -38,6 +38,7 @@ from backend.src.services.cluster.sync.protocol import (
     CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
+from backend.src.services.risk import clock as _clock
 
 log = logging.getLogger("sync")
 
@@ -206,7 +207,13 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
                 return
 
             self._ws = ws
-            await ws.send(json.dumps(make(MSG_HELLO, token=self._token)))
+            # clock_offset_min: this machine is where the user is, so its
+            # offset is the one the VPS should keep time by. Sent on the
+            # handshake AND on every ping, so a link that stays up across
+            # a daylight-saving change still carries the new value.
+            await ws.send(json.dumps(make(
+                MSG_HELLO, token=self._token,
+                clock_offset_min=_clock.effective_offset_minutes())))
             hello_reply = json.loads(await asyncio.wait_for(ws.recv(), timeout=10.0))
             if hello_reply.get("type") == MSG_REJECT:
                 self.conn_state = CONN_REJECTED
@@ -671,7 +678,9 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
         while self.conn_state == CONN_CONNECTED:
             try:
                 if self._ws is not None:
-                    await self._ws.send(json.dumps(make(MSG_PING)))
+                    await self._ws.send(json.dumps(make(
+                        MSG_PING,
+                        clock_offset_min=_clock.effective_offset_minutes())))
             except Exception:
                 break
             await asyncio.sleep(_LIVENESS_PING_INTERVAL_S)

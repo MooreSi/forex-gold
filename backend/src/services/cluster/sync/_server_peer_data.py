@@ -44,6 +44,53 @@ class ServerPeerDataMixin:
         )
         log.info("[SyncServer] mirrored learned rule from Mac: %s", channel_name)
 
+    # ── The trading clock ────────────────────────────────────────────────
+    #
+    # The user's own local time is the machine's own clock -- on the machine
+    # where the user is. This is the VPS, and it is not. An offset can be
+    # configured for exactly that, but a fixed number does not follow daylight
+    # saving: +60 for British Summer Time stays +60 in November, an hour wrong
+    # for five months with nothing reporting it.
+    #
+    # So the Mac reports its own current offset and this adopts it. When the
+    # Mac's clocks change, its next message carries the new value.
+    #
+    # One-way on purpose. The machine where the user actually is is the
+    # authority on what time it is there, so the server adopts from the client
+    # and never the reverse. `trading_clock_offset_min` is deliberately absent
+    # from _SYNCED_SETTINGS_KEYS for the same reason -- as an ordinary synced
+    # setting the broadcast would push this value back to the Mac and the Mac
+    # would start running on its server's clock.
+
+    def _apply_peer_clock_offset(self, msg: dict) -> None:
+        """Adopt the peer's UTC offset as this node's trading clock."""
+        from backend.src.utils.trading_clock import (
+            SETTING_KEY, configured_offset_minutes,
+        )
+
+        raw = msg.get("clock_offset_min")
+        if raw is None:
+            return
+        offset = configured_offset_minutes({SETTING_KEY: raw})
+        if offset is None:
+            log.warning("[SyncServer] ignoring unusable clock offset from the "
+                        "Mac: %r", raw)
+            return
+        try:
+            current = db_module.get_risk_settings().get(SETTING_KEY)
+            if current is not None and int(current) == offset:
+                return          # runs on every ping; only write on a change
+            db_module.update_risk_settings({SETTING_KEY: offset},
+                                           _from_sync=True)
+        except Exception as e:
+            # Runs inside the connection handler and on every ping. Dropping
+            # the link over a clock detail would be worse than the wrong hour.
+            log.warning("[SyncServer] could not apply the Mac's clock offset "
+                        "(%s) — keeping this machine's own clock", e)
+            return
+        log.info("[SyncServer] trading clock now follows the Mac: UTC%+d:%02d",
+                 offset // 60, abs(offset) % 60)
+
     # ── AI-recovered signal review queue (Telegram > Reader Logic > AI tab) ──
 
     def _handle_ai_recovered_signal_sync(self, msg: dict) -> None:

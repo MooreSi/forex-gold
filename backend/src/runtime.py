@@ -64,7 +64,6 @@ from backend.src.services.reversal_engine.research_loop import (
 # Re-exported for callers that import them from here rather than from the
 # service that owns them -- see tests/refactor/test_runtime_has_no_dead_imports.py,
 # which treats an external `from backend.src.runtime import X` as a use.
-from backend.src.services.broker.mt5_performance import _apply_fee, _platform_fee_rate
 from backend.src.services.positions.max_tp import _tp_level_from_extreme
 from backend.src.services.risk import expert_params as _expert_params
 from backend.src.services.cluster.node_roles import (

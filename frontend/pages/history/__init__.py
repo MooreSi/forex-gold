@@ -8,17 +8,6 @@ from nicegui import ui
 from backend.src.controllers import settings_controller as cfg_module
 from frontend.pages import ai_trade_analysis as _ai_analysis
 
-# Imported and unused, deliberately, and only until someone unpicks it:
-# runtime.py imports _platform_fee_rate purely to re-export it, and
-# tests/refactor/test_runtime_has_no_dead_imports.py treats an external
-# `from backend.src.runtime import X` as the thing that justifies it. The
-# pre-split history.py was that importer and never called it. Dropping it
-# here makes runtime's own import dead and fails that gate, so the chain
-# is left exactly as it was -- a split is the wrong commit to unpick it in.
-# Tracked in docs/todo/refactor/frontend/restructure/phase2-view-decomposition/031-*.md
-# (no trailing noqa: the scanner's regex would swallow it into the name.)
-from backend.src.runtime import _platform_fee_rate
-
 from ._calendar import _render_calendar
 from ._channels import _render_channels
 from ._equity_curve import _render_equity_curve

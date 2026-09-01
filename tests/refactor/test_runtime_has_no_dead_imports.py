@@ -191,5 +191,11 @@ def test_the_reexport_scan_finds_the_known_reexports():
     referenced them, and a test that imported them from runtime broke."""
     reexported = _reexported_names()
     assert "TradingRuntime" in reexported
-    for name in ("_apply_fee", "_platform_fee_rate", "_tp_level_from_extreme"):
+    # Names chosen because they are load-bearing TODAY. _apply_fee and
+    # _platform_fee_rate were here until 2026-09-01, when the History page
+    # stopped reaching through runtime for them and runtime's own import of
+    # them became genuinely dead -- so the control had to move to names that
+    # can still fail. A control listing retired names passes for the wrong
+    # reason, which is the one thing a control may not do.
+    for name in ("_tp_level_from_extreme", "SimulationEngine"):
         assert name in reexported, f"{name} is imported from runtime elsewhere"

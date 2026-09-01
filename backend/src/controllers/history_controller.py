@@ -36,6 +36,7 @@ __all__ = [
     "ticket_rr_map", "ticket_order_type_map", "ticket_group_map",
     "ticket_info",
     "get_cached_spreads", "cache_spread", "platform_fee_rate",
+    "apply_fee",
     "get_hourly_pnl_grid", "session_for_hour",
     "get_app_config", "set_app_config",
     "recompute_channel_performance", "get_channel_scorecard",
@@ -120,6 +121,15 @@ async def cache_spread(ticket, price, points, cost) -> None:
 
 async def platform_fee_rate():
     return await _fees.platform_fee_rate()
+
+
+def apply_fee(pos_deals: list, open_lots: float, comm_rate: float):
+    """Net P&L and the fee charged for one closed position's deals.
+
+    Sync, unlike platform_fee_rate above: this is arithmetic over rows the
+    caller already holds, with no database read to get off the loop for.
+    """
+    return _fees.apply_fee(pos_deals, open_lots, comm_rate)
 
 
 def get_hourly_pnl_grid(days: int):

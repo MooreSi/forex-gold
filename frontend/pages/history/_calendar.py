@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 from nicegui import ui
 
 from backend.src.controllers import history_controller as history_ctl
-from backend.src.runtime import _apply_fee
 from frontend.components.empty_state import render_empty_state
 
 from ._shared import (
@@ -71,13 +70,13 @@ def _render_calendar(engine):
                     d_date = history_ctl.broker_ts_to_uk_date(close_ts)
                     if not d_date or d_date.year != year or d_date.month != month:
                         continue
-                    # Net P&L including estimated fees (_apply_fee), matching the
+                    # Net P&L including estimated fees (apply_fee), matching the
                     # Closed Trades table and equity curve — not raw MT5 profit,
                     # which is always fee-free on a demo account and would
                     # understate real trading cost everywhere else in this file.
                     open_deal = next((d for d in pos_deals if d.get("entry") == 0), None)
                     open_lots = float(open_deal.get("volume", 0)) if open_deal else float(close_deal.get("volume", 0))
-                    pnl, _fees = _apply_fee(pos_deals, open_lots, comm_rate)
+                    pnl, _fees = history_ctl.apply_fee(pos_deals, open_lots, comm_rate)
                     trade_map[ticket] = (d_date, pnl)
                     _ch = _broker_ts_to_utc_hour(close_ts)
                     if _ch is not None:

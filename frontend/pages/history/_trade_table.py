@@ -6,7 +6,6 @@ from typing import Optional
 from nicegui import ui
 
 from backend.src.controllers import history_controller as history_ctl
-from backend.src.runtime import _apply_fee
 from backend.src.controllers.history_controller import (
     CONTRACT_SIZE,
 )
@@ -242,7 +241,7 @@ def _render_trade_table(engine):
                             open_lots  = float(close_deal.get("volume", 0))
 
                         exit_p       = float(close_deal.get("price", 0))
-                        pnl, fees_display = _apply_fee(pos_deals, open_lots, comm_rate)
+                        pnl, fees_display = history_ctl.apply_fee(pos_deals, open_lots, comm_rate)
                         close_ts = float(close_deal.get("time", 0))
                         open_ts  = float(open_deal.get("time", 0)) if open_deal else 0.0
                         reason   = history_ctl.parse_reason(close_deal.get("comment") or "", pnl)

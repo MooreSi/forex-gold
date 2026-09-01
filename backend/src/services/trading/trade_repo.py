@@ -274,11 +274,25 @@ def apply_partial_close_with_reason(trade_id: str, now: float, lots_to_close: fl
     """partial_close.py's exact block: reason is parameterised and the TP1
     breakeven move consults risk settings inside the same transaction."""
     with transaction() as conn:
-        conn.execute(
-            "INSERT INTO vantage_partial_closes (trade_id,ts,lots_closed,close_price,pnl,reason)"
+        # Idempotency guard (owner decision, docs/simon-handover/018).
+        # Everything below moves money -- realised_pnl, net_pnl and the balance
+        # are all `x = x + ?` -- and the upstream status check cannot catch a
+        # repeat, because a partial LEAVES the trade open. Migration 30's
+        # UNIQUE index covers the ladder's TP<n> markers only, so a second TP1
+        # inserts nothing and rowcount is 0; broker-sourced reasons still
+        # insert every time, by design. See that migration for why.
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO vantage_partial_closes "
+            "(trade_id,ts,lots_closed,close_price,pnl,reason)"
             " VALUES (?,?,?,?,?,?)",
             (trade_id, now, lots_to_close, close_price, partial_pnl, reason),
         )
+        if cur.rowcount == 0:
+            log.warning(
+                "apply_partial_close_with_reason %s: %s already recorded — "
+                "ignoring the repeat (no second credit)", trade_id[:8], reason,
+            )
+            return
         conn.execute(
             "UPDATE vantage_simulated_trades SET remaining_lots=?,realised_pnl=realised_pnl+?,"
             "net_pnl=net_pnl+? WHERE trade_id=?",

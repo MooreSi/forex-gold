@@ -557,6 +557,56 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         # is not exposed in the UI. This is written to survive that changing.)
         "UPDATE ea_trade_templates SET harvest_pips = 0.0 WHERE harvest_pips = 1.0",
     ]),
+    (30, "One partial close per take-profit level per trade (2026-09-01)", [
+        # Owner decision, docs/simon-handover/018: the same TP must not be
+        # taken twice on one trade. apply_partial_close_with_reason runs
+        # `balance = balance + ?` with no guard, so a repeat credited the
+        # account twice -- the same shape stage1 2/040 fixed on the FULL close.
+        # The status check upstream cannot see it, because a partial leaves the
+        # trade open by design.
+        #
+        # PARTIAL index, and that is the whole point. Broker-sourced partials
+        # ("MT5_close", "MT5_sync_TP", "MT5_SL") legitimately repeat -- a
+        # position really can be part-closed at the terminal more than once --
+        # and a blanket UNIQUE(trade_id, reason) would silently drop the second
+        # one, under-recording the money and leaving remaining_lots wrong. That
+        # would be a worse bug than the one being fixed. Only the strategy
+        # ladder's own TP<n> markers are constrained, where a repeat is always
+        # a duplicate.
+        #
+        # GLOB not LIKE: SQLite's LIKE is case-insensitive by default and would
+        # also match a hypothetical "tp1".
+        #
+        # FIRST, make room for the index. An install where the bug has already
+        # fired has duplicate rows on disk, and CREATE UNIQUE INDEX on those
+        # raises IntegrityError -- which the migration runner treats as fatal,
+        # so the app would refuse to start. Found by testing this migration
+        # against a legacy database rather than a fresh one.
+        #
+        # The duplicates are RENAMED, not deleted. Deleting would make the
+        # partial-close table disagree with an account balance that was already
+        # credited twice, quietly rewriting history to look consistent. Marking
+        # them keeps every row, keeps the audit trail, frees the index, and
+        # leaves the evidence visible -- a "TP1_dup37" row is a record that
+        # this actually happened here, which is worth knowing.
+        #
+        # The suffix is the row's own id rather than a running count: an UPDATE
+        # that rewrites the column it is grouping on sees partly-updated data,
+        # and a count-based suffix gave two rows the same label. The id is
+        # unique by construction and needs no subquery to stay that way.
+        """
+        UPDATE vantage_partial_closes
+           SET reason = reason || '_dup' || CAST(id AS TEXT)
+         WHERE (reason GLOB 'TP[0-9]' OR reason GLOB 'TP[0-9][0-9]')
+           AND EXISTS (SELECT 1 FROM vantage_partial_closes AS earlier
+                        WHERE earlier.trade_id = vantage_partial_closes.trade_id
+                          AND earlier.reason   = vantage_partial_closes.reason
+                          AND earlier.id       < vantage_partial_closes.id)
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_partial_close_one_per_tp "
+        "ON vantage_partial_closes (trade_id, reason) "
+        "WHERE reason GLOB 'TP[0-9]' OR reason GLOB 'TP[0-9][0-9]'",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

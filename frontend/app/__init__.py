@@ -567,7 +567,12 @@ def main_page():
                 cb_top_lbl.classes(replace="text-xs font-semibold leading-none text-green-400")
 
         ui.timer(5.0, _refresh_cb_badge)
-        _refresh_cb_badge()
+        # once=True rather than a bare call: _refresh_cb_badge became `async
+        # def` on 2026-09-01 (it reads the database, and a sync timer callback
+        # does that on the event loop). A bare call now builds a coroutine and
+        # drops it, so the badge would stay blank until the first 5s tick.
+        # Pinned by tests/refactor/test_unawaited_coroutines.py.
+        ui.timer(0.1, _refresh_cb_badge, once=True)
 
     def _on_tab_change(e):
         if e.value != "History":

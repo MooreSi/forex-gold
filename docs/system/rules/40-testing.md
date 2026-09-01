@@ -172,6 +172,21 @@ fixtures that had passed on macOS since the day they were written.
 A shrinking baseline in `tests/refactor/test_fixture_dedup.py` tracks the
 remaining local copies. It may go down.
 
+## Changing a function from sync to async breaks its bare call sites
+
+Every `await`ed call keeps working. Every bare call silently stops — Python
+builds a coroutine, drops it, and the work never happens. There is no
+exception; there is a `RuntimeWarning` on stderr that nobody reads in a running
+app.
+
+```bash
+python -m tools.refactor_audit.unawaited_coroutines backend frontend tools
+```
+
+Also a check in `python -m tools.checks all`. Introduced 2026-09-01 after
+making four timer callbacks async (so they would stop reading the database on
+the event loop) turned one of their one-off initial calls into a no-op.
+
 ## After moving code between modules, check it can still see what it uses
 
 A verbatim move takes the function **body**. The module-level constants and

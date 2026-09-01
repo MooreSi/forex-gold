@@ -63,6 +63,13 @@ GATES = [
         "behind, which four bugs in this repo have taken",
     ),
     Check(
+        "unawaited coroutines",
+        [PY, "-m", "tools.refactor_audit.unawaited_coroutines",
+         "backend", "frontend", "tools", "run.py"],
+        "an async function called without await -- builds a coroutine, drops "
+        "it, and the work silently never happens",
+    ),
+    Check(
         "boot smoke",
         [PY, "-c", "import backend.src.app"],
         "the composition root still imports",

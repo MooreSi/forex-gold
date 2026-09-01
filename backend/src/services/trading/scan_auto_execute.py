@@ -42,6 +42,7 @@ from backend.src.services.signals import repo as signals_repo
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading.open_trade import open_trade as _real_open_trade
 from backend.src.services.trading.send_dedup import send_outcome_is_unknown
+from backend.src.services.trading import entry_realignment as _entry_realignment
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.schedule import check_trading_schedule
@@ -236,6 +237,46 @@ async def execute_auto_signal(
                     (dir_up == "BUY" and live_px < el) or
                     (dir_up == "SELL" and live_px > eh)
                 )
+                # Entry Realignment on the market path (owner decision
+                # 2026-09-01, docs/simon-handover/009). Default is still to
+                # DISCARD -- that was decision A, and nothing changes for
+                # anyone who has not switched this on. What changes is that
+                # the setting now applies here as well as in the limit-order
+                # path, where it already lived; the same breached zone was
+                # otherwise handled two different ways depending on which
+                # route a signal took.
+                #
+                # It keeps the trade's geometry by moving the stop and every
+                # target by the breach distance, so the trade is the one the
+                # channel sent, at a worse price. realign_for_breach returns
+                # None whenever the numbers would not be safe, and None means
+                # the discard below happens exactly as before.
+                if zone_broken and bool(rs.get("lk_entry_realignment", 0)):
+                    _realigned = _entry_realignment.realign_for_breach(
+                        direction=dir_up, entry_low=el, entry_high=eh,
+                        live_px=live_px, stop_loss=float(parsed["stop_loss"]),
+                        tps={n: parsed.get(f"tp{n}") for n in range(1, 9)},
+                    )
+                    if _realigned is not None:
+                        parsed["stop_loss"] = _realigned.stop_loss
+                        for _n in range(1, 9):
+                            parsed[f"tp{_n}"] = _realigned.tps.get(_n)
+                        live_px = _realigned.entry_px
+                        in_zone = True
+                        zone_broken = False
+                        gap_note = (
+                            f"entry realigned {_realigned.delta:+.2f} "
+                            f"(zone ${el:.2f}–${eh:.2f} breached, entered at "
+                            f"${_realigned.entry_px:.2f}; SL "
+                            f"${_realigned.stop_loss:.2f})"
+                        )
+                        log.warning(
+                            "[%s] Entry Realignment: %s zone $%.2f–$%.2f breached at "
+                            "$%.2f — entering at market with SL $%.2f, TPs %s",
+                            source_label, dir_up, el, eh, live_px,
+                            _realigned.stop_loss, _realigned.tps,
+                        )
+
                 if zone_broken:
                     skip_reason = (
                         f"Auto-execution skipped — {dir_up} zone ${el:.2f}–${eh:.2f} "

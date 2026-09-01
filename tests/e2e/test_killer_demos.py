@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from backend.src.runtime import TradingRuntime
 from backend.src.services.broker.ea_bridge import COMMENT_ID_LEN
 from backend.src.services.broker.fake_bridge import FakeMT5Bridge
@@ -616,3 +618,112 @@ def test_020_a_lost_BRIDGE_response_also_parks_the_signal(fresh_db, caplog):
         "signal back to the scheduler"
     )
     assert trades == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry Realignment on the market path (owner decision 009, 2026-09-01)
+# ─────────────────────────────────────────────────────────────────────────────
+
+BREACHED_SELL = (
+    "Sell Gold 2390 - 2392\n"
+    "Stop Loss 2397\n"
+    "TP1 2385  TP2 2380  TP3 2375"
+)
+
+
+def _breached_runtime(fresh_db, clock, realignment):
+    """A SELL signal whose zone the price has already risen above.
+
+    Price 2395 against a 2390-2392 zone with the stop at 2397: the market has
+    moved toward the stop before any entry existed, leaving 2.00 of stop
+    instead of the 5.00 the channel specified. This is the shape Simon watched
+    live on 2026-08-28.
+    """
+    engine, reader = _runtime(clock, [[0, 2395.0]], signals=[
+        {"at": 0, "channel": "Debug Channel", "text": BREACHED_SELL},
+    ])
+    fresh_db.update_risk_settings({
+        "auto_execute_signals": 1, "accept_tg_signals": 1,
+        "lk_entry_realignment": 1 if realignment else 0,
+    })
+    reader.feed_due(now=1.0)
+    return engine
+
+
+def test_009_a_breached_zone_is_DISCARDED_when_realignment_is_off(fresh_db):
+    """Decision A. The default is unchanged: nothing is opened, and no signal
+    row is left behind for anything else to pick up."""
+    engine = _breached_runtime(fresh_db, {"now": BASE}, realignment=False)
+
+    asyncio.run(engine._scan_messages())
+
+    assert asyncio.run(engine._bridge.get_positions()) == []
+    with fresh_db.db() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) c FROM vantage_simulated_trades").fetchone()["c"] == 0
+
+
+def test_009_realignment_ON_enters_and_keeps_the_trades_shape(fresh_db):
+    """The trade the channel sent, at a worse price — not a different trade."""
+    engine = _breached_runtime(fresh_db, {"now": BASE}, realignment=True)
+
+    asyncio.run(engine._scan_messages())
+
+    positions = asyncio.run(engine._bridge.get_positions())
+    assert len(positions) == 1, "realignment was on and nothing was entered"
+
+    with fresh_db.db() as conn:
+        row = conn.execute(
+            "SELECT status, entry_price, stop_loss, tp1, tp2, tp3 "
+            "FROM vantage_simulated_trades").fetchone()
+
+    assert row["status"] == "open"
+    entry = float(row["entry_price"])
+
+    # The original geometry: 5.00 of stop from the zone edge, 7.00 to TP1.
+    assert float(row["stop_loss"]) - entry == pytest.approx(2397.0 - 2392.0, abs=0.05)
+    assert entry - float(row["tp1"]) == pytest.approx(2392.0 - 2385.0, abs=0.05)
+    assert entry - float(row["tp2"]) == pytest.approx(2392.0 - 2380.0, abs=0.05)
+    assert entry - float(row["tp3"]) == pytest.approx(2392.0 - 2375.0, abs=0.05)
+
+
+def test_009_the_realigned_stop_is_further_away_than_a_flat_entry_would_give(
+        fresh_db):
+    """The whole point. Entering flat at 2395 leaves 2.00 of stop; the channel
+    asked for 5.00, and that is what the trade gets."""
+    engine = _breached_runtime(fresh_db, {"now": BASE}, realignment=True)
+
+    asyncio.run(engine._scan_messages())
+
+    with fresh_db.db() as conn:
+        row = conn.execute(
+            "SELECT entry_price, stop_loss FROM vantage_simulated_trades").fetchone()
+
+    risk = float(row["stop_loss"]) - float(row["entry_price"])
+    assert risk == pytest.approx(5.0, abs=0.05)
+    assert float(row["stop_loss"]) > 2397.0, (
+        "the stop was not moved with the price"
+    )
+
+
+def test_009_an_UNBREACHED_signal_is_untouched_by_the_setting(fresh_db):
+    """Control: realignment must only fire on a breach. A signal entered
+    inside its zone keeps the channel's own numbers exactly."""
+    clock = {"now": BASE}
+    engine, reader = _runtime(clock, [[0, 2391.0]], signals=[
+        {"at": 0, "channel": "Debug Channel", "text": BREACHED_SELL},
+    ])
+    fresh_db.update_risk_settings({
+        "auto_execute_signals": 1, "accept_tg_signals": 1,
+        "lk_entry_realignment": 1,
+    })
+    reader.feed_due(now=1.0)
+
+    asyncio.run(engine._scan_messages())
+
+    with fresh_db.db() as conn:
+        row = conn.execute(
+            "SELECT stop_loss, tp1 FROM vantage_simulated_trades").fetchone()
+
+    assert float(row["stop_loss"]) == pytest.approx(2397.0)
+    assert float(row["tp1"]) == pytest.approx(2385.0)

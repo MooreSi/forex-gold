@@ -173,3 +173,42 @@ class TestTheDemoOneBranchItDescribes:
             encoding="utf-8", errors="replace")
 
         assert '"ea:" + StringSubstr(trade_id, 0, 12)' in ea
+
+
+class TestDemoTwosCorrection:
+    """Demo 2's instruction was wrong: it told the operator to stop the bridge,
+    which produces the SAFE branch, not the one under test. The correction
+    rests on two facts about the code, and both must stay true or the
+    correction becomes the new wrong instruction.
+    """
+
+    def test_a_refused_connection_is_still_the_safe_branch(self):
+        """If ConnectError ever left _NEVER_SENT, stopping the bridge WOULD
+        produce unknown and the struck-through instruction becomes right
+        again."""
+        from backend.src.services.broker.mt5_client import _NEVER_SENT
+        import httpx
+
+        assert httpx.ConnectError in _NEVER_SENT
+
+    def test_a_mid_request_break_is_still_not_in_the_safe_list(self):
+        """The other half. ReadError joining _NEVER_SENT would silently turn
+        every lost answer into a retry."""
+        from backend.src.services.broker.mt5_client import _NEVER_SENT
+        import httpx
+
+        assert httpx.ReadError not in _NEVER_SENT
+        assert httpx.ReadTimeout not in _NEVER_SENT
+
+    def test_the_runbook_says_not_to_run_it_as_written(self):
+        text = RUNBOOK.read_text(encoding="utf-8")
+        demo2 = text[text.index("## Demo 2"):text.index("## Demo 3")]
+
+        assert "DO NOT run this as written" in demo2
+        assert "_NEVER_SENT" in demo2
+
+    def test_the_socket_test_it_points_at_exists(self):
+        """The correction cites a file as its evidence. A citation to a file
+        that has been renamed or deleted is worse than none."""
+        assert (REPO / "tests/services/broker/"
+                       "test_send_failure_against_a_real_socket.py").exists()

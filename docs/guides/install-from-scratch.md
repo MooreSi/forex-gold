@@ -161,11 +161,19 @@ Knowing this makes most problems diagnosable.
 | Your data, settings, logs | `%APPDATA%\ForexTrader\` | `~/Library/Application Support/ForexTrader/` |
 | The log | `...\data\forex_trader.log` | `.../data/forex_trader.log` |
 | Databases | `...\data\forex_trader_demo.db` and `_live.db` | same |
-| Licence + certificates | `...\remote\` | `.../remote/` |
+| Certificates, tokens, admin password | `...\remote\` | `.../remote/` |
+| **Your licence key** | `%USERPROFILE%\.forex_trader_licence` | `~/.forex_trader_licence` |
+
+**[2026-09-01] The licence is the exception, and it used to be listed
+wrongly here.** It is a hidden file in your HOME directory
+(`backend/src/config/licence/store.py`), not in the data folder with
+everything else. That matters twice: backing up "the data folder" does not
+back up your licence, and it is not where you would look when activation
+misbehaves.
 
 Your settings and trade history live in that data folder, **not** in the
 program folder. You can delete and re-copy the program folder without losing
-anything.
+anything — but the licence is in neither, so it survives both.
 
 The log is the first place to look for anything unexplained. It is plain text
 and the most recent entries are at the bottom.

@@ -22,6 +22,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.utils.sql_identifiers import set_clause_for
 
 
 # ── MT5 credentials — always stored in the demo DB (env-independent) ─────────
@@ -77,7 +78,7 @@ def save_mt5_credentials(updates: dict) -> None:
         logging.getLogger(__name__).warning("[DB] credential encrypt failed: %s", e)
     conn = _sq.connect(_master_creds_path(), check_same_thread=False)
     try:
-        sc = ", ".join(f"{k}=?" for k in updates)
+        sc = set_clause_for(updates)
         conn.execute(
             f"UPDATE mt5_credentials SET {sc} WHERE id=1", list(updates.values())
         )

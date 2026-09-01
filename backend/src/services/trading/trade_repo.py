@@ -19,6 +19,7 @@ import time as _time
 from backend.src.db import transaction
 from backend.src.db import database as db_module
 from backend.src.db.database import db, row_to_dict
+from backend.src.utils.sql_identifiers import set_clause_for
 
 log = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ def update_trade_fields(trade_id: str, fields: dict) -> None:
     """Dynamic column update used by the follow-up paths. Column names come
     from fixed literal sets at the call sites, never from user input."""
     with db() as conn:
-        set_clause = ", ".join(f"{k}=?" for k in fields)
+        set_clause = set_clause_for(fields)
         conn.execute(
             f"UPDATE vantage_simulated_trades SET {set_clause} WHERE trade_id=?",
             list(fields.values()) + [trade_id],
@@ -412,7 +413,7 @@ def update_signal_fields(signal_id: str, fields: dict) -> dict:
     """update_signal.py's block: dynamic column update + fetch of the open
     trade for the same signal, on the same connection."""
     with db() as conn:
-        set_clause = ", ".join(f"{k}=?" for k in fields)
+        set_clause = set_clause_for(fields)
         conn.execute(
             f"UPDATE vantage_signals SET {set_clause} WHERE signal_id=?",
             list(fields.values()) + [signal_id],

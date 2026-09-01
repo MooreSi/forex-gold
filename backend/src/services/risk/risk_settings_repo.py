@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 from backend.src.db import database as _database_module  # noqa: E402
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.utils.sql_identifiers import set_clause_for
 
 
 _RS_CACHE_TTL = 10.0  # seconds — risk settings change only on user edit
@@ -58,7 +59,7 @@ def update_risk_settings(updates: dict, _from_sync: bool = False) -> dict:
     global _applying_sync_settings
     if not updates:
         return get_risk_settings()
-    set_clause = ", ".join(f"{k}=?" for k in updates)
+    set_clause = set_clause_for(updates)
     with db() as conn:
         conn.execute(f"UPDATE vantage_risk_settings SET {set_clause} WHERE id=1",
                      list(updates.values()))
@@ -138,7 +139,7 @@ def get_fee_settings() -> dict:
 def update_fee_settings(updates: dict) -> dict:
     if not updates:
         return get_fee_settings()
-    set_clause = ", ".join(f"{k}=?" for k in updates)
+    set_clause = set_clause_for(updates)
     with db() as conn:
         conn.execute(f"UPDATE vantage_fee_settings SET {set_clause} WHERE id=1",
                      list(updates.values()))

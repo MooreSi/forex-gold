@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from backend.src.config import get as cfg_get
 from backend.src.db import connection as _conn_mod
 from backend.src.services.reversal_engine import _repo_schema
+from backend.src.utils.sql_identifiers import set_clause_for
 
 _NAMESPACE = "reversal_engine"
 
@@ -496,7 +497,7 @@ def upsert_daily_correlation(date: str, **kwargs) -> None:
     with get_db().transaction():
         existing = get_db().get("SELECT * FROM re_correlation WHERE date=?", date)
         if existing:
-            sets = ", ".join(f"{k}=?" for k in kwargs)
+            sets = set_clause_for(kwargs)
             get_db().run(f"UPDATE re_correlation SET {sets} WHERE date=?", *kwargs.values(), date)
         else:
             kwargs = dict(kwargs)

@@ -22,6 +22,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.utils.sql_identifiers import set_clause_for
 
 
 # ── Unrecognised messages ─────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ def update_unrecognised_message(
         updates["status"] = status
     if not updates:
         return
-    set_clause = ", ".join(f"{k}=?" for k in updates)
+    set_clause = set_clause_for(updates)
     with db() as conn:
         conn.execute(
             f"UPDATE channel_unrecognised_messages SET {set_clause} WHERE id=?",

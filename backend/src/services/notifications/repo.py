@@ -22,6 +22,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_coro  # noqa: E402
+from backend.src.utils.sql_identifiers import set_clause_for
 
 
 def get_email_config() -> dict:
@@ -31,7 +32,7 @@ def get_email_config() -> dict:
 
 def save_email_config(updates: dict) -> None:
     data = {**updates, "updated_at": time.time()}
-    set_clause = ", ".join(f"{k}=?" for k in data)
+    set_clause = set_clause_for(data)
     with db() as conn:
         conn.execute(
             f"UPDATE email_config SET {set_clause} WHERE id=1",

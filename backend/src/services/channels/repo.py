@@ -14,6 +14,7 @@ from backend.src.db.database import db, _schedule_coro
 # `transaction` is db() under its boundary-declaring name (see backend/src/db/__init__).
 from backend.src.db.database import db as transaction  # noqa: E402
 from backend.src.services.cluster.sync_repo import _ensure_sync_tables  # noqa: E402
+from backend.src.utils.sql_identifiers import set_clause_for
 # Imported inside _refresh to avoid an import-order cycle: read_repo imports
 # database, database imports this module, and this module needs read_repo's
 # helpers. Deferring to call time means no order of first-import can break
@@ -98,7 +99,7 @@ def _fold_renamed_row(table: str, col: str, old_val: str, new_val: str,
             return
         old = dict(old_row)
         if carry_cols and old.get(carry_cols[0]) is not None:
-            assign = ", ".join(f"{c}=?" for c in carry_cols)
+            assign = set_clause_for(carry_cols)
             conn.execute(f"UPDATE {table} SET {assign} WHERE {col}=?",
                          (*(old[c] for c in carry_cols), new_val))
         conn.execute(f"DELETE FROM {table} WHERE {col}=?", (old_val,))

@@ -28,6 +28,7 @@ deliberately leaves alone.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
@@ -226,8 +227,9 @@ def diff_snapshots(broker_positions: Iterable[dict],
     return ReconcileDiff(entries=entries)
 
 
-def report(diff: ReconcileDiff) -> str:
-    """A human-readable summary. Writes nothing; returns the text and logs it."""
+def _report_text(diff: ReconcileDiff) -> str:
+    """The summary text, formatted once so the WARNING and the throttled DEBUG
+    line cannot drift apart."""
     if not diff.needs_attention:
         return "Reconciliation: no differences between the broker and the database."
 
@@ -243,9 +245,89 @@ def report(diff: ReconcileDiff) -> str:
                 f"    trade={e.trade_id or '-'} signal={e.signal_id or '-'} "
                 f"ticket={e.ticket or '-'} — {e.detail}")
 
-    text = "\n".join(lines)
-    log.warning("[reconcile] %s", text)
+    return "\n".join(lines)
+
+
+def report(diff: ReconcileDiff) -> str:
+    """A human-readable summary. Writes nothing; returns the text and logs it."""
+    text = _report_text(diff)
+    if diff.needs_attention:
+        log.warning("[reconcile] %s", text)
     return text
+
+
+# ── Reporting the same thing over and over ───────────────────────────────────
+#
+# Found live on the owner's demo account, 2026-09-01. Two EA-template
+# placeholders whose legs never filled sat open for their designed 24-hour
+# expiry, and this pass logged the identical two-line WARNING about them every
+# TWELVE SECONDS -- the monitor loop fast-polls at 1s while trades are open and
+# this runs every 12 cycles. Roughly 7,200 identical warnings over one row's
+# life, into a log already 35MB.
+#
+# The cost is not disk. A warning that appears 7,200 times stops being read,
+# and the next genuinely new difference scrolls past inside it -- which is the
+# failure this pass exists to prevent.
+#
+# So: any CHANGE to the set is reported immediately and in full, an unchanged
+# set drops to DEBUG, and a standing disagreement is still repeated at WARNING
+# every _REPEAT_REMINDER_S so the throttle cannot turn into silence. A problem
+# that persists for a day is worse than one that appears once, not better.
+
+_REPEAT_REMINDER_S = 3600.0
+
+_last_signature: Optional[tuple] = None
+_last_warned_at: float = 0.0
+
+
+def _diff_signature(diff: ReconcileDiff) -> tuple:
+    """What counts as "the same disagreement".
+
+    The whole entry, not just the trade id: the same trade moving from "no
+    evidence" to "closed at the broker" is a different fact and must not be
+    swallowed as a repeat. Sorted, because the broker's position list has no
+    guaranteed order and an order-sensitive signature would never match twice
+    -- which would throttle nothing at all.
+    """
+    return tuple(sorted(
+        (e.kind, e.trade_id, e.signal_id, e.ticket, e.detail)
+        for e in diff.entries if e.kind in _ATTENTION_KINDS
+    ))
+
+
+def reset_report_throttle() -> None:
+    """Forget what was last reported. For tests, and for a deliberate re-report."""
+    global _last_signature, _last_warned_at
+    _last_signature = None
+    _last_warned_at = 0.0
+
+
+def report_periodic(diff: ReconcileDiff) -> None:
+    """report(), for the pass that runs every few seconds forever.
+
+    `report()` itself is left alone: it returns text and is the one-shot
+    surface, so throttling inside it would make a deliberate call silently do
+    nothing.
+    """
+    global _last_signature, _last_warned_at
+
+    if not diff.needs_attention:
+        reset_report_throttle()
+        return
+
+    signature = _diff_signature(diff)
+    now = time.time()
+    changed = signature != _last_signature
+    due = (now - _last_warned_at) >= _REPEAT_REMINDER_S
+
+    if changed or due:
+        report(diff)
+        _last_signature = signature
+        _last_warned_at = now
+        return
+
+    # Quiet, not absent.
+    log.debug("[reconcile] unchanged: %s", _report_text(diff))
 
 
 # ── The periodic pass ────────────────────────────────────────────────────────
@@ -307,6 +389,5 @@ async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
         return None
 
     diff = diff_snapshots(positions, deals, db_open, unknown)
-    if diff.needs_attention:
-        report(diff)
+    report_periodic(diff)
     return diff

@@ -152,12 +152,12 @@ Four splits in this repo have shipped this bug —
 
 ## Current status
 
-Measured 2026-08-31, not remembered. **Three files exceed the 800-line ceiling
+Measured 2026-09-01, not remembered. **Three files exceed the 800-line ceiling
 in the whole tree, and two of them are permanently exempt.**
 
 | File | Lines | Plan |
 |---|---|---|
-| `backend/src/runtime.py` | 1,508 | **exempt** — at its floor by design, see `30-architecture.md` |
+| `backend/src/runtime.py` | 1,507 | **exempt** — at its floor by design, see `30-architecture.md` |
 | `mt5_bridge.py` | 1,344 | **exempt** — runs under a separate interpreter |
 | `services/cluster/remote/server.py` | 1,204 | the only real one left. See below. |
 
@@ -166,15 +166,22 @@ Everything else that was ever on this list is done: `frontend/pages/trading.py`
 `test_panel.py` (1,245), `ai_trade_analysis.py` (1,250), `breakout_panel.py`
 (918), `telegram.py` (892), `chart.py` (938), `reversal_panel.py` (923) are all
 packages now, and `db/database.py` is 457. The four cluster files came down
-under the ceiling on 2026-08-29/30 (`sync/server` 1,085 → 732, `remote/client`
-894 → 732, `sync/client` 867 → 709).
+under the ceiling on 2026-08-29/30 (`sync/server` 1,085 → 721, `remote/client`
+894 → 732, `sync/client` 867 → 744).
+
+On 2026-09-01 those three came **off the LOC baseline entirely** rather than
+being lowered. A file absent from a section may never reappear in it, so they
+are now held to the same 800 ceiling as every other file — stricter than any
+number, and it means growth back toward their old sizes fails the gate instead
+of being permitted up to it. Reasons in `structure_baseline.json`
+`_tightened["2026-09-01"]`.
 
 ### The one that is left
 
 `services/cluster/remote/server.py` is 1,204 lines of token issuance, licence
 delivery and admin authority. It was listed for years as "blocked: needs tests
 first". That was true when written and is **no longer the reason to leave it
-alone**: as of 2026-08-31 it is at 58% coverage, and its connection front door
+alone**: as of 2026-09-01 it is at 64% coverage, and its connection front door
 (`_handler`, the largest block in the file) went from 145 uncovered lines to
 65 — see `tests/remote/test_connection_auth.py`.
 

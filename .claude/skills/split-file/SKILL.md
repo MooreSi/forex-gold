@@ -106,12 +106,12 @@ directories for nothing.
 
 ## Current queue
 
-**Measured 2026-08-31.** Three files in the tree exceed 800 lines, and two are
+**Measured 2026-09-01.** Three files in the tree exceed 800 lines, and two are
 permanently exempt:
 
 | File | Lines | |
 |---|---|---|
-| `backend/src/runtime.py` | 1,508 | exempt — at its design floor |
+| `backend/src/runtime.py` | 1,507 | exempt — at its design floor |
 | `mt5_bridge.py` | 1,344 | exempt — separate interpreter |
 | `backend/src/services/cluster/remote/server.py` | 1,204 | the only one left |
 
@@ -120,7 +120,7 @@ Everything the old version of this list named is done. `frontend/pages/trading.p
 `frontend/` exceeds 800 lines. `backend/src/controllers/remote/` and
 `controllers/sync/` do not exist.
 
-`cluster/remote/server.py` is **not** blocked on tests any more — it is at 58%
+`cluster/remote/server.py` is **not** blocked on tests any more — it is at 64%
 coverage and its connection front door is tested
 (`tests/remote/test_connection_auth.py`). It is blocked on the "check for
 module-level state" step above: it rebinds six sets of globals and five test

@@ -24,8 +24,8 @@
       "series. This is four recorded exceptions, not a general reset."
     ],
     "backend/src/runtime.py": {
-      "was": 1310,
       "now": 1509,
+      "was": 1310,
       "why": [
         "The merge added nine methods to TradingRuntime: six supervisor loops",
         "(_auto_template, _closed_market_queue, _ea_link_watchdog,",
@@ -42,36 +42,9 @@
         "the two numbers are one fact stated twice and must move together."
       ]
     },
-    "mt5_bridge.py": {
-      "was": 1335,
-      "now": 1344,
-      "why": [
-        "A PII fix, not growth. The MT5 connect log carried the account",
-        "number, the broker server and the balance, and the diagnostics",
-        "feature uploads ~3,000 raw log lines to the admin server -- so every",
-        "one of them carried it (Q005 #1 in",
-        "docs/simon-handover/005-fact-finding.md, confirmed from real",
-        "captured logs). Seven of the nine lines are the comment recording",
-        "that. Deleting them to satisfy a line count would be the wrong",
-        "trade. The file is exempt from splitting anyway: it runs under a",
-        "different interpreter."
-      ]
-    },
-    "backend/src/services/cluster/sync/server.py": {
-      "was": 1073,
-      "now": 1085,
-      "why": [
-        "Three execution-affecting settings joined the cross-node sync list:",
-        "internal_hedge_mode, internal_net_exposure_max_lots and",
-        "re_learn_from_ref_signals. Whichever node is the active trader reads",
-        "these before executing, so a flag set on one side that never reaches",
-        "the other is a live divergence between what the operator set and",
-        "what actually trades. Each entry carries its own comment."
-      ]
-    },
     "backend/src/services/cluster/remote/server.py": {
-      "was": 1196,
       "now": 1256,
+      "was": 1196,
       "why": [
         "THE LEAST COMFORTABLE OF THE FOUR, recorded as such deliberately.",
         "This is licence-key issuance (Ed25519 signing through a",
@@ -87,49 +60,107 @@
         "The tests are deferred, not cancelled -- docs/todo/testing/012.",
         "When they land, this entry should come back down."
       ]
+    },
+    "backend/src/services/cluster/sync/server.py": {
+      "now": 1085,
+      "was": 1073,
+      "why": [
+        "Three execution-affecting settings joined the cross-node sync list:",
+        "internal_hedge_mode, internal_net_exposure_max_lots and",
+        "re_learn_from_ref_signals. Whichever node is the active trader reads",
+        "these before executing, so a flag set on one side that never reaches",
+        "the other is a live divergence between what the operator set and",
+        "what actually trades. Each entry carries its own comment."
+      ]
+    },
+    "mt5_bridge.py": {
+      "now": 1344,
+      "was": 1335,
+      "why": [
+        "A PII fix, not growth. The MT5 connect log carried the account",
+        "number, the broker server and the balance, and the diagnostics",
+        "feature uploads ~3,000 raw log lines to the admin server -- so every",
+        "one of them carried it (Q005 #1 in",
+        "docs/simon-handover/005-fact-finding.md, confirmed from real",
+        "captured logs). Seven of the nine lines are the comment recording",
+        "that. Deleting them to satisfy a line count would be the wrong",
+        "trade. The file is exempt from splitting anyway: it runs under a",
+        "different interpreter."
+      ]
     }
   },
   "_tightened": {
-    "_when": "2026-08-27",
-    "_why": [
-      "Found while checking that the four raises above sat exactly on reality",
-      "rather than leaving slack. Three entries had drifted the OTHER way:",
-      "the files shrank and nobody lowered their number, so the ratchet was",
-      "holding a ceiling well above the code and could not have caught",
-      "regrowth up to it. Lowering is always permitted by the rule at the top",
-      "of this file, so these needed no sign-off.",
-      "",
-      "  backend/src/db/database.py            1251 -> removed (now 457)",
-      "  backend/src/services/cluster/remote/client.py  920 -> 894",
-      "  frontend/pages/test_panel.py         1246 -> 1245",
-      "",
-      "database.py is DELETED from the section rather than lowered: at 457 it",
-      "is under the 800 ceiling entirely, so it is no longer a violation, and",
-      "a file absent from a section may not reappear in it. That is stricter",
-      "than any number would be -- it can never cross 800 again without",
-      "failing the gate. It had 794 lines of headroom before this.",
-      "",
-      "The lesson is the one CLAUDE.md already states: green output is not",
-      "evidence. This gate was green on those three files because its ceiling",
-      "was too high to touch, not because the files were healthy."
-    ]
+    "2026-08-27": {
+      "_why": [
+        "Found while checking that the four raises above sat exactly on reality",
+        "rather than leaving slack. Three entries had drifted the OTHER way:",
+        "the files shrank and nobody lowered their number, so the ratchet was",
+        "holding a ceiling well above the code and could not have caught",
+        "regrowth up to it. Lowering is always permitted by the rule at the top",
+        "of this file, so these needed no sign-off.",
+        "",
+        "  backend/src/db/database.py            1251 -> removed (now 457)",
+        "  backend/src/services/cluster/remote/client.py  920 -> 894",
+        "  frontend/pages/test_panel.py         1246 -> 1245",
+        "",
+        "database.py is DELETED from the section rather than lowered: at 457 it",
+        "is under the 800 ceiling entirely, so it is no longer a violation, and",
+        "a file absent from a section may not reappear in it. That is stricter",
+        "than any number would be -- it can never cross 800 again without",
+        "failing the gate. It had 794 lines of headroom before this.",
+        "",
+        "The lesson is the one CLAUDE.md already states: green output is not",
+        "evidence. This gate was green on those three files because its ceiling",
+        "was too high to touch, not because the files were healthy."
+      ]
+    },
+    "2026-09-01": {
+      "_why": [
+        "Five loc entries removed and one lowered. Lowering and removing are",
+        "always permitted by the rule at the top of this file, so none of",
+        "this needed sign-off.",
+        "",
+        "  backend/src/services/cluster/remote/client.py   894 -> removed (732)",
+        "  backend/src/services/cluster/sync/client.py     867 -> removed (744)",
+        "  backend/src/services/cluster/sync/server.py    1085 -> removed (721)",
+        "  frontend/pages/ai_trade_analysis.py           1250 -> removed (package)",
+        "  frontend/pages/test_panel.py                  1245 -> removed (package)",
+        "  backend/src/runtime.py                        1509 -> 1507",
+        "",
+        "The three cluster files are now UNDER the 800 ceiling, so they are",
+        "no longer violations at all and are held to the same ceiling as",
+        "every other file -- stricter than any number, since a file absent",
+        "from a section may never reappear in it. Note that removes the",
+        "sync/server.py entry from _raised's scope in practice: its 2026-08-27",
+        "rise is history now, and the record above stays as the account of",
+        "what was decided at the time.",
+        "",
+        "The two frontend entries named files that no longer exist. Both",
+        "became packages, and a baseline entry for a deleted path is a number",
+        "the gate can never check.",
+        "",
+        "The transaction section also dropped from three entries to one:",
+        "reversal_engine/database.py (3) and test_signal/database.py (1) are",
+        "resolved. backend/src/db/database.py (1) remains, and is the schema",
+        "builder.",
+        "",
+        "Found while reconciling the refactor trackers against the code. The",
+        "same pass found that --update-baseline itself DELETED this whole",
+        "record -- _comment, _raised and _tightened all rebuilt from a literal",
+        "-- so running the command this file documents destroyed the reason",
+        "its numbers are what they are. Fixed in the same change, with tests."
+      ]
+    }
   },
   "baseline": {
     "loc": {
-      "backend/src/runtime.py": 1509,
-      "backend/src/services/cluster/remote/client.py": 894,
-      "backend/src/services/cluster/remote/server.py": 1256,
-      "backend/src/services/cluster/sync/client.py": 867,
-      "backend/src/services/cluster/sync/server.py": 1085,
-      "frontend/pages/ai_trade_analysis.py": 1250,
-      "frontend/pages/test_panel.py": 1245,
+      "backend/src/runtime.py": 1507,
+      "backend/src/services/cluster/remote/server.py": 1204,
       "mt5_bridge.py": 1344
     },
     "sql": {},
     "transaction": {
-      "backend/src/db/database.py": 1,
-      "backend/src/services/reversal_engine/database.py": 3,
-      "backend/src/services/test_signal/database.py": 1
+      "backend/src/db/database.py": 1
     },
     "ui_db": {}
   }

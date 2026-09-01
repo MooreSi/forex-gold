@@ -35,6 +35,19 @@ from tools.refactor_audit import orphan_detector as od
 
 BASELINE_PATH = od.REPO_ROOT / "tools" / "refactor_audit" / "structure_baseline.json"
 
+# Written only into a baseline that has no _comment of its own. The live file's
+# comment carries the EXCEPTION paragraph pointing at _raised, which is record
+# rather than boilerplate, so a regenerate preserves it like every other
+# underscore key.
+DEFAULT_COMMENT = [
+    "Shrink-only ratchet. Every number here may fall and may not rise;",
+    "a file absent from a section may not appear in it.",
+    "Regenerate with: python -m tools.refactor_audit.structure_gates",
+    "--update-baseline, and only when the totals have gone DOWN.",
+    "Notes under a leading underscore -- this one included -- are preserved",
+    "across a regenerate. See _raised and _tightened.",
+]
+
 LOC_CEILING = 800
 
 # Controllers route; they do not decide. A file that only names operations and
@@ -309,24 +322,37 @@ def check(now: dict, baseline: dict) -> list[str]:
     return failures
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="CI: exit 1 on regression")
     parser.add_argument("--update-baseline", action="store_true",
                         help="record the current state as the new ceiling")
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
+    # argv defaults to sys.argv[1:], so the CLI is unchanged; it is a
+    # parameter so the regenerate can be tested without a real baseline.
+    args = parser.parse_args(argv)
 
     now = current()
 
     if args.update_baseline:
+        # Everything the file already carries under a leading underscore is
+        # kept. Those are the human record: `_raised` holds the four LOC
+        # entries the owner signed off on 2026-08-27, and this file's own
+        # header points at it as what separates a signed-off exception from a
+        # regression. Rebuilding from a literal deleted all of it, so running
+        # the command this file documents destroyed the reason its own numbers
+        # are what they are. Found 2026-09-01, by running it.
+        preserved: dict = {}
+        if BASELINE_PATH.exists():
+            try:
+                existing = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = {}   # nothing to preserve from a mangled file
+            preserved = {k: v for k, v in existing.items()
+                         if k.startswith("_")}
         BASELINE_PATH.write_text(json.dumps({
-            "_comment": [
-                "Shrink-only ratchet. Every number here may fall and may not rise;",
-                "a file absent from a section may not appear in it.",
-                "Regenerate with: python -m tools.refactor_audit.structure_gates",
-                "--update-baseline, and only when the totals have gone DOWN."
-            ],
+            "_comment": DEFAULT_COMMENT,
+            **preserved,
             "baseline": now,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"Baseline written to {BASELINE_PATH.relative_to(od.REPO_ROOT)}")

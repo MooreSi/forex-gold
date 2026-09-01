@@ -146,9 +146,14 @@ def update_fee_settings(updates: dict) -> dict:
     return get_fee_settings()
 
 
-def get_effective_strategy(rs: dict) -> tuple[str, bool]:
+def get_effective_strategy(rs: dict, now=None) -> tuple[str, bool]:
     """
     Return (effective_strategy_key, is_ooh_active).
+
+    `now` is an injection point for tests only -- production passes nothing and
+    gets the current UTC time, exactly as before. The same shape
+    `check_trading_schedule(now=...)` uses, and the reason this function could
+    not be tested until 2026-09-01.
 
     When Out of Hours is enabled and the current UTC time/date falls inside the
     configured window, the OOH strategy is returned and is_ooh_active=True.
@@ -172,7 +177,7 @@ def get_effective_strategy(rs: dict) -> tuple[str, bool]:
     date_to_str   = rs.get("ooh_date_to",    "") or ""
 
     try:
-        now = datetime.now(_tz.utc)
+        now = now or datetime.now(_tz.utc)
 
         # Date-range filter: when active, OOH only applies on dates within the range.
         # If today is outside the range, OOH is inactive regardless of time.

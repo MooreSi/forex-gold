@@ -9,6 +9,105 @@ from backend.src.controllers.trading_controller import (
 # Sibling sections of this page.
 
 
+# ── The trading clock ────────────────────────────────────────────────────────
+#
+# Every window time on this tab is a wall-clock time, and the gate reads them
+# against the trading clock. On the machine the user is sitting at that is just
+# the machine's own clock. On a VPS it is not, and until this control existed
+# there was no way to say so.
+
+MACHINE_CLOCK = "machine"     # sentinel; the setting's own value is None
+
+
+def _fmt_offset(minutes: int) -> str:
+    """"UTC-03:30". The sign belongs to the whole offset, not to the hours --
+    formatting the parts independently turns -210 into UTC-02:30, an hour out
+    and entirely plausible-looking."""
+    sign = "-" if minutes < 0 else "+"
+    total = abs(minutes)
+    return f"UTC{sign}{total // 60:02d}:{total % 60:02d}"
+
+
+def _offset_options() -> dict:
+    """The dropdown's choices, machine clock first.
+
+    15-minute steps rather than whole hours: +05:30 (India), +05:45 (Nepal)
+    and +12:45 (Chatham Islands) are real places, and a coarser list would
+    leave everyone in them with no correct entry to pick. -12:00 to +14:00
+    covers every zone in use.
+    """
+    options = {MACHINE_CLOCK: "This machine's clock (default)"}
+    for minutes in range(-12 * 60, 14 * 60 + 1, 15):
+        options[minutes] = _fmt_offset(minutes)
+    return options
+
+
+def _selected_offset(desc: dict):
+    """Which entry the dropdown should start on.
+
+    `configured` is None for "follow the machine" and an int otherwise --
+    including 0, which is falsy. Anything using `or` here puts a UTC+0 user
+    back on the machine's clock, which on a VPS is the exact bug this control
+    exists to fix.
+    """
+    configured = desc.get("configured")
+    return MACHINE_CLOCK if configured is None else configured
+
+
+def _offset_to_save(chosen):
+    """The value to hand the controller. Same falsy-zero trap as above."""
+    return None if chosen is MACHINE_CLOCK else chosen
+
+
+def _render_trading_clock_card():
+    """The clock the windows below are read against."""
+    from backend.src.controllers import schedule_controller as sched
+
+    desc = sched.describe_trading_clock()
+
+    with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mb-3"):
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.label("Trading Clock").classes("text-base font-bold text-yellow-300")
+            ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
+                "The clock every window time below is read against, and the "
+                "one the daily balance report uses.\n\n"
+                "Leave it on this machine's clock unless the app is running "
+                "somewhere you are not -- a VPS in another country keeps that "
+                "country's time, so 09:00 in a window would mean 09:00 there.\n\n"
+                "A fixed offset does not follow daylight saving on its own. "
+                "When a Mac is connected over the sync link it reports its own "
+                "offset and this machine follows it automatically, including "
+                "the twice-yearly change."
+            )
+
+        summary = ui.label().classes("text-xs text-gray-400 mb-2")
+
+        def _refresh_summary(latest: dict) -> None:
+            when = latest["now"].strftime("%a %d %b, %H:%M")
+            source = ("following this machine's own clock"
+                      if latest["following_machine"] else "set here")
+            summary.set_text(f"Now {when} — {latest['label']}, {source}.")
+
+        _refresh_summary(desc)
+
+        def _save(event) -> None:
+            try:
+                sched.set_trading_clock_offset(_offset_to_save(event.value))
+            except ValueError as e:
+                # The dropdown cannot produce one of these (a test pins that),
+                # so this is the service telling us the list has drifted.
+                ui.notify(str(e), type="negative")
+                return
+            latest = sched.describe_trading_clock()
+            _refresh_summary(latest)
+            ui.notify(f"Trading clock set to {latest['label']}", type="positive")
+
+        ui.select(
+            _offset_options(), value=_selected_offset(desc), label="Clock",
+            on_change=_save,
+        ).props("dense outlined options-dense").classes("w-72")
+
+
 def _render_schedule():
     """Trading Schedule tab — per-day, per-window profit-target discipline
     cap on AUTOMATED order execution (manual orders are always exempt).
@@ -23,6 +122,8 @@ def _render_schedule():
     schedule = sched.get_trading_schedule()
     enabled_now = sched.is_trading_schedule_enabled()
     rs = trading_ctl.get_risk_settings()
+
+    _render_trading_clock_card()
 
     # ── Trading Markets card ─────────────────────────────────────────────────
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mb-3"):

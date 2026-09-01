@@ -51,7 +51,9 @@ SETTING_KEY = "trading_clock_offset_min"
 
 # More than a day away from UTC is a typo, not a timezone. Real zones span
 # -12:00 to +14:00; this is deliberately a little wider and still a sanity net.
-_MAX_OFFSET_MIN = 24 * 60
+# Public: the setter in services/risk/clock validates against this same
+# ceiling, and a second copy of the number would drift from this one.
+MAX_OFFSET_MIN = 24 * 60
 
 
 def machine_offset_minutes() -> int:
@@ -77,7 +79,7 @@ def configured_offset_minutes(rs: dict) -> Optional[int]:
         log.warning("[clock] %s is not a number (%r) — using this machine's "
                     "own clock", SETTING_KEY, raw)
         return None
-    if abs(offset) > _MAX_OFFSET_MIN:
+    if abs(offset) > MAX_OFFSET_MIN:
         log.warning("[clock] %s of %d minutes is not a timezone — using this "
                     "machine's own clock", SETTING_KEY, offset)
         return None

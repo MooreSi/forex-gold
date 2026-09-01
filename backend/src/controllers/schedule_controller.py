@@ -10,12 +10,14 @@ Forwards to backend.src.services.risk.schedule unchanged.
 """
 from __future__ import annotations
 
+from backend.src.services.risk import clock as _clock
 from backend.src.services.risk import schedule as _schedule
 
 __all__ = [
     "DAY_NAMES", "get_trading_schedule", "set_trading_schedule",
     "is_trading_schedule_enabled", "set_trading_schedule_enabled",
     "get_daily_profit_target", "set_daily_profit_target", "parse_hm",
+    "describe_trading_clock", "set_trading_clock_offset",
 ]
 
 DAY_NAMES = _schedule.DAY_NAMES
@@ -56,3 +58,14 @@ def parse_hm(value: str):
     do it. Same function, named so a page may legitimately call it.
     """
     return _schedule._parse_hm(value)
+
+
+def describe_trading_clock(*args, **kwargs):
+    """The clock the windows above are read against — what it is, and the
+    time it currently says."""
+    return _clock.describe(*args, **kwargs)
+
+
+def set_trading_clock_offset(*args, **kwargs):
+    """Set the trading clock, or None to follow this machine's own clock."""
+    return _clock.set_offset_minutes(*args, **kwargs)

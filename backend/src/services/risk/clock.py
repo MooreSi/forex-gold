@@ -16,12 +16,12 @@ from datetime import datetime
 from typing import Optional
 
 from backend.src.utils.trading_clock import (
-    configured_offset_minutes, local_from_timestamp, local_now, local_timestamp,
-    machine_offset_minutes,
+    MAX_OFFSET_MIN, SETTING_KEY, configured_offset_minutes,
+    local_from_timestamp, local_now, local_timestamp, machine_offset_minutes,
 )
 
-__all__ = ["offset_minutes", "effective_offset_minutes", "now",
-           "from_timestamp", "to_timestamp"]
+__all__ = ["offset_minutes", "effective_offset_minutes", "set_offset_minutes",
+           "describe", "now", "from_timestamp", "to_timestamp"]
 
 
 def _rs() -> dict:
@@ -64,3 +64,56 @@ def effective_offset_minutes() -> int:
     """
     configured = offset_minutes()
     return machine_offset_minutes() if configured is None else configured
+
+
+def set_offset_minutes(offset: Optional[int]) -> None:
+    """Set the trading clock, or pass None to follow the machine's own clock.
+
+    Validates here rather than at the reader. The readers run on the path that
+    decides whether to trade, and the only thing they can usefully do with a
+    nonsense offset is ignore it -- which means the setting silently does
+    nothing and the UI happily shows the number you typed. Refusing at the one
+    place a human types it is the only point where saying no is any use.
+    """
+    if offset is not None:
+        try:
+            whole = int(offset)
+        except (TypeError, ValueError):
+            raise ValueError(f"trading clock offset must be a whole number of "
+                             f"minutes, got {offset!r}")
+        if whole != offset:
+            raise ValueError(f"trading clock offset must be a whole number of "
+                             f"minutes, got {offset!r}")
+        if abs(whole) > MAX_OFFSET_MIN:
+            raise ValueError(f"trading clock offset {whole} is more than a day "
+                             f"from UTC -- that is a typo, not a timezone")
+        offset = whole
+
+    from backend.src.services.risk.risk_settings_repo import update_risk_settings
+    update_risk_settings({SETTING_KEY: offset})
+
+
+def _label(offset: int) -> str:
+    """"UTC+05:30". Sign belongs to the whole offset, not to the hours: -210
+    is UTC-03:30, and formatting the parts independently gets that wrong."""
+    sign = "-" if offset < 0 else "+"
+    total = abs(offset)
+    return f"UTC{sign}{total // 60:02d}:{total % 60:02d}"
+
+
+def describe() -> dict:
+    """A one-line summary of the clock in force, for the UI to show.
+
+    Reads through the same functions the schedule gate uses, so the time shown
+    on the page and the time the gate acts on cannot disagree. That is the
+    point of showing it at all.
+    """
+    configured = offset_minutes()
+    effective = machine_offset_minutes() if configured is None else configured
+    return {
+        "configured": configured,
+        "effective": effective,
+        "following_machine": configured is None,
+        "label": _label(effective),
+        "now": now(),
+    }

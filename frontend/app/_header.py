@@ -19,6 +19,7 @@ from nicegui import ui
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.app import ADMIN_AVAILABLE, admin_open_fn as _admin_open_fn, get_engine
 from backend.src.controllers import settings_controller as settings_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers.system_controller import app_version as _app_version
 
 _APP_VERSION = _app_version()
@@ -431,6 +432,13 @@ def build_header(*, power_dialog, pause_dialog, root):
             pause_raw = settings_ctl.get_app_config("trade_pause_until")
             is_paused = pause_raw and float(pause_raw or 0) > _time.time()
             pause_badge.style("" if is_paused else "display:none")
+            # The badge said only that trading was stopped. Which guard stopped
+            # it decides what the operator does about it, so the reason goes on
+            # the tooltip -- too long for the badge itself, and always there on
+            # hover rather than needing a dialog opened.
+            if is_paused:
+                _why = trading_ctl.trading_halt_reason()
+                pause_badge.tooltip(_why or "Trading is paused.")
 
             # News event badge — check live calendar; send one Telegram alert on entry
             try:

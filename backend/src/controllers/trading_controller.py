@@ -39,6 +39,7 @@ from backend.src.utils.models import (  # noqa: F401
 
 __all__ = [
     "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
+    "trading_halt_reason",
     "get_app_config", "set_app_config", "get_circuit_breaker_state",
     "get_effective_strategy", "get_custom_strategies", "delete_custom_strategy",
     "get_all_channel_strategy_settings", "get_channel_strategy_rec",
@@ -186,3 +187,9 @@ def validate_signal(*args, **kwargs):
     Returns a list of complaints; empty means valid."""
     from backend.src.services.signals.parser import validate_signal as _vs
     return _vs(*args, **kwargs)
+
+
+def trading_halt_reason() -> str:
+    """Why trading is stopped right now, or "" if it is not."""
+    from backend.src.services.risk import governor as _governor
+    return _governor.halt_reason()

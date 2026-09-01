@@ -59,6 +59,7 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 # ── end patch ──────────────────────────────────────────────────────────────────
 
 from backend.src.controllers import settings_controller as cfg_module
+from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers import settings_controller as settings_ctl
 from frontend.pages import backtest as backtest_page
 from frontend.pages import news as news_page
@@ -269,6 +270,12 @@ def main_page():
                     _pause_status_lbl.text = f"Currently PAUSED until {exp.strftime('%d %b %Y %H:%M')}"
                 except Exception:
                     _pause_status_lbl.text = "Currently PAUSED"
+                # Why, not only until when. This dialog is where the Resume
+                # button lives, so it is exactly where the operator needs to
+                # know which guard fired before deciding to override it.
+                _why = trading_ctl.trading_halt_reason()
+                if _why:
+                    _pause_status_lbl.text += f" — {_why}"
                 _pause_status_lbl.style("display:block")
                 _resume_btn.style("display:inline-flex")
             else:

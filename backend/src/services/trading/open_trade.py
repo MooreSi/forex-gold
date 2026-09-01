@@ -353,11 +353,24 @@ async def open_trade(
     # Trading pause — blocks MT5 order placement only; signals and generators continue.
     if await db_module.to_db_thread(is_trading_paused):
         _pause_until = db_module.get_app_config("trade_pause_until")
+        # The cause, not only the time. Both matter: one says what to fix, the
+        # other says whether waiting is an option. Until 2026-09-01 this said
+        # only "paused until HH:MM", so the operator could not tell a drawdown
+        # halt from a daily-loss halt without reading the database -- and they
+        # call for completely different responses.
+        _why = ""
+        try:
+            from backend.src.services.risk.governor import halt_reason as _hr
+            _why = _hr()
+        except Exception:
+            pass
         try:
             _until_str = time.strftime("%H:%M", time.localtime(float(_pause_until)))
             _pause_msg = f"Trading paused until {_until_str} — MT5 order blocked."
         except Exception:
             _pause_msg = "Trading paused — MT5 order blocked."
+        if _why:
+            _pause_msg = f"{_pause_msg[:-1]}: {_why}."
         log.warning("[Pause] %s (signal=%s)", _pause_msg, signal_id[:8])
         raise ValueError(_pause_msg)
 

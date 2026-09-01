@@ -108,3 +108,68 @@ class TestTheClaimsItMakesAboutBehaviour:
 
         assert "max_daily_loss_pct            REAL    NOT NULL DEFAULT 3.0" in schema
         assert 'rs.get("max_daily_loss_pct", 3.0)' in gov
+
+
+class TestTheDemoOneBranchItDescribes:
+    """Demo 1 now tells the operator which strategies reach the dedup guard
+    and which take the placeholder branch instead. Both halves are claims
+    about `open_trade`, and getting either wrong sends him down a path where
+    the expected log line can never appear.
+    """
+
+    def test_a_template_ack_timeout_does_not_fall_back(self):
+        """The runbook says a `template:` strategy records a placeholder and
+        never reaches the dedup guard. That rests on this re-raise: a
+        non-template timeout propagates to the outer handler and falls back,
+        a template one does not."""
+        src = (REPO / "backend/src/services/trading/open_trade.py").read_text(
+            encoding="utf-8")
+
+        assert "except asyncio.TimeoutError:\n                    if not _is_template:\n                        raise" in src
+
+    def test_the_fallback_is_what_the_dedup_guard_protects(self):
+        src = (REPO / "backend/src/services/trading/open_trade.py").read_text(
+            encoding="utf-8")
+
+        assert "falling back to Python bridge" in src
+        assert "_resolve_fallback_send" in src
+
+    def test_the_strategies_the_runbook_names_are_really_ea_portable(self):
+        """The runbook lists them by name. A list that drifts from the code
+        sends the operator to a strategy that never reaches the EA at all."""
+        from backend.src.services.broker.ea_bridge import EA_PORTABLE_STRATEGIES
+
+        text = RUNBOOK.read_text(encoding="utf-8")
+        named = [s for s in EA_PORTABLE_STRATEGIES if f"`{s}`" in text]
+
+        assert len(named) >= 10, f"only {len(named)} of the named strategies are portable"
+        for s in named:
+            assert s in EA_PORTABLE_STRATEGIES
+
+    def test_the_non_template_ack_timeout_is_still_five_seconds(self):
+        """The runbook tells him to wait 5s. If this default moves he waits
+        the wrong amount and calls a slow ack a failure."""
+        src = (REPO / "backend/src/services/trading/open_trade.py").read_text(
+            encoding="utf-8")
+
+        assert "_ack_timeout = 5.0" in src
+
+    def test_the_ea_places_before_it_acks(self):
+        """The whole demo depends on this order. If the EA ever acked first,
+        removing it mid-flight would leave nothing at the broker to adopt and
+        demo 1 would be untestable by this method."""
+        src = (REPO / "mql5/ForexTraderBridge.mq5").read_text(
+            encoding="utf-8", errors="replace")
+        place = src.index("ok = trade.Buy(lots, _Symbol")
+        ack = src.index('SendJson("{\\"type\\":\\"trade_opened\\"', place)
+
+        assert place < ack
+
+    def test_the_order_carries_the_trade_id_the_guard_searches_for(self):
+        """`_resolve_fallback_send` finds the existing order by the comment
+        the EA stamps on it. Two halves of one contract, in two languages,
+        with no compiler between them."""
+        ea = (REPO / "mql5/ForexTraderBridge.mq5").read_text(
+            encoding="utf-8", errors="replace")
+
+        assert '"ea:" + StringSubstr(trade_id, 0, 12)' in ea

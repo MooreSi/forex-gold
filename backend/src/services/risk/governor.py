@@ -107,6 +107,33 @@ def rg_max_stop_atr() -> float:
     return expert_params.get("rg_max_stop_atr")
 
 
+def halt_reason() -> str:
+    """Why trading is stopped right now, or "" if it is not.
+
+    `risk_halt_reason` is written beside `trade_pause_until` by every guard and
+    is never cleared on resume, so the stored text outlives the halt it
+    describes. Reading it unconditionally would attach last week's reason to
+    today's pause, which is worse than showing none -- so this is gated on the
+    pause actually being in force.
+
+    Added 2026-09-01. Until then this string was written in three places, read
+    in one (`services/signals/scan_staleness.py`), and shown to the user
+    nowhere at all: a halted account reported the time it would resume and not
+    the guard that stopped it, so a drawdown halt, a daily-loss halt and a
+    give-back halt were indistinguishable without reading the database. Found
+    on a live halt during the owner's demo session.
+
+    Never raises: this renders a badge on every header refresh, and a failure
+    must cost the explanation, not the page.
+    """
+    try:
+        if not is_trading_paused():
+            return ""
+        return db_module.get_app_config("risk_halt_reason") or ""
+    except Exception:
+        return ""
+
+
 def is_trading_paused() -> bool:
     """Is trading currently halted? **Fails CLOSED.**
 

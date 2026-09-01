@@ -47,7 +47,12 @@ def compare(orphan: dict, engine_tree: ast.AST) -> dict:
     extracted = find_function(
         ast.parse(module_path.read_text(encoding="utf-8")), orphan["function"]
     )
-    assert extracted is not None, f"{orphan['module']}::{orphan['function']} vanished"
+    if extracted is None:
+        # Raised, not asserted: `python -O` strips asserts, and a scanner
+        # whose own guard disappears is the vacuous-guardrail failure this
+        # repo was rebuilt after.
+        raise RuntimeError(
+            f"{orphan['module']}::{orphan['function']} vanished")
 
     twin = twin_name = None
     for name in candidate_names(orphan["function"]):

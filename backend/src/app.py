@@ -182,13 +182,21 @@ _engine:    Optional[TradingRuntime] = None
 _tg_reader: Optional[TelegramReader]   = None
 
 
+# RuntimeError rather than assert: `python -O` strips assert statements, and
+# these two are the app's only guard against handing out a None engine. Under
+# -O the accessor would return None and the caller would fail somewhere else
+# entirely, with an AttributeError that says nothing about what went wrong.
+# Nothing runs this with -O today; the point is that it would break quietly if
+# anything ever did.
 def get_engine() -> TradingRuntime:
-    assert _engine is not None, "Engine not initialised"
+    if _engine is None:
+        raise RuntimeError("Engine not initialised")
     return _engine
 
 
 def get_tg_reader() -> TelegramReader:
-    assert _tg_reader is not None, "TelegramReader not initialised"
+    if _tg_reader is None:
+        raise RuntimeError("TelegramReader not initialised")
     return _tg_reader
 
 

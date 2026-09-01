@@ -325,3 +325,24 @@ def remove_db_file(path: str) -> None:
         f"could not delete {path} after gc + retries. "
         f"{len(live)} sqlite connection(s) still alive: {live}"
     )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_log_throttle():
+    """A clean log throttle for every test.
+
+    `backend.src.utils.log_throttle` keeps module-level state so a standing
+    condition is logged once rather than thousands of times. That state
+    survives between tests in the same process, which makes any assertion
+    about a throttled log line depend on what ran before it -- two tests in
+    tests/positions/test_monitor_close_recording.py started failing on exactly
+    that the moment the throttle went in, both of them single-call tests that
+    were entirely correct.
+
+    Autouse, because the trap is invisible: the test that breaks is not the
+    test that dirtied the state.
+    """
+    from backend.src.utils import log_throttle
+    log_throttle.reset()
+    yield
+    log_throttle.reset()

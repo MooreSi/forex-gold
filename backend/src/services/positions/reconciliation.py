@@ -28,11 +28,12 @@ deliberately leaves alone.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 log = logging.getLogger(__name__)
+
+from backend.src.utils import log_throttle as _throttle
 
 
 # Kinds, in the order a reader should care about them.
@@ -274,10 +275,11 @@ def report(diff: ReconcileDiff) -> str:
 # every _REPEAT_REMINDER_S so the throttle cannot turn into silence. A problem
 # that persists for a day is worse than one that appears once, not better.
 
-_REPEAT_REMINDER_S = 3600.0
-
-_last_signature: Optional[tuple] = None
-_last_warned_at: float = 0.0
+# Superseded 2026-09-01 by backend/src/utils/log_throttle, once this became
+# the third site with the same problem. The bespoke version here was written
+# first; keeping it would have left two implementations of one idea, which is
+# what the duplicate-implementation detector exists to catch.
+_THROTTLE_KEY = "reconcile"
 
 
 def _diff_signature(diff: ReconcileDiff) -> tuple:
@@ -297,9 +299,7 @@ def _diff_signature(diff: ReconcileDiff) -> tuple:
 
 def reset_report_throttle() -> None:
     """Forget what was last reported. For tests, and for a deliberate re-report."""
-    global _last_signature, _last_warned_at
-    _last_signature = None
-    _last_warned_at = 0.0
+    _throttle.clear(_THROTTLE_KEY)
 
 
 def report_periodic(diff: ReconcileDiff) -> None:
@@ -309,21 +309,12 @@ def report_periodic(diff: ReconcileDiff) -> None:
     surface, so throttling inside it would make a deliberate call silently do
     nothing.
     """
-    global _last_signature, _last_warned_at
-
     if not diff.needs_attention:
         reset_report_throttle()
         return
 
-    signature = _diff_signature(diff)
-    now = time.time()
-    changed = signature != _last_signature
-    due = (now - _last_warned_at) >= _REPEAT_REMINDER_S
-
-    if changed or due:
+    if _throttle.should_announce(_THROTTLE_KEY, repr(_diff_signature(diff))):
         report(diff)
-        _last_signature = signature
-        _last_warned_at = now
         return
 
     # Quiet, not absent.

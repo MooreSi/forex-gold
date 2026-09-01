@@ -123,13 +123,21 @@ class TestItDoesNotGoSilentForever:
     def test_a_standing_problem_is_repeated_periodically(self, caplog, monkeypatch):
         """The point of the throttle is fewer lines, not none. A disagreement
         that persists all day must still be visible to someone reading
-        warnings, or the throttle has just hidden the problem."""
+        warnings, or the throttle has just hidden the problem.
+
+        The interval moved to backend.src.utils.log_throttle on 2026-09-01,
+        when this became the third site with the same problem. The property
+        still has to hold HERE, which is why this test stayed rather than
+        being deleted as covered upstream.
+        """
+        from backend.src.utils import log_throttle
+
         rec.report_periodic(_diff("a"))
         caplog.clear()
-        now = [rec.time.time()]
-        monkeypatch.setattr(rec.time, "time", lambda: now[0])
+        now = [log_throttle.time.time()]
+        monkeypatch.setattr(log_throttle.time, "time", lambda: now[0])
 
-        now[0] += rec._REPEAT_REMINDER_S + 1
+        now[0] += log_throttle.DEFAULT_INTERVAL_S + 1
         with caplog.at_level(logging.WARNING):
             rec.report_periodic(_diff("a"))
 
@@ -137,8 +145,10 @@ class TestItDoesNotGoSilentForever:
 
     def test_the_reminder_interval_is_long_enough_to_matter(self):
         """At 12s a cycle, anything under a few minutes barely helps. An hour
-        is 300 lines a day instead of 7,200."""
-        assert rec._REPEAT_REMINDER_S >= 900
+        is 24 lines a day instead of 7,200."""
+        from backend.src.utils import log_throttle
+
+        assert log_throttle.DEFAULT_INTERVAL_S >= 900
 
 
 class TestCleanRuns:

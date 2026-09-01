@@ -29,6 +29,8 @@ from backend.src.services.trading.partial_close import partial_close_trade
 
 log = logging.getLogger(__name__)
 
+from backend.src.utils import log_throttle as _throttle
+
 
 def check_sl(trade: dict, tick: Any) -> Optional[tuple]:
     direction = trade["direction"].upper()
@@ -111,7 +113,14 @@ def _report_close_refused(trade: dict, detail: str) -> None:
     monitor loop, and losing position management is worse than losing an
     alert.
     """
-    log.error(
+    # The close is retried on every tick while the target is still met, so a
+    # standing refusal logged in full each time is an ERROR every second --
+    # measured at exactly that on 2026-09-01 while AutoTrading was off.
+    # Retrying is right; saying so a thousand times is not.
+    _loud = _throttle.should_announce(
+        f"close-refused:{trade.get('trade_id', '')}", detail,
+    )
+    (log.error if _loud else log.debug)(
         "[Close] trade=%s ticket=%s NOT closed — %s. Leaving it open in the "
         "database; reconciliation will settle it.",
         str(trade.get("trade_id", ""))[:8], trade.get("mt5_ticket"), detail,
@@ -219,19 +228,34 @@ async def reclaim_ea_managed_trade(trade: dict, strategy: str) -> bool:
     # in the gap, rather than the wrong thing managing it.
     from backend.src.services.broker.ea_templates import is_template_override
     if is_template_override(strategy):
-        log.warning(
-            "[EA] trade=%s ticket=%s strategy=%s EA unhealthy -- template "
-            "strategies have no Python fallback, leaving unmanaged until "
-            "the EA reconnects rather than reclaiming",
-            trade["trade_id"][:8], trade.get("mt5_ticket"), strategy,
-        )
+        # Once per trade while the condition holds, then hourly. This runs on
+        # every monitor cycle -- once a second while trades are open -- and on
+        # 2026-09-01 it produced ~400 identical lines in the seven minutes an
+        # EA was off the chart. It must not go silent either: an unmanaged
+        # template position is bugs/013 and is the worst state in the app.
+        if _throttle.should_announce(
+            f"ea-unhealthy:{trade['trade_id']}", f"template:{strategy}",
+        ):
+            log.warning(
+                "[EA] trade=%s ticket=%s strategy=%s EA unhealthy -- template "
+                "strategies have no Python fallback, leaving unmanaged until "
+                "the EA reconnects rather than reclaiming",
+                trade["trade_id"][:8], trade.get("mt5_ticket"), strategy,
+            )
         return True
 
-    log.warning(
-        "[EA] trade=%s ticket=%s EA unhealthy — reclaiming "
-        "management in Python",
-        trade["trade_id"][:8], trade.get("mt5_ticket"),
-    )
+    # Reclaiming is a one-off transition, not a standing condition -- but the
+    # caller can reach here repeatedly if the handoff keeps flapping, so it is
+    # throttled on the same key. Clearing on recovery is what makes a genuine
+    # flap visible instead of collapsing into one line.
+    if _throttle.should_announce(
+        f"ea-unhealthy:{trade['trade_id']}", "reclaimed",
+    ):
+        log.warning(
+            "[EA] trade=%s ticket=%s EA unhealthy — reclaiming "
+            "management in Python",
+            trade["trade_id"][:8], trade.get("mt5_ticket"),
+        )
 
     await db_module.to_db_thread(
         positions_repo.reclaim_management, trade["trade_id"])

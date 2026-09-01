@@ -448,15 +448,19 @@ def _render_dpm_subcard(rs: dict) -> None:
                         "Close the remaining position when cumulative profit — "
                         "partial closes already taken plus unrealised P&L on "
                         "remaining lots — reaches this amount.\n"
-                        "Example: set $150 and DPM will keep managing the trade "
-                        "through its normal TP levels until the running total "
-                        "hits $150, then close everything.\n"
-                        "0 = DPM decides entirely (no dollar cap)."
+                        "Example: set $150 and the trade keeps running through "
+                        "its normal TP levels until the running total hits "
+                        "$150, then everything closes.\n"
+                        "This applies whether or not Dynamic Position "
+                        "Management is switched on — the check runs on every "
+                        "open trade regardless. It sits under this heading for "
+                        "grouping, not because it needs DPM.\n"
+                        "0 = off (no dollar cap)."
                     )
                 dpm_profit_inp = ui.number(
                     value=float(rs.get("profit_close_usd", 0.0) or 0.0),
                     min=0.0, step=5.0, format="%.2f",
-                    placeholder="0 = DPM decides",
+                    placeholder="0 = off",
                 ).classes("w-full")
 
             def _save_dpm_profit():

@@ -26,7 +26,8 @@ from __future__ import annotations
 import calendar
 from datetime import date, datetime, timedelta, timezone
 
-__all__ = ["last_sunday", "utc_offset_hours", "uk_wall_time", "uk_now"]
+__all__ = ["last_sunday", "utc_offset_hours", "uk_wall_time", "uk_now",
+           "uk_from_timestamp", "uk_timestamp"]
 
 
 def last_sunday(year: int, month: int) -> date:
@@ -69,3 +70,35 @@ def uk_wall_time(moment: datetime) -> datetime:
 def uk_now() -> datetime:
     """Now, as UK wall-clock time. The drop-in for a bare `datetime.now()`."""
     return uk_wall_time(datetime.now(timezone.utc))
+
+
+def uk_from_timestamp(epoch: float) -> datetime:
+    """A stored epoch time as UK wall-clock time.
+
+    The drop-in for `datetime.fromtimestamp(x)`, which silently uses the
+    machine's own zone. Trade close times are stored as epoch seconds and
+    bucketed into UK days by the balance report; converting them with the
+    machine's zone would produce the machine's days wearing UK labels.
+    """
+    return uk_wall_time(datetime.fromtimestamp(epoch, tz=timezone.utc))
+
+
+def uk_timestamp(wall: datetime) -> float:
+    """The epoch second for a naive UK wall-clock time.
+
+    The drop-in for `naive.timestamp()`, which also silently assumes the
+    machine's zone. Used for day and week boundaries: UK midnight in summer is
+    23:00 UTC the day before, not 00:00 UTC.
+
+    The offset cannot simply be looked up, because it depends on the instant
+    this is trying to find. Both candidates are tried and the self-consistent
+    one wins. On the October change day 01:00-01:59 UK happens twice and
+    neither is more correct; BST -- the earlier instant -- is chosen, and the
+    choice is deterministic, which is what matters for a boundary that must not
+    move between two calls.
+    """
+    for offset in (1, 0):
+        candidate = (wall - timedelta(hours=offset)).replace(tzinfo=timezone.utc)
+        if utc_offset_hours(candidate) == offset:
+            return candidate.timestamp()
+    return (wall - timedelta(hours=1)).replace(tzinfo=timezone.utc).timestamp()

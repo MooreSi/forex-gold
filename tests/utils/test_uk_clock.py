@@ -146,3 +146,57 @@ class TestItAgreesWithTheRealTimezoneDatabase:
                     moment = base + delta
                     assert uk_clock.uk_wall_time(moment) == \
                         moment.astimezone(london).replace(tzinfo=None), moment
+
+
+class TestConvertingToAndFromStoredTimestamps:
+    """The balance report buckets trades into UK days, and trade close times
+    are stored as epoch seconds. Both directions of that conversion have to go
+    through the UK clock, or the buckets are the machine's days wearing UK
+    labels.
+
+    `datetime.fromtimestamp(x)` with no timezone and `naive.timestamp()` both
+    silently use the machine's local zone, which is exactly the bug being
+    fixed.
+    """
+
+    def test_a_stored_time_becomes_uk_wall_time(self):
+        epoch = _utc(2026, 7, 15, 23, 30).timestamp()
+
+        assert uk_clock.uk_from_timestamp(epoch) == datetime(2026, 7, 16, 0, 30)
+
+    def test_and_back_again(self):
+        epoch = _utc(2026, 7, 15, 23, 30).timestamp()
+
+        wall = uk_clock.uk_from_timestamp(epoch)
+
+        assert uk_clock.uk_timestamp(wall) == pytest.approx(epoch)
+
+    @pytest.mark.parametrize("moment", [
+        _utc(2026, 1, 15, 12), _utc(2026, 3, 29, 0, 59), _utc(2026, 3, 29, 1, 1),
+        _utc(2026, 7, 15, 23, 30), _utc(2026, 10, 25, 0, 59), _utc(2026, 12, 31, 23, 59),
+    ])
+    def test_it_round_trips_across_the_year(self, moment):
+        epoch = moment.timestamp()
+
+        assert uk_clock.uk_timestamp(
+            uk_clock.uk_from_timestamp(epoch)) == pytest.approx(epoch)
+
+    def test_a_uk_midnight_is_the_right_instant(self):
+        """The day boundary the report buckets on. In summer UK midnight is
+        23:00 UTC the day before, not 00:00 UTC."""
+        summer_midnight = datetime(2026, 7, 16, 0, 0)
+
+        assert uk_clock.uk_timestamp(summer_midnight) == \
+            _utc(2026, 7, 15, 23, 0).timestamp()
+
+    def test_a_winter_midnight_matches_utc(self):
+        assert uk_clock.uk_timestamp(datetime(2026, 1, 16, 0, 0)) == \
+            _utc(2026, 1, 16, 0, 0).timestamp()
+
+    def test_the_repeated_autumn_hour_resolves_deterministically(self):
+        """01:30 UK happens twice on the October change day. Whichever is
+        chosen, it must be the same every time — a day boundary that moved
+        between two calls would put the same trade in two different buckets."""
+        ambiguous = datetime(2026, 10, 25, 1, 30)
+
+        assert uk_clock.uk_timestamp(ambiguous) == uk_clock.uk_timestamp(ambiguous)

@@ -27,6 +27,9 @@ Read-only: nothing here places, closes or modifies an order.
 from __future__ import annotations
 
 import logging
+from backend.src.utils.uk_clock import (
+    uk_from_timestamp, uk_now, uk_timestamp,
+)
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -97,7 +100,7 @@ def period_totals(now: datetime | None = None) -> dict:
     the month. One query covers all four -- the month always starts on or
     before the week for any date except when a week spans a month boundary,
     which is why the cutoff is the earlier of the two."""
-    now = now or datetime.now()
+    now = now or uk_now()
     today_start = _day_start(now)
     week_start = today_start - timedelta(days=now.weekday())   # Monday
     month_start = today_start.replace(day=1)
@@ -106,12 +109,18 @@ def period_totals(now: datetime | None = None) -> dict:
     days = {week_start + timedelta(days=i): _Bucket() for i in range(7)}
     week, month, today = _Bucket(), _Bucket(), _Bucket()
 
-    for trade in closed_since(cutoff.timestamp()):
+    # uk_timestamp, not cutoff.timestamp(): `cutoff` is UK wall time and a
+    # naive .timestamp() would read it as the machine's zone, so the window
+    # would start at the wrong instant on any machine that is not in the UK.
+    for trade in closed_since(uk_timestamp(cutoff)):
         closed_at = float(trade.get("close_time") or 0)
         if not closed_at:
             continue
         value = _trade_pnl(trade)
-        stamp = datetime.fromtimestamp(closed_at)
+        # Close times are stored as epoch seconds. Converting with the
+        # machine's zone would bucket them into the MACHINE's days while
+        # labelling them UK ones.
+        stamp = uk_from_timestamp(closed_at)
         day = _day_start(stamp)
         if day in days:
             days[day].add(value)

@@ -175,7 +175,21 @@ def _render_pending_signals(engine):
                                 e_notes = ui.input(value=s.get("notes", "") or "").classes("w-full")
                             e_result = ui.label("").classes("text-xs text-gray-400 mt-1")
 
-                            async def save_edit(sid=signal_id):
+                            # Every widget is captured as a default, not just `sid`.
+                            # These are all rebound on each pass of `for s in sigs`,
+                            # and this runs later from a button click -- so without
+                            # the capture, Save on ANY row read the LAST row's inputs
+                            # and wrote them to its own signal: wrong entry, wrong
+                            # stop, wrong targets, and update_signal pushes SL/TP on
+                            # to an open trade. Same idiom _active_trades.py already
+                            # uses for its own per-row buttons.
+                            async def save_edit(
+                                sid=signal_id,
+                                e_dir=e_dir, e_el=e_el, e_eh=e_eh, e_sl=e_sl,
+                                e_tp1=e_tp1, e_tp2=e_tp2, e_tp3=e_tp3, e_tp4=e_tp4,
+                                e_tp5=e_tp5, e_tp6=e_tp6, e_tp7=e_tp7, e_tp8=e_tp8,
+                                e_notes=e_notes, e_result=e_result,
+                            ):
                                 try:
                                     updates = {
                                         "direction":  e_dir.value,

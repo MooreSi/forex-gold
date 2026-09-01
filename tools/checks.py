@@ -70,6 +70,12 @@ GATES = [
         "it, and the work silently never happens",
     ),
     Check(
+        "late binding",
+        [PY, "-m", "tools.refactor_audit.late_binding", "backend", "frontend"],
+        "a callback defined in a loop that reads the loop's variables later -- "
+        "every row's button ends up acting on the last row",
+    ),
+    Check(
         "boot smoke",
         [PY, "-c", "import backend.src.app"],
         "the composition root still imports",

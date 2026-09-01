@@ -87,12 +87,71 @@ def server_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
-def client_ssl_context() -> ssl.SSLContext:
-    """Return an SSL context that accepts our self-signed cert without CA verification."""
+# ── Who this client is willing to talk to (bugs/014, stage 2) ────────────────
+#
+# The hello sent straight after connecting carries the licence token, the
+# machine UUID and the hostname, so the peer has to be established before it
+# goes out. Two paths, two mechanisms, on the owner's instruction 2026-09-01:
+#
+#   the internet path  verifies against the private CA bundled in the build
+#   the LAN path       trust-on-first-use pins, because no certificate for the
+#                      public address can validate a local one and the local
+#                      address varies by network
+#
+# There is deliberately NO trust-on-first-use on the internet path. Pinning
+# the current self-signed certificate there would mean that the day the
+# CA-signed certificate is deployed, every already-updated client sees a
+# mismatch and refuses -- a lockout created by the upgrade itself. That path
+# goes straight from unauthenticated to CA-verified in one build.
+
+
+def is_ca_verified(host: str) -> bool:
+    """Did the TLS handshake itself establish who this peer is?
+
+    True only for the internet path, and only in a build that ships an
+    authority. Everything else -- LAN, localhost, and every build made before
+    the cutover -- has to be checked at the application layer instead.
+    """
+    from backend.src.services.cluster.remote import ca as _ca
+    return host == SERVER_HOST and _ca.bundled_ca_path() is not None
+
+
+def client_ssl_context(host: str = SERVER_HOST) -> ssl.SSLContext:
+    """The SSL context for connecting to *host*.
+
+    Per host on purpose: one context reused for both paths would either refuse
+    every LAN connection or verify neither.
+    """
+    from backend.src.services.cluster.remote import ca as _ca
+
+    if is_ca_verified(host):
+        return _ca.verify_context(_ca.bundled_ca_path())
+
+    # Unchanged from before the cutover. The application layer does the
+    # checking on this path -- see peer_is_acceptable.
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode    = ssl.CERT_NONE
     return ctx
+
+
+def peer_is_acceptable(host: str, presented: str) -> tuple[bool, str]:
+    """May the token be sent to this peer? Returns (ok, reason).
+
+    On a CA-verified connection the answer is yes and no fingerprint is
+    needed: TLS has already done the work, and demanding one on top would
+    refuse a connection that is already authenticated.
+
+    Otherwise the fingerprint must match what was pinned for this host, or be
+    the first one seen. Reuses the sync channel's primitives rather than
+    growing a second implementation of the same idea -- the pin store is
+    keyed by host, so the two channels cannot collide.
+    """
+    if is_ca_verified(host):
+        return True, "verified against the bundled certificate authority"
+
+    from backend.src.services.cluster.sync import tls_util as _pin
+    return _pin.verify_or_pin(host, presented)
 
 
 def cert_fingerprint() -> str:

@@ -64,6 +64,13 @@ CA_VALID_DAYS = 3650
 SERVER_VALID_DAYS = 825
 
 CA_CERT_NAME = "ca_cert.pem"
+
+# The authority shipped inside the build. Its PRESENCE is what switches
+# verification on -- a build-time fact, not a runtime flag, so there is no
+# setting an attacker or a confused user can flip to downgrade a client back to
+# accepting anything. A build made before the cutover simply has no file here
+# and behaves as it always did.
+BUNDLED_CA = Path(__file__).with_name(CA_CERT_NAME)
 CA_KEY_NAME = "ca_key.pem"
 
 
@@ -248,3 +255,16 @@ def verify_context(ca_cert_path: Path) -> "object":
     ctx.load_verify_locations(cafile=str(ca_cert_path))
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx
+
+
+def bundled_ca_path():
+    """The authority shipped with this build, or None if none is bundled.
+
+    Never raises and never falls back to a system path: "no CA bundled" is a
+    legitimate state (every build before the cutover) and must be reported as
+    such rather than as an error.
+    """
+    try:
+        return BUNDLED_CA if BUNDLED_CA.exists() else None
+    except Exception:
+        return None

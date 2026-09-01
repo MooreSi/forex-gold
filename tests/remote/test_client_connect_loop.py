@@ -115,7 +115,15 @@ def token_file(monkeypatch, tmp_path):
 @pytest.fixture
 def env(monkeypatch, tmp_path, token_file):
     """Everything the loop touches, pointed away from the real install."""
-    monkeypatch.setattr(rc, "client_ssl_context", lambda: None)
+    # Takes the host, as the real one does since bugs/014 stage 2: the context
+    # differs per path (CA-verified on the internet, TOFU on the LAN), so a
+    # zero-argument fake would be testing a signature that no longer exists.
+    monkeypatch.setattr(rc, "client_ssl_context", lambda host=None: None)
+    # The loop establishes the peer before sending the hello. These tests are
+    # about what happens AFTER a connection is accepted, so the check is made
+    # to pass; its own behaviour is covered in
+    # tests/remote/test_remote_client_verification.py.
+    monkeypatch.setattr(rc, "peer_is_acceptable", lambda host, presented: (True, "test"))
     monkeypatch.setattr(rc, "_REMOTE_DIR", tmp_path)
 
     async def _no_lan(timeout=6.0):

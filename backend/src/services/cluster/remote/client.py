@@ -33,7 +33,9 @@ from backend.src.services.cluster.remote.protocol import (
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
     MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO, make,
 )
-from backend.src.services.cluster.remote.tls import client_ssl_context, SERVER_HOST, SERVER_PORT
+from backend.src.services.cluster.remote.tls import (
+    client_ssl_context, peer_is_acceptable, SERVER_HOST, SERVER_PORT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +155,7 @@ async def _speaks_our_protocol(host: str) -> bool:
     try:
         async with websockets.connect(
             f"wss://{host}:{SERVER_PORT}",
-            ssl=client_ssl_context(),
+            ssl=client_ssl_context(host),
             open_timeout=4,
             close_timeout=2,
         ):
@@ -460,7 +462,10 @@ from backend.src.services.cluster.remote._update import (  # noqa: E402
 
 async def _connect_loop() -> None:
     import websockets
-    ssl_ctx  = client_ssl_context()
+    # The context is built per host inside the loop: the internet path
+    # verifies against the bundled authority and the LAN path cannot, so one
+    # context reused for both would either refuse every LAN connection or
+    # verify neither.
     token    = get_or_create_token()
     backoff  = 10  # initial retry delay (seconds)
 
@@ -475,11 +480,26 @@ async def _connect_loop() -> None:
         try:
             async with websockets.connect(
                 url,
-                ssl=ssl_ctx,
+                ssl=client_ssl_context(host),
                 max_size=64 * 1024 * 1024,
                 open_timeout=10,
                 close_timeout=5,
             ) as ws:
+                # Establish WHO this is before the hello goes out. The hello
+                # carries the licence token, the machine UUID and the hostname
+                # (_build_hello), so anything sent to an unestablished peer is
+                # sent to whoever answered on that address (bugs/014).
+                #
+                # On the internet path with a bundled authority this is already
+                # settled by the TLS handshake and returns immediately. On the
+                # LAN path it is trust-on-first-use.
+                from backend.src.services.cluster.sync.tls_util import peer_fingerprint
+                _ok, _why = peer_is_acceptable(host, peer_fingerprint(ws))
+                if not _ok:
+                    log.error("[RemoteClient] refusing %s: %s", host, _why)
+                    await asyncio.sleep(backoff)
+                    continue
+
                 # Send hello
                 await ws.send(json.dumps(_build_hello()))
 

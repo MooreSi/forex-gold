@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime
 import re
+
+from backend.src.utils.uk_clock import uk_now
 from typing import Optional
 
 from backend.src.services.risk import schedule as schedule_mod
@@ -45,7 +47,9 @@ def _save_block(full: dict, day: int, idx: int, changes: dict) -> None:
 def schedule_screen() -> Screen:
     enabled = schedule_mod.is_trading_schedule_enabled()
     daily = schedule_mod.get_daily_profit_target()
-    today = datetime.now().weekday()
+    # UK wall time, the same clock the gate reads -- otherwise the day
+    # highlighted on this screen can differ from the day being enforced.
+    today = uk_now().weekday()
 
     rows = [
         [_btn(f"{_dot(enabled)} Schedule: {'ON' if enabled else 'OFF'}", "sch2", "en")],

@@ -1,26 +1,20 @@
 """Which clock the trading schedule is read against.
 
-This pins current behaviour rather than asserting it is right, because the
-answer is a policy decision and it is not written down anywhere. Raised as
-`docs/simon-handover/017`.
+Settled 2026-09-01 (docs/simon-handover/017). The owner's answer:
 
-The facts, as of 2026-09-01:
+> "Keep the clock to UK time which is the timezone I am in so I can keep track
+> of the time locally."
 
-  * **Sessions** (`get_session`, Asia/London/NY, the news windows, the
-    counter-bias windows) are evaluated in **UTC**, explicitly.
-  * **The trading schedule** (`check_trading_schedule`,
-    `get_schedule_strategy_override`) is evaluated with a bare
-    `datetime.now()`, which is **each machine's local time**.
+So the Trading Schedule is read in **UK wall-clock time** — a fixed zone, not
+"whatever this machine's local time is". That distinction is the whole point:
+the schedule is mirrored between the Mac and the VPS by the sync link, so the
+setting travels while the clock does not. Until today it read a bare
+`datetime.now()`, and a 09:00 window set on the Mac would have gated
+14:00–17:00 UTC on a US-East VPS with nothing reporting the discrepancy.
 
-Both are defensible on their own. Together they mean "09:00" means two
-different instants depending on which gate is reading it — and the schedule is
-**mirrored between the Mac and the VPS by the sync link**, so a schedule set on
-one runs at that machine's wall clock on the other. A 09:00–12:00 window set on
-a UK Mac is 04:00–07:00 on a US-East VPS, gating a different part of the
-trading day entirely.
-
-These tests exist so that whichever way it is settled, the change is deliberate
-and visible rather than a one-word edit nobody notices.
+**Sessions remain UTC** — Asia/London/NY, the news windows, the counter-bias
+windows. Two clocks, on purpose, and these tests keep the difference visible in
+one place so neither drifts into the other by accident.
 """
 from __future__ import annotations
 
@@ -52,30 +46,51 @@ def _now_calls_without_tz(path: pathlib.Path, fn_names) -> list:
     return out
 
 
-class TestTheScheduleUsesTheMachinesLOCALClock:
-    """Pinned, not endorsed. See docs/simon-handover/017."""
+class TestTheScheduleUsesUKWallTime:
 
-    def test_the_schedule_gate_reads_a_naive_now(self):
+    def test_the_gate_does_NOT_read_the_machines_own_clock(self):
+        """A bare `datetime.now()` here is the bug: it makes the same setting
+        mean different hours on the Mac and the VPS."""
         found = _now_calls_without_tz(
             REPO / "backend/src/services/risk/schedule.py",
             {"check_trading_schedule", "get_schedule_strategy_override"},
         )
 
-        assert found, (
-            "the trading schedule no longer reads a bare datetime.now(). If it "
-            "was moved to UTC deliberately, that answers "
-            "docs/simon-handover/017 -- update this test and that note "
-            "together, and check the two nodes agree."
+        assert found == [], (
+            f"the schedule is reading the machine's own local clock again at "
+            f"{found}. It is mirrored between two machines; use uk_now()."
         )
 
-    def test_a_caller_may_pass_its_own_clock(self):
-        """The `now` parameter is how any change here would be made testable,
-        and it is already honoured."""
+    def test_both_entry_points_use_the_uk_clock(self):
+        import ast
+
+        src = (REPO / "backend/src/services/risk/schedule.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        for name in ("check_trading_schedule", "get_schedule_strategy_override"):
+            fn = next(n for n in ast.walk(tree)
+                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and n.name == name)
+            calls = {c.func.id for c in ast.walk(fn)
+                     if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+            assert "uk_now" in calls, f"{name} does not read the UK clock"
+
+    def test_the_screen_shows_the_same_clock_as_the_gate(self):
+        """The panel highlights "today". If it used a different clock from the
+        one being enforced, the day shown could differ from the day gated."""
+        src = (REPO / "backend/src/services/positions/_panel_schedule.py"
+               ).read_text(encoding="utf-8")
+
+        assert "uk_now()" in src
+        assert "datetime.now().weekday()" not in src
+
+    def test_a_caller_may_still_pass_its_own_clock(self):
         far_future = datetime(2030, 1, 1, 3, 0)
 
         allowed, _reason = schedule.check_trading_schedule(now=far_future)
 
         assert isinstance(allowed, bool)
+
 
 
 class TestSessionsUseUTC:
@@ -106,22 +121,35 @@ class TestSessionsUseUTC:
         assert "timezone.utc" in src[start:start + 800]
 
 
-class TestWhyItMatters:
-    """The concrete consequence, expressed as arithmetic rather than prose."""
+class TestTheTwoNodesNowAgree:
+    """What the fix buys, stated as the property rather than as prose: the same
+    instant produces the same schedule time regardless of where the machine
+    thinks it is."""
 
-    @pytest.mark.parametrize("offset_hours,label", [
-        (0, "UK winter"), (-5, "US East"), (8, "Singapore"),
-    ])
-    def test_the_same_window_covers_a_different_utc_span_per_machine(
-            self, offset_hours, label):
-        window_start_local = 9        # what the operator typed
-        as_utc = (window_start_local - offset_hours) % 24
+    def test_the_window_hour_no_longer_depends_on_the_machine(self,
+                                                              monkeypatch):
+        from datetime import timezone as _tz
 
-        if offset_hours == 0:
-            assert as_utc == 9
-        else:
-            assert as_utc != 9, (
-                f"a 09:00 window on a machine at UTC{offset_hours:+d} ({label}) "
-                f"starts at {as_utc:02d}:00 UTC -- the schedule is mirrored "
-                f"between nodes, so the two would gate different hours"
-            )
+        from backend.src.utils import uk_clock
+
+        instant = datetime(2026, 7, 15, 12, 0, tzinfo=_tz.utc)
+
+        # Same instant, read on machines that believe they are anywhere.
+        assert uk_clock.uk_wall_time(instant).hour == 13
+        assert uk_clock.uk_wall_time(
+            instant.astimezone(_tz(timedelta(hours=-5)))).hour == 13
+        assert uk_clock.uk_wall_time(
+            instant.astimezone(_tz(timedelta(hours=8)))).hour == 13
+
+    def test_it_follows_the_UK_clock_change_not_UTC(self):
+        """The point of UK time rather than UTC: 09:00 stays 09:00 on his
+        clock across the March and October changes."""
+        from datetime import timezone as _tz
+
+        from backend.src.utils import uk_clock
+
+        winter = datetime(2026, 1, 15, 9, 0, tzinfo=_tz.utc)
+        summer = datetime(2026, 7, 15, 8, 0, tzinfo=_tz.utc)
+
+        assert uk_clock.uk_wall_time(winter).hour == 9
+        assert uk_clock.uk_wall_time(summer).hour == 9

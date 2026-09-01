@@ -278,6 +278,10 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin):
         self._writer = writer
         self._last_seen = time.time()
         self.last_connected_at = self._last_seen
+        # A new connection is a new EA process as far as its counters go, so
+        # the old baseline is not comparable (bugs/013 option B).
+        from backend.src.services.broker import ea_health as _health
+        _health.reset()
         local = writer.get_extra_info("sockname")
         local_port = local[1] if isinstance(local, tuple) and len(local) > 1 else None
         log.info("[EABridge] EA connected from %s on port %s", peer, local_port)

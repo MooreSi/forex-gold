@@ -62,6 +62,21 @@ class EventsMixin:
             asyncio.create_task(self._push_panel_context())
             self._ensure_panel_loop()
         elif t == "ping":
+            # bugs/013 option B. When a ping arrives after the app had already
+            # written the EA off as unhealthy, ask what it was actually doing
+            # in the gap. "We stopped hearing it" and "it stopped working" are
+            # different facts, and until now the app could not tell them apart
+            # -- which is why the bug forbids acting on the signal.
+            #
+            # Diagnostic only: nothing here changes what is managed.
+            from backend.src.services.broker import ea_health as _health
+            if not self.is_ea_healthy():
+                v = _health.verdict_after_silence(msg)
+                if v.outcome == _health.STALLED:
+                    log.error("[EA] recovered after a silence — %s", v.summary)
+                elif v.outcome != _health.UNKNOWN:
+                    log.warning("[EA] recovered after a silence — %s", v.summary)
+            _health.record(msg)
             await self._send({"type": "pong"})
         elif t == "panel_action":
             await self._on_panel_action(msg)

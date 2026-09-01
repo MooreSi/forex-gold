@@ -86,6 +86,24 @@ string g_recvBuffer = "";
 // remains correct everywhere else in this file (order expiry, VWAP windows,
 // panel timestamps), all of which genuinely mean market time.
 ulong  g_lastPingSent = 0;
+
+// bugs/013 option B. The app decides the EA is unhealthy after 8 seconds of
+// silence, which says it has not HEARD from us -- not that we stopped working.
+// Those are different facts and the app cannot tell them apart from its side,
+// so it must not act on the signal. These two counters let it: they ride on
+// every ping, and the app compares them across a silence.
+//
+//   g_tickCount    every OnTick, BEFORE the early return. "Did the market
+//                  move at all?" A gap with no ticks is not a fault -- MT5
+//                  only calls OnTick when there is something to react to.
+//   g_managePasses every completed pass over the tracked trades. "Did we
+//                  actually manage them?" Ticks arriving with no passes is
+//                  the real outage.
+//
+// Monotonic within one EA run and reset on reload, which the app reads as a
+// restart rather than a stall.
+ulong  g_tickCount    = 0;
+ulong  g_managePasses = 0;
 ulong  g_lastRecv = 0;
 // Socket link state. g_connected only means SocketConnect returned true --
 // under Wine that happens even when nothing is listening, which is why the
@@ -651,7 +669,9 @@ void PollSocket()
    // market -- see the note on g_lastPingSent's declaration.
    if(GetTickCount64() - g_lastPingSent >= 2000)
    {
-      SendJson("{\"type\":\"ping\"}");
+      SendJson("{\"type\":\"ping\",\"ticks\":" + (string)g_tickCount +
+               ",\"passes\":" + (string)g_managePasses +
+               ",\"n\":" + (string)ArraySize(g_trades) + "}");
       g_lastPingSent = GetTickCount64();
    }
    if(g_connected && GetTickCount64() - g_lastRecv > 10000)
@@ -4326,6 +4346,10 @@ void DiagHeartbeat()
 
 void OnTick()
 {
+   // Counted FIRST, before any early return: the question this answers is
+   // "did the market move at all", and a tick we returned early on still
+   // moved. See g_tickCount's declaration (bugs/013 option B).
+   g_tickCount++;
    // Global harvest runs even with g_trades/g_pending both empty -- it
    // sweeps PositionsTotal() directly, so it must not be skipped by the
    // early-return below (which exists for everything else here, all of
@@ -4338,5 +4362,8 @@ void OnTick()
    CheckForClosures();
    for(int i = 0; i < ArraySize(g_trades); i++)
       ManageTrade(g_trades[i], tick);
+   // Counted LAST, so it means "a pass completed", not "a pass began". A
+   // pass that threw or blocked half way through must not report as managed.
+   g_managePasses++;
 }
 //+------------------------------------------------------------------+

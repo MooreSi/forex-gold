@@ -108,13 +108,36 @@ def rg_max_stop_atr() -> float:
 
 
 def is_trading_paused() -> bool:
-    raw = db_module.get_app_config("trade_pause_until")
+    """Is trading currently halted? **Fails CLOSED.**
+
+    This is the last line of defence: `open_trade` checks it before both send
+    paths, and `tests/refactor/test_order_paths_have_one_funnel.py` pins that
+    ordering. It used to read through `get_app_config`, which returns None both
+    for an unset key and for a failed database read -- and unset means "not
+    paused". So a locked or failing database reported "not paused" and the halt
+    stopped applying, silently.
+
+    A protective halt that stops protecting on a transient read error is worse
+    than no halt, because the operator believes one is in place. So an
+    unreadable or unparseable value now reports PAUSED and says why. It is
+    self-healing: the next call re-reads, so a momentary blip pauses that one
+    check rather than latching.
+    """
+    from backend.src.services.risk import app_config_repo as _cfg_repo
+    try:
+        raw = _cfg_repo.read_app_config_strict("trade_pause_until")
+    except Exception as e:
+        log.error("[RG] could not read the trading-pause state (%s) — "
+                  "reporting PAUSED until it can be read", e)
+        return True
     if not raw:
         return False
     try:
         return float(raw) > time.time()
-    except Exception:
-        return False
+    except (TypeError, ValueError):
+        log.error("[RG] trade_pause_until is not a number (%r) — reporting "
+                  "PAUSED; the pause window cannot be known", raw)
+        return True
 
 
 def price_in_entry_range(direction: str, entry_low: float, entry_high: float,

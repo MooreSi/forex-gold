@@ -25,12 +25,34 @@ from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_cor
 
 
 def get_app_config(key: str) -> Optional[str]:
+    """Lenient read: None for an unset key AND for a failed one.
+
+    Deliberately unchanged -- around forty callers read optional configuration
+    through this and expect None rather than an exception. Where the difference
+    between "not set" and "could not read" MATTERS, use
+    `read_app_config_strict` below.
+    """
     try:
         with db() as conn:
             row = conn.execute("SELECT value FROM app_config WHERE key=?", (key,)).fetchone()
             return row[0] if row else None
     except Exception:
         return None
+
+
+def read_app_config_strict(key: str) -> Optional[str]:
+    """Same read, but a database failure RAISES instead of looking unset.
+
+    `get_app_config` cannot tell a caller which of the two happened, and for
+    `trade_pause_until` that ambiguity means a locked database reports "not
+    paused" and a halted account resumes trading. Callers that gate safety on
+    a value read it through here and decide for themselves what an unreadable
+    answer means. See governor.is_trading_paused.
+    """
+    with db() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
 
 
 def set_app_config(key: str, value: str) -> None:

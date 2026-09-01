@@ -29,8 +29,13 @@ from backend.src.services.risk import schedule
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
+# Only `datetime.now()` counts. `_clock.now()` is the fix, not the fault, and a
+# check that cannot tell them apart reports the corrected code as broken.
+_MACHINE_CLOCK_OWNERS = {"datetime", "dt", "_dt", "_dt_exp"}
+
+
 def _now_calls_without_tz(path: pathlib.Path, fn_names) -> list:
-    """Every `datetime.now()` with no timezone inside the named functions."""
+    """Every bare `datetime.now()` inside the named functions."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     out = []
     for node in ast.walk(tree):
@@ -38,15 +43,17 @@ def _now_calls_without_tz(path: pathlib.Path, fn_names) -> list:
                 and node.name in fn_names):
             continue
         for inner in ast.walk(node):
-            if (isinstance(inner, ast.Call)
+            if not (isinstance(inner, ast.Call)
                     and isinstance(inner.func, ast.Attribute)
                     and inner.func.attr == "now"
                     and not inner.args and not inner.keywords):
+                continue
+            if getattr(inner.func.value, "id", "") in _MACHINE_CLOCK_OWNERS:
                 out.append((node.name, inner.lineno))
     return out
 
 
-class TestTheScheduleUsesUKWallTime:
+class TestTheScheduleUsesTheTradingClock:
 
     def test_the_gate_does_NOT_read_the_machines_own_clock(self):
         """A bare `datetime.now()` here is the bug: it makes the same setting
@@ -58,10 +65,11 @@ class TestTheScheduleUsesUKWallTime:
 
         assert found == [], (
             f"the schedule is reading the machine's own local clock again at "
-            f"{found}. It is mirrored between two machines; use uk_now()."
+            f"{found}. It is mirrored between two machines, so it must go "
+            f"through the trading clock rather than the machine's own."
         )
 
-    def test_both_entry_points_use_the_uk_clock(self):
+    def test_both_entry_points_use_the_trading_clock(self):
         import ast
 
         src = (REPO / "backend/src/services/risk/schedule.py").read_text(
@@ -71,9 +79,9 @@ class TestTheScheduleUsesUKWallTime:
             fn = next(n for n in ast.walk(tree)
                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                       and n.name == name)
-            calls = {c.func.id for c in ast.walk(fn)
-                     if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
-            assert "uk_now" in calls, f"{name} does not read the UK clock"
+            calls = {c.func.attr for c in ast.walk(fn)
+                     if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)}
+            assert "now" in calls, f"{name} does not read the trading clock"
 
     def test_the_screen_shows_the_same_clock_as_the_gate(self):
         """The panel highlights "today". If it used a different clock from the
@@ -81,7 +89,7 @@ class TestTheScheduleUsesUKWallTime:
         src = (REPO / "backend/src/services/positions/_panel_schedule.py"
                ).read_text(encoding="utf-8")
 
-        assert "uk_now()" in src
+        assert "_clock.now()" in src
         assert "datetime.now().weekday()" not in src
 
     def test_a_caller_may_still_pass_its_own_clock(self):
@@ -130,15 +138,15 @@ class TestTheTwoNodesNowAgree:
                                                               monkeypatch):
         from datetime import timezone as _tz
 
-        from backend.src.utils import uk_clock
+        from backend.src.utils import trading_clock as uk_clock
 
         instant = datetime(2026, 7, 15, 12, 0, tzinfo=_tz.utc)
 
         # Same instant, read on machines that believe they are anywhere.
-        assert uk_clock.uk_wall_time(instant).hour == 13
-        assert uk_clock.uk_wall_time(
+        assert uk_clock.local_from(instant).hour == 13
+        assert uk_clock.local_from(
             instant.astimezone(_tz(timedelta(hours=-5)))).hour == 13
-        assert uk_clock.uk_wall_time(
+        assert uk_clock.local_from(
             instant.astimezone(_tz(timedelta(hours=8)))).hour == 13
 
     def test_it_follows_the_UK_clock_change_not_UTC(self):
@@ -146,10 +154,10 @@ class TestTheTwoNodesNowAgree:
         clock across the March and October changes."""
         from datetime import timezone as _tz
 
-        from backend.src.utils import uk_clock
+        from backend.src.utils import trading_clock as uk_clock
 
         winter = datetime(2026, 1, 15, 9, 0, tzinfo=_tz.utc)
         summer = datetime(2026, 7, 15, 8, 0, tzinfo=_tz.utc)
 
-        assert uk_clock.uk_wall_time(winter).hour == 9
-        assert uk_clock.uk_wall_time(summer).hour == 9
+        assert uk_clock.local_from(winter).hour == 9
+        assert uk_clock.local_from(summer).hour == 9

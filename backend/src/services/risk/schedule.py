@@ -61,26 +61,27 @@ trade history and needs no reset-at-midnight bookkeeping.
 
 ## Which clock
 
-Windows and the daily target are read in **UK wall-clock time**, not the
-machine's own. That is the owner's decision (docs/simon-handover/017): the
-windows were built around his day, and he keeps track of the time locally.
+Windows and the daily target are read on the **trading clock**: the user's own
+local time, wherever they are, daylight saving included (owner decision,
+docs/simon-handover/017 and 020 -- "it should always be local time").
 
-It has to be a FIXED zone rather than "local", because this schedule is
-mirrored between the Mac and the VPS by the sync link. The setting travels and
-the clock does not, so a 09:00 window set on the Mac would otherwise gate a
-different part of the trading day on a VPS in another country -- and nothing
-would report the discrepancy. Until 2026-09-01 it read a bare
-`datetime.now()`, which is exactly that failure.
+By default that is the machine's own clock, which is the user's clock on the
+user's machine. A machine that is NOT where its user is -- a VPS -- can be
+given an explicit offset instead, because this schedule is mirrored between the
+Mac and the VPS: the setting travels and the clock does not, so a 09:00 window
+set in the UK would otherwise gate a different part of the trading day on a
+server abroad, with nothing reporting the difference.
 
 Note this is a different clock from the SESSIONS (Asia/London/NY, the news and
-counter-bias windows), which are UTC. That is deliberate and now written down
-in one place rather than being an accident.
+counter-bias windows), which are UTC. That is deliberate -- sessions are a fact
+about the market, these windows are a fact about the operator's day -- and now
+written down rather than being an accident.
 """
 from __future__ import annotations
 
 import json
 import logging
-from backend.src.utils.uk_clock import uk_now  # noqa: E402
+from backend.src.services.risk import clock as _clock  # noqa: E402
 from datetime import datetime
 from typing import Optional
 
@@ -361,7 +362,7 @@ def get_schedule_strategy_override(source: str) -> Optional[str]:
     profit-target gate does; it only substitutes which strategy is used."""
     if not is_trading_schedule_enabled():
         return None
-    now = uk_now()
+    now = _clock.now()
     schedule = get_trading_schedule()
     _idx, block = _find_active_block(schedule, now)
     if block is None:
@@ -432,7 +433,7 @@ def check_trading_schedule(
     window's telegram_default_enabled rather than erroring)."""
     if not is_trading_schedule_enabled():
         return True, ""
-    now = now or uk_now()
+    now = now or _clock.now()
 
     # Cumulative daily target (2026-07-27) -- checked ahead of, and
     # independent of, the per-window schedule below: once the day's running

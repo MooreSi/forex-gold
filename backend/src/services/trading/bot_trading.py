@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from backend.src.utils.uk_clock import uk_now, uk_timestamp
+from backend.src.services.risk import clock as _clock
 from datetime import datetime
 from typing import Any
 
@@ -111,14 +111,13 @@ async def cmd_report(args: list, bridge: Any, cfg: dict) -> str:
     except Exception:
         perf = {}
 
-    # UK midnight, as an instant. In summer that is 23:00 UTC the day before,
-    # so a naive .timestamp() would start "today" an hour late on a UK machine
-    # and further out on any other.
-    day_cutoff = uk_timestamp(
-        uk_now().replace(hour=0, minute=0, second=0, microsecond=0))
+    # Local midnight, as an instant -- rarely 00:00 UTC, so a naive
+    # .timestamp() starts "today" at the wrong moment.
+    day_cutoff = _clock.to_timestamp(
+        _clock.now().replace(hour=0, minute=0, second=0, microsecond=0))
     closed_today = trade_repo.fetch_closed_trades_since(day_cutoff)
 
-    today_str   = uk_now().strftime("%A, %d %B %Y")
+    today_str   = _clock.now().strftime("%A, %d %B %Y")
     _balance    = float(perf.get("balance", 0) or 0)
     _dpnl       = float(perf.get("daily_pnl", 0) or 0)
     try:
@@ -131,7 +130,7 @@ async def cmd_report(args: list, bridge: Any, cfg: dict) -> str:
     html    = email_service.build_daily_html(perf, closed_today, today_str,
                                               claude_analysis=claude_analysis)
     ok, err = await email_service.send_email(
-        f"FOREX Trader Daily Report — {uk_now().strftime('%Y-%m-%d')}", html, ecfg
+        f"FOREX Trader Daily Report — {_clock.now().strftime('%Y-%m-%d')}", html, ecfg
     )
     if ok:
         return f"Report sent to {to_addr}."

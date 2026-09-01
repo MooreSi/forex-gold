@@ -607,6 +607,25 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         "ON vantage_partial_closes (trade_id, reason) "
         "WHERE reason GLOB 'TP[0-9]' OR reason GLOB 'TP[0-9][0-9]'",
     ]),
+    (31, "Trading clock offset for a machine that is not where its user is", [
+        # Owner decision, docs/simon-handover/017 and 020: the Trading Schedule
+        # and the reports read the USER's local time, wherever they are.
+        #
+        # NULL -- the default -- means "this machine's own clock", which is the
+        # user's clock on the user's own machine, in any country, with daylight
+        # saving handled by the OS and no timezone database needed.
+        #
+        # A value is set only where the machine is NOT where its user is: a
+        # VPS. The schedule is mirrored between the Mac and the VPS, so the
+        # setting travels and the clock does not -- a 09:00 window set in the
+        # UK would otherwise gate a different part of the trading day on a
+        # server abroad.
+        #
+        # Minutes rather than hours, because India is +5:30 and Nepal +5:45,
+        # and "other users in other countries" includes them.
+        "ALTER TABLE vantage_risk_settings "
+        "ADD COLUMN trading_clock_offset_min INTEGER DEFAULT NULL",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

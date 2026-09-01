@@ -1,21 +1,20 @@
-"""The balance report's days are UK days, on any machine.
+"""The balance report's days are the user's days, on any machine.
 
-Owner decision, 2026-09-01, extending docs/simon-handover/017 from the Trading
-Schedule to the reports. "Today", "this week" and "this month" mean UK
-calendar periods — the same clock the schedule gates on and the one he reads.
+Owner decision, 2026-09-01 (docs/simon-handover/017 and 020): "it should always
+be local time -- if I'm based in the UK use my local time based on the time of
+the year, and if there are other users in other countries use their specific
+local time."
 
-There are two conversions and both were using the machine's own zone:
+There are two conversions and both have to use the same clock:
 
-  * `datetime.now()` for where the period boundaries fall, and
-  * `datetime.fromtimestamp(close_time)` for which side of them a trade lands.
+  * where the period boundaries fall, and
+  * which side of them a stored trade lands.
 
-The second is the subtler one. Trade close times are stored as epoch seconds;
-converting them with the machine's zone buckets them into the MACHINE's days
-while labelling them UK ones. On a VPS five hours behind, a trade closed at
-02:00 UK on Tuesday is reported under Monday.
-
-These tests drive `period_totals` with an explicit `now`, so they assert the
-bucketing rather than whatever today happens to be.
+The second is the subtler one. Close times are epoch seconds, and
+`datetime.fromtimestamp(x)` with no timezone uses the machine's own zone. On a
+single-machine install that IS the user's zone and the two agree -- which is
+why this went unnoticed. On a VPS given an explicit offset they do not, and the
+buckets become one machine's days wearing another's labels.
 """
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.src.services.positions import core_bot_balance_report as rep
-from backend.src.utils import uk_clock
+from backend.src.services.risk import clock as trading_clock
 
 
 def _closed(trade_id, close_epoch, pnl):
@@ -97,7 +96,7 @@ class TestThePeriodBoundariesThemselves:
 
         assert seen
         # 1 July 2026 00:00 UK == 30 June 23:00 UTC (month start beats week start)
-        assert seen[0] == pytest.approx(uk_clock.uk_timestamp(
+        assert seen[0] == pytest.approx(trading_clock.to_timestamp(
             datetime(2026, 7, 1, 0, 0)))
 
     def test_the_cutoff_is_the_earlier_of_week_and_month_start(
@@ -110,19 +109,19 @@ class TestThePeriodBoundariesThemselves:
 
         rep.period_totals(now=datetime(2026, 7, 2, 12, 0))   # Thursday
 
-        assert seen[0] == pytest.approx(uk_clock.uk_timestamp(
+        assert seen[0] == pytest.approx(trading_clock.to_timestamp(
             datetime(2026, 6, 29, 0, 0)))                    # the Monday
 
 
 class TestItDoesNotReadTheMachineClock:
     """Structural, and that is not laziness.
 
-    On a machine that is in the UK, `datetime.fromtimestamp(x)` and
-    `uk_from_timestamp(x)` return the same thing — so no behavioural test run
-    here can tell the fixed code from the broken code. The same is true on a
-    UTC machine in winter, which is what CI is. The difference only appears on
-    a machine in another zone, which is precisely the machine nobody runs the
-    tests on.
+    With no offset configured -- the default, and what the test machine runs --
+    `datetime.fromtimestamp(x)` and the clock's own conversion return the same
+    thing, because both are the machine's zone. So no behavioural test run here
+    can tell the fixed code from the broken code; the difference only appears
+    on a machine given an explicit offset, which is the VPS and not the machine
+    anyone runs tests on.
 
     Confirmed by mutation: reverting either conversion left every behavioural
     test in this file green. These assertions are what actually hold the
@@ -130,6 +129,8 @@ class TestItDoesNotReadTheMachineClock:
     """
 
     def test_no_naive_now_or_fromtimestamp_remains(self):
+        """A bare `datetime.now()` or `datetime.fromtimestamp(x)` is the
+        machine's zone, whatever the clock is configured to be."""
         import ast
         import pathlib
 
@@ -140,18 +141,21 @@ class TestItDoesNotReadTheMachineClock:
             if not (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute)):
                 continue
-            if node.func.attr in ("now", "fromtimestamp") and not node.args:
-                offenders.append(f"{node.func.attr}() at line {node.lineno}")
+            owner = getattr(node.func.value, "id", "")
+            if owner not in ("datetime", "dt", "_dt"):
+                continue
+            if node.func.attr == "now" and not node.args:
+                offenders.append(f"datetime.now() at line {node.lineno}")
             if node.func.attr == "fromtimestamp" and len(node.args) == 1:
-                offenders.append(f"fromtimestamp(x) at line {node.lineno}")
+                offenders.append(f"datetime.fromtimestamp(x) at line {node.lineno}")
 
         assert offenders == [], (
             f"the report is reading the machine's own clock again: {offenders}"
         )
 
-    def test_the_query_window_is_built_with_uk_timestamp(self):
-        """`cutoff` is UK wall time, so `cutoff.timestamp()` reads it as the
-        machine's zone. Behaviourally identical here; wrong on a VPS."""
+    def test_the_query_window_is_built_on_the_trading_clock(self):
+        """`cutoff` is trading-clock wall time, so `cutoff.timestamp()` always
+        reads it as the machine's zone. Identical here; wrong on a VPS."""
         import ast
         import pathlib
 
@@ -166,8 +170,8 @@ class TestItDoesNotReadTheMachineClock:
         assert len(calls) == 1, "expected one closed_since call"
 
         arg = calls[0].args[0]
-        assert (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name)
-                and arg.func.id == "uk_timestamp"), (
+        assert (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
+                and arg.func.attr == "to_timestamp"), (
             "closed_since is being given a naive .timestamp(), which starts "
             "the window at the wrong instant on any machine outside the UK"
         )
@@ -185,11 +189,13 @@ class TestItDoesNotReadTheMachineClock:
                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                   and n.name == "cmd_report")
 
+        # `datetime.now()` only -- `_clock.now()` is the fix, not the fault.
         naive_now = [c.lineno for c in ast.walk(fn)
                      if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
-                     and c.func.attr == "now" and not c.args]
+                     and c.func.attr == "now" and not c.args
+                     and getattr(c.func.value, "id", "") in ("datetime", "dt")]
         assert naive_now == [], f"cmd_report reads the machine clock at {naive_now}"
 
-        names = {c.func.id for c in ast.walk(fn)
-                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
-        assert "uk_now" in names and "uk_timestamp" in names
+        attrs = {c.func.attr for c in ast.walk(fn)
+                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)}
+        assert "now" in attrs and "to_timestamp" in attrs

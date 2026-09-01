@@ -350,13 +350,39 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
         elif t == MSG_LEARNED_RULE_SYNC:
             self._handle_learned_rule_sync(msg)
         elif t == MSG_LEDGER_PUSH:
+            # Per row, and never fatal. This runs inside `async for raw in ws`
+            # and _run_loop catches everything and reconnects, so a row the
+            # ledger will not take does not cost one row: it ends the receive
+            # loop, drops the link, abandons every remaining row in the batch,
+            # and the 120s pull refetches the same batch on reconnect where
+            # the same row does it again. consolidated_trades declares node_id
+            # and trade_id NOT NULL, so a sender that omits either is enough.
+            # MSG_TRADE_CLOSED below has guarded on both since it was written;
+            # this bulk path did not.
+            #
+            # No pre-check on node_id/trade_id here, unlike MSG_TRADE_CLOSED
+            # below. There it is the only protection; here the table's own
+            # NOT NULL raises and this catches it, so a pre-check adds a
+            # branch with no outcome any test can distinguish -- confirmed by
+            # mutation: deleting it changed nothing observable.
             for row in msg.get("trades", []):
-                db_module.record_consolidated_trade(row.get("node_id", ""), row)
+                try:
+                    db_module.record_consolidated_trade(row.get("node_id", ""), row)
+                except Exception as e:
+                    log.warning("[SyncClient] ledger push: could not record "
+                                "trade %s: %s", row.get("trade_id"), e)
         elif t == MSG_AI_RECOVERED_SIGNAL_SYNC:
             self._handle_ai_recovered_signal_sync(msg)
         elif t == MSG_AI_RECOVERED_PUSH:
+            # Same shape and same reason as the ledger push above: a row this
+            # node cannot store must cost that row, not the connection and
+            # every row behind it.
             for row in msg.get("signals", []):
-                self._apply_ai_recovered_snapshot_row(row)
+                try:
+                    self._apply_ai_recovered_snapshot_row(row)
+                except Exception as e:
+                    log.warning("[SyncClient] ai-recovered snapshot: could not "
+                                "apply %s: %s", row.get("tg_message_id"), e)
         elif t == MSG_PONG:
             pass
         else:

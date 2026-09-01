@@ -289,10 +289,10 @@ def apply_partial_close_with_reason(trade_id: str, now: float, lots_to_close: fl
             (trade_id, now, lots_to_close, close_price, partial_pnl, reason),
         )
         if cur.rowcount == 0:
-            log.warning(
-                "apply_partial_close_with_reason %s: %s already recorded — "
-                "ignoring the repeat (no second credit)", trade_id[:8], reason,
-            )
+            # Same level, lots AND price: one close reported twice (mig 32).
+            log.warning("apply_partial_close_with_reason %s: %s of %s lots at "
+                        "%s already recorded — ignoring the duplicate report",
+                        trade_id[:8], reason, lots_to_close, close_price)
             return
         conn.execute(
             "UPDATE vantage_simulated_trades SET remaining_lots=?,realised_pnl=realised_pnl+?,"

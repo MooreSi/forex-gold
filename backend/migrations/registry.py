@@ -626,6 +626,38 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings "
         "ADD COLUMN trading_clock_offset_min INTEGER DEFAULT NULL",
     ]),
+    (32, "A partial close is identified by what happened, not by its label", [
+        # Migration 30 made a take-profit level unique per trade:
+        #   UNIQUE(trade_id, reason) WHERE reason GLOB 'TP[0-9]'
+        # written for bugs/018, where the Python handler and the EA can both
+        # report one TP hit and crediting it twice pays twice.
+        #
+        # The key is wrong, and the owner's own account proved it on
+        # 2026-09-01 -- before migration 30 had ever run there. Trade
+        # 9f1fd2ea closed in three chunks, every one a real broker close:
+        #
+        #   16:38:16  TP1  0.01 lots @ 4366.33  $3.04
+        #   16:38:17  TP1  0.01 lots @ 4366.53  $3.24
+        #   16:38:19  TP1  0.01 lots @ 4366.27  $2.98
+        #
+        # 0.03 lots -- the whole position -- summing to exactly the trade's
+        # realised $9.26, which ProfitSync then confirmed against MT5's $9.27.
+        # Under the old key, INSERT OR IGNORE silently drops the second and
+        # third: realised short by $6.22, and remaining_lots left at 0.02 for
+        # a position the broker has already closed. A phantom holding, which
+        # is the exact failure this stage exists to prevent.
+        #
+        # So the identity of a close is not its LABEL. It is what happened:
+        # how much, and at what price. A duplicate REPORT of one close carries
+        # the same lots and the same price; three distinct closes do not.
+        #
+        # Dropped and recreated rather than edited in place: an install that
+        # already applied 30 must end up with the same index as a fresh one.
+        "DROP INDEX IF EXISTS idx_partial_close_one_per_tp",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_partial_close_one_per_tp "
+        "ON vantage_partial_closes (trade_id, reason, lots_closed, close_price) "
+        "WHERE reason GLOB 'TP[0-9]' OR reason GLOB 'TP[0-9][0-9]'",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

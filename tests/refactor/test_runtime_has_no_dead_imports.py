@@ -18,7 +18,6 @@ behind.
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -46,7 +45,6 @@ def _reexported_names() -> set[str]:
     which is exactly what happened when this sweep first ran.
     """
     names: set[str] = set()
-    pattern = re.compile(r"from\s+backend\.src\.runtime\s+import\s+([^\n(]+)")
     for root in ("backend", "frontend", "tests", "tools"):
         base = REPO / root
         if not base.exists():
@@ -54,10 +52,34 @@ def _reexported_names() -> set[str]:
         for path in base.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue
-            for match in pattern.finditer(path.read_text(encoding="utf-8")):
-                for part in match.group(1).split(","):
-                    names.add(part.strip().split(" as ")[0].strip())
+            names |= _reexported_names_in(path.read_text(encoding="utf-8"))
     return names
+
+
+def _reexported_names_in(src: str) -> set[str]:
+    """Names *src* imports from runtime, by AST rather than by regex.
+
+    The 2026-08-27 fix walked the AST for names used INSIDE runtime.py after
+    a docstring mention kept a dead import alive. This half was left as a
+    regex over raw text and has the identical hole in the opposite direction:
+    a prose line or a string literal anywhere in the repo marks a name as a
+    load-bearing re-export, and runtime.py then keeps importing something
+    nothing imports. Found 2026-09-01, by a test whose own sample string the
+    scan believed.
+
+    Aliases resolve to the original name -- `import _one as _alias` still
+    requires runtime.py to have _one.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return set()
+    return {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "backend.src.runtime"
+        for alias in node.names
+    }
 
 
 def _names_in_annotation(node: ast.AST) -> set[str]:
@@ -183,6 +205,47 @@ def test_a_quoted_annotation_still_counts_as_a_usage():
     )
     assert "Tick" in _used_names(ast.parse('def f() -> "Optional[Tick]": ...\n'))
     assert "Tick" in _used_names(ast.parse('x: Optional["Tick"] = None\n'))
+
+
+def test_the_reexport_scan_ignores_prose_and_strings(tmp_path):
+    """The other half of the 2026-08-27 fix, which only landed on one half.
+
+    That commit hardened the scan for names USED inside runtime.py: a name
+    mentioned only in a docstring counted as used, so is_gd2_message survived
+    as a dead import. The scan for names re-exported OUT of runtime.py was
+    left as a regex over raw text and has exactly the same hole -- a prose
+    line, or a test asserting something about the string, anywhere under
+    backend/ frontend/ tests/ tools/ marks a name load-bearing and keeps a
+    genuinely dead import alive.
+
+    Found 2026-09-01 the way these things are: a new test contained the
+    sentence as a string literal and the scan believed it.
+    """
+    module = tmp_path / "prose.py"
+    module.write_text(
+        '''"""A docstring that says: from backend.src.runtime import _ghost_name."""\n'''
+        "# and a comment: from backend.src.runtime import _comment_ghost\n"
+        '''SAMPLE = "from backend.src.runtime import _string_ghost"\n'''
+        "from backend.src.runtime import _real_name\n",
+        encoding="utf-8",
+    )
+
+    found = _reexported_names_in(module.read_text(encoding="utf-8"))
+
+    assert found == {"_real_name"}, found
+
+
+def test_the_reexport_scan_still_sees_the_forms_that_count(tmp_path):
+    """Negative control for the test above: a scan that returned nothing
+    would satisfy it. Aliases resolve to the ORIGINAL name, because that is
+    what runtime.py has to keep importing."""
+    src = (
+        "from backend.src.runtime import TradingRuntime\n"
+        "from backend.src.runtime import _one as _alias\n"
+        "from backend.src.runtime import (\n    _two,\n    _three,\n)\n"
+    )
+
+    assert _reexported_names_in(src) == {"TradingRuntime", "_one", "_two", "_three"}
 
 
 def test_the_reexport_scan_finds_the_known_reexports():

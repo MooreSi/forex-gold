@@ -31,15 +31,13 @@ class TestTheBoundary:
         """Negative control: the assertion above is a substring test, and a
         substring test that matches nothing proves nothing.
 
-        The sample line is assembled rather than written out, because
-        tests/refactor/test_runtime_has_no_dead_imports.py scans this whole
-        repository for `from backend.src.runtime import ...` to decide which
-        of runtime's imports are load-bearing re-exports. A literal one here
-        would tell it a page still needs a name that no page imports.
+        This line was assembled from fragments for a day, because
+        tests/refactor/test_runtime_has_no_dead_imports.py scanned the repo
+        for `from backend.src.runtime import ...` with a regex over raw text
+        and read this string as a real import. That scan walks the AST now,
+        so the sample can be written out plainly.
         """
-        sample = "from " + "backend.src.runtime" + " import _apply_fee"
-
-        assert "backend.src.runtime" in sample
+        assert "backend.src.runtime" in "from backend.src.runtime import _apply_fee"
 
     @pytest.mark.parametrize("rel", HISTORY_MODULES)
     def test_no_history_module_reaches_the_performance_service(self, rel):

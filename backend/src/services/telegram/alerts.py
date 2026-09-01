@@ -164,6 +164,34 @@ async def send_message(text: str, trade_id: Optional[str] = None, event_type: st
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(url, json=payload)
             ok = r.status_code == 200
+
+            # An alert that silently fails is worse than no alert, because the
+            # operator believes he would have been told. Found 2026-09-01: 107
+            # of 6,866 alerts had been rejected, and the ones failing were
+            # ea_bridge_lost and tp_safety_net -- the two that matter most.
+            #
+            # The cause is always the same: Markdown v1 treats _ * ` [ as
+            # delimiters, and a dynamic value went in unescaped. `_md_esc`
+            # exists for that and its docstring names this exact failure; it
+            # simply is not called at every site. So this is a DELIVERY
+            # guarantee rather than another per-site escape -- the next
+            # formatter to forget loses its formatting, not its message.
+            #
+            # Loud, because the missing escape should still be fixed: silently
+            # succeeding on the retry would leave the bad formatter in place
+            # for ever.
+            if not ok and r.status_code == 400 and "can't parse entities" in r.text:
+                log.warning(
+                    "Telegram rejected the markup on a %s alert (%s) — "
+                    "resending as plain text. The formatter for this alert is "
+                    "interpolating a value without _md_esc.",
+                    event_type or "-", r.text[:120],
+                )
+                plain = dict(payload)
+                plain.pop("parse_mode", None)
+                r = await client.post(url, json=plain)
+                ok = r.status_code == 200
+
             db_module.log_telegram_event(
                 event_type, trade_id, "sent" if ok else "failed",
                 None if ok else r.text[:200],

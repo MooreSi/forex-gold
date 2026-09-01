@@ -117,6 +117,14 @@ def _report_close_refused(trade: dict, detail: str) -> None:
     # standing refusal logged in full each time is an ERROR every second --
     # measured at exactly that on 2026-09-01 while AutoTrading was off.
     # Retrying is right; saying so a thousand times is not.
+    # One decision for both the log and the alert. On 2026-09-01 this sent 45
+    # identical push notifications for one trade in 45 seconds, because the
+    # log was throttled and the alert deliberately was not -- "a message to
+    # the operator is not log noise". True of the first one; the 46th is not
+    # information, it is the operator's phone being used against him.
+    #
+    # Retrying the close is still right: the target is still met and
+    # AutoTrading may come back. Saying so every second is not.
     _loud = _throttle.should_announce(
         f"close-refused:{trade.get('trade_id', '')}", detail,
     )
@@ -125,6 +133,8 @@ def _report_close_refused(trade: dict, detail: str) -> None:
         "database; reconciliation will settle it.",
         str(trade.get("trade_id", ""))[:8], trade.get("mt5_ticket"), detail,
     )
+    if not _loud:
+        return
     try:
         asyncio.create_task(telegram_alerts.send_message(
             f"*Close refused by the broker*\n"
@@ -261,7 +271,11 @@ async def reclaim_ea_managed_trade(trade: dict, strategy: str) -> bool:
         positions_repo.reclaim_management, trade["trade_id"])
     asyncio.create_task(telegram_alerts.send_message(
         f"*EA Bridge Lost*\n"
-        f"Ticket {trade.get('mt5_ticket')} ({strategy}) was being "
+        # Escaped: strategy names carry a single underscore (be_runner,
+        # scalp_runner, trail_stop, scale_out), which Markdown reads as an
+        # unbalanced italic delimiter. This alert had been rejected by
+        # Telegram since at least 2026-08-26 for exactly that.
+        f"Ticket {trade.get('mt5_ticket')} ({telegram_alerts._md_esc(strategy)}) was being "
         f"managed by the local EA, which has stopped responding. "
         f"Management has been reclaimed by the app — no gap in "
         f"SL/TP coverage.",

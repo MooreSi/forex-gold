@@ -37,10 +37,23 @@ from backend.src.utils import os_utils
 
 
 class TestAFailureIsNotSilent:
+    """The POSIX branch, pinned to it.
+
+    These patch `check_output`, which only the pgrep path uses. Without
+    forcing the platform they asserted nothing on Windows -- the PowerShell
+    branch ran instead, answered legitimately, and logged nothing, so
+    test_a_broken_lookup_is_logged failed on CI 2026-09-02 with an empty list
+    of captured records. The Windows branches have their own tests above.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _on_posix(self, monkeypatch):
+        monkeypatch.setattr(os_utils.sys, "platform", "darwin")
+
     def test_a_broken_lookup_is_logged(self, monkeypatch, caplog):
         """Returning [] quietly is what makes a dead watchdog look healthy."""
         def _boom(*a, **kw):
-            raise FileNotFoundError("wmic")
+            raise FileNotFoundError("pgrep")
 
         monkeypatch.setattr(os_utils.subprocess, "check_output", _boom)
 

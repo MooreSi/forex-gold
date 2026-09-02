@@ -55,8 +55,12 @@ def _load_or_create_key() -> bytes:
     key = Fernet.generate_key()
     kf.parent.mkdir(parents=True, exist_ok=True)
     kf.write_bytes(key)
+    from backend.src.utils.file_perms import restrict_to_owner
+    if not restrict_to_owner(kf):
+        log.error("[Secrets] The credentials encryption key at %s could NOT be "
+                  "restricted to this account.", kf)
     try:
-        os.chmod(kf, 0o600)
+        pass
     except OSError:
         pass
     log.info("[Secrets] New encryption key stored at %s", kf)

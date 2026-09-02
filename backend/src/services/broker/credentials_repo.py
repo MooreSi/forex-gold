@@ -131,10 +131,12 @@ def sync_bridge_credentials_file(env: str) -> bool:
         with open(creds_file, "w") as f:
             json.dump(payload, f)
         # The bridge needs plaintext, but nothing else does — owner-only perms.
-        try:
-            os.chmod(creds_file, 0o600)
-        except OSError:
-            pass
+        # Through file_perms, not chmod: chmod does not restrict a file on
+        # Windows, and this one holds the broker password.
+        from backend.src.utils.file_perms import restrict_to_owner
+        if not restrict_to_owner(creds_file):
+            log.error("[Credentials] %s holds the broker password in plaintext "
+                      "and could NOT be restricted to this account.", creds_file)
         return True
     except Exception as e:
         log.warning("sync_bridge_credentials_file failed: %s", e)

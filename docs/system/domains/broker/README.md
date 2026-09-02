@@ -48,27 +48,23 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 
 ## Known things & gotchas
 
-- **On Windows the bridge credentials file is world-readable, and chmod cannot
-  fix it.** `credentials_repo.sync_bridge_credentials_file` writes the MT5
-  login, server and **plaintext password** to disk -- the bridge needs plaintext
-  to call `mt5.initialize()` -- and protects it with `os.chmod(path, 0o600)`.
-  That is the only thing protecting it. On Windows `os.chmod` sets nothing but
-  the read-only flag, so the file lands **`0o666`** and any local account can
-  read the broker password. Found 2026-09-02 from a Windows CI run that had
-  been red on this since 2026-09-01; the assertion is skipped on Windows
-  (`tests/services/broker/test_credentials.py`) because the check genuinely
-  cannot pass there, and a companion test pins this paragraph so the gap is not
-  silently forgotten on the one platform that has it. Closing it properly means
-  a Windows ACL (`icacls`, granting the owner only) -- not attempted here
-  because it cannot be verified from macOS. **If the app is run on Windows,
-  treat that file as exposed to anyone with a local login.**
-  The **private CA key** written by `services/cluster/remote/ca.py` has exactly
-  the same problem and the same skip
-  (`tests/remote/test_remote_ca.py`) -- and it is the worse of the two, because
-  anyone holding it can mint a certificate the app trusts. It is not yet in
-  use (`bundled_ca_path()` returns None, so verification is inert), but this
-  must be solved before bugs/014 stage 3 turns it on for a Windows client.
-
+- **Secret files are restricted through `utils/file_perms.restrict_to_owner`,
+  never `os.chmod` alone.** `chmod` does not restrict a file on Windows -- it
+  toggles a read-only flag, the permission bits are ignored, and the file keeps
+  whatever its parent directory grants. Four secrets were written that way and
+  all landed `0o666` on Windows: the bridge credentials file (**the plaintext
+  broker password**), the private CA key (**anyone holding it can mint a
+  certificate the app trusts**), the credentials encryption key, and the
+  licence. Found 2026-09-02 from a Windows CI run; fixed the same day once the
+  owner confirmed Windows clients are in scope. The helper uses `icacls
+  <path> /inheritance:r /grant:r <user>:F` -- **both halves matter**, since
+  granting the owner without dropping inherited ACEs leaves everyone else's
+  access untouched. It returns False rather than raising when it cannot apply
+  the restriction, and every caller logs at ERROR naming what is exposed.
+  `tests/utils/test_every_secret_is_restricted.py` fails if a new secret is
+  written with a bare `chmod`. The real ACL is verified by a Windows-only test
+  that runs on CI, because it cannot be verified on the Mac this is developed
+  on.
 - `services/broker/debug_guard.py` (2026-08-11, review C1): `TradingRuntime.__init__` passes `_make_bridge`'s pick through `reject_real_bridge_in_debug()` — a debug-mode boot that selected a real bridge class raises instead of logging into a live account behind the "no real orders" banner. **Consequence: a plain `FOREX_DEBUG_MODE=1` boot refuses until the Simon-gated seam wires the fake** (local-debug-mode 020); once the seam lands the guard simply never trips (pinned by `tests/runtime/test_debug_bridge_guard.py`). Bridge *selection* in `_make_bridge` is untouched.
 - Timing constants: watchdog checks every 60s, restart cooldown 180s, startup wait 20s. Self-healer: 90s poll, 300s window, threshold 3 occurrences — deliberately below the watchdogs so it ignores one-off blips.
 - Watchdog state is a caller-owned dict mutated in place; callers must seed it with the original loop's initial values.

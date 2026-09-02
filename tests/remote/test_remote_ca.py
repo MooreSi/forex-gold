@@ -88,9 +88,10 @@ class TestCreatingTheAuthority:
         os.name == "nt",
         reason="POSIX file modes. Windows ignores chmod's permission bits, so "
                "the key lands 0o666 there and no chmod will change it -- the "
-               "same limitation as the bridge credentials file, and the same "
-               "decision: skip rather than assert a mode Windows never "
-               "applied. Recorded in docs/system/domains/broker/README.md.",
+               "same limitation as the bridge credentials file. Windows is "
+               "protected by an ACL instead (utils/file_perms), verified "
+               "there by a Windows-only test on CI; this assertion remains "
+               "the right check on POSIX.",
     )
     def test_the_key_is_not_world_readable(self, ca_dir):
         """Anyone holding this key can mint a certificate the app trusts."""

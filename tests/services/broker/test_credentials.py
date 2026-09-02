@@ -195,10 +195,12 @@ class TestTheBridgeFileIsPlaintextAndOwnerOnly:
                "os.chmod only toggles the read-only flag there -- so the file "
                "lands 0o666 and no amount of chmod will change it. Skipped "
                "rather than weakened: asserting a mode Windows never applied "
-               "would be a green tick for a check that did not happen. The "
-               "exposure is real and is recorded in the broker domain file; "
-               "test_the_windows_exposure_is_written_down below keeps that "
-               "record honest.",
+               "would be a green tick for a check that did not happen. "
+               "Windows is protected by an ACL instead -- see "
+               "utils/file_perms.restrict_to_owner, whose real behaviour is "
+               "verified by a Windows-only test that runs on CI. This "
+               "assertion stays because the POSIX mode is still the right "
+               "check on POSIX.",
     )
     def test_it_is_written_owner_read_write_only(self, creds_db, real_crypto,
                                                  bridge_file):

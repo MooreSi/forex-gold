@@ -24,10 +24,8 @@ def load() -> Optional[dict]:
 def save(data: dict) -> None:
     """Persist licence data. Sets file permissions to owner-read-only."""
     STORE_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    try:
-        os.chmod(STORE_PATH, 0o600)
-    except Exception:
-        pass
+    from backend.src.utils.file_perms import restrict_to_owner
+    restrict_to_owner(STORE_PATH)
 
 
 def clear() -> None:

@@ -107,9 +107,17 @@ def _write_key(path: Path, key) -> None:
         serialization.PrivateFormat.TraditionalOpenSSL,
         serialization.NoEncryption(),
     )
+    # 0o600 on the open() is the POSIX half and is honoured there; Windows
+    # ignores the mode entirely, so the ACL is applied straight after. Anyone
+    # holding this key can mint a certificate the app trusts.
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as fh:
         fh.write(pem)
+    from backend.src.utils.file_perms import restrict_to_owner
+    if not restrict_to_owner(path):
+        log.error("[CA] The private CA key at %s could NOT be restricted to "
+                  "this account. Anyone able to read it can mint a "
+                  "certificate this app will trust.", path)
 
 
 def init_ca(directory: Path) -> tuple[Path, Path]:

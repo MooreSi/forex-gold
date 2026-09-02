@@ -116,3 +116,23 @@ def test_ci_installs_the_test_dependencies():
     # if they ever do, this test's premise (and the workflow line) can simplify.
     req = (WORKFLOW.parents[2] / "requirements.txt").read_text(encoding="utf-8")
     assert "pytest" not in req
+
+
+def test_the_coverage_artifact_can_actually_be_uploaded():
+    """`.coverage.json` is a dotfile and upload-artifact v4 excludes hidden
+    files by default, so the upload step ran green and produced nothing on
+    every build since it was added -- "No files were found with the provided
+    path" is a warning, not a failure.
+
+    It was only noticed when the data was needed: a coverage floor failed on
+    Windows only, and the artifact that would have explained it did not exist.
+    A diagnostic nobody reads is the same failure as a gate nobody reads.
+    """
+    wf = (Path(__file__).resolve().parents[2]
+          / ".github/workflows/checks.yml").read_text(encoding="utf-8")
+    step = wf[wf.index("name: coverage-json"):]
+    step = step[:step.index("if-no-files-found")]
+
+    assert "include-hidden-files: true" in step, (
+        "the coverage artifact is a dotfile; without include-hidden-files the "
+        "upload silently uploads nothing")

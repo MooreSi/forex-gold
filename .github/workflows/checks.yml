@@ -68,6 +68,13 @@ jobs:
         with:
           name: coverage-json
           path: .coverage.json
+          # .coverage.json is a DOTFILE, and upload-artifact v4 skips hidden
+          # files unless told otherwise. Without this the step ran green on
+          # every build and uploaded nothing -- "No files were found with the
+          # provided path", a warning, never a failure. Found 2026-09-02 while
+          # trying to read the coverage data to diagnose a Windows-only floor
+          # failure, and discovering there had never been any to read.
+          include-hidden-files: true
           if-no-files-found: ignore
           # (kept on v4 deliberately — bump majors one at a time so a broken
           # action version is attributable; the checkout/setup-python bumps

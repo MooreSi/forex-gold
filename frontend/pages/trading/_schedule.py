@@ -1,6 +1,8 @@
 """Trading schedule, and the strategy-comparison table cells."""
 from datetime import datetime, timezone
 from nicegui import ui
+
+from frontend.components.poll import poll
 from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers.trading_controller import (
     STRATEGY_NAMES,
@@ -183,11 +185,21 @@ def _render_schedule():
         with ui.row().classes("items-center gap-2 mb-1"):
             ui.label("Current session:").classes("text-xs text-gray-400")
             sess_badge = ui.badge(_init_label, color=_init_color).classes("text-xs")
-        def _refresh_sess_badge(badge=sess_badge):
-            lbl, col = _compute_session_label()
+        # _compute_session_label() looks like a clock read, and it is -- except
+        # for is_weekly_market_closed(), which goes to the database. On a sync
+        # timer that read happened on the event loop every 60 seconds. The
+        # strengthened timer gate found this one; reading the four-line callback
+        # body did not, because the DB call is a level further down.
+        def _apply_sess_badge(pair, badge=sess_badge):
+            lbl, col = pair
             badge.text = lbl
             badge.props(f"color={col}")
-        ui.timer(60, _refresh_sess_badge)
+
+        def _refresh_sess_badge(badge=sess_badge):
+            """Immediate refresh, for first render."""
+            _apply_sess_badge(_compute_session_label(), badge)
+
+        poll(60, _compute_session_label, _apply_sess_badge)
 
         # Three market toggle buttons
         with ui.row().classes("gap-2 flex-wrap"):

@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 from nicegui import ui
 
+from frontend.components.poll import poll
+
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import news_controller as nc
 
@@ -297,6 +299,15 @@ def render() -> None:
         _render_events()
 
     _refresh()
-    # Cheap: the feed itself is cached for 30 min, so this only recomputes
-    # countdowns and the blackout banner against the cached payload.
-    ui.timer(30.0, _refresh)
+    # Mostly cheap: the feed is cached for 30 min, so 59 of every 60 ticks only
+    # recompute countdowns and the blackout banner against the cached payload.
+    # The sixtieth finds the cache stale and fetches ForexFactory over the
+    # network -- and on a synchronous timer that fetch ran ON THE EVENT LOOP,
+    # stalling every page in the app for its duration. Warming the cache in a
+    # worker thread first means the render below always hits a warm cache, so
+    # no tick can block the UI on the feed.
+    #
+    # The lambda is deliberate: `_refresh` takes `force`, and handing it the
+    # poll's data directly would pass a truthy events list as force=True and
+    # invalidate the cache on every single tick.
+    poll(30.0, nc.get_events, lambda _events: _refresh())

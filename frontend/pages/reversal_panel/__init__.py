@@ -22,6 +22,8 @@ import logging
 
 from nicegui import ui
 
+from frontend.components.poll import poll
+
 _log = logging.getLogger(__name__)
 
 from backend.src.controllers import sync_controller as sync_ctl
@@ -144,27 +146,45 @@ def render() -> None:
 
         learn_status_lbl = ui.label("").classes("text-xs font-mono text-gray-500")
 
-        def _refresh_learn_status() -> None:
+        # Split into a read half and a render half so the 30s poll can run the
+        # reads off the event loop: both _learn_on() and pro_model_status() go
+        # to the database, and on the loop they stall every other page.
+        def _learn_status_read() -> dict:
+            """Reads only — runs in a worker thread. Touches no UI."""
             if not _learn_on():
+                return {"on": False}
+            try:
+                from backend.src.controllers import engines_controller as pro_model
+                return {"on": True, "st": pro_model.pro_model_status()}
+            except Exception as e:
+                return {"on": True, "error": str(e)}
+
+        def _learn_status_render(d: dict) -> None:
+            """Renders only — runs on the event loop, where NiceGUI is safe."""
+            if not d.get("on"):
                 learn_status_lbl.set_text("off — pro_likeness held at neutral")
                 learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
                 return
-            try:
-                from backend.src.controllers import engines_controller as pro_model
-                st = pro_model.pro_model_status()
-                c = st.get("corpus") or {}
-                base = (f"corpus {c.get('pos', 0)} pro / {c.get('neg', 0)} background · "
-                        f"outcomes {c.get('wins', 0)}W-{c.get('losses', 0)}L "
-                        f"({c.get('pending', 0)} unresolved)")
-                if st.get("ready"):
-                    learn_status_lbl.set_text(f"live · AUC {st['auc']:.3f} on n={st['n']} · {base}")
-                    learn_status_lbl.classes(replace="text-xs font-mono text-green-400")
-                else:
-                    learn_status_lbl.set_text(f"collecting — {st.get('reason')} · {base}")
-                    learn_status_lbl.classes(replace="text-xs font-mono text-yellow-500")
-            except Exception as e:
-                learn_status_lbl.set_text(f"unavailable: {e}")
+            if "error" in d:
+                learn_status_lbl.set_text(f"unavailable: {d['error']}")
                 learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
+                return
+            st = d["st"]
+            c = st.get("corpus") or {}
+            base = (f"corpus {c.get('pos', 0)} pro / {c.get('neg', 0)} background · "
+                    f"outcomes {c.get('wins', 0)}W-{c.get('losses', 0)}L "
+                    f"({c.get('pending', 0)} unresolved)")
+            if st.get("ready"):
+                learn_status_lbl.set_text(f"live · AUC {st['auc']:.3f} on n={st['n']} · {base}")
+                learn_status_lbl.classes(replace="text-xs font-mono text-green-400")
+            else:
+                learn_status_lbl.set_text(f"collecting — {st.get('reason')} · {base}")
+                learn_status_lbl.classes(replace="text-xs font-mono text-yellow-500")
+
+        def _refresh_learn_status() -> None:
+            """Immediate, synchronous refresh — for first render and the toggle,
+            where the user is waiting for the answer anyway."""
+            _learn_status_render(_learn_status_read())
 
         def _toggle_learn(e) -> None:
             engines_controller.update_risk_settings(
@@ -196,7 +216,7 @@ def render() -> None:
             "and the model beats chance out of sample."
         )
         _refresh_learn_status()
-        ui.timer(30.0, _refresh_learn_status)
+        poll(30.0, _learn_status_read, _learn_status_render)
 
     ui.separator()
 

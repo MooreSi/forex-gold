@@ -1,3 +1,51 @@
+## v0.5 — Refactor (2026-09-02)
+
+The release the refactor closes out. Version history and the About screen
+carry the user-facing summary; this is the engineering record.
+
+**Windows is a supported client platform.** The suite runs green on Windows CI
+for the first time. Four of the defects that got it there were invisible on
+macOS, and three were tests that encoded the developer's own machine — its
+timezone, its file-permission model, its socket behaviour, its process lookup.
+
+**Security**
+- Every file the app writes a secret into is restricted per platform through
+  `utils/file_perms.restrict_to_owner`. `os.chmod` does not restrict a file on
+  Windows, so the bridge credentials (holding the broker password in
+  plaintext), the private CA key, the credentials encryption key and the
+  licence all landed `0o666` there.
+- bugs/014 closed: the licence/admin channel is authenticated. Internet path
+  verifies against a private CA bundled in the build; LAN pins on first use.
+- bugs/022: Telegram approval signed licences for an empty machine id on one
+  of the two registration paths, so approval succeeded and delivered nothing.
+- bugs/021: the activation screen can approve a registration from Telegram,
+  through a poller restricted to that one action.
+
+**Correctness**
+- The Windows bridge watchdog could not enumerate processes at all, so it
+  could never restart a dead bridge. `wmic` is replaced by a PowerShell CIM
+  query; the query was then found to match its own process.
+- The test suite made live, billed calls to the DeepSeek API on every run, and
+  read (and on a fresh machine would have written) the developer's real OS
+  keychain. Both are blocked at the transport now.
+
+**Guardrails that were reporting success while checking nothing**
+- The timer gate had reported zero offenders since 2026-08-31 while four were
+  live: it matched controller imports by name, so aliased imports were
+  invisible.
+- The coverage artifact upload had never uploaded anything — a dotfile, and
+  `include-hidden-files` defaults to false.
+- The Getting Started checklist asked the Telegram reader for keys its status
+  dict has never had.
+
+**Removed on the owner's instruction**
+- The Bounce generator, TP HIT parsing, and the win-rate figures beside each
+  channel's strategy picker.
+
+**Structure**
+- Five of seven import contracts enforced at zero; no file over its ceiling;
+  cluster code from no tests to 84%.
+
 ## Unreleased — Money-path hardening + a bug class closed (2026-08-28 → 2026-08-31)
 
 **Nothing in the "money path" section below is verified against a broker.**

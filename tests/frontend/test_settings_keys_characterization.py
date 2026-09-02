@@ -25,6 +25,10 @@ EXPECTED_KEYS = {
     "ai_models_last_refreshed",
     "ai_provider",
     "anthropic_api_key",
+    "auto_login_enabled",   # added 2026-09-02 with Settings > Security (owner
+                            # request): choose password-on-restart or auto
+                            # login. Declared here deliberately, as this
+                            # file's docstring requires.
     "avg_s",
     "balance",
     "bot_token_enc",

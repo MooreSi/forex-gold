@@ -12,6 +12,7 @@ from ._ai import _render_ai
 from ._appearance import _render_registration, _render_theme
 from ._mt5 import _render_mt5
 from ._risk import render_risk_card
+from ._security import _render_security
 from ._telegram import _render_tg_bot
 
 # The package's whole public surface. render() is the page; render_risk_card
@@ -33,6 +34,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         t_email  = ui.tab("Email Reports")
         t_remote = ui.tab("Remote Node")
         t_diag   = ui.tab("Diagnostics")
+        t_sec    = ui.tab("Security")
         t_reg    = ui.tab("Registration")
         t_upd    = ui.tab("Update")
         t_expert = ui.tab("Expert Tunables")
@@ -52,6 +54,8 @@ def render(get_engine: Callable, get_tg_reader: Callable):
             _render_remote_node(get_engine)
         with ui.tab_panel(t_diag):
             _run_diag = _render_diagnostics(engine)
+        with ui.tab_panel(t_sec):
+            _render_security()
         with ui.tab_panel(t_reg):
             _render_registration()
         with ui.tab_panel(t_upd):

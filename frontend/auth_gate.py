@@ -11,6 +11,36 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from backend.src.controllers import auth_controller as _auth
+from backend.src.controllers import settings_controller as _cfg
+
+# Owner's choice, 2026-09-02: log in with a password on every restart, or come
+# straight in. DEFAULT FALSE -- an install that has never touched the setting
+# keeps asking. This app places live orders with real money and this gate is
+# the only thing between someone at the keyboard and the trading controls, so
+# turning it off has to be a decision somebody made deliberately.
+SETTING_KEY = "auto_login_enabled"
+
+
+def _auto_login_enabled() -> bool:
+    """Cheap enough for a per-request check: config.get serves from an
+    in-memory dict after the first load."""
+    try:
+        return bool(_cfg.get_config(SETTING_KEY, False))
+    except Exception:
+        return False          # unreadable config must not open the door
+
+
+def _may_pass(path: str) -> bool:
+    """Whether an unauthenticated request may proceed.
+
+    Split out of dispatch() so the decision can be tested without NiceGUI's
+    request context.
+    """
+    if app.storage.user.get("authenticated", False):
+        return True
+    if any(path.startswith(p) for p in _OPEN_PREFIXES):
+        return True
+    return _auto_login_enabled()
 
 # Paths reachable without a session. Everything under /_nicegui (framework
 # internals: websocket, JS libraries) and /static (assets) must stay open or the
@@ -21,7 +51,7 @@ _OPEN_PREFIXES = ("/login", "/_nicegui", "/static", "/favicon")
 class _AuthGate(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if app.storage.user.get("authenticated", False) or any(path.startswith(p) for p in _OPEN_PREFIXES):
+        if _may_pass(path):
             return await call_next(request)
         # Remember where they were headed so we can return them after login.
         app.storage.user["referrer_path"] = path

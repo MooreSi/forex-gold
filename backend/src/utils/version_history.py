@@ -7,6 +7,53 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.5",
+        "Refactor",
+        "purple",
+        "",
+        [
+            "Windows is now a supported client platform. The test suite runs "
+            "green on Windows CI for the first time; four defects it found "
+            "were invisible on macOS.",
+            "Security: the MT5 bridge credentials file (which holds the "
+            "broker password in plaintext), the private CA key, the "
+            "credentials encryption key and the licence file are now "
+            "restricted to the owning account on Windows via an ACL. "
+            "os.chmod does not restrict a file on Windows, so all four were "
+            "readable by any local account there.",
+            "Security: the licence/admin channel is authenticated. It was "
+            "encrypted but unauthenticated -- the licence token, machine id "
+            "and hostname were sent before the peer was established. The "
+            "internet path now verifies against a private certificate "
+            "authority shipped in the build; the LAN path pins on first use.",
+            "Fixed Telegram approval issuing empty licence keys. One of the "
+            "two registration paths never stored the machine id the licence "
+            "is signed for, so approving a request succeeded and delivered "
+            "nothing -- the client stayed on the activation screen and "
+            "re-requested for ever.",
+            "The activation screen can now approve a registration from "
+            "Telegram. It runs before the app is licensed, so nothing was "
+            "polling for the button press; a restricted poller now serves "
+            "registration approvals there and nothing else.",
+            "Fixed the Windows bridge watchdog being unable to see processes "
+            "at all, so it could never restart a dead bridge.",
+            "Fixed the test suite making live, billed calls to the DeepSeek "
+            "API on every run, and reading the developer's own OS keychain.",
+            "MT5 Bridge Control reported a running bridge as 'NOT running' "
+            "when the bridge URL used any port other than 9000 -- and would "
+            "have started a second bridge against the same terminal.",
+            "The Getting Started checklist's Telegram row could never be "
+            "ticked; the checklist no longer appears once everything is done.",
+            "Removed: the Bounce generator, TP HIT parsing, and the "
+            "win-rate figures beside each channel's strategy picker.",
+            "Internal: five of seven module-boundary contracts are now "
+            "enforced at zero, no source file exceeds its size ceiling, and "
+            "the cluster code went from no tests to 84% covered. Several "
+            "guardrails that had been reporting success while checking "
+            "nothing were found and repaired.",
+        ],
+    ),
+    (
         "v0.42",
         "ORB Auto-Execute Fix, R:R Tracking & Version Reporting",
         "teal",

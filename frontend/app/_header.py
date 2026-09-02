@@ -17,7 +17,6 @@ from typing import Optional
 from nicegui import ui
 
 from backend.src.controllers import settings_controller as cfg_module
-from backend.src.app import ADMIN_AVAILABLE, admin_open_fn as _admin_open_fn, get_engine
 from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers.system_controller import app_version as _app_version
@@ -29,7 +28,16 @@ from ._shared import _CASH_REGISTER_JS, STATIC_DIR
 log = logging.getLogger(__name__)
 
 
-def build_header(*, power_dialog, pause_dialog, root):
+def build_header(*, power_dialog, pause_dialog, root,
+                 get_engine, admin_available, admin_open_fn):
+    """Render the header bar.
+
+    `get_engine`, `admin_available` and `admin_open_fn` are injected by
+    frontend/app/__init__.py rather than imported here. This module is a view;
+    the composition root is the sanctioned place to reach the app's own
+    lifecycle handles, and importing them from a view is the last thing that
+    kept the frontend import contract off zero.
+    """
     """Build the header bar and start its 2-second refresh.
 
     Returns the Help button's one-element cell. The button is created here but
@@ -403,8 +411,8 @@ def build_header(*, power_dialog, pause_dialog, root):
         ).tooltip("Power options — Restart / Stop")
 
         # ── Admin button (far right — only visible when KeyGen is present) ──────
-        if ADMIN_AVAILABLE:
-            ui.button(icon="admin_panel_settings", on_click=_admin_open_fn).classes(
+        if admin_available:
+            ui.button(icon="admin_panel_settings", on_click=admin_open_fn).classes(
                 "ml-2 shrink-0"
             ).style(
                 "background:transparent; color:#facc15; min-width:32px; min-height:32px; "

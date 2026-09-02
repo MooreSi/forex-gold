@@ -48,6 +48,16 @@ class Contract:
     forbidden: tuple[str, ...]
     # Import prefixes that are allowed despite matching `forbidden`.
     allowed: tuple[str, ...] = ()
+    # Individual files exempted by path, so a contract can be enforced at zero
+    # with one named exception instead of sitting on a baseline for ever
+    # because of it. A baseline of 1 cannot tell a sanctioned site apart from
+    # the next one somebody adds; a named file can.
+    #
+    # Guarded by tests/refactor/test_import_contracts.py::TestFileExemptions,
+    # which requires every entry to exist AND to still violate the contract --
+    # so an exemption that outlives its reason fails the build instead of
+    # quietly pre-authorising a violation in a file nobody watches any more.
+    exempt_files: tuple[str, ...] = ()
     # True  -> any violation fails (ground already taken).
     # False -> counted against a baseline that may only shrink.
     enforced_at_zero: bool = False
@@ -111,7 +121,7 @@ CONTRACTS: list[Contract] = [
     Contract(
         name="frontend-reaches-the-backend-through-controllers",
         rationale=(
-            "The database boundary is closed; the service boundary is not. "
+            "The database boundary is closed; the service boundary is now closed too. "
             "Every page that imports a service directly is a page that can "
             "call a service function on the UI thread, and is one more caller "
             "to rewire whenever a service's signature changes. Shrinks as "
@@ -120,6 +130,14 @@ CONTRACTS: list[Contract] = [
         source_packages=("frontend",),
         forbidden=("backend.src",),
         allowed=("backend.src.controllers",),
+        # The composition root. frontend/app/__init__.py wires the app's own
+        # startup and shutdown, and needs the lifecycle handles to do it --
+        # CLAUDE.md already names it a sanctioned site. Every OTHER page now
+        # reaches the backend through a controller, so the rule is enforced at
+        # zero rather than parked on a baseline of 1 that could not tell this
+        # file apart from the next one added.
+        exempt_files=("frontend/app/__init__.py",),
+        enforced_at_zero=True,
     ),
     Contract(
         name="no-nicegui-in-the-backend",
@@ -246,6 +264,8 @@ def violations_for(contract: Contract) -> list[Violation]:
             # split on "/", so a Windows backslash path silently matches
             # nothing and the coupling-edge dedup stops working.
             rel = path.relative_to(REPO_ROOT).as_posix()
+            if rel in contract.exempt_files:
+                continue
             # One import statement is one violation. _module_names emits both
             # `x.y` and `x.y.name` for a `from x.y import name`; keeping the
             # SHORTEST name that matched preserves the module string every

@@ -209,3 +209,67 @@ def test_the_same_module_imported_twice_in_one_package_counts_once():
     edges = ic.coupling_edges(contract)
     assert len(edges) <= len(statements)
     assert all(isinstance(e, tuple) and len(e) == 2 for e in edges)
+
+
+# ── Named file exemptions (restructure phase1/060) ────────────────────────────
+
+def _contract(name):
+    return next(c for c in ic.CONTRACTS if c.name == name)
+
+
+class TestFileExemptions:
+    """`exempt_files` lets a contract be enforced at zero with one named
+    exception, instead of sitting on a baseline for ever because of it.
+
+    The frontend contract's last site is `frontend/app/__init__.py` — the
+    composition root, which wires the app's own startup and is already treated
+    as a sanctioned site in CLAUDE.md. A baseline of 1 cannot tell that site
+    apart from the next one somebody adds; a named exemption can.
+
+    The danger is obvious and is what these tests are for: an exemption that
+    silently grows, or goes stale, turns "enforced at zero" into a slogan.
+    """
+
+    def test_the_frontend_contract_is_enforced_at_zero(self):
+        c = _contract("frontend-reaches-the-backend-through-controllers")
+
+        assert c.enforced_at_zero
+
+    def test_it_exempts_exactly_one_file(self):
+        """Every addition here is a decision someone must make deliberately."""
+        c = _contract("frontend-reaches-the-backend-through-controllers")
+
+        assert len(c.exempt_files) == 1
+
+    def test_every_exempt_file_exists(self):
+        """A stale exemption is a hole nobody can see. If the file is renamed
+        or deleted, this fails rather than quietly widening the rule."""
+        for c in ic.CONTRACTS:
+            for rel in c.exempt_files:
+                assert (ic.REPO_ROOT / rel).exists(), rel
+
+    def test_every_exempt_file_still_violates_the_contract(self):
+        """The sharper half. Once a site is cleaned up, its exemption must go —
+        otherwise the exemption list outlives its reason and pre-authorises a
+        violation in a file nobody is watching any more."""
+        for c in ic.CONTRACTS:
+            for rel in c.exempt_files:
+                without = [v for v in ic.violations_for(c)]
+                bare = ic.Contract(
+                    name=c.name, rationale=c.rationale,
+                    source_packages=c.source_packages, forbidden=c.forbidden,
+                    allowed=c.allowed, enforced_at_zero=False)
+                assert any(v.path == rel for v in ic.violations_for(bare)), (
+                    f"{rel} is exempted from {c.name} but no longer violates it "
+                    "— delete the exemption")
+                assert not any(v.path == rel for v in without), rel
+
+    def test_the_contract_still_fails_on_a_new_violation(self):
+        """Proof the exemption path did not disable the rule. A file that is
+        not exempt must still be reported."""
+        c = _contract("frontend-reaches-the-backend-through-controllers")
+        others = [v for v in ic.violations_for(c)]
+
+        assert others == [], (
+            "frontend is enforced at zero apart from the named composition "
+            f"root; these are new:\n  " + "\n  ".join(str(v) for v in others))

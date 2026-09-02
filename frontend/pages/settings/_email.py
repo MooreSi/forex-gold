@@ -200,9 +200,7 @@ def _render_email():
                 return
             schedule_test_lbl.text = "Building ORB report..."
             schedule_test_lbl.classes(replace="text-sm text-gray-400")
-            from backend.src.app import get_engine as _get_engine
-            engine = _get_engine()
-            report = await engine.build_orb_report()
+            report = await email_service.build_orb_report()
             if not report:
                 schedule_test_lbl.text = "Could not build report — MT5 bridge/candles not available right now"
                 schedule_test_lbl.classes(replace="text-sm text-red-300")

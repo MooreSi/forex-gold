@@ -70,6 +70,7 @@ log = logging.getLogger(__name__)
 # so the headless entry point sees the same logic without importing NiceGUI.
 from backend.src.app import (          # noqa: E402
     get_engine, get_tg_reader,
+    ADMIN_AVAILABLE, admin_open_fn,
     startup as _lifecycle_startup, shutdown as _lifecycle_shutdown,
 )
 
@@ -293,6 +294,11 @@ def main_page():
         power_dialog=_power_dialog,
         pause_dialog=_pause_dialog,
         root=root,
+        # Injected, not imported by the view: _header.py is a view and this
+        # module is the composition root. See tests/frontend/test_header_is_injected.py.
+        get_engine=get_engine,
+        admin_available=ADMIN_AVAILABLE,
+        admin_open_fn=admin_open_fn,
     )
 
 

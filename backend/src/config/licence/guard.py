@@ -48,6 +48,103 @@ def _parse_activation_code(code: str):
     return key, expiry, ltype
 
 
+# ── What the activation screen brings up behind it ───────────────────────────
+#
+# Hit for real on 2026-09-02. The owner's Mac lost its licence file, restarted,
+# and could not get back in:
+#
+#   1. no licence, so enforce() shows this screen and startup stops here --
+#      run.py calls it BEFORE backend.src.app.startup();
+#   2. the screen starts the remote CLIENT so an admin can push a licence down;
+#   3. the client dials the admin server;
+#   4. the admin server IS this machine, and it is started from startup(),
+#      which step 1 never reached;
+#   5. connection refused, for ever.
+#
+# ADMIN_AVAILABLE and password_is_set() were both true throughout. The issuer
+# simply never ran, because the issuer would not start until it was licensed.
+#
+# This does not grant, weaken or bypass a licence. It starts the thing that can
+# legitimately issue one, on the one machine allowed to.
+
+
+def _this_is_the_admin_machine() -> bool:
+    """Is this the machine that issues licences?
+
+    Deliberately answered from the filesystem rather than by importing
+    `backend.src.app.ADMIN_AVAILABLE` and
+    `services.cluster.remote.auth.password_is_set`. `config/` sits at the
+    bottom of the stack and the import contract holds it there -- reaching up
+    to the composition root from here would make the module that gates
+    startup depend on the module that performs it.
+
+    The two facts are the same ones `app.py` uses, checked directly:
+      * KeyGen's admin module is present next to FOREX or in ~/Documents;
+      * an admin password has been set (remote/admin_password.hash, non-empty).
+
+    Never raises: this decides which agent the activation screen brings up,
+    and that screen is the only way back in.
+    """
+    try:
+        from pathlib import Path as _P
+
+        from backend.src.config import USER_DATA_DIR as _udd
+
+        forex_root = _P(__file__).parent.parent.parent.parent
+        keygen = any((c / "forex_admin.py").exists() for c in (
+            forex_root.parent / "KeyGen", _P.home() / "Documents" / "KeyGen"))
+        if not keygen:
+            return False
+        pw = _P(_udd) / "remote" / "admin_password.hash"
+        return pw.exists() and pw.stat().st_size > 0
+    except Exception as exc:
+        log.warning("Could not determine whether this is the admin machine: %s", exc)
+        return False
+
+
+def _start_agents_for_activation(ng_app, is_admin: bool, known_client: bool) -> None:
+    """Bring up whichever remote agent can get this machine relicensed.
+
+    The admin machine starts its SERVER -- the console can then issue a licence
+    to itself, and the existing self-heal push installs it. It does not also
+    start the client: the admin Mac does not connect to itself, and doing both
+    would have it dial its own port and log a refusal on every retry.
+
+    Everything else starts the client, exactly as before, so an admin-pushed
+    licence can self-heal the install.
+
+    Failures are swallowed. This screen is the only way back in, and an
+    exception here replaces it with a traceback and strands the machine.
+    """
+    if is_admin:
+        @ng_app.on_startup
+        def _autostart_admin_server():
+            try:
+                from backend.src.services.cluster.remote import server as _rs_auto
+                _rs_auto.start()
+                log.info(
+                    "Activation screen: this is the admin machine — starting the "
+                    "admin server so a licence can be issued to it locally."
+                )
+            except Exception as exc:
+                log.warning("Could not auto-start the admin server on the "
+                            "activation screen: %s", exc)
+        return
+
+    if known_client:
+        @ng_app.on_startup
+        def _autoconnect_known_client():
+            try:
+                from backend.src.services.cluster.remote import client as _rc_auto
+                _rc_auto.start()
+                log.info(
+                    "Activation screen: existing remote token found — "
+                    "connecting so an admin-pushed licence can self-heal this install."
+                )
+            except Exception as exc:
+                log.warning("Could not auto-start remote client on activation screen: %s", exc)
+
+
 # ── Blocking error screen ─────────────────────────────────────────────────────
 
 def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
@@ -175,18 +272,8 @@ def _show_registration_page(notice: str = "") -> None:
     def _lic_page():
         return HTMLResponse(_ACTIVATION_HTML)
 
-    if _known_client:
-        @_ng_app.on_startup
-        def _autoconnect_known_client():
-            try:
-                from backend.src.services.cluster.remote import client as _rc_auto
-                _rc_auto.start()
-                log.info(
-                    "Activation screen: existing remote token found — "
-                    "connecting so an admin-pushed licence can self-heal this install."
-                )
-            except Exception as exc:
-                log.warning("Could not auto-start remote client on activation screen: %s", exc)
+    _start_agents_for_activation(_ng_app, is_admin=_this_is_the_admin_machine(),
+                                 known_client=_known_client)
 
     @ui.page("/")
     def _reg_page():

@@ -355,6 +355,29 @@ def main():
     _ensure_data_dirs()
     _migrate_config_yaml()
 
+    # ── Database first, so the licence screen behind it can function ─────────
+    #
+    # The activation screen does real work: it registers this machine and, on
+    # the admin machine, brings up the admin server so a licence can be issued
+    # locally. All of that reads this database. Opened after the licence check
+    # it is never opened at all on that path -- enforce() shows the screen and
+    # never returns -- and on 2026-09-02 that produced:
+    #
+    #   [RemoteServer] Registration Telegram notify failed:
+    #                  no such table: telegram_config
+    #
+    # The owner sat on "awaiting administrator approval" waiting for a
+    # notification that could not be sent, with nothing on screen saying why.
+    #
+    # Nothing about the licence DECISION moves: the guard reads a file in the
+    # home directory, not this database. What moves is whether the screen it
+    # shows can do its job. The engines still start only after the check.
+    import backend.src.config as cfg_module
+    cfg  = cfg_module.load()
+
+    from backend.src.db import database as _db_mod
+    _db_mod.init(cfg["db_path"])
+
     # ── Licence check — must pass before any engine or UI starts ──────────────
     from backend.src.config.licence.guard import enforce as _licence_enforce
     _licence_enforce()
@@ -362,13 +385,8 @@ def main():
     bridge_proc = _start_mt5_bridge()
 
     try:
-        import backend.src.config as cfg_module
-        cfg  = cfg_module.load()
         port = int(cfg.get("port", 8888))
         _free_port(port)
-
-        from backend.src.db import database as _db_mod
-        _db_mod.init(cfg["db_path"])
 
         # Daily snapshot of the live-money DB (at most one per day, keep 30) to a
         # local backups/ folder. Non-fatal: a backup problem must never stop the

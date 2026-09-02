@@ -52,14 +52,36 @@ def _probe_code() -> str:
     return "\n".join(ast.unparse(node) for node in body)
 
 
+@pytest.fixture(autouse=True)
+def own_port(monkeypatch):
+    """Give every test its own beacon port.
+
+    They all bound the one real port (8444) and `_beacon` fires from a delayed
+    daemon thread -- so a test that finished early delivered its datagram into
+    the NEXT test's socket. That made the file flaky: 4 failures, then 11
+    passes, then 4 failures, on unchanged code. A flaky test is worse than no
+    test, because it teaches you to re-run rather than to look.
+
+    `_blocking_probe_beacon` reads the module global at call time, so patching
+    it here is enough.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setattr(rc, "_LAN_BEACON_PORT", port)
+    return port
+
+
 def _beacon(payload, delay=0.05, port=None):
-    """Send one UDP datagram to the beacon port after a short delay."""
+    """Send one UDP datagram to this test's beacon port after a short delay."""
+    target = port or rc._LAN_BEACON_PORT
+
     def _send():
         time.sleep(delay)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-            s.sendto(raw, ("127.0.0.1", port or rc._LAN_BEACON_PORT))
+            s.sendto(raw, ("127.0.0.1", target))
     t = threading.Thread(target=_send, daemon=True)
     t.start()
     return t

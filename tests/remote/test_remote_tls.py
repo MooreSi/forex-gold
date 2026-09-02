@@ -141,19 +141,102 @@ class TestSslContexts:
         tls.server_ssl_context()
         assert (isolated / "server_cert.pem").exists()
 
-    def test_the_client_context_does_not_verify_and_NOTHING_PINS_THE_CERT(self):
-        """Records a real gap. Read docs/todo/bugs/014 before touching this.
+    def test_the_internet_path_is_now_CA_VERIFIED(self):
+        """bugs/014, closed 2026-09-02.
 
-        The comment beside the fingerprint write says it is stored "so clients
-        can pin it". No client does. Nothing in the tree calls getpeercert(),
-        and this module's fingerprint is only ever logged and displayed. The
-        licence/admin channel is therefore encrypted but UNAUTHENTICATED.
+        This test previously asserted the opposite, deliberately: it recorded
+        the gap in the suite rather than leaving it implied by a comment, and
+        said in its own docstring that it should change when 014 did. It has.
 
-        Asserted as it stands so the gap is visible in the suite rather than
-        implied by a comment. It should change when 014 does."""
-        ctx = tls.client_ssl_context()
-        assert ctx.check_hostname is False
+        The build now ships `ca_cert.pem`, so the handshake to the public
+        address establishes who the peer is before the hello -- which carries
+        the licence token, the machine UUID and the hostname -- goes out.
+        """
+        ctx = tls.client_ssl_context(tls.SERVER_HOST)
+
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+
+    def test_the_LAN_path_is_deliberately_still_trust_on_first_use(self):
+        """Not an oversight. No certificate for the public address can
+        validate a local one, and the local address varies by network, so the
+        LAN path pins on first sight at the application layer instead --
+        `peer_is_acceptable` -> `verify_or_pin`."""
+        ctx = tls.client_ssl_context("192.168.0.42")
+
         assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is False
+
+    def test_the_internet_path_needs_no_fingerprint(self):
+        """TLS has already done the work. Demanding a pin on top would refuse
+        a connection that is already authenticated."""
+        ok, why = tls.peer_is_acceptable(tls.SERVER_HOST, "any-fingerprint")
+
+        assert ok is True
+        assert "authority" in why
+
+    def test_an_impostor_certificate_is_REFUSED_on_the_internet_path(self, tmp_path):
+        """The property the whole change exists for.
+
+        A self-signed certificate for the right address -- exactly what an
+        attacker on the network path would present -- must now fail the
+        handshake. Before 014 it was accepted, and the licence token went to
+        it.
+        """
+        import socket
+        import ssl as _ssl
+        import threading
+        import datetime as _dt
+        import ipaddress
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, tls.SERVER_HOST)])
+        now = _dt.datetime.now(_dt.timezone.utc)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - _dt.timedelta(minutes=5))
+            .not_valid_after(now + _dt.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([
+                x509.IPAddress(ipaddress.ip_address(tls.SERVER_HOST)),
+                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            ]), critical=False)
+            .sign(key, hashes.SHA256())
+        )
+        cp, kp = tmp_path / "impostor_cert.pem", tmp_path / "impostor_key.pem"
+        cp.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        kp.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption()))
+
+        sctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        sctx.load_cert_chain(str(cp), str(kp))
+        sock = socket.socket(); sock.bind(("127.0.0.1", 0)); sock.listen(1)
+        port = sock.getsockname()[1]
+
+        def _serve():
+            try:
+                c, _ = sock.accept()
+                with sctx.wrap_socket(c, server_side=True):
+                    pass
+            except Exception:
+                pass
+
+        threading.Thread(target=_serve, daemon=True).start()
+
+        ctx = tls.client_ssl_context(tls.SERVER_HOST)
+        with pytest.raises(_ssl.SSLError):
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+                with ctx.wrap_socket(raw, server_hostname=tls.SERVER_HOST):
+                    pass
+        sock.close()
 
     def test_the_client_context_is_a_client_context(self):
         """A server-side protocol here fails the handshake in a way that looks

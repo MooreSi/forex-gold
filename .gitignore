@@ -43,3 +43,10 @@ FOREX Trader.app/
 
 # NiceGUI runtime storage (sessions, app.storage) — never commit
 .nicegui/
+
+# bugs/014 — the admin channel private CA.
+# ca_cert.pem IS committed (it is the public authority the build ships).
+# ca_key.pem must NEVER be: anyone holding it can mint a certificate this app
+# trusts. It lives offline, outside this repo.
+ca_key.pem
+**/ca_key.pem

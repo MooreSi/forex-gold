@@ -53,12 +53,90 @@ def creds_db(monkeypatch, tmp_path):
     return path
 
 
+class _FakeKeyring:
+    """An in-memory stand-in for the OS keychain."""
+
+    def __init__(self):
+        self.store: dict = {}
+
+    def get_password(self, service, account):
+        return self.store.get((service, account))
+
+    def set_password(self, service, account, value):
+        self.store[(service, account)] = value
+
+
 @pytest.fixture
-def real_crypto(monkeypatch, tmp_path):
-    """Real Fernet, with its key file in tmp_path rather than the install."""
+def fake_keychain(monkeypatch):
+    """Stop the suite from reading and WRITING the developer's real keychain.
+
+    `_load_or_create_key` tries the OS keychain FIRST and only falls back to a
+    key file. Redirecting the key file therefore isolated nothing on macOS or
+    Windows: the real keychain answered, and the tmp file was never even
+    created (verified 2026-09-02 — the file did not exist after the call).
+
+    Two consequences, one of which is worse than a dirty test:
+
+      * on a machine that already has the key, the suite silently reads the
+        owner's real credentials key;
+      * on a machine that does NOT — a fresh laptop, a CI runner — the suite
+        GENERATES a key and writes it into that user's real keychain.
+
+    Found when a redirected HOME made macOS unable to locate a keychain at all
+    and it put up a "Keychain Not Found — Reset To Defaults" dialog mid-run.
+    A test suite should never be able to produce that prompt.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", _FakeKeyring())
+    return sys.modules["keyring"]
+
+
+@pytest.fixture
+def real_crypto(monkeypatch, tmp_path, fake_keychain):
+    """Real Fernet, with its key in a fake keychain and its file in tmp_path."""
     monkeypatch.setattr(sec, "_key_file_path", lambda: tmp_path / "secret.key")
     sec._get_fernet.cache_clear() if hasattr(sec._get_fernet, "cache_clear") else None
+    monkeypatch.setattr(sec, "_fernet", None)
     return sec
+
+
+class TestTheSuiteNeverTouchesTheRealKeychain:
+    """A guard on the fixture above, not on production code."""
+
+    def test_the_key_comes_from_the_fake_keychain(self, real_crypto,
+                                                  fake_keychain):
+        key = sec._load_or_create_key()
+
+        assert fake_keychain.store, "nothing was stored in the fake keychain"
+        assert key.decode() in [v for v in fake_keychain.store.values()]
+
+    def test_a_second_call_reuses_it_rather_than_generating_a_new_one(
+            self, real_crypto, fake_keychain):
+        """A regenerated key cannot decrypt what the first one encrypted."""
+        first = sec._load_or_create_key()
+
+        assert sec._load_or_create_key() == first
+
+    def test_the_file_fallback_still_works_when_there_is_no_keychain(
+            self, monkeypatch, tmp_path):
+        """The path a Linux box with no Secret Service actually takes."""
+        import sys
+
+        class _Broken:
+            def get_password(self, *a):
+                raise RuntimeError("no keychain here")
+
+            def set_password(self, *a):
+                raise RuntimeError("no keychain here")
+
+        monkeypatch.setitem(sys.modules, "keyring", _Broken())
+        monkeypatch.setattr(sec, "_key_file_path", lambda: tmp_path / "secret.key")
+
+        key = sec._load_or_create_key()
+
+        assert (tmp_path / "secret.key").exists()
+        assert (tmp_path / "secret.key").read_bytes().strip() == key
 
 
 @pytest.fixture
@@ -111,12 +189,41 @@ class TestTheBridgeFileIsPlaintextAndOwnerOnly:
     """The bridge needs plaintext to call mt5.initialize(). Its permissions are
     the only thing protecting it."""
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX file modes. Windows ignores chmod's permission bits -- "
+               "os.chmod only toggles the read-only flag there -- so the file "
+               "lands 0o666 and no amount of chmod will change it. Skipped "
+               "rather than weakened: asserting a mode Windows never applied "
+               "would be a green tick for a check that did not happen. The "
+               "exposure is real and is recorded in the broker domain file; "
+               "test_the_windows_exposure_is_written_down below keeps that "
+               "record honest.",
+    )
     def test_it_is_written_owner_read_write_only(self, creds_db, real_crypto,
                                                  bridge_file):
         assert cr.sync_bridge_credentials_file("demo") is True
 
         mode = stat.S_IMODE(os.stat(bridge_file).st_mode)
         assert mode == 0o600, f"credentials file is mode {mode:o}, not 0600"
+
+    def test_the_windows_exposure_is_written_down(self):
+        """Runs on every platform, including the one with the hole.
+
+        A skipped test leaves no trace on the platform it skipped, so the gap
+        would be invisible exactly where it exists. This pins the written
+        record instead. Found 2026-09-02 from a Windows CI run that had been
+        failing on the assertion above since 2026-09-01.
+        """
+        import pathlib as _pl
+
+        doc = _pl.Path("docs/system/domains/broker/README.md").read_text(
+            encoding="utf-8")
+
+        assert "0o666" in doc, (
+            "the Windows credentials-file exposure is no longer described in "
+            "docs/system/domains/broker/README.md -- either restore it, or if "
+            "it has genuinely been fixed, delete the skipif above with it")
 
     def test_it_contains_the_decrypted_password(self, creds_db, real_crypto,
                                                 bridge_file):

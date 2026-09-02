@@ -128,12 +128,22 @@ class TestNothingLeftTheMachine:
         This is also what the runbook's demo-2 instruction actually produces:
         stopping the bridge first gives exactly this branch, not the one
         above.
+
+        The assertion is on the CLASSIFICATION, not on the exception class.
+        Asserting `httpx.ConnectError` pinned a detail of the operating system:
+        macOS refuses the connection outright, Windows lets it time out, so
+        this failed on CI (2026-09-02) with `ConnectTimeout` while the
+        behaviour under test was identical and correct. `_NEVER_SENT` already
+        lists both, so production classified the Windows case right all along
+        -- only the test was platform-specific.
         """
+        from backend.src.services.broker.mt5_client import _NEVER_SENT
+
         port = _free_port()          # bound, then released: nothing listening
 
         exc = asyncio.run(_post(port, timeout=2.0))
 
-        assert isinstance(exc, httpx.ConnectError), type(exc).__name__
+        assert isinstance(exc, _NEVER_SENT), type(exc).__name__
         assert _send_failure(exc).get("unknown") is None
 
     def test_the_two_cases_really_do_differ(self):

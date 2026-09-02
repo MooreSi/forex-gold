@@ -136,28 +136,56 @@ class TestTheTwoNodesNowAgree:
 
     def test_the_window_hour_no_longer_depends_on_the_machine(self,
                                                               monkeypatch):
+        """The instant's OWN timezone must not change the answer.
+
+        The offset is pinned. Without it these three assertions passed on any
+        machine in the UK and failed everywhere else -- including CI -- because
+        `local_from` with no offset returns the machine's local time. A test
+        named "no longer depends on the machine" that depended entirely on the
+        machine; found 2026-09-02.
+        """
+        from datetime import timezone as _tz
+
+        from backend.src.utils import trading_clock as uk_clock
+
+        BST = 60
+        instant = datetime(2026, 7, 15, 12, 0, tzinfo=_tz.utc)
+
+        # Same instant, read on machines that believe they are anywhere.
+        assert uk_clock.local_from(instant, BST).hour == 13
+        assert uk_clock.local_from(
+            instant.astimezone(_tz(timedelta(hours=-5))), BST).hour == 13
+        assert uk_clock.local_from(
+            instant.astimezone(_tz(timedelta(hours=8))), BST).hour == 13
+
+    def test_a_configured_offset_holds_09_00_across_the_clock_change(self):
+        """09:00 stays 09:00 on the user's clock across March and October --
+        which, for a machine given an explicit offset, means the offset is
+        refreshed at each change. `trading_clock`'s docstring is explicit that
+        a configured offset does NOT follow daylight saving on its own, so the
+        two are passed here as the two different numbers they really are.
+        """
+        from datetime import timezone as _tz
+
+        from backend.src.utils import trading_clock as uk_clock
+
+        GMT, BST = 0, 60
+        winter = datetime(2026, 1, 15, 9, 0, tzinfo=_tz.utc)
+        summer = datetime(2026, 7, 15, 8, 0, tzinfo=_tz.utc)
+
+        assert uk_clock.local_from(winter, GMT).hour == 9
+        assert uk_clock.local_from(summer, BST).hour == 9
+
+    def test_with_no_offset_it_is_the_machines_own_clock(self, monkeypatch):
+        """The other half of the design, and the reason the two tests above
+        had to pin: with no offset configured the answer IS the machine's local
+        time, whatever that is. Asserted against the machine's own reported
+        offset so it holds in any zone."""
         from datetime import timezone as _tz
 
         from backend.src.utils import trading_clock as uk_clock
 
         instant = datetime(2026, 7, 15, 12, 0, tzinfo=_tz.utc)
+        machine = uk_clock.machine_offset_minutes()
 
-        # Same instant, read on machines that believe they are anywhere.
-        assert uk_clock.local_from(instant).hour == 13
-        assert uk_clock.local_from(
-            instant.astimezone(_tz(timedelta(hours=-5)))).hour == 13
-        assert uk_clock.local_from(
-            instant.astimezone(_tz(timedelta(hours=8)))).hour == 13
-
-    def test_it_follows_the_UK_clock_change_not_UTC(self):
-        """The point of UK time rather than UTC: 09:00 stays 09:00 on his
-        clock across the March and October changes."""
-        from datetime import timezone as _tz
-
-        from backend.src.utils import trading_clock as uk_clock
-
-        winter = datetime(2026, 1, 15, 9, 0, tzinfo=_tz.utc)
-        summer = datetime(2026, 7, 15, 8, 0, tzinfo=_tz.utc)
-
-        assert uk_clock.local_from(winter).hour == 9
-        assert uk_clock.local_from(summer).hour == 9
+        assert uk_clock.local_from(instant) == uk_clock.local_from(instant, machine)

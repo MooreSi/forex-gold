@@ -15,6 +15,13 @@ The second is the subtler one. Close times are epoch seconds, and
 single-machine install that IS the user's zone and the two agree -- which is
 why this went unnoticed. On a VPS given an explicit offset they do not, and the
 buckets become one machine's days wearing another's labels.
+
+**Every test here pins the offset** (`uk_summer` / `uk_winter`). It did not,
+and the whole file passed on the owner's Mac and failed on CI, because with no
+offset configured `local_from` returns the MACHINE's local time -- so on a UTC
+runner "23:10 UTC is 00:10 UK" is simply false. The tests were not asserting
+the UK clock; they were asserting that the developer sits in the UK. Found
+2026-09-02 from a Windows CI run that had been red since 2026-09-01.
 """
 from __future__ import annotations
 
@@ -32,6 +39,19 @@ def _closed(trade_id, close_epoch, pnl):
 
 
 @pytest.fixture
+def uk_summer(monkeypatch):
+    """BST, +60. Pinned rather than inherited from the machine."""
+    monkeypatch.setattr(trading_clock, "offset_minutes", lambda: 60)
+
+
+@pytest.fixture
+def uk_winter(monkeypatch):
+    """GMT, +0 -- the half of the year in which UK time and UTC agree, which is
+    why the bug this file covers was invisible for six months."""
+    monkeypatch.setattr(trading_clock, "offset_minutes", lambda: 0)
+
+
+@pytest.fixture
 def closed_trades(monkeypatch):
     box: list = []
     monkeypatch.setattr(rep, "closed_since",
@@ -43,7 +63,7 @@ def closed_trades(monkeypatch):
 class TestATradeIsBucketedByItsUKDay:
 
     def test_a_summer_trade_just_after_uk_midnight_counts_as_the_NEW_day(
-            self, closed_trades):
+            self, closed_trades, uk_summer):
         """23:10 UTC on 15 July is 00:10 UK on the 16th. Bucketing it by UTC —
         or by a machine behind the UK — puts it on the wrong day."""
         closed_trades.append(_closed(
@@ -54,7 +74,7 @@ class TestATradeIsBucketedByItsUKDay:
         assert totals["today"].pnl == pytest.approx(30.0)
 
     def test_and_ten_minutes_earlier_counts_as_the_PREVIOUS_day(
-            self, closed_trades):
+            self, closed_trades, uk_summer):
         """22:50 UTC is 23:50 UK on the 15th — the day before."""
         closed_trades.append(_closed(
             "t1", datetime(2026, 7, 15, 22, 50, tzinfo=timezone.utc).timestamp(), 30.0))
@@ -64,7 +84,7 @@ class TestATradeIsBucketedByItsUKDay:
         assert totals["today"].pnl == pytest.approx(0.0)
         assert totals["week"].pnl == pytest.approx(30.0)
 
-    def test_a_winter_trade_uses_the_same_boundary_as_utc(self, closed_trades):
+    def test_a_winter_trade_uses_the_same_boundary_as_utc(self, closed_trades, uk_winter):
         """In January UK time is UTC, so the two agree — which is why this was
         invisible for half the year."""
         closed_trades.append(_closed(
@@ -77,7 +97,7 @@ class TestATradeIsBucketedByItsUKDay:
 
 class TestThePeriodBoundariesThemselves:
 
-    def test_the_week_starts_on_monday(self, closed_trades):
+    def test_the_week_starts_on_monday(self, closed_trades, uk_summer):
         wednesday = datetime(2026, 7, 15, 12, 0)
 
         totals = rep.period_totals(now=wednesday)
@@ -85,7 +105,7 @@ class TestThePeriodBoundariesThemselves:
         assert min(totals["days"]) == datetime(2026, 7, 13, 0, 0)
 
     def test_the_query_window_starts_at_a_UK_instant(self, closed_trades,
-                                                     monkeypatch):
+                                                     monkeypatch, uk_summer):
         """The cutoff handed to the database must be the epoch for UK midnight,
         not for the machine's midnight."""
         seen: list = []

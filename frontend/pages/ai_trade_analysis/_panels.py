@@ -559,3 +559,81 @@ def _render_strategy_dpm_panel(data: dict, analysis: dict):  # noqa: C901
                     ui.icon("lightbulb", color="blue-300", size="xs")
                     ui.label("Actionable Advice").classes("text-blue-300 font-semibold text-xs")
                 ui.label(advice).classes("text-gray-200 text-xs leading-relaxed whitespace-pre-line")
+
+
+# ── Recommended EA template, per channel (owner's request, 2026-09-02) ───────
+#
+# The picks already existed: strategy_ai.py has chosen from
+# `auto_templates() + [STAND_DOWN]` since 2026-08-17, and stores one per
+# channel in channel_strategy_rec. This page just never showed them -- it had
+# a single free-text "Overall Recommendation" for everything, while its
+# strategy/DPM panel still spoke in built-in strategy names.
+#
+# Display only. Nothing here applies a template; selecting one stays a
+# deliberate act on Trading > Strategy.
+
+_STAND_DOWN = "stand_down"
+_TEMPLATE_PREFIX = "template:"
+
+
+def _template_rec_rows(channels: list, recs: dict) -> list[dict]:
+    """One row per channel, whether or not it has a recommendation.
+
+    A channel with no pick is listed with a dash rather than omitted --
+    dropping it would read as "this channel does not exist" rather than "the
+    AI has not judged it yet".
+    """
+    rows: list[dict] = []
+    for ch in channels:
+        rec = recs.get(ch.get("source", "")) or {}
+        raw = (rec.get("strategy") or "").strip()
+        if not raw:
+            label = "\u2014"
+        elif raw == _STAND_DOWN:
+            # A real recommendation -- trade nothing here -- not a missing one.
+            label = "Stand down (trade nothing)"
+        elif raw.startswith(_TEMPLATE_PREFIX):
+            label = raw[len(_TEMPLATE_PREFIX):]
+        else:
+            label = raw
+        rows.append({
+            "channel":    ch.get("channel_name", ""),
+            "template":   label,
+            "confidence": rec.get("confidence") if raw else None,
+            "reasoning":  (rec.get("reasoning") or "").strip(),
+        })
+    return rows
+
+
+def _render_template_recs_panel(channels: list, recs: dict) -> None:
+    rows = _template_rec_rows(channels, recs)
+    if not rows:
+        return
+    with ui.card().classes("w-full bg-gray-900 p-4 mb-4"):
+        with ui.row().classes("items-center gap-2 mb-1"):
+            ui.icon("auto_awesome", color="purple-300")
+            ui.label("Recommended EA template by channel").classes(
+                "text-purple-300 font-semibold text-sm")
+        ui.label(
+            "What the analysis suggests for each channel. Nothing is applied "
+            "automatically \u2014 set it on Trading \u203a Strategy."
+        ).classes("text-xs text-gray-500 mb-3")
+
+        for r in rows:
+            with ui.row().classes("items-start gap-2 w-full mb-2"):
+                ui.label(r["channel"]).classes(
+                    "text-xs font-semibold text-gray-300 shrink-0"
+                ).style("width:9rem")
+                with ui.column().classes("gap-0 flex-1 min-w-0"):
+                    with ui.row().classes("items-center gap-2"):
+                        ui.label(r["template"]).classes(
+                            "text-xs font-mono "
+                            + ("text-gray-500" if r["template"] == "\u2014"
+                               else "text-purple-200")
+                        )
+                        if r["confidence"] is not None:
+                            ui.badge(f"{float(r['confidence']):.0%}",
+                                     color="purple").classes("text-xs")
+                    if r["reasoning"]:
+                        ui.label(r["reasoning"]).classes(
+                            "text-xs text-gray-500 leading-snug")

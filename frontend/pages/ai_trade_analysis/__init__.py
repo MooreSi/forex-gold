@@ -19,6 +19,7 @@ from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import ai_controller as ai_module
 from backend.src.controllers import ai_controller as ai_provider
 from backend.src.controllers import ai_analysis_controller as ai_ctl
+from backend.src.controllers import trading_controller as trading_ctl
 
 from . import _panels
 
@@ -534,6 +535,19 @@ def render(get_engine: Callable):  # noqa: C901
 
             output.clear()
             with output:
+                # Recommended EA template per channel. Read from
+                # channel_strategy_rec, which strategy_ai.py has been filling
+                # with template picks since 2026-08-17 -- this page simply
+                # never displayed them.
+                if channels:
+                    try:
+                        _recs = trading_ctl.get_channel_strategy_rec_map(
+                            [c.get("source", "") for c in channels])
+                    except Exception as _exc:      # never break the page for it
+                        _log.debug("template recs unavailable: %s", _exc)
+                        _recs = {}
+                    with ui.element("div").classes("w-full"):
+                        _panels._render_template_recs_panel(channels, _recs)
                 if sg_data and sg_analysis:
                     with ui.element("div").classes("w-full"):
                         _panels._render_signal_generator_panel(sg_data, sg_analysis)

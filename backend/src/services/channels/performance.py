@@ -54,6 +54,20 @@ def strategy_rec(source: str):
     return _repo.get_channel_strategy_rec(source)
 
 
+def strategy_rec_map(sources: list) -> dict:
+    """{source: recommendation} for a handful of channels, synchronously.
+
+    `strategy_recs` above is the one to use on a request path -- it batches
+    off the event loop. This exists for the AI Analysis page, which builds its
+    output inside a synchronous render and only ever holds a few channels.
+
+    Here rather than in the controller: a controller routes, it does not loop.
+    Putting this comprehension there took trading_controller.py to 206 lines
+    and the controller-LOC gate caught it, correctly.
+    """
+    return {src: strategy_rec(src) for src in sources if src}
+
+
 async def strategy_recs(sources: list) -> dict:
     """One off-loop pass over every source.
 

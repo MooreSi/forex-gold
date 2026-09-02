@@ -44,6 +44,7 @@ __all__ = [
     "get_effective_strategy", "get_custom_strategies", "delete_custom_strategy",
     "get_all_channel_strategy_settings", "get_channel_strategy_rec",
     "set_channel_strategy_override", "get_channel_strategy_recs",
+    "get_channel_strategy_rec_map",
     "get_signal", "set_signal_commentary", "delete_tg_signal_row",
     "get_open_trades", "get_signals", "get_tg_signals",
     "STRATEGY_ADAPTIVE_RUNNER",
@@ -119,6 +120,10 @@ def set_channel_strategy_override(source: str, strategy, auto: bool):
 
 async def get_channel_strategy_recs(sources: list) -> dict:
     return await _channels.strategy_recs(sources)
+
+
+def get_channel_strategy_rec_map(sources: list) -> dict:
+    return _channels.strategy_rec_map(sources)
 
 
 # -- Signal commentary + tg-signal row maintenance ---------------------------

@@ -739,7 +739,7 @@ def _record_failure(ip: str) -> None:
 
 from backend.src.services.cluster.remote._beacon_version import (  # noqa: E402
     _LAN_BEACON_PORT, _get_local_ip, _lan_beacon_loop, _read_changelog,
-    _read_version, _send_udp_broadcast,
+    _read_version, _send_udp_broadcast, registration_is_news,
 )
 
 
@@ -815,23 +815,20 @@ async def _handler(websocket) -> None:
             log.info("[RemoteServer] Registration from %s (%s) ignored — "
                       "token already approved", hostname, ip)
         elif token:
-            _pending[token] = {
-                "hostname": hostname,
-                "platform": platform,
-                "version":  version,
-                "email":    msg.get("email", ""),
-                "nickname": msg.get("nickname", ""),
-                "ts":       time.time(),
-                "ip":       ip,
-            }
+            _reg = {"hostname": hostname, "platform": platform,
+                    "version": version, "email": msg.get("email", ""),
+                    "nickname": msg.get("nickname", ""), "ip": ip}
+            _news = registration_is_news(_pending.get(token), _reg)
+            _pending[token] = {**_reg, "ts": time.time()}
             _save_pending()
-            log.info("[RemoteServer] Registration request from %s (%s)", hostname, ip)
-            # Notify any connected remote admin clients.
+            log.info("[RemoteServer] Registration request from %s (%s)%s",
+                     hostname, ip, "" if _news else " — already queued")
             asyncio.create_task(_push_pending_to_all_admins())
-            asyncio.create_task(_notify_new_registration(
-                hostname=hostname, email=msg.get("email", ""),
-                nickname=msg.get("nickname", ""), ip=ip, token=token,
-            ))
+            if _news:
+                asyncio.create_task(_notify_new_registration(
+                    hostname=hostname, email=msg.get("email", ""),
+                    nickname=msg.get("nickname", ""), ip=ip, token=token,
+                ))
         await _close_ws(websocket)
         return
 

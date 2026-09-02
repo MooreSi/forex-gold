@@ -128,3 +128,23 @@ async def _lan_beacon_loop() -> None:
 # which left every client's working tree "dirty" and broke its own next
 # git-based update (confirmed live — see the "Fix self-update apply_update()
 # failing when the working tree has drifted" commit).
+
+
+def registration_is_news(previous, details: dict) -> bool:
+    """Has anything the admin acts on changed since this token last asked?
+
+    Clients re-register on every reconnect, correctly. Announcing each one
+    sent 139 Telegram messages in an hour for a single pending machine
+    (docs/todo/bugs/021). `ts` is excluded from the comparison -- it moves on
+    every request, so including it would announce every repeat and fix
+    nothing.
+
+    Pure, and here rather than in server.py for the reason this module exists:
+    it touches none of that file's mutable state, and server.py is at its LOC
+    ceiling. The caller passes `_pending.get(token)` -- keyed by TOKEN, because
+    the admin approves a token and the same machine with a new one is news.
+    """
+    keys = ("hostname", "platform", "version", "email", "nickname", "ip")
+    if previous is None:
+        return True
+    return any(previous.get(k) != details.get(k) for k in keys)

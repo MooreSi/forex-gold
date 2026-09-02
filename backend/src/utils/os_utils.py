@@ -113,7 +113,16 @@ def pids_matching(pattern: str) -> list[int]:
                     except ValueError:
                         pass
             return pids
-        except Exception:
+        except subprocess.CalledProcessError:
+            return []          # ordinary "no matches" — stay quiet
+        except Exception as exc:
+            # wmic is deprecated and absent from recent Windows builds. Without
+            # this log, a missing tool is indistinguishable from "no such
+            # process", kill_matching reports 0 killed, and the bridge watchdog
+            # concludes there was nothing to restart.
+            log.warning("[os] Could not look up processes matching %r on "
+                        "Windows (%s: %s) — treating as no matches, but the "
+                        "lookup itself failed.", pattern, type(exc).__name__, exc)
             return []
     else:
         try:
@@ -122,6 +131,13 @@ def pids_matching(pattern: str) -> list[int]:
             ).decode().strip().split()
             return [int(p) for p in out if p]
         except subprocess.CalledProcessError:
+            return []          # pgrep exits 1 when nothing matches
+        except Exception as exc:
+            # Previously uncaught: a missing pgrep raised FileNotFoundError
+            # straight out of the watchdog instead of being handled.
+            log.warning("[os] Could not look up processes matching %r (%s: %s)"
+                        " — treating as no matches, but the lookup itself "
+                        "failed.", pattern, type(exc).__name__, exc)
             return []
 
 

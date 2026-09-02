@@ -37,9 +37,6 @@ _PARSING_CATEGORIES: list[tuple[str, str, list[tuple[str, str, str, int]]]] = [
         ("lk_enable_risk_free_be_parsing", "Enable RISK FREE / BE Parsing",
          "Move SL to entry price (breakeven) when the channel sends a "
          "breakeven/risk-free trigger phrase.", 1),
-        ("lk_enable_tp_hit_parsing", "Enable TP HIT Parsing",
-         "Detect and log/notify \"TP1 HIT\"-style messages. Never moves SL or "
-         "closes anything by itself.", 1),
         ("immediate_market_entry", "Immediate Market Buy/Sell",
          "Reads all Telegram channels for bare 'Buy Now'/'Sell Now' messages and "
          "enters at current market price immediately. When the follow-up signal "

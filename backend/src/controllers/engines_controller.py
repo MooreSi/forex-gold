@@ -69,8 +69,19 @@ def sub_engines() -> tuple:
     return tuple(svc.get_instance() for svc in _ENGINE_SERVICES.values())
 
 
+# Bounce lost its panel on 2026-09-02 (owner's instruction). It is excluded
+# from the bulk start rather than deleted: this function is what the power /
+# mode toggle calls, and a Bounce engine with no UI would otherwise still be
+# started by it -- placing live MT5 orders with nothing on screen saying so.
+# Its service and its position in _ENGINE_SERVICES are deliberately untouched;
+# the sync server and the mode toggle bind engines by that fixed order.
+_NOT_BULK_STARTED = ("bounce",)
+
+
 def start_stopped_engines() -> None:
-    for svc in _ENGINE_SERVICES.values():
+    for name, svc in _ENGINE_SERVICES.items():
+        if name in _NOT_BULK_STARTED:
+            continue
         eng = svc.get_instance()
         if eng is not None and not getattr(eng, "is_running", False):
             eng.start()

@@ -15,6 +15,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
+import pytest
+
 from frontend.components import start_here
 
 from tests.frontend._source import module_source
@@ -125,3 +127,112 @@ def test_reads_only_no_writes():
     # Negative control: the pattern is not blind.
     assert forbidden.search("from backend.src.services.trading import open_trade")
     assert forbidden.search("await engine._bridge.place_order(...)")
+
+
+# ── The Telegram row could never be ticked (owner report, 2026-09-02) ────────
+
+class TestTheTelegramRowReflectsTheReader:
+    """It was permanently red on a fully configured install.
+
+    `gather_status` read `tg.get("connected") or tg.get("authenticated")`, and
+    `TelegramReader.get_status()` returns neither key -- it reports
+    `auth_state`, `session_exists`, `api_id_set`, `api_hash_set` and `slots`.
+    Both lookups returned None, so the row was False unconditionally, however
+    well Telegram was set up. The same shape as a gate matching a name nothing
+    uses: it looked like a check and tested nothing.
+    """
+
+    class _Reader:
+        def __init__(self, state):
+            self._state = state
+
+        def get_status(self):
+            return {
+                "auth_state": self._state,
+                "session_exists": True,
+                "api_id_set": True,
+                "api_hash_set": True,
+                "slots": [],
+            }
+
+    @pytest.mark.asyncio
+    async def test_a_connected_reader_ticks_the_row(self):
+        status = await start_here.gather_status(
+            None, self._Reader("connected"), demo_mode=True)
+
+        assert status["telegram_connected"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("state", [
+        "disconnected", "awaiting_code", "awaiting_2fa", "failed",
+    ])
+    async def test_an_unconnected_reader_does_not(self, state):
+        status = await start_here.gather_status(
+            None, self._Reader(state), demo_mode=True)
+
+        assert status["telegram_connected"] is False
+
+    @pytest.mark.asyncio
+    async def test_reconnecting_still_counts_as_set_up(self):
+        """A dropped link that is retrying is a configured install, not an
+        unconfigured one. Showing it as an outstanding setup step sends the
+        user to configure something that is already configured."""
+        status = await start_here.gather_status(
+            None, self._Reader("reconnecting"), demo_mode=True)
+
+        assert status["telegram_connected"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_reader_at_all_is_not_an_error(self):
+        """The dialog opens at startup, before the reader may exist."""
+        status = await start_here.gather_status(None, None, demo_mode=True)
+
+        assert status["telegram_connected"] is False
+
+
+class TestItStopsAppearingWhenEverythingIsDone:
+    """Owner, 2026-09-02: "when everything is ticked it shouldn't appear".
+
+    Previously it showed on every start until explicitly dismissed, so a
+    finished setup still got the popup for ever.
+    """
+
+    def test_a_finished_checklist_does_not_show(self):
+        done = {row["key"]: True for row in start_here.checklist_rows({})}
+
+        assert start_here.should_show({}, all_done=True) is False
+
+    def test_an_unfinished_checklist_still_shows(self):
+        assert start_here.should_show({}, all_done=False) is True
+
+    def test_dismissal_still_wins_when_things_are_outstanding(self):
+        assert start_here.should_show({"setup_seen": True}, all_done=False) is False
+
+
+class TestAllRowsDone:
+    """What "nothing left to do" means, which is what stops the dialog."""
+
+    _REQUIRED = {"licence": True, "mt5_connected": True, "algo_enabled": True,
+                 "risk_set": True, "demo_mode": True}
+
+    def test_every_required_row_ticked_is_done(self):
+        assert start_here.all_rows_done(
+            {**self._REQUIRED, "telegram_connected": True}) is True
+
+    def test_an_install_with_nothing_set_up_is_not_done(self):
+        assert start_here.all_rows_done({}) is False
+
+    def test_the_optional_telegram_row_does_not_block_completion(self):
+        """An install that never uses Telegram must still reach "done", or the
+        dialog can never stop appearing for the people it applies to least.
+        Asserted through all_rows_done, not by inspecting the key list: the
+        first version of this test checked the set of required keys and passed
+        happily with the optional filter deleted."""
+        assert start_here.all_rows_done(
+            {**self._REQUIRED, "telegram_connected": False}) is True
+
+    @pytest.mark.parametrize("missing", sorted(_REQUIRED))
+    def test_any_missing_required_row_blocks_completion(self, missing):
+        status = {**self._REQUIRED, "telegram_connected": True, missing: False}
+
+        assert start_here.all_rows_done(status) is False

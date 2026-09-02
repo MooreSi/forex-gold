@@ -245,7 +245,7 @@ def _render_mt5(engine):
     with ui.card().classes("w-full max-w-xl bg-gray-800 border border-blue-600 p-4 rounded-lg"):
         with ui.row().classes("w-full items-center justify-between"):
             ea_bridge_sw = ui.switch(
-                "EA Bridge (experimental)",
+                "EA Bridge",
                 value=bool(rs.get("ea_bridge_enabled", 0)),
             ).classes("text-blue-300 font-bold")
             ui.icon("bolt", size="sm").classes("text-blue-400")

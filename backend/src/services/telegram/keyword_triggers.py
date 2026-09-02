@@ -367,19 +367,6 @@ async def try_handle_risk_free_be_trigger(
     return True
 
 
-_TP_HIT_RE = re.compile(r'\bTP\s*\d+\b[^A-Za-z]{0,20}\bHIT', re.IGNORECASE)
-
-
-async def try_handle_tp_hit_trigger(text: str, channel_name: str, tg_id: str, rs: dict) -> bool:
-    """Returns True if this message reported a TP hit (handled here --
-    log/notify only, confirmed with the user 2026-07-22: never moves SL or
-    closes anything by itself)."""
-    if not bool(rs.get("lk_enable_tp_hit_parsing", 1)):
-        return False
-    if not _TP_HIT_RE.search(text):
-        return False
-    if not await db_module.to_db_thread(claim_trigger, tg_id, "tp_hit"):
-        return True
     log.info("[LogicKeywords] TP HIT reported by %s: %s", channel_name, text[:120])
     asyncio.create_task(telegram_alerts.send_message(
         f"*TP hit reported* — {channel_name}\n{text[:300]}",

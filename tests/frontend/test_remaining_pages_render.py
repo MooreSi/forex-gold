@@ -30,16 +30,29 @@ import pytest
 #                         Uniqueness is now checked across all of frontend/.
 #   "Learned Parameters"  and "Bounce" stayed findable by should_see with
 #   / "Bounce"            test_panel stubbed, so neither can fail and neither
-#                         is here. test_panel therefore has ONE validated
+#                         is here. test_panel therefore had ONE validated
 #                         landmark rather than a padded two -- a landmark that
 #                         cannot go red is worse than not having it.
+#
+#   test_panel            REMOVED 2026-09-02. Its landmark was
+#                         "TG LEARNING OFF", which lived in the Bounce panel;
+#                         Bounce was removed on the owner's instruction and
+#                         the module is now a pure tab host. Its only remaining
+#                         text is the tab labels "Breakout" and
+#                         "Reversal Engine", and BOTH appear elsewhere in
+#                         frontend/ (_schedule.py, _signals_card.py,
+#                         reversal_panel), so neither can fail if this page
+#                         stops rendering. Rather than pad the table with a
+#                         landmark that cannot go red -- the exact thing the
+#                         note above rejects -- the page has no entry. Its two
+#                         panels are covered by breakout_panel and
+#                         reversal_panel above.
 PAGE_LANDMARKS = {
     "ai_trade_analysis": ("AI Trade Analysis", "XAUUSD \u00b7 Per-channel signal quality"),
     "breakout_panel":    ("Engine Parameters", "M5 candle gate + 3s velocity monitor"),
     "chart":             ("RSI 14", "FVG:"),
     "reversal_panel":    ("Active Candidate Levels", "Learn From Pro Signals"),
     "telegram":          ("Telegram Authentication", "Step 1: Send login code"),
-    "test_panel":        ("TG LEARNING OFF",),
 }
 
 CASES = [(page, text) for page, texts in sorted(PAGE_LANDMARKS.items()) for text in texts]

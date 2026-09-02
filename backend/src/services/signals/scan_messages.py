@@ -52,7 +52,6 @@ from backend.src.services.telegram.keyword_triggers import should_skip_media_or_
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.telegram.keyword_triggers import try_handle_close_all_trigger
 from backend.src.services.telegram.keyword_triggers import try_handle_risk_free_be_trigger
-from backend.src.services.telegram.keyword_triggers import try_handle_tp_hit_trigger
 from backend.src.services.telegram.keyword_triggers import (
     apply_sl_parsing_override, apply_mirror_copy,
     parse_lexicon_direction_trigger,
@@ -184,8 +183,6 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             if await try_handle_risk_free_be_trigger(
                 text, channel_name, tg_id, rs, bridge=ctx.bridge,
             ):
-                continue
-            if await try_handle_tp_hit_trigger(text, channel_name, tg_id, rs):
                 continue
 
             # Dedup — skip already-processed messages, but re-parse edited ones

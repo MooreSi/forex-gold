@@ -265,49 +265,13 @@ def test_risk_free_be_second_scan_of_same_message_does_not_reapply(fresh_db):
     assert sl == 4090.0  # unchanged -- the claim already happened on the first (trade-less) scan
 
 
-# ── try_handle_tp_hit_trigger ───────────────────────────────────────────────
+# ── TP HIT parsing was REMOVED 2026-09-02 ──────────────────────────────────
+#
+# Owner: "remove the 'Enable TP HIT Parsing' - not needed". The handler only
+# logged and notified -- its own docstring recorded that it never moved an SL
+# or closed anything -- so the tests that covered it went with it rather than
+# being left asserting against a function that no longer exists.
+#
+# tests/frontend/test_tp_hit_parsing_removed.py now pins the ABSENCE, and
+# checks that CLOSE ALL and RISK FREE / BE (which DO act on trades) survived.
 
-def test_tp_hit_disabled_toggle_returns_false(fresh_db):
-    handled = asyncio.run(trig.try_handle_tp_hit_trigger(
-        "TP2 HITT +40pips", "Gold Diggers VIP", "tg1", {"lk_enable_tp_hit_parsing": 0},
-    ))
-    assert handled is False
-
-
-def test_tp_hit_matches_pattern(fresh_db):
-    handled = asyncio.run(trig.try_handle_tp_hit_trigger(
-        "TP2 HITT +40pips \U0001f911", "Gold Diggers VIP", "tg1", _RS_ALL_ON,
-    ))
-    assert handled is True
-
-
-def test_tp_hit_no_action_on_trade(fresh_db):
-    """Confirmed with the user: TP HIT is log/notify only -- must not touch
-    any trade's SL or status."""
-    _insert_open_trade(trade_id="t1", channel="Gold Diggers VIP", stop_loss=4090.0)
-    asyncio.run(trig.try_handle_tp_hit_trigger(
-        "TP1 HIT +30pips", "Gold Diggers VIP", "tg1", _RS_ALL_ON,
-    ))
-    with db.db() as conn:
-        row = conn.execute(
-            "SELECT stop_loss, status FROM vantage_simulated_trades WHERE trade_id='t1'"
-        ).fetchone()
-    assert tuple(row) == (4090.0, "open")
-
-
-def test_tp_hit_no_match_returns_false(fresh_db):
-    handled = asyncio.run(trig.try_handle_tp_hit_trigger(
-        "just chatting", "Gold Diggers VIP", "tg1", _RS_ALL_ON,
-    ))
-    assert handled is False
-
-
-def test_tp_hit_dedup_second_message_still_true_but_no_duplicate_alert(fresh_db):
-    handled1 = asyncio.run(trig.try_handle_tp_hit_trigger(
-        "TP1 HIT", "Gold Diggers VIP", "tg1", _RS_ALL_ON,
-    ))
-    handled2 = asyncio.run(trig.try_handle_tp_hit_trigger(
-        "TP1 HIT", "Gold Diggers VIP", "tg1", _RS_ALL_ON,
-    ))
-    assert handled1 is True
-    assert handled2 is True  # claim_trigger fails silently, still "handled" (no re-parse as signal)

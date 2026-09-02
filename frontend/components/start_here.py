@@ -15,6 +15,7 @@ from typing import Any, Callable, Mapping, Optional
 
 from nicegui import app, ui
 
+
 log = logging.getLogger(__name__)
 
 # key, label, hint, optional, fix_tab, fix_section
@@ -73,8 +74,27 @@ def checklist_rows(status: Mapping[str, object]) -> list[dict]:
     ]
 
 
-def should_show(storage: Mapping[str, object]) -> bool:
-    """Show until the user dismisses it (setup_seen)."""
+def all_rows_done(status: Mapping[str, object]) -> bool:
+    """Every non-optional row ticked.
+
+    The Telegram row is optional, so an install that never uses Telegram is
+    still "done" -- otherwise the dialog could never stop appearing for the
+    people it least applies to.
+    """
+    return all(row["done"] for row in checklist_rows(status)
+               if not row.get("optional"))
+
+
+def should_show(storage: Mapping[str, object], all_done: bool = False) -> bool:
+    """Show until the user dismisses it, or until there is nothing left to do.
+
+    `all_done` was added 2026-09-02: a finished setup still got the dialog on
+    every start, which is a checklist asking you to complete a checklist you
+    have completed. Dismissal still wins when items are outstanding, so a user
+    who does not want the reminder can still turn it off.
+    """
+    if all_done:
+        return False
     return not storage.get("setup_seen")
 
 
@@ -157,10 +177,15 @@ async def gather_status(engine: Any, tg_reader: Any, demo_mode: bool) -> dict:
     except Exception as exc:
         log.debug("start-here: risk settings unavailable: %s", exc)
     try:
+        # auth_state, NOT "connected"/"authenticated": TelegramReader's status
+        # dict has never carried either key, so this row read None or None and
+        # was False on every install however well Telegram was set up (owner
+        # report, 2026-09-02). RECONNECTING counts as configured -- a dropped
+        # link that is retrying is not an outstanding setup step, and sending
+        # the user to configure something already configured is worse than
+        # showing nothing.
         tg = await _tg_ctl.get_reader_status(tg_reader)
-        status["telegram_connected"] = bool(
-            tg.get("connected") or tg.get("authenticated")
-        )
+        status["telegram_connected"] = _tg_ctl.reader_is_configured(tg)
     except Exception as exc:
         log.debug("start-here: telegram status unavailable: %s", exc)
     return status
@@ -193,8 +218,14 @@ def attach(
         app.storage.user["setup_seen"] = True
         dialog.close()
 
-    async def open_start_here() -> None:
+    async def open_start_here(auto: bool = False) -> None:
+        """`auto=True` is the startup call: it opens only if something is
+        still outstanding. Opened from Help it always shows, because the user
+        asked for it (owner, 2026-09-02: "when everything is ticked it
+        shouldn't appear")."""
         status = await gather_status(get_engine(), get_tg_reader(), is_demo())
+        if auto and all_rows_done(status):
+            return
         body.clear()
         with body:
             render(status, on_fix=_fix, on_dismiss=_dismiss)

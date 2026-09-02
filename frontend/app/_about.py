@@ -254,7 +254,7 @@ def _render_about(nav: Optional[dict] = None):
                                 "Back in MT5, right-click Expert Advisors in the Navigator and choose Refresh so 'ForexTraderBridge' appears, then drag it onto the XAUUSD chart.",
                                 "In the dialog that opens, go to the Common tab and tick 'Allow Algo Trading' for this EA specifically — separate from (and in addition to) the terminal-wide Algo Trading toggle in the main toolbar.",
                                 "One-time terminal setting, required or the EA can never connect: go to Tools > Options > Expert Advisors, tick 'Allow WebRequest/Socket for listed addresses', and add 127.0.0.1 to the list.",
-                                "In the app, go to Settings > MT5 / Bridge, enable the 'EA Bridge (experimental)' switch, and click Save. The app only hands a trade to the EA when it detects a live, connected EA on that terminal — if the EA is disconnected or was never attached, every trade is managed by Python instead, with no other change needed.",
+                                "In the app, go to Settings > MT5 / Bridge, enable the 'EA Bridge' switch, and click Save. The app only hands a trade to the EA when it detects a live, connected EA on that terminal — if the EA is disconnected or was never attached, every trade is managed by Python instead, with no other change needed.",
                                 "To confirm it's working: with the EA attached and the switch on, open a small test trade. You should see the EA's own activity in MT5's Experts tab (bottom panel) alongside the position.",
                             ],
                         ),

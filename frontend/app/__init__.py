@@ -677,7 +677,9 @@ def main_page():
         lambda: cfg_module.get_config("account_env", "demo") != "live",
     )
     if _start_here.should_show(app.storage.user):
-        asyncio.ensure_future(open_start_here())
+        # auto=True: it decides for itself, once it has the status, whether
+        # anything is still outstanding.
+        asyncio.ensure_future(open_start_here(auto=True))
 
     # ── Help "?" → Getting Started (frontend/components/getting_started.py) ──
     from frontend.components import getting_started as _getting_started

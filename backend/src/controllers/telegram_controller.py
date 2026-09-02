@@ -45,6 +45,25 @@ async def get_reader_status(reader: Any) -> dict:
     return await _messages.reader_status(reader)
 
 
+def reader_is_configured(status: dict) -> bool:
+    """Is the Telegram reader set up, as far as a setup checklist cares?
+
+    Here rather than in the view because the view got it wrong: it tested
+    `status["connected"] or status["authenticated"]`, and the reader's status
+    dict carries neither key -- it reports `auth_state`. Both lookups returned
+    None, so the Getting Started row was red on every install however well
+    Telegram was configured (owner report, 2026-09-02).
+
+    RECONNECTING counts. A dropped link that is retrying is a configured
+    install; telling the user to go and set it up is worse than saying
+    nothing.
+    """
+    from backend.src.services.telegram.reader_common import (
+        AUTH_CONNECTED, AUTH_RECONNECTING,
+    )
+    return status.get("auth_state") in (AUTH_CONNECTED, AUTH_RECONNECTING)
+
+
 async def get_pending_unrecognised(limit: int = 20) -> list[dict]:
     return await _channels.pending_unrecognised(limit=limit)
 

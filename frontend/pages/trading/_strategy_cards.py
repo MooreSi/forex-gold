@@ -121,18 +121,12 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
             is_auto = ch.get("auto_strategy", False)
             cur_ov  = "auto" if is_auto else (ch.get("strategy_override") or "")
             rec     = trading_ctl.get_channel_strategy_rec(src)
-            pnl_col = "text-green-400" if (ch["net_pnl"] or 0) >= 0 else "text-red-400"
             rec_tip = _rec_label_text(rec, strat_opts)
-            # Single stats label with fixed width keeps all dropdowns left-aligned
-            stats_txt = f"WR {ch['win_rate']:.0f}% ${ch['net_pnl']:+.0f}"
 
             with ui.row().classes("items-center gap-1 w-full"):
                 ui.label(src).classes(
                     "text-xs font-semibold text-gray-300 truncate shrink-0"
                 ).style("width:7rem").tooltip(src)
-                ui.label(stats_txt).classes(
-                    f"text-xs font-mono {pnl_col} shrink-0"
-                ).style("width:6rem")
                 sel = ui.select(
                     strat_opts, value=cur_ov, label=None,
                 ).classes("text-xs min-w-0").style("flex:1").props("dense outlined")

@@ -36,8 +36,39 @@ def _mt5_bottle_path() -> str:
         _os.path.expanduser("~/.wine_mt5")
 
 
+_DEFAULT_BRIDGE_PORT = 9000
+
+
+def _bridge_url() -> str:
+    from backend.src.controllers import settings_controller as _cfg
+    return (_cfg.get_config("mt5_bridge_url") or "").strip()
+
+
+def _bridge_port() -> int:
+    """The port the bridge is CONFIGURED on, not a hardcoded guess.
+
+    This checked 9000 unconditionally while mt5_bridge_url pointed at 9010,
+    so a healthy bridge was reported as "NOT running" (owner, 2026-09-02).
+    The label was the harmless half: start_bridge() short-circuits on
+    _bridge_running(), so the wrong port meant Start Bridge would launch a
+    SECOND bridge against the same MT5 terminal.
+
+    Falls back to 9000 rather than to urlparse's default of 80: a URL with no
+    port has always meant the bridge default here, and answering 80 would
+    report "not running" for ever. Never raises -- this runs on every settings
+    refresh, and a traceback takes the page down with it.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        port = urlparse(_bridge_url()).port
+    except Exception:
+        port = None
+    return int(port) if port else _DEFAULT_BRIDGE_PORT
+
+
 def _bridge_running() -> bool:
-    return _pu.is_port_listening(9000)
+    return _pu.is_port_listening(_bridge_port())
 
 
 def _render_bridge_control(engine):

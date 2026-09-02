@@ -8,8 +8,16 @@ then reports 0 killed and the watchdog concludes there was nothing to restart.
 
 That matters more than it used to: Windows clients are in scope (owner,
 2026-09-02), and `wmic` is deprecated -- Microsoft has been removing it from
-recent Windows builds. If it is gone on a client's machine, the recovery path
-goes quiet rather than failing.
+recent Windows builds.
+
+**It is not hypothetical.** On 2026-09-02 the Windows CI run failed this
+file's empirical test: a process started with a unique marker on its command
+line was not found. `wmic` is now a fallback; PowerShell's CIM query is the
+primary path, because it is present on every supported Windows.
+
+`tasklist` cannot do this job at all -- it reports image names, not command
+lines, and the watchdog matches on "wineserver", "mt5_bridge.py" and
+"terminal64.exe", two of which are not image names.
 
 `test_the_current_process_is_discoverable` is the empirical half. It runs on
 every platform, and on Windows CI it answers the question this repo cannot
@@ -57,6 +65,111 @@ class TestAFailureIsNotSilent:
         assert not [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
 
 
+class TestTheWindowsLookup:
+    """Simulated, so the mechanism is pinned from a Mac. The real behaviour is
+    proved on Windows CI by TestItActuallyFindsProcesses below."""
+
+    @pytest.fixture
+    def on_windows(self, monkeypatch):
+        monkeypatch.setattr(os_utils.sys, "platform", "win32")
+
+    def test_powershell_is_tried_before_wmic(self, on_windows, monkeypatch):
+        """wmic is deprecated and missing from recent builds; CIM is not."""
+        calls: list = []
+        monkeypatch.setattr(
+            os_utils, "_pids_windows_powershell",
+            lambda p: calls.append("powershell") or [42])
+        monkeypatch.setattr(
+            os_utils, "_pids_windows_wmic",
+            lambda p: calls.append("wmic") or [99])
+
+        assert os_utils.pids_matching("x") == [42]
+        assert calls == ["powershell"]
+
+    def test_wmic_is_the_fallback_when_powershell_cannot_answer(
+            self, on_windows, monkeypatch):
+        monkeypatch.setattr(os_utils, "_pids_windows_powershell", lambda p: None)
+        monkeypatch.setattr(os_utils, "_pids_windows_wmic", lambda p: [99])
+
+        assert os_utils.pids_matching("x") == [99]
+
+    def test_an_empty_result_is_NOT_treated_as_a_failure(self, on_windows,
+                                                          monkeypatch):
+        """"Nothing matched" is a real answer. Falling through to wmic on an
+        empty list would reintroduce the confusion this change removes."""
+        wmic: list = []
+        monkeypatch.setattr(os_utils, "_pids_windows_powershell", lambda p: [])
+        monkeypatch.setattr(os_utils, "_pids_windows_wmic",
+                            lambda p: wmic.append("called") or [])
+
+        assert os_utils.pids_matching("x") == []
+        assert wmic == [], "fell back to wmic on a legitimate empty result"
+
+    def test_both_mechanisms_failing_is_logged_at_ERROR(self, on_windows,
+                                                         monkeypatch, caplog):
+        """The watchdog is blind at this point. It must say so loudly."""
+        monkeypatch.setattr(os_utils, "_pids_windows_powershell", lambda p: None)
+        monkeypatch.setattr(os_utils, "_pids_windows_wmic", lambda p: None)
+
+        with caplog.at_level("ERROR"):
+            assert os_utils.pids_matching("x") == []
+
+        assert any(r.levelname == "ERROR" for r in caplog.records)
+
+    def test_a_quote_in_the_pattern_is_refused(self, monkeypatch):
+        """The pattern is interpolated into a single-quoted PowerShell string.
+        Every real caller passes a literal, so a quote means something has gone
+        wrong -- refuse rather than build a command that means something else."""
+        ran: list = []
+        monkeypatch.setattr(os_utils.subprocess, "run",
+                            lambda *a, **kw: ran.append(a))
+
+        assert os_utils._pids_windows_powershell("bad'pattern") is None
+        assert ran == []
+
+    def test_a_powershell_error_is_not_reported_as_no_matches(self,
+                                                              monkeypatch):
+        """The whole bug class, in the new mechanism. A non-zero exit must
+        return None so the wmic fallback runs -- returning [] would say
+        "nothing is running" about a lookup that never ran."""
+        class _R:
+            returncode = 1
+            stdout = ""
+            stderr = "Get-CimInstance : Access denied"
+
+        monkeypatch.setattr(os_utils.subprocess, "run", lambda *a, **kw: _R())
+
+        assert os_utils._pids_windows_powershell("x") is None
+
+    def test_a_powershell_crash_is_not_reported_as_no_matches(self,
+                                                              monkeypatch):
+        """A machine with no powershell.exe at all."""
+        def _boom(*a, **kw):
+            raise FileNotFoundError("powershell")
+
+        monkeypatch.setattr(os_utils.subprocess, "run", _boom)
+
+        assert os_utils._pids_windows_powershell("x") is None
+
+    def test_the_cim_query_matches_on_the_command_line(self, monkeypatch):
+        """Not the image name. Two of the three real patterns
+        ("mt5_bridge.py", "wineserver") never appear as an image name."""
+        seen: list = []
+
+        class _R:
+            returncode = 0
+            stdout = "123\n"
+            stderr = ""
+
+        monkeypatch.setattr(os_utils.subprocess, "run",
+                            lambda cmd, **kw: seen.append(cmd) or _R())
+
+        assert os_utils._pids_windows_powershell("mt5_bridge.py") == [123]
+        script = seen[0][-1]
+        assert "CommandLine" in script
+        assert "mt5_bridge.py" in script
+
+
 class TestItActuallyFindsProcesses:
     def test_a_process_we_started_is_found_by_its_command_line(self):
         """The empirical check, and the reason this file exists.
@@ -88,11 +201,23 @@ class TestItActuallyFindsProcesses:
                     break
                 time.sleep(0.2)
 
-            assert pids, (
-                f"no process matched {marker!r}, yet one was just started with "
-                "it on its command line — the process-lookup mechanism is "
-                "broken on this platform, and the bridge watchdog silently "
-                "believes nothing needs restarting")
+            if not pids:
+                # The suite runs at -q on CI, so captured warnings do not reach
+                # the log. When this failed on 2026-09-02 the message said only
+                # "no process matched", and which mechanism broke could not be
+                # recovered from the run at all. Put the diagnosis IN the
+                # assertion, where it survives.
+                detail = ""
+                if sys.platform == "win32":
+                    ps = os_utils._pids_windows_powershell(marker)
+                    wm = os_utils._pids_windows_wmic(marker)
+                    detail = (f" powershell returned {ps!r}, wmic returned "
+                              f"{wm!r} (None means the tool could not answer)")
+                raise AssertionError(
+                    f"no process matched {marker!r}, yet one was just started "
+                    f"with it on its command line (pid {proc.pid}).{detail} "
+                    "The bridge watchdog cannot see processes on this "
+                    "platform and will not restart a dead bridge.")
             # That process, specifically. "returned a non-empty list" is
             # satisfied by a lookup that fabricates PIDs, and the watchdog
             # kills whatever this returns.

@@ -92,53 +92,116 @@ def kill_pid(pid: int, force: bool = False) -> None:
             pass
 
 
+def _pids_windows_powershell(pattern: str) -> "list[int] | None":
+    """Ask CIM for processes whose command line contains `pattern`.
+
+    Returns None if PowerShell itself could not answer -- which is different
+    from an empty list, and the caller falls back only on the former.
+
+    Preferred over wmic because wmic is deprecated and absent from recent
+    Windows builds; CIM is present on every supported version. Verified on
+    Windows CI by tests/utils/test_process_discovery.py, which is the only
+    place this repo can test it -- it is developed on a Mac.
+    """
+    if "'" in pattern:
+        # The pattern is interpolated into a single-quoted PowerShell string.
+        # Every real caller passes a literal ("wineserver", "mt5_bridge.py"),
+        # so refuse rather than build a quoted string that means something
+        # other than what was asked.
+        log.warning("[os] Refusing a process pattern containing a quote: %r", pattern)
+        return None
+    script = (
+        "Get-CimInstance Win32_Process | "
+        f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
+        "ForEach-Object { $_.ProcessId }"
+    )
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:
+        log.warning("[os] PowerShell process lookup could not run (%s: %s)",
+                    type(exc).__name__, exc)
+        return None
+    if proc.returncode != 0:
+        log.warning("[os] PowerShell process lookup failed (rc=%s): %s",
+                    proc.returncode, (proc.stderr or "").strip()[:200])
+        return None
+    pids = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            pids.append(int(line))
+    return pids
+
+
+def _pids_windows_wmic(pattern: str) -> "list[int] | None":
+    """The old mechanism, kept as a fallback for boxes without PowerShell.
+
+    wmic is deprecated and has been removed from recent Windows builds, so
+    this is no longer the primary path.
+    """
+    try:
+        out = subprocess.check_output(
+            [
+                "wmic", "process", "where",
+                f"CommandLine like '%{pattern}%'",
+                "get", "ProcessId", "/value",
+            ],
+            stderr=subprocess.DEVNULL,
+        ).decode("utf-8", errors="replace")
+    except subprocess.CalledProcessError:
+        return []          # ordinary "no matches"
+    except Exception as exc:
+        log.warning("[os] wmic process lookup could not run (%s: %s)",
+                    type(exc).__name__, exc)
+        return None
+    pids = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line.lower().startswith("processid="):
+            try:
+                pids.append(int(line.split("=", 1)[1]))
+            except ValueError:
+                pass
+    return pids
+
+
 def pids_matching(pattern: str) -> list[int]:
-    """Return PIDs of all processes whose command line contains `pattern`."""
+    """Return PIDs of all processes whose command line contains `pattern`.
+
+    An empty list means "nothing matched". It must never mean "the lookup
+    broke": the bridge watchdog kills what this returns, so a silent [] makes
+    a dead bridge look like a healthy one with nothing to restart. Every
+    failure path here logs.
+    """
     if sys.platform == "win32":
-        try:
-            out = subprocess.check_output(
-                [
-                    "wmic", "process", "where",
-                    f"CommandLine like '%{pattern}%'",
-                    "get", "ProcessId", "/value",
-                ],
-                stderr=subprocess.DEVNULL,
-            ).decode("utf-8", errors="replace")
-            pids = []
-            for line in out.splitlines():
-                line = line.strip()
-                if line.lower().startswith("processid="):
-                    try:
-                        pids.append(int(line.split("=", 1)[1]))
-                    except ValueError:
-                        pass
+        pids = _pids_windows_powershell(pattern)
+        if pids is not None:
             return pids
-        except subprocess.CalledProcessError:
-            return []          # ordinary "no matches" — stay quiet
-        except Exception as exc:
-            # wmic is deprecated and absent from recent Windows builds. Without
-            # this log, a missing tool is indistinguishable from "no such
-            # process", kill_matching reports 0 killed, and the bridge watchdog
-            # concludes there was nothing to restart.
-            log.warning("[os] Could not look up processes matching %r on "
-                        "Windows (%s: %s) — treating as no matches, but the "
-                        "lookup itself failed.", pattern, type(exc).__name__, exc)
-            return []
-    else:
-        try:
-            out = subprocess.check_output(
-                ["pgrep", "-f", pattern], stderr=subprocess.DEVNULL
-            ).decode().strip().split()
-            return [int(p) for p in out if p]
-        except subprocess.CalledProcessError:
-            return []          # pgrep exits 1 when nothing matches
-        except Exception as exc:
-            # Previously uncaught: a missing pgrep raised FileNotFoundError
-            # straight out of the watchdog instead of being handled.
-            log.warning("[os] Could not look up processes matching %r (%s: %s)"
-                        " — treating as no matches, but the lookup itself "
-                        "failed.", pattern, type(exc).__name__, exc)
-            return []
+        pids = _pids_windows_wmic(pattern)
+        if pids is not None:
+            return pids
+        log.error("[os] No working process lookup on this machine — neither "
+                  "PowerShell nor wmic could answer for %r. The bridge "
+                  "watchdog cannot see processes and will not restart a dead "
+                  "bridge.", pattern)
+        return []
+    try:
+        out = subprocess.check_output(
+            ["pgrep", "-f", pattern], stderr=subprocess.DEVNULL
+        ).decode().strip().split()
+        return [int(p) for p in out if p]
+    except subprocess.CalledProcessError:
+        return []          # pgrep exits 1 when nothing matches
+    except Exception as exc:
+        # Previously uncaught: a missing pgrep raised FileNotFoundError
+        # straight out of the watchdog instead of being handled.
+        log.warning("[os] Could not look up processes matching %r (%s: %s)"
+                    " — treating as no matches, but the lookup itself "
+                    "failed.", pattern, type(exc).__name__, exc)
+        return []
 
 
 def kill_matching(pattern: str, force: bool = False) -> int:

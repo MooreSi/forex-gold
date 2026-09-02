@@ -815,9 +815,12 @@ async def _handler(websocket) -> None:
             log.info("[RemoteServer] Registration from %s (%s) ignored — "
                       "token already approved", hostname, ip)
         elif token:
+            # machine_id is what approve_registration signs the licence for:
+            # without it the approval SUCCEEDS with an empty key (bugs/022).
             _reg = {"hostname": hostname, "platform": platform,
                     "version": version, "email": msg.get("email", ""),
-                    "nickname": msg.get("nickname", ""), "ip": ip}
+                    "nickname": msg.get("nickname", ""), "ip": ip,
+                    "machine_id": msg.get("machine_id", "")}
             _news = registration_is_news(_pending.get(token), _reg)
             _pending[token] = {**_reg, "ts": time.time()}
             _save_pending()

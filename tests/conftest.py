@@ -150,6 +150,11 @@ def pytest_configure(config):
         "live_market_hours: test deliberately reads the real calendar week "
         "(exempt from the market-open stub in tests/conftest.py)",
     )
+    config.addinivalue_line(
+        "markers",
+        "live_network: test deliberately makes a real outbound HTTP request "
+        "(exempt from the network guard in tests/conftest.py)",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -346,3 +351,73 @@ def _fresh_log_throttle():
     log_throttle.reset()
     yield
     log_throttle.reset()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_network(request, monkeypatch):
+    """No test makes a real outbound HTTP request unless it says so.
+
+    Found 2026-09-02: two balance-math tests in
+    tests/test_signal/test_engine_characterization.py were making live, billed
+    calls to https://api.deepseek.com on every local run, using whatever API
+    key the developer had configured. The engine's close path fires AI
+    commentary, the commentary call is wrapped in a try/except with a
+    fallback, and the failure was swallowed -- so the tests passed either way
+    and nothing ever said the wire had been touched.
+
+    It surfaced only as a coverage floor that failed on Windows and not on
+    macOS, because CI has no API key and therefore never executed the request
+    body. That is the whole reason this fixture exists: a test that quietly
+    reaches the internet is invisible until something downstream disagrees.
+
+    Blocks at the transport, so it catches every httpx caller rather than the
+    ones we thought to stub. Mark a test `live_network` to opt out.
+
+    **Loopback is allowed.** The rule is "nothing leaves this machine", not
+    "no sockets": several tests talk to a local server on purpose -- the
+    send-failure classifier drives a real broken socket on 127.0.0.1, and the
+    page-render harness runs NiceGUI locally. Blocking those too made 42 tests
+    fail for reasons that had nothing to do with the defect this guards.
+    """
+    if "live_network" in request.keywords:
+        return
+
+    import httpx
+
+    _LOOPBACK = {"localhost", "127.0.0.1", "::1", "0.0.0.0", ""}
+    _IN_PROCESS = tuple(
+        t for t in (getattr(httpx, "ASGITransport", None),
+                    getattr(httpx, "WSGITransport", None),
+                    getattr(httpx, "MockTransport", None)) if t is not None
+    )
+
+    def _refuse(client, request_obj):
+        # An ASGI/WSGI/Mock transport answers in this process. None of them
+        # can reach the network however the URL is spelled -- the page render
+        # harness uses http://test/ against NiceGUI in-process, and a stubbed
+        # provider test uses the real api.deepseek.com URL against a
+        # MockTransport precisely so the outgoing request stays inspectable.
+        if _IN_PROCESS and isinstance(getattr(client, "_transport", None),
+                                      _IN_PROCESS):
+            return False
+        if (request_obj.url.host or "") in _LOOPBACK:
+            return False
+        raise RuntimeError(
+            f"outbound HTTP request blocked in tests: {request_obj.url}. "
+            "Stub the transport, or mark the test `live_network` if it "
+            "genuinely needs the wire."
+        )
+
+    real_async = httpx.AsyncClient.send
+    real_sync = httpx.Client.send
+
+    async def _async_send(self, request_obj, *a, **kw):
+        _refuse(self, request_obj)
+        return await real_async(self, request_obj, *a, **kw)
+
+    def _sync_send(self, request_obj, *a, **kw):
+        _refuse(self, request_obj)
+        return real_sync(self, request_obj, *a, **kw)
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", _async_send)
+    monkeypatch.setattr(httpx.Client, "send", _sync_send)

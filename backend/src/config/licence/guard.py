@@ -102,6 +102,34 @@ def _this_is_the_admin_machine() -> bool:
         return False
 
 
+# Agents injected by run.py, started only on the admin path (bugs/021).
+#
+# The Telegram approval poller has to live in services/telegram, and config/
+# sits at the bottom of the import stack -- importing it here would be the
+# lowest layer reaching upward, which the import contract exists to stop. So
+# run.py, which is above both, hands the callable down instead.
+_activation_agents: list = []
+
+
+def register_activation_agent(fn) -> None:
+    """Register something for the activation screen to start on the ADMIN
+    machine. Used for the Telegram registration-approval poller: without it the
+    Approve button in the alert has nothing polling for it and does nothing."""
+    _activation_agents.append(fn)
+
+
+def _start_activation_agents() -> None:
+    """Run every registered agent, independently. One that raises must not stop
+    the next, and must not take the screen down -- this screen is the only way
+    back into a stranded install."""
+    for fn in _activation_agents:
+        try:
+            fn()
+        except Exception as exc:
+            log.warning("Activation agent %s failed to start: %s",
+                        getattr(fn, "__name__", fn), exc)
+
+
 def _start_agents_for_activation(ng_app, is_admin: bool, known_client: bool) -> None:
     """Bring up whichever remote agent can get this machine relicensed.
 
@@ -129,6 +157,12 @@ def _start_agents_for_activation(ng_app, is_admin: bool, known_client: bool) -> 
             except Exception as exc:
                 log.warning("Could not auto-start the admin server on the "
                             "activation screen: %s", exc)
+
+        @ng_app.on_startup
+        def _autostart_activation_agents():
+            # Admin only. A client machine cannot issue a licence, and a poller
+            # there would compete with the real admin for the bot token.
+            _start_activation_agents()
         return
 
     if known_client:

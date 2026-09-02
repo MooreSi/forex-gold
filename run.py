@@ -380,6 +380,21 @@ def main():
 
     # ── Licence check — must pass before any engine or UI starts ──────────────
     from backend.src.config.licence.guard import enforce as _licence_enforce
+    from backend.src.config.licence.guard import register_activation_agent
+
+    # bugs/021: the activation screen runs before TradingRuntime.startup(), so
+    # nothing polls Telegram getUpdates there and the Approve button in a
+    # registration alert does nothing. Register a restricted poller that serves
+    # registration approvals ONLY. It is started by the guard on the admin
+    # machine alone, and must be registered before enforce(), which shows the
+    # screen and never returns.
+    def _start_activation_approval_loop() -> None:
+        import asyncio
+
+        from backend.src.services.telegram.activation_bot import activation_bot_loop
+        asyncio.create_task(activation_bot_loop(lambda: True))
+
+    register_activation_agent(_start_activation_approval_loop)
     _licence_enforce()
 
     bridge_proc = _start_mt5_bridge()

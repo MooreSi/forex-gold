@@ -45,6 +45,44 @@ def get_risk_settings() -> dict:
 _applying_sync_settings = False  # re-entrancy guard — see update_risk_settings
 
 
+# The settings that decide when trading STOPS. A change to one of these is
+# logged with its old and new value and where it came from; everything else
+# stays quiet.
+#
+# Why: on 2026-09-02 the owner's governor was off, his drawdown limit 40% and
+# his daily loss 20%, where the day before they had been on, 10% and 3%.
+# Establishing which of "he changed them", "the sync pushed the other node's
+# values over them" or "something else" had happened took a database query, a
+# check of _SYNCED_SETTINGS_KEYS (all four ARE synced), a hunt for a sync
+# connection and two log greps that found nothing. It was benign. But "was
+# that me or the other node?" should not be a question answered by inference.
+#
+# Deliberately a small list. This runs on every settings save, and a line per
+# key per save is the noise problem already fixed three times in this
+# codebase.
+_PROTECTIVE_KEYS = frozenset({
+    "risk_governor_enabled", "max_total_drawdown_pct", "max_daily_loss_pct",
+    "circuit_breaker_enabled", "circuit_breaker_losses", "max_open_trades",
+    "giveback_guard_enabled", "cooldown_after_loss_min", "auto_execute_signals",
+})
+
+
+def _log_protective_changes(before: dict, updates: dict, from_sync: bool) -> None:
+    """Record any protective limit that actually moved. Never raises: the log
+    is a nicety and the setting is not, so a settings save must not fail
+    because its audit line could not be built."""
+    try:
+        moved = [(k, before.get(k), v) for k, v in updates.items()
+                 if k in _PROTECTIVE_KEYS and str(before.get(k)) != str(v)]
+        if not moved:
+            return
+        origin = " (over the sync channel from the other node)" if from_sync else ""
+        for key, old, new in moved:
+            log.warning("[RiskSettings] %s changed: %s -> %s%s", key, old, new, origin)
+    except Exception as e:
+        log.debug("[RiskSettings] could not record the change: %s", e)
+
+
 def update_risk_settings(updates: dict, _from_sync: bool = False) -> dict:
     """Update risk settings and, for a normal (non-sync-originated) edit,
     forward the change over the Local/Remote sync channel if one is active.
@@ -59,6 +97,10 @@ def update_risk_settings(updates: dict, _from_sync: bool = False) -> dict:
     global _applying_sync_settings
     if not updates:
         return get_risk_settings()
+    try:
+        _before = get_risk_settings()
+    except Exception:
+        _before = {}
     set_clause = set_clause_for(updates)
     with db() as conn:
         conn.execute(f"UPDATE vantage_risk_settings SET {set_clause} WHERE id=1",
@@ -66,6 +108,7 @@ def update_risk_settings(updates: dict, _from_sync: bool = False) -> dict:
     _database_module._rs_cache    = None   # invalidate so next read hits the DB
     _database_module._rs_cache_ts = 0.0
     result = get_risk_settings()
+    _log_protective_changes(_before, updates, _from_sync)
 
     if not _from_sync and not _applying_sync_settings:
         _applying_sync_settings = True

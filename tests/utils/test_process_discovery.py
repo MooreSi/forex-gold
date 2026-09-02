@@ -169,6 +169,25 @@ class TestTheWindowsLookup:
         assert "CommandLine" in script
         assert "mt5_bridge.py" in script
 
+    def test_the_query_excludes_itself(self, monkeypatch):
+        """The pattern goes into the command line of the query being run, so
+        without this the lookup finds its own PowerShell process and every
+        call returns one spurious pid -- including calls that should match
+        nothing. Found on Windows CI by the nonsense-pattern control."""
+        seen: list = []
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr(os_utils.subprocess, "run",
+                            lambda cmd, **kw: seen.append(cmd) or _R())
+
+        os_utils._pids_windows_powershell("wineserver")
+
+        assert "$_.ProcessId -ne $PID" in seen[0][-1]
+
 
 class TestItActuallyFindsProcesses:
     def test_a_process_we_started_is_found_by_its_command_line(self):

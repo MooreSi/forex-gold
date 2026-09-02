@@ -110,9 +110,16 @@ def _pids_windows_powershell(pattern: str) -> "list[int] | None":
         # other than what was asked.
         log.warning("[os] Refusing a process pattern containing a quote: %r", pattern)
         return None
+    # $_.ProcessId -ne $PID excludes THIS PowerShell process, and it is not
+    # optional: the pattern is embedded in the command line of the very query
+    # being run, so Get-CimInstance finds itself and every lookup returns one
+    # spurious pid. Caught on Windows CI 2026-09-02 by the negative control --
+    # a nonsense pattern that should match nothing returned a pid. kill_matching
+    # kills what this returns, so a self-match means the watchdog terminates its
+    # own helper and believes a dead bridge is alive.
     script = (
         "Get-CimInstance Win32_Process | "
-        f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
+        f"Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -like '*{pattern}*' }} | "
         "ForEach-Object { $_.ProcessId }"
     )
     try:

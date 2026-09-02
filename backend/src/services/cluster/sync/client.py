@@ -704,9 +704,25 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
         while self.conn_state == CONN_CONNECTED:
             try:
                 if self._ws is not None:
-                    await self._ws.send(json.dumps(make(
-                        MSG_PING,
-                        clock_offset_min=_clock.effective_offset_minutes())))
+                    # The offset is read defensively and the ping goes out
+                    # either way. The VPS's watchdog decides the link is dead
+                    # from "last message from the Mac", so losing the
+                    # heartbeat over a clock detail would make a healthy link
+                    # look broken -- and the clock is the lesser of the two.
+                    try:
+                        _off = _clock.effective_offset_minutes()
+                    except Exception as _e:
+                        log.warning("[SyncClient] could not read the trading "
+                                    "clock for the heartbeat (%s) — pinging "
+                                    "without it", _e)
+                        _off = None
+                    # Passed explicitly even when None: the server's
+                    # _apply_peer_clock_offset treats a None as "not reported"
+                    # and returns, so the ping stays well-formed either way --
+                    # and the keyword stays visible to the test that pins this
+                    # contract by reading the source.
+                    await self._ws.send(json.dumps(
+                        make(MSG_PING, clock_offset_min=_off)))
             except Exception:
                 break
             await asyncio.sleep(_LIVENESS_PING_INTERVAL_S)

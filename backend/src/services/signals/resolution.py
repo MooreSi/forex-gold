@@ -130,6 +130,35 @@ def _sig_guard_blocks(channel_name: str, direction: str,
     return False
 
 
+
+def _template_lot_is_fixed(is_template: bool, template) -> bool:
+    """Is this trade's lot a template's own fixed Anchor Lot?
+
+    Such a lot is a deliberate manual value and must not be scaled by the
+    channel multiplier -- the same exemption `lot_size_override` gets.
+
+    Decided from the TEMPLATE, not as a by-product of which sizing branch ran.
+    It used to be set only inside `if not lot_size and _is_template ...`, so a
+    signal that carried its own lot skipped that branch and left the flag
+    False. The Telegram Auto route stores a lot on the signal, so every trade
+    it placed on a fixed-anchor template was scaled: 0.10 x 1.3 = 0.13, 30%
+    more risk than the owner set (ticket 1925815819 and four others, 2026-09).
+    Plain-channel signals carry no lot, take the branch, and were correct --
+    which is why it looked occasional.
+
+    `risk_pct > 0` is NOT exempt, deliberately: that path derives the lot from
+    account risk, the same as generic sizing, so the multiplier is meant to
+    apply to it.
+    """
+    if not is_template or template is None:
+        return False
+    try:
+        return float(template.get("risk_pct") or 0) <= 0
+    except (TypeError, ValueError):
+        # An unreadable risk_pct must not silently turn a fixed lot into a
+        # scaled one; treat it as the fixed case it almost certainly is.
+        return True
+
 async def resolve_open_trade_params(
     bridge: Any,
     signal_id: str,
@@ -425,7 +454,9 @@ async def resolve_open_trade_params(
         raise ValueError(f"Channel '{_ch_src}' is paused by the scorecard — trade skipped")
 
     lot_size = lot_size_override or sig.get("lot_size")
-    _lot_is_template_fixed = False
+    # Derived from the template itself, so it holds however the lot was
+    # obtained -- see _template_lot_is_fixed for what this used to miss.
+    _lot_is_template_fixed = _template_lot_is_fixed(_is_template, _template)
     if not lot_size and _is_template and _template is not None:
         # A template's own Entries & Lots fields are authoritative for
         # sizing, not the generic per-strategy path below. Grid mode's
@@ -454,7 +485,8 @@ async def resolve_open_trade_params(
             # that function entirely so it needs its own cap.
             _max_lot = float(rs.get("max_lot_size", 0.10))
             lot_size = min(float(_template.get("lot_anchor") or 0.01), _max_lot)
-            _lot_is_template_fixed = True
+            # _lot_is_template_fixed is already True: set above from the
+            # template, so it holds whether or not this branch ran.
     if not lot_size:
         risk_pct  = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
         balance   = await get_trading_balance(bridge, starting_balance)

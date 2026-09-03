@@ -375,8 +375,36 @@ def main():
     import backend.src.config as cfg_module
     cfg  = cfg_module.load()
 
+    # ── Which database? One per MT5 account (owner, 2026-09-03) ──────────────
+    #
+    # The path used to be purely environment-based, so two demo accounts shared
+    # one set of trades. It is now resolved per login as well.
+    #
+    # Nothing changes for an existing install: the first login seen for an
+    # environment CLAIMS the existing forex_trader_<env>.db, so this file keeps
+    # opening the same database it always did. Only adding a second account
+    # creates anything, and that new database is seeded with the shared tables
+    # -- credentials, risk settings, EA templates, learned rules -- so it opens
+    # able to connect and trade rather than blank.
+    #
+    # Failure here falls back to cfg["db_path"], the environment default: the
+    # app must start even if the registry cannot be read.
+    from backend.src.db import account_registry as _acct
     from backend.src.db import database as _db_mod
-    _db_mod.init(cfg["db_path"])
+
+    _db_path = cfg["db_path"]
+    try:
+        from backend.src.services.broker.credentials_repo import get_mt5_credentials
+        _env   = cfg.get("account_env", "demo")
+        _login = _acct.login_for_env(get_mt5_credentials(), _env)
+        _db_path = str(_acct.resolve_db_path(
+            cfg_module.DATA_DIR, _env, _login))
+    except Exception as _exc:
+        logging.getLogger(__name__).error(
+            "[startup] could not resolve the per-account database (%s) — "
+            "falling back to %s", _exc, _db_path)
+
+    _db_mod.init(_db_path)
 
     # ── Licence check — must pass before any engine or UI starts ──────────────
     from backend.src.config.licence.guard import enforce as _licence_enforce

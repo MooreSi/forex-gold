@@ -372,6 +372,36 @@ datetime g_panelLastPaint = 0;
 
 bool   g_panelBuilt    = false;
 
+// ── Minimise (owner request 2026-09-03: "so i can see the candles") ──────
+// Collapsed leaves ONLY the header strip with the restore button, so the
+// chart is clear but the panel is one click away.
+//
+// Persisted in a terminal global keyed by chart id: the EA is recompiled and
+// reloaded often, and re-opening a panel the user deliberately collapsed --
+// on every recompile -- would be its own annoyance.
+bool   g_panelMin      = false;
+// Whether the collapsed strip is currently on the chart. Without this the
+// paint below would delete and recreate its three objects on EVERY timer
+// repaint, which flickers and churns the chart's object list for nothing.
+bool   g_panelMinDrawn = false;
+
+string PanelMinKey()
+{
+   return "FTB_PNL_MIN_" + (string)ChartID();
+}
+
+void PanelMinLoad()
+{
+   string k = PanelMinKey();
+   if(GlobalVariableCheck(k))
+      g_panelMin = (GlobalVariableGet(k) != 0.0);
+}
+
+void PanelMinSave()
+{
+   GlobalVariableSet(PanelMinKey(), g_panelMin ? 1.0 : 0.0);
+}
+
 // ── Template state (the left column) ────────────────────────────────────
 // g_panelCfg is the last complete set_template payload. Every numeric field
 // and toggle on the left column is read out of it with TplD/TplI/TplB/TplS
@@ -3567,7 +3597,8 @@ int PanelDrawLeft()
    const int W4 = (W - PNL_GAP * 3) / 4;      // quarter
 
    // ── Header ───────────────────────────────────────────────────────
-   PnlCell("hdr", x, y, 184, H, "COPIER PANEL", CLR_CELL, CLR_TEXT, 9, "Arial Bold");
+   PnlCell("hdr", x, y, 146, H, "COPIER PANEL", CLR_CELL, CLR_TEXT, 9, "Arial Bold");
+   PnlButton("min", x + 150, y, 34, H, "_", CLR_CELL, CLR_DIM);
    PnlButton("refresh", x + 188, y, 34, H, "R", CLR_CELL, CLR_CYAN);
    PnlButton("tabtrades", x + 226, y, 86, H, "TRADES",
              g_panelTab == "trades" ? CLR_AMBER : CLR_CELL,
@@ -3691,8 +3722,28 @@ int PanelDrawLeft()
    PnlCell("cshdr", x, y, W, H, "CHANNEL STRATEGY", CLR_CELL2, CLR_CYAN, 8);
    y += S;
 
+   // Global harvest — read-only, and deliberately NOT a button: it is set in
+   // the app (Trading > Global Parameters) and arrives by set_global_config.
+   // Displayed because nothing on this panel showed it, so an armed global
+   // harvest was invisible on the chart it acts on.
+   PnlCell("ghvst", x, y, W, H,
+           g_globalHarvestEnabled
+              ? StringFormat("GLOBAL HARVEST: ON  at $%.2f profit per trade",
+                             g_globalHarvestThresholdUsd)
+              : "GLOBAL HARVEST: OFF",
+           CLR_CELL2,
+           g_globalHarvestEnabled ? CLR_GREEN : CLR_DIM, 8);
+   y += S;
+
+   // "TPL HARVEST", not "HARVEST": this is the TEMPLATE's own harvest flag,
+   // and there is a SEPARATE global harvest (g_globalHarvestEnabled, pushed by
+   // set_global_config and applied by CheckGlobalHarvest to every position on
+   // this symbol). The owner read "HARVEST OFF" here on 2026-09-03 and
+   // reasonably concluded the $75 global harvest he had set was not working.
+   // Two settings with one name on screen is the bug; the row below shows the
+   // global one so they can be told apart.
    bool harvest = PnlB("harvest_enabled", false);
-   PnlButton("b_harvest", x, y, W3, H, harvest ? "HARVEST ON" : "HARVEST OFF",
+   PnlButton("b_harvest", x, y, W3, H, harvest ? "TPL HARVEST ON" : "TPL HARVEST OFF",
              harvest ? CLR_TEAL : CLR_OFF, harvest ? clrWhite : CLR_DIM);
    string mode = PnlS("mode", "single");
    PnlButton("b_mode", x + W3 + PNL_GAP, y, W3, H,
@@ -4021,6 +4072,30 @@ int PanelDrawSignalsTab(const int x, int y, const int W, const int H,
 void PanelUpdate()
 {
    if(!g_panelBuilt) PanelBuild();
+
+   if(g_panelMin)
+   {
+      // Clear the full panel ONCE on the way in. Everything is deleted rather
+      // than hidden: the panel is ~90 objects, and leaving them invisible
+      // still sits in the chart's object list. Doing this on every repaint
+      // instead would flicker the strip once per timer tick.
+      if(!g_panelMinDrawn)
+      {
+         ObjectsDeleteAll(0, PNL_PREFIX);
+         g_editCount = 0;
+         g_panelMinDrawn = true;
+      }
+      PnlRect("BGL", PNL_X - PNL_PAD, PNL_Y - PNL_PAD,
+              234 + PNL_PAD * 2, PNL_ROW + PNL_PAD * 2, CLR_BG);
+      PnlCell("hdr", PNL_X, PNL_Y, 196, PNL_ROW, "COPIER PANEL",
+              CLR_CELL, CLR_DIM, 9, "Arial Bold");
+      PnlButton("min", PNL_X + 200, PNL_Y, 34, PNL_ROW, "+",
+                CLR_CELL, CLR_CYAN);
+      ChartRedraw(0);
+      return;
+   }
+   g_panelMinDrawn = false;
+
    int yl = PanelDrawLeft();
    int yr = PanelDrawRight();
    // Resize the backing rectangles to whatever the layout actually used, so
@@ -4132,6 +4207,19 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    ObjectSetInteger(0, sparam, OBJPROP_STATE, false);   // momentary
 
    // ── Local view state ─────────────────────────────────────────────
+   if(what == "min")
+   {
+      g_panelMin = !g_panelMin;
+      PanelMinSave();
+      // Rebuild from scratch either way: collapsing clears the full panel,
+      // expanding has to recreate every object the collapse deleted.
+      ObjectsDeleteAll(0, PNL_PREFIX);
+      g_editCount     = 0;
+      g_panelBuilt    = false;
+      g_panelMinDrawn = false;
+      PanelUpdate();
+      return;
+   }
    if(what == "sound")     { g_panelSound  = !g_panelSound;  PanelUpdate(); return; }
    if(what == "manual")    { g_panelManual = !g_panelManual; PanelUpdate(); return; }
    if(what == "tabtrades") { g_panelTab = "trades"; PanelUpdate(); return; }
@@ -4292,6 +4380,7 @@ int OnInit()
    EventSetMillisecondTimer(200);
    BuildPortList();
    EnsureConnected();
+   PanelMinLoad();          // restore a panel the user collapsed
    if(InpShowPanel) PanelUpdate();
    return(INIT_SUCCEEDED);
 }

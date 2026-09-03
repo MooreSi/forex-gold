@@ -95,19 +95,27 @@ MAX_GAP_FIRE_PTS = 15.0
 def ime_enabled_for_channel(rs: dict, channel_name: str) -> bool:
     """True when Immediate Market Entry is live for `channel_name`.
 
-    Mirrors engine.py's own IME gate exactly: the global risk-settings
-    toggle AND the per-channel instant_entry_enabled flag, whose default
-    depends on the channel's parser format (format_ab/gd2 default ON,
-    everything else OFF) -- so a channel that has never been configured
-    reads the same here as it does there. engine.py keeps its own inline
-    copy because it already has `ch_cfg` loaded in that loop; this one
-    exists for callers that only have the channel name.
+    2026-09-03, by owner directive: IME is a single global feature, not a
+    per-channel opt-in -- gated on the risk-settings toggle alone for any
+    channel the app actually knows about. The `channel_parser_config` row
+    check remains: it is what distinguishes a real Telegram channel (every
+    one gets an auto-bootstrapped row the first time scan_messages.py sees
+    it) from a non-Telegram source such as the Reversal Engine or a manual
+    signal, which must keep the ordinary R:R/zone gates regardless of this
+    toggle -- IME only ever meant "take this Telegram channel's fill at
+    market", never "waive every filter for every signal source". The
+    `instant_entry_enabled` column itself is no longer read here; it stays
+    in the schema as a historical field, still bootstrapped, no longer
+    consulted.
+
+    engine.py keeps its own inline copy because it already has `ch_cfg`
+    loaded in that loop; this one exists for callers that only have the
+    channel name.
     """
     if not bool(rs.get("immediate_market_entry", 0)):
         return False
     ch_cfg = db_module.get_channel_parser_config(channel_name) or {}
-    _default = 1 if ch_cfg.get("parser_format") in ("format_ab", "gd2") else 0
-    return bool(ch_cfg.get("instant_entry_enabled", _default))
+    return bool(ch_cfg)
 
 
 async def execute_auto_signal(

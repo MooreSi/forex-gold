@@ -37,6 +37,7 @@ from backend.src.services.trading.ai_signal_fallback import apply_sl_adjustment 
 from backend.src.services.signals.scan_parse_classify import classify_and_parse as _classify_and_parse_impl
 from backend.src.services.broker import ea_templates as _ea_templates
 from backend.src.services.trading.scan_auto_execute import execute_auto_signal as _execute_auto_signal_impl
+from backend.src.services.trading.scan_auto_execute import ime_enabled_for_channel as _ime_enabled_for_channel
 from backend.src.services.trading.limit_order_signal import handle_limit_order_signal as _handle_limit_order_signal_impl
 from backend.src.services.signals.scan_edit_reparse import handle_signal_edit as _handle_signal_edit_impl
 from backend.src.services.trading.instant_entry import process_instant_entry as _process_instant_entry_impl
@@ -157,10 +158,6 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                 ch_cfg = db_module.get_channel_parser_config(channel_name) or {}
             parser_fmt  = ch_cfg.get('parser_format', 'auto')
             sig_prefix  = ch_cfg.get('signal_prefix') or SIGNAL_PREFIX
-            # Default ime_enabled to True for both known formats; only False when
-            # the user has explicitly set it to 0 in the channel config.
-            _ime_default = 1 if parser_fmt in ('format_ab', 'gd2') else 0
-            ime_enabled  = bool(ch_cfg.get('instant_entry_enabled', _ime_default))
 
             if parser_fmt == 'none' or not bool(ch_cfg.get('enabled', 1)):
                 continue
@@ -230,7 +227,22 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             # recognises whatever the user typed into Parsing > Logic
             # Keywords, so a built-in match must win rather than depend on
             # what happens to be in a box.
-            if bool(rs.get("immediate_market_entry", 0)) and ime_enabled:
+            #
+            # ime_enabled_for_channel is now the single shared gate (the
+            # same function scan_auto_execute and governor.rr_filter_bypassed
+            # call) -- 2026-09-03, by owner directive, Immediate Market Entry
+            # is a single global feature, not a per-channel opt-in. The old
+            # per-channel `instant_entry_enabled` check was one of three
+            # independent copies of "global toggle AND per-channel flag",
+            # exactly the pattern 20-trading-safety.md warns against ("a
+            # route is eventually missed") -- confirmed live 2026-08-06, when
+            # GOLD DIGGERS INSTITUTIONAL was opted in on one path and still
+            # declined on the others. ch_cfg is guaranteed to exist here
+            # (auto-bootstrapped just above), so the function's remaining
+            # "is this a real Telegram channel" check always passes for this
+            # call site specifically -- it still matters for the other two
+            # callers, which reach it for non-Telegram sources.
+            if _ime_enabled_for_channel(rs, channel_name):
                 _instant = (parse_instant_entry(text)
                             or parse_gd2_instant_entry(text)
                             or parse_lexicon_direction_trigger(text))

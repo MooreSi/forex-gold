@@ -187,15 +187,20 @@ def test_rr_still_enforced_when_global_ime_is_off(fresh_db):
     assert "R:R filter" in result
 
 
-def test_rr_still_enforced_when_channel_opted_out_of_ime(fresh_db):
+def test_rr_bypassed_even_when_channel_flag_is_off(fresh_db):
+    """2026-09-03, by owner directive: Immediate Market Entry is a single
+    global feature, not a per-channel opt-in. The old
+    `instant_entry_enabled` column is bootstrapped but no longer consulted
+    -- only whether the channel has a real channel_parser_config row at all
+    (see test_rr_still_enforced_for_an_unconfigured_source for the case
+    that still matters: a non-Telegram source with no row)."""
     _configure_channel("GOLD DIGGERS INSTITUTIONAL", instant_entry_enabled=False)
     _set_ime(True)
     result = rg.check_pre_trade_filters(
         "BUY", 2395.0, 2405.0, 2390.0, tp1=2401.0, actual_price=2400.0,
         source_name="GOLD DIGGERS INSTITUTIONAL",
     )
-    assert result is not None
-    assert "R:R filter" in result
+    assert result is None
 
 
 def test_rr_still_enforced_for_an_unconfigured_source(fresh_db):

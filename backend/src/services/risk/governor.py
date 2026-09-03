@@ -53,9 +53,12 @@ def rr_filter_bypassed(source_name: str) -> bool:
 
       * the channel is in RR_BYPASS_SOURCES above, or
       * Immediate Market Entry is live for it (the global risk-settings
-        toggle AND the channel's own instant_entry_enabled flag, defaulting
-        by parser format exactly as core_scan_messages_auto_execute.
-        ime_enabled_for_channel and engine.py's own inline gate do).
+        toggle, for any channel with a real channel_parser_config row --
+        2026-09-03, by owner directive, IME is a single global feature, not
+        a per-channel opt-in; see scan_auto_execute.ime_enabled_for_channel,
+        the shared source of this rule, for the full reasoning. The row
+        check is retained -- it is what excludes non-Telegram sources such
+        as the Reversal Engine, not a per-channel toggle).
 
     The IME arm was added to the scan/auto-execute path on 2026-08-06 by
     explicit user directive -- IME means the user has opted into taking this
@@ -83,10 +86,7 @@ def rr_filter_bypassed(source_name: str) -> bool:
         if not bool(rs.get("immediate_market_entry", 0)):
             return False
         ch_cfg = db_module.get_channel_parser_config(source_name) or {}
-        if not ch_cfg:
-            return False
-        _default = 1 if ch_cfg.get("parser_format") in ("format_ab", "gd2") else 0
-        return bool(ch_cfg.get("instant_entry_enabled", _default))
+        return bool(ch_cfg)
     except Exception:
         return False
 

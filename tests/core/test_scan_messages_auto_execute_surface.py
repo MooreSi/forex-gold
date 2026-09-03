@@ -293,9 +293,11 @@ def test_gap_adjusted_market_entry_fires_just_inside_cap(fresh_db):
     assert calls[0]["entry_low"] == pytest.approx(4529.0 + gap)
 
 
-def test_gap_adjusted_market_entry_skipped_when_ime_off_for_channel(fresh_db):
+def test_gap_adjusted_market_entry_skipped_for_unconfigured_channel(fresh_db):
     # No channel_parser_config row for "TestChannel" -> ime_enabled_for_channel
     # is False regardless of the global toggle -- signal stays queued.
+    # 2026-09-03: no longer a per-channel opt-out, just "is this a real
+    # Telegram channel at all" (see test_rr_still_enforced_for_an_unconfigured_source).
     gap_tick = SimpleNamespace(bid=4535.0, ask=4536.0)
     result, calls, bridge = _call(
         rs={"immediate_market_entry": 1}, tick=gap_tick,
@@ -463,15 +465,16 @@ def test_ime_on_bypasses_pre_trade_filter(fresh_db):
     assert len(calls) == 1
 
 
-def test_ime_off_still_honours_pre_trade_filter(fresh_db):
-    # The per-channel flag is off, so IME is not live here and the filter
-    # must still block exactly as before.
+def test_ime_bypasses_pre_trade_filter_even_when_channel_flag_is_off(fresh_db):
+    # 2026-09-03, by owner directive: IME is a single global feature, not a
+    # per-channel opt-in -- the instant_entry_enabled column is bootstrapped
+    # but no longer read. A real channel_parser_config row is enough.
     db.save_channel_parser_config("TestChannel", "auto", "", False, True, "t")
     result, calls, bridge = _call(
         rs={"immediate_market_entry": 1}, filter_err="R:R too low",
     )
-    assert result["executed"] is False
-    assert calls == []
+    assert result["executed"] is True
+    assert len(calls) == 1
 
 
 def test_global_ime_off_still_honours_pre_trade_filter(fresh_db):

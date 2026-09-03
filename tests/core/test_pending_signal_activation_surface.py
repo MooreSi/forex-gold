@@ -189,9 +189,14 @@ def test_gap_fire_beyond_cap_does_not_fire_or_write(fresh_db):
     assert after == before
 
 
-def test_price_outside_zone_ime_off_for_channel_still_skips(fresh_db):
-    """Global immediate_market_entry on but no channel_parser_config row
-    for "Chan" -> ime_enabled_for_channel is False -- must not gap-fire."""
+def test_price_outside_zone_unconfigured_source_still_skips(fresh_db):
+    """Global immediate_market_entry on but no channel_parser_config row for
+    "Chan" -> ime_enabled_for_channel is False regardless. 2026-09-03: this
+    is no longer a per-channel opt-out (that check was removed by owner
+    directive) -- what still gates it is that "Chan" isn't a recognised
+    Telegram channel at all, the same distinction
+    test_rr_still_enforced_for_an_unconfigured_source makes for the
+    Reversal Engine."""
     _insert_signal()
     rs = {"max_open_trades": 1, "trade_strategy": "scale_out", "immediate_market_entry": 1}
     with mock.patch.object(psa, "get_open_trades", return_value=[]), \

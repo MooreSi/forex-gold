@@ -45,6 +45,14 @@ licence_activated = threading.Event()
 
 _LAN_BEACON_PORT = 8444
 
+# Per-host timeout for the parallel /24 TCP probe below. A module constant
+# rather than an inline literal so tests can raise it under CI-runner
+# contention (2026-09-03: 254 concurrent connects sharing one event loop hit
+# this on a loaded Windows CI runner, missing even the one real connection --
+# see tests/remote/test_lan_discovery_validation.py). Unchanged in production:
+# real LAN scans still fail fast on a quiet host's own machine.
+_SCAN_PROBE_TIMEOUT_S = 0.5
+
 
 def _get_local_ip() -> str:
     """Return this machine's primary LAN IP (the interface used to reach the internet)."""
@@ -112,7 +120,7 @@ async def _scan_lan_for_server() -> str:
     async def _probe(host: str) -> str:
         try:
             _, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, SERVER_PORT), timeout=0.5
+                asyncio.open_connection(host, SERVER_PORT), timeout=_SCAN_PROBE_TIMEOUT_S
             )
             writer.close()
             try:

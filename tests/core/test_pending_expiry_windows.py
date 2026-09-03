@@ -121,10 +121,15 @@ def test_ime_on_keeps_the_original_two_minute_default(fresh_db):
     assert psa._resolve_expiry_sec(_sig(), _ime(True), "scale_out") == psa._EXPIRY
 
 
-def test_global_ime_on_but_channel_flag_off_still_gets_three_minutes(fresh_db):
-    # IME is only live when BOTH toggles agree, so this channel is IME-off.
+def test_the_per_channel_flag_no_longer_affects_the_window(fresh_db):
+    # 2026-09-03, by owner directive: IME is a single global feature now --
+    # scan_auto_execute.ime_enabled_for_channel no longer reads
+    # instant_entry_enabled, only the channel_parser_config row's existence
+    # and the global toggle. A channel with its old per-channel flag off is
+    # therefore IME-on exactly like one with it on: the default window, not
+    # the 180s "IME off" window this test used to require.
     db.save_channel_parser_config("Some Channel", "auto", "", False, True, "t")
-    assert psa._resolve_expiry_sec(_sig(), _ime(True), "scale_out") == 180
+    assert psa._resolve_expiry_sec(_sig(), _ime(True), "scale_out") == psa._EXPIRY
 
 
 def test_limit_format_signals_are_excluded(fresh_db):

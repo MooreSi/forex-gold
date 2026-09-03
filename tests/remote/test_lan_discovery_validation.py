@@ -20,6 +20,7 @@ import http.server
 import socket
 import ssl
 import threading
+import time
 
 import pytest
 import websockets
@@ -97,7 +98,16 @@ def real_ws_server(certs):
         if "loop" in holder:
             break
         threading.Event().wait(0.05)
-    threading.Event().wait(0.3)
+    # Poll with a real connect instead of a flat sleep -- proves the server
+    # is actually accepting before the test proceeds, rather than guessing
+    # how long websockets.serve() takes to bind under CI-runner contention.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                break
+        except OSError:
+            threading.Event().wait(0.05)
     yield port
     holder["loop"].call_soon_threadsafe(holder["stop"].set_result, None)
 
@@ -129,6 +139,11 @@ def test_scan_ignores_a_host_that_only_has_the_port_open(monkeypatch, https_404_
     """
     monkeypatch.setattr(rc, "SERVER_PORT", https_404_server)
     monkeypatch.setattr(rc, "_get_local_ip", lambda: "127.0.0.2")
+    # 254 concurrent connects sharing one event loop is real CI-runner
+    # contention, not something this test is trying to measure -- give each
+    # probe more headroom than production's real-LAN default (see
+    # _SCAN_PROBE_TIMEOUT_S's docstring).
+    monkeypatch.setattr(rc, "_SCAN_PROBE_TIMEOUT_S", 3.0)
 
     assert asyncio.run(rc._scan_lan_for_server()) == ""
 
@@ -138,5 +153,6 @@ def test_scan_returns_a_host_that_really_is_the_server(monkeypatch, real_ws_serv
     tightens discovery, it does not disable it."""
     monkeypatch.setattr(rc, "SERVER_PORT", real_ws_server)
     monkeypatch.setattr(rc, "_get_local_ip", lambda: "127.0.0.2")
+    monkeypatch.setattr(rc, "_SCAN_PROBE_TIMEOUT_S", 3.0)
 
     assert asyncio.run(rc._scan_lan_for_server()) == "127.0.0.1"

@@ -33,6 +33,7 @@ from backend.src.services.dpm import engine
 from backend.src.services.telegram import alerts
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.signals.resolution import _sig_guard_blocks
+from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
 from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT, STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL,
@@ -230,17 +231,43 @@ async def process_instant_entry(
         # recomputes `lot` regardless of strategy. That was the actual bug:
         # a template's Anchor Lot was overwritten by whichever of those
         # three happened to be active, not just by the Risk Governor one.
-        # The provisional SL distance still needs computing (replaced once
-        # the real follow-up signal arrives) -- same ATR-based default the
-        # risk_pct branch below uses, since a template's own sl_pips isn't
-        # in comparable point-from-fill terms for this placeholder.
-        _ime_atr_tpl = 0.0
-        if dpm_candles:
+        #
+        # bugs/023: the SL distance used to have the identical problem --
+        # always the generic ATR-clamped placeholder below, even when the
+        # template itself set sl_pips or use_dynamic_atr, silently
+        # overwriting a stop the template's own config was supposed to be
+        # authoritative for (same as its TP ladder). Mirrors
+        # resolution.py:527-556's precedence exactly: use_dynamic_atr wins
+        # over sl_pips, which wins over the ATR-clamped fallback -- measured
+        # from entry_px rather than a fresh tick, since every other branch
+        # in this function already measures from entry_px and a template
+        # fires at market, so the two are effectively the same reference.
+        _tpl_sl_dist = None
+        if bool(_template_ime.get("use_dynamic_atr")) and dpm_candles:
             try:
-                _ime_atr_tpl = dpm_engine.compute_atr(dpm_candles) or 0.0
+                _tpl_atr_ime = dpm_engine.compute_atr(
+                    dpm_candles, period=int(_template_ime.get("atr_period") or 14)) or 0.0
             except Exception:
-                _ime_atr_tpl = 0.0
-        _IME_SL_DIST = max(8.0, min(round(_ime_atr_tpl * 1.2 if _ime_atr_tpl > 0 else 12.0, 2), 25.0))
+                _tpl_atr_ime = 0.0
+            if _tpl_atr_ime > 0:
+                _tpl_sl_dist = _tpl_atr_ime * float(_template_ime.get("atr_sl_mult") or 1.5)
+        if _tpl_sl_dist is None:
+            _tpl_sl_pips = float(_template_ime.get("sl_pips") or 0)
+            if _tpl_sl_pips > 0:
+                _tpl_sl_dist = _tpl_sl_pips * PIPS_TO_PRICE_XAUUSD
+        if _tpl_sl_dist is not None:
+            _IME_SL_DIST = round(_tpl_sl_dist, 2)
+        else:
+            # sl_pips unset (0) -- unchanged from before this fix: the same
+            # ATR-clamped placeholder every other IME path uses, for a
+            # template that genuinely leaves its stop for the EA/follow-up.
+            _ime_atr_tpl = 0.0
+            if dpm_candles:
+                try:
+                    _ime_atr_tpl = dpm_engine.compute_atr(dpm_candles) or 0.0
+                except Exception:
+                    _ime_atr_tpl = 0.0
+            _IME_SL_DIST = max(8.0, min(round(_ime_atr_tpl * 1.2 if _ime_atr_tpl > 0 else 12.0, 2), 25.0))
         provisional_sl = round(
             entry_px - _IME_SL_DIST if direction == "BUY" else entry_px + _IME_SL_DIST, 2
         )
@@ -331,11 +358,17 @@ async def process_instant_entry(
         _ime_self_managed = strategy in (
             STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL
         )
-        _sl_note = (
-            "_(levels set by strategy immediately)_"
-            if _ime_self_managed else
-            f"_(provisional {_IME_SL_DIST:.1f} pts / -${_ime_max_loss:.0f} max — awaiting follow-up)_"
-        )
+        if _template_ime is not None:
+            # bugs/023: instant_followup.py's managed_by == "ea" skip means
+            # no follow-up SL/TP is EVER applied to a template-managed
+            # trade -- "awaiting follow-up" here was a promise that
+            # structurally could not be kept. The SL above is already the
+            # template's own, not a placeholder, so say so instead.
+            _sl_note = f"_(SL from template \"{_tpl_name_ime}\")_"
+        elif _ime_self_managed:
+            _sl_note = "_(levels set by strategy immediately)_"
+        else:
+            _sl_note = f"_(provisional {_IME_SL_DIST:.1f} pts / -${_ime_max_loss:.0f} max — awaiting follow-up)_"
         asyncio.create_task(telegram_alerts.send_message(
             f"*Immediate Signal Entry*  ({telegram_alerts._md_esc(channel_name)})\n"
             f"*{direction}* at ${exec_price:.2f}  |  lot {lot:.2f}  |  ticket `{_ime_ticket}`\n"

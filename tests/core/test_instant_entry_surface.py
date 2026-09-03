@@ -66,10 +66,11 @@ def _tg_status(tg_id):
         return row[0] if row else None
 
 
-def _run(bridge, msg, tg_id, direction, price, rs, auto_execute, text="XAU Buy Now"):
+def _run(bridge, msg, tg_id, direction, price, rs, auto_execute, text="XAU Buy Now",
+         dpm_candles=None):
     return asyncio.run(ime.process_instant_entry(
         msg, tg_id, "grp-1", "Chan", text, direction, price, rs, auto_execute,
-        bridge, [],
+        bridge, dpm_candles if dpm_candles is not None else [],
     ))
 
 
@@ -126,11 +127,12 @@ def test_max_open_trades_reached_no_signal(fresh_db):
     assert _signals_count() == 0
 
 
-def _run_open_trade_path(rs, tg_id="tg-8"):
+def _run_open_trade_path(rs, tg_id="tg-8", dpm_candles=None, direction="BUY", bridge=None):
     with mock.patch.object(ime, "get_trading_balance", new=mock.AsyncMock(return_value=1000.0)), \
          mock.patch.object(ime, "get_open_trades", return_value=[]), \
          mock.patch.object(ime, "open_trade", new=mock.AsyncMock(return_value=_TRADE_RESULT)) as ot:
-        _run(_FakeBridge(), {"timestamp": _fresh_ts()}, tg_id, "BUY", None, rs, True)
+        _run(bridge or _FakeBridge(), {"timestamp": _fresh_ts()}, tg_id, direction, None, rs, True,
+             dpm_candles=dpm_candles)
     return ot
 
 
@@ -189,6 +191,71 @@ def test_template_risk_governor_does_not_override_lot_anchor(fresh_db):
         ot = _run_open_trade_path(rs, tg_id="tg-tpl-4")
     assert ot.called
     assert ot.call_args.kwargs["lot_size"] == 0.02
+
+
+# ── bugs/023: the template SL, not a generic provisional distance ────────
+
+def test_template_sl_pips_used_not_generic_provisional(fresh_db):
+    """The template's own sl_pips must place the order's real stop, not the
+    8-25pt ATR-clamped placeholder every other IME path uses. entry_px for a
+    BUY with price=None is tick.ask (2415.0); 50 pips = 5.0 price units."""
+    from backend.src.services.broker import ea_templates as et
+    et.save_ea_template("SlTpl", {"lot_anchor": 0.05, "risk_pct": 0, "sl_pips": 50})
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("SlTpl")):
+        ot = _run_open_trade_path(_rs(), tg_id="tg-sl-1")
+    assert ot.called
+    assert ot.call_args.kwargs["stop_loss"] == pytest.approx(2410.0)
+
+
+def test_template_use_dynamic_atr_overrides_sl_pips(fresh_db):
+    """use_dynamic_atr must win over sl_pips when both are set, mirroring
+    resolution.py's identical precedence for the full-signal path."""
+    from backend.src.services.broker import ea_templates as et
+    et.save_ea_template("AtrTpl", {
+        "lot_anchor": 0.05, "risk_pct": 0, "sl_pips": 50,
+        "use_dynamic_atr": 1, "atr_sl_mult": 1.5,
+    })
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("AtrTpl")), \
+         mock.patch.object(ime.dpm_engine, "compute_atr", return_value=4.0):
+        ot = _run_open_trade_path(_rs(), tg_id="tg-sl-2", dpm_candles=[{"close": 1.0}])
+    assert ot.called
+    # 4.0 (atr) * 1.5 (atr_sl_mult) = 6.0, not 50 pips = 5.0.
+    assert ot.call_args.kwargs["stop_loss"] == pytest.approx(2409.0)
+
+
+def test_template_sl_pips_zero_falls_back_to_provisional(fresh_db):
+    """sl_pips unset (0) must not disturb the existing ATR-clamped
+    provisional -- this is the regression guard for templates that
+    genuinely leave their SL for the follow-up to set."""
+    from backend.src.services.broker import ea_templates as et
+    et.save_ea_template("NoSlTpl", {"lot_anchor": 0.05, "risk_pct": 0, "sl_pips": 0})
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("NoSlTpl")):
+        ot = _run_open_trade_path(_rs(), tg_id="tg-sl-3")
+    assert ot.called
+    # Same 12.0pt default as the non-template path (test_default_risk_pct_
+    # sizing_floors_to_min_lot): 2415.0 - 12.0 = 2403.0.
+    assert ot.call_args.kwargs["stop_loss"] == pytest.approx(2403.0)
+
+
+def test_template_ime_message_names_template_not_awaiting_followup(fresh_db):
+    """instant_followup.py explicitly skips template-managed trades
+    (managed_by == "ea"), so a message promising a correction that will
+    never arrive is actively misleading -- it must name the template
+    instead."""
+    from backend.src.services.broker import ea_templates as et
+    et.save_ea_template("MsgTpl", {"lot_anchor": 0.05, "risk_pct": 0, "sl_pips": 50})
+    with mock.patch.object(db, "get_channel_strategy_override",
+                           return_value=et.override_for_template("MsgTpl")), \
+         mock.patch.object(ime.telegram_alerts, "send_message",
+                           new=mock.AsyncMock()) as sm:
+        _run_open_trade_path(_rs(), tg_id="tg-sl-4")
+    assert sm.called
+    text = sm.call_args.args[0]
+    assert "awaiting follow-up" not in text
+    assert "MsgTpl" in text
 
 
 def test_governor_on_default_settings_skips_entirely(fresh_db):

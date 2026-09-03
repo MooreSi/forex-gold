@@ -18,6 +18,7 @@
   "get_signals",
   "get_tg_signals",
   "get_tick",
+  "get_ticks_range",
   "get_total_deposits",
   "get_triggered_tps",
   "get_untracked_mt5_positions",

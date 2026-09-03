@@ -119,6 +119,9 @@ class FakeMT5Bridge:
         count = max(1, int((float(to_ts) - float(from_ts)) / tf) + 1)
         return self._market.candles(float(to_ts), tf, count)
 
+    async def get_ticks_range(self, from_ts: float, to_ts: float) -> list[dict]:
+        return self._market.ticks(float(from_ts), float(to_ts))
+
     # ── Account / positions ───────────────────────────────────────────────
 
     def _settle(self) -> None:

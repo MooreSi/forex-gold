@@ -18,7 +18,15 @@
     "",
     "Two of the nine loop BODIES were relocated into their services before",
     "this rise, with 20 new tests. That is the shape any future reduction",
-    "should take: the method stays, the decision logic leaves."
+    "should take: the method stays, the decision logic leaves.",
+    "",
+    "Raised again, 2026-09-03, from 88 to 89, owner sign-off in-session.",
+    "get_ticks_range() forwards to the bridge, same one-line shape as every",
+    "other market-data method here (get_candles_for_symbol, get_tick, ...).",
+    "docs/todo/backtest/010 phase 1: the backtest's tick-walking simulator",
+    "needs tick history, and the live bridge connection only exists inside",
+    "this class -- there is no side door that reaches it without going",
+    "through the facade."
   ],
-  "method_count": 88
+  "method_count": 89
 }

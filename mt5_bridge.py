@@ -520,6 +520,48 @@ def _get_candles_range(from_ts: float, to_ts: float,
         return None
 
 
+# docs/todo/backtest/010 phase 1: one closed hour of XAUUSD ticks measured at
+# 29,580-34,584 ticks / 1.7-2.0MB (2026-09-03 probe). A full day is tens of
+# MB over this HTTP bridge, which already shows contention under concurrent
+# native calls (see the _mt5_call_lock comment above) — bounded to a single
+# calendar day per request so a careless range can't try to pull weeks of
+# tick data through it.
+_MAX_TICKS_RANGE_SEC = 86_400
+
+
+def _get_ticks_range(from_ts: float, to_ts: float,
+                     symbol: str = SYMBOL) -> list[dict] | None:
+    """Fetch every tick between two Unix (true UTC) timestamps, bounded to
+    one day.
+
+    Unlike _get_candles_range, this uses mt5.copy_ticks_range() directly
+    rather than working around a from-position + offset dance: the
+    documented copy_rates_range() bug is a NAIVE-datetime interpretation
+    problem, and passing tz-aware UTC datetimes here was confirmed correct
+    against the live terminal by the 2026-09-03 probe (returned ticks landed
+    exactly in the requested UTC window, not offset by the broker's server
+    time). If that ever stops being true, this needs the same offset
+    correction _get_candles_range applies.
+    """
+    if not _ensure_connected():
+        return None
+    if to_ts - from_ts > _MAX_TICKS_RANGE_SEC:
+        return None
+    try:
+        start = datetime.fromtimestamp(float(from_ts), tz=timezone.utc)
+        end   = datetime.fromtimestamp(float(to_ts), tz=timezone.utc)
+        ticks = mt5.copy_ticks_range(symbol, start, end, mt5.COPY_TICKS_ALL)
+        if ticks is None:
+            return None
+        return [
+            {"time": float(t["time"]), "bid": float(t["bid"]), "ask": float(t["ask"])}
+            for t in ticks
+        ]
+    except Exception as e:
+        log.warning("_get_ticks_range error: %s", e)
+        return None
+
+
 def _get_candles_for_symbol(symbol: str, timeframe: str, count: int) -> list[dict] | None:
     if not _ensure_connected():
         return None
@@ -1166,6 +1208,21 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     self._send_json({"timeframe": tf, "count": len(candles), "candles": candles})
                 else:
                     self._send_error(f"No range candle data. Connected={_connected}.")
+
+        elif path == "/ticks":
+            from_ts = float(params.get("from", ["0"])[0])
+            to_ts   = float(params.get("to",   ["0"])[0])
+            symbol_req = params.get("symbol", [SYMBOL])[0]
+            if not from_ts or not to_ts or to_ts <= from_ts:
+                self._send_error("ticks requires from= and to= Unix timestamps")
+            elif to_ts - from_ts > _MAX_TICKS_RANGE_SEC:
+                self._send_error(f"range exceeds the {_MAX_TICKS_RANGE_SEC}s (1 day) limit")
+            else:
+                ticks = _get_ticks_range(from_ts, to_ts, symbol_req)
+                if ticks is not None:
+                    self._send_json({"count": len(ticks), "ticks": ticks})
+                else:
+                    self._send_error(f"No tick data. Connected={_connected}.")
 
         elif path.startswith("/candles"):
             tf    = params.get("timeframe", ["M5"])[0]

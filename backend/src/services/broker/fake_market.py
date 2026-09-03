@@ -117,6 +117,18 @@ class FakeMarket:
             for k in range(count, 0, -1)
         ]
 
+    def ticks(self, from_ts: float, to_ts: float, interval: float = 1.0) -> list[dict]:
+        """One synthetic tick per `interval` seconds across [from_ts, to_ts)
+        -- deterministic, same curve as tick()/candles(), for tests of
+        anything that walks real ticks (docs/todo/backtest/010 phase 1)."""
+        out = []
+        ts = float(from_ts)
+        while ts < to_ts:
+            t = self.tick(ts)
+            out.append({"time": ts, "bid": t.bid, "ask": t.ask})
+            ts += interval
+        return out
+
 
 TF_SECONDS = {
     "M1": 60, "M5": 300, "M15": 900, "M30": 1800,

@@ -9,7 +9,8 @@ from backend.src.services.backtest import engine as _engine
 from backend.src.services.backtest import template_support as _template_support
 
 __all__ = [
-    "run_backtest", "signals_from_db", "filter_signals", "summarise_templates",
+    "run_backtest", "run_backtest_ticks", "signals_from_db", "filter_signals",
+    "summarise_templates",
     "BtSignal", "StrategyStats", "FilterStats", "BROKER_TZ_OFFSET",
 ]
 
@@ -24,6 +25,10 @@ BROKER_TZ_OFFSET = _engine._BROKER_TZ_OFFSET
 
 def run_backtest(*args, **kwargs):
     return _engine.run_backtest(*args, **kwargs)
+
+
+def run_backtest_ticks(*args, **kwargs):
+    return _engine.run_backtest_ticks(*args, **kwargs)
 
 
 def signals_from_db(*args, **kwargs):

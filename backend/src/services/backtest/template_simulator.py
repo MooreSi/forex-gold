@@ -44,7 +44,8 @@ from typing import Optional
 
 from backend.src.services.backtest.template_support import can_simulate
 
-__all__ = ["simulate", "pips_to_price", "TemplateResult", "UnsupportedTemplate"]
+__all__ = ["simulate", "simulate_ticks", "pips_to_price", "TemplateResult",
+           "UnsupportedTemplate"]
 
 # XAUUSD. The EA's own conversion, kept as one constant so a symbol change is
 # one edit rather than a hunt: PipsToPrice(p) = p * 10 * _Point.
@@ -62,6 +63,17 @@ _MAX_TP_LEVELS = 8
 # ratchet with per-rung remove_tp) and `fractal` (needs fractal detection)
 # are refused instead.
 _SUPPORTED_TRAIL_MODES = ("off", "", "step", "candle", "tp")
+
+# The tick walk additionally refuses `candle`: CandleTrailLevel() (mql5:2558-
+# 2576) trails to the lowest low / highest high of the last 3 CLOSED M15
+# candles, fixed regardless of the backtest's own timeframe -- data this walk
+# has no access to (it has bid/ask, not an M15 candle series). The bar walk's
+# own "candle" mode trails to the previous BAR's low/high instead, which is
+# only the same thing when the backtest happens to be run at M15 with a
+# 1-candle lookback; at any other timeframe, or with the EA's real 3-candle
+# lookback, it diverges from the EA. Tracked as a known bar-walk fidelity gap
+# in docs/todo/backtest/010 rather than fixed here or silently inherited.
+_SUPPORTED_TICK_TRAIL_MODES = ("off", "", "step", "tp")
 
 
 class UnsupportedTemplate(Exception):
@@ -124,12 +136,19 @@ def _lot_for(template: dict, sl_distance: float, balance: float) -> float:
     return round(min(_MAX_LOT, max(_MIN_LOT, lot)), 2)
 
 
-def _guard(template: dict) -> None:
+def _guard(template: dict, tick_mode: bool = False) -> None:
     ok, reasons = can_simulate(template)
     if not ok:
         raise UnsupportedTemplate("; ".join(reasons))
     mode = str(template.get("trail_mode") or "off").strip().lower()
-    if mode not in _SUPPORTED_TRAIL_MODES:
+    supported = _SUPPORTED_TICK_TRAIL_MODES if tick_mode else _SUPPORTED_TRAIL_MODES
+    if mode not in supported:
+        if tick_mode and mode == "candle":
+            raise UnsupportedTemplate(
+                "trail_mode=candle: not simulated on ticks. The EA trails to "
+                "the last 3 closed M15 candles, which this walk has no candle "
+                "series to reproduce -- use the bar-based backtest instead."
+            )
         raise UnsupportedTemplate(
             f"trail_mode={mode}: not simulated. `staged` is a three-rung SL "
             "ratchet and `fractal` needs fractal detection; neither is "
@@ -167,6 +186,15 @@ def simulate(template: dict, bars: list, entry: float, is_buy: bool,
     trail_pad = pips_to_price(_f(template, "trail_padding", 0.0))
     trail_act = pips_to_price(_f(template, "trail_activation", 0.0))
     trail_level = int(_f(template, "tp1_trigger_level", 0))
+    # ApplyTemplateStepTrail's own minimum-move gate (mql5:2159-2171): a step
+    # trail only actually moves the stop once the improvement over the LIVE
+    # stop is >= trail_step pips, 0 meaning "move on any improvement" -- the
+    # EA's own default when the key is missing. Every template created by
+    # ea_templates.py's DEFAULTS carries trail_step=10.0, so omitting this
+    # gate (as this walk did until 2026-09-03) trailed on every single-pip
+    # wiggle a bar's high/low happened to produce -- tighter, more often,
+    # than the EA the numbers are supposed to match.
+    trail_step = pips_to_price(_f(template, "trail_step", 0.0))
     trail_armed = False
 
     res = TemplateResult(lot_size=lot, entry=entry, remaining_lots=lot)
@@ -219,6 +247,16 @@ def simulate(template: dict, bars: list, entry: float, is_buy: bool,
                 res.pnl_price += (tp_price - entry) * sign * lots
                 res.closed_lots.append(lots)
                 res.remaining_lots = round(res.remaining_lots - lots, 2)
+                # A ladder whose levels sum to exactly 100% (the normal
+                # case) zeroes remaining_lots right here, through the
+                # ordinary partial-close path rather than the dedicated
+                # "close everything" branch above -- which is the only
+                # other place close_price/close_bar get set. Without this,
+                # every such trade reports outcome="tp" with close_price
+                # stuck at its 0.0 default.
+                if res.remaining_lots <= 0:
+                    res.close_price = tp_price
+                    res.close_bar = idx
 
         if res.remaining_lots <= 0:
             if res.outcome == "timeout":
@@ -241,7 +279,10 @@ def simulate(template: dict, bars: list, entry: float, is_buy: bool,
 
         if trail_armed:
             if trail_mode == "step" and trail_dist > 0:
-                _tighten((high if is_buy else low) - sign * (trail_dist + trail_pad))
+                candidate = (high if is_buy else low) - sign * (trail_dist + trail_pad)
+                move = (candidate - stop) * sign if stop is not None else None
+                if stop is None or trail_step <= 0 or move >= trail_step:
+                    _tighten(candidate)
             elif trail_mode == "candle" and idx > 0:
                 prev = bars[idx - 1]
                 _tighten(float(prev["low"]) if is_buy else float(prev["high"]))
@@ -257,6 +298,150 @@ def simulate(template: dict, bars: list, entry: float, is_buy: bool,
     if res.remaining_lots > 0 and res.outcome == "timeout" and bars:
         res.close_price = float(bars[-1]["close"])
         res.close_bar = len(bars) - 1
+        res.pnl_price += (res.close_price - entry) * sign * res.remaining_lots
+
+    res.pnl_usd = round(res.pnl_price * _USD_PER_PRICE_UNIT_PER_LOT, 2)
+    return res
+
+
+def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
+                    balance: float = 10_000.0) -> TemplateResult:
+    """Walk `ticks` under `template`, starting from a fill at `entry`.
+
+    Same rules as `simulate()`, but resolved against actual bid/ask instead
+    of a bar's high/low -- the same-bar "stop or target first" ambiguity that
+    walk resolves pessimistically does not exist here, because a real tick
+    can only be on one side of a level at a time.
+
+    Every comparison uses the side ManageTemplate() itself reads off the
+    live `MqlTick` (mql5:2696-2941): a BUY marks against `tick.bid` (what you
+    could sell it for right now, matching TpCleared()'s `tick.bid >= val` and
+    the three `favMove`/`inProfit` reads), a SELL against `tick.ask`. Getting
+    this backwards would make every fill look worse than the EA's for a BUY
+    and better for a SELL, in a way that would not show up as an obviously
+    wrong number -- it would just be quietly biased.
+
+    `ticks` is `[{"time": ts, "bid": b, "ask": a}, ...]`, ascending by time.
+    Raises UnsupportedTemplate for anything `simulate()` refuses, plus
+    `trail_mode=candle` -- see `_SUPPORTED_TICK_TRAIL_MODES`.
+    """
+    _guard(template, tick_mode=True)
+
+    sign = 1.0 if is_buy else -1.0
+    sl_distance = pips_to_price(_f(template, "sl_pips", 0.0))
+    lot = _lot_for(template, sl_distance, balance)
+
+    stop: Optional[float] = (entry - sign * sl_distance) if sl_distance > 0 else None
+    ladder = _ladder(template, entry, sign)
+    triggered = [False] * len(ladder)
+
+    ladder_on = str(template.get("tpsl_mode") or "on").strip().lower() != "off"
+    partials_on = bool(_f(template, "partials", 1))
+    close_full_on_last = bool(_f(template, "close_full_on_last", 0))
+
+    be_level = int(_f(template, "be_trigger", 0))
+    be_mode = str(template.get("be_mode") or "entry").strip().lower()
+    be_buffer = _f(template, "be_buffer_pts", 0.0)
+
+    trail_mode = str(template.get("trail_mode") or "off").strip().lower()
+    trail_dist = pips_to_price(_f(template, "trail_distance", 0.0))
+    trail_pad = pips_to_price(_f(template, "trail_padding", 0.0))
+    trail_act = pips_to_price(_f(template, "trail_activation", 0.0))
+    trail_level = int(_f(template, "tp1_trigger_level", 0))
+    trail_step = pips_to_price(_f(template, "trail_step", 0.0))
+    trail_armed = False
+
+    res = TemplateResult(lot_size=lot, entry=entry, remaining_lots=lot)
+
+    def _favourable(mark: float) -> float:
+        return (mark - entry) * sign
+
+    def _tighten(new_stop: float) -> None:
+        nonlocal stop
+        if stop is None or (new_stop - stop) * sign > 0:
+            stop = new_stop
+
+    for idx, t in enumerate(ticks):
+        mark = float(t["bid"]) if is_buy else float(t["ask"])
+
+        if stop is not None and ((mark <= stop) if is_buy else (mark >= stop)):
+            res.outcome = "sl"
+            res.close_price = stop
+            res.close_bar = idx
+            res.pnl_price += (stop - entry) * sign * res.remaining_lots
+            res.remaining_lots = 0.0
+            break
+
+        if ladder_on and res.remaining_lots > 0:
+            for i, (tp_price, pct) in enumerate(ladder):
+                if triggered[i]:
+                    continue
+                reached = (mark >= tp_price) if is_buy else (mark <= tp_price)
+                if not reached:
+                    break
+                is_last = (i == len(ladder) - 1)
+                if is_last and (close_full_on_last or not partials_on):
+                    res.pnl_price += (tp_price - entry) * sign * res.remaining_lots
+                    res.closed_lots.append(round(res.remaining_lots, 2))
+                    res.remaining_lots = 0.0
+                    triggered[i] = True
+                    res.outcome = "tp"
+                    res.close_price = tp_price
+                    res.close_bar = idx
+                    break
+                if not partials_on:
+                    break
+                lots = min(round(lot * pct, 2), res.remaining_lots)
+                triggered[i] = True
+                if lots <= 0:
+                    continue
+                res.pnl_price += (tp_price - entry) * sign * lots
+                res.closed_lots.append(lots)
+                res.remaining_lots = round(res.remaining_lots - lots, 2)
+                # A ladder whose levels sum to exactly 100% (the normal
+                # case) zeroes remaining_lots right here, through the
+                # ordinary partial-close path rather than the dedicated
+                # "close everything" branch above -- which is the only
+                # other place close_price/close_bar get set. Without this,
+                # every such trade reports outcome="tp" with close_price
+                # stuck at its 0.0 default.
+                if res.remaining_lots <= 0:
+                    res.close_price = tp_price
+                    res.close_bar = idx
+
+        if res.remaining_lots <= 0:
+            if res.outcome == "timeout":
+                res.outcome = "tp"
+            break
+
+        if 0 < be_level <= len(ladder) and triggered[be_level - 1]:
+            _tighten(entry + sign * be_buffer if be_mode == "entry_buffer" else entry)
+
+        if not trail_armed:
+            if trail_act > 0 and _favourable(mark) >= trail_act:
+                trail_armed = True
+            elif 0 < trail_level <= len(ladder) and triggered[trail_level - 1]:
+                trail_armed = True
+
+        if trail_armed:
+            if trail_mode == "step" and trail_dist > 0:
+                candidate = mark - sign * (trail_dist + trail_pad)
+                move = (candidate - stop) * sign if stop is not None else None
+                if stop is None or trail_step <= 0 or move >= trail_step:
+                    _tighten(candidate)
+            elif trail_mode == "tp":
+                best = None
+                for i, (tp_price, _pct) in enumerate(ladder):
+                    if not triggered[i]:
+                        break
+                    best = tp_price
+                if best is not None:
+                    _tighten(best)
+
+    if res.remaining_lots > 0 and res.outcome == "timeout" and ticks:
+        last = ticks[-1]
+        res.close_price = float(last["bid"]) if is_buy else float(last["ask"])
+        res.close_bar = len(ticks) - 1
         res.pnl_price += (res.close_price - entry) * sign * res.remaining_lots
 
     res.pnl_usd = round(res.pnl_price * _USD_PER_PRICE_UNIT_PER_LOT, 2)

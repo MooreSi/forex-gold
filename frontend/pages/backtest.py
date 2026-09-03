@@ -85,6 +85,22 @@ _TF_INFO = {
              "Bars typically 15–40 pts — too coarse for scalping SL accuracy. "
              "Useful only for session-level or swing strategy analysis. Vantage depth ~12 months."),
 }
+
+# docs/todo/backtest/010 phase 1, measured 2026-09-03: one closed hour of
+# XAUUSD ticks is 29,580-34,584 ticks / 1.7-2.0MB, so the bridge itself
+# refuses a range over one day. Retention is a hard ~93-95 day cutoff
+# (confirmed against five separate weekdays, not a weekend gap) -- "Ticks"
+# can therefore only ever reach the last quarter, never the months the
+# candle timeframes above cover.
+_TICKS_KEY = "TICKS"
+_TICKS_MAX_DAYS_PER_REQUEST = 1
+_TICKS_RETENTION_DAYS = 90  # conservative side of the measured 93-95 day cutoff
+_TICKS_DESCRIPTION = (
+    "Real bid/ask ticks, not bars — removes the same-bar SL/TP-order ambiguity "
+    "every timeframe above admits (\"simulation assumes TP1 hit first\"). "
+    "Bounded to 1 day per fetch (a measured hour is 1.7-2.0MB) and to the last "
+    "~90 days (Vantage's tick retention ends around there). Template strategies only."
+)
 # Fields: (label, tf_minutes, candles_per_calendar_day, max_days, description)
 
 
@@ -101,6 +117,7 @@ def render(get_engine) -> None:
     # ── State ─────────────────────────────────────────────────────────────────
     manual_signals: list[bt.BtSignal] = []
     candles_cache: list[dict] = []
+    ticks_cache: list[dict] = []
     results_container = None  # assigned below
 
     # ── Page header ───────────────────────────────────────────────────────────
@@ -283,7 +300,7 @@ def render(get_engine) -> None:
 
             with ui.row().classes("items-center gap-4 flex-wrap"):
                 tf_sel = ui.select(
-                    {k: v[0] for k, v in _TF_INFO.items()},
+                    {**{k: v[0] for k, v in _TF_INFO.items()}, _TICKS_KEY: "Ticks"},
                     value="M5",
                     label="Timeframe",
                 ).classes("w-32")
@@ -302,7 +319,26 @@ def render(get_engine) -> None:
             tf_advice_lbl     = ui.label("").classes("text-xs text-blue-300 mt-1 w-full")
 
             def _update_tf_info():
-                tf        = tf_sel.value or "M5"
+                tf = tf_sel.value or "M5"
+                fetch_btn.text = "Fetch Ticks" if tf == _TICKS_KEY else "Fetch Candles"
+
+                if tf == _TICKS_KEY:
+                    days = max(1, int(days_inp.value or 30))
+                    if days > _TICKS_MAX_DAYS_PER_REQUEST:
+                        candle_detail_lbl.text = (
+                            f"Ticks fetch 1 day per request regardless of the Days field "
+                            f"(you asked for {days}) — the bridge itself refuses a wider range."
+                        )
+                        candle_detail_lbl.classes(replace="text-xs text-orange-400 mt-1 w-full font-mono")
+                    else:
+                        candle_detail_lbl.text = (
+                            f"1 day of ticks (~700k-800k ticks, tens of MB) ending today, "
+                            f"within the ~{_TICKS_RETENTION_DAYS}-day retention window."
+                        )
+                        candle_detail_lbl.classes(replace="text-xs text-gray-400 mt-1 w-full font-mono")
+                    tf_advice_lbl.text = _TICKS_DESCRIPTION
+                    return
+
                 days      = max(1, int(days_inp.value or 30))
                 info      = _TF_INFO.get(tf, _TF_INFO["M5"])
                 max_days  = info[3]
@@ -327,14 +363,21 @@ def render(get_engine) -> None:
 
             tf_sel.on_value_change(lambda _: _update_tf_info())
             days_inp.on_value_change(lambda _: _update_tf_info())
-            _update_tf_info()
 
             with ui.row().classes("items-center gap-4 mt-3"):
                 candle_status_lbl = ui.label("No candles loaded.").classes("text-gray-400 text-sm")
                 fetch_btn = ui.button(
                     "Fetch Candles", icon="download",
-                    on_click=lambda: asyncio.ensure_future(_fetch_candles())
+                    on_click=lambda: asyncio.ensure_future(_fetch_data())
                 ).classes("bg-gray-700 text-white px-4 py-2")
+
+            _update_tf_info()
+
+        async def _fetch_data():
+            if (tf_sel.value or "M5") == _TICKS_KEY:
+                await _fetch_ticks()
+            else:
+                await _fetch_candles()
 
         async def _fetch_candles():
             tf        = tf_sel.value or "M5"
@@ -351,6 +394,7 @@ def render(get_engine) -> None:
                     return
                 candles_cache.clear()
                 candles_cache.extend(raw)
+                ticks_cache.clear()
                 from datetime import datetime, timezone
                 from backend.src.controllers.backtest_controller import BROKER_TZ_OFFSET as _BROKER_TZ_OFFSET
                 # Candle ts is UTC+3; subtract offset for UTC display
@@ -369,6 +413,37 @@ def render(get_engine) -> None:
             finally:
                 fetch_btn.enable()
 
+        async def _fetch_ticks():
+            from datetime import datetime, timezone
+
+            to_ts   = time.time()
+            from_ts = to_ts - _TICKS_MAX_DAYS_PER_REQUEST * 86_400
+            candle_status_lbl.text = "Fetching 1 day of ticks — this can take a while (tens of MB)..."
+            candle_status_lbl.classes(replace="text-gray-400 text-sm")
+            fetch_btn.disable()
+            try:
+                raw = await engine.get_ticks_range(from_ts, to_ts)
+                if not raw:
+                    candle_status_lbl.text = "No ticks returned — ensure the bridge is connected."
+                    candle_status_lbl.classes(replace="text-orange-400 text-sm")
+                    return
+                ticks_cache.clear()
+                ticks_cache.extend(raw)
+                candles_cache.clear()
+                # Tick "time" is already true UTC — no _BROKER_TZ_OFFSET here,
+                # unlike the candle path above (see engine._simulate_ticks).
+                first_dt = datetime.fromtimestamp(raw[0]["time"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                last_dt  = datetime.fromtimestamp(raw[-1]["time"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                candle_status_lbl.text = (
+                    f"{len(raw):,} ticks loaded  ({first_dt} → {last_dt} UTC)"
+                )
+                candle_status_lbl.classes(replace="text-green-400 text-sm")
+            except Exception as e:
+                candle_status_lbl.text = f"Fetch error: {e}"
+                candle_status_lbl.classes(replace="text-red-400 text-sm")
+            finally:
+                fetch_btn.enable()
+
         # ── Run ────────────────────────────────────────────────────────────────
         run_status_lbl    = ui.label("").classes("text-sm text-gray-400")
         results_container = ui.column().classes("w-full gap-4")
@@ -378,7 +453,8 @@ def render(get_engine) -> None:
             if not selected:
                 run_status_lbl.text = "Select at least one strategy."
                 return
-            if not candles_cache:
+            use_ticks = bool(ticks_cache)
+            if not candles_cache and not ticks_cache:
                 run_status_lbl.text = "Fetch candles first."
                 return
 
@@ -402,9 +478,20 @@ def render(get_engine) -> None:
                     return
                 raw_signals = manual_signals[:]
 
-            # Filter signals: time window alignment + data quality validation
+            # Filter signals: time window alignment + data quality validation.
+            # filter_signals() only ever reads candles[0]/[-1]["ts"], corrected
+            # by BROKER_TZ_OFFSET, to get the window boundary -- ticks carry no
+            # such offset (see engine._simulate_ticks), so re-adding it here
+            # for this synthetic two-entry "candles" list makes filter_signals
+            # subtract it right back out to the true-UTC boundary ticks are
+            # already in, unchanged otherwise.
             max_sl = float(max_sl_inp.value or 50.0)
-            signals, fstats = bt.filter_signals(raw_signals, candles_cache, max_sl_pts=max_sl)
+            if use_ticks:
+                window = [{"ts": ticks_cache[0]["time"] + bt.BROKER_TZ_OFFSET},
+                         {"ts": ticks_cache[-1]["time"] + bt.BROKER_TZ_OFFSET}]
+            else:
+                window = candles_cache
+            signals, fstats = bt.filter_signals(raw_signals, window, max_sl_pts=max_sl)
 
             if not signals:
                 run_status_lbl.text = (
@@ -429,16 +516,26 @@ def render(get_engine) -> None:
             await asyncio.sleep(0)
 
             try:
-                stats = bt.run_backtest(
-                    signals             = signals,
-                    candles             = candles_cache,
-                    strategies          = selected,
-                    starting_balance    = float(balance_inp.value or 1000),
-                    risk_pct            = float(risk_inp.value or 1.0),
-                    spread_pts          = float(spread_inp.value or 0.4),
-                    lots_per_trade      = lots,
-                    commission_per_lot  = comm,
-                )
+                if use_ticks:
+                    stats = bt.run_backtest_ticks(
+                        signals             = signals,
+                        ticks               = ticks_cache,
+                        strategies          = selected,
+                        starting_balance    = float(balance_inp.value or 1000),
+                        spread_pts          = float(spread_inp.value or 0.4),
+                        commission_per_lot  = comm,
+                    )
+                else:
+                    stats = bt.run_backtest(
+                        signals             = signals,
+                        candles             = candles_cache,
+                        strategies          = selected,
+                        starting_balance    = float(balance_inp.value or 1000),
+                        risk_pct            = float(risk_inp.value or 1.0),
+                        spread_pts          = float(spread_inp.value or 0.4),
+                        lots_per_trade      = lots,
+                        commission_per_lot  = comm,
+                    )
                 run_status_lbl.text = (
                     f"Done — {fstats.valid} of {fstats.total} signals valid for this candle window "
                     f"({fstats.out_of_window} outside window, {fstats.zero_sl} no-SL, "

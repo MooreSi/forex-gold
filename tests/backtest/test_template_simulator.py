@@ -142,6 +142,19 @@ class TestTheTpLadder:
 
         assert r.closed_lots == []
 
+    def test_a_single_full_tp_via_the_partial_path_still_records_a_close_price(self):
+        """A one-level ladder at 100% with close_full_on_last=0 zeroes
+        remaining_lots through the ORDINARY partial-close branch, never the
+        dedicated "close everything" branch that sets close_price -- and
+        close_price defaults to 0.0. Any template whose levels sum to
+        exactly 100% (the normal case) hits this, not an edge case."""
+        r = sim.simulate(self._ladder(tp1_pips=20.0, tp1_pct=100.0,
+                                      tp2_pips=0.0, tp2_pct=0.0),
+                         _bars((4002.5, 3999.5)), entry=4000.0, is_buy=True)
+
+        assert r.outcome == "tp"
+        assert r.close_price == pytest.approx(4002.0)
+
     def test_tpsl_mode_off_disables_the_whole_ladder(self):
         r = sim.simulate(self._ladder(tpsl_mode="off"),
                          _bars((4004.5, 3999.9)), entry=4000.0, is_buy=True)
@@ -256,6 +269,44 @@ class TestTrailing:
             entry=4000.0, is_buy=True)
 
         assert r.close_price == pytest.approx(4002.0)
+
+    def test_trail_step_blocks_a_move_smaller_than_itself(self):
+        """ApplyTemplateStepTrail (mql5:2159-2171): a step trail only moves
+        once the improvement over the LIVE stop is >= trail_step pips.
+        Bar 0 arms the trail and sets the stop at 4003.0 (20 pips behind the
+        4005.0 high). Bar 1's high of 4005.4 would compute 4003.4 -- a mere
+        0.4 improvement, well under a 20-pip trail_step -- so the stop must
+        stay at 4003.0, not creep forward on every fractional wiggle."""
+        r = sim.simulate(
+            _tpl(trail_mode="step", trail_distance=20.0, trail_activation=10.0,
+                 trail_step=20.0),
+            _bars((4005.0, 3999.5), (4005.4, 4004.0), (4001.0, 3994.0)),
+            entry=4000.0, is_buy=True)
+
+        assert r.close_price == pytest.approx(4003.0)
+
+    def test_trail_step_allows_a_move_at_least_as_large(self):
+        """Same setup, but bar 1's high (4006.0) computes 4004.0 -- exactly
+        the 1.0 (10-pip) trail_step above the 4003.0 stop bar 0 set -- so
+        this move must be accepted."""
+        r = sim.simulate(
+            _tpl(trail_mode="step", trail_distance=20.0, trail_activation=10.0,
+                 trail_step=10.0),
+            _bars((4005.0, 3999.5), (4006.0, 4005.0), (4001.0, 3994.0)),
+            entry=4000.0, is_buy=True)
+
+        assert r.close_price == pytest.approx(4004.0)
+
+    def test_trail_step_zero_means_move_on_any_improvement(self):
+        """0 is the EA's own default when the key is absent -- unlimited
+        trail granularity, same as before trail_step existed."""
+        r = sim.simulate(
+            _tpl(trail_mode="step", trail_distance=20.0, trail_activation=10.0,
+                 trail_step=0.0),
+            _bars((4005.0, 3999.5), (4005.4, 4004.0), (4001.0, 3994.0)),
+            entry=4000.0, is_buy=True)
+
+        assert r.close_price == pytest.approx(4003.4)
 
     def test_a_stop_is_never_widened(self):
         """MoveSl only ever accepts a stop closer than the current one.

@@ -382,6 +382,96 @@ def _simulate_template(
         hold_bars=res.close_bar,
     )
 
+def _simulate_ticks_template(
+    ticks: list, sig: "BtSignal", strategy: str, fill_idx: int,
+    fill_price: float, is_buy: bool, balance: float,
+) -> "Optional[BtTrade]":
+    """Tick-walk counterpart to _simulate_template -- same backstop: None,
+    never an approximation, for anything the walk cannot model faithfully."""
+    from backend.src.services.backtest.template_simulator import (
+        UnsupportedTemplate, simulate_ticks as _walk,
+    )
+
+    template = _load_backtest_template(strategy[len(TEMPLATE_PREFIX):])
+    if not template:
+        return None
+    try:
+        res = _walk(template, ticks[fill_idx:], fill_price, is_buy, balance)
+    except UnsupportedTemplate:
+        return None
+
+    return BtTrade(
+        signal_id=sig.signal_id,
+        strategy=strategy,
+        direction=sig.direction,
+        fill_price=fill_price,
+        fill_bar_idx=fill_idx,
+        lot_size=res.lot_size,
+        pnl_pts=round(res.pnl_price, 2),
+        pnl_usd=res.pnl_usd,
+        close_price=res.close_price,
+        close_bar_idx=fill_idx + res.close_bar,
+        outcome=res.outcome,
+        hold_bars=res.close_bar,
+    )
+
+
+def _simulate_ticks(
+    ticks:              list[dict],
+    sig:                BtSignal,
+    strategy:           str,
+    balance:            float,
+    spread_pts:         float,
+    commission_per_lot: float = 0.0,
+) -> Optional[BtTrade]:
+    """Tick-walk counterpart to _simulate() -- template strategies only. The
+    backtest picker (frontend/pages/backtest.py) has offered EA templates
+    exclusively since item 7, so a built-in strategy key reaching here would
+    already be a picker bug; this returns None for one rather than guessing
+    which built-in simulator to run against ticks none of them support.
+    """
+    if not strategy.startswith(TEMPLATE_PREFIX):
+        return None
+
+    if sig.direction == "BUY"  and sig.stop_loss >= sig.entry_low:
+        return None
+    if sig.direction == "SELL" and sig.stop_loss <= sig.entry_high:
+        return None
+
+    # No _BROKER_TZ_OFFSET here, unlike _simulate()'s candle path. Candle
+    # timestamps come from copy_rates_from_pos, which returns raw MT5 server
+    # time with no conversion at all (_get_candles_range's own docstring:
+    # copy_rates_range silently misinterprets a naive datetime). Ticks come
+    # from copy_ticks_range given a tz-AWARE UTC datetime, and the 2026-09-03
+    # probe confirmed the ticks that come back land exactly in the UTC window
+    # requested -- already true UTC, same convention sig.created_ts is in.
+    # Adding the offset here would silently shift every tick fill by 3 hours.
+    fill_idx = None
+    for i, t in enumerate(ticks):
+        if t["time"] < sig.created_ts:
+            continue
+        mid = (float(t["bid"]) + float(t["ask"])) / 2.0
+        if sig.entry_low <= mid <= sig.entry_high:
+            fill_idx = i
+            break
+
+    if fill_idx is None:
+        return None
+
+    half_spread = spread_pts / 2.0
+    is_buy      = sig.direction == "BUY"
+    fill_price  = sig.entry_mid + half_spread if is_buy else sig.entry_mid - half_spread
+
+    trade = _simulate_ticks_template(ticks, sig, strategy, fill_idx, fill_price, is_buy, balance)
+
+    if trade is not None and commission_per_lot > 0:
+        comm             = round(commission_per_lot * trade.lot_size, 2)
+        trade.commission = comm
+        trade.pnl_usd    = round(trade.pnl_usd - comm, 2)
+
+    return trade
+
+
 # ── Main simulation dispatcher ────────────────────────────────────────────────
 
 def _simulate(
@@ -494,6 +584,36 @@ def run_backtest(
         for sig in signals:
             t = _simulate(candles, sig, strategy, current_balance, risk_pct,
                           spread_pts, lots_per_trade, commission_per_lot)
+            if t is not None:
+                trades.append(t)
+                current_balance = max(current_balance + t.pnl_usd, 1.0)
+
+        out[strategy] = _compute_stats(strategy, trades, starting_balance)
+
+    return out
+
+
+def run_backtest_ticks(
+    signals:            list[BtSignal],
+    ticks:               list[dict],
+    strategies:          list[str],
+    starting_balance:    float = 1_000.0,
+    spread_pts:          float = 0.4,
+    commission_per_lot:  float = 7.0,
+) -> dict[str, StrategyStats]:
+    """Tick-walk counterpart to run_backtest() -- docs/todo/backtest/010
+    phase 1. EA templates only; a non-template strategy key produces no
+    trades rather than a guess at which built-in simulator to run on ticks.
+    """
+    out: dict[str, StrategyStats] = {}
+
+    for strategy in strategies:
+        trades:          list[BtTrade] = []
+        current_balance: float         = starting_balance
+
+        for sig in signals:
+            t = _simulate_ticks(ticks, sig, strategy, current_balance,
+                                spread_pts, commission_per_lot)
             if t is not None:
                 trades.append(t)
                 current_balance = max(current_balance + t.pnl_usd, 1.0)

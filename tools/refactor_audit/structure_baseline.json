@@ -5,13 +5,14 @@
     "Regenerate with: python -m tools.refactor_audit.structure_gates",
     "--update-baseline, and only when the totals have gone DOWN.",
     "",
-    "EXCEPTION: four loc entries were raised once, on 2026-08-27, with the",
-    "owner's sign-off. Each rise is recorded in _raised below with the reason",
-    "and the number it replaced. A rise with no entry there is a regression,",
-    "not a decision -- put the lines back rather than editing this file."
+    "EXCEPTION: loc entries have been raised twice, each with the owner's",
+    "sign-off, dated batches under _raised below. Each rise carries the",
+    "reason and the number it replaced. A rise with no entry there is a",
+    "regression, not a decision -- put the lines back rather than editing",
+    "this file."
   ],
   "_raised": {
-    "_when": "2026-08-27",
+    "2026-08-27": {
     "_why": [
       "The upstream merge (1e383fe) added nine supervised subsystems plus a",
       "set of upstream features. Four baselined files grew. The alternative",
@@ -88,6 +89,42 @@
         "different interpreter."
       ]
     }
+    },
+    "2026-09-03": {
+      "_why": [
+        "docs/todo/backtest/010 phase 1: the backtest's tick-walking",
+        "simulator needs tick history, fetched through TradingRuntime (the",
+        "same facade get_candles_for_symbol already uses -- the live bridge",
+        "connection is only reachable through it, no side door) and served",
+        "by a new bounded /ticks endpoint on the Wine bridge process.",
+        "Both rises are small, mechanical additions in the same one-line-",
+        "per-method shape every other market-data method here already has,",
+        "not new growth of an existing responsibility."
+      ],
+      "backend/src/runtime.py": {
+        "now": 1513,
+        "was": 1507,
+        "why": [
+          "get_ticks_range() forwards to self._bridge.get_ticks_range(),",
+          "same shape as get_candles_for_symbol two lines above it.",
+          "facade_baseline.json rose from 88 to 89 for the same method --",
+          "the two numbers are one fact stated twice and move together,",
+          "same rule the 2026-08-27 runtime.py entry above states."
+        ]
+      },
+      "mt5_bridge.py": {
+        "now": 1401,
+        "was": 1344,
+        "why": [
+          "_get_ticks_range() and its /ticks HTTP route, bounded to one",
+          "calendar day per request -- docs/todo/backtest/010's 2026-09-03",
+          "probe measured one closed hour of XAUUSD ticks at 29,580-34,584",
+          "ticks / 1.7-2.0MB, so an unbounded range would be tens of MB per",
+          "request. Still exempt from splitting: runs under a different",
+          "interpreter, same as the 2026-08-27 entry above."
+        ]
+      }
+    }
   },
   "_tightened": {
     "2026-08-27": {
@@ -154,9 +191,9 @@
   },
   "baseline": {
     "loc": {
-      "backend/src/runtime.py": 1507,
+      "backend/src/runtime.py": 1513,
       "backend/src/services/cluster/remote/server.py": 1204,
-      "mt5_bridge.py": 1344
+      "mt5_bridge.py": 1401
     },
     "sql": {},
     "transaction": {

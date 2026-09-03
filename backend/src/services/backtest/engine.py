@@ -323,6 +323,65 @@ def _ema_closes(candles: list[dict], end_idx: int, period: int) -> Optional[floa
     return ema
 
 
+
+# ── EA templates ──────────────────────────────────────────────────────────────
+
+TEMPLATE_PREFIX = "template:"
+
+
+def _load_backtest_template(name: str):
+    """The stored EA template called `name`, or None.
+
+    Its own function so the dispatch can be tested without a database, and so
+    a missing template is a None rather than an exception on a page render.
+    """
+    try:
+        from backend.src.services.broker.ea_templates import get_ea_template
+        return get_ea_template(name)
+    except Exception:
+        return None
+
+
+def _simulate_template(
+    candles: list, sig: "BtSignal", strategy: str, fill_bar: int,
+    fill_price: float, is_buy: bool, balance: float,
+) -> "Optional[BtTrade]":
+    """Walk an EA template, or return None if it cannot be simulated faithfully.
+
+    None, never an approximation: the picker should not have offered an
+    unsupported template, and if it does, this is the backstop. A plausible
+    number from a template the walk cannot model is worse than no number,
+    because it would be used to choose what trades real money.
+    """
+    from backend.src.services.backtest.template_simulator import (
+        UnsupportedTemplate, simulate as _walk,
+    )
+
+    template = _load_backtest_template(strategy[len(TEMPLATE_PREFIX):])
+    if not template:
+        return None
+    try:
+        res = _walk(template, candles[fill_bar:], fill_price, is_buy, balance)
+    except UnsupportedTemplate:
+        return None
+
+    return BtTrade(
+        signal_id=sig.signal_id,
+        strategy=strategy,
+        direction=sig.direction,
+        fill_price=fill_price,
+        fill_bar_idx=fill_bar,
+        lot_size=res.lot_size,
+        pnl_pts=round(res.pnl_price, 2),
+        pnl_usd=res.pnl_usd,
+        close_price=res.close_price,
+        # The walk starts at the fill, so its indices are offsets into that
+        # slice; the results table shows the index into the whole series.
+        close_bar_idx=fill_bar + res.close_bar,
+        outcome=res.outcome,
+        hold_bars=res.close_bar,
+    )
+
 # ── Main simulation dispatcher ────────────────────────────────────────────────
 
 def _simulate(
@@ -373,7 +432,10 @@ def _simulate(
     fill_price  = sig.entry_mid + half_spread if is_buy else sig.entry_mid - half_spread
     sl_dist     = abs(fill_price - sig.stop_loss)
 
-    if strategy == "conservative":
+    if strategy.startswith(TEMPLATE_PREFIX):
+        trade = _simulate_template(
+            candles, sig, strategy, fill_bar, fill_price, is_buy, balance)
+    elif strategy == "conservative":
         trade = _simulate_conservative(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)
     elif strategy == "conservative_trial":
         trade = _simulate_ct(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)

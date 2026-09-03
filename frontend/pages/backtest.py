@@ -16,11 +16,32 @@ from typing import Optional
 from nicegui import ui
 
 from backend.src.controllers import backtest_controller as bt
-from backend.src.controllers.trading_controller import (
-    STRATEGY_NAMES,
-)
 
-_STRATEGY_LABELS = dict(STRATEGY_NAMES)
+TEMPLATE_PREFIX = "template:"
+
+
+def _template_choices() -> list[dict]:
+    """Every EA template, with whether the backtest can simulate it.
+
+    Read, never hardcoded -- the owner's requirement that "if new EA templates
+    are created they should appear here automatically" is satisfied by asking
+    the same store Trading > Strategy writes to.
+
+    Unsupported templates are still listed, disabled, with the reason. Hiding
+    them would read as "that template does not exist"; showing them greyed
+    with "grid legs are not modelled" is the answer someone can act on.
+    """
+    from backend.src.controllers import broker_controller as _et
+
+    try:
+        return bt.summarise_templates(_et.list_ea_templates())
+    except Exception:
+        return []
+
+
+def _strategy_label(key: str) -> str:
+    """Display name for a results row's strategy key."""
+    return key[len(TEMPLATE_PREFIX):] if key.startswith(TEMPLATE_PREFIX) else key
 
 _OUTCOME_LABELS = {
     "sl":          ("SL", "text-red-400"),
@@ -151,12 +172,23 @@ def render(get_engine) -> None:
                         "Also filters point-entry signals (entry_low == entry_high, no zone) and zero-SL instant orders."
                     )
 
-            ui.label("Strategies to compare").classes("text-blue-300 text-sm font-semibold mt-3 mb-1")
+            ui.label("EA Templates to compare").classes("text-blue-300 text-sm font-semibold mt-3 mb-1")
             strategy_checks: dict[str, ui.checkbox] = {}
+            _choices = _template_choices()
+            if not _choices:
+                ui.label("No EA templates saved yet — create one under "
+                         "Trading › Strategy.").classes("text-xs text-gray-500")
             with ui.row().classes("flex-wrap gap-3"):
-                for key, label in _STRATEGY_LABELS.items():
-                    cb = ui.checkbox(label, value=(key in ("be_runner", "scale_out", "conservative")))
-                    strategy_checks[key] = cb
+                for _row in _choices:
+                    _key = f"{TEMPLATE_PREFIX}{_row['name']}"
+                    if _row["supported"]:
+                        strategy_checks[_key] = ui.checkbox(_row["name"], value=False)
+                    else:
+                        # Disabled rather than hidden, with the reason on hover.
+                        cb = ui.checkbox(_row["name"], value=False)
+                        cb.props("disable").classes("opacity-50")
+                        cb.tooltip("Not simulated — "
+                                   + "; ".join(_row["reasons"]))
 
         # ── Signal source ──────────────────────────────────────────────────────
         with ui.card().classes("w-full bg-gray-800 rounded-lg p-4"):
@@ -525,7 +557,7 @@ def _render_results(
 
                         with ui.element("tr").classes(row_cls):
                             with ui.element("td").classes("px-3 py-2"):
-                                lbl = _STRATEGY_LABELS.get(strategy, strategy)
+                                lbl = _strategy_label(strategy)
                                 ui.label(lbl + (" ★" if is_best else "")).classes(
                                     "text-sm font-semibold "
                                     + ("text-green-300" if is_best else "text-gray-200")
@@ -572,7 +604,7 @@ def _render_results(
         for strategy, s in stats.items():
             if not s.trade_list:
                 continue
-            label = _STRATEGY_LABELS.get(strategy, strategy)
+            label = _strategy_label(strategy)
             with ui.expansion(
                 f"{label}  —  {s.trades} trade(s), {_fmt_pnl(s.total_pnl)}",
                 icon="list",

@@ -6,9 +6,10 @@ is simulation over stored history -- it places nothing and touches no broker.
 from __future__ import annotations
 
 from backend.src.services.backtest import engine as _engine
+from backend.src.services.backtest import template_support as _template_support
 
 __all__ = [
-    "run_backtest", "signals_from_db", "filter_signals",
+    "run_backtest", "signals_from_db", "filter_signals", "summarise_templates",
     "BtSignal", "StrategyStats", "FilterStats", "BROKER_TZ_OFFSET",
 ]
 
@@ -31,3 +32,8 @@ def signals_from_db(*args, **kwargs):
 
 def filter_signals(*args, **kwargs):
     return _engine.filter_signals(*args, **kwargs)
+
+
+def summarise_templates(templates):
+    """One row per template -- which are backtestable, and why not for the rest."""
+    return _template_support.summarise(templates)

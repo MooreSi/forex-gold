@@ -14,6 +14,41 @@ import logging
 _log = logging.getLogger(__name__)
 
 
+def _strategy_options(templates: list, current_values: list) -> dict:
+    """The Channel Strategy dropdown's options: EA templates, and nothing else.
+
+    Built-in strategies were removed from this list on the owner's
+    instruction (2026-09-03, "all channels are on templates"). Verified
+    against the database first: everything that traded that day was on a
+    template.
+
+    But three stored bindings still named a built-in -- Breakout Engine
+    (conservative_trial), Bounce Engine (conservative) and the fallback
+    default (scale_out). Those bindings are deliberately NOT rewritten here:
+    changing them changes how live trades are managed, which is the owner's
+    call, not a side-effect of tidying a dropdown.
+
+    That is what `current_values` is for. A channel already bound to a
+    built-in keeps its own entry, marked "(legacy)", so the dropdown shows
+    what the channel actually uses. Without it the select renders blank and
+    the next save silently rebinds the channel to whatever sits first in the
+    list.
+    """
+    from backend.src.controllers import broker_controller as _et
+
+    opts = {"": "\u2014 Inherit Global \u2014", "auto": "Auto (Claude)"}
+    for t in templates:
+        opts[_et.override_for_template(t["name"])] = f"Template: {t['name']}"
+
+    for cur in current_values:
+        cur = (cur or "").strip()
+        if not cur or cur == "auto" or cur in opts:
+            continue
+        name = STRATEGY_NAMES.get(cur, cur)
+        opts[cur] = f"{name} (legacy)"
+    return opts
+
+
 def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     """
     Compact channel strategy card: one row per channel with name, stats badge,
@@ -101,16 +136,11 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
         if ch["source"] != "ORB/IVB Report"
     ]
 
-    strat_opts = {"": "— Inherit Global —", "auto": "Auto (Claude)"}
-    strat_opts.update(STRATEGY_NAMES)
-    for k, v in all_names.items():
-        if k not in strat_opts:
-            strat_opts[k] = v
-    # EA Templates -- a saved template fully replaces strategy dispatch for
-    # a channel (the EA manages the trade end-to-end), so it's a peer entry
-    # in the same list rather than a second selector.
-    for _t in _et.list_ea_templates():
-        strat_opts[_et.override_for_template(_t["name"])] = f"Template: {_t['name']}"
+    strat_opts = _strategy_options(
+        _et.list_ea_templates(),
+        [("auto" if c.get("auto_strategy") else (c.get("strategy_override") or ""))
+         for c in channels],
+    )
 
     _rec_icons: dict[str, object] = {}   # source → ui.icon for tooltip updates
     _sel_map:   dict[str, object] = {}   # source → ui.select
@@ -270,151 +300,12 @@ def _rec_label_text(rec: dict, strat_opts: dict) -> str:
     conf_str   = f" ({conf:.0%})" if conf else ""
     reasoning_str = f" — {reasoning}" if reasoning else ""
     return f"Rec: {strat_name}{conf_str}{reasoning_str}"
-def _render_strategy_params_card() -> None:
-    """
-    Strategy Parameters: live-editable SL/TP/close-% values for every
-    fixed-parameter strategy (see core_strategy_params.PARAM_STRATEGIES),
-    plus a small named-template library to save/reapply a parameter set
-    later. A change here applies to the next trade opened under that
-    strategy -- no restart, no code change. Mirrors a third-party EA's
-    "Settings Templates" panel investigated 2026-07-22; see
-    core_strategy_params.py's module docstring for why this needs no
-    MQL5 changes at all (every strategy here is already fully resolved
-    to concrete SL/TP prices by Python before any EA sees the trade).
-    """
-    from backend.src.controllers import strategy_controller as sp
+# _render_strategy_params_card was removed 2026-09-03 with the built-in
+# strategies it edited (owner: "we're now only using EA templates").
+# The SERVICE it drove -- services/risk/strategy_params -- is untouched and
+# still live: resolution.py reads it for channels whose stored binding is
+# still a built-in, such as Breakout Engine on conservative_trial.
 
-    with ui.row().classes("items-center gap-2 mb-2"):
-        ui.label("Strategy Parameters").classes("text-base font-bold text-yellow-300")
-        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-            "Live-editable SL/TP values for the fixed-parameter strategies -- "
-            "a change applies to the next trade opened under that strategy, "
-            "no restart needed. Save named presets below to switch between "
-            "setups quickly."
-        )
-
-    state = {"strategy": sp.PARAM_STRATEGIES[0]}
-    fields: dict[str, object] = {}
-
-    def _on_strategy_change(e) -> None:
-        v = e.value
-        if isinstance(v, dict):  # NiceGUI dict-options returns {label,value} obj
-            v = v.get("value")
-        if v:
-            state["strategy"] = v
-            _draw_body()
-
-    ui.select(
-        sp.STRATEGY_LABELS, value=state["strategy"], label="Strategy",
-    ).classes("w-56 mb-2").props("dense outlined").on_value_change(
-        _on_strategy_change
-    ).tooltip(
-        "Which built-in strategy's fixed SL/TP point values to edit below. "
-        "Changes apply to the next trade opened under that strategy."
-    )
-
-    body = ui.column().classes("w-full gap-2")
-
-    def _current_values() -> dict:
-        return {k: f.value for k, f in fields.items()}
-
-    def _draw_body() -> None:
-        body.clear()
-        strategy = state["strategy"]
-        specs = sp.PARAM_SPECS[strategy]
-        live = sp.get_strategy_params(strategy)
-        fields.clear()
-        with body:
-            with ui.row().classes("w-full gap-3 flex-wrap items-end"):
-                for key, label, default, unit in specs:
-                    step = 0.05 if unit in ("x", "frac") else 1.0
-                    fields[key] = ui.number(
-                        label=f"{label} ({unit})", value=live.get(key, default), step=step,
-                        format="%.2f",
-                    ).classes("w-36").props("dense outlined")
-
-            with ui.row().classes("gap-2 mt-1"):
-                ui.button("Save & Apply", on_click=_save_live).classes(
-                    "text-xs bg-green-800 text-white"
-                ).props("dense")
-                ui.button("Reset to Default", on_click=_reset_default).classes(
-                    "text-xs"
-                ).props("dense outline")
-
-            ui.separator().classes("my-2 border-gray-700")
-            ui.label("Saved Templates").classes("text-sm font-semibold text-gray-300")
-
-            templates = sp.list_templates(strategy)
-            if not templates:
-                ui.label("No saved templates for this strategy yet.").classes(
-                    "text-xs text-gray-500"
-                )
-            else:
-                for t in templates:
-                    with ui.row().classes("items-center gap-2"):
-                        ui.label(t["name"]).classes(
-                            "text-xs text-gray-200 truncate"
-                        ).style("width:10rem").tooltip(t["name"])
-                        ui.button("Apply", on_click=lambda _t=t: _apply_tpl(_t)).classes(
-                            "text-xs"
-                        ).props("dense flat color=blue")
-                        ui.button(icon="delete_outline", on_click=lambda _t=t: _delete_tpl(_t)).props(
-                            "dense flat color=red"
-                        )
-
-            with ui.row().classes("items-center gap-2 mt-2"):
-                name_input = ui.input(placeholder="Template name").classes("w-48").props(
-                    "dense outlined"
-                )
-                ui.button(
-                    "Save as Template", on_click=lambda: _save_as_template(name_input)
-                ).classes("text-xs").props("dense outline color=blue")
-
-    def _save_live() -> None:
-        strategy = state["strategy"]
-        try:
-            sp.set_strategy_params(strategy, _current_values())
-            ui.notify(
-                f"{sp.STRATEGY_LABELS[strategy]} parameters saved — applies to new trades",
-                type="positive",
-            )
-        except Exception as exc:
-            ui.notify(f"Save failed: {exc}", type="negative")
-
-    def _reset_default() -> None:
-        strategy = state["strategy"]
-        sp.reset_strategy_params(strategy)
-        ui.notify(f"{sp.STRATEGY_LABELS[strategy]} reset to defaults", type="info")
-        _draw_body()
-
-    def _apply_tpl(t: dict) -> None:
-        try:
-            sp.apply_template(t["id"])
-            ui.notify(f"Applied template '{t['name']}'", type="positive")
-            _draw_body()
-        except Exception as exc:
-            ui.notify(f"Apply failed: {exc}", type="negative")
-
-    def _delete_tpl(t: dict) -> None:
-        sp.delete_template(t["id"])
-        ui.notify(f"Deleted template '{t['name']}'", type="info")
-        _draw_body()
-
-    def _save_as_template(name_input) -> None:
-        strategy = state["strategy"]
-        name = (name_input.value or "").strip()
-        if not name:
-            ui.notify("Enter a template name first", type="warning")
-            return
-        try:
-            sp.save_template(strategy, name, _current_values())
-            name_input.value = ""
-            ui.notify(f"Saved template '{name}'", type="positive")
-            _draw_body()
-        except Exception as exc:
-            ui.notify(f"Save failed: {exc}", type="negative")
-
-    _draw_body()
 def _render_global_parameters_card(rs: dict) -> None:
     """
     Global Parameters (2026-07-24): account-wide numbers that used to be

@@ -335,6 +335,9 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+from backend.src.services.channels.scorecard_repo import (  # noqa: F401
+    get_channel_performance_map,
+)
 from backend.src.services.channels.repo import (  # noqa: E402,F401
     _TG_GROUP_ID_MAP,
     _normalise_tg_source,
@@ -363,7 +366,6 @@ from backend.src.services.channels.repo import (  # noqa: E402,F401
     get_open_trade_count_for_channel,
     get_all_channel_strategy_settings,
     set_channel_paused,
-    get_channel_performance_map,
 )
 from backend.src.services.risk.custom_strategies_repo import (  # noqa: E402,F401
     get_custom_strategies,

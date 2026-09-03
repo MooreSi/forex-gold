@@ -50,12 +50,16 @@ class TestTheRestOfThePageSurvives:
     def test_ea_templates_still_render(self):
         assert "_render_ea_templates_card" in _code()
 
-    def test_strategy_parameters_still_renders(self):
-        """Still here on purpose. Channels are still bound to Python
-        strategies, and this card is the only way to tune the SL/TP geometry
-        they enter with -- removing it before the templates can express that
-        would be a functional regression, not a tidy-up."""
-        assert "_render_strategy_params_card" in _code()
+    def test_strategy_parameters_is_now_gone_too(self):
+        """It was kept when the comparison table went, because channels were
+        still bound to built-in strategies and this card was the only way to
+        tune the geometry they entered with.
+
+        Removed 2026-09-03 once the owner confirmed every channel is on a
+        template and the built-ins left the picker. Verified against the
+        database first: everything trading that day was on a template.
+        """
+        assert "_render_strategy_params_card" not in _code()
 
     def test_the_module_still_parses(self):
         ast.parse(SRC.read_text(encoding="utf-8"))

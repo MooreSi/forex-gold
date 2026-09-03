@@ -18,7 +18,6 @@ from backend.src.controllers.trading_controller import (
 from ._strategy_cards import (
     _render_channel_strategy_card,
     _render_global_parameters_card,
-    _render_strategy_params_card,
 )
 
 
@@ -59,15 +58,14 @@ def _render_strategy(engine):
         }
         all_names.update({cs["id"]: cs["name"] for cs in custom_strats})
 
-        # ── Top row: Strategy Parameters (half) + Channel Strategy (half) ────
-        with ui.row().classes("w-full gap-4 flex-wrap items-stretch"):
-
-          # ── Strategy Parameters card ─────────────────────────────────────
-          with ui.card().classes("flex-1 min-w-72 bg-gray-800 p-2 rounded-lg"):
-            _render_strategy_params_card()
-
-          # ── Channel Strategy card ─────────────────────────────────────────
-          with ui.card().classes("flex-1 min-w-72 bg-gray-800 p-2 rounded-lg"):
+        # ── Channel Strategy (full width) ────────────────────────────────────
+        #
+        # The Strategy Parameters card was removed 2026-09-03 on the owner's
+        # instruction: the built-in strategies it tuned are no longer
+        # selectable, so a live editor for their SL/TP geometry had nothing
+        # left to point at. Existing bindings to a built-in are untouched and
+        # still shown in the picker, marked "(legacy)".
+        with ui.card().classes("w-full bg-gray-800 p-2 rounded-lg"):
             _render_channel_strategy_card(engine, all_names, rs)
 
         # ── Global Parameters card (full width) ────────────────────────────────

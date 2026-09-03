@@ -30,8 +30,13 @@ _TG_GROUP_ID_MAP: dict[str, str] = {
 
 
 def _normalise_tg_source(src: str) -> str:
-    """Map raw numeric Telegram group IDs to human-readable channel names."""
-    return _TG_GROUP_ID_MAP.get(str(src).strip(), src) if src else src
+    """Group ID -> name, then the "Telegram Auto (<channel>)" wrapper off.
+    The scorecard groups by this; without the wrapper step (missing until
+    2026-09-03) one channel aggregated as two."""
+    if not src:
+        return src
+    named = _TG_GROUP_ID_MAP.get(str(src).strip(), src)
+    return _canonical(named)
 
 
 # Channel-name tables that key rows by the channel's display name string
@@ -349,7 +354,8 @@ def recompute_channel_performance(days: int = 30) -> list[str]:
     newly_paused: list[str] = []
     with db() as conn:
         for r in scorecard:
-            src = r["source"]
+            # Explicit: this WRITES the rows every reader looks up.
+            src = _canonical(r["source"])
             n   = r["wins"] + r["losses"]
             pf  = _channel_profit_factor(r)
             wr  = r["win_rate"]
@@ -389,14 +395,16 @@ def recompute_channel_performance(days: int = 30) -> list[str]:
 
 
 def get_channel_lot_mult(source: str) -> tuple[float, bool]:
-    """Return (lot_multiplier, paused) for a signal source. Defaults (1.0, False)."""
+    """(lot_multiplier, paused) for a signal source. Defaults (1.0, False).
+    Canonicalised: resolution.py sizes on one and refuses on the other, so two
+    rows let one channel size and pause two ways."""
     if not source:
         return 1.0, False
     try:
         with db() as conn:
             row = conn.execute(
                 "SELECT lot_mult, paused FROM channel_performance WHERE source=?",
-                (source,),
+                (_canonical(source),),
             ).fetchone()
         if not row:
             return 1.0, False
@@ -771,7 +779,7 @@ def get_all_channel_strategy_settings() -> list:
 
 def set_channel_paused(source: str, paused: bool) -> None:
     """Manually pause/resume a channel; marks manual_override so auto-recompute
-    won't flip it back."""
+    won't flip it back. Canonicalised: a pause applies to every route."""
     import time as _t
     with db() as conn:
         conn.execute(
@@ -779,18 +787,7 @@ def set_channel_paused(source: str, paused: bool) -> None:
             "VALUES (?,?,1,?) "
             "ON CONFLICT(source) DO UPDATE SET paused=excluded.paused, "
             "  manual_override=1, updated_at=excluded.updated_at",
-            (source, 1 if paused else 0, _t.time()),
+            (_canonical(source), 1 if paused else 0, _t.time()),
         )
 
 
-def get_channel_performance_map() -> dict:
-    """Return {source: {lot_mult, paused, manual_override}} for the scorecard UI."""
-    try:
-        with db() as conn:
-            rows = conn.execute(
-                "SELECT source, lot_mult, paused, manual_override FROM channel_performance"
-            ).fetchall()
-        return {r[0]: {"lot_mult": float(r[1] or 1.0), "paused": bool(r[2]),
-                       "manual_override": bool(r[3])} for r in rows}
-    except Exception:
-        return {}

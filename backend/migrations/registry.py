@@ -658,6 +658,58 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         "ON vantage_partial_closes (trade_id, reason, lots_closed, close_price) "
         "WHERE reason GLOB 'TP[0-9]' OR reason GLOB 'TP[0-9][0-9]'",
     ]),
+
+    (33, "merge the 'Telegram Auto (X)' channel rows onto X", [
+        # Owner, 2026-09-03: "telegram auto and telegram are the same thing so
+        # consolidate them."
+        #
+        # The scorecard grouped by _normalise_tg_source, which mapped numeric
+        # group IDs to names but left the "Telegram Auto (<channel>)" wrapper
+        # alone -- so one channel aggregated as two, and
+        # recompute_channel_performance wrote a row for each. On the owner's
+        # database that produced:
+        #
+        #   Gold Diggers VIP                  1.3  paused=1  188 samples
+        #   Telegram Auto (Gold Diggers VIP)  1.3  paused=0   17 samples
+        #
+        # Every reader that queried WHERE source=? with the raw name then found
+        # whichever row matched literally. get_channel_lot_mult is the one that
+        # matters: it feeds BOTH the lot multiplier and the paused check in
+        # resolution.py, so one channel could size and pause two different ways
+        # depending on which route a signal arrived by.
+        #
+        # The code fix keys everything canonically. This clears the rows that
+        # exist already.
+        #
+        # THE MERGED CHANNEL IS NOT PAUSED. That is the owner's explicit
+        # decision (2026-09-03), and it is a real one: the bare channel carried
+        # a manual pause while its Telegram Auto twin traded 69 times in 30
+        # days, including that morning. Inheriting the pause would have stopped
+        # a live route silently, which is the worse failure.
+        #
+        # Stats are left to rebuild themselves -- recompute_channel_performance
+        # recalculates win_rate/sample_n/net_pnl from the trades on its next
+        # run, and those trades keep their historical tg_source, so the merged
+        # row is correct after one cycle rather than being hand-summed here.
+        "UPDATE channel_performance SET paused = 0 "
+        "WHERE source IN ("
+        "  SELECT REPLACE(REPLACE(source, 'Telegram Auto (', ''), ')', '') "
+        "  FROM channel_performance "
+        "  WHERE source LIKE 'Telegram Auto (%)'"
+        ")",
+
+        # Carry a manual override across only if the canonical row has none of
+        # its own: a deliberate setting should survive the merge, but it must
+        # not overwrite a deliberate setting already on the surviving row.
+        "UPDATE channel_performance AS c SET manual_override = 1 "
+        "WHERE c.manual_override = 0 AND EXISTS ("
+        "  SELECT 1 FROM channel_performance w "
+        "  WHERE w.source = 'Telegram Auto (' || c.source || ')' "
+        "    AND w.manual_override = 1"
+        ")",
+
+        "DELETE FROM channel_performance WHERE source LIKE 'Telegram Auto (%)'",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

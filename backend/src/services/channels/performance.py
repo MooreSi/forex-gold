@@ -37,7 +37,10 @@ def recompute(days: int):
 
 
 def performance_map():
-    return _repo.get_channel_performance_map()
+    # scorecard_repo, not repo: the display-only accessor moved there
+    # 2026-09-03 to keep repo.py under its line ceiling.
+    from . import scorecard_repo as _scorecard
+    return _scorecard.get_channel_performance_map()
 
 
 def set_paused(source: str, paused) -> None:

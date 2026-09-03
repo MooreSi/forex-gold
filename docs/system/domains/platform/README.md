@@ -23,6 +23,7 @@ allowed to call.
 - `services/cluster/node.py`, `node_roles.py` — node identity, sync token, which paired node owns which job
 - `services/cluster/sync/` — Mac client / VPS server for the 1:1 link, settings mirroring, STAND_DOWN/RESUME, the consolidated closed-trade ledger, remote stats facades, one-shot ML model transfer
 - `services/cluster/remote/` — hub-and-spoke admin/licence/update channel (wss to the admin server)
+- `backend/src/services/positions/core_app_update.py` — the other update mechanism: client-initiated, `git fetch`/`checkout` straight from `https://github.com/MooreSi/forex`, no admin server involved. Lives under `services/positions/` despite having nothing to do with trade positions.
 - `backend/src/controllers/__init__.py` — the controller contract; one flat `<page>_controller.py` per page
 - `installer/FOREX_Trader_Setup.iss` + `BUILD_INSTALLER.md` — Inno Setup 6 Windows installer
 
@@ -52,6 +53,7 @@ allowed to call.
 - STAND_DOWN records which engines it stopped, so RESUME only restarts what sync itself paused.
 - Remote users can run normally when the admin server is offline; only updates are unavailable.
 - The installer no longer bundles Python: it downloads the 3.11 embeddable runtime at install time, creates a venv under `%LOCALAPPDATA%\FOREX Trader\.venv\`, and adds firewall rules (requires internet).
+- **`core_app_update.py`'s `_REPO_ROOT` was a fixed `.parent.parent.parent` count, silently wrong after the module moved to `services/positions/`** (2026-09-03) — the sixth instance of the class of bug `os_utils.repo_root()`'s docstring already describes for four other modules. It made every check on Settings > Update and the header's update badge fail with "not a git checkout" even though the checkout and `origin` remote were fine. Fixed by importing `os_utils.repo_root()` instead of re-deriving it; `tests/core/test_app_update.py::test_repo_root_resolves_to_the_actual_checkout_root` pins it directly, since every other test in that file monkeypatches `_REPO_ROOT` and would never catch this. A fresh install (no prior `.git`) is a separate, verified-working path: `apply_update()` bootstraps with `git init` + `remote add origin` + `checkout -B main --track origin/main -f`, and force-checkout overwrites untracked files that pre-exist from the installer's plain file copy without erroring, confirmed by direct testing against a real git repo.
 
 - **`node_roles` is one exclusion expressed twice, and exactly one side must
   answer True.** `is_bot_command_authority()` decides who long-polls the

@@ -22,10 +22,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 from backend.src.services.ai import provider as ai_provider
+from backend.src.utils.os_utils import repo_root as _repo_root
 
 log = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).parent.parent.parent  # forex_trader/core/core_app_update.py -> repo root
+_REPO_ROOT = _repo_root()  # walks up for run.py -- see os_utils.repo_root()
 _BRANCH = "main"
 _GITHUB_REPO_URL = "https://github.com/MooreSi/forex"
 

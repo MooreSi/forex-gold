@@ -240,3 +240,16 @@ def test_a_post_update_step_failing_is_a_warning_not_a_failure(has_checkout, git
     assert out["ok"] is True, "the code did land, so this is not a failed update"
     assert "post-update step failed" in out["error"]
     assert "pip exploded" in out["error"]
+
+
+def test_repo_root_resolves_to_the_actual_checkout_root():
+    """_REPO_ROOT is computed once at import time from this module's own
+    location. The `has_checkout` fixture monkeypatches it directly in every
+    other test, which hides a wrong parent-count -- this test is the one
+    place that would catch this module resolving to the wrong directory
+    after being moved, the way os_utils.repo_root()'s docstring describes
+    happening to four other modules on 2026-08-25."""
+    from backend.src.utils import os_utils
+
+    assert upd._REPO_ROOT == os_utils.repo_root()
+    assert (upd._REPO_ROOT / "run.py").exists()

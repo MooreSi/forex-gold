@@ -123,3 +123,55 @@ class TestTheSettingIsOffered:
 
         assert "_render_security" in code
         assert "Security" in code
+
+
+class TestTheChoiceSurvivesARestart:
+    """The bug the owner hit, 2026-09-04: choosing "Log in automatically" and
+    pressing Save appeared to work, and the radio was back on "Ask for the
+    dashboard password" the next time the page was opened.
+
+    Every other test in this file stubs `_auto_login_enabled` or `get_config`,
+    so none of them ever ran the value through the real save-and-reload path --
+    which is where it was being dropped. `config.load()` rebuilds its in-memory
+    dict from a fixed list of known keys, so a key written to config.yaml that
+    load() does not name is gone the moment save_to_yaml() reloads.
+    """
+
+    @pytest.fixture
+    def isolated_config(self, monkeypatch, tmp_path):
+        """A real config.yaml in a temp dir, with the module cache restored."""
+        import backend.src.config as cfg_module
+
+        before = dict(cfg_module._cfg)
+        monkeypatch.setattr(cfg_module, "CONFIG_FILE", tmp_path / "config.yaml")
+        yield cfg_module
+        cfg_module._cfg = before
+
+    def test_saving_auto_login_persists_it(self, isolated_config):
+        """Through the same controller the Save button calls, and the same
+        helper the gate reads."""
+        from backend.src.controllers import settings_controller as controller
+
+        controller.save_config({"auto_login_enabled": True})
+
+        assert controller.get_config("auto_login_enabled", False) is True
+        assert auth_gate._auto_login_enabled() is True
+
+    def test_it_is_still_there_after_a_fresh_load(self, isolated_config):
+        """A restart re-reads the file from scratch."""
+        from backend.src.controllers import settings_controller as controller
+
+        controller.save_config({"auto_login_enabled": True})
+        isolated_config.load()
+
+        assert auth_gate._auto_login_enabled() is True
+
+    def test_turning_it_back_off_persists_too(self, isolated_config):
+        """Negative control: the round trip carries False, not just True --
+        a fix that hardcoded True would pass the two tests above."""
+        from backend.src.controllers import settings_controller as controller
+
+        controller.save_config({"auto_login_enabled": True})
+        controller.save_config({"auto_login_enabled": False})
+
+        assert auth_gate._auto_login_enabled() is False

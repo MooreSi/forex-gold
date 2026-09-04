@@ -173,6 +173,44 @@ def load() -> dict:
         # App
         "port": int(_e("PORT", base.get("port", 8888))),
 
+        # Settings > Security: does a restart ask for the dashboard password.
+        # It has to be named here. load() rebuilds _cfg from this literal, so a
+        # key that only ever reaches config.yaml through save_to_yaml() is
+        # dropped by the reload save_to_yaml() itself performs -- the setting
+        # wrote to disk correctly and read back as absent, which is exactly
+        # what the owner saw on 2026-09-04 (chose "Log in automatically",
+        # saved, came back to "Ask for the dashboard password").
+        # Default False: an install that has never set it keeps asking.
+        "auto_login_enabled": str(_e("AUTO_LOGIN_ENABLED", False)).lower()
+                              in ("1", "true", "yes"),
+
+        # Settings > News: the blackout that refuses automated entries around
+        # economic releases. Same story as auto_login_enabled above -- the page
+        # wrote all four keys and load() named none of them, so every reader
+        # got news_calendar's hardcoded defaults instead. `enabled` defaults
+        # True, so switching the blackout OFF in the UI did nothing at all;
+        # found 2026-09-04, on by default the whole time.
+        #
+        # NOT via _e(): it resolves with `or`, so a saved False or a saved 0
+        # is falsy and falls through to the default -- which is the exact bug
+        # this block exists to fix. Read env-then-yaml-then-default by hand.
+        # Defaults mirror news_calendar._DEF_* (config imports nothing, so they
+        # cannot be shared); clamping stays in news_calendar.
+        "news_blackout_enabled": str(os.environ.get(
+            "NEWS_BLACKOUT_ENABLED", base.get("news_blackout_enabled", True)
+        )).strip().lower() not in ("0", "false", "no"),
+        "news_blackout_impact": str(os.environ.get(
+            "NEWS_BLACKOUT_IMPACT", base.get("news_blackout_impact", "high")
+        )).strip().lower(),
+        "news_blackout_minutes_before": int(os.environ.get(
+            "NEWS_BLACKOUT_MINUTES_BEFORE",
+            base.get("news_blackout_minutes_before", 30),
+        )),
+        "news_blackout_minutes_after": int(os.environ.get(
+            "NEWS_BLACKOUT_MINUTES_AFTER",
+            base.get("news_blackout_minutes_after", 30),
+        )),
+
         # Debug mode: run the whole app on fakes with no credentials or network
         # (fake MT5 bridge, fake Telegram reader, canned news/AI/email). Default
         # OFF; env FOREX_DEBUG_MODE wins over config.yaml's debug_mode:. When on,

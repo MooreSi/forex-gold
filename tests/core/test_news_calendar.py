@@ -11,7 +11,15 @@ for that; they fail against the old `ev.get("currency")` parse.
 """
 import pytest
 
+import backend.src.config as _cfg_module
 from backend.src.utils import news_calendar as nc
+
+# Captured at import, before any fixture runs. tests/conftest.py's autouse
+# _offline_news_calendar replaces config.get with one that forces
+# news_blackout_enabled False, so the class at the bottom of this file -- the
+# one whose whole subject is whether that key round-trips -- has to put the
+# real accessor back. Its docstring invites exactly this: "their setup wins".
+_REAL_CFG_GET = _cfg_module.get
 
 
 # One real week's worth of feed shape, trimmed. Field names and impact casing
@@ -318,6 +326,92 @@ def test_absurd_padding_is_clamped_not_honoured(monkeypatch):
     assert s["minutes_before"] == 240
     assert s["minutes_after"] == 0
 
+
+
+# ── The settings actually survive a save ──────────────────────────────────────
+#
+# Every test above stubs `cfg.get`, which is precisely how this went unnoticed:
+# `config.load()` rebuilds its dict from a literal list of named keys, the four
+# blackout keys were not on it, and `save_to_yaml()` reloads at the end. So
+# Settings > News wrote all four to config.yaml correctly and then every reader
+# got the hardcoded defaults back -- including `enabled`, whose default is True.
+# The owner had switched the blackout off in the UI and it had been on ever
+# since (found 2026-09-04, alongside the same bug in `auto_login_enabled`).
+
+
+class TestTheBlackoutSettingsRoundTripThroughConfig:
+    @pytest.fixture
+    def isolated_config(self, monkeypatch, tmp_path):
+        """A real config.yaml in a temp dir, reading through the real
+        config.get, with the module cache restored afterwards."""
+        cfg_module = _cfg_module
+
+        before = dict(cfg_module._cfg)
+        monkeypatch.setattr(cfg_module, "CONFIG_FILE", tmp_path / "config.yaml")
+        monkeypatch.setattr(cfg_module, "get", _REAL_CFG_GET)
+        yield cfg_module
+        cfg_module._cfg = before
+
+    def _save(self, values):
+        from backend.src.controllers import settings_controller as controller
+        controller.save_config(values)
+
+    def test_switching_the_blackout_off_sticks(self, isolated_config):
+        """The one that was broken: `enabled` defaults to True, so a dropped
+        key left the blackout on no matter what the page said."""
+        self._save({"news_blackout_enabled": False})
+
+        assert nc.get_blackout_settings()["enabled"] is False
+
+    def test_switching_it_back_on_sticks_too(self, isolated_config):
+        """Negative control -- False must not be hardcoded in the fix."""
+        self._save({"news_blackout_enabled": False})
+        self._save({"news_blackout_enabled": True})
+
+        assert nc.get_blackout_settings()["enabled"] is True
+
+    def test_impact_and_padding_survive(self, isolated_config):
+        """All four keys, at values distinguishable from every default.
+        "high_medium" is the only other impact the page offers; anything else
+        is rejected upstream by _IMPACT_SETS, as the test above pins."""
+        self._save({
+            "news_blackout_enabled": True,
+            "news_blackout_impact": "high_medium",
+            "news_blackout_minutes_before": 45,
+            "news_blackout_minutes_after": 15,
+        })
+
+        s = nc.get_blackout_settings()
+
+        assert s["impact"] == "high_medium"
+        assert s["impacts"] == frozenset({"high", "medium"})
+        assert s["minutes_before"] == 45
+        assert s["minutes_after"] == 15
+
+    def test_a_restart_still_sees_them(self, isolated_config):
+        """A fresh load(), not just the reload save_to_yaml() does."""
+        self._save({"news_blackout_enabled": False,
+                    "news_blackout_minutes_before": 5})
+        isolated_config.load()
+
+        s = nc.get_blackout_settings()
+
+        assert s["enabled"] is False
+        assert s["minutes_before"] == 5
+
+    def test_clamping_still_applies_to_saved_values(self, isolated_config):
+        """The round trip must not become a way past the 0..240 clamp."""
+        self._save({"news_blackout_minutes_before": 99999,
+                    "news_blackout_minutes_after": -5})
+
+        s = nc.get_blackout_settings()
+
+        assert s["minutes_before"] == 240
+        assert s["minutes_after"] == 0
+
+    def test_an_untouched_install_keeps_the_blackout_on(self, isolated_config):
+        """Nothing saved: the safe default still stands."""
+        assert nc.get_blackout_settings()["enabled"] is True
 
 # ── check_news_blackout: the (allowed, reason) gate used by the entry paths ───
 

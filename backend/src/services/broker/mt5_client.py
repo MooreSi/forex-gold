@@ -297,7 +297,19 @@ class MT5BridgeClient:
     async def get_ticks_range(self, from_ts: float, to_ts: float) -> list[dict]:
         """Fetch XAUUSD ticks between two Unix timestamps -- bounded to one
         day by the bridge itself (docs/todo/backtest/010 phase 1; a measured
-        hour is 1.7-2.0MB, so a full range request is tens of MB)."""
+        hour is 1.7-2.0MB, so a full range request is tens of MB).
+
+        A 404 is raised rather than swallowed. /ticks arrived in c919996, so a
+        bridge process started before that commit answers "Unknown path" to
+        this and 200 to everything else -- which is exactly what happened on
+        2026-09-04 (bridge up since 16:28:08 on 09-03, mt5_bridge.py gaining
+        the endpoint at 16:38). Returning [] rendered that as "No ticks
+        returned -- ensure the bridge is connected", and the bridge WAS
+        connected: the message sent the diagnosis to the Days field and the
+        one-day range cap, neither of which was involved. Only the 404 is
+        promoted; a 500 or a dropped connection stays a quiet empty list,
+        because this feeds a page button and the caller renders that fine.
+        """
         if not self._url:
             return []
         try:
@@ -306,8 +318,16 @@ class MT5BridgeClient:
                 timeout=60.0,
                 params={"from": str(from_ts), "to": str(to_ts)},
             )
+            if getattr(r, "status_code", None) == 404:
+                raise RuntimeError(
+                    "This MT5 bridge has no /ticks endpoint — it is running a "
+                    "build from before tick history was added. Restart the "
+                    "bridge to pick up the current mt5_bridge.py."
+                )
             r.raise_for_status()
             return r.json().get("ticks", [])
+        except RuntimeError:
+            raise
         except Exception as e:
             log.debug("bridge ticks fetch failed: %s", e)
             return []

@@ -210,6 +210,13 @@ def recent_tg_signals(*args, **kwargs):
     return _read_repo.recent_tg_signals(*args, **kwargs)
 
 
+def strategy_ladder_reach(*args, **kwargs):
+    """How far up its TP ladder each strategy's trades actually get, for the
+    AI summary page's prompt."""
+    from backend.src.services.analytics import read_repo as _read_repo
+    return _read_repo.get_strategy_ladder_reach(*args, **kwargs)
+
+
 def signal_lab_is_available() -> bool:
     """Whether the signal-lab tables exist. The Heat Map hides itself when
     they do not, rather than erroring on a fresh install."""

@@ -47,6 +47,16 @@ COMMIT_NO_CHECKOUT   = "no-checkout"    # never updated: install scripts copy fi
 COMMIT_GIT_UNREADABLE = "git-unreadable"  # .git is there but neither git nor a direct read worked
 
 
+def _restart() -> None:
+    """Relaunch the app -- the same mechanism the header's Power dialog uses.
+    Spawns a detached run.py after a delay, then asks the running NiceGUI
+    server to shut down (graceful; not a hard os._exit -- see
+    os_utils.restart_app's own docstring). A module-level seam so tests can
+    stub it instead of actually spawning a process."""
+    from backend.src.utils.os_utils import restart_app
+    restart_app(_REPO_ROOT)
+
+
 def _is_sha(value: str) -> bool:
     return len(value) == 40 and all(c in "0123456789abcdef" for c in value.lower())
 
@@ -318,7 +328,7 @@ async def commits_behind(sha: str) -> Optional[int]:
         return None
 
 
-async def apply_update() -> dict:
+async def apply_update(restart: bool = True) -> dict:
     """Bootstrap a git checkout if this install doesn't have one yet, then
     fetch + force-checkout to origin/<branch>, reinstall requirements.txt
     into the venv, and clear stale __pycache__ dirs.
@@ -342,8 +352,20 @@ async def apply_update() -> dict:
     Anything a client actually needs to keep -- config.yaml, the licence
     store, .venv, the DB -- is already gitignored and untouched by this.
 
-    Returns {"ok": bool, "error": str|None}. Does not restart -- call
-    platform_utils.restart_app() after a successful result.
+    Restarts on success (both a clean run and one where the post-update pip
+    install / pycache sweep failed -- see below) unless `restart=False`.
+    2026-09-03: leaving that to the caller meant a live install ran for ~40
+    minutes against a venv this function had already reinstalled dependencies
+    into, because nothing forced the restart to actually happen -- every
+    outbound HTTPS call (Telegram alerts, AI commentary, the daily email)
+    failed silently with a stale-module error for that whole window while 5
+    real trades opened with no notification at all. `restart=False` exists
+    only for the admin-console-triggered path (cluster/remote/_update.py),
+    which runs its own restart sequence (Windows icon refresh, then a hard
+    process exit with the bat-loop's relaunch code) and must keep doing that
+    instead of being pre-empted here.
+
+    Returns {"ok": bool, "error": str|None}.
     """
     if not (_REPO_ROOT / ".git").exists():
         if not shutil.which("git"):
@@ -384,15 +406,33 @@ async def apply_update() -> dict:
         for p in _REPO_ROOT.rglob("__pycache__"):
             shutil.rmtree(p, ignore_errors=True)
 
+    def _deploy_ea() -> None:
+        """Push the EA the pull just brought into every MetaTrader terminal on
+        this machine, so a remote user gets a new EA without touching
+        anything. Best-effort by construction: see ea_deploy.deploy_after_
+        update, which swallows its own failures -- the pull has already
+        succeeded here, and a terminal that could not be written to is the
+        state the machine was in a moment ago anyway. It cannot compile on
+        macOS (MetaEditor does nothing headless under CrossOver), so a repo
+        carrying a pre-compiled .ex5 is what makes this complete there."""
+        from backend.src.services.broker import ea_deploy
+        ea_deploy.deploy_after_update()
+
     try:
         await asyncio.to_thread(_pip_install)
         await asyncio.to_thread(_clear_pycache)
+        await asyncio.to_thread(_deploy_ea)
     except Exception as e:
         log.warning("[Update] pip install / cache clear step failed: %s", e)
         # The pull already succeeded -- surface this as a soft warning, not
         # a hard failure, since a stale dependency/cache issue is
         # recoverable (Save & Restart again) whereas re-pulling isn't safe
-        # to retry blindly.
+        # to retry blindly. Restarting below is that "Save & Restart" --
+        # automatic now instead of waiting on the caller to notice and click it.
+        if restart:
+            _restart()
         return {"ok": True, "error": f"update pulled, but post-update step failed: {e}"}
 
+    if restart:
+        _restart()
     return {"ok": True, "error": None}

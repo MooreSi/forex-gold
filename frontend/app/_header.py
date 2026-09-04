@@ -10,7 +10,6 @@ closure rather than becoming 27 parameters. What genuinely crosses the
 boundary is small: two dialogs and the repo root go in, the Help button's
 cell comes back out.
 """
-import asyncio
 import logging
 from typing import Optional
 
@@ -139,10 +138,11 @@ def build_header(*, power_dialog, pause_dialog, root,
                     _update_dialog_status.text = f"Update failed: {result['error']}"
                     _update_dialog_status.classes(replace="text-xs text-red-400 mt-2")
                     return
+                # apply_update() restarts on success itself now (2026-09-03) --
+                # see core_app_update.py's docstring for why leaving that to
+                # the caller was unsafe. Nothing left to do here but tell
+                # the user.
                 ui.notify("Update applied — restarting...", type="positive")
-                from backend.src.controllers.system_controller import restart_app
-                await asyncio.sleep(1)
-                restart_app(root)
 
             with ui.row().classes("gap-2 mt-3 justify-end"):
                 ui.button("Cancel", on_click=_update_dialog.close).props("flat")
@@ -276,8 +276,12 @@ def build_header(*, power_dialog, pause_dialog, root,
         pause_badge = ui.badge("⏸ PAUSED", color="orange").classes(
             "text-xs ml-1 shrink-0"
         ).style("display:none")
-        news_badge = ui.badge("📰 NEWS EVENT", color="red").classes(
-            "text-xs ml-1 shrink-0"
+        # Red box, the word NEWS, shown only while orders are actually being
+        # held for a news event (owner, 2026-09-04). The detail -- which event
+        # and how long is left -- is on the tooltip: the box has to read at a
+        # glance from across the room, and the header row is already full.
+        news_badge = ui.badge("NEWS", color="red").classes(
+            "text-xs ml-1 shrink-0 font-bold"
         ).style("display:none")
 
         # ── Local/Remote mode toggle ─────────────────────────────────────────
@@ -448,18 +452,45 @@ def build_header(*, power_dialog, pause_dialog, root,
                 _why = trading_ctl.trading_halt_reason()
                 pause_badge.tooltip(_why or "Trading is paused.")
 
-            # News event badge — check live calendar; send one Telegram alert on entry
+            # News badge — shown while orders are actually being held for news.
+            # Driven by news_pause_state (which asks check_news_blackout, the
+            # same call the entry paths gate on) rather than by
+            # get_current_event alone, which answers "are we inside a calendar
+            # window" and gets it wrong both ways: it ignores the enabled flag,
+            # so the badge used to announce a pause that was switched off, and
+            # it returns None during the feed-down hardcoded fallback, which
+            # really does block entries -- trading paused for news with nothing
+            # on screen saying so. See news_calendar.news_pause_state.
             try:
-                from backend.src.controllers.news_controller import get_current_event as _get_news_event
-                _news_ev = _get_news_event()
+                from backend.src.controllers.news_controller import (
+                    get_current_event as _get_news_event,
+                    news_pause_state as _news_pause_state,
+                )
+                _news_state = _news_pause_state()
+                _news_paused = bool(_news_state["paused"])
+
+                # Visibility is governed by the pause and nothing else. It
+                # deliberately does NOT depend on there being an event to name:
+                # the feed-down fallback pauses trading with no event object,
+                # and that is the case most in need of a visible box.
+                news_badge.style("" if _news_paused else "display:none")
+                if _news_paused:
+                    news_badge.tooltip(_news_state["detail"])
+                else:
+                    _news_in_window[0] = False
+
+                # The Telegram alert needs the event itself (title, scheduled
+                # time, resume time), so it stays keyed to get_current_event --
+                # but only once the pause is real. It used to fire whenever a
+                # calendar window opened, announcing "Trading Paused" while the
+                # blackout was switched off and orders were still going out.
+                _news_ev = _get_news_event() if _news_paused else None
                 if _news_ev:
                     import datetime as _dt_news
                     _resume_utc = _dt_news.datetime.fromtimestamp(
                         _news_ev["window_end"], tz=_dt_news.timezone.utc
                     ).strftime("%H:%M UTC")
                     _pause_mins = int(round(_news_ev["mins_remaining"]))
-                    news_badge.text  = f"📰 NEWS EVENT — resumes {_resume_utc}"
-                    news_badge.style("")
                     # Send Telegram alert once per unique event window
                     _ws = _news_ev["window_start"]
                     if not _news_in_window[0] or _news_alerted_window[0] != _ws:
@@ -484,9 +515,6 @@ def build_header(*, power_dialog, pause_dialog, root,
                             await _tg.send_message(_tg_msg, event_type="news_pause")
                         except Exception as _news_alert_exc:
                             log.warning("news-pause Telegram alert failed: %s", _news_alert_exc)
-                else:
-                    news_badge.style("display:none")
-                    _news_in_window[0] = False
             except Exception:
                 news_badge.style("display:none")
 

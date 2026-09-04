@@ -39,6 +39,7 @@ from backend.src.services.positions.core_grid_template_dispatch import grid_temp
 from backend.src.services.trading.open_from_signal import open_trade_from_signal
 from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range
 from backend.src.services.analytics.reporting import get_open_trades
+from backend.src.services.trading import signal_state_repo as _slots
 from backend.src.utils.models import (
     STRATEGY_SCALE_OUT,
     STRATEGY_REVERSAL_RUNNER, STRATEGY_ADAPTIVE_RUNNER,
@@ -280,7 +281,10 @@ async def try_activate_pending_signals(
         return False
 
     open_trades = get_open_trades()
-    open_count  = len(open_trades)
+    # Plus whatever is resting at the broker or already in flight -- a
+    # resting order holds a slot (owner, 2026-09-04). Seeded once here and
+    # incremented per open below, same as before.
+    open_count  = len(open_trades) + _slots.count_slots_not_yet_open()
     max_trades  = int(rs.get("max_open_trades", 1))
     current_strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
 

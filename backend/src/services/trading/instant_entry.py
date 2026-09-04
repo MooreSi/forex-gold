@@ -28,6 +28,7 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.analytics.reporting import get_open_trades
+from backend.src.services.trading import signal_state_repo as _slots
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.dpm import engine
 from backend.src.services.telegram import alerts
@@ -195,7 +196,9 @@ async def process_instant_entry(
             return
 
     open_trades  = get_open_trades()
-    open_count   = len(open_trades)
+    # Plus whatever is resting at the broker or already in flight -- a
+    # resting order holds a slot (owner, 2026-09-04).
+    open_count   = len(open_trades) + _slots.count_slots_not_yet_open()
     max_trades   = int(rs.get("max_open_trades", 1))
     if open_count >= max_trades:
         log.info("[IME] Instant %s — max_trades (%d) reached, skipped", direction, max_trades)

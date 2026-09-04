@@ -162,7 +162,10 @@ async def _apply_git_update() -> None:
     from backend.src.services.positions import core_app_update
 
     log.info("[RemoteClient] Git update triggered by admin — applying")
-    result = await core_app_update.apply_update()
+    # restart=False: this path runs its own restart sequence below (Windows
+    # icon refresh, then a hard process exit with the bat-loop's relaunch
+    # code) and must not be pre-empted by apply_update()'s own restart.
+    result = await core_app_update.apply_update(restart=False)
     if not result.get("ok"):
         log.error("[RemoteClient] Git update failed: %s", result.get("error"))
         return

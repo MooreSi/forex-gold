@@ -14,7 +14,7 @@ from backend.src.utils import news_calendar as _news
 
 __all__ = [
     "get_events", "get_current_event", "get_blackout_settings",
-    "invalidate_cache", "save_config",
+    "news_pause_state", "invalidate_cache", "save_config",
 ]
 
 
@@ -30,6 +30,11 @@ def get_current_event(*args, **kwargs):
 
 def get_blackout_settings(*args, **kwargs):
     return _news.get_blackout_settings(*args, **kwargs)
+
+
+def news_pause_state(*args, **kwargs):
+    """Whether trading is paused for news right now, for the header's box."""
+    return _news.news_pause_state(*args, **kwargs)
 
 
 def invalidate_cache(*args, **kwargs):

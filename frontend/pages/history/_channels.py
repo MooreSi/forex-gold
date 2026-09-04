@@ -28,8 +28,7 @@ def _render_channels(engine):
             ui.label(
                 "Rolling performance by signal source. The lot multiplier scales position "
                 "size on risk-based entries; paused channels are blocked from opening trades. "
-                "Profit factor < 0.8 over 8+ trades auto-pauses (Bounce Generator excluded — manage manually); "
-                "manual pause overrides."
+                "Profit factor < 0.8 over 8+ trades auto-pauses; manual pause overrides."
             ).classes("text-xs text-gray-400 mb-2")
             if not scorecard:
                 render_empty_state("closed_trades", compact=True)

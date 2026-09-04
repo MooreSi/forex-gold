@@ -652,6 +652,34 @@ def _render_results(
                         if is_best:
                             row_cls += " bg-green-900/20"
 
+                        # A template this walk refused produces no trades, and
+                        # a row of zeros reads as "traded nothing and lost
+                        # nothing" -- which, beside a row showing a real
+                        # drawdown, argues FOR the template that could not be
+                        # simulated at all. Say refused instead of showing
+                        # numbers that were never computed. (Owner, 2026-09-04:
+                        # "why does the top strategy show all 0?" — a
+                        # trail_mode=candle template on a tick run.)
+                        if s.unsupported_reason:
+                            with ui.element("tr").classes(
+                                "border-b border-gray-700 bg-gray-800/40"
+                            ):
+                                with ui.element("td").classes("px-3 py-2"):
+                                    ui.label(_strategy_label(strategy)).classes(
+                                        "text-sm font-semibold text-gray-400"
+                                    )
+                                with ui.element("td").classes(
+                                    "px-3 py-2 text-left"
+                                ).props('colspan=12'):
+                                    with ui.row().classes("items-center gap-2 flex-nowrap"):
+                                        ui.badge("NOT SIMULATED", color="grey").classes(
+                                            "text-xs shrink-0"
+                                        )
+                                        ui.label(s.unsupported_reason).classes(
+                                            "text-xs text-orange-300"
+                                        )
+                            continue
+
                         with ui.element("tr").classes(row_cls):
                             with ui.element("td").classes("px-3 py-2"):
                                 lbl = _strategy_label(strategy)

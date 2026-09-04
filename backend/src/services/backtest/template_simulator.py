@@ -136,6 +136,23 @@ def _lot_for(template: dict, sl_distance: float, balance: float) -> float:
     return round(min(_MAX_LOT, max(_MIN_LOT, lot)), 2)
 
 
+def unsupported_reason(template: dict, tick_mode: bool = False) -> str:
+    """Why this walk would refuse `template`, or "" when it would not.
+
+    The same decision _guard makes, asked without running a simulation, so a
+    caller can report the refusal instead of aggregating the resulting
+    absence of trades into a row of zeros. Zeros are what the owner saw on
+    2026-09-04 for a trail_mode=candle template on a tick run, and zeros in a
+    comparison table read as "traded nothing and lost nothing" rather than
+    "this walk cannot model it".
+    """
+    try:
+        _guard(template, tick_mode)
+    except UnsupportedTemplate as exc:
+        return str(exc)
+    return ""
+
+
 def _guard(template: dict, tick_mode: bool = False) -> None:
     ok, reasons = can_simulate(template)
     if not ok:

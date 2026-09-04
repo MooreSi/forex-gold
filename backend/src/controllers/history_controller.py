@@ -190,3 +190,8 @@ def signal_lab_adx_and_bias_samples(*args, **kwargs):
 def recent_tg_signals(*args, **kwargs):
     """Recent parsed Telegram signals, for the AI summary page."""
     return _reporting.recent_tg_signals(*args, **kwargs)
+
+
+def strategy_ladder_reach(*args, **kwargs):
+    """Measured TP-ladder depth per strategy, for the AI summary page."""
+    return _reporting.strategy_ladder_reach(*args, **kwargs)

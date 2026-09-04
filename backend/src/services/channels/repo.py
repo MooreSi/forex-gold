@@ -327,7 +327,7 @@ _CHANNEL_MIN_SAMPLE   = 8    # need this many decided trades before adapting
 _CHANNEL_PAUSE_PF     = 0.0  # auto-pause disabled (set > 0 to re-enable)
 
 
-_CHANNEL_NO_AUTO_PAUSE = {"Signal Generator", "Bounce Generator", "manual_market"}
+_CHANNEL_NO_AUTO_PAUSE = {"manual_market"}
 
 
 def _channel_profit_factor(r: dict) -> float:

@@ -36,6 +36,7 @@ import uuid
 from typing import Any, Awaitable, Callable, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.trading import signal_state_repo as _slots
 from backend.src.services.broker import ea_bridge
 from backend.src.services.trading import trade_repo
 from backend.src.services.signals import repo as signals_repo
@@ -161,7 +162,26 @@ async def execute_auto_signal(
     # silently swallowed as a "follow-up" and applied to the already-open
     # instant-entry market trade instead of ever placing the resting order
     # it actually described.
-    if bool(rs.get("immediate_market_entry", 0)) and parsed.get("tp_open") is None:
+    #
+    # Fixed 2026-09-03: that guard was too blunt for a template-overridden
+    # channel. GOLD DIGGERS INSTITUTIONAL's own genuine follow-up wording
+    # ("BUY GOLD @ 4482/4481 ... TP OPEN ... SL 4480") matches parse_limit_
+    # order_signal's shape just as readily as an actual "[LIMITS]...AREA"
+    # pending order -- tp_open ends up set either way -- but scan_messages.py
+    # (where "tp_open is not None and not is_template_override(strategy)"
+    # decides whether this becomes a real Limit Runner order) already knows a
+    # template override means it never does; the resting order the 2026-07-24
+    # fix protects doesn't exist on this path. Two real MT5 orders 11 seconds
+    # apart, live, same signal: the follow-up matcher below was never even
+    # asked because tp_open was set, so the follow-up opened a second,
+    # independent trade instead of completing the one IME had just placed.
+    # Same condition scan_messages.py already uses, so the two cannot drift
+    # apart the way core_instant_followup.py's own VPS-forwarding twin did.
+    _limit_runner_shaped = (
+        parsed.get("tp_open") is not None
+        and not ea_templates.is_template_override(strategy)
+    )
+    if bool(rs.get("immediate_market_entry", 0)) and not _limit_runner_shaped:
         followup_matched = await find_and_apply_instant_followup_fn(
             channel_name, parsed["direction"], parsed, tg_id,
         )
@@ -195,7 +215,10 @@ async def execute_auto_signal(
     # already-open trade, and blocking it would strand that position on its
     # provisional stop going into the news event -- the opposite of protective.
     _news_ok, _news_reason = check_news_blackout()
-    open_count = len(get_open_trades_fn())
+    # Resting orders hold slots too (owner, 2026-09-04) -- the caller's list
+    # only knows about positions, so the rest of the book is added here from
+    # the one definition in signal_state_repo.
+    open_count = len(get_open_trades_fn()) + _slots.count_slots_not_yet_open()
     max_trades = int(rs.get("max_open_trades", 1))
     if not sess_ok:
         pass  # skip_reason already set by the caller

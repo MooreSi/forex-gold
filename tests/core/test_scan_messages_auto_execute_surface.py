@@ -128,6 +128,32 @@ def test_ime_followup_never_checked_for_limit_format_signal(fresh_db):
     assert result.get("followup_matched") is not True
 
 
+def test_ime_followup_is_checked_for_limit_shaped_signal_on_a_template_channel(fresh_db):
+    # Live 2026-09-03, GOLD DIGGERS INSTITUTIONAL: two real MT5 orders for one
+    # signal, 11 seconds apart. The channel is bound to an EA Template, and
+    # its genuine full-signal wording ("BUY GOLD @ 4482/4481 ... TP OPEN ...
+    # SL 4480") matches parse_limit_order_signal's shape just as readily as an
+    # actual "[LIMITS]...AREA" pending order does -- `tp_open` ends up set
+    # either way. scan_messages.py:387 already knows a template override
+    # means this message was never going to become a real Limit Runner
+    # resting order (the template wins), so the 2026-07-24 fix's premise --
+    # "protect the genuine resting order this describes" -- doesn't apply
+    # here: there is no resting order in play, only a follow-up completing
+    # the instant-entry trade IME opened seconds earlier on the same signal.
+    # execute_auto_signal's own tp_open-is-None gate didn't know that and
+    # blocked the follow-up check regardless, so the follow-up matcher below
+    # (which would have said yes) was never even asked, and a second,
+    # independent trade opened for the same signal.
+    limit_shaped_parsed = dict(_PARSED)
+    limit_shaped_parsed["tp_open"] = True
+    result, calls, bridge = _call(
+        rs={"immediate_market_entry": 1}, followup_matched=True,
+        parsed=limit_shaped_parsed, strategy="template:GD Instituational - single",
+    )
+    assert calls == []
+    assert result.get("followup_matched") is True
+
+
 def test_max_open_trades_reached_skips(fresh_db):
     result, calls, bridge = _call(rs={"max_open_trades": 3}, open_trades=[{}] * 3)
     assert result["executed"] is False

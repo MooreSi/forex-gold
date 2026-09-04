@@ -99,9 +99,18 @@ class TestTheProtectiveLimitsAreEnforced:
         """The cap is counted in open_trade, against the table about to
         receive the INSERT. Counting is faked rather than seeding rows: the
         subject here is the gate, not the query, and a hand-built row is one
-        schema change away from testing nothing."""
-        from backend.src.services.trading import trade_repo
-        monkeypatch.setattr(trade_repo, "count_open_trades", lambda: 5)
+        schema change away from testing nothing.
+
+        Mock target moved 2026-09-04: the counter open_trade consults is now
+        signal_state_repo.count_trade_slots_used, because a resting order holds
+        a slot too (owner's call -- see
+        tests/trading/test_resting_orders_consume_a_slot.py). Same gate, same
+        assertion, same negative control below; only the name of the function
+        being faked changed. It takes exclude_signal_id, hence **kw.
+        """
+        from backend.src.services.trading import signal_state_repo
+        monkeypatch.setattr(signal_state_repo, "count_trade_slots_used",
+                            lambda *a, **kw: 5)
         with db.db() as conn:
             conn.execute("UPDATE vantage_risk_settings SET max_open_trades=5 WHERE id=1")
 
@@ -113,8 +122,9 @@ class TestTheProtectiveLimitsAreEnforced:
     def test_one_slot_free_still_places(self, fresh_db, engine, monkeypatch):
         """Negative control for the test above: at 4 of 5 it must go through,
         or the refusal proves only that something refused."""
-        from backend.src.services.trading import trade_repo
-        monkeypatch.setattr(trade_repo, "count_open_trades", lambda: 4)
+        from backend.src.services.trading import signal_state_repo
+        monkeypatch.setattr(signal_state_repo, "count_trade_slots_used",
+                            lambda *a, **kw: 4)
         with db.db() as conn:
             conn.execute("UPDATE vantage_risk_settings SET max_open_trades=5 WHERE id=1")
 

@@ -147,7 +147,12 @@ def new_state() -> dict:
     return {"was_healthy": True, "down_since": 0.0, "last_alert_at": 0.0,
             "last_restart_at": 0.0, "restarts": 0,
             "last_tick_ts": 0.0, "last_tick_change_at": 0.0,
-            "market_closed": False}
+            "market_closed": False,
+            # One terminal restart per process for a stale EA -- see
+            # _maybe_reload_stale_ea. Not reset when the link recovers, unlike
+            # "restarts": a build that is the wrong version is still the wrong
+            # version after it reconnects.
+            "ea_reload_tried": False}
 
 
 async def ea_link_check(
@@ -196,6 +201,8 @@ async def ea_link_check(
         # Only *consecutive* restarts count against MAX_RESTARTS. A link that
         # came back has earned the full budget again for the next outage.
         state["restarts"] = 0
+        await _maybe_reload_stale_ea(
+            bridge, state, send, restart_bridge, inhibit_reconnect)
         return CHECK_INTERVAL
 
     if state["was_healthy"]:
@@ -322,6 +329,73 @@ async def _market_is_live(state: dict, now: float, mt5_bridge: Any) -> tuple[boo
     if quiet_for >= TICK_STALE_S:
         return False, f"no new tick for {quiet_for / 60:.0f} min"
     return True, ""
+
+
+def _slots_in_use() -> int:
+    """Open positions + orders resting at the broker + opens in flight.
+
+    Named here so a test can drive it, and read through signal_state_repo so
+    "is anything at risk" has one definition in this codebase rather than a
+    second one written for this guard.
+    """
+    from backend.src.services.trading.signal_state_repo import count_trade_slots_used
+    return count_trade_slots_used()
+
+
+async def _maybe_reload_stale_ea(
+    bridge: Any, state: dict, send, restart_bridge, inhibit_reconnect: bool,
+) -> bool:
+    """Restart the terminal so MT5 loads a newly deployed EA, if it is safe.
+
+    Runs on the HEALTHY path, which is the whole point: this is not an outage.
+    ea_deploy has already put a newer file in the terminal's Experts folder
+    (it runs after every app self-update), the EA on the chart is still the
+    old build, and nothing but a terminal restart will load the new one --
+    attaching an expert has no runtime API. Owner's call, 2026-09-04.
+
+    Every guard lives in ea_deploy.reload_decision except the two this
+    function owns: a bridge the user stopped by hand is never relaunched
+    underneath them, and a slot count that cannot be read counts as busy.
+    Unknown is not idle.
+    """
+    if restart_bridge is None:
+        return False
+    if inhibit_reconnect:
+        return False
+
+    from backend.src.services.broker import ea_deploy
+
+    try:
+        slots = _slots_in_use()
+    except Exception as e:
+        # The safe reading of "I could not check" is "something is open".
+        log.debug("[EALink] slot count unavailable, holding the EA reload: %s", e)
+        return False
+
+    decision = ea_deploy.reload_decision(
+        ea_version_ok=getattr(bridge, "ea_version_ok", None),
+        slots_in_use=slots,
+        can_reload=True,          # withheld by the caller as restart_bridge=None
+        already_tried=bool(state.get("ea_reload_tried")),
+    )
+    if not decision["reload"]:
+        return False
+
+    state["ea_reload_tried"] = True
+    log.warning("[EALink] %s — restarting the terminal so MT5 loads it",
+                decision["reason"])
+    await send(
+        "A newer EA has been deployed to this terminal and the running one is "
+        "still the old build. Nothing is open, so MT5 is being restarted now to "
+        "load it — management is blind for about two minutes while it comes "
+        "back. Positions and pending orders are held by the broker either way."
+    )
+    try:
+        return bool(await restart_bridge())
+    except Exception as e:
+        log.warning("[EALink] terminal restart for a stale EA failed: %s", e)
+        await send(f"MT5 restart to load the new EA failed: {e}")
+        return False
 
 
 async def _maybe_restart_terminal(

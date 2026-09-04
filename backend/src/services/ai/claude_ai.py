@@ -157,6 +157,111 @@ async def _fetch_gold_news() -> list[str]:
     return headlines
 
 
+def _atr_pips(candles: list[dict] | None, period: int = 14) -> float | None:
+    """Wilder ATR of `candles`, expressed in pips.
+
+    Delegates to dpm.engine.compute_atr rather than carrying a third copy of
+    the maths -- strategy_ai.py computes ATR inline and dpm owns the shared
+    implementation. Returns None when there is not enough data to be honest
+    about, rather than a plausible-looking default: a made-up volatility
+    figure is worse here than none, because the model cannot tell them apart.
+    """
+    if not candles or len(candles) < period // 2:
+        return None
+    try:
+        from backend.src.services.dpm.engine import compute_atr as _compute_atr
+        from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
+        price_atr = _compute_atr(candles, period)
+        if not price_atr:
+            return None
+        return round(price_atr / PIPS_TO_PRICE_XAUUSD, 1)
+    except Exception as exc:
+        log.debug("Market analysis: ATR unavailable: %s", exc)
+        return None
+
+
+def _volatility_lines(h1_candles, m15_candles) -> list[str]:
+    h1  = _atr_pips(h1_candles)
+    m15 = _atr_pips(m15_candles)
+    if h1 is None and m15 is None:
+        return []
+    out = ["", "CURRENT VOLATILITY (pips — the same unit as every template's "
+               "trail distance and TP rungs):"]
+    if h1 is not None:
+        out.append(f"  H1 ATR: {h1:.0f} pips — a typical hour's range")
+    if m15 is not None:
+        out.append(f"  M15 ATR: {m15:.0f} pips — a typical 15-minute range")
+    if h1 is not None:
+        out += [
+            "",
+            "HOW TO USE THIS AGAINST A TEMPLATE'S GEOMETRY:",
+            f"  - A trailing stop closes a trade on a give-back of its trail "
+            f"distance. Compare that distance against the {h1:.0f}-pip H1 ATR: "
+            f"a trail materially smaller than a typical hour's range sits inside "
+            f"normal noise and will cut the trade short long before the upper "
+            f"rungs of a ladder are reached, however well the move is going.",
+            "  - Judge a stop distance the same way: an SL inside a typical "
+            "15-minute range will be taken by noise rather than by being wrong.",
+        ]
+    return out
+
+
+# The trail-versus-ladder rule holds whether or not live volatility is
+# available -- it is a statement about the templates' own geometry, which is
+# always in the prompt. Keeping it inside _volatility_lines made it vanish
+# exactly when the bridge was down, which is when the model is guessing most.
+_TRAIL_VS_LADDER_RULE = (
+    "When judging any option, read its trailing stop and its TP ladder "
+    "TOGETHER, not as separate features. A trail that arms at or below an "
+    "early rung truncates the ladder: the trade banks that early rung and is "
+    "then trailed out, so the upper rungs are decoration rather than targets. "
+    "Never describe such an option as 'letting profits run', 'capturing a "
+    "continued move' or 'progressive exit' — describe what it actually does. "
+    "A long ladder is only evidence of upside capture if the trail is wide "
+    "enough, and armed late enough, to let price reach the upper rungs."
+)
+
+
+def _ladder_reach_lines(reach: dict[str, dict] | None) -> list[str]:
+    """The measured counterweight to a template's configured ladder.
+
+    A configuration says which rungs exist; this says which were reached. The
+    two diverge whenever a trail is armed inside the ladder, and the gap is
+    invisible in win rate -- a trade trailed out after TP1 is a WIN.
+    """
+    if not reach:
+        return []
+    out = ["", "WHERE TRADES ON EACH OPTION ACTUALLY FINISHED (last 30 days):",
+           "Configured rungs say what is reachable in principle. These say what "
+           "was reached in practice."]
+    for key, r in sorted(reach.items(), key=lambda kv: -kv[1].get("n", 0)):
+        n = r.get("n", 0)
+        out.append(
+            f"  {key}: n={n} WR={r.get('win_rate', 0):.1f}% "
+            f"PnL=${r.get('net_pnl', 0):.2f} | finished: no TP {r.get('no_tp', 0)}, "
+            f"TP1-2 {r.get('tp1_2', 0)}, TP3-4 {r.get('tp3_4', 0)}, "
+            f"TP5+ {r.get('tp5_plus', 0)} | "
+            f"{r.get('stopped_after_tp', 0)} banked a rung then exited on a stop "
+            f"| highest rung ever reached: TP{r.get('top_rung', 0)}"
+        )
+    out += [
+        "",
+        "READING THIS (important):",
+        "  - 'Highest rung ever reached' is a hard ceiling from real trades. "
+        "Rungs above it have NEVER been reached: do not justify a choice by "
+        "targets the data says are unreachable with that geometry.",
+        "  - A high count in 'banked a rung then exited on a stop' is the "
+        "signature of a trail cutting the ladder short. Those are wins, so win "
+        "rate will not reveal it.",
+        "  - A template whose trades cluster in TP1-2 is a short-target "
+        "instrument regardless of how many rungs it has configured. Recommend "
+        "it for what it does, and say so in the reason.",
+        "  - Thin or absent history is not evidence of reach. Say so rather "
+        "than assuming the configured ladder gets climbed.",
+    ]
+    return out
+
+
 async def request_market_analysis(
     tick,
     candles: list[dict],
@@ -166,6 +271,9 @@ async def request_market_analysis(
     timeout: int = 60,
     custom_strategies: list[dict] | None = None,
     strategies: list[dict] | None = None,
+    h1_candles: list[dict] | None = None,
+    m15_candles: list[dict] | None = None,
+    ladder_reach: dict[str, dict] | None = None,
 ) -> dict:
     """Request a full market analysis from the configured AI provider for the current gold market.
 
@@ -270,6 +378,22 @@ async def request_market_analysis(
             cdesc = (cs.get("description") or "").split("\n")[0].strip().lstrip("#").strip()
             lines.append(f"  {cid}: {cname} — {cdesc[:120]}")
 
+    # ── Volatility, in pips ──────────────────────────────────────────────────
+    # Denominated in pips deliberately. Every template's trail distance,
+    # activation and TP rung is a pip figure, so an ATR the model has to
+    # convert before it can compare is an ATR it will not compare -- and
+    # comparing them is the entire point. 1 pip = 0.10 price on this feed
+    # (core_pips, confirmed against the channels' own "+30 PIPS" wording).
+    #
+    # Added 2026-09-04 because this prompt had no volatility input at all: it
+    # recommended an eight-rung ladder for "letting profits run" while that
+    # template's 50-pip trail, armed at 40 pips, was closing trades two rungs
+    # in -- a 50-pip give-back being ~42% of a typical H1 range that morning.
+    lines += _volatility_lines(h1_candles, m15_candles)
+
+    # ── Where trades on each option ACTUALLY finish ──────────────────────────
+    lines += _ladder_reach_lines(ladder_reach)
+
     if news:
         lines += ["", "Recent news headlines related to gold/USD:"]
         for h in news[:8]:
@@ -285,6 +409,8 @@ async def request_market_analysis(
         "custom strategies and EA templates are all equally eligible; judge each on the "
         "behaviour described, not on its name. Put its exact key in strategy_recommendation "
         "and say in strategy_reason why it beats the alternatives today.",
+        "",
+        _TRAIL_VS_LADDER_RULE,
     ]
 
     prompt = "\n".join(lines)

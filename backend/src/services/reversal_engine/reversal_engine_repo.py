@@ -621,21 +621,30 @@ def claim_vantage_signal_activation(signal_id) -> int:
     pass and the signal opened twice -- the sweep causing the exact failure the
     claim exists to prevent.
 
-    NOTE (2026-08-30): this does NOT enforce max_open_trades, unlike the
-    canonical claim in signal_state_repo. That is deliberate and unresolved,
-    not an oversight -- this path places a RESTING pending order rather than
-    opening a position, and whether a resting order should consume a trade slot
-    is a money decision for the owner. See the open question in
-    docs/simon-handover/. Until it is answered this path can still over-open
-    against the cap on its own.
+    ANSWERED 2026-09-04. This used NOT to enforce max_open_trades, on the
+    reasoning that it places a RESTING order rather than opening a position and
+    that whether a resting order should consume a trade slot was a money
+    decision for the owner. The owner's answer: "whether it is a resting order
+    or a market order the EA should manage the max number of allowable trades
+    as set within the gui". So the cap applies here too, using the one
+    definition in signal_state_repo -- a resting order holds a slot from
+    placement until the position it becomes is closed.
+
+    The cap is inside the UPDATE's own WHERE for the same reason the canonical
+    claim keeps it there: SQLite serialises writers, so two engines claiming at
+    once cannot both read "under the cap" and both place.
     """
     import time as _t
     from backend.src.db import database as db_module
+    from backend.src.services.trading.signal_state_repo import (
+        _SLOTS_IN_USE_SQL, _NO_EXCLUSION, _max_open_trades,
+    )
     with db_module.db() as conn:
         return conn.execute(
             "UPDATE vantage_signals SET status='activating', activated_at=? "
-            "WHERE signal_id=? AND status IN ('pending','active')",
-            (_t.time(), signal_id),
+            f"WHERE signal_id=? AND status IN ('pending','active') "
+            f"AND ({_SLOTS_IN_USE_SQL}) < ?",
+            (_t.time(), signal_id, *_NO_EXCLUSION, _max_open_trades(conn)),
         ).rowcount
 
 

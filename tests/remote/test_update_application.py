@@ -40,10 +40,11 @@ def restarts(monkeypatch):
 
 @pytest.fixture
 def update_result(monkeypatch):
-    """Drives what apply_update() returns."""
-    box: dict = {"value": {"ok": True}}
+    """Drives what apply_update() returns, and records how it was called."""
+    box: dict = {"value": {"ok": True}, "calls": []}
 
-    async def _fake():
+    async def _fake(restart=True):
+        box["calls"].append(restart)
         return box["value"]
     monkeypatch.setattr(core_app_update, "apply_update", _fake)
     return box
@@ -97,6 +98,18 @@ class TestAFailedUpdateDoesNotRestart:
         asyncio.run(_update._apply_git_update())
 
         assert no_icon_refresh == []
+
+
+def test_apply_update_is_told_not_to_restart_itself(restarts, update_result,
+                                                     no_icon_refresh):
+    """apply_update() restarts on success by default (2026-09-03) -- this
+    path must opt out with restart=False, since it runs its own restart
+    sequence (icon refresh, then _do_restart) right after. Losing this flag
+    would restart twice: once inside apply_update(), pre-empting the icon
+    refresh and the bat-loop's exit-code-42 relaunch entirely."""
+    asyncio.run(_update._apply_git_update())
+
+    assert update_result["calls"] == [False]
 
 
 class TestASuccessfulUpdateDoesRestart:

@@ -71,35 +71,9 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     # Shown purely on the schedule's enabled flag, not on whether a window
     # happens to be active right now: this renders once on page load and
     # would otherwise go stale the moment a window boundary passed.
-    if _csched.is_trading_schedule_enabled():
-        with ui.row().classes(
-            "w-full items-center gap-2 mb-2 px-2 py-1 rounded "
-            "bg-amber-900 border-l-4 border-amber-500"
-        ):
-            ui.icon("event_available", size="xs").classes("text-amber-300")
-            ui.label("Schedule Override").classes(
-                "text-xs font-bold text-amber-200"
-            )
-            ui.icon("info_outline", size="xs").classes(
-                "text-amber-300 cursor-help"
-            ).tooltip(
-                "The Trading Schedule is on. Where the active window sets a "
-                "strategy or template for a channel, that wins over the pick "
-                "below for as long as the window is active. Windows with no "
-                "override configured leave the selection below in effect."
-            )
-
-    # Schedule Override banner (2026-08-06). While the Trading Schedule is
-    # enabled, the active window's own per-channel strategy/template pick
-    # wins over everything selected on this card, for as long as that window
-    # is active -- see core_trading_schedule.get_schedule_strategy_override
-    # and the two sites that honour it (core_signal_resolution.py and
-    # core_scan_messages_staleness_strategy.py). Without this the card reads
-    # as authoritative when it may not be, which is exactly the confusion
-    # that made a schedule-assigned template look like it was being ignored.
-    # Shown purely on the schedule's enabled flag, not on whether a window
-    # happens to be active right now: this renders once on page load and
-    # would otherwise go stale the moment a window boundary passed.
+    #
+    # ONE banner, not two: this block was duplicated verbatim (comment and
+    # all) and rendered the badge twice whenever the schedule was on.
     if _csched.is_trading_schedule_enabled():
         with ui.row().classes(
             "w-full items-center gap-2 mb-2 px-2 py-1 rounded "
@@ -133,7 +107,12 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
         # canonical source everywhere else (trade attribution, scorecards,
         # rename cascades) and any override already stored for it is still
         # honoured by orb_auto_execute.
-        if ch["source"] != "ORB/IVB Report"
+        #
+        # Bounce Engine was removed as a signal source (owner, 2026-09-02) and
+        # generates no new signals, so it never opens a trade under this
+        # binding again. Hidden the same way as ORB/IVB rather than deleted --
+        # its stored "conservative" override stays untouched as history.
+        if ch["source"] not in ("ORB/IVB Report", "Bounce Engine")
     ]
 
     strat_opts = _strategy_options(
@@ -322,6 +301,13 @@ def _render_global_parameters_card(rs: dict) -> None:
       position by ticket, not just the ones in its own g_trades[]/
       g_pending[] tracking. See ForexTraderBridge.mq5's
       CheckGlobalHarvest().
+
+      The threshold is the BASKET's combined floating P&L, not each
+      position's own (owner, 2026-09-04, EA v1.06). It used to be per
+      position, which is a different feature under the same name: six
+      trades at $15 each is $90 of open profit that a $75 harvest never
+      touched. Account-wide mirror of the template-level
+      basket_harvest_threshold (core_equity_protect.check_basket_harvest).
     - Fixed Lot Size (Single): moved from Active Strategy, same
       strategy_lot_size column/semantics (0 = risk-based auto) -- "fixed
       lot always wins" everywhere it's read (core_open_trade.py,
@@ -355,9 +341,11 @@ def _render_global_parameters_card(rs: dict) -> None:
                 min=0.0, step=5.0,
             ).classes("w-full mt-1").props("dense outlined")
             ui.label(
-                "Auto-close ANY open position (regardless of strategy, template, "
-                "or how it was opened) once its own floating P&L reaches this "
-                "amount."
+                "Closes EVERY open position on the symbol at once (regardless of "
+                "strategy, template, or how each was opened) as soon as their "
+                "COMBINED floating P&L reaches this amount. A total, not a "
+                "per-trade target — so positions individually in loss are closed "
+                "too, as part of banking the total."
             ).classes("text-xs text-gray-500 mt-1")
 
         with ui.card().classes("bg-gray-900 p-3 rounded-lg"):

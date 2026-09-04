@@ -278,6 +278,104 @@ def closed_pnls_since(close_time_from: float) -> list[float]:
     return [float(r[0] or 0.0) for r in rows]
 
 
+def _rung_index(max_tp_hit) -> int:
+    """0 for "never reached a TP", else the rung number from a "TP<n>" value.
+
+    The column carries 'none', 'n/a', '' and NULL for the same outcome (all
+    four are present in the live database), so every non-"TP<n>" value means
+    no rung. Reading any of them as a rung would overstate ladder depth, which
+    is the one number this aggregate exists to make trustworthy.
+    """
+    s = str(max_tp_hit or "").strip().upper()
+    if not s.startswith("TP"):
+        return 0
+    try:
+        return int(s[2:])
+    except ValueError:
+        return 0
+
+
+def get_strategy_ladder_reach(days: int = 30, min_n: int = 5) -> dict[str, dict]:
+    """How far up its TP ladder each strategy's trades ACTUALLY get.
+
+    A template's configured ladder says what is reachable in principle; this
+    says what was reached in practice, which is a different quantity whenever
+    a trailing stop is armed inside the ladder. "GD VIP - Single" is the
+    worked example (2026-09-04): eight rungs at 20/40/60/80/100/120/170/270
+    pips, a trail armed at 40 pips (TP2) with a 50-pip distance, and 50 pips
+    is around 42% of a typical H1 range on XAUUSD. Over 30 days, 50 of its 85
+    closed trades topped out at TP1 or TP2, 3 reached TP5 or beyond, and one
+    completed the ladder. The AI Analysis prompt recommended it for "letting
+    profits run up the ladder" -- reasoning from the configuration, because
+    the configuration was all it was given.
+
+    `stopped_after_tp` is the truncation signature: a rung was banked and the
+    trade then exited on a stop. Those are WINS, so win rate cannot show it.
+
+    Returns {strategy: {n, win_rate, net_pnl, no_tp, tp1_2, tp3_4, tp5_plus,
+    stopped_after_tp, top_rung}}, strategies under `min_n` trades dropped.
+    Never raises: this feeds a prompt, and a failure must cost the evidence,
+    not the analysis.
+    """
+    import time as _t
+    cutoff = _t.time() - days * 86400
+    acc: dict[str, dict] = {}
+    try:
+        with db() as conn:
+            rows = conn.execute(
+                "SELECT strategy, max_tp_hit, exit_reason, net_pnl "
+                "FROM vantage_simulated_trades "
+                "WHERE status='closed' AND close_time >= ? AND strategy IS NOT NULL",
+                (cutoff,),
+            ).fetchall()
+    except Exception as exc:
+        log.warning("strategy ladder reach unavailable: %s", exc)
+        return {}
+
+    for strategy, max_tp_hit, exit_reason, net_pnl in rows:
+        r = acc.setdefault(str(strategy), {
+            "n": 0, "wins": 0, "net_pnl": 0.0, "no_tp": 0, "tp1_2": 0,
+            "tp3_4": 0, "tp5_plus": 0, "stopped_after_tp": 0, "top_rung": 0,
+        })
+        pnl  = float(net_pnl or 0.0)
+        rung = _rung_index(max_tp_hit)
+        r["n"] += 1
+        r["net_pnl"] += pnl
+        if pnl > 0:
+            r["wins"] += 1
+        if rung <= 0:
+            r["no_tp"] += 1
+        else:
+            r["top_rung"] = max(r["top_rung"], rung)
+            if rung <= 2:
+                r["tp1_2"] += 1
+            elif rung <= 4:
+                r["tp3_4"] += 1
+            else:
+                r["tp5_plus"] += 1
+            # Only a banked rung can be truncated -- a stop with no rung
+            # behind it is an ordinary loser, not a ladder cut short.
+            if str(exit_reason or "").upper() == "SL":
+                r["stopped_after_tp"] += 1
+
+    out: dict[str, dict] = {}
+    for strategy, r in acc.items():
+        if r["n"] < min_n:
+            continue
+        out[strategy] = {
+            "n":                r["n"],
+            "win_rate":         round(100.0 * r["wins"] / r["n"], 1),
+            "net_pnl":          round(r["net_pnl"], 2),
+            "no_tp":            r["no_tp"],
+            "tp1_2":            r["tp1_2"],
+            "tp3_4":            r["tp3_4"],
+            "tp5_plus":         r["tp5_plus"],
+            "stopped_after_tp": r["stopped_after_tp"],
+            "top_rung":         r["top_rung"],
+        }
+    return out
+
+
 def realised_pnl_opened_since(open_time_from: float) -> float:
     """Total net P&L of CLOSED trades OPENED since a timestamp.
 

@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.05"
+#property version   "1.06"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,7 +40,12 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.05"
+#define EA_VERSION "1.06"
+// Hand-maintained, and bumped in the same edit as EA_VERSION: __DATETIME__
+// says when the .ex5 was COMPILED, which tells you nothing about how old
+// the source behind it is. This says when the source last changed, so the
+// two together answer "is the running build the current one".
+#define EA_VERSION_DATE "2026-09-04"
 
 #include <Trade\Trade.mqh>
 
@@ -627,6 +632,7 @@ void EnsureConnected()
    SendJson("{\"type\":\"hello\",\"account\":" + (string)AccountInfoInteger(ACCOUNT_LOGIN) +
             ",\"symbol\":\"" + _Symbol + "\"" +
             ",\"ea_version\":\"" + EA_VERSION + "\"" +
+            ",\"ea_version_date\":\"" + EA_VERSION_DATE + "\"" +
             ",\"compiled\":\"" + TimeToString(__DATETIME__, TIME_DATE | TIME_SECONDS) + "\"" +
             ",\"mql_build\":" + (string)__MQL5BUILD__ +
             ",\"terminal_build\":" + (string)TerminalInfoInteger(TERMINAL_BUILD) + "}");
@@ -668,7 +674,7 @@ void PollSocket()
             g_linkConfirmed = true;
             g_lastLinkDownLog = 0;
             Print("[EABridge] connected to ", InpHost, ":", g_activePort,
-                  " (v", EA_VERSION, ", compiled ",
+                  " (v", EA_VERSION, " of ", EA_VERSION_DATE, ", compiled ",
                   TimeToString(__DATETIME__, TIME_DATE | TIME_SECONDS), ")");
             if(g_activePort != InpPort)
                Print("[EABridge] NOTE: reached the app on port ", g_activePort,
@@ -3044,22 +3050,65 @@ void CheckForClosures()
 // executed", per the Global Parameters card's own description. Called
 // every OnTick regardless of g_trades/g_pending size (see OnTick below) --
 // a Python-only-managed trade leaves both those arrays empty.
-void CheckGlobalHarvest()
+// The BASKET's combined floating profit right now, and how many positions
+// are in it. Shared by CheckGlobalHarvest and the on-chart panel so the
+// number the panel shows is the number the check acts on -- two ways of
+// summing the same book is how a display and a trigger drift apart.
+double GlobalHarvestFloating(int &countOut)
 {
-   if(!g_globalHarvestEnabled) return;
+   double total = 0.0;
+   countOut = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0) continue;
       if(!PositionSelectByTicket(ticket)) continue;
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-      double profit = PositionGetDouble(POSITION_PROFIT);
-      if(profit >= g_globalHarvestThresholdUsd)
-      {
-         Print("[EABridge] global harvest threshold reached ($", profit,
-               " >= $", g_globalHarvestThresholdUsd, "), closing ticket=", ticket);
-         trade.PositionClose(ticket);
-      }
+      total += PositionGetDouble(POSITION_PROFIT);
+      countOut++;
+   }
+   return total;
+}
+
+void CheckGlobalHarvest()
+{
+   if(!g_globalHarvestEnabled) return;
+
+   // SUM, not per position (owner, 2026-09-04). This used to close each
+   // position whose OWN floating profit reached the threshold, which is a
+   // different feature wearing the same name: a basket of six trades at $15
+   // each is $90 of open profit that a $75 harvest never touched, and the
+   // panel's "at $75.00 profit per trade" was the only thing on screen that
+   // said why. It is the account-wide mirror of the template-level
+   // basket_harvest_threshold (core_equity_protect.check_basket_harvest),
+   // and of equity_protect in the loss direction: one number for the whole
+   // book, and when it is reached the whole book is banked.
+   //
+   // CONSEQUENCE, deliberately: closing the basket closes EVERY position on
+   // the symbol, including any that are individually in loss. That is what
+   // banking a combined total means -- the alternative (close only the
+   // winners) leaves the losers running and books less than the threshold
+   // that just triggered.
+   int count = 0;
+   double total = GlobalHarvestFloating(count);
+   if(count == 0 || total < g_globalHarvestThresholdUsd) return;
+
+   Print("[EABridge] global harvest threshold reached (combined $", total,
+         " >= $", g_globalHarvestThresholdUsd, " across ", count,
+         " position(s)) -- closing all");
+
+   // Re-walked from the top: closing changes PositionsTotal() and every
+   // index above the one just closed, so the sum above cannot be reused as
+   // a list.
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      Print("[EABridge] global harvest closing ticket=", ticket,
+            " ($", PositionGetDouble(POSITION_PROFIT), ")");
+      trade.PositionClose(ticket);
    }
 }
 
@@ -3726,10 +3775,12 @@ int PanelDrawLeft()
    // the app (Trading > Global Parameters) and arrives by set_global_config.
    // Displayed because nothing on this panel showed it, so an armed global
    // harvest was invisible on the chart it acts on.
+   int    ghCount = 0;
+   double ghTotal = g_globalHarvestEnabled ? GlobalHarvestFloating(ghCount) : 0.0;
    PnlCell("ghvst", x, y, W, H,
            g_globalHarvestEnabled
-              ? StringFormat("GLOBAL HARVEST: ON  at $%.2f profit per trade",
-                             g_globalHarvestThresholdUsd)
+              ? StringFormat("GLOBAL HARVEST: ON  $%.2f / $%.2f combined (%d)",
+                             ghTotal, g_globalHarvestThresholdUsd, ghCount)
               : "GLOBAL HARVEST: OFF",
            CLR_CELL2,
            g_globalHarvestEnabled ? CLR_GREEN : CLR_DIM, 8);

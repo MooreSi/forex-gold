@@ -285,6 +285,37 @@ def main_page():
 
         _pause_dialog.on_value_change(_on_pause_dialog_change)
 
+    # ── Resume-trading confirm popup — opened by clicking the header badge ────
+    # Separate from _pause_dialog above: that dialog only knows about the
+    # governor's trade_pause_until halt. The header badge also reflects the
+    # circuit breaker (a different mechanism, circuit_breaker_active_until in
+    # vantage_risk_settings), so this popup clears whichever of the two is
+    # actually active rather than assuming it is always the governor.
+    with ui.dialog() as _resume_confirm_dialog, ui.card().classes(
+        "bg-gray-800 p-5 rounded-lg min-w-80"
+    ):
+        ui.label("Re-enable trading?").classes("text-base font-semibold text-white mb-1")
+        _resume_confirm_reason_lbl = ui.label("").classes("text-xs text-gray-400 mb-4")
+
+        def _do_confirm_resume():
+            cb = settings_ctl.get_circuit_breaker_state()
+            if cb.get("is_active"):
+                settings_ctl.reset_circuit_breaker()
+            raw = settings_ctl.get_app_config("trade_pause_until")
+            if raw is not None and float(raw or 0) > _time.time():
+                settings_ctl.set_app_config("trade_pause_until", "0")
+            _resume_confirm_dialog.close()
+            ui.notify("Trading resumed", type="positive")
+
+        with ui.row().classes("gap-2 mt-3"):
+            ui.button(
+                "Resume Trading", icon="play_arrow",
+                on_click=_do_confirm_resume,
+            ).classes("bg-green-700 text-white px-4 py-2")
+            ui.button("Cancel", on_click=_resume_confirm_dialog.close).classes(
+                "bg-gray-700 text-white px-4 py-2"
+            )
+
     # ── Debug banner — above everything when running on fakes ─────────────────
     if cfg_module.is_debug():
         from frontend.components.debug_banner import render_debug_banner
@@ -551,12 +582,48 @@ def main_page():
         # execution and just duplicated/confused this one. Single indicator,
         # always visible, next to About.
         with ui.row().classes(
-            "items-center gap-1.5 px-3 shrink-0"
-        ).style("border-left:1px solid #374151"):
+            "items-center gap-1.5 px-3 shrink-0 cursor-pointer"
+        ).style("border-left:1px solid #374151") as cb_row:
             cb_icon = ui.icon("shield", size="xs").classes("text-green-400")
             cb_top_lbl = ui.label("Circuit Breaker OK").classes(
                 "text-xs font-semibold leading-none text-green-400"
             )
+
+        def _open_resume_confirm():
+            # Re-reads rather than trusting the last badge refresh: the
+            # dialog can open several seconds after that poll, and clearing
+            # a halt that has since lifted itself (or missing one that just
+            # tripped) is exactly the kind of stale-state bug this guards
+            # against everywhere else.
+            cb = settings_ctl.get_circuit_breaker_state()
+            raw = settings_ctl.get_app_config("trade_pause_until")
+            gov_paused = raw is not None and float(raw or 0) > _time.time()
+            cb_paused = bool(cb.get("is_active"))
+            if not (cb_paused or gov_paused):
+                ui.notify("Trading is not currently paused", type="info")
+                return
+            reasons = []
+            if gov_paused:
+                reasons.append(trading_ctl.trading_halt_reason() or "Trading paused")
+            if cb_paused:
+                reasons.append(
+                    f"Circuit breaker active ({cb.get('losses_threshold')} consecutive losses)"
+                )
+            _resume_confirm_reason_lbl.text = " / ".join(reasons)
+            _resume_confirm_dialog.open()
+
+        cb_row.on("click", _open_resume_confirm)
+
+        def _news_pause_state_safe() -> dict:
+            """news_pause_state, never raising. This feeds a 5s timer that also
+            drives the halt badge; a calendar failure must cost the countdown,
+            not the whole indicator."""
+            try:
+                from backend.src.controllers.news_controller import news_pause_state
+                return news_pause_state()
+            except Exception:
+                return {"paused": False, "label": "", "detail": "",
+                        "resume_ts": None, "mins_remaining": None}
 
         async def _refresh_cb_badge():
             # async on purpose: this reaches a synchronous SQLite read, and a
@@ -566,14 +633,48 @@ def main_page():
                 cb = await settings_ctl.get_circuit_breaker_state_async()
             except Exception:
                 return
-            if cb.get("is_active"):
-                rem = int(cb.get("remaining_secs", 0))
-                hms = f"{rem // 3600:02d}:{(rem % 3600) // 60:02d}:{rem % 60:02d}"
+            try:
+                gov_until = float(await settings_ctl.get_app_config_async("trade_pause_until") or 0)
+            except Exception:
+                gov_until = 0.0
+            now = _time.time()
+            cb_paused  = bool(cb.get("is_active"))
+            gov_paused = gov_until > now
+            if cb_paused or gov_paused:
+                until_ts = max(
+                    cb.get("active_until", 0) if cb_paused else 0,
+                    gov_until if gov_paused else 0,
+                )
+                from datetime import datetime as _dt
+                until_str = _dt.fromtimestamp(until_ts).strftime("%d %b %H:%M") if until_ts else "?"
                 cb_icon.classes(replace="text-red-400")
                 cb_icon.props("name=block")
-                cb_top_lbl.text = f"Circuit Breaker Active — resumes in {hms}"
+                cb_top_lbl.text = f"Trading Paused until {until_str}"
                 cb_top_lbl.classes(replace="text-xs font-semibold leading-none text-red-400")
             else:
+                # A news blackout takes this slot ahead of the all-clear (owner,
+                # 2026-09-04): entries ARE being held, so "Circuit Breaker OK"
+                # is true and misleading at the same time. It ranks BELOW a real
+                # halt -- a halt needs a Resume and lasts the day, a blackout
+                # lifts itself -- so the branch above still wins.
+                #
+                # The countdown is computed here, from resume_ts against this
+                # tick's own clock, so it actually moves on the 5s refresh
+                # rather than freezing at whatever the calendar last said. No
+                # resume_ts (the feed-down hardcoded fallback knows a window is
+                # open, not when it ends) means the box shows with no timer.
+                _news = _news_pause_state_safe()
+                if _news["paused"]:
+                    _left = float(_news["resume_ts"] or 0) - now
+                    _clock = (f" — {int(_left // 60):d}:{int(_left % 60):02d}"
+                              if _left > 0 else "")
+                    cb_icon.classes(replace="text-amber-400")
+                    cb_icon.props("name=newspaper")
+                    cb_top_lbl.text = f"News Blackout{_clock}"
+                    cb_top_lbl.classes(
+                        replace="text-xs font-semibold leading-none text-amber-400")
+                    cb_row.tooltip(_news["detail"])
+                    return
                 cb_icon.classes(replace="text-green-400")
                 cb_icon.props("name=shield")
                 cb_top_lbl.text = "Circuit Breaker OK"

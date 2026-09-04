@@ -242,6 +242,86 @@ def test_a_post_update_step_failing_is_a_warning_not_a_failure(has_checkout, git
     assert "pip exploded" in out["error"]
 
 
+# ── apply_update restarts on success ────────────────────────────────────────
+# 2026-09-03: a live install was left running for ~40 minutes against a venv
+# apply_update() had already reinstalled dependencies into, because every
+# caller was individually responsible for restarting afterward and the
+# instrumentation to know one of them hadn't (or had failed before reaching
+# that step) didn't exist -- every outbound HTTPS call (Telegram alerts, AI
+# commentary, the daily email) failed with a stale-module FileNotFoundError
+# for that whole window while 5 real trades opened with zero notification.
+# apply_update() now restarts itself so no caller can skip or fumble it.
+
+@pytest.fixture
+def restart(monkeypatch):
+    """Stub the actual relaunch — a real one spawns a subprocess and asks a
+    (nonexistent, in a test) NiceGUI server to shut down."""
+    calls = []
+    monkeypatch.setattr(upd, "_restart", lambda: calls.append(True))
+    return calls
+
+
+def test_a_successful_update_restarts_the_app(has_checkout, git, no_post_steps, restart):
+    has_checkout(True)
+    git()
+
+    out = asyncio.run(upd.apply_update())
+
+    assert out == {"ok": True, "error": None}
+    assert restart == [True], "a landed update must not be left running the old code"
+
+
+def test_a_soft_post_update_failure_still_restarts(has_checkout, git, monkeypatch, restart):
+    """The checkout landed even though pip/pycache-clear didn't -- restarting
+    is exactly what 'Save & Restart again' meant, so do it automatically
+    rather than leaving the caller to notice and click it."""
+    has_checkout(True)
+    git()
+
+    async def _boom(fn, *a, **k):
+        raise RuntimeError("pip exploded")
+    monkeypatch.setattr(upd.asyncio, "to_thread", _boom)
+
+    out = asyncio.run(upd.apply_update())
+
+    assert out["ok"] is True
+    assert restart == [True]
+
+
+def test_a_failed_fetch_does_not_restart(has_checkout, git, no_post_steps, restart):
+    has_checkout(True)
+    git((128, "", "network down"))
+
+    out = asyncio.run(upd.apply_update())
+
+    assert out["ok"] is False
+    assert restart == [], "nothing landed -- restarting would just relaunch the old code"
+
+
+def test_a_failed_checkout_does_not_restart(has_checkout, git, no_post_steps, restart):
+    has_checkout(True)
+    git((0, "", ""), (1, "", "checkout refused"))
+
+    out = asyncio.run(upd.apply_update())
+
+    assert out["ok"] is False
+    assert restart == []
+
+
+def test_restart_can_be_suppressed_by_the_caller(has_checkout, git, no_post_steps, restart):
+    """The admin-console-triggered update (cluster/remote/_update.py) runs its
+    own restart sequence afterward -- Windows icon refresh, then a hard
+    os._exit() with the bat-loop's exit code -- and must keep doing exactly
+    that rather than being pre-empted by this one."""
+    has_checkout(True)
+    git()
+
+    out = asyncio.run(upd.apply_update(restart=False))
+
+    assert out == {"ok": True, "error": None}
+    assert restart == []
+
+
 def test_repo_root_resolves_to_the_actual_checkout_root():
     """_REPO_ROOT is computed once at import time from this module's own
     location. The `has_checkout` fixture monkeypatches it directly in every

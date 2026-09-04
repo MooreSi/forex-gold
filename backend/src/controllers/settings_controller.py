@@ -14,7 +14,7 @@ from backend.src.services.risk import settings as _risk
 import backend.src.config as _cfg_file
 
 __all__ = [
-    "get_app_config", "set_app_config", "get_risk_settings",
+    "get_app_config", "get_app_config_async", "set_app_config", "get_risk_settings",
     "update_risk_settings", "get_active_trader", "set_active_trader",
     "get_email_config", "save_email_config", "get_telegram_config",
     "save_telegram_config", "get_mt5_credentials", "save_mt5_credentials",
@@ -32,6 +32,10 @@ __all__ = [
 
 def get_app_config(key: str) -> Optional[str]:
     return _config.get(key)
+
+
+async def get_app_config_async(key: str) -> Optional[str]:
+    return await _config.get_async(key)
 
 
 def set_app_config(key: str, value: str) -> None:

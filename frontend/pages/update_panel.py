@@ -8,7 +8,6 @@ The status cards refresh every 5 seconds so the page stays accurate without
 the user having to navigate away and back.
 """
 
-import asyncio
 from pathlib import Path
 
 from nicegui import ui
@@ -126,13 +125,10 @@ def _render_github_update_card() -> None:
                 _state["error"] = result["error"]
                 _draw()
                 return
+            # apply_update() restarts on success itself now (2026-09-03) --
+            # see core_app_update.py's docstring for why leaving that to the
+            # caller was unsafe. Nothing left to do here but tell the user.
             ui.notify("Update applied — restarting...", type="positive")
-            from backend.src.controllers.system_controller import restart_app
-            await asyncio.sleep(1)
-            # Marker-based: four parents resolved above the repo, so applying
-            # an update shut the app down and relaunched nothing. (2026-08-26.)
-            from backend.src.controllers.system_controller import repo_root as _repo_root
-            restart_app(_repo_root())
 
         ui.label(
             "Pulls directly from the GitHub repository above via git. "

@@ -21,6 +21,13 @@
 #
 # So: never hand-copy this file again. Run this, then compile.
 #
+# THIS IS THE HAND-RUN, MACOS-ONLY PATH. The automated one is
+# backend/src/services/broker/ea_deploy.py, which does the same copy on
+# Windows and macOS and runs itself after every app self-update, so a remote
+# machine needs nobody in front of it. Keep the two in step, or fix one and
+# delete the other -- do not let them diverge silently, which is the whole
+# failure this file was written about.
+#
 # USAGE
 #   tools/deploy_ea.sh            deploy repo -> every MT5 Experts folder
 #   tools/deploy_ea.sh --check    report drift only, change nothing

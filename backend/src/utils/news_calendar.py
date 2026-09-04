@@ -505,6 +505,68 @@ def check_news_blackout() -> tuple[bool, str]:
     )
 
 
+def news_pause_state() -> dict:
+    """Is trading paused for news right now, and what should the header say?
+
+    Returns {paused, label, detail, resume_ts, mins_remaining}. `label` is what
+    goes in the red box, `detail` is the hover text, and `resume_ts` is when
+    the window ends (None when nothing knows) so the caller can render a live
+    countdown against its own clock.
+
+    Keyed to check_news_blackout() -- the SAME call the entry paths gate on --
+    rather than to get_current_event(), so "the box is showing" and "orders
+    are being held for news" are one fact rather than two implementations that
+    have to agree. get_current_event answers a different question and gets
+    both directions wrong for this purpose (2026-09-04):
+
+      * it never consults the `enabled` flag, so with the blackout switched
+        off it still reports a window, and a badge driven by it announced a
+        pause that was not in force;
+      * when the feed is unreachable and nothing was ever cached,
+        check_news_blackout falls back to a hardcoded schedule and really does
+        block entries, while get_current_event returns None -- trading paused
+        for news with nothing on screen saying so.
+
+    The event is still consulted, but only to name the event and its resume
+    time once the pause is established.
+
+    Never raises: this runs on the header's refresh timer, and a calendar
+    failure must cost the badge, not the header.
+    """
+    _clear = {"paused": False, "label": "", "detail": "",
+              "resume_ts": None, "mins_remaining": None}
+    try:
+        allowed, reason = check_news_blackout()
+    except Exception as exc:
+        _log.debug("[NewsCalendar] news_pause_state: blackout check failed: %s", exc)
+        return dict(_clear)
+
+    if allowed:
+        return dict(_clear)
+
+    detail = reason or "Trading is paused for a news event."
+    try:
+        ev = get_current_event()
+    except Exception:
+        ev = None
+    # resume_ts is a TIMESTAMP, not a minutes figure, because the header
+    # refreshes on a 5s timer and has no clock of its own: a number computed
+    # once here would sit frozen on screen and drift by the length of the
+    # window. Both stay None on the fallback branch -- the hardcoded schedule
+    # knows a window is open, not when it ends, and a badge is better with no
+    # timer than with an invented one.
+    resume_ts = mins = None
+    if ev:
+        mins = ev.get("mins_remaining")
+        resume_ts = ev.get("window_end")
+        detail = (
+            f"{ev.get('title', 'News event')} ({ev.get('currency', '?')}) — "
+            f"no new orders for {int(round(mins or 0))} more min"
+        )
+    return {"paused": True, "label": "NEWS", "detail": detail,
+            "resume_ts": resume_ts, "mins_remaining": mins}
+
+
 def _hardcoded_fallback(now: datetime) -> bool:
     """Feed-free approximation: FOMC days, NFP Friday, CPI Tuesday, top of hour."""
     m, h, dow = now.minute, now.hour, now.weekday()

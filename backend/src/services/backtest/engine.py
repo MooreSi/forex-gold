@@ -150,6 +150,12 @@ class StrategyStats:
     final_balance:    float
     equity_curve:     list[float] = field(default_factory=list)
     trade_list:       list[BtTrade] = field(default_factory=list)
+    # Why this walk refused the template, or "" when it did not. Without it,
+    # a refusal reaches the comparison table as zeros -- and zeros read as a
+    # strategy that traded nothing and lost nothing, which beside a row
+    # showing a real drawdown is an argument FOR the template that could not
+    # be simulated at all. See template_simulator.unsupported_reason.
+    unsupported_reason: str = ""
 
 
 # ── Signal pre-filter ─────────────────────────────────────────────────────────
@@ -588,7 +594,9 @@ def run_backtest(
                 trades.append(t)
                 current_balance = max(current_balance + t.pnl_usd, 1.0)
 
-        out[strategy] = _compute_stats(strategy, trades, starting_balance)
+        stats = _compute_stats(strategy, trades, starting_balance)
+        stats.unsupported_reason = _template_refusal(strategy, tick_mode=False)
+        out[strategy] = stats
 
     return out
 
@@ -618,9 +626,34 @@ def run_backtest_ticks(
                 trades.append(t)
                 current_balance = max(current_balance + t.pnl_usd, 1.0)
 
-        out[strategy] = _compute_stats(strategy, trades, starting_balance)
+        stats = _compute_stats(strategy, trades, starting_balance)
+        stats.unsupported_reason = _template_refusal(strategy, tick_mode=True)
+        out[strategy] = stats
 
     return out
+
+
+def _template_refusal(strategy: str, tick_mode: bool) -> str:
+    """Why this walk refused `strategy`'s template, or "" when it did not.
+
+    Deliberately narrow. A built-in strategy is not "unsupported" -- it is
+    simply not walked on ticks, a different silence. A template that no longer
+    exists is a different problem again, and labelling it unsupported sends
+    the user to edit a trail mode on a template that is not there. Only a
+    template the walk actively refuses gets a reason.
+    """
+    if not strategy.startswith(TEMPLATE_PREFIX):
+        return ""
+    template = _load_backtest_template(strategy[len(TEMPLATE_PREFIX):])
+    if not template:
+        return ""
+    try:
+        from backend.src.services.backtest.template_simulator import (
+            unsupported_reason as _why,
+        )
+        return _why(template, tick_mode)
+    except Exception:
+        return ""
 
 
 def _compute_stats(

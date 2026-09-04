@@ -254,6 +254,38 @@ class EventsMixin:
                     trade_id, "ea_close_sibling_leg",
                 ))
                 return
+            # A close with no price of its own is an OBSERVATION that the EA
+            # can no longer see the ticket -- not a settled exit. Only the
+            # restore path sends one (HandleRestoreTrade's
+            # "closed_while_disconnected"); every real close comes through
+            # ReportTradeClosed, which always carries close_price. Reading the
+            # absence as 0.0 booked an exit at $0.00: entry 4478.35, 0.1 lots,
+            # and record_close computed -$44,783.50, wrote it to net_pnl,
+            # realised_pnl and the simulated balance, and fed it to the
+            # daily-loss and give-back guards -- which halt trading. Live,
+            # ticket 1935433548, 2026-09-04. The broker had no closing deal at
+            # all, which is why History (built from deal history) never showed
+            # it. Ask the broker; with no deal there is no close to record.
+            if close_price <= 0:
+                verified = await self._broker_exit_price(
+                    msg.get("ticket") or trade.get("mt5_ticket"))
+                if not verified:
+                    log.warning(
+                        "[EABridge] trade_closed(%s) for trade=%s ticket=%s carried no "
+                        "close price and the broker has no closing deal for it — leaving "
+                        "the row open rather than recording an exit at $0",
+                        reason, trade_id[:8], msg.get("ticket"),
+                    )
+                    asyncio.create_task(telegram_alerts.send_message(
+                        f"EA reported ticket {msg.get('ticket')} as gone ({reason}), but the "
+                        f"broker has no closing deal for it. This trade stays OPEN and "
+                        f"unmanaged — no P&L has been recorded. Check MT5: if the position "
+                        f"is still there it needs a look; if it really closed, its deal "
+                        f"history has not arrived yet.",
+                        trade_id, "ea_close_unverified",
+                    ))
+                    return
+                close_price = verified
             # A leg's close IS this trade's close when the leg owns the row's
             # ticket -- record it against the parent id, never the suffixed
             # one (which has no row of its own and previously made the whole
@@ -479,6 +511,39 @@ class EventsMixin:
             telegram_alerts.fmt_leg_fill(row, label, ticket, fill_price, lots, is_first),
             original_id, "template_leg_filled",
         ))
+
+    async def _broker_exit_price(self, ticket) -> Optional[float]:
+        """The broker's own exit price for `ticket`, or None when the broker
+        shows no closing deal for it.
+
+        Asked only when the EA reports a close with no price of its own (see
+        _on_trade_closed). None deliberately collapses three cases -- the
+        position is still open, the deal history is unreachable, the ticket is
+        unknown -- because none of them is evidence that anything closed, and
+        the action is the same for all three: record nothing.
+
+        `entry != 0` is an exit, same reading as positions/reconciliation.py.
+        An opening deal is not evidence of a close: read as one it would book
+        the trade shut at its own entry price. The LAST exit settles the
+        price, since a staged exit leaves one deal per portion and the trade
+        is out at the final one.
+        """
+        try:
+            if not ticket or self._engine is None:
+                return None
+            bridge = getattr(self._engine, "_bridge", None)
+            if bridge is None:
+                return None
+            deals = await bridge.get_position_history(int(ticket)) or []
+            closing = [d for d in deals if int(d.get("entry", 0) or 0) != 0]
+            if not closing:
+                return None
+            last  = max(closing, key=lambda d: float(d.get("time", 0) or 0))
+            price = float(last.get("price", 0) or 0)
+            return price or None
+        except Exception as e:
+            log.warning("[EABridge] exit-price lookup failed for ticket=%s: %s", ticket, e)
+            return None
 
     async def _leg_position_volume(self, ticket) -> Optional[float]:
         """The broker's own volume for a just-filled leg ticket, or None if it

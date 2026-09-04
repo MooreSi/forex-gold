@@ -420,6 +420,26 @@ def render(get_engine: Callable):
             # here rather than holding a list built at import time.
             strategies = strategy_catalogue.build_strategy_catalogue()
 
+            # Volatility and measured ladder depth (2026-09-04). The prompt
+            # had neither, so it argued from each template's configured rungs
+            # and recommended an eight-rung ladder for "letting profits run"
+            # while that template's 50-pip trail, armed at 40 pips, was
+            # closing trades two rungs in. Both are fetched here rather than
+            # inside the service so the service keeps taking its market data
+            # as arguments instead of reaching for the engine.
+            h1_candles = m15_candles = None
+            try:
+                h1_candles  = await engine.get_candles("H1", 30)
+                m15_candles = await engine.get_candles("M15", 30)
+            except Exception as e:
+                _log.debug("[ai summary] volatility candles unavailable: %s", e)
+
+            ladder_reach = {}
+            try:
+                ladder_reach = _hist.strategy_ladder_reach()
+            except Exception as e:
+                _log.debug("[ai summary] ladder-reach history unavailable: %s", e)
+
             data = await claude_ai.request_market_analysis(
                 tick=tick,
                 candles=candles,
@@ -428,6 +448,9 @@ def render(get_engine: Callable):
                 cfg=config,
                 timeout=60,
                 strategies=strategies,
+                h1_candles=h1_candles,
+                m15_candles=m15_candles,
+                ladder_reach=ladder_reach,
             )
 
             _result[0] = data

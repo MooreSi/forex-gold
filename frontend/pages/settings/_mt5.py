@@ -187,6 +187,12 @@ def _render_mt5(engine):
                                 )
                                 br = result.get("status") or result.get("error") or "ok"
                                 status_lbl.text = f"{_env.title()} credentials saved — bridge: {br}"
+                                # Deposits total is cached for an hour (deposits.py)
+                                # keyed on nothing but time -- switching account
+                                # here would otherwise show the old account's
+                                # lifetime P&L against the new account's equity
+                                # until the cache expired on its own.
+                                settings_ctl.set_app_config("mt5_total_deposits_cache", "")
                             except Exception:
                                 status_lbl.text = f"{_env.title()} credentials saved (bridge offline)"
                         else:

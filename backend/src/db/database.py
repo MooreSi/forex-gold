@@ -325,6 +325,7 @@ from backend.src.services.cluster.sync_repo import (  # noqa: E402,F401
 _ANALYTICS_LAZY = {
     "_session_for_hour", "_trade_pts", "get_hourly_pnl_grid",
     "get_equity_drawdown_pct", "get_regime_score",
+    "get_strategy_ladder_reach",
 }
 
 

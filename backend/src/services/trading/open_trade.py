@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
+from backend.src.services.trading import signal_state_repo
 from backend.src.services.trading.send_dedup import (
     _FallbackDecision, _bridge_order_comment, _resolve_fallback_send,
     SendOutcomeUnknown,
@@ -387,9 +388,20 @@ async def open_trade(
     # the trade row) rather than in the callers, so it's checked against
     # whichever node's table is about to receive the INSERT.
     rs = await db_module.to_db_thread(db_module.get_risk_settings)
-    open_count = trade_repo.count_open_trades()
+    # Slots, not open rows. A resting order holds one from placement until the
+    # position it becomes is closed (owner, 2026-09-04) -- counting only open
+    # rows here let a market order in on top of a book already full of resting
+    # ones. See signal_state_repo._SLOTS_IN_USE_SQL for the definition and why
+    # the three terms cannot double-count.
+    # Excluding this signal's own claim: the scheduler claims the slot and
+    # THEN calls here, so counting it would refuse every trade the normal
+    # path makes (pinned by tests/trading/test_resting_orders_consume_a_slot).
+    open_count = signal_state_repo.count_trade_slots_used(
+        exclude_signal_id=signal_id)
     if open_count >= int(rs.get("max_open_trades", 1)):
-        raise ValueError(f"Max open trades reached ({rs.get('max_open_trades', 1)})")
+        raise ValueError(
+            f"Max open trades reached ({rs.get('max_open_trades', 1)}) — "
+            f"{signal_state_repo.describe_trade_slots()}")
 
     # Use caller-supplied tick if available — callers on the critical path
     # (open_trade_from_signal, _process_instant_entry) already hold a fresh

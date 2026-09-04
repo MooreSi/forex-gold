@@ -293,10 +293,15 @@ class EventsMixin:
             result = await self._engine.record_close(trade_id, close_price, reason)
             account = await self._engine.get_mt5_account()
             closed_row = await self._fetch_trade(trade_id)
-            asyncio.create_task(telegram_alerts.send_message(
-                telegram_alerts.fmt_trade_close(closed_row, result, {}, account),
-                trade_id, "ea_close",
-            ))
+            # The monitor loop's SL check runs on EA-managed rows too (it sits
+            # above the managed_by=='ea' skip in monitor_cycle), so it and this
+            # event race on every stopped-out template trade. Whoever loses the
+            # compare-and-set in apply_full_close says nothing.
+            if not result.get("already_closed"):
+                asyncio.create_task(telegram_alerts.send_message(
+                    telegram_alerts.fmt_trade_close(closed_row, result, {}, account),
+                    trade_id, "ea_close",
+                ))
             if int(closed_row.get("mt5_ticket") or 0):
                 # Replace the entry-vs-exit estimate with the broker's own
                 # realised figure once the deal history settles.

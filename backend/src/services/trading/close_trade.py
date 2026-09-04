@@ -132,7 +132,7 @@ async def close_trade(trade_id: str, reason: str, ctx: CloseTradeContext) -> dic
     if mt5_ticket and ctx.schedule_profit_sync:
         asyncio.create_task(ctx.schedule_profit_sync(trade_id, int(mt5_ticket)))
 
-    if tick and ctx.background_close_commentary:
+    if tick and ctx.background_close_commentary and not result.get("already_closed"):
         asyncio.create_task(ctx.background_close_commentary(trade_id, result, reason, tick))
 
     return result
@@ -198,7 +198,14 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
     prev_net_pnl  = float(row.get("net_pnl", 0))
     now = time.time()
 
-    await db_module.to_db_thread(
+    # False when another caller closed this trade first. apply_full_close is a
+    # compare-and-set, so the database is already safe from the duplicate --
+    # but nothing told the loser, so it went on to announce the close on
+    # Telegram as if it had recorded it. Live 2026-09-04, ticket 1940612275:
+    # the EA's own trade_closed and the monitor loop's SL reconcile landed
+    # seconds apart and the owner was told twice. See
+    # tests/trading/test_close_alert_not_sent_twice.py.
+    close_recorded = await db_module.to_db_thread(
         trade_repo.apply_full_close,
         trade_id, now, round(close_price, 2), reason,
         round(gross_pnl, 4), round(prev_realised + gross_pnl, 4),
@@ -237,6 +244,8 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
         "gross_pnl":   gross_pnl,
         "net_pnl":     net_pnl,
         "reason":      reason,
+        # Set for every caller, checked by the five that alert on a close.
+        "already_closed": not close_recorded,
     }
 
     try:
@@ -252,26 +261,32 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
                     _rr = abs(_tp1 - _entry) / abs(_entry - _sl)
         except Exception:
             _rr = None
-        push_trade_closed({
-            "trade_id":    trade_id,
-            "engine":      "main",
-            "direction":   direction,
-            "strategy":    row.get("strategy", ""),
-            "open_time":   row.get("open_time"),
-            "close_time":  now,
-            "pnl_dollars": round(prev_net_pnl + net_pnl, 4),
-            "outcome":     "win" if gross_pnl > 0.5 else ("loss" if gross_pnl < -0.5 else "be"),
-            "tg_source":   row.get("tg_source"),
-            "mt5_ticket":  row.get("mt5_ticket"),
-            "rr":          _rr,
-        })
+        # Winner only: the ledger upsert is keyed on (node_id, trade_id), so a
+        # second caller lands on the SAME row -- and its gross_pnl is 0,
+        # because the winner already zeroed remaining_lots. That grades as
+        # "be" and overwrote the real win or loss, which is the column every
+        # win rate on the Edge Dashboard is read from.
+        if close_recorded:
+            push_trade_closed({
+                "trade_id":    trade_id,
+                "engine":      "main",
+                "direction":   direction,
+                "strategy":    row.get("strategy", ""),
+                "open_time":   row.get("open_time"),
+                "close_time":  now,
+                "pnl_dollars": round(prev_net_pnl + net_pnl, 4),
+                "outcome":     "win" if gross_pnl > 0.5 else ("loss" if gross_pnl < -0.5 else "be"),
+                "tg_source":   row.get("tg_source"),
+                "mt5_ticket":  row.get("mt5_ticket"),
+                "rr":          _rr,
+            })
     except Exception as _le:
         log.debug("[Ledger] push failed: %s", _le)
 
     # Persist DPM learning record if DPM was active for this trade
     try:
         rs = await db_module.to_db_thread(db_module.get_risk_settings)
-        if bool(rs.get("dpm_enabled", 0)):
+        if close_recorded and bool(rs.get("dpm_enabled", 0)):  # see the ledger above
             total_pnl = round(prev_net_pnl + net_pnl, 4)
             await db_module.to_db_thread(
                 finalize_dpm_record, trade_id, close_price, reason, total_pnl
@@ -280,6 +295,11 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
         log.debug("[DPM] finalize_dpm_record skipped: %s", _e)
 
     # Tier 1 Risk Governor: re-evaluate circuit breakers after each close.
+    # Deliberately NOT gated on close_recorded, unlike the three blocks above.
+    # These re-EVALUATE a limit against the live balance rather than recording
+    # an outcome, so a second caller reaches the same verdict -- and skipping a
+    # protective check to tidy up a duplicate would trade a real risk for a
+    # cosmetic one. Pinned by test_a_lost_close_race_books_nothing_twice.py.
     try:
         _rg_rs = await db_module.to_db_thread(db_module.get_risk_settings)
         if bool(_rg_rs.get("risk_governor_enabled", 0)):
@@ -309,8 +329,13 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
         # untouched, only the reporting changed (stage3/050).
         _notify_halt_check_failed("RG", str(_rg_e))
 
-    # Global circuit breaker — only count live MT5 trade outcomes.
-    if row.get("mt5_ticket"):
+    # Global circuit breaker — only count live MT5 trade outcomes, and only
+    # from the caller that actually recorded the close. Counted from both, one
+    # losing trade became two consecutive losses, and at the default threshold
+    # of 3 that means two real losses can halt live execution for the whole
+    # cooldown. It cannot be spotted after the fact either: tripping RESETS
+    # consec_losses, so the evidence deletes itself.
+    if close_recorded and row.get("mt5_ticket"):
         try:
             total_pnl = round(float(row.get("net_pnl", 0)) + net_pnl, 4)
             new_cb = await db_module.to_db_thread(db_module.record_live_trade_outcome, won=total_pnl >= 0)

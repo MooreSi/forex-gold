@@ -231,11 +231,15 @@ async def sync_closed_mt5_positions(ctx: PositionSyncCtx) -> None:
                 _broker_repo.fetch_trade, trade["trade_id"])
             account  = await ctx.get_mt5_account()
             last_tp  = await db_module.to_db_thread(_last_closed_tp_impl, trade["trade_id"]) if reason == "SL" else None
-            asyncio.create_task(telegram_alerts.send_message(
-                telegram_alerts.fmt_trade_close(closed_row, result, {}, account,
-                                                last_tp=last_tp),
-                trade["trade_id"], f"mt5_sync_{reason}",
-            ))
+            # Silent if another caller recorded this close first -- the EA
+            # exclusion above stops the common duplicate, but a manual close
+            # or the placeholder repair can still get here first.
+            if not result.get("already_closed"):
+                asyncio.create_task(telegram_alerts.send_message(
+                    telegram_alerts.fmt_trade_close(closed_row, result, {}, account,
+                                                    last_tp=last_tp),
+                    trade["trade_id"], f"mt5_sync_{reason}",
+                ))
         except Exception as e:
             log.warning("MT5 sync close failed %s: %s", trade["trade_id"], e)
 

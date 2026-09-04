@@ -100,7 +100,13 @@ async def reconcile_sl_hit(trade: dict, tick: Any, price: float, reason: str,
     result = await record_close(trade_id, price, reason, ctx)
     if mt5_ticket:
         asyncio.create_task(ctx.schedule_profit_sync(trade_id, int(mt5_ticket)))
-    asyncio.create_task(ctx.background_close_commentary(trade_id, result, reason, tick))
+    # Not ours to announce if someone else recorded it. This check runs on
+    # every open trade BEFORE the `managed_by == 'ea'` skip in monitor_cycle,
+    # so an EA Template trade whose stop fires is seen here and by the EA's
+    # own trade_closed event -- and the owner got the same close on Telegram
+    # twice (live 2026-09-04, ticket 1940612275).
+    if not result.get("already_closed"):
+        asyncio.create_task(ctx.background_close_commentary(trade_id, result, reason, tick))
     return "closed"
 
 
@@ -199,9 +205,10 @@ async def check_profit_close_target(trade: dict, tick: Any, profit_close_usd: fl
     result = await record_close(trade["trade_id"], close_price, "profit_close_target", ctx)
     if mt5_ticket:
         asyncio.create_task(ctx.schedule_profit_sync(trade["trade_id"], int(mt5_ticket)))
-    asyncio.create_task(ctx.background_close_commentary(
-        trade["trade_id"], result, "profit_close_target", tick
-    ))
+    if not result.get("already_closed"):  # see reconcile_sl_hit
+        asyncio.create_task(ctx.background_close_commentary(
+            trade["trade_id"], result, "profit_close_target", tick
+        ))
     return True
 
 

@@ -250,10 +250,13 @@ async def _close_from_deals(row: dict, open_deal: dict, deals: list,
         account = await bridge.get_account()
     except Exception:
         pass
-    asyncio.create_task(telegram_alerts.send_message(
-        telegram_alerts.fmt_trade_close(closed_row, result, {}, account),
-        trade_id, f"template_placeholder_repair_{reason.lower()}",
-    ))
+    # This runs to settle rows the other close paths left open, so of all five
+    # callers it is the likeliest to arrive second. If it did, it stays quiet.
+    if not result.get("already_closed"):
+        asyncio.create_task(telegram_alerts.send_message(
+            telegram_alerts.fmt_trade_close(closed_row, result, {}, account),
+            trade_id, f"template_placeholder_repair_{reason.lower()}",
+        ))
     return True
 
 

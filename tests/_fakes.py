@@ -57,3 +57,54 @@ class _FakeBridge:
         if self._modify_raises:
             raise RuntimeError("bridge died mid-call")
         return dict(self._modify_result)
+
+
+class _ReconciliationBridge:
+    """A read-only broker double: canned positions, health and deal history.
+
+    Separate from `_FakeBridge` above rather than folded into it, and named for
+    what it is rather than to duck the ratchet in
+    tests/refactor/test_fixture_dedup.py. Two reasons:
+
+      * `_FakeBridge` is the double for the POSITION HANDLERS -- fifteen files'
+        worth -- and it deliberately cannot close a position. Teaching it the
+        broker's read surface would also mean teaching it get_account, which
+        changes what get_trading_balance() returns under all fifteen.
+      * this shape is the reconciliation/close-path one: is the ticket still
+        there, what did the deal history say, what is the account worth. A test
+        that needs it should take it from here instead of writing the 51st
+        local copy, which is exactly what the ratchet is asking for.
+
+    It has no close_position and no order placement at all. A test that needs a
+    CONFIRMED broker close subclasses it and says so.
+    """
+
+    def __init__(self, positions=None, deal_history=None, position_history=None,
+                 account=None, tick=None, configured=True):
+        self._positions = positions if positions is not None else []
+        self._deal_history = deal_history or []
+        self._position_history = position_history
+        self._account = account if account is not None else {"balance": 1000.0}
+        self._tick = tick
+        self._configured = configured
+
+    def is_configured(self):
+        return self._configured
+
+    async def get_positions(self):
+        return self._positions
+
+    async def get_health(self):
+        return {"connected": True}
+
+    async def get_deal_history(self, days):
+        return self._deal_history
+
+    async def get_position_history(self, ticket):
+        return self._position_history if self._position_history is not None else []
+
+    async def get_account(self):
+        return self._account
+
+    async def get_tick(self):
+        return self._tick

@@ -203,16 +203,16 @@ def apply_followup_watchdog_levels(trade_id: str, tp_vals6: tuple, new_sl,
 
 def apply_full_close(trade_id: str, now: float, close_price: float, reason: str,
                      gross_pnl: float, realised_total: float, net_pnl_total: float,
-                     net_delta: float, signal_id) -> None:
+                     net_delta: float, signal_id) -> bool:
     with transaction() as conn:
         # Only an OPEN trade may become closed (stage1 phase2/040). Without
         # `AND status='open'` this block could run twice, and the balance
         # statement below is `balance = balance + ?` -- a duplicate call pays
         # the same profit out again and feeds the breaker the same outcome
-        # twice. Five callers can race here; see
-        # tests/trading/test_close_idempotency.py for which and why.
+        # twice. Five callers can race here; see test_close_idempotency.py.
         # The compare-and-set IS the WHERE clause, so there is no window
-        # between checking and acting.
+        # between checking and acting -- and its rowcount is the only thing
+        # that knows who won, so it is returned: the loser must stay quiet.
         cur = conn.execute(
             """UPDATE vantage_simulated_trades
                SET status=?,close_time=?,close_price=?,exit_reason=?,
@@ -230,7 +230,7 @@ def apply_full_close(trade_id: str, now: float, close_price: float, reason: str,
                 "settled, so no balance change and no signal update",
                 trade_id,
             )
-            return
+            return False
         conn.execute(
             "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
             (net_delta,),
@@ -239,6 +239,7 @@ def apply_full_close(trade_id: str, now: float, close_price: float, reason: str,
             "UPDATE vantage_signals SET status='closed' WHERE signal_id=?",
             (signal_id,),
         )
+        return True
 
 
 def apply_ladder_close(trade_id: str, closed_any: bool, lots_closed: float,

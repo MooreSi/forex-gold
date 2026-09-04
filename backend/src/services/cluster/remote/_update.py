@@ -82,7 +82,7 @@ def _refresh_desktop_icon(app_root: Path) -> None:
 
 
 def _do_restart() -> None:
-    """Hard-exit this process so the app comes back up cleanly.
+    """Bring the app back up, in this process where the platform allows it.
 
     On Windows we used to rely solely on the bat launcher's loop catching
     _RESTART_EXIT_CODE — but that only works if the app was actually started
@@ -90,10 +90,30 @@ def _do_restart() -> None:
     Scheduler, IDE run, manual `python run.py`) left the process dead with
     no relaunch, stranding the browser on the "Licence Activated / Loading.."
     page forever. We now ALSO spawn our own detached relaunch subprocess
-    (same mechanism as macOS/Linux) so the restart is self-sufficient
-    regardless of how the app was launched; the bat loop, if present, simply
-    sees the process exit and skips straight to its own relaunch — harmless
-    overlap, not a conflict, since the new process binds the port either way.
+    so the restart is self-sufficient regardless of how the app was launched;
+    the bat loop, if present, simply sees the process exit and skips straight
+    to its own relaunch — harmless overlap, not a conflict, since the new
+    process binds the port either way.
+
+    On macOS/Linux we do NOT spawn anything: `os.execv` replaces this process
+    image in place. Same PID, same session, same parent, same terminal window.
+
+    The detached-child version was the cause of the longest-running complaint
+    about this app — "it activated the licence and then never came back, I had
+    to start it by hand" — reproduced again on a fresh macOS install on
+    2026-09-04. It spawned `bash -c "sleep 3 && python run.py"` with
+    start_new_session and then hard-exited one second later, so the only route
+    back was a grandchild that had to survive its parent's death, the
+    Terminal.app window's shell exiting (`FOREX Start.command` is double-
+    clicked, and `exec`s python as that window's process), and a three-second
+    timer — with its only diagnostics going to a restart.log nobody reads.
+    execv has none of those failure modes: if it returns at all it failed, and
+    it says so. `guard.py`'s "Activate Manually" button has always used execv
+    here; the automatic path is now the same mechanism.
+
+    The listening socket on port 8888 is closed by exec — Python sets
+    close-on-exec on sockets — so the re-executed process binds it cleanly
+    with no delay to wait out.
     """
     # Marker-based: three parents landed in backend/src/services, so the
     # licence-activation restart relaunched a run.py that is not there.
@@ -128,10 +148,21 @@ def _do_restart() -> None:
         # Still exit with _RESTART_EXIT_CODE so a bat-file launcher (if
         # present) recognises this as a clean restart rather than a crash.
         os._exit(_RESTART_EXIT_CODE)
+        return  # unreachable in production; keeps the branch closed under test
 
-    # macOS / Linux path: spawn delayed relaunch, then hard-exit.
+    # macOS / Linux path: re-exec in place. No child, nothing to outlive us.
     venv_python = app_root / ".venv" / "bin" / "python3"
     python = str(venv_python) if venv_python.exists() else sys.executable
+    try:
+        log.info("[RemoteClient] Restarting in place: %s run.py --no-browser", python)
+        os.chdir(str(app_root))          # run.py is passed relative
+        os.execv(python, [python, "run.py", "--no-browser"])
+    except Exception as exc:
+        # execv only returns if it failed. Say why — this is the one moment
+        # the app has no other way to report that it is not coming back.
+        log.error("[RemoteClient] In-place restart failed (%s) — falling back "
+                  "to a detached relaunch", exc)
+
     with open_restart_log(log_path) as _log:
         subprocess.Popen(
             delayed_relaunch_cmd(python, "run.py", delay_secs=3, extra_args=["--no-browser"]),

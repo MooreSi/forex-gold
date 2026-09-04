@@ -78,6 +78,58 @@ allowed to call.
   open as described; the asymmetry looks unintended but changing an error path
   on a live gate was left as its own decision.
 
+- **`_do_restart()` re-execs in place on macOS/Linux; only Windows spawns a
+  relaunch child.** Every automatic restart -- licence activation, admin
+  revoke, admin-pushed git update -- goes through it, and if it fails the app
+  is simply gone: the process has already exited and the browser sits on
+  "Licence Activated / Loading..." forever. The POSIX side used to spawn a
+  detached `bash -c "sleep 3 && python run.py"` and hard-exit one second
+  later, so the only route back was a grandchild that had to outlive its
+  parent's session teardown, with its only diagnostics going to
+  `restart.log`. On a fresh macOS install (2026-09-04) that lost -- approved,
+  licence verified and stored, log ends on "Licence received — signalling UI
+  then restarting", app never returned, user relaunched by hand. `os.execv`
+  keeps the same PID, session, parent and Terminal window, and the port-8888
+  socket is released by exec (Python sets close-on-exec on sockets), so
+  nothing has to be waited out. `guard.py`'s "Activate Manually" button had
+  always used execv here; the automatic path had not. Windows keeps
+  spawn-then-`os._exit(_RESTART_EXIT_CODE)` because the bat launcher's loop
+  reads that exit code and `os.execv` on Windows is a spawn-and-exit
+  emulation that would hand it the wrong one. Pinned by
+  `tests/remote/test_do_restart.py`.
+- **The `/licence-activated` wait page polls a probe path, not `/`, and
+  leaves via `location.replace('/')`, not `location.reload()`.** It is plain
+  HTML with no socket.io so it survives the process dying underneath it, and
+  its only job is to notice the replacement process and go there. It had two
+  ways of failing that, both ending in the user relaunching by hand.
+  (1) It polled `/` and navigated on the first 200 — but the process serving
+  this page also serves `/` and answers 200 until it exits, and the guard
+  navigates here, sleeps 0.6 s, then restarts, while the first poll fires
+  800 ms after page load. ~200 ms of margin was the entire safety mechanism.
+  `_ACTIVATION_PROBE_PATH` (`/licence-activated/probe`) is registered by
+  `_show_registration_page` and nowhere else, so 200 means "still the
+  activation screen" and 404 means "the app is up" — a distinction by
+  construction rather than by timing. There is no catch-all route in the
+  app, so the 404 is real. (2) It called `location.reload()`, but this page's
+  URL is `/licence-activated`, which only the activation screen registers —
+  so even when the timing worked, the reload re-requested a route the new app
+  does not serve and landed on a 404. If the restarted process lands on the
+  activation screen again the probe keeps answering 200 and the page keeps
+  waiting, surfacing its manual link after ~10 s; that is deliberate, and
+  better than silently reloading into the registration form. Pinned by
+  `tests/licence/test_activation_wait_page.py`, which asserts over the script
+  block with its `//` comments stripped — the comments there name the calls
+  they warn against, so asserting over the raw document would only assert
+  that the page agrees with its own prose.
+- **The activation screen's "no licence yet" path is not an error.**
+  `_show_error_and_exit("")` used to log `ERROR ... Licence check failed:`
+  with an empty reason on every first install, one line after `enforce()`
+  had already explained the same thing at INFO. The activation flow is the
+  one part of this app a user watches in a terminal, so that line is what
+  they point at when something else goes wrong. It now logs only when there
+  is a reason, and the `nicegui` import moved below the `allow_register`
+  branch (that branch never used it).
+
 ## Open questions
 
 - `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).

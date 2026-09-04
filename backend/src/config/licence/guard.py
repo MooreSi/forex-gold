@@ -183,9 +183,14 @@ def _start_agents_for_activation(ng_app, is_admin: bool, known_client: bool) -> 
 
 def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
     import sys
-    from nicegui import ui
 
-    log.error("Licence check failed: %s", reason)
+    # Only log an error when there is one. A first install reaches here with an
+    # empty reason on the completely normal path -- enforce() has already said
+    # "No valid licence found — showing activation screen" at INFO -- and the
+    # bare `ERROR ... Licence check failed:` that followed it is the first
+    # thing a user points at when the activation flow does not finish.
+    if reason:
+        log.error("Licence check failed: %s", reason)
 
     if allow_register:
         # `reason` is shown on the activation screen as an explanatory banner
@@ -193,6 +198,8 @@ def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
         # to register again instead of just seeing a bare "activation required".
         _show_registration_page(notice=reason)
         return
+
+    from nicegui import ui
 
     @ui.page("/")
     def _error_page():
@@ -239,29 +246,62 @@ _ACTIVATION_HTML = """<!DOCTYPE html>
   <p>Loading FOREX Trader<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
   <p id="manual-link" style="display:none;margin-top:8px">
     Taking longer than expected &mdash;
-    <a href="/" style="color:#3b82f6" onclick="location.reload(true)">click here to open FOREX Trader</a>
+    <a href="/" style="color:#3b82f6">click here to open FOREX Trader</a>
   </p>
   <script>
-    // Poll the root until the new app server answers, then force a hard
-    // navigation there. cache:'no-store' avoids the browser serving a stale
-    // cached failure/redirect from the moment the old process was dying.
-    // We deliberately never clearInterval/give up on our own: a single
-    // successful poll could still be racing the old process's last gasp
-    // before it exits, so we keep polling and only stop once the hard
-    // reload actually takes us off this page.
+    // Which process is answering on this port?
+    //
+    // The one serving THIS page answers the probe path with 200. The app it
+    // restarts into does not register that path at all, so it answers 404.
+    // A non-ok response is therefore positive proof the restart has landed.
+    //
+    // Polling '/' instead (as this did until 2026-09-04) asks a question both
+    // processes answer 200, and the dying one keeps answering it for the
+    // ~200 ms between this page loading and the process exiting -- so the
+    // first poll navigated away before the app being waited for existed.
+    //
+    // cache:'no-store' keeps the browser from serving a stale cached answer
+    // from the moment the old process was going down.
+    var PROBE = '__PROBE_PATH__';
     var attempts = 0;
     var t = setInterval(function(){
       attempts++;
-      if(attempts === 6){
+      if(attempts === 12){
         document.getElementById('manual-link').style.display = 'block';
       }
-      fetch('/', {cache: 'no-store'}).then(function(r){
-        if(r.ok){ location.reload(true); }
-      }).catch(function(){});
+      fetch(PROBE, {cache: 'no-store'}).then(function(r){
+        if(!r.ok){
+          clearInterval(t);
+          // NOT location.reload(): this page's URL is /licence-activated,
+          // which only the activation screen ever serves. Reloading it once
+          // the real app is up re-requests a route that app does not have,
+          // and lands the user on a 404 instead of the app.
+          location.replace('/');
+        }
+      }).catch(function(){});   // nothing listening yet -- keep waiting
     }, 800);
   </script>
 </body>
 </html>"""
+
+# Registered by the activation screen and by nothing else. The wait page above
+# uses it to tell the process it is talking to apart from the one that replaces
+# it: 200 means "still the activation screen", 404 means "the app is up".
+_ACTIVATION_PROBE_PATH = "/licence-activated/probe"
+
+
+def _activation_probe() -> dict:
+    """Answer 200 for as long as this process is the one on the port."""
+    return {"stage": "activation"}
+
+
+def _activation_html() -> str:
+    """The wait page, with the probe path substituted in.
+
+    Kept as a substitution rather than an f-string because the template is
+    mostly CSS and JS, and both are full of braces.
+    """
+    return _ACTIVATION_HTML.replace("__PROBE_PATH__", _ACTIVATION_PROBE_PATH)
 
 
 def _show_registration_page(notice: str = "") -> None:
@@ -304,7 +344,12 @@ def _show_registration_page(notice: str = "") -> None:
     # No socket.io — survives the NiceGUI process dying.
     @_ng_app.get("/licence-activated")
     def _lic_page():
-        return HTMLResponse(_ACTIVATION_HTML)
+        return HTMLResponse(_activation_html())
+
+    # The wait page polls this to find out when it is no longer us answering.
+    # Registered here and nowhere else on purpose -- the main app 404ing it is
+    # the whole signal.
+    _ng_app.get(_ACTIVATION_PROBE_PATH)(_activation_probe)
 
     _start_agents_for_activation(_ng_app, is_admin=_this_is_the_admin_machine(),
                                  known_client=_known_client)

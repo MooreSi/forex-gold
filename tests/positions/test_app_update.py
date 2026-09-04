@@ -229,7 +229,7 @@ def no_post_steps(monkeypatch):
     monkeypatch.setattr(upd.asyncio, "to_thread", _to_thread)
 
 
-def test_a_fresh_install_is_bootstrapped_before_fetching(has_checkout, git, no_post_steps, monkeypatch):
+def test_a_fresh_install_is_bootstrapped_before_fetching(has_checkout, git, no_post_steps, monkeypatch, restart):
     """The Setup & Start scripts copy files, they never clone -- so a newly
     installed machine has no .git until its first update."""
     has_checkout(False)
@@ -255,7 +255,7 @@ def test_no_git_on_path_cannot_bootstrap(has_checkout, git, no_post_steps, monke
     assert g.calls == []
 
 
-def test_an_existing_checkout_is_not_re_initialised(has_checkout, git, no_post_steps):
+def test_an_existing_checkout_is_not_re_initialised(has_checkout, git, no_post_steps, restart):
     has_checkout(True)
     g = git()
 
@@ -264,7 +264,7 @@ def test_an_existing_checkout_is_not_re_initialised(has_checkout, git, no_post_s
     assert "init" not in g.commands
 
 
-def test_the_working_tree_is_forced_to_match_origin(has_checkout, git, no_post_steps):
+def test_the_working_tree_is_forced_to_match_origin(has_checkout, git, no_post_steps, restart):
     """`checkout -B --track -f`, not `pull --ff-only`. No client carries its own
     commits; each mirrors origin, so discarding local drift is the intended
     outcome rather than data loss."""
@@ -298,7 +298,7 @@ def test_a_failed_checkout_is_reported_as_a_failure(has_checkout, git, no_post_s
     assert "checkout refused" in out["error"]
 
 
-def test_a_post_update_step_failing_is_a_warning_not_a_failure(has_checkout, git, monkeypatch):
+def test_a_post_update_step_failing_is_a_warning_not_a_failure(has_checkout, git, monkeypatch, restart):
     """The pull already succeeded. Reporting failure would invite a blind retry
     of something that is not safe to repeat, when the real fix is another Save
     & Restart."""
@@ -329,7 +329,18 @@ def test_a_post_update_step_failing_is_a_warning_not_a_failure(has_checkout, git
 @pytest.fixture
 def restart(monkeypatch):
     """Stub the actual relaunch — a real one spawns a subprocess and asks a
-    (nonexistent, in a test) NiceGUI server to shut down."""
+    (nonexistent, in a test) NiceGUI server to shut down.
+
+    EVERY test that reaches the end of apply_update() needs this, including
+    the ones asserting only on the git sequence: the restart is the last
+    thing apply_update does on both its success and its soft-failure path.
+    Four tests did not take it and spawned a real relaunch of a tmp_path that
+    has no run.py in it. On macOS that is invisible (a detached shell that
+    fails silently), which is why it survived; on Windows CI it is a hard
+    PermissionError [WinError 5], because os_utils.restart_app passes
+    CREATE_BREAKAWAY_FROM_JOB and the GitHub runner puts the job in a Job
+    Object that does not permit breakaway. Four red tests on main,
+    2026-09-04."""
     calls = []
     monkeypatch.setattr(upd, "_restart", lambda: calls.append(True))
     return calls

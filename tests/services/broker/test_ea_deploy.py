@@ -249,16 +249,32 @@ class TestItNeverTakesTheUpdateDown:
     Nothing here may raise: a failed EA copy must not turn a good app update
     into a failed one."""
 
-    def test_one_unwritable_target_does_not_stop_the_others(self, tmp_path):
+    def test_one_unwritable_target_does_not_stop_the_others(self, tmp_path, monkeypatch):
+        """The refusal is injected at the copy itself, not with chmod.
+
+        `bad.chmod(0o500)` says nothing on Windows -- os.chmod only toggles
+        the read-only flag, and on a DIRECTORY it does essentially nothing --
+        so the "unwritable" target was perfectly writable on the CI runner,
+        no error was collected, and this failed on `assert report["errors"]`
+        while passing on macOS (red on main, 2026-09-04). Raising
+        PermissionError from the copy is what an unwritable target actually
+        does to this code, on either platform, and it no longer depends on
+        POSIX permission semantics to construct its own premise.
+        """
         home = tmp_path / "home"
         bad = _windows_terminal(home, "AAA")
         good = _windows_terminal(home, "BBB")
         repo = _repo(tmp_path)
-        bad.chmod(0o500)
-        try:
-            report = ea_deploy.deploy(repo_root=repo, home=home)
-        finally:
-            bad.chmod(0o700)
+
+        real_copy = ea_deploy.shutil.copy
+
+        def _refuse_the_bad_one(src, dst):
+            if Path(dst).parent == bad:
+                raise PermissionError(13, "Permission denied", str(dst))
+            return real_copy(src, dst)
+        monkeypatch.setattr(ea_deploy.shutil, "copy", _refuse_the_bad_one)
+
+        report = ea_deploy.deploy(repo_root=repo, home=home)
 
         assert (good / f"{EA}.mq5").exists()
         assert report["errors"]

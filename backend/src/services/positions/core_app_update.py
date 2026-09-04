@@ -206,8 +206,24 @@ async def check_for_update() -> dict:
             if len(parts) == 3:
                 commits.append({"sha": parts[0], "short_sha": parts[1], "summary": parts[2]})
 
+    # Differing SHAs are NOT an update on their own: they are equally true when
+    # this checkout is AHEAD of origin (an unpushed local commit) or has
+    # diverged. `local..remote` lists what origin has that we do not, so an
+    # empty range in the ahead direction is the honest answer "nothing to
+    # pull". Until 2026-09-04 the badge flashed permanently on any development
+    # machine with an unpushed commit, and offered to check out an OLDER tree;
+    # the popup then had no commits to list and nothing to summarise, which is
+    # how it was reported ("could not be read").
+    #
+    # A log we could not READ (rc != 0) is a different fact from a range that
+    # is genuinely empty, and stays "assume an update" -- knowing one exists
+    # matters more than being able to list it (see the test of that name).
+    # (`--no-merges` cannot hide a real update here: a merge brings the side
+    # branch's own non-merge commits into the range with it.)
+    available = rc != 0 or bool(commits)
+
     return {
-        "available": True, "local_sha": local_sha, "remote_sha": remote_sha,
+        "available": available, "local_sha": local_sha, "remote_sha": remote_sha,
         "commits": commits, "error": None,
     }
 

@@ -126,6 +126,80 @@ def test_an_unreadable_log_still_reports_the_update(has_checkout, git):
     assert out["commits"] == []
 
 
+class TestOnlyBeingBEHINDOriginIsAnUpdate:
+    """`available` was `local_sha != remote_sha`, which is also true when this
+    checkout is AHEAD of origin/main or has diverged from it.
+
+    Reported live 2026-09-04, and reproducible in the development checkout at
+    the time: one unpushed local commit made the header badge flash "Update
+    Available" permanently. `git log <local>..<remote>` is empty in that
+    direction, so the popup had no commits to list, no digest to summarise,
+    and said "The commit list for this update could not be read." The badge
+    was offering to replace the working tree with an OLDER commit.
+
+    The two empty-list cases are not the same fact and must not be collapsed:
+    a log that FAILED means we could not tell (assume an update, see below),
+    while a log that succeeded and returned nothing means the range really is
+    empty and there is nothing to pull.
+    """
+
+    def test_a_checkout_that_is_AHEAD_of_origin_has_no_update(self, has_checkout, git):
+        has_checkout(True)
+        # rc 0 with no output: the range local..remote is genuinely empty.
+        git((0, "", ""), (0, "a" * 40, ""), (0, "b" * 40, ""), (0, "", ""))
+
+        out = asyncio.run(upd.check_for_update())
+
+        assert out["available"] is False, (
+            "the badge flashes an update that does not exist, and offers to "
+            "check out an older commit")
+
+    def test_it_reports_no_error_for_it_either(self, has_checkout, git):
+        """Being ahead of origin is a normal state for the machine the app is
+        developed on -- not a failure to report on the Update page."""
+        has_checkout(True)
+        git((0, "", ""), (0, "a" * 40, ""), (0, "b" * 40, ""), (0, "", ""))
+
+        out = asyncio.run(upd.check_for_update())
+
+        assert out["error"] is None
+        assert out["commits"] == []
+
+    def test_the_shas_are_still_returned(self, has_checkout, git):
+        """The Update page shows them either way, and summarise_changes()
+        needs the pair to build its digest."""
+        has_checkout(True)
+        git((0, "", ""), (0, "a" * 40, ""), (0, "b" * 40, ""), (0, "", ""))
+
+        out = asyncio.run(upd.check_for_update())
+
+        assert out["local_sha"] == "a" * 40
+        assert out["remote_sha"] == "b" * 40
+
+    def test_a_REAL_update_is_still_offered(self, has_checkout, git):
+        """The control. A guard that answered False to everything would pass
+        every test above and silently stop the app updating for ever."""
+        has_checkout(True)
+        log = "\x1f".join(["b" * 40, "bbbbbbb", "a genuine new commit"])
+        git((0, "", ""), (0, "a" * 40, ""), (0, "b" * 40, ""), (0, log, ""))
+
+        out = asyncio.run(upd.check_for_update())
+
+        assert out["available"] is True
+
+    def test_the_badge_and_the_popup_can_never_disagree(self, has_checkout, git):
+        """The invariant behind the whole bug: if the badge is shown, the
+        popup has something to show -- either commits, or the honest "could
+        not read the range" case the test below covers."""
+        has_checkout(True)
+        git((0, "", ""), (0, "a" * 40, ""), (0, "b" * 40, ""), (0, "  \n ", ""))
+
+        out = asyncio.run(upd.check_for_update())
+
+        assert not (out["available"] and not out["commits"]), (
+            "an update was announced with nothing to show for it")
+
+
 def test_a_malformed_log_line_is_skipped_not_guessed_at(has_checkout, git):
     has_checkout(True)
     log = "not-in-the-expected-format\n" + "\x1f".join(["b" * 40, "bbbbbbb", "good one"])

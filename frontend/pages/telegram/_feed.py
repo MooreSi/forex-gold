@@ -24,16 +24,52 @@ def _ts(s) -> str:
         return str(s)[:8]
 
 
+def _save_channel_flags(channel_name: str, existing: dict, *,
+                        instant_entry: bool, enabled: bool) -> None:
+    """Write one channel's two switches back, carrying the rest of its row.
+
+    save_channel_parser_config takes six POSITIONAL arguments and the two this
+    card owns are adjacent booleans. Keyword-only here so a caller cannot pass
+    them the wrong way round: swapping them would disable a channel while
+    reporting that instant entry changed, and both calls would still run.
+    """
+    tg_controller.save_channel_parser_config(
+        channel_name,
+        existing.get("parser_format", "auto"),
+        existing.get("signal_prefix", ""),
+        instant_entry,
+        enabled,
+        existing.get("notes", ""),
+    )
+
+
 def _render_channels_active_section(reader) -> None:
-    """One toggle per loaded Telegram channel — turns parsing/execution off
-    for that channel entirely (the listener keeps running, messages are
-    just ignored) without touching the other channels or disconnecting.
-    Wired to channel_parser_config.enabled, the same column engine.py's
-    _scan_messages already gates every message on (see the `not bool(ch_cfg.
-    get('enabled', 1))` skip) — this only adds a visible, dedicated place to
-    flip it, no new backend mechanism. Names are read live from the
-    Telegram reader's own resolved group titles every render, never
-    hardcoded, so a channel rename shows up here automatically."""
+    """Two toggles per loaded Telegram channel.
+
+    The first turns parsing/execution off for that channel entirely (the
+    listener keeps running, messages are just ignored) without touching the
+    other channels or disconnecting. Wired to channel_parser_config.enabled,
+    the same column engine.py's _scan_messages already gates every message on
+    (see the `not bool(ch_cfg.get('enabled', 1))` skip).
+
+    The second is that channel's own Instant Market Entry flag
+    (channel_parser_config.instant_entry_enabled), added 2026-09-05 for
+    docs/todo/bugs/024. It is the per-channel half of the gate in
+    scan_messages.py; the Parsing tab's "Immediate Market Buy/Sell" is the
+    global half and both must be on. It had no control anywhere in the app,
+    so the only value it ever held was whatever a channel's auto-bootstrap
+    wrote the first time that channel was seen — and a channel renamed on
+    Telegram's side gets a fresh row, because this config is keyed by
+    channel_name and not by group_id. That is how a channel came to match a
+    BUY trigger correctly and place nothing, with nothing on screen saying
+    why.
+
+    Neither switch is a new backend mechanism: both write existing columns
+    through save_channel_parser_config, which already accepted both.
+
+    Names are read live from the Telegram reader's own resolved group titles
+    every render, never hardcoded, so a channel rename shows up here
+    automatically."""
     with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg mt-3"):
         with ui.row().classes("items-center gap-2 mb-3"):
             ui.icon("hub", size="sm").classes("text-yellow-400")
@@ -41,8 +77,10 @@ def _render_channels_active_section(reader) -> None:
             ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
                 "Turn a channel off to stop parsing and executing signals from it "
                 "entirely — the Telegram listener keeps running, messages from "
-                "that channel are just ignored. Names update automatically if a "
-                "channel is renamed on Telegram's side."
+                "that channel are just ignored. Instant Entry is separate: it "
+                "decides whether a bare direction with no levels from that "
+                "channel opens a market order immediately. Names update "
+                "automatically if a channel is renamed on Telegram's side."
             )
 
         status = reader.get_status() if reader else {"slots": []}
@@ -64,14 +102,24 @@ def _render_channels_active_section(reader) -> None:
                     ).classes("text-sm")
                     ui.label(f"Slot {s['slot']}").classes("text-xs text-gray-500 mt-1")
 
+                    ime = ui.switch(
+                        "Instant Entry",
+                        value=bool(cfg.get("instant_entry_enabled", 0)),
+                    ).classes("text-xs")
+                    ime.tooltip(
+                        "Let a bare direction from this channel — \"BUY NOW\", "
+                        "\"PREPARE FOR A BUY\" — open a market order straight "
+                        "away, without waiting for entry, stop and target. Off "
+                        "means those messages are ignored until the full levels "
+                        "arrive. The Parsing tab's Immediate Market Buy/Sell "
+                        "must also be on; this is the per-channel half."
+                    )
+
                     def _on_toggle(e, ch=channel_name, existing=cfg):
-                        tg_controller.save_channel_parser_config(
-                            ch,
-                            existing.get("parser_format", "auto"),
-                            existing.get("signal_prefix", ""),
-                            bool(existing.get("instant_entry_enabled", 0)),
-                            bool(e.value),
-                            existing.get("notes", ""),
+                        _save_channel_flags(
+                            ch, existing,
+                            instant_entry=bool(existing.get("instant_entry_enabled", 0)),
+                            enabled=bool(e.value),
                         )
                         ui.notify(
                             f"{ch} {'enabled' if e.value else 'disabled'} — "
@@ -80,6 +128,21 @@ def _render_channels_active_section(reader) -> None:
                             type="positive" if e.value else "warning",
                         )
                     sw.on_value_change(_on_toggle)
+
+                    def _on_ime_toggle(e, ch=channel_name, existing=cfg):
+                        _save_channel_flags(
+                            ch, existing,
+                            instant_entry=bool(e.value),
+                            enabled=bool(existing.get("enabled", 1)),
+                        )
+                        ui.notify(
+                            f"{ch} instant entry "
+                            + ("ON — a bare direction from this channel will "
+                               "open a market order" if e.value
+                               else "off — bare directions will be ignored"),
+                            type="warning" if e.value else "positive",
+                        )
+                    ime.on_value_change(_on_ime_toggle)
 
 
 def _render_slot_feed(reader, slot: int):

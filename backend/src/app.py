@@ -248,19 +248,30 @@ def _remote_client_enabled(config) -> bool:
     unauthenticated, because a warning that names a risk which no longer exists
     trains people to ignore warnings.
 
+    **Rewritten 2026-09-05.** It had become exactly that. It still announced
+    "certificate verification DISABLED and no certificate pinning" and called
+    pinning "the tracked fix" -- all three untrue since bugs/014 closed this
+    channel on 2026-09-02. `remote/tls.py` now CA-verifies the internet path
+    and trust-on-first-use pins the LAN path, both BEFORE the licence token
+    leaves the machine. What is genuinely left is TOFU's first connection, and
+    only on the LAN.
+
     Kept as a single predicate so the "is it on?" decision is testable and
     cannot drift away from the warning.
     """
     if not config.get("remote_admin_client_enabled", True):
         return False
     log.warning(
-        "remote-admin client starting. The link to the admin server runs TLS "
-        "with certificate verification DISABLED and no certificate pinning "
-        "(remote/tls.py), so someone on the network path can impersonate the "
-        "server. What they can trigger is now limited to a git pull from this "
+        "remote-admin client starting. Connections to the admin server over "
+        "the internet are verified against the certificate authority bundled "
+        "in this build. On a LAN the certificate is trusted on FIRST sight "
+        "and pinned, so on that first connection -- and only that one -- "
+        "someone on the network path could impersonate the server; "
+        "every later one must match the pin or is refused. What an "
+        "impersonator could trigger is limited to a git pull from this "
         "checkout's own remote, not arbitrary code. Set "
-        "remote_admin_client_enabled=false to stay off the fleet; certificate "
-        "pinning is the tracked fix."
+        "remote_admin_client_enabled=false to stay off the fleet. See "
+        "remote/tls.py."
     )
     return True
 

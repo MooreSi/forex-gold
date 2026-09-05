@@ -156,6 +156,43 @@ def get_commit_report(short: bool = True) -> tuple[str, str]:
     return "", COMMIT_GIT_UNREADABLE
 
 
+# Probed once per process, then remembered -- including a failure. On a Mac
+# without the Xcode Command Line Tools, invoking `git` can raise the "install
+# the developer tools" dialog, and the heartbeat that reports this runs every
+# ~60s. One dialog per app run is a bug report; one a minute is unusable. The
+# cost is that installing git while the app is running is not noticed until
+# the next restart, which is the right way round.
+_GIT_VERSION: Optional[str] = None
+
+
+def get_git_version() -> str:
+    """The version of the `git` on this machine, e.g. "2.39.5", or "" when
+    there isn't a usable one.
+
+    Reported alongside the commit on every client heartbeat. COMMIT_NO_CHECKOUT
+    is about the absence of `.git` and says nothing about the binary, so the
+    admin console could not tell a machine that has never self-updated from one
+    that CANNOT -- and every update is a `git fetch`/`git pull`.
+    """
+    global _GIT_VERSION
+    if _GIT_VERSION is not None:
+        return _GIT_VERSION
+    _GIT_VERSION = ""
+    try:
+        proc = subprocess.run(
+            ["git", "--version"], capture_output=True, text=True, timeout=5,
+        )
+    except Exception as e:
+        log.debug("[Update] git --version could not run: %s", e)
+        return _GIT_VERSION
+    # "git version 2.39.5 (Apple Git-154)" -> "2.39.5". Anything else (a CLT
+    # stub's xcrun error, an empty line) leaves it blank rather than guessing.
+    parts = proc.stdout.strip().split()
+    if proc.returncode == 0 and len(parts) >= 3 and parts[0] == "git":
+        _GIT_VERSION = parts[2]
+    return _GIT_VERSION
+
+
 def get_local_commit_sha(short: bool = True) -> str:
     """This checkout's current HEAD commit, or "" if it can't be determined.
     Thin wrapper over get_commit_report() for callers that don't need to know

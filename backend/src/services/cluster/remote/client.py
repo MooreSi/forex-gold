@@ -300,6 +300,19 @@ def _commit_report() -> tuple[str, str]:
         return "", "unavailable"
 
 
+def _git_version() -> str:
+    """The `git` this machine has, "" if none -- see
+    core_app_update.get_git_version(). Sent with the commit so the admin
+    console can tell "never cloned" apart from "cannot clone": both used to
+    arrive as nothing but COMMIT_NO_CHECKOUT."""
+    try:
+        from backend.src.services.positions.core_app_update import get_git_version
+        return get_git_version()
+    except Exception as e:
+        log.debug("[RemoteClient] git version unavailable: %s", e)
+        return ""
+
+
 def _build_hello() -> dict:
     import platform
     from backend.src.services.cluster.remote.ip_check import get_machine_uuid
@@ -310,6 +323,7 @@ def _build_hello() -> dict:
         version=_app_version(),
         commit_sha=commit_sha,
         commit_note=commit_note,
+        git_version=_git_version(),
         platform=sys.platform,
         hostname=platform.node(),
         machine_uuid=get_machine_uuid(),
@@ -394,6 +408,7 @@ def _build_status() -> dict:
         version=_app_version(),
         commit_sha=commit_sha,
         commit_note=commit_note,
+        git_version=_git_version(),
         uptime_s=uptime,
         trades_open=trades_open,
         bridge_connected=bridge_ok,

@@ -764,6 +764,7 @@ async def _handler(websocket) -> None:
     version     = msg.get("version", "?")
     commit_sha  = msg.get("commit_sha", "")
     commit_note = msg.get("commit_note", "")
+    git_version = msg.get("git_version", "")
 
     # ── Remote admin connection ───────────────────────────────────────────────
     if msg.get("type") == MSG_ADMIN_HELLO:
@@ -958,6 +959,7 @@ async def _handler(websocket) -> None:
         "version":      version,
         "commit_sha":   commit_sha,
         "commit_note":  commit_note,
+        "git_version":  git_version,
         "ip":           ip,
         "online":       True,
         "machine_uuid": machine_uuid,
@@ -1001,14 +1003,11 @@ async def _handler(websocket) -> None:
 
             elif t == MSG_STATUS:
                 if conn_entry:
-                    conn_entry["info"].update({
-                        "version":          m.get("version", version),
-                        "commit_sha":       m.get("commit_sha", commit_sha),
-                        "commit_note":      m.get("commit_note", commit_note),
-                        "uptime_s":         m.get("uptime_s", 0),
-                        "trades_open":      m.get("trades_open", 0),
-                        "bridge_connected": m.get("bridge_connected", False),
-                    })
+                    conn_entry["info"].update({k: m.get(k, d) for k, d in (
+                        ("version", version), ("commit_sha", commit_sha),
+                        ("commit_note", commit_note), ("git_version", git_version),
+                        ("uptime_s", 0), ("trades_open", 0),
+                        ("bridge_connected", False))})
                     # A client that updates itself mid-session reports the new
                     # build on its next heartbeat, not on a fresh HELLO.
                     _remember_build(

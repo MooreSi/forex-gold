@@ -23,6 +23,7 @@ caller has, so no real default is supplied here.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections import OrderedDict
@@ -104,6 +105,30 @@ async def classify_and_parse(
         if _partial_any:
             return hold_or_resolve(tg_id, channel_name, _partial_any, rs)
 
+    # ── Already known to be a bare direction (bugs/015) ──────────────────
+    # Same message, same text, already classified as a trigger with no levels.
+    # Every parser below would reach the same conclusion again, and the scan
+    # loop asks about once a second for as long as the message stays in the
+    # reader's fetch window -- 8,319 times for one 15-character SELL on
+    # 2026-08-28, and still climbing when it was found.
+    #
+    # Deliberately BELOW the learned-rules parser and the second-message
+    # block: the operator can add a learned rule at any moment and it must
+    # apply to a message already parked, and a levels-only follow-up is a
+    # different message that still has to be consumed.
+    #
+    # In-process memory, not a database row. 015 proposed parking the message
+    # as a `vantage_tg_signals` row; checking the code first showed that would
+    # be wrong twice over -- the follow-up matcher reads
+    # `vantage_second_message_holds`, not this table, so a parked row helps it
+    # not at all; and scan_messages.py routes any message that HAS a row into
+    # the edit handler, where an edit adding full levels to a
+    # non-pending_followup row updates the fields and returns without
+    # executing. Parking would turn a taken trade into a missed one. See the
+    # open decision in docs/simon-handover/.
+    if _is_known_bare_direction(tg_id, text):
+        return None
+
     # Limit Runner's "BUY/SELL [LIMITS] GOLD @ high/low AREA" layout --
     # every channel, format-matched only. See core_limit_order_signal.py for
     # what happens with the returned dict's `tp_open` marker.
@@ -179,7 +204,7 @@ async def classify_and_parse(
     )
     _ime_trigger = parse_gd2_instant_entry(text) or parse_lexicon_direction_trigger(text)
     if _ime_trigger:
-        if _note_bare_direction(tg_id):
+        if _note_bare_direction(tg_id, text):
             log.info(
                 "[%s] Bare direction tg_id=%s (%s) — silently skipped "
                 "(awaiting follow-up with full levels)",
@@ -212,15 +237,34 @@ async def classify_and_parse(
 # Insertion-ordered and bounded: this is module state in a process that runs
 # for weeks, and eviction must drop the OLDEST, since dropping the newest would
 # restore the every-cycle spam for the message currently in the window.
+#
+# Keyed on the id AND the body. A Telegram edit keeps the message id and
+# changes the text, and that is the usual way a bare direction becomes a real
+# signal -- remembering the id alone would skip the edited text forever and
+# lose the trade. The body is stored as a short digest so a long message
+# cannot make this memory large.
 _BARE_LOG_MEMORY = 512
-_bare_direction_logged: "OrderedDict[str, None]" = OrderedDict()
+_bare_direction_logged: "OrderedDict[tuple[str, str], None]" = OrderedDict()
 
 
-def _note_bare_direction(tg_id: str) -> bool:
-    """True the first time this message is seen, False on every rescan."""
-    if tg_id in _bare_direction_logged:
+def _bare_key(tg_id: str, text: str) -> tuple[str, str]:
+    digest = hashlib.blake2s(text.encode("utf-8", "replace"), digest_size=8)
+    return (str(tg_id), digest.hexdigest())
+
+
+def _is_known_bare_direction(tg_id: str, text: str) -> bool:
+    """Has this exact message body already been classified as a bare
+    direction? Read-only -- it must not record anything, or the first
+    sighting would suppress its own log line."""
+    return _bare_key(tg_id, text) in _bare_direction_logged
+
+
+def _note_bare_direction(tg_id: str, text: str) -> bool:
+    """True the first time this message body is seen, False on every rescan."""
+    key = _bare_key(tg_id, text)
+    if key in _bare_direction_logged:
         return False
-    _bare_direction_logged[tg_id] = None
+    _bare_direction_logged[key] = None
     while len(_bare_direction_logged) > _BARE_LOG_MEMORY:
         _bare_direction_logged.popitem(last=False)
     return True

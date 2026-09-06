@@ -39,6 +39,7 @@ import backend.src.config as _cfg_module
 from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 from backend.src.services.reversal_engine import level_detector as ld
 from backend.src.services.reversal_engine import ml_engine as re_ml
+from backend.src.services.reversal_engine import re_macro
 from backend.src.services.reversal_engine import signal_generator as sg
 from backend.src.services.reversal_engine.reversal_engine_correlate import _CorrelationMixin
 from backend.src.services.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
@@ -349,6 +350,12 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             ref_discipline_score, ref_aggression_score = re_ml.get_daily_research_scores()
         except Exception:
             ref_discipline_score, ref_aggression_score = 0.5, 0.5
+        # Macro context (DXY/US10Y/VIX/GVZ/TIP). Fetched here rather than
+        # inside the candidate loop: it is identical for every candidate, and
+        # the underlying call is blocking HTTP that re_macro offloads to a
+        # thread and re-reads at most once every 15 minutes. Failure returns
+        # {}, which extract_features reads as the documented neutrals.
+        macro_ctx = await re_macro.get_cycle_context()
         win_rate = re_db.get_recent_win_rate(20)
 
         # Gather up to _ML_CANDIDATE_POOL gate-passing candidates (built +
@@ -416,6 +423,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             feat_input["ref_aggression_score"]   = ref_aggression_score
             feat_input["minutes_since_last_ref"] = cadence[0]
             feat_input["ref_signals_today"]      = cadence[1]
+            feat_input.update(macro_ctx)
             try:
                 from backend.src.db import database as _cdb_agree
                 feat_input["concurrent_agreement"] = _cdb_agree.get_concurrent_agreement("reversal_engine", direction)

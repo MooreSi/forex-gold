@@ -207,6 +207,15 @@ class _LiveExecuteMixin:
                     cadence = await self._ref_cadence_stats()
                     fresh_sig["minutes_since_last_ref"] = cadence[0]
                     fresh_sig["ref_signals_today"]      = cadence[1]
+                    # Macro. Not a re_signals column, so it is absent from
+                    # the stored row and must be re-read here or this
+                    # "same feature set" re-score silently falls back to the
+                    # neutrals in five slots the creation-time vector filled.
+                    try:
+                        from backend.src.services.reversal_engine import re_macro
+                        fresh_sig.update(await re_macro.get_cycle_context())
+                    except Exception:
+                        pass
 
                     from backend.src.services.reversal_engine import ml_engine as re_ml
                     win_rate = re_db.get_recent_win_rate(20)

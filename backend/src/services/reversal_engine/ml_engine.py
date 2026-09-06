@@ -17,6 +17,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from backend.src.services.reversal_engine.re_macro import (
+    MACRO_FEATURE_NAMES, MACRO_NEUTRAL, macro_features)
+
 _log = logging.getLogger(__name__)
 
 _MIN_TRAIN = 15
@@ -54,7 +57,10 @@ _labeled_count = 0
 # the same weights). Same discard-and-retrain handling as v3-v7: the stored
 # vectors are back-filled to the new width by _FEATURE_NEUTRAL, so the
 # training history survives even though the fitted models do not.
-_version = "re_ml_v8"
+# v9 (2026-09-05) appends the five macro series Bounce and Breakout already
+# read -- DXY, US10Y, VIX, GVZ, TIP -- normalised in re_macro.py (which says
+# why there). Discard-and-retrain as v3-v8. Spec: docs/todo/001-reversal-macro-context.md.
+_version = "re_ml_v9"
 
 # Dollars per point for a virtual signal. Mirrors reversal_engine_manage.py's
 # `gross = pnl_pts * _VIRTUAL_LOT * 100` -- duplicated as a constant rather
@@ -215,6 +221,8 @@ FEATURE_NAMES = [
     # coin out of sample. All three mean the same thing to a model: no
     # information, so they must produce the same number.
     "pro_likeness",
+    # ── Macro context (v9, 2026-09-05) — see reversal_engine/re_macro.py ──
+    *MACRO_FEATURE_NAMES,
 ]
 
 # Neutral value for every feature, used to back-fill rows labeled under an
@@ -231,6 +239,7 @@ _FEATURE_NEUTRAL = {
     "pro_rsi_delta": 0.0, "pro_adx_delta": 0.0,
     "pro_fvg_delta": 0.0, "pro_profile_ready": 0.0,
     "pro_likeness": 0.5,
+    **MACRO_NEUTRAL,
 }
 
 
@@ -379,6 +388,9 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
             # profile degrades to the documented neutrals.
             *_pro_features(signal_data),
             _pro_likeness_feature(signal_data),
+            # Macro. The caller injects the raw series into signal_data;
+            # absent, these are the documented neutrals.
+            *macro_features(signal_data, None),
         ]
     except Exception as exc:
         _log.debug("[RE-ML] extract_features error: %s", exc)

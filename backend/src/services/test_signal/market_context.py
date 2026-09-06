@@ -18,9 +18,12 @@ try:
 except ImportError:
     _YF_AVAILABLE = False
 
-# {cache_key: (timestamp, value)}
-_CACHE: dict[str, tuple[float, float]] = {}
+# {cache_key: (timestamp, closes)}
+_CACHE: dict[str, tuple[float, list[float]]] = {}
 _CACHE_TTL = 15 * 60  # 15 minutes
+# Closes fetched and cached per symbol. Every caller asks for <= this, so one
+# fetch serves all of them -- see _get_hourly_closes.
+_FETCH_WINDOW = 5
 
 _NEUTRAL = {
     "dxy_momentum":  0.0,
@@ -32,22 +35,37 @@ _NEUTRAL = {
 
 
 def _get_hourly_closes(symbol: str, n: int = 5) -> list[float]:
+    """Last `n` hourly closes for `symbol`, served from a 15-minute cache.
+
+    The cache stores the whole `_FETCH_WINDOW`-long list, not just its last
+    value. That matters twice: the hit branch can actually return something,
+    and one fetch serves every caller whatever `n` they ask for --
+    `_dxy_momentum` wants 3 and `_latest` wants 2 off overlapping symbols.
+
+    The original shape packed a single float in here, so the hit branch could
+    not reconstruct the list and fell through to re-fetch on every call. The
+    documented 15-minute cache had therefore never once prevented a request:
+    every `get_context()` was five live yfinance round trips. Found while
+    speccing this module onto the Reversal Engine's 60s cycle
+    (docs/todo/001-reversal-macro-context.md), where that would have put five
+    blocking HTTP calls inside the async engine loop every minute.
+    """
     now = time.time()
     key = f"{symbol}_closes"
-    if key in _CACHE:
-        ts, _ = _CACHE[key]
+    hit = _CACHE.get(key)
+    if hit is not None:
+        ts, cached = hit
         if (now - ts) < _CACHE_TTL:
-            # stored as packed float — not usable directly; fall through to re-fetch
-            pass
+            return cached[-n:]
     if not _YF_AVAILABLE:
         return []
     try:
         hist = yf.Ticker(symbol).history(period="5d", interval="1h", auto_adjust=True)
         if hist.empty:
             return []
-        closes = [float(v) for v in hist["Close"].dropna().tolist()[-n:]]
-        _CACHE[key] = (now, closes[-1] if closes else 0.0)
-        return closes
+        closes = [float(v) for v in hist["Close"].dropna().tolist()[-_FETCH_WINDOW:]]
+        _CACHE[key] = (now, closes)
+        return closes[-n:]
     except Exception as e:
         _log.debug("[MarketCtx] %s fetch error: %s", symbol, e)
         return []

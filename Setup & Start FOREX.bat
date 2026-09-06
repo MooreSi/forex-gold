@@ -198,7 +198,7 @@ if "!DO_INSTALL!"=="1" (
 :: changes) into a user-writable folder and adds it to PATH for this session
 :: -- later relaunches inherit the same PATH since restarts spawn from
 :: within this same running process tree.
-where git >nul 2>&1
+git --version >nul 2>&1
 if !errorlevel! neq 0 (
     set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\Programs\PortableGit"
     if exist "!PORTABLE_GIT_DIR!\bin\git.exe" (
@@ -217,10 +217,12 @@ if !errorlevel! neq 0 (
                 set "PATH=!PORTABLE_GIT_DIR!\bin;!PORTABLE_GIT_DIR!\cmd;%PATH%"
                 echo  Git installed.
             ) else (
-                echo  WARNING: Git install did not complete - GitHub update checks will be skipped.
+                echo  WARNING: Git install did not complete - Settings ^> Update
+                echo  will say git is not installed. Re-run this script to retry.
             )
         ) else (
-            echo  WARNING: Git download failed - GitHub update checks will be skipped.
+            echo  WARNING: Git download failed ^(no internet?^) - Settings ^> Update
+            echo  will say git is not installed. Re-run this script to retry.
         )
     )
     echo.

@@ -29,6 +29,28 @@ def _read_changelog() -> list[str]:
 _GITHUB_REPO_URL = "https://github.com/MooreSi/forex"
 
 
+def _update_action(state: dict) -> str:
+    """Which button the card offers for a given check result.
+
+    "update"    -- origin has commits this checkout does not.
+    "bootstrap" -- there is no checkout here yet, and a git binary to make one.
+                   apply_update() creates it (git init + remote add + force
+                   checkout) and lands on origin's HEAD, which is the same
+                   thing the admin console's Update button asks a client to do.
+    ""          -- up to date, or a failure the user has to resolve first
+                   (no git installed, a fetch that could not reach GitHub).
+
+    A free function, not a closure, so the choice can be tested without
+    rendering the page -- the card had no test at all when it was leaving a
+    fresh install with no button to press (2026-09-06).
+    """
+    if state.get("available"):
+        return "update"
+    if state.get("bootstrap"):
+        return "bootstrap"
+    return ""
+
+
 def _render_github_update_card() -> None:
     """GitHub-based self-update (2026-08-01) -- a separate mechanism from
     the admin-push "App Updates" card below: this one checks/pulls directly
@@ -72,6 +94,8 @@ def _render_github_update_card() -> None:
                 ui.element("div").classes("w-px bg-gray-700 self-stretch mx-1")
                 if _state.get("checking"):
                     ui.badge("Checking...", color="grey").classes("text-xs")
+                elif _state.get("bootstrap"):
+                    ui.badge("Setup needed", color="blue").classes("text-xs")
                 elif _state.get("error"):
                     ui.badge("Check failed", color="red").classes("text-xs")
                 elif _state.get("available"):
@@ -89,17 +113,29 @@ def _render_github_update_card() -> None:
                             )
 
             action_row.clear()
+            action = _update_action(_state)
             with action_row:
                 ui.button(
                     "Check for Updates", icon="refresh", on_click=lambda: _check(),
                 ).props("dense outline").classes("text-xs")
-                if _state.get("available"):
+                if action == "update":
                     ui.button(
                         "Update", icon="download",
                         on_click=lambda: _apply(),
                     ).props("dense unelevated").classes("bg-green-700 text-white text-xs")
+                elif action == "bootstrap":
+                    ui.button(
+                        "Set Up Updates", icon="link",
+                        on_click=lambda: _apply(),
+                    ).props("dense unelevated").classes("bg-blue-700 text-white text-xs")
 
-            if _state.get("error"):
+            if _state.get("bootstrap"):
+                # Not an error the user has to solve -- it is the normal state
+                # of an install that has never updated, and the button next to
+                # this label fixes it.
+                status_lbl.text = _state.get("error", "")
+                status_lbl.classes(replace="text-xs text-blue-300 mt-1")
+            elif _state.get("error"):
                 status_lbl.text = f"Error: {_state['error']}"
                 status_lbl.classes(replace="text-xs text-red-400 mt-1")
             elif _state.get("applying"):
@@ -113,6 +149,11 @@ def _render_github_update_card() -> None:
             _draw()
             result = await core_app_update.check_for_update()
             _state["checking"] = False
+            # Clear first: a result dict only carries the keys that apply to
+            # it, and _state is reused across checks -- a stale "bootstrap"
+            # would keep offering to re-create a checkout that now exists.
+            _state["bootstrap"] = False
+            _state["error"] = None
             _state.update(result)
             _draw()
 
@@ -123,6 +164,10 @@ def _render_github_update_card() -> None:
             if not result["ok"]:
                 _state["applying"] = False
                 _state["error"] = result["error"]
+                # Show it as the failure it is, not as the blue "setup needed"
+                # hint. Check for Updates re-derives the offer if it still
+                # applies, so the retry is one click away either way.
+                _state["bootstrap"] = False
                 _draw()
                 return
             # apply_update() restarts on success itself now (2026-09-03) --

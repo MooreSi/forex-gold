@@ -112,36 +112,48 @@ ensure_libomp() {
 # Mirrors ensure_libomp()'s shape: silent brew install when Homebrew is
 # present, one-time manual notice otherwise — never blocks the app itself.
 
+# `command -v git` is not enough on macOS: without the Command Line Tools,
+# /usr/bin/git is a stub that exists, is executable, and fails every
+# invocation with "xcrun: error: invalid active developer path". Run it.
+have_git() {
+    git --version >/dev/null 2>&1
+}
+
 ensure_git() {
-    command -v git >/dev/null 2>&1 && return 0
+    have_git && return 0
 
     BREW=$(find_brew || true)
     if [ -n "$BREW" ]; then
         echo "  Installing git..."
         "$BREW" install git --quiet 2>/dev/null
-        if command -v git >/dev/null 2>&1; then
+        if have_git; then
             echo "  git installed."
             rm -f "$GIT_NOTICE"
             return 0
         fi
-        echo "  git install failed — will retry next launch."
-        return 1
+        echo "  git install failed — trying the Command Line Tools instead."
     fi
 
-    # Homebrew not available — show a one-time notice; app still runs fine,
-    # only the GitHub self-update panel is affected.
+    # No Homebrew (or brew could not do it): ask macOS for the Command Line
+    # Tools, which is where git comes from on a stock Mac. This opens Apple's
+    # own installer window and returns immediately — it does not block the
+    # launch, and it is a no-op ("already installed") on a machine that has
+    # them. Printing an instruction and leaving it at that meant a user who
+    # never opens Terminal never got git, and the update feature simply did
+    # not exist on their machine (reported 2026-09-06).
     if [ ! -f "$GIT_NOTICE" ]; then
         echo ""
         echo "  ─────────────────────────────────────────────────────────────"
-        echo "  Note: git not found — cannot auto-install it without Homebrew."
-        echo "  The Settings > Update page's GitHub update check will show"
-        echo "  'not a git checkout' until this is resolved."
+        echo "  git is needed for automatic updates and is not installed."
+        echo "  Opening Apple's Command Line Tools installer — click Install"
+        echo "  in the window that appears, then restart FOREX Trader."
         echo ""
-        echo "  To fix (one-time setup):"
-        echo "    Run in Terminal: xcode-select --install"
-        echo "    (or install Homebrew from https://brew.sh, then: brew install git)"
+        echo "  Until then, Settings > Update will say git is not installed."
+        echo "  Alternative: install Homebrew (https://brew.sh), then this"
+        echo "  script installs git for you on the next launch."
         echo "  ─────────────────────────────────────────────────────────────"
         echo ""
+        xcode-select --install >/dev/null 2>&1 || true
         touch "$GIT_NOTICE"
     fi
     return 1

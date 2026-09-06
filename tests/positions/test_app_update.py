@@ -67,13 +67,34 @@ def has_checkout(monkeypatch, tmp_path):
 
 # ── check_for_update ──────────────────────────────────────────────────────────
 
-def test_no_checkout_reports_that_rather_than_failing(has_checkout, git):
+def test_no_checkout_offers_to_create_one_rather_than_just_failing(has_checkout, git, monkeypatch):
+    """Amended 2026-09-06. This used to return a bare "not a git checkout" and
+    the Update page turned that into "Check failed" with no button, so a
+    freshly installed machine could never reach the bootstrap `apply_update()`
+    has done since 2026-09-03 -- the only way out was an admin console push.
+    A machine that HAS git is one click away from updating; say so."""
     has_checkout(False)
+    monkeypatch.setattr(upd.shutil, "which", lambda _: "/usr/bin/git")
     g = git()
     out = asyncio.run(upd.check_for_update())
 
-    assert out == {"available": False, "error": "not a git checkout"}
+    assert out["available"] is False
+    assert out["bootstrap"] is True
     assert g.calls == [], "nothing should be run without a checkout"
+
+
+def test_no_checkout_and_no_git_says_git_is_what_is_missing(has_checkout, git, monkeypatch):
+    """The distinction the user acts on: install git, versus press the button.
+    Offering a bootstrap that cannot run is worse than saying why."""
+    has_checkout(False)
+    monkeypatch.setattr(upd.shutil, "which", lambda _: None)
+    g = git()
+    out = asyncio.run(upd.check_for_update())
+
+    assert out["available"] is False
+    assert out["bootstrap"] is False
+    assert "git is not installed" in out["error"]
+    assert g.calls == []
 
 
 def test_a_failed_fetch_is_reported_not_raised(has_checkout, git):

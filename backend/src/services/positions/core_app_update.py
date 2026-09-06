@@ -213,7 +213,23 @@ async def check_for_update() -> dict:
     this on a timer.
     """
     if not (_REPO_ROOT / ".git").exists():
-        return {"available": False, "error": "not a git checkout"}
+        # A fresh install has no .git: the Setup & Start scripts copy files,
+        # they never clone. apply_update() bootstraps one (git init + remote
+        # add + checkout -B), so this is a state the user can leave in one
+        # click -- but only if there is a git binary to do it with. Until
+        # 2026-09-06 both cases came back as a bare "not a git checkout" and
+        # the Update page rendered "Check failed" with no button at all, so
+        # the bootstrap was unreachable from the machine that needed it.
+        if not shutil.which("git"):
+            return {"available": False, "bootstrap": False, "error": (
+                "git is not installed on this machine, so this install cannot "
+                "update itself. macOS: run 'xcode-select --install'. Windows: "
+                "re-run 'Setup & Start FOREX.bat', which installs it."
+            )}
+        return {"available": False, "bootstrap": True, "error": (
+            "this install is not linked to GitHub yet -- press Set Up Updates "
+            "to link it and pull the latest version."
+        )}
 
     rc, _, err = await _run_git("fetch", "origin", _BRANCH)
     if rc != 0:

@@ -110,9 +110,35 @@ def _import_with_timeout(module_name: str, timeout: float = 20.0):
     return outcome.get("module")
 
 
+def _is_somebody_elses_client() -> bool:
+    """Has another machine's admin server welcomed this one as a client?
+
+    The marker is written by remote/client.py on MSG_WELCOME, and only on a
+    machine with no admin password of its own -- see its comment for why the
+    admin Mac dialling its own server must not count.
+
+    Presence of a KeyGen folder is a filesystem fact, not an authorisation:
+    an iCloud-synced ~/Documents or a copied app folder puts one on a client
+    machine, and until 2026-09-06 that alone opened the FULL local admin
+    console there. A client's route to the console is the console's own Grant
+    Admin button (_find_remote_admin_open_fn), and nothing else.
+    """
+    from backend.src.config import USER_DATA_DIR
+    try:
+        return (Path(USER_DATA_DIR) / "remote" / "is_remote_client").exists()
+    except Exception:            # unreadable data dir -- default to no console
+        return True
+
+
 def _find_admin_open_fn():
     """Look for KeyGen/forex_admin.py next to the FOREX directory.
-    Adds KeyGen to sys.path if found and returns open_admin_dialog, else None."""
+    Adds KeyGen to sys.path if found and returns open_admin_dialog, else None.
+    Refused outright on a machine that is somebody else's remote client."""
+    if _is_somebody_elses_client():
+        log.info("[Admin] This machine is a remote client — the local KeyGen "
+                 "console is not offered here; an admin grant is (Grant Admin "
+                 "on the admin console)")
+        return None
     forex_root = Path(__file__).parent.parent.parent  # forex_trader/core/app_lifecycle.py → FOREX/
     candidates = [
         forex_root.parent / "KeyGen",               # sibling: ~/Documents/KeyGen
@@ -172,9 +198,20 @@ def _find_remote_admin_open_fn():
 
 
 admin_open_fn = _find_admin_open_fn()
+# Only the machine holding KeyGen runs the admin SERVER. A granted remote admin
+# gets a console (admin_panel.py, driven over the WS connection) and therefore
+# ADMIN_AVAILABLE too, but it must keep dialling the server rather than
+# becoming one -- so the two facts are kept apart.
+LOCAL_ADMIN_AVAILABLE = admin_open_fn is not None
 if admin_open_fn is None:
     admin_open_fn = _find_remote_admin_open_fn()
 ADMIN_AVAILABLE = admin_open_fn is not None
+
+
+def _should_start_remote_server() -> bool:
+    """True on the machine that issues licences: KeyGen present AND an admin
+    password set. Everything else runs the client (see startup())."""
+    return LOCAL_ADMIN_AVAILABLE and password_is_set()
 
 # ── App-wide singletons ──────────────────────────────────────────────────────
 
@@ -448,7 +485,7 @@ async def startup() -> None:
 
     # Remote admin: server only starts on admin machine (KeyGen present + password set).
     # Client only runs on non-admin machines — the admin Mac doesn't connect to itself.
-    if ADMIN_AVAILABLE and password_is_set():
+    if _should_start_remote_server():
         _remote_server.start()
     elif _remote_client_enabled(config):
         _remote_client.start()

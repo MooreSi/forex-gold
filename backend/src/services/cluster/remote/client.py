@@ -600,6 +600,23 @@ async def _connect_loop() -> None:
                 except Exception:
                     pass
 
+                # "This install is somebody else's client" -- a welcome is the
+                # only positive proof of it. app.py reads this marker to keep
+                # KeyGen's LOCAL admin console off a machine that merely has a
+                # copy of the KeyGen folder (an iCloud-synced ~/Documents is
+                # enough), which opened the full console with no grant at all
+                # until 2026-09-06. Never written on a machine with its own
+                # admin password: the activation screen makes the admin Mac
+                # dial its OWN server (config/licence/guard.py) and that
+                # welcome must not hide the console it needs. Read via
+                # _REMOTE_DIR, not auth._HASH_FILE, so a test pointing
+                # _REMOTE_DIR at a tmp dir cannot hit the real one.
+                try:
+                    if not (_REMOTE_DIR / "admin_password.hash").exists():
+                        (_REMOTE_DIR / "is_remote_client").touch()
+                except Exception:
+                    pass
+
                 # A successful MSG_WELCOME means the server already has this
                 # token in its approved list. Persist that so app_lifecycle.py's
                 # startup check (config.get("remote_admin_client_enabled"),

@@ -318,3 +318,31 @@ class TestAnUnexpectedFirstReply:
         await _run()
 
         assert rc._status["connected"] is False
+
+
+class TestTheRemoteClientMarker:
+    """A welcome is the only positive proof that another machine's admin
+    server accepts this one as a client. `backend/src/app.py` reads the marker
+    it writes to keep KeyGen's LOCAL admin console off a client machine that
+    has a copy of the KeyGen folder -- an iCloud-synced ~/Documents is enough
+    to put one there (see tests/licence/test_admin_console_default_off.py)."""
+
+    async def test_a_welcome_marks_this_machine_as_a_client(
+            self, env, restarts, monkeypatch, tmp_path):
+        _one_connection(monkeypatch, _Ws([{"type": MSG_WELCOME}]))
+
+        await _run()
+
+        assert (tmp_path / "is_remote_client").exists()
+
+    async def test_the_admin_machine_does_not_mark_ITSELF_a_client(
+            self, env, restarts, monkeypatch, tmp_path):
+        """The activation screen makes the admin Mac dial its OWN server
+        (config/licence/guard.py) when its licence is missing. That welcome
+        must not hide the console the owner needs to re-issue the licence."""
+        (tmp_path / "admin_password.hash").write_text("salt:hash", encoding="utf-8")
+        _one_connection(monkeypatch, _Ws([{"type": MSG_WELCOME}]))
+
+        await _run()
+
+        assert not (tmp_path / "is_remote_client").exists()

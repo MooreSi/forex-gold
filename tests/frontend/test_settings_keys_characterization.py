@@ -76,6 +76,14 @@ EXPECTED_KEYS = {
     "min_s",
     "mt5_bottle_path",
     "mt5_bridge_url",
+    "ooh_date_active",     # the eight ooh_* keys added 2026-09-07 with the
+    "ooh_date_from",       # Out of Hours card. Declared here deliberately, as
+    "ooh_date_to",         # this file's docstring requires. Out of Hours had
+    "ooh_enabled",         # NO interface at all until then -- every one of
+    "ooh_end_time",        # these was settable only by editing the database,
+    "ooh_start_time",      # while monitor_cycle.py:206 used them to choose
+    "ooh_strategy",        # which strategy manages a trade. handover/020.
+    "ooh_timezone",
     "orb_report_enabled",
     "p90_s",
     "port",

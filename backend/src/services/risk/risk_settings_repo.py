@@ -189,6 +189,42 @@ def update_fee_settings(updates: dict) -> dict:
     return get_fee_settings()
 
 
+def _ooh_now(rs: dict, now=None):
+    """`now`, expressed in the timezone Out of Hours is configured to use.
+
+    handover/020. The window used to be read in UTC while the Trading Schedule
+    reads Europe/London, so for the four months the UK is on BST an OOH window
+    set to 22:00 actually began at 23:00 local -- an hour of the night managed
+    by the base strategy rather than the OOH one.
+
+    A NAMED zone rather than the machine's own clock, which is what was asked
+    for: this app runs on the owner's box and on a VPS that is conventionally
+    UTC, and reading each machine's local time would make the two nodes enter
+    Out of Hours an hour apart while each looked correct on its own. One stored
+    value gives both the same answer and still suits a user in another country.
+
+    Defaults to UTC so an upgrade retunes nobody (rules/60-adding-a-tunable).
+    Anything unusable -- unset, blank, misspelt, not a string -- falls back to
+    UTC rather than raising: this runs inside monitor_cycle, where an exception
+    is not a wrong answer but trade management stopping.
+    """
+    from datetime import datetime, timezone as _tz
+    now = now or datetime.now(_tz.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_tz.utc)
+    name = rs.get("ooh_timezone") or "UTC"
+    try:
+        from zoneinfo import ZoneInfo
+        return now.astimezone(ZoneInfo(str(name).strip() or "UTC"))
+    except Exception:
+        if str(name).strip() not in ("", "UTC"):
+            log.warning(
+                "[OOH] timezone %r is not usable — falling back to UTC. Out of "
+                "Hours will run on UTC until this is corrected.", name,
+            )
+        return now.astimezone(_tz.utc)
+
+
 def get_effective_strategy(rs: dict, now=None) -> tuple[str, bool]:
     """
     Return (effective_strategy_key, is_ooh_active).
@@ -220,11 +256,13 @@ def get_effective_strategy(rs: dict, now=None) -> tuple[str, bool]:
     date_to_str   = rs.get("ooh_date_to",    "") or ""
 
     try:
-        now = now or datetime.now(_tz.utc)
+        now = _ooh_now(rs, now)
 
         # Date-range filter: when active, OOH only applies on dates within the range.
         # If today is outside the range, OOH is inactive regardless of time.
         # If the date range is not active, the time window applies every day.
+        # Read in the SAME zone as the time window below -- a holiday range is
+        # the owner's dates, and 21:30 UTC is already tomorrow in Tokyo.
         if bool(rs.get("ooh_date_active", 0)) and date_from_str and date_to_str:
             try:
                 d_from = _date.fromisoformat(date_from_str)

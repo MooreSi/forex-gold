@@ -710,6 +710,17 @@ MIGRATIONS: list[tuple[int, str, object]] = [
 
         "DELETE FROM channel_performance WHERE source LIKE 'Telegram Auto (%)'",
     ]),
+
+    # Out of Hours read its window in UTC while the Trading Schedule reads
+    # Europe/London, so for the four months the UK is on BST an OOH window set
+    # to 22:00 began at 23:00 local. Empty default = UTC = exactly what every
+    # existing install already did, so this migration retunes nobody; the owner
+    # sets a zone when he wants one. A stored NAME rather than the machine's
+    # clock, so the Mac and the VPS cannot answer differently. See
+    # docs/simon-handover/020.
+    (34, "Out of Hours runs on a chosen timezone, not UTC alone", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN ooh_timezone TEXT NOT NULL DEFAULT ''",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

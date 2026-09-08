@@ -619,7 +619,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # several cases even had the opposite sign. See
             # _reconcile_live_signal (reversal_engine_manage.py).
             if sig.get("mt5_ticket") and sig.get("live_exec_status") == "executed":
-                await self._reconcile_live_signal(sig)
+                await self._reconcile_live_signal(sig, tick)
                 continue
 
             await self._manage_triggered_signal(sig, tick)

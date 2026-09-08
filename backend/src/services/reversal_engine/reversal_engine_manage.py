@@ -503,7 +503,37 @@ class _ManagementMixin:
                       sig.get("signal_ref", sig.get("id")), len(legs), sorted(legs))
         return legs
 
-    async def _reconcile_live_signal(self, sig: dict) -> None:
+    def _record_live_excursion(self, sig: dict, tick) -> None:
+        """Widen this live signal's travelled-each-way watermarks.
+
+        data-inspect/003: `record_excursion` was only ever called from
+        `_manage_triggered_signal`, which live-executed signals never reach --
+        so of 745 executed signals just 52 carried an MFE and none at all in
+        September. That is the one measurement that says whether stops are
+        being exceeded and whether wins are being cut short, and without it
+        `_manage_ref_ladder_signal`'s own warning applies: "any change to stop
+        width or target distance is a guess".
+
+        Measured from `trigger_price`, the realistic fill, exactly as the
+        virtual path does -- measuring from the zone midpoint would misreport
+        every signal not filled dead centre.
+
+        Recording only. It moves no stop and closes nothing, and it is wrapped
+        because a measurement must never cost a live trade its management.
+        """
+        try:
+            price = float(getattr(tick, "mid", 0) or getattr(tick, "bid", 0) or 0)
+            if not price:
+                return
+            entry_ref = float(sig.get("trigger_price")
+                              or ((sig["entry_low"] + sig["entry_high"]) / 2))
+            fav = (price - entry_ref) if sig["direction"] == "BUY" else (entry_ref - price)
+            re_db.record_excursion(sig["id"], fav, -fav)
+        except Exception as exc:
+            _log.debug("[RE-Engine] live excursion not recorded for id=%s: %s",
+                       sig.get("id"), exc)
+
+    async def _reconcile_live_signal(self, sig: dict, tick=None) -> None:
         """Mirror a live-executed signal's outcome/P&L from the real MT5
         trade rather than the tick-based simulation used for virtual
         signals -- see the call site in _check_outcomes for why this exists.
@@ -532,6 +562,9 @@ class _ManagementMixin:
 
         if any(int(p.get("ticket", 0)) in leg_tickets for p in live_positions):
             self._live_missing_streak.pop(ticket, None)
+            # Still open, and this is the ONLY moment the live path sees a
+            # running price -- so it is where the excursion has to be taken.
+            self._record_live_excursion(sig, tick)
             return  # still open on the real account -- nothing to reconcile yet
 
         streak = self._live_missing_streak.get(ticket, 0) + 1

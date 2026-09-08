@@ -38,6 +38,37 @@ recorded candles against the live strategy management rules.
 
 ## Known things & gotchas
 
+- **The Reversal Engine ML version history, and why a bump used to be dangerous (moved here from `ml_engine.py` 2026-09-08).** That file sits on the 800-line ceiling, and this is rationale rather than code. Each bump discards the fitted models because a changed feature width or label makes the old ones invalid; **the training DATA is never lost** — `_collect_training_data` re-reads every closed signal from the database and right-pads older rows with `_FEATURE_NEUTRAL`. What a bump used to cost was the model itself until the next retrain, and that window was dangerous because **the ML gate fails OPEN**: `reversal_engine_live_execute` blocks only `if fresh_prob is not None and < 0`, and `predict()` returns None with no model, so every signal executed unfiltered. v9 shipped Saturday 2026-09-05 and the first v9 retrain was Monday 09:27. Since 2026-09-08 `ml_handover.py` hands the previous model over instead — it keeps scoring the leading features it was fitted on (valid because features are append-only) until a retrain replaces it, and **only from v5**, because v5 replaced the label and an older model predicts a different quantity that the gate would compare to zero. The per-version history:
+
+```
+  v3 switches to R-multiple regression and adds 4 new features (news_proximity_norm,
+  regime_score, equity_drawdown_pct, concurrent_agreement) — discards v2 models so
+  dimension and label format mismatches can't happen; retrains from scratch.
+  v4 adds ref_discipline_score/ref_aggression_score — daily values derived by
+  telegram_research.py's nightly AI read of the reference channel/GD2 messages+images, cached
+  in re_config and refreshed once per night. Same discard-and-retrain-from-
+  scratch handling as v3 for the same reason (dimension mismatch).
+  v5 (2026-07-31) keeps v4's features but replaces the LABEL: was
+  `rr_tp1 if win else -1.0`, now realised net R (see _realised_r). The old
+  label was a fiction -- it priced every loss at exactly -1.0R and every win
+  at its planned rr_tp1, so summed over the 576 closed signals it read +51.1
+  ("profitable") while the same trades actually lost $2,691 (sum of realised
+  R: -46.1). Measured against real rows: losses averaged -1.22R (worst
+  -5.75R, stops slipping well past sl_dist) and wins +0.39R, a true payoff of
+  0.32:1 versus the 0.54:1 the model was being told. Retrained from scratch
+  because a model fitted on the old label is calibrated to the wrong scale.
+  v8 (2026-08-06) appends `pro_likeness` -- the output of pro_model.py, a
+  classifier trained on "a reference channel fired here" vs "background", so
+  what the professionals do enters this model as ONE weighted opinion rather
+  than as training rows of its own (their signals have no realised R of ours
+  to regress against, and pooling them would answer a different question with
+  the same weights). Same discard-and-retrain handling as v3-v7: the stored
+  vectors are back-filled to the new width by _FEATURE_NEUTRAL, so the
+  training history survives even though the fitted models do not.
+  v9 (2026-09-05) appends the five macro series Bounce and Breakout already
+  read -- DXY, US10Y, VIX, GVZ, TIP -- normalised in re_macro.py (which says
+  why there). Discard-and-retrain as v3-v8. Spec: docs/todo/001-reversal-macro-context.md.
+```
 - Reversal correlation is **asymmetric on purpose**: our signals fire as price *approaches* a level, the REF channel posts when it *arrives*, so legitimate matches lead by 10–30 minutes. The old symmetric ±300s window failed 498 of 511 matches. `correlation_time_delta_s` is signed: negative = we fired first (good).
 - Reversal session is 04:00–16:00 UTC, measured from 591 real REF signals. Asia range is a *level source*, not a trading session. Signal expiry is 2 hours.
 - Known bug class in `reversal_engine_manage.py`: `sig["strategy"]` overwritten after `build_signal()` tagged it `"gd2_unicorn"`, so GD2 signals silently fell through to the REF 8-level ladder branch.

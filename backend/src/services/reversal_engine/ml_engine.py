@@ -33,34 +33,11 @@ _data_dir: Optional[Path] = None
 _model_batch  = None   # LightGBM or RandomForest
 _model_online = None   # SRElassifier
 _labeled_count = 0
-# v3 switches to R-multiple regression and adds 4 new features (news_proximity_norm,
-# regime_score, equity_drawdown_pct, concurrent_agreement) — discards v2 models so
-# dimension and label format mismatches can't happen; retrains from scratch.
-# v4 adds ref_discipline_score/ref_aggression_score — daily values derived by
-# telegram_research.py's nightly AI read of the reference channel/GD2 messages+images, cached
-# in re_config and refreshed once per night. Same discard-and-retrain-from-
-# scratch handling as v3 for the same reason (dimension mismatch).
-# v5 (2026-07-31) keeps v4's features but replaces the LABEL: was
-# `rr_tp1 if win else -1.0`, now realised net R (see _realised_r). The old
-# label was a fiction -- it priced every loss at exactly -1.0R and every win
-# at its planned rr_tp1, so summed over the 576 closed signals it read +51.1
-# ("profitable") while the same trades actually lost $2,691 (sum of realised
-# R: -46.1). Measured against real rows: losses averaged -1.22R (worst
-# -5.75R, stops slipping well past sl_dist) and wins +0.39R, a true payoff of
-# 0.32:1 versus the 0.54:1 the model was being told. Retrained from scratch
-# because a model fitted on the old label is calibrated to the wrong scale.
-# v8 (2026-08-06) appends `pro_likeness` -- the output of pro_model.py, a
-# classifier trained on "a reference channel fired here" vs "background", so
-# what the professionals do enters this model as ONE weighted opinion rather
-# than as training rows of its own (their signals have no realised R of ours
-# to regress against, and pooling them would answer a different question with
-# the same weights). Same discard-and-retrain handling as v3-v7: the stored
-# vectors are back-filled to the new width by _FEATURE_NEUTRAL, so the
-# training history survives even though the fitted models do not.
-# v9 (2026-09-05) appends the five macro series Bounce and Breakout already
-# read -- DXY, US10Y, VIX, GVZ, TIP -- normalised in re_macro.py (which says
-# why there). Discard-and-retrain as v3-v8. Spec: docs/todo/001-reversal-macro-context.md.
+# Version history: docs/system/domains/engines/README.md (rationale, not code).
 _version = "re_ml_v9"
+
+from backend.src.services.reversal_engine import ml_handover as _ho  # noqa: E402
+
 
 # Dollars per point for a virtual signal. Mirrors reversal_engine_manage.py's
 # `gross = pnl_pts * _VIRTUAL_LOT * 100` -- duplicated as a constant rather
@@ -149,11 +126,18 @@ def _load_all() -> None:
                     k: {"trades": 0, "wins": 0, "touches": v.get("touches", 0)}
                     for k, v in (meta.get("ref_level_stats") or {}).items()
                 }
-                _log.info(
-                    "[RE-ML] version mismatch (%s -> %s) — discarding saved models; "
-                    "kept touch counts for %d level types, reset trades/wins",
-                    meta.get("version"), _version, len(_ref_level_stats),
-                )
+                if _ho.may_hand_over(meta.get("version")):
+                    _model_batch, _model_online, _w = _ho.hand_over(_data_dir)
+                    _ho.set_legacy_width(_w)
+                    _log.warning("[RE-ML] %s -> %s — HANDING OVER, old model scores "
+                                 "its first %s features (ml_handover)",
+                                 meta.get("version"), _version, _w)
+                    return
+                _log.warning(
+                    "[RE-ML] %s -> %s — discarding models: label epoch differs, so "
+                    "the ML gate does NOT block until the first retrain. Kept "
+                    "touches for %d types", meta.get("version"), _version,
+                    len(_ref_level_stats))
                 return
             _labeled_count  = meta.get("labeled_count", 0)
             _train_history  = meta.get("train_history", [])
@@ -540,6 +524,7 @@ def _retrain() -> None:
         backend = "rf"
 
     _labeled_count = len(X)
+    _ho.end()
     _train_history.append({
         "ts": time.time(), "n": len(X), "mean_r": round(float(np.mean(ya)), 4), "backend": backend
     })
@@ -577,6 +562,7 @@ def predict(features: list) -> Optional[float]:
         return None
 
     import numpy as np
+    features = _ho.truncate(features)
     fa = np.array(features, dtype=float).reshape(1, -1)
     preds = []
 

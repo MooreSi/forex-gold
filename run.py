@@ -396,9 +396,8 @@ def main():
     try:
         from backend.src.services.broker.credentials_repo import get_mt5_credentials
         _env   = cfg.get("account_env", "demo")
-        _login = _acct.login_for_env(get_mt5_credentials(), _env)
-        _db_path = str(_acct.resolve_db_path(
-            cfg_module.DATA_DIR, _env, _login))
+        _db_path = str(_acct.db_path_for_env(
+            cfg_module.DATA_DIR, _env, get_mt5_credentials()))
     except Exception as _exc:
         logging.getLogger(__name__).error(
             "[startup] could not resolve the per-account database (%s) — "

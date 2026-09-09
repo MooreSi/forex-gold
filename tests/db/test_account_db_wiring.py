@@ -27,17 +27,31 @@ def _code(rel: str) -> str:
 
 class TestStartupUsesTheRegistry:
     def test_run_py_resolves_the_path(self):
+        """`db_path_for_env` replaced the `login_for_env` + `resolve_db_path`
+        pair here on 2026-09-09 (bugs/031). Same resolution, one entry point,
+        because backend/src/app.py had to make the identical call and two
+        hand-rolled versions are what let them disagree."""
         code = _code("run.py")
 
         assert "account_registry" in code
-        assert "resolve_db_path" in code
+        assert "db_path_for_env" in code
 
     def test_it_is_resolved_before_the_database_is_opened(self):
         """Opening the default first and switching later would leave every
         table the licence screen reads pointing at the wrong file."""
         code = _code("run.py")
 
-        assert code.index("resolve_db_path") < code.index("_db_mod.init(")
+        assert code.index("db_path_for_env") < code.index("_db_mod.init(")
+
+    def test_app_startup_resolves_it_the_same_way(self):
+        """bugs/031: run.py resolved correctly and backend/src/app.py then
+        re-initialised from config["db_path"] -- the ENVIRONMENT default --
+        undoing it, so an install trading 26004592 wrote to 25470480's
+        ledger."""
+        code = _code("backend/src/app.py")
+
+        assert "db_path_for_env" in code
+        assert 'init(config["db_path"])' not in code
 
 
 class TestTheLoginForTheActiveEnvironment:

@@ -72,6 +72,23 @@ SHARED_TABLES = (
 # A new account showing another account's trades is worse than showing none.
 
 
+def db_path_for_env(data_dir: Path, env: str, creds: Optional[dict]) -> Path:
+    """The database this install should open, for `env` and these credentials.
+
+    THE single entry point. bugs/031: run.py resolved the per-account path
+    correctly and then backend/src/app.py re-initialised from
+    `config["db_path"]`, the environment default, throwing it away -- so an
+    install trading account 26004592 wrote every trade to 25470480's ledger and
+    read that account's (corrupt) balance for position sizing, the daily-loss
+    halt and an ML feature. Two call sites each doing their own resolution is
+    what allowed them to disagree; there is now one.
+
+    Never raises. An unreadable login yields the environment default, which is
+    exactly the pre-existing behaviour and always a safe answer on a boot path.
+    """
+    return resolve_db_path(data_dir, env, login_for_env(creds, env))
+
+
 def login_for_env(creds: Optional[dict], env: str) -> str:
     """The MT5 login for `env`, as text, or "" if there is not one.
 

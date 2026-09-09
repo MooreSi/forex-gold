@@ -316,7 +316,19 @@ def _remote_client_enabled(config) -> bool:
 async def startup() -> None:
     global _engine, _tg_reader
     config = cfg_module.load()
-    db_module.init(config["db_path"])
+    # Per-account, NOT config["db_path"]. bugs/031: that key is the ENVIRONMENT
+    # default, and initialising from it here silently undid the correct
+    # per-account path run.py had just resolved -- an install trading account
+    # 26004592 wrote 182 trades to 25470480's ledger and sized positions off
+    # that account's corrupt -$4,904 balance. One resolver, used by both.
+    from backend.src.db import account_registry as _acct
+    from backend.src.services.broker.credentials_repo import get_mt5_credentials
+    try:
+        _creds = get_mt5_credentials()
+    except Exception:
+        _creds = None
+    db_module.init(str(_acct.db_path_for_env(
+        cfg_module.DATA_DIR, config.get("account_env", "demo"), _creds)))
     # Captures this thread's running loop so DB calls dispatched to the
     # dedicated worker thread (to_db_thread) can still schedule a sync
     # coroutine back onto it — see set_main_event_loop's docstring.

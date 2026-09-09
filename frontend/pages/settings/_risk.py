@@ -181,9 +181,24 @@ def _render_risk_settings_subcard(rs: dict) -> None:
             "When checked, any Telegram signal containing 'High Risk' is silently ignored and not traded."
         )
 
+        htf_gate = ui.checkbox(
+            "Only trade with the trend",
+            value=bool(rs.get("htf_bias_gate_enabled", 0)),
+        ).classes("text-sm text-gray-300")
+        htf_gate.tooltip(
+            "Refuses a BUY when the higher timeframe (H1) is bearish, and a "
+            "SELL when it is bullish. Applies to EVERY source — Telegram "
+            "channels and the Reversal Engine alike, EA templates included. "
+            "A neutral or unreadable trend never blocks anything. "
+            "Measured on this account: trades WITH the trend are the only "
+            "profitable group on record (+$101 over 369), against it "
+            "-$1,211 over 201. Off by default; turn it on to apply it."
+        )
+
         def save_risk():
             try:
                 settings_ctl.update_risk_settings({
+                    "htf_bias_gate_enabled":          int(bool(htf_gate.value)),
                     "risk_governor_enabled":          int(bool(risk_gov.value)),
                     "max_daily_loss_pct":             float(max_dd.value      or 0),
                     "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),

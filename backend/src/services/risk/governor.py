@@ -22,6 +22,7 @@ new adapter/repo needed.
 from __future__ import annotations
 
 import logging
+import time as _time
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -184,6 +185,96 @@ def price_in_entry_range(direction: str, entry_low: float, entry_high: float,
         return tick.ask <= entry_high
     else:
         return tick.bid >= entry_low
+
+
+_HTF_BIAS_TTL_S = 60.0
+_htf_bias_cache = {"ts": 0.0, "value": ""}
+
+
+async def current_htf_bias(bridge, rs: Optional[dict] = None) -> str:
+    """The H1 higher-timeframe bias, or "" when it cannot be determined.
+
+    Only fetched when the gate is ON, so an install with it off makes no extra
+    bridge call at all. Cached for a minute because the bias is an H1 read and
+    the open path is latency-sensitive -- a fresh fetch per trade would put a
+    round trip on the critical path for a value that changes hourly.
+
+    Returns "" on any failure, and `htf_bias_blocks` never blocks on "": a risk
+    filter that refuses trades because a feed hiccuped would stop all trading.
+
+    Delegates to `level_detector.get_htf_bias`, the implementation whose
+    recorded output is the evidence for the rule. There is a second one in
+    `test_signal/signal_generator.compute_htf_bias`; they must not both become
+    "the" bias.
+    """
+    # Read the toggle defensively and lazily. An earlier version had the
+    # caller pass `db_module.get_risk_settings()` unconditionally, which put a
+    # database read on the open path for every install including the ones with
+    # the gate off -- and broke eight tests that legitimately run without a
+    # settings table.
+    try:
+        if rs is None:
+            from backend.src.db import database as _db
+            rs = _db.get_risk_settings() or {}
+        if not bool(rs.get("htf_bias_gate_enabled", 0)):
+            return ""
+    except Exception:
+        return ""
+    now = _time.time()
+    if now - _htf_bias_cache["ts"] < _HTF_BIAS_TTL_S:
+        return _htf_bias_cache["value"]
+    value = ""
+    try:
+        from backend.src.services.reversal_engine.level_detector import get_htf_bias
+        candles = await bridge.get_candles(timeframe="H1", count=30)
+        value = get_htf_bias(candles or [])
+    except Exception as exc:
+        log.debug("[Governor] htf bias unavailable: %s", exc)
+        value = ""
+    _htf_bias_cache.update(ts=now, value=value)
+    return value
+
+
+def htf_bias_blocks(direction: str, htf_bias, rs: dict) -> Optional[str]:
+    """Refuse a trade that runs against a DECIDED higher-timeframe bias.
+
+    Returns a reason string when the trade should be refused, None when it may
+    proceed. One function for every source: the Reversal Engine and the shared
+    open path both call this, because two implementations of "is the trend
+    against us" that can disagree is how this class of bug starts.
+
+    **Why it exists.** Measured over every executed Reversal Engine signal on
+    record: trades WITH the bias are 369 trades at 61.8% for +$101.41 -- the
+    only profitable group in the whole history -- while trades against it are
+    201 at -$1,210.98. On 2026-09-08 gold fell from 4438 to 4391, the system
+    bought it 46 times, and the day lost $1,270.89. See
+    docs/todo/data-inspect/004.
+
+    **Neutral proceeds.** A neutral bias loses money too (-$1,234 over 184
+    trades) but "no clear trend" is a different claim from "the trend is
+    against you", and blocking it is a larger change than was asked for.
+    Recorded in reversal-engine/090 instead.
+
+    **An unknown bias proceeds.** The bias is unavailable when candles are
+    missing or the bridge is down. A risk filter that blocks on missing DATA
+    stops all trading the moment a feed hiccups; this one fails open on
+    not-knowing and closed only on knowing the trend is against.
+
+    **Off by default** (rules/60-adding-a-tunable): nothing changes until the
+    owner turns it on, and it has never been demoed.
+    """
+    if not bool(rs.get("htf_bias_gate_enabled", 0)):
+        return None
+    bias = str(htf_bias or "").strip().lower()
+    if bias not in ("bullish", "bearish"):
+        return None
+    d = str(direction or "").strip().upper()
+    if (bias == "bearish" and d == "BUY") or (bias == "bullish" and d == "SELL"):
+        return (
+            f"Higher-timeframe bias is {bias} — a {d} runs against it. "
+            f"(Trading > Strategy > Risk Settings: 'Only trade with the trend')"
+        )
+    return None
 
 
 def check_pre_trade_filters(

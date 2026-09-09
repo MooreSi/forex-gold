@@ -721,6 +721,13 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (34, "Out of Hours runs on a chosen timezone, not UTC alone", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN ooh_timezone TEXT NOT NULL DEFAULT ''",
     ]),
+
+    # Only trade with the higher-timeframe trend. OFF by default, so this
+    # changes nobody's behaviour. Evidence and rationale:
+    # docs/todo/reversal-engine/080 and /090.
+    (35, "Higher-timeframe bias gate, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN htf_bias_gate_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

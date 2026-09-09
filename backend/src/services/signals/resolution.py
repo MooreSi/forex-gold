@@ -28,7 +28,10 @@ from backend.src.services.signals import tg_repo
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
-from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range, rg_size_and_check
+from backend.src.services.risk.governor import (
+    check_pre_trade_filters, htf_bias_blocks as check_htf_bias,
+    price_in_entry_range, rg_size_and_check,
+)
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
@@ -166,6 +169,7 @@ async def resolve_open_trade_params(
     tick: Optional[Tick] = None,
     age_lot_mult: float = 1.0,
     dpm_candles: Optional[list] = None,
+    htf_bias: str = "",
     starting_balance: float = 1000.0,
 ) -> dict:
     """Resolve a pending/active signal into everything open_trade() needs.
@@ -357,6 +361,16 @@ async def resolve_open_trade_params(
         )
         if filter_err:
             raise ValueError(filter_err)
+
+    # Higher-timeframe bias gate (reversal-engine/080). DELIBERATELY OUTSIDE
+    # the block above: that one is skipped for templates and for
+    # self-levelling strategies, and every trade that lost money on
+    # 2026-09-08 was a template -- a gate inside it would have stopped none of
+    # them. Off unless the owner turns it on; `htf_bias` is "" wherever the
+    # caller could not work it out, and an unknown bias never blocks.
+    _bias_err = check_htf_bias(sig.get("direction", ""), htf_bias, rs)
+    if _bias_err:
+        raise ValueError(_bias_err)
 
     _el  = float(sig["entry_low"])
     _eh  = float(sig["entry_high"])

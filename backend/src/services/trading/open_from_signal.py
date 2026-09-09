@@ -36,6 +36,7 @@ from backend.src.services.signals.resolution import (
     _rr_sl_dist, _adaptive_sl_dist, _adaptive_final_tp_dist,
 )
 from backend.src.services.risk.strategy_params import get_strategy_params
+from backend.src.services.risk import governor as _gov
 from backend.src.utils.models import (
     Tick,
     STRATEGY_CONSERVATIVE, STRATEGY_SCALP_RUNNER, STRATEGY_CONSERVATIVE_TRIAL,
@@ -80,10 +81,14 @@ async def open_trade_from_signal(
     starting_balance: float = 1000.0,
     background_open_commentary: Optional[Callable[[str, dict, Tick], Awaitable[None]]] = None,
 ) -> dict:
+    # Higher-timeframe bias for the gate in resolve_open_trade_params. Returns
+    # "" (and makes no bridge call) unless the owner has turned the gate on.
+    _htf = await _gov.current_htf_bias(bridge)
     resolved = await resolve_open_trade_params(
         bridge, signal_id,
         lot_size_override=lot_size_override, tick=tick, age_lot_mult=age_lot_mult,
         dpm_candles=dpm_candles, starting_balance=starting_balance,
+        htf_bias=_htf,
     )
     sig               = resolved["sig"]
     strategy          = resolved["strategy"]

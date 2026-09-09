@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+
+from backend.src.services.risk import governor as _gov
 import time
 import uuid
 from datetime import datetime, timezone
@@ -131,7 +133,16 @@ class _LiveExecuteMixin:
                     # creation time, just re-evaluated against the CURRENT
                     # bias instead of whatever it was when the signal fired.
                     level_score = float(sig.get("level_score", 0.5) or 0.5)
-                    if ((fresh_htf == "bullish" and direction == "SELL" and level_score < 0.75)
+                    # reversal-engine/090: `level_score` used to grant a bypass here
+                    # (`and level_score < 0.75`), so a high-scoring level was trusted to
+                    # trade AGAINST the higher timeframe. level_score does not rank
+                    # outcomes -- its 0.9 band is the biggest losing band on record --
+                    # and on 2026-09-08 all six counter-bias signals cleared the bypass
+                    # and all six lost. When the owner's gate is ON the shared rule
+                    # decides; when it is OFF the original bypass behaviour stands, so
+                    # nothing changes until he turns it on.
+                    _bias_block = _gov.htf_bias_blocks(direction, fresh_htf, rs)
+                    if _bias_block or ((fresh_htf == "bullish" and direction == "SELL" and level_score < 0.75)
                             or (fresh_htf == "bearish" and direction == "BUY" and level_score < 0.75)):
                         re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
                         re_db.update_live_exec(sig["id"], status="bias_skipped")

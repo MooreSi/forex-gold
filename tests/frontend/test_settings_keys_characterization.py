@@ -59,6 +59,10 @@ EXPECTED_KEYS = {
     "giveback_pct",
     "host",
     "hour_blocklist_enabled",
+    "htf_bias_gate_enabled",   # added 2026-09-09 with the "Only trade
+                               # with the trend" toggle. Declared here
+                               # deliberately, as this file's docstring
+                               # requires. reversal-engine/080 and /090.
     "imported",
     "internal_hedge_mode",
     "internal_net_exposure_max_lots",

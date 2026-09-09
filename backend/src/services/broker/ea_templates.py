@@ -322,6 +322,55 @@ _CHOICES = {
 }
 
 
+def _strategy_override_for(channel_name: str):
+    """This channel's explicitly assigned strategy, or None. Seam for tests."""
+    from backend.src.db import database as _db
+    return _db.get_channel_strategy_override(channel_name)
+
+
+def _ai_rec_for(channel_name: str):
+    """The AI recommendation for this channel, or None. Seam for tests."""
+    from backend.src.db import database as _db
+    rec = _db.get_channel_strategy_rec(channel_name)
+    return (rec or {}).get("strategy") if isinstance(rec, dict) else None
+
+
+def template_for_channel(channel_name: str, rs: dict) -> dict | None:
+    """The EA template actually governing this channel, or None.
+
+    A channel's strategy is resolved through several routes and code that
+    consults only ONE of them silently gets a different answer from the
+    execution path. `apply_sl_parsing_override` looked at the channel override
+    alone: on 2026-09-09 GOLD DIGGERS INSTITUTIONAL had no override, so a
+    signal whose governing template specifies a 70-pip stop was given the
+    generic 50-pip Fallback instead -- while 40 of that channel's trades were
+    running under that very template.
+
+    Order here matches the execution path's own precedence, minus the Trading
+    Schedule window override: channel assignment, then the AI recommendation,
+    then the global strategy. **The schedule window is NOT consulted** -- it is
+    time-dependent and resolved asynchronously further down, and reproducing it
+    here would be a second implementation of the thing this function exists to
+    stop. A channel governed by a schedule window still falls back to the
+    generic distances, which is the old behaviour, not a new failure.
+
+    Never raises: this runs inside the scan loop, where an exception costs the
+    whole cycle. Any failure degrades to None, i.e. exactly what happened
+    before this existed.
+    """
+    try:
+        for pick in (_strategy_override_for(channel_name),
+                     _ai_rec_for(channel_name),
+                     (rs or {}).get("trade_strategy")):
+            if is_template_override(pick):
+                tpl = get_ea_template(template_name_from_override(pick))
+                if tpl:
+                    return tpl
+    except Exception:
+        return None
+    return None
+
+
 def is_template_override(override: str | None) -> bool:
     return bool(override) and override.startswith(TEMPLATE_OVERRIDE_PREFIX)
 

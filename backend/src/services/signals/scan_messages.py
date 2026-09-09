@@ -54,6 +54,7 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.telegram.keyword_triggers import try_handle_close_all_trigger
 from backend.src.services.telegram.keyword_triggers import try_handle_risk_free_be_trigger
 from backend.src.services.telegram.keyword_triggers import (
+    apply_tp_parsing_override,
     apply_sl_parsing_override, apply_mirror_copy,
     parse_lexicon_direction_trigger,
 )
@@ -292,9 +293,9 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             # consumer (validation, strategy resolution, execution) sees
             # exactly the same "missing field" shape it already handles for
             # a signal that never had one, rather than a new code path.
-            if not bool(rs.get("lk_enable_tp_parsing", 1)):
-                for _tp_i in range(1, 9):
-                    parsed[f"tp{_tp_i}"] = None
+            _tp_sub = apply_tp_parsing_override(parsed, rs, channel_name)
+            if _tp_sub:
+                log.info("[LogicKeywords] tg_id=%s — %s", tg_id, _tp_sub)
             # A stop is NOT optional the way a TP is, so SL Parsing OFF substitutes
             # a configured distance rather than stripping the field. Stripping it
             # (what this did before the 2026-08-25 merge) sent the signal on with

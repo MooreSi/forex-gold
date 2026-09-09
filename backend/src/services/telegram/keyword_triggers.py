@@ -224,6 +224,63 @@ def apply_mirror_copy(parsed: dict, rs: dict) -> Optional[str]:
 _FALLBACK_SL_PIPS = 50.0
 
 
+def apply_tp_parsing_override(parsed: dict, rs: dict, channel_name: str) -> Optional[str]:
+    """Enable TP Parsing OFF -- decide this signal's targets, in place.
+
+    Reported live 2026-09-09: GOLD DIGGERS INSTITUTIONAL posted TP 4396/4399/
+    4403 and the app answered "Limit order skipped - signal has no TP levels".
+    The parser was fine; TP Parsing is a GLOBAL toggle and it had stripped every
+    target to None, after which `limit_order_signal` refused the order for
+    having none.
+
+    **A template outranks a global toggle**, exactly as it already does for the
+    stop (see `apply_sl_parsing_override`: "a template is a self-contained
+    per-channel definition and already outranks the signal's own stop"). So
+    when a template governs the channel:
+
+      * `tp_from_telegram` set -- the template ASKS for the signal's targets,
+        so they are kept. That was the live case: the toggle was removing the
+        very levels the template wanted.
+      * otherwise -- the template's own `tp*_pips`, measured from the far edge
+        of the entry zone, the same anchor the stop uses.
+
+    With no governing template the old behaviour stands and the targets are
+    stripped, which is what every non-template channel had before this existed.
+
+    Returns a short description for the log, or None when nothing changed.
+    """
+    if bool(rs.get("lk_enable_tp_parsing", 1)):
+        return None
+
+    tpl = ea_templates.template_for_channel(channel_name, rs)
+    if tpl and bool(tpl.get("tp_from_telegram")):
+        return (f"TP Parsing OFF — kept the signal's own targets: template "
+                f"'{tpl['name']}' is set to take TPs from Telegram")
+
+    if tpl:
+        direction = str(parsed.get("direction") or "").upper()
+        lo, hi = parsed.get("entry_low"), parsed.get("entry_high")
+        if direction in ("BUY", "SELL") and lo is not None and hi is not None:
+            anchor_px = float(hi) if direction == "BUY" else float(lo)
+            used = 0
+            for i in range(1, 9):
+                pips = float(tpl.get(f"tp{i}_pips") or 0)
+                if pips <= 0:
+                    parsed[f"tp{i}"] = None
+                    continue
+                dist = pips * PIPS_TO_PRICE_XAUUSD
+                parsed[f"tp{i}"] = round(
+                    anchor_px + dist if direction == "BUY" else anchor_px - dist, 2)
+                used = i
+            if used:
+                return (f"TP Parsing OFF — targets taken from template "
+                        f"'{tpl['name']}' ({used} level(s), from the zone edge)")
+
+    for i in range(1, 9):
+        parsed[f"tp{i}"] = None
+    return "TP Parsing OFF — signal's own targets stripped (no governing template)"
+
+
 def apply_sl_parsing_override(parsed: dict, rs: dict, channel_name: str) -> Optional[str]:
     """Enable SL Parsing OFF (2026-08-05) -- replaces the signal's own stated
     Stop Loss with one derived from configuration, in place on `parsed`.
@@ -267,12 +324,15 @@ def apply_sl_parsing_override(parsed: dict, rs: dict, channel_name: str) -> Opti
 
     pips = 0.0
     src = ""
-    _ch_ov = db_module.get_channel_strategy_override(channel_name)
-    if ea_templates.is_template_override(_ch_ov):
-        _tpl = ea_templates.get_ea_template(ea_templates.template_name_from_override(_ch_ov))
-        if _tpl:
-            pips = float(_tpl.get("sl_pips") or 0)
-            src = f"template '{_tpl['name']}' sl_pips"
+    # The template that GOVERNS this channel, not just an explicitly assigned
+    # one. Looking only at the channel override missed the live case entirely:
+    # GOLD DIGGERS INSTITUTIONAL has no override, 40 of its trades ran under
+    # `template:GD Instituational - single`, and a signal was handed the
+    # generic 50-pip Fallback instead of that template's 70 (2026-09-09).
+    _tpl = ea_templates.template_for_channel(channel_name, rs)
+    if _tpl:
+        pips = float(_tpl.get("sl_pips") or 0)
+        src = f"template '{_tpl['name']}' sl_pips"
     if pips <= 0:
         pips = float(rs.get("lk_fallback_sl_pips", _FALLBACK_SL_PIPS) or 0)
         src = "Fallback SL Distance"

@@ -138,3 +138,46 @@ class TestTheExemptionsAreDeliberate:
         assert not any(k in body for k in _CONSULTS), (
             f"{rel} now consults the gate but is listed EXEMPT — move it to GATED"
         )
+
+
+class TestWhatTheAuditAlsoFound:
+    """Two results from auditing every route against every gate, pinned so
+    neither has to be worked out again.
+    """
+
+    def test_the_limit_path_is_schedule_gated_at_FILL_not_at_placement(self):
+        """`limit_order_signal` consults neither the schedule nor the news
+        blackout, and that is NOT a hole.
+
+        A resting order is accepted long before it fills, so the entry gates
+        cannot be evaluated at placement. `ea_bridge/_events.py` re-checks the
+        schedule when the order actually fills and closes the position if the
+        window has shut. This test exists because the limit path looks like a
+        fourth uncovered route until you find that check.
+        """
+        events = (SRC / "services/broker/ea_bridge/_events.py").read_text(
+            encoding="utf-8", errors="replace")
+
+        assert "check_trading_schedule(" in events, (
+            "the pending-order fill path no longer re-checks the trading "
+            "schedule, which is the only thing gating a resting order"
+        )
+        assert "trading_schedule_blocked" in events, (
+            "the schedule check no longer closes the position it blocked"
+        )
+
+    def test_and_the_news_blackout_is_NOT_checked_there(self):
+        """The other half of the same argument is missing — bugs/040.
+
+        This asserts the CURRENT behaviour, deliberately. It is not an
+        endorsement: it is a tripwire, so that if someone adds the news check
+        they are sent to bugs/040 to record the decision rather than leaving
+        the two gates silently asymmetric in the other direction.
+        """
+        events = (SRC / "services/broker/ea_bridge/_events.py").read_text(
+            encoding="utf-8", errors="replace")
+
+        assert "check_news_blackout(" not in events, (
+            "a news check appeared on the pending-order fill path — that is "
+            "bugs/040 and it needs the owner's decision recorded there"
+        )

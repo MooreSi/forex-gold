@@ -488,10 +488,14 @@ def rearm_risk_guards() -> None:
     This is a reset, not an off switch: each guard stays armed and fires again
     on a fresh breach measured from here.
     """
-    now = str(time.time())
+    # The give-back half DELEGATES rather than repeating the write. Both
+    # functions used to set giveback_baseline_ts, and nothing called
+    # rearm_giveback_guard, whose docstring nevertheless claimed to own it.
+    # One definition, so the pair cannot drift the next time either changes.
+    # db_module.db() is re-entrant, so the inner call joins this transaction.
     with db_module.db():
-        db_module.set_app_config("giveback_baseline_ts", now)
-        db_module.set_app_config("daily_loss_baseline_ts", now)
+        rearm_giveback_guard()
+        db_module.set_app_config("daily_loss_baseline_ts", str(time.time()))
 
 
 def rearm_giveback_guard() -> None:

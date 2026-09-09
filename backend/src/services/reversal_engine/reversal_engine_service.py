@@ -534,6 +534,32 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 _log.debug("[RE-Engine] outcome error: %s", exc)
             await asyncio.sleep(_OUTCOME_INTERVAL_S)
 
+    _RESTING_SWEEP_INTERVAL_S = 60.0
+    _last_resting_sweep = 0.0
+
+    async def _maybe_revalidate_resting_orders(self) -> None:
+        """Withdraw resting orders the higher-timeframe bias has turned
+        against. Cancels only; never touches an open position. Silent and
+        cheap when the gate is off -- `current_htf_bias` makes no call at all
+        in that case."""
+        try:
+            now = time.time()
+            if now - self._last_resting_sweep < self._RESTING_SWEEP_INTERVAL_S:
+                return
+            self._last_resting_sweep = now
+            from backend.src.db import database as core_db
+            from backend.src.services.broker import ea_bridge as _ea_mod
+            from backend.src.services.trading import resting_revalidation as _rr
+            from backend.src.services.risk import governor as _gov
+            ea = _ea_mod.get_instance()
+            if ea is None:
+                return
+            rs = core_db.get_risk_settings()
+            bias = await _gov.current_htf_bias(self._bridge, rs)
+            await _rr.revalidate_resting_orders(ea, rs, bias=bias)
+        except Exception as exc:
+            _log.debug("[RE-Engine] resting revalidation skipped: %s", exc)
+
     async def _check_outcomes(self) -> None:
         try:
             tick = await self._bridge.get_tick()
@@ -544,6 +570,13 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 return
         except Exception:
             return
+
+        # Resting-order revalidation (reversal-engine/050). The bias gate is
+        # evaluated when an order is PLACED; a limit order can rest for the
+        # better part of an hour and fill into a bias that has since reversed.
+        # Own interval because this loop runs every 5s and a cancel sweep does
+        # not need to: the bias is an H1 read, cached for a minute.
+        await self._maybe_revalidate_resting_orders()
 
         open_sigs = re_db.get_open_signals()
         now = time.time()

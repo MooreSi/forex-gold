@@ -349,10 +349,30 @@ async def process_instant_entry(
         _ime_max_loss = round(_IME_SL_DIST * lot * 100.0, 2)
 
     signal_id = str(uuid.uuid4())[:16]
+
+    # bugs/036: the note stored on the row must not promise a follow-up that
+    # cannot arrive. instant_followup's managed_by == "ea" skip means a
+    # template-managed trade never receives one, and the stop above is already
+    # the template's own -- so on a template this describes what happened
+    # rather than what is still awaited. The Telegram alert below has said this
+    # since bugs/023; the stored note and the log line did not, and a
+    # "(provisional)" line on a template stop is what made demo 12 read as a
+    # failure when it had passed.
+    if _template_ime is not None:
+        _ime_note = (
+            f"Instant market entry — SL ${provisional_sl:.2f} "
+            f"({_IME_SL_DIST:.1f} pts = -${_ime_max_loss:.0f} max) "
+            f"from template \"{_tpl_name_ime}\" (tg_id={tg_id})"
+        )
+    else:
+        _ime_note = (
+            f"Instant market entry — provisional SL ${provisional_sl:.2f} "
+            f"({_IME_SL_DIST:.1f} pts = -${_ime_max_loss:.0f} max) "
+            f"— awaiting follow-up SL/TP (tg_id={tg_id})"
+        )
     trade_repo.insert_instant_signal(
         signal_id, channel_name, direction, entry_px, provisional_sl, lot,
-        f"Instant market entry — provisional SL ${provisional_sl:.2f} ({_IME_SL_DIST:.1f} pts = -${_ime_max_loss:.0f} max) — awaiting follow-up SL/TP (tg_id={tg_id})",
-        time.time(), tg_id,
+        _ime_note, time.time(), tg_id,
     )
 
     try:
@@ -368,8 +388,10 @@ async def process_instant_entry(
         _lt_ime.mark(tg_id, "t8_ordered")
         exec_price  = float(trade_result.get("entry_price", entry_px))
         _ime_ticket = trade_result.get("mt5_ticket") or "pending"
-        log.info("[IME] Instant %s executed @ %.2f lot=%.2f ticket=%s SL=%.2f (provisional)",
-                 direction, exec_price, lot, _ime_ticket, provisional_sl)
+        log.info("[IME] Instant %s executed @ %.2f lot=%.2f ticket=%s SL=%.2f (%s)",
+                 direction, exec_price, lot, _ime_ticket, provisional_sl,
+                 f'from template "{_tpl_name_ime}"' if _template_ime is not None
+                 else "provisional")
         _ime_self_managed = strategy in (
             STRATEGY_CONSERVATIVE, STRATEGY_CONSERVATIVE_TRIAL
         )

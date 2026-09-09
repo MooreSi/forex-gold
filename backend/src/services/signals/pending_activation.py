@@ -36,6 +36,10 @@ from backend.src.services.signals import tg_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_grid_template_dispatch import grid_template
+from backend.src.services.risk.schedule import check_trading_schedule
+from backend.src.utils.news_calendar import check_news_blackout
+from backend.src.services.risk import governor as _gov
+import time as _time
 from backend.src.services.trading.open_from_signal import open_trade_from_signal
 from backend.src.services.risk.governor import check_pre_trade_filters, price_in_entry_range
 from backend.src.services.analytics.reporting import get_open_trades
@@ -423,6 +427,39 @@ async def try_activate_pending_signals(
         # Respect the max-trades cap
         if open_count >= max_trades:
             break
+
+        # ── Re-evaluate now that price has actually arrived ─────────────────
+        # Owner, 2026-09-09: a queued signal must be judged against the market
+        # at the moment it would execute, not the one it was created in.
+        #
+        # The Reversal Engine already re-asks all of these at ITS fill
+        # (reversal_engine_live_execute) and this path asked none of them, so a
+        # signal could sit for an hour and open inside a news blackout or
+        # outside the trading schedule. The same shared functions, not copies:
+        # a second implementation of "are we in a blackout" is how the two
+        # routes come to disagree.
+        #
+        # The higher-timeframe bias is NOT re-checked here: activation runs
+        # through open_trade_from_signal -> resolve_open_trade_params, where
+        # that gate already sits outside the template exemption.
+        _pa_sched_ok, _pa_sched_why = check_trading_schedule(
+            source=sig.get("source_name") or "")
+        if not _pa_sched_ok:
+            log.info("[PendingWatcher] Signal %s held — %s",
+                     sig["signal_id"][:8], _pa_sched_why)
+            continue
+
+        _pa_news_ok, _pa_news_why = check_news_blackout()
+        if not _pa_news_ok:
+            log.info("[PendingWatcher] Signal %s held — %s",
+                     sig["signal_id"][:8], _pa_news_why)
+            continue
+
+        _pa_soon = _gov.fill_too_soon(sig.get("created_at"), _time.time(), rs)
+        if _pa_soon:
+            log.info("[PendingWatcher] Signal %s skipped — %s",
+                     sig["signal_id"][:8], _pa_soon)
+            continue
 
         # Pre-trade filters: R:R and directional cap.
         #

@@ -107,8 +107,8 @@ from backend.src.services.positions.tp_tracking import (
 from backend.src.services.signals.repo import (
     create_signal as _create_signal_impl,
     get_signals as _get_signals_impl,
-    cancel_signal as _cancel_signal_impl,
 )
+from backend.src.services.signals.cancellation import cancel_signal as _cancel_signal_svc  # withdraws the broker order too (bugs/039)
 from backend.src.services.notifications.scheduler import email_scheduler_sweep as _email_scheduler_sweep_impl
 # The bot command table lives in services/telegram/bot_dispatch.py (M4 B4);
 # the runtime only binds its collaborators and keeps the four order/process
@@ -426,7 +426,7 @@ class TradingRuntime:
         return _get_signals_impl(status)
 
     def cancel_signal(self, signal_id: str) -> None:
-        _cancel_signal_impl(signal_id)
+        _cancel_signal_svc(signal_id)
 
     # ── Trade management ──────────────────────────────────────────────────────
 

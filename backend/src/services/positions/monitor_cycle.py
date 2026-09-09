@@ -107,6 +107,10 @@ class MonitorState:
     # it costs a /positions read plus a history lookup per suspect row,
     # and a stranded row has usually been stranded for hours.
     last_orphan_sweep: float = 0.0
+    # Resting-order revalidation, same once-a-minute throttle and for the same
+    # reason: the bias it reads is an H1 value cached for a minute, so a sweep
+    # per 5s cycle would re-ask a question that cannot have changed.
+    last_resting_sweep: float = 0.0
     dpm_dxy_candles: list = field(default_factory=list)
 
 
@@ -165,6 +169,37 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                         log.debug("Orphan reconcile failed", exc_info=True)
             rs = await db_module.to_db_thread(db_module.get_risk_settings)
             profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
+
+            # Withdraw resting orders the higher-timeframe bias has turned
+            # against (reversal-engine/050). Cancels only; never touches an
+            # open position.
+            #
+            # HERE, not in ReversalEngine._check_outcomes where it started.
+            # The sweep covers EVERY working order, including Limit Runner
+            # orders from a Telegram signal, but the engine's loop runs only
+            # `while self.is_running` -- so stopping the Reversal Engine from
+            # its panel also stopped protecting orders that have nothing to do
+            # with it. `_check_outcomes` also returns early with no tick,
+            # skipping the sweep again.
+            #
+            # OUTSIDE the open-trades block above on purpose: the case this
+            # exists for is a resting order with nothing open yet.
+            _now_rest = time.time()
+            if _now_rest - ctx.state.last_resting_sweep > 60.0:
+                ctx.state.last_resting_sweep = _now_rest
+                try:
+                    from backend.src.services.broker import ea_bridge as _ea_mod
+                    from backend.src.services.risk import governor as _gov
+                    from backend.src.services.trading import (
+                        resting_revalidation as _rr,
+                    )
+                    _rest_ea = _ea_mod.get_instance()
+                    if _rest_ea is not None:
+                        await _rr.revalidate_resting_orders(
+                            _rest_ea, rs,
+                            bias=await _gov.current_htf_bias(ctx.bridge, rs))
+                except Exception:
+                    log.debug("Resting-order revalidation failed", exc_info=True)
             # Will the pending-signal watcher run at the end of this cycle?
             # Computed here because it also decides whether the candle cache
             # below needs refreshing -- see the comment there.

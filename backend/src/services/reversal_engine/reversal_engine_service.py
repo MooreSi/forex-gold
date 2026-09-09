@@ -571,12 +571,12 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         except Exception:
             return
 
-        # Resting-order revalidation (reversal-engine/050). The bias gate is
-        # evaluated when an order is PLACED; a limit order can rest for the
-        # better part of an hour and fill into a bias that has since reversed.
-        # Own interval because this loop runs every 5s and a cancel sweep does
-        # not need to: the bias is an H1 read, cached for a minute.
-        await self._maybe_revalidate_resting_orders()
+        # Resting-order revalidation used to run here. It MOVED to the
+        # monitor cycle on 2026-09-09: the sweep covers every working order,
+        # including Telegram Limit Runner ones, but this loop only runs while
+        # the Reversal Engine is started, so stopping the engine silently
+        # stopped protecting them. See
+        # tests/trading/test_resting_sweep_is_not_tied_to_the_reversal_engine.py
 
         open_sigs = re_db.get_open_signals()
         now = time.time()

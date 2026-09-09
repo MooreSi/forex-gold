@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+from backend.src.services.risk import governor as _gov
 import time
 import uuid
 from typing import Any, Optional
@@ -139,6 +141,16 @@ async def process_instant_entry(
     _ime_news_ok, _ime_news_reason = check_news_blackout()
     if not _ime_news_ok:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_news_reason)
+        return
+
+    # Higher-timeframe bias gate — the fourth gate this path has to keep its
+    # own copy of, for the same reason as the three above: it never calls
+    # resolve_open_trade_params(), where the shared one lives. Off unless the
+    # owner turns it on. reversal-engine/080.
+    _ime_bias = await _gov.current_htf_bias(bridge, rs)
+    _ime_bias_block = _gov.htf_bias_blocks(direction, _ime_bias, rs)
+    if _ime_bias_block:
+        log.info("[IME] Instant %s blocked — %s", direction, _ime_bias_block)
         return
 
     tick = await bridge.get_tick()

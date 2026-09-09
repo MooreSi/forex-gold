@@ -52,6 +52,8 @@ from __future__ import annotations
 
 import json
 import logging
+
+from backend.src.services.risk import governor as _gov
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -245,6 +247,17 @@ async def handle_limit_order_signal(
     # SELL: bottom), same boundary price_in_entry_range() already treats as
     # "in zone" for the Python-simulated path (core_scan_messages_auto_execute.py).
     price = entry_high if direction == "BUY" else entry_low
+
+    # Higher-timeframe bias gate. Placed before BOTH exits below -- the
+    # pending order and the realignment branch that turns a breached limit
+    # into a market order -- because gating only one leaves the other open.
+    # This path reaches the broker through place_pending_order()/open_trade()
+    # and never through resolve_open_trade_params(), where the shared gate
+    # lives. Off unless the owner turns it on. reversal-engine/080.
+    _bias_block = _gov.htf_bias_blocks(
+        direction, await _gov.current_htf_bias(bridge, rs), rs)
+    if _bias_block:
+        return {"skip_reason": f"Limit order skipped — {_bias_block}"}
 
     balance = await get_trading_balance_fn()
     lot = suggest_lot_size_fn(price, stop_loss, balance, float(rs.get("risk_per_trade_pct", 0.5)))

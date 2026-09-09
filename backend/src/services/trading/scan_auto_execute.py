@@ -47,6 +47,7 @@ from backend.src.services.trading import entry_realignment as _entry_realignment
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.schedule import check_trading_schedule
+from backend.src.services.risk import governor as _gov
 from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
     Tick,
@@ -215,6 +216,23 @@ async def execute_auto_signal(
     # already-open trade, and blocking it would strand that position on its
     # provisional stop going into the news event -- the opposite of protective.
     _news_ok, _news_reason = check_news_blackout()
+    # Higher-timeframe bias gate (reversal-engine/080), the FOURTH route that
+    # needed its own copy. This path opens through open_trade directly and
+    # never calls resolve_open_trade_params, exactly as the comment above says
+    # about the schedule gate -- so a fresh Telegram signal whose price is
+    # already in its zone was executed against the trend while queued
+    # zone-fills, pending orders, IME trades and the engines were all blocked.
+    #
+    # That is the 2026-09-08 case: GOLD DIGGERS INSTITUTIONAL posting BUYs into
+    # a falling market, -$718.95 over 20 trades. The gate was switched on
+    # 2026-09-09 and did not cover them.
+    #
+    # Same position as the other two gates and BELOW the IME follow-up block,
+    # for the same reason: a follow-up applies SL/TP to an already-open trade,
+    # and blocking it would strand that position on its provisional stop.
+    # Makes no bridge call while the toggle is off.
+    _bias_reason = _gov.htf_bias_blocks(
+        parsed.get("direction", ""), await _gov.current_htf_bias(bridge, rs), rs)
     # Resting orders hold slots too (owner, 2026-09-04) -- the caller's list
     # only knows about positions, so the rest of the book is added here from
     # the one definition in signal_state_repo.
@@ -230,6 +248,10 @@ async def execute_auto_signal(
         skip_reason = f"Auto-execution skipped — {_news_reason}"
         log.info("[%s] Signal blocked by news blackout: %s",
                  source_label, _news_reason)
+    elif _bias_reason:
+        skip_reason = f"Auto-execution skipped — {_bias_reason}"
+        log.info("[%s] Signal blocked by the trend gate: %s",
+                 source_label, _bias_reason)
     elif per_signal_skip:
         skip_reason = f"Auto-eval declined signal: {per_signal_skip_reason}"
     elif open_count >= max_trades:

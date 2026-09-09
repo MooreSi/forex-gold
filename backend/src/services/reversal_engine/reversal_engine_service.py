@@ -534,31 +534,6 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 _log.debug("[RE-Engine] outcome error: %s", exc)
             await asyncio.sleep(_OUTCOME_INTERVAL_S)
 
-    _RESTING_SWEEP_INTERVAL_S = 60.0
-    _last_resting_sweep = 0.0
-
-    async def _maybe_revalidate_resting_orders(self) -> None:
-        """Withdraw resting orders the higher-timeframe bias has turned
-        against. Cancels only; never touches an open position. Silent and
-        cheap when the gate is off -- `current_htf_bias` makes no call at all
-        in that case."""
-        try:
-            now = time.time()
-            if now - self._last_resting_sweep < self._RESTING_SWEEP_INTERVAL_S:
-                return
-            self._last_resting_sweep = now
-            from backend.src.db import database as core_db
-            from backend.src.services.broker import ea_bridge as _ea_mod
-            from backend.src.services.trading import resting_revalidation as _rr
-            from backend.src.services.risk import governor as _gov
-            ea = _ea_mod.get_instance()
-            if ea is None:
-                return
-            rs = core_db.get_risk_settings()
-            bias = await _gov.current_htf_bias(self._bridge, rs)
-            await _rr.revalidate_resting_orders(ea, rs, bias=bias)
-        except Exception as exc:
-            _log.debug("[RE-Engine] resting revalidation skipped: %s", exc)
 
     async def _check_outcomes(self) -> None:
         try:

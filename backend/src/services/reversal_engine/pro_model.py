@@ -51,7 +51,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Optional
 
 from backend.src.services.reversal_engine import pro_corpus_repo as pro_corpus
@@ -243,6 +245,81 @@ def fit(force: bool = False) -> dict:
     return status()
 
 
+# ── Fitting off the event loop ────────────────────────────────────────────────
+#
+# fit() trains five RandomForests of 300 trees (four CV folds plus the final
+# model). On the live corpus of 7,769 rows that is about five seconds, and it
+# used to run inline on the asyncio event loop from two hot paths -- scoring
+# and the per-signal refit. Measured 2026-09-09:
+#
+#   [ProModel] fitted n=7769 ... AUC=0.820 -> ok
+#   [LoopMonitor] event loop stalled 4959ms (expected 250ms)
+#
+# Nothing else runs during those seconds, including the EA socket reader. The
+# EA reconnects after ten seconds of silence and a template-managed trade has
+# no Python fallback, so this was half of that budget. See bugs/030.
+#
+# One worker, so fits serialise rather than piling up: signals arrive faster
+# than a fit finishes, and eight concurrent trains would be worse than the
+# stall they replaced.
+
+_fit_pool: Optional[ThreadPoolExecutor] = None
+_fit_lock = threading.Lock()
+_fit_future: Optional[Future] = None
+
+
+def _pool() -> ThreadPoolExecutor:
+    global _fit_pool
+    if _fit_pool is None:
+        _fit_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="promodel-fit")
+    return _fit_pool
+
+
+def fit_in_background(force: bool = False) -> None:
+    """Start a refit off the caller's thread, or do nothing if one is running.
+
+    Never raises and never blocks: both callers are on the trading path.
+    """
+    global _fit_future
+    with _fit_lock:
+        if _fit_future is not None and not _fit_future.done():
+            return
+        try:
+            _fit_future = _pool().submit(_fit_guarded, force)
+        except Exception as exc:  # pool shut down during teardown
+            log.debug("[ProModel] could not schedule fit: %s", exc)
+
+
+def _fit_guarded(force: bool) -> None:
+    """fit() with its exceptions swallowed.
+
+    A raising fit must not leave the in-flight future pending forever -- that
+    would stop the model ever training again for the life of the process.
+    Completion is what clears the guard, so the try/except has to be INSIDE
+    the submitted callable.
+    """
+    try:
+        fit(force=force)
+    except Exception as exc:
+        log.debug("[ProModel] background fit failed: %s", exc)
+
+
+def wait_for_fit(timeout: Optional[float] = None) -> bool:
+    """Block until any in-flight fit finishes. True if none is outstanding.
+
+    For shutdown and for tests. Nothing on the trading path calls this.
+    """
+    with _fit_lock:
+        fut = _fit_future
+    if fut is None:
+        return True
+    try:
+        fut.result(timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
 def _ready() -> bool:
     return (_state["model"] is not None and _state["auc"] is not None
             and _state["auc"] >= _MIN_AUC)
@@ -255,8 +332,12 @@ def pro_likeness(direction: str, rsi: Optional[float], adx: Optional[float],
     trustworthy yet. Never raises: this is enrichment on the scoring path."""
     try:
         if not _ready():
-            fit()
-        if not _ready():
+            # Start one, do not wait for it. Blocking here froze the whole app
+            # for ~5s on the scoring path; NEUTRAL is already this function's
+            # documented answer for "not trustworthy yet", and is what it
+            # returns whenever scoring raises. Owner approved the change
+            # 2026-09-09.
+            fit_in_background()
             return NEUTRAL
         v = _vector(direction, rsi, adx, atr, regime, fvg or {})
         if v is None:
@@ -290,7 +371,4 @@ def on_new_signal() -> None:
     """Called after a reference signal is captured, when the learning toggle
     is on. One incremental refit per signal is the whole point of the toggle;
     fit() itself is a no-op when the corpus has not actually grown."""
-    try:
-        fit()
-    except Exception as exc:
-        log.debug("[ProModel] refit failed: %s", exc)
+    fit_in_background()

@@ -142,3 +142,94 @@ class VersionMixin:
         log.info("[EABridge] EA v%s (compiled %s, MQL build %s, terminal "
                  "build %s)", self.ea_version, self.ea_compiled,
                  msg.get("mql_build"), msg.get("terminal_build"))
+
+
+def template_blocked_by_stale_build(ea, strategy: str):
+    """Reason a TEMPLATE must not open on this EA build, or None.
+
+    bugs/033, on the owner's instruction. An EA Template IS an EA-native
+    management definition -- `is_strategy_portable` returns True for every
+    template precisely because there is no Python-managed equivalent to fall
+    back to -- so the whole management of a template trade is whatever build
+    sits on the chart. Opening one against a stale `.ex5` runs it under logic
+    this app has already replaced.
+
+    Templates only. The EA-portable strategies have a Python fallback, and
+    failing them here would silently reroute rather than refuse, hiding the
+    problem instead of surfacing it.
+
+    Unknown is not stale (`ea_version_ok` is None with no source to compare
+    against), no EA at all is `open_trade`'s own "requires a connected, healthy
+    EA" rather than a second error for one cause, and a bridge that throws does
+    not block -- this sits on the order path.
+    """
+    try:
+        from backend.src.services.broker.ea_templates import is_template_override
+        if ea is None or not is_template_override(strategy):
+            return None
+        if getattr(ea, "ea_version_ok", None) is not False:
+            return None
+        running = getattr(ea, "ea_version", None) or "unknown"
+        expected = _expected_ea_version() or "unknown"
+        return (
+            f"EA Template refused: the chart is running EA v{running} but this "
+            f"app ships v{expected}. A template is managed entirely by the EA, "
+            f"so a stale build would run it under replaced logic. "
+            f"Fix: run tools/deploy_ea.sh, compile (F7) and re-attach the EA."
+        )
+    except Exception:
+        return None
+
+
+def ea_build_status() -> tuple[bool, str]:
+    """Is the terminal running a stale .ex5? Returns (stale, detail).
+
+    The handshake in `_version.py` has always logged this, and on 2026-09-09
+    that was not enough: the owner recompiled, re-attached, saw the old
+    behaviour, and the explanation sat in a WARNING nobody was reading. This
+    exposes the same state for the top-bar EA badge, because a green badge on a
+    stale build is the screen contradicting the log.
+
+    `ea_version_ok` is None when there is no EA source to compare against (a
+    packaged install). Unknown is NOT stale -- crying wolf there would train
+    the badge to be ignored, which is how the log warning stopped working.
+
+    Never raises: this runs on the header's refresh tick.
+    """
+    try:
+        from backend.src.services.broker import ea_bridge
+        bridge = ea_bridge.get_instance()
+        if bridge is None or getattr(bridge, "ea_version_ok", None) is not False:
+            return False, ""
+        running = getattr(bridge, "ea_version", None) or "unknown"
+        expected = _expected_ea_version() or "unknown"
+        return True, (
+            f"The EA on the chart is v{running}, but this app ships v{expected}. "
+            f"The compiled .ex5 is stale, so EA fixes are NOT running. "
+            f"Fix: run tools/deploy_ea.sh, then compile in MetaEditor (F7) and "
+            f"re-attach the EA."
+        )
+    except Exception:
+        return False, ""
+
+
+def ea_badge_state(ea_ok: bool, stale: bool, scope: str, stale_detail: str) -> tuple:
+    """(colour, text, tooltip) for the top-bar EA badge.
+
+    A pure function so the DECISION can be tested rather than the presence of a
+    colour string in the render: a mutation making the amber branch unreachable
+    left "orange" in the source and passed a grep-based test.
+
+    Stale outranks connected, and is amber rather than green or red: the EA IS
+    connected and managing trades, but it is not the build this app ships, so
+    every EA fix since is absent. A disconnected EA is not running any build, so
+    "not connected" outranks both.
+    """
+    if not ea_ok:
+        return "red", "EA", (
+            f"EA not connected on {scope} — trades still work, falling back to "
+            "Python-managed instead of native on-tick management")
+    if stale:
+        return "orange", "EA STALE BUILD", stale_detail
+    return "green", "EA", (
+        f"EA connected on {scope} — trades can be managed natively in MT5")

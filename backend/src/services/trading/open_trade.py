@@ -481,6 +481,14 @@ async def open_trade(
                 _ea.is_ea_healthy() if _ea is not None else None,
                 _ea.is_strategy_portable(strategy) if _ea is not None else None,
             )
+            # A template is managed ENTIRELY by the EA, so a stale build would
+            # run it under logic this app has already replaced (bugs/033).
+            # Refused rather than rerouted: there is no Python fallback for a
+            # template, which is the same reason the branch below raises when
+            # no EA is reachable at all.
+            _stale_block = _ea_mod.template_blocked_by_stale_build(_ea, strategy)
+            if _stale_block:
+                raise RuntimeError(_stale_block)
             if _ea is not None and _ea.is_ea_healthy() and _ea.is_strategy_portable(strategy):
                 _tps = {n: v for n, v in enumerate(
                     [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8], start=1

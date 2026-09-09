@@ -436,7 +436,11 @@ def main():
         try:
             from backend.src.db import backup as _db_backup
             from backend.src.config import DATA_DIR as _DATA_DIR
-            made = _db_backup.maybe_daily_backup(cfg["db_path"], _DATA_DIR / "backups")
+            # _db_path, NOT cfg["db_path"] -- the latter is the environment
+            # default, so on a two-account install every automatic backup was
+            # of a file the app no longer writes to (bugs/031). A backup of
+            # the wrong database is worse than none: it looks like protection.
+            made = _db_backup.maybe_daily_backup(_db_path, _DATA_DIR / "backups")
             if made:
                 log.info("Daily DB backup written: %s", made)
         except Exception as exc:

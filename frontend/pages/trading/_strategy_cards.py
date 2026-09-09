@@ -14,6 +14,65 @@ import logging
 _log = logging.getLogger(__name__)
 
 
+# Every Schedule Override banner currently on screen. bugs/032: the banner was
+# evaluated once while the card rendered and then never again, so turning the
+# Trading Schedule off on another tab left it showing until a browser reload --
+# a screen the operator checks BEFORE judging whether a trade routed as
+# expected, saying the opposite of the truth. The row is now always built and
+# its visibility follows the flag, refreshed on the card's existing 60s timer.
+_schedule_banners: list = []
+
+
+def render_schedule_override_banner(is_enabled):
+    """Draw the banner row and register it for refresh. Returns the row.
+
+    Built unconditionally and hidden when the schedule is off, rather than
+    created only when it is on -- otherwise there is nothing for the refresh to
+    turn back on.
+
+    While the Trading Schedule is enabled, the active window's own per-channel
+    strategy/template pick wins over everything selected on this card, for as
+    long as that window is active (see get_schedule_strategy_override and the
+    two sites that honour it). Shown on the schedule's ENABLED flag, not on
+    whether a window happens to be active right now, which would go stale the
+    moment a window boundary passed.
+    """
+    with ui.row().classes(
+        "w-full items-center gap-2 mb-2 px-2 py-1 rounded "
+        "bg-amber-900 border-l-4 border-amber-500"
+    ) as row:
+        ui.icon("event_available", size="xs").classes("text-amber-300")
+        ui.label("Schedule Override").classes("text-xs font-bold text-amber-200")
+        ui.icon("info_outline", size="xs").classes(
+            "text-amber-300 cursor-help"
+        ).tooltip(
+            "The Trading Schedule is on. Where the active window sets a "
+            "strategy or template for a channel, that wins over the pick "
+            "below for as long as the window is active. Windows with no "
+            "override configured leave the selection below in effect."
+        )
+    try:
+        row.visible = bool(is_enabled())
+    except Exception:
+        row.visible = False
+    _schedule_banners.append((row, is_enabled))
+    return row
+
+
+def refresh_schedule_override_banner(_reader=None) -> None:
+    """Re-read the flag and show/hide every registered banner.
+
+    Wrapped per banner: this runs on a UI timer, and a database hiccup must
+    neither raise into it nor blank a safety-relevant banner -- on failure the
+    row keeps whatever it was last showing.
+    """
+    for row, is_enabled in list(_schedule_banners):
+        try:
+            row.visible = bool((_reader or is_enabled)())
+        except Exception:
+            continue
+
+
 def _strategy_options(templates: list, current_values: list) -> dict:
     """The Channel Strategy dropdown's options: EA templates, and nothing else.
 
@@ -74,23 +133,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
     #
     # ONE banner, not two: this block was duplicated verbatim (comment and
     # all) and rendered the badge twice whenever the schedule was on.
-    if _csched.is_trading_schedule_enabled():
-        with ui.row().classes(
-            "w-full items-center gap-2 mb-2 px-2 py-1 rounded "
-            "bg-amber-900 border-l-4 border-amber-500"
-        ):
-            ui.icon("event_available", size="xs").classes("text-amber-300")
-            ui.label("Schedule Override").classes(
-                "text-xs font-bold text-amber-200"
-            )
-            ui.icon("info_outline", size="xs").classes(
-                "text-amber-300 cursor-help"
-            ).tooltip(
-                "The Trading Schedule is on. Where the active window sets a "
-                "strategy or template for a channel, that wins over the pick "
-                "below for as long as the window is active. Windows with no "
-                "override configured leave the selection below in effect."
-            )
+    render_schedule_override_banner(_csched.is_trading_schedule_enabled)
 
     with ui.row().classes("items-center gap-2 mb-1"):
         ui.label("Channel Strategy").classes("text-base font-bold text-yellow-300")
@@ -189,6 +232,10 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
                 _rec_icons[src].tooltip(tip or "No recommendation yet")
             ts = __import__("datetime").datetime.now().strftime("%H:%M")
             eval_status.text = f"Updated {ts}"
+            # bugs/032: the Schedule Override banner used to be evaluated once
+            # at render and then never again. It rides this existing poll
+            # rather than adding a second timer.
+            refresh_schedule_override_banner()
         except Exception as e:
             _log.debug("[trading] strategy tooltip refresh failed: %s", e)
 

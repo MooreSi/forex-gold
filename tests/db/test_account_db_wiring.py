@@ -87,3 +87,33 @@ class TestItCannotStopTheAppStarting:
         """No login means the environment default, which is exactly what an
         install that has not entered credentials should get."""
         assert reg.login_for_env(None, "demo") == ""
+
+
+class TestTheDailyBackupBacksUpTheRightFile:
+    """bugs/031, the same class of bug one line further down.
+
+    `run.py` resolved the per-account database and then took its daily backup
+    from `cfg["db_path"]` -- the ENVIRONMENT default. On a two-account install
+    that means every automatic backup is of a file the app no longer writes to.
+    Confirmed live 2026-09-09: the backups folder held four ~22 MB copies of
+    `forex_trader_demo.db` while the account in use was recording into a
+    different file entirely. A backup of the wrong database is worse than no
+    backup, because it looks like protection.
+    """
+
+    def test_the_backup_uses_the_resolved_path(self):
+        code = _code("run.py")
+        backup_call = code.index("maybe_daily_backup(")
+        line_end = code.index(")", backup_call)
+
+        assert 'cfg["db_path"]' not in code[backup_call:line_end], (
+            "the daily backup still copies the environment default"
+        )
+
+    def test_it_backs_up_what_the_app_actually_opened(self):
+        """`_db_path` is the value handed to `_db_mod.init()`, so the backup
+        and the open database cannot diverge."""
+        code = _code("run.py")
+        backup_call = code.index("maybe_daily_backup(")
+
+        assert "_db_path" in code[backup_call:code.index(")", backup_call)]

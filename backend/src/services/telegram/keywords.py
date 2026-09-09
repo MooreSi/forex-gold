@@ -80,24 +80,53 @@ DEFAULT_LEXICONS: dict[str, list[str]] = {
     # Seeded from signal_parser.py's own direction-detection regexes
     # (_DIRECTION_RE, _DIRECTION_B_RE, _GD2_DIRECTION_RE, _GD2_ZONE_DIRECTION_RE,
     # parse_instant_entry). Live triggers -- see the module docstring.
-    # No bare "BUY"/"SELL" here, on purpose (2026-08-27, owner directive).
-    # A one-word phrase makes any message whose line is just that word a
-    # market order, and channels post bare "BUY" as commentary as often as
-    # they post it as an instruction. Every entry below names the pair, the
-    # zone or the action, so it cannot be mistaken for either. Add a bare
-    # word in the UI if you want it -- deliberately, not by default.
+    # Updated 2026-09-09 from the owner's own live lexicons, on his request
+    # that the keywords he had added in the app be captured in the repo.
+    #
+    # NOTE the two lists are different KINDS of thing, and his edits read as
+    # though they are the same: buy_orders/sell_orders are LIVE triggers,
+    # limit_orders is a reference list the AI-fallback gate consults. Moving a
+    # phrase into limit_orders does not create a limit order -- that layout is
+    # matched by a regex in parser.py which no lexicon feeds. So "SELL ZONE"
+    # sitting in both is not a conflict, and the ZONE additions here are
+    # documentation rather than behaviour.
+    #
+    # HIS BARE "BUY" IS DELIBERATELY NOT HERE. He has one in his own install
+    # and it stays there; test_lexicon_direction_triggers refuses a one-word
+    # default (owner directive 2026-08-27, after bare BUY/SELL shipped briefly
+    # and were pulled). A lone "BUY" posted as commentary is indistinguishable
+    # from one posted as an instruction, and line-exact matching does not help
+    # with that. Addable in the UI, never by default.
+    #
+    # "BUY GOLD @" is INERT as a trigger: the matcher refuses any message
+    # stating a number, and a real "BUY GOLD @ 4394/4388" always carries one.
+    # Harmless, but it will not do what its wording suggests. See
+    # tests/core/test_logic_keyword_defaults_match_the_owners.py.
+    #
+    # A BARE "BUY" is now here, and it was previously refused on purpose
+    # (2026-08-27 directive): a one-word phrase makes any message whose line
+    # is just that word a market order, and channels post bare "BUY" as
+    # commentary as often as they post it as an instruction. That comment
+    # invited adding one "in the UI... deliberately, not by default", and he
+    # did. Shipping it as a DEFAULT goes a step further and is his call --
+    # pinned by tests/core/test_logic_keyword_defaults_match_the_owners.py so
+    # it stays a visible decision. Note there is no bare "SELL": the asymmetry
+    # is his, and is asserted so a later tidy-up cannot add one for symmetry.
     "buy_orders": [
-        "BUY NOW", "BUY GOLD", "BUY ZONE", "BUY ZONE NOW",
-        "BUY GOLD NOW", "XAU USD BUY", "XAUUSD BUY", "DIRECTION BUY",
+        "BUY NOW", "BUY GOLD", "BUY ZONE NOW", "BUY GOLD NOW",
+        "XAU USD BUY", "XAUUSD BUY", "DIRECTION BUY", "BUY GOLD @",
+        "SCALP BUY NOW", "PREPARE FOR A BUY",
     ],
     "sell_orders": [
         "SELL NOW", "SELL GOLD", "SELL ZONE", "SELL ZONE NOW",
         "SELL GOLD NOW", "XAU USD SELL", "XAUUSD SELL", "DIRECTION SELL",
+        "PREPARE FOR A SELL", "SCALP SELL NOW", "SELL GOLD @",
     ],
     # Extracted from _GD2_LIMITS_DIRECTION_RE / is_limit_order_signal.
     "limit_orders": [
         "LIMIT", "LIMITS", "AREA", "BUY LIMITS GOLD", "SELL LIMITS GOLD",
-        "BUY GOLD @", "SELL GOLD @",
+        "BUY ZONE", "SELL ZONE", "NEXT SELL ZONE", "NEXT BUY ZONE",
+        "FUTURE BUY LIMIT", "FUTURE SELL LIMIT",
     ],
 }
 

@@ -29,7 +29,7 @@ from backend.src.services.broker import ea_templates as _templates
 
 __all__ = [
     # EA connection — read-only
-    "get_effective_ea_status",
+    "get_effective_ea_status", "ea_build_status", "ea_badge_state",
     "ea_is_healthy",
     "ea_seconds_since_last_seen",
     # EA connection — reaches the EA
@@ -146,3 +146,15 @@ def override_for_template(*args, **kwargs):
 
 def ladder_rr(*args, **kwargs):
     return _templates.ladder_rr(*args, **kwargs)
+
+
+def ea_build_status(*args, **kwargs):
+    """Is the terminal running a stale EA .ex5? See ea_bridge.ea_build_status."""
+    from backend.src.services.broker import ea_bridge as _ea
+    return _ea.ea_build_status(*args, **kwargs)
+
+
+def ea_badge_state(*args, **kwargs):
+    """Colour/text/tooltip for the EA badge. See ea_bridge.ea_badge_state."""
+    from backend.src.services.broker import ea_bridge as _ea
+    return _ea.ea_badge_state(*args, **kwargs)

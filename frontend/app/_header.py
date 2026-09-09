@@ -602,13 +602,18 @@ def build_header(*, power_dialog, pause_dialog, root,
             try:
                 from backend.src.controllers import broker_controller as _ea_bridge_mod
                 ea_ok, ea_scope = _ea_bridge_mod.get_effective_ea_status()
-                ea_badge.props(f"color={'green' if ea_ok else 'red'}")
-                ea_badge.tooltip(
-                    f"EA connected on {ea_scope} — trades can be managed natively in MT5"
-                    if ea_ok else
-                    f"EA not connected on {ea_scope} — trades still work, "
-                    "falling back to Python-managed instead of native on-tick management"
-                )
+                # A STALE build is its own state, and amber rather than green:
+                # the EA is connected and working, but it is not the build this
+                # app ships, so every EA fix since is absent. On 2026-09-09 that
+                # was logged on every connection and read by nobody while the
+                # owner concluded a fix had not worked. Green here would be the
+                # screen contradicting the log.
+                stale, stale_detail = _ea_bridge_mod.ea_build_status()
+                _colour, _text, _tip = _ea_bridge_mod.ea_badge_state(
+                    ea_ok, stale, ea_scope, stale_detail)
+                ea_badge.props(f"color={_colour}")
+                ea_badge.text = _text
+                ea_badge.tooltip(_tip)
             except Exception as _ea_exc:
                 log.debug("EA badge refresh failed: %s", _ea_exc)
 

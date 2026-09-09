@@ -11,11 +11,10 @@ incident is named — those are not hypotheticals.
 
 ## The five that can cost money
 
-### 1. Never place, close or modify a real or demo MT5 order to test something
+### 1. Never place, close or modify a real trade on a live account, only ever test using the demo account
 
-Not "carefully", not "just once", not "on demo". Tests use fakes and
-sentinels. If you cannot test a change without touching a broker, that
-change needs a human at a demo terminal — stop and say so.
+Not "carefully", not "just once", only "on demo". Tests use fakes and
+sentinels and demo account.
 
 ### 2. The close path does not get "improved"
 

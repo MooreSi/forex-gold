@@ -97,6 +97,10 @@ is safe, say that instead of shipping it with confident wording.
 A report that overstates completion is the single most expensive thing an
 agent can produce here — the last one cost a full re-audit.
 
+### 11. Expert Advisor updates
+
+Every time updates are made to the Expert Advisor you need to ensure the version number within the EA is updated along with a timestamp
+
 ---
 
 ## Hard "do not" list

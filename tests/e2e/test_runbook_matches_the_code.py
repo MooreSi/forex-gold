@@ -41,6 +41,50 @@ QUOTED = [
      "backend/src/services/positions/reconciliation.py"),
     ("broker refused the close",
      "backend/src/services/positions/monitor_loop.py"),
+
+    # Demos 6-12, added 2026-09-09. The runbook grew from five demos to twelve
+    # and the pinning list did not follow -- so seven demos' worth of quoted
+    # output was unguarded, which is the exact drift this file was written to
+    # catch. Each fragment is chosen to sit inside ONE string literal: the
+    # first attempt at these picked "carried no close price", which the source
+    # wraps as "carried no " + "close price", and reported drift that was not
+    # there. The runbook wraps too, so a fragment has to fit inside one line of
+    # BOTH -- the check runs in both directions.
+    ("and the broker has no closing deal for it",
+     "backend/src/services/broker/ea_bridge/_events.py"),
+    ("recording an exit at $0",
+     "backend/src/services/broker/ea_bridge/_events.py"),
+    ("stays OPEN and",
+     "backend/src/services/broker/ea_bridge/_events.py"),
+    ("Max open trades reached",
+     "backend/src/services/trading/open_trade.py"),
+    ("global harvest threshold reached",
+     "mql5/ForexTraderBridge.mq5"),
+    ("global harvest closing ticket",
+     "mql5/ForexTraderBridge.mq5"),
+
+    # Demos 13-18, added 2026-09-09: the six filters shipped since the runbook
+    # was last extended. Five of the six refuse a trade, so a reworded reason
+    # is not cosmetic -- it is the difference between the operator recognising
+    # a correct refusal and recording a failed demo.
+    ("Higher-timeframe bias is",
+     "backend/src/services/risk/governor.py"),
+    ("'Only trade with the trend')",
+     "backend/src/services/risk/governor.py"),
+    ("Filled too soon",
+     "backend/src/services/risk/governor.py"),
+    ("'Ignore signals that fill immediately')",
+     "backend/src/services/risk/governor.py"),
+    ("[Resting] withdrew",
+     "backend/src/services/trading/resting_revalidation.py"),
+    ("Enable SL Parsing is off, so stops are not taken from Telegram.",
+     "backend/src/services/trading/ai_signal_fallback.py"),
+    ("EA Template refused: the chart is running EA v",
+     "backend/src/services/broker/ea_bridge/_version.py"),
+    ("Fix: run tools/deploy_ea.sh, compile (F7) and re-attach the EA.",
+     "backend/src/services/broker/ea_bridge/_version.py"),
+    ("EA STALE BUILD",
+     "backend/src/services/broker/ea_bridge/_version.py"),
 ]
 
 

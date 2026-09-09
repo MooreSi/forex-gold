@@ -218,6 +218,23 @@ async def apply_sl_adjustment(
     # trade already has one. Unreadable settings fail OPEN -- refusing to move
     # a stop because a read failed leaves a trade on a stop the channel has
     # already said to move.
+    # The claim comes FIRST, including on the decline path. It is the only
+    # thing that stops scan_messages offering the same message on the next
+    # pass, so a decline that returns before it re-parses and re-logs forever:
+    # running demo 17 on 2026-09-09 produced 4,099 identical DECLINED lines in
+    # 71 minutes, one a second, across five message ids.
+    #
+    # This reverses the ordering chosen when the toggle gate was added earlier
+    # that same day. That version deliberately did not claim, so the
+    # instruction could still be honoured if the toggle were switched back on
+    # while the message sat in the buffer. The live run priced both sides: the
+    # loop is continuous and certain, the mid-buffer toggle flip is
+    # speculative. See test_declined_sl_adjustment_is_not_retried_forever.py.
+    if not await db_module.to_db_thread(
+        db_module.try_claim_sl_adjustment, tg_id, channel_name, new_sl,
+    ):
+        return
+
     try:
         _rs = rs if rs is not None else db_module.get_risk_settings()
         _sl_parsing_on = bool((_rs or {}).get("lk_enable_sl_parsing", 1))
@@ -230,11 +247,6 @@ async def apply_sl_adjustment(
             "The trade keeps the stop it has.",
             channel_name, tg_id, via, new_sl,
         )
-        return
-
-    if not await db_module.to_db_thread(
-        db_module.try_claim_sl_adjustment, tg_id, channel_name, new_sl,
-    ):
         return
 
     row = trade_repo.find_channel_open_trade(channel_name)

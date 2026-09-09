@@ -24,6 +24,9 @@ gets missed. Same lesson as bugs/024 and reversal-engine/080.
 **OFF means do nothing, not substitute.** At entry the toggle substitutes a
 template or fallback distance, because a trade must have a stop. Here the trade
 already has one; the instruction is simply declined.
+
+**The message is still CLAIMED when declined** -- reversed later the same day,
+see `test_it_DOES_claim_the_message` below and the file it points at.
 """
 from __future__ import annotations
 
@@ -70,13 +73,27 @@ class TestWithTheToggleOff:
 
         assert spy["looked_for_trade"] == 0, "it went looking for a trade to modify"
 
-    def test_it_does_not_even_claim_the_message(self, spy):
-        """Claiming marks the message handled. Declining and claiming would
-        mean the instruction could never be honoured if the toggle were turned
-        back on while the message was still buffered."""
+    def test_it_DOES_claim_the_message(self, spy):
+        """REVERSED 2026-09-09, same day, by running demo 17 for real.
+
+        This test originally asserted the opposite -- that a declined message
+        must NOT be claimed, so the instruction could still be honoured if the
+        toggle were switched back on while the message sat in the buffer.
+
+        The live run priced that trade-off. The claim is the only thing that
+        stops `scan_messages` offering the message again, so not claiming
+        produced 4,099 identical DECLINED log lines in 71 minutes, one a
+        second, across five message ids. A continuous, certain cost against a
+        speculative benefit that needs someone to flip a setting mid-buffer.
+
+        The decline itself is unchanged: no stop is moved, nothing is
+        substituted. Only the claim moved ahead of the toggle check. The loop
+        is pinned separately in
+        `test_declined_sl_adjustment_is_not_retried_forever.py`.
+        """
         _run(_rs(0))
 
-        assert spy["claimed"] == 0
+        assert spy["claimed"] == 1
 
 
 class TestWithTheToggleOn:

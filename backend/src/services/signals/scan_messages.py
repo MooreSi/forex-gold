@@ -263,7 +263,9 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             # so it never needs another AI call for this channel's wording).
             _sl_adj = check_sl_adjustment_rules(text, channel_name)
             if _sl_adj is not None:
-                await _apply_sl_adjustment_impl(_sl_adj, channel_name, tg_id, 'learned_rule', ctx.bridge)
+                # rs passed through: this loop already holds the settings, and
+                # the gate inside would otherwise re-read them per message.
+                await _apply_sl_adjustment_impl(_sl_adj, channel_name, tg_id, 'learned_rule', ctx.bridge, rs)
                 continue
 
             # ── Logic Keywords: exclusion pre-check ──────────────────────────

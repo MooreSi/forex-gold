@@ -178,6 +178,7 @@ async def push_ai_recovered_created(
 
 async def apply_sl_adjustment(
     new_sl: float, channel_name: str, tg_id: str, via: str, bridge: Any,
+    rs: Optional[dict] = None,
 ) -> None:
     """Apply a recognised "Adjust SL to X" instruction to whichever open
     trade this channel most recently produced. via is "learned_rule"
@@ -201,6 +202,36 @@ async def apply_sl_adjustment(
     message every cycle for as long as it stayed buffered, each time
     sending a fresh "SL adjusted" alert (found live 2026-07-08 — same
     message re-triggered roughly once a minute for over half an hour)."""
+    # Enable SL Parsing OFF stops a follow-up moving an open trade's stop too.
+    # Reported live 2026-09-09 with the toggle off: "SL adjusted — GOLD
+    # DIGGERS INSTITUTIONAL ... 4391.65 -> 4395.0, Source: learned rule".
+    # apply_sl_parsing_override only covers a NEW signal's stated stop; this is
+    # a stop arriving in a later message, and the owner's reading is the plain
+    # one -- told not to take stops from Telegram, that covers both.
+    #
+    # HERE rather than at the call sites: two routes reach this function, the
+    # learned-rule fast path in scan_messages and the AI classifier above, and
+    # gating each is how the next route added gets missed.
+    #
+    # OFF means decline, not substitute: at entry the toggle supplies a
+    # template or fallback distance because a trade must have a stop, but this
+    # trade already has one. Unreadable settings fail OPEN -- refusing to move
+    # a stop because a read failed leaves a trade on a stop the channel has
+    # already said to move.
+    try:
+        _rs = rs if rs is not None else db_module.get_risk_settings()
+        _sl_parsing_on = bool((_rs or {}).get("lk_enable_sl_parsing", 1))
+    except Exception:
+        _sl_parsing_on = True
+    if not _sl_parsing_on:
+        log.info(
+            "[%s] SL adjustment (tg_id=%s, via=%s) to %.2f DECLINED — "
+            "Enable SL Parsing is off, so stops are not taken from Telegram. "
+            "The trade keeps the stop it has.",
+            channel_name, tg_id, via, new_sl,
+        )
+        return
+
     if not await db_module.to_db_thread(
         db_module.try_claim_sl_adjustment, tg_id, channel_name, new_sl,
     ):

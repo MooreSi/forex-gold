@@ -77,6 +77,10 @@ EXPECTED_KEYS = {
     "max_open_trades",
     "max_s",
     "max_total_drawdown_pct",
+    "min_fill_delay_enabled",  # added 2026-09-09 with the "Ignore signals
+    "min_fill_delay_s",        # that fill immediately" filter. Declared here
+                               # deliberately, as this file's docstring
+                               # requires. reversal-engine/040.
     "min_s",
     "mt5_bottle_path",
     "mt5_bridge_url",

@@ -235,6 +235,58 @@ async def current_htf_bias(bridge, rs: Optional[dict] = None) -> str:
     return value
 
 
+_MIN_FILL_DELAY_S = 300.0
+
+
+def fill_too_soon(created_at, now, rs: dict) -> Optional[str]:
+    """Refuse a signal that reaches its entry within moments of being created.
+
+    Returns a reason when the trade should be refused, None when it may
+    proceed. reversal-engine/040.
+
+    **Empirical, with no established mechanism.** Over every executed Reversal
+    Engine signal on record: fills inside five minutes are 443 trades at
+    -$2,142, while 5-15 minutes is 115 trades at 71.3% for +$1,041 -- and the
+    split holds in each of July, August and September rather than coming from
+    one month or a handful of outliers.
+
+    The obvious explanation was tested and REJECTED. "A fast fill means price
+    was already at or through the zone, so the level never held" splits the
+    same population into -$3.55 and -$2.91 a trade, which separates nothing and
+    covers under half the fast bucket. So this is a consistent effect whose
+    cause is unknown, which is exactly why it is off by default and why the
+    window is configurable rather than baked in.
+
+    Fails open on anything it cannot judge -- no creation time, a zero window,
+    a clock that ran backwards -- for the same reason as the bias gate: a risk
+    filter that refuses on missing DATA stops all trading the moment a field is
+    absent.
+    """
+    if not bool(rs.get("min_fill_delay_enabled", 0)):
+        return None
+    try:
+        created = float(created_at or 0)
+        if created <= 0:
+            return None
+        elapsed = float(now) - created
+        if elapsed < 0:
+            return None
+    except (TypeError, ValueError):
+        return None
+    try:
+        window = float(rs.get("min_fill_delay_s", _MIN_FILL_DELAY_S))
+    except (TypeError, ValueError):
+        # Garbage in the column must not silently switch a risk filter off.
+        window = _MIN_FILL_DELAY_S
+    if window <= 0 or elapsed >= window:
+        return None
+    return (
+        f"Filled too soon — {elapsed:.0f}s after the signal, under the "
+        f"{window:.0f}s minimum. (Trading > Strategy > Risk Settings: "
+        f"'Ignore signals that fill immediately')"
+    )
+
+
 def htf_bias_blocks(direction: str, htf_bias, rs: dict) -> Optional[str]:
     """Refuse a trade that runs against a DECIDED higher-timeframe bias.
 

@@ -42,6 +42,28 @@ files** — not everything is in the unified DB.
 
 ## Known things & gotchas
 
+- **The migration registry's history and rules (moved here from `backend/migrations/registry.py` 2026-09-09).** That file sits against the 800-line ceiling and every new migration pushed it over — twice in one day — so the prose moved and the rules stayed. **A new migration is ~6 lines; budget for it, or shrink something first.** The original rationale:
+
+```
+History: the boot-time migrations were one flat list of ~90 idempotent
+ALTER/CREATE statements inside database._apply_schema, originally wrapped in
+a single `except Exception: pass` (so a genuinely failed migration was
+indistinguishable from an already-applied one), later fail-closed via
+apply_migration, and now numbered here so a database records *which*
+migrations it has (`schema_version.version` = the last applied step).
+
+Rules for changing this file:
+- NEVER renumber, reorder, or edit an existing step — append a new one.
+- Every SQL step must stay idempotent (ADD COLUMN / CREATE TABLE IF NOT
+  EXISTS); apply_migration skips the benign already-applied errors and
+  aborts on anything else.
+- The statements below are the verbatim transcription of the old flat loop
+  (2026-08-11); the grouping follows the feature waves the comments named.
+
+These functions take a connection so they carry no import dependency on
+database.py; database.py calls run() from _apply_schema after the base
+CREATE TABLE pass.
+```
 - `db()` caches one connection **per thread**. `init()` explicitly closes the calling thread's and the DB worker's cached connections before re-pointing `_DB_PATH` — without that, a live/demo switch left writes going to the OLD file (found 2026-07-21).
 - `init()` also resets the 10s risk-settings memo — otherwise the app answered with the *other* environment's session gates for ten seconds after a switch.
 - Any DB-derived cache must register via `register_cache_invalidator()`; a broken invalidator is logged and must not block the environment switch.

@@ -195,9 +195,29 @@ def _render_risk_settings_subcard(rs: dict) -> None:
             "-$1,211 over 201. Off by default; turn it on to apply it."
         )
 
+        fill_gate = ui.checkbox(
+            "Ignore signals that fill immediately",
+            value=bool(rs.get("min_fill_delay_enabled", 0)),
+        ).classes("text-sm text-gray-300")
+        fill_gate.tooltip(
+            "Refuses a signal whose entry is reached within the window below "
+            "of the signal being posted. Measured on this account: fills "
+            "inside 5 minutes are 443 trades at -$2,142, while 5-15 minutes "
+            "is 115 trades at 71% for +$1,041 — and that split holds in every "
+            "month on record. WHY it happens is not known, so this is off by "
+            "default and the window is adjustable."
+        )
+        fill_secs = ui.number(
+            "Minimum seconds before a fill counts",
+            value=float(rs.get("min_fill_delay_s", 300) or 300),
+            min=0, max=3600, step=30, format="%.0f",
+        ).classes("w-full")
+
         def save_risk():
             try:
                 settings_ctl.update_risk_settings({
+                    "min_fill_delay_enabled":         int(bool(fill_gate.value)),
+                    "min_fill_delay_s":               float(fill_secs.value or 300),
                     "htf_bias_gate_enabled":          int(bool(htf_gate.value)),
                     "risk_governor_enabled":          int(bool(risk_gov.value)),
                     "max_daily_loss_pct":             float(max_dd.value      or 0),

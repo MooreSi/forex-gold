@@ -1,23 +1,11 @@
 """Schema migrations — an ordered, numbered registry, applied fail-closed.
 
-History: the boot-time migrations were one flat list of ~90 idempotent
-ALTER/CREATE statements inside database._apply_schema, originally wrapped in
-a single `except Exception: pass` (so a genuinely failed migration was
-indistinguishable from an already-applied one), later fail-closed via
-apply_migration, and now numbered here so a database records *which*
-migrations it has (`schema_version.version` = the last applied step).
-
 Rules for changing this file:
 - NEVER renumber, reorder, or edit an existing step — append a new one.
 - Every SQL step must stay idempotent (ADD COLUMN / CREATE TABLE IF NOT
-  EXISTS); apply_migration skips the benign already-applied errors and
-  aborts on anything else.
-- The statements below are the verbatim transcription of the old flat loop
-  (2026-08-11); the grouping follows the feature waves the comments named.
+  EXISTS); apply_migration skips already-applied errors, aborts on the rest.
 
-These functions take a connection so they carry no import dependency on
-database.py; database.py calls run() from _apply_schema after the base
-CREATE TABLE pass.
+History and rationale: docs/system/domains/data/README.md.
 """
 from __future__ import annotations
 
@@ -727,6 +715,13 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     # docs/todo/reversal-engine/080 and /090.
     (35, "Higher-timeframe bias gate, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN htf_bias_gate_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # Ignore signals that fill within moments of being created. OFF by
+    # default. Empirical, mechanism unknown: docs/todo/reversal-engine/040.
+    (36, "Minimum fill delay, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN min_fill_delay_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN min_fill_delay_s REAL NOT NULL DEFAULT 300.0",
     ]),
 ]
 

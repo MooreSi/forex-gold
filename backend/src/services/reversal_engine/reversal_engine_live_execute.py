@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time as _time
 
 from backend.src.services.risk import governor as _gov
 import time
@@ -241,6 +242,15 @@ class _LiveExecuteMixin:
                     "[RE-Engine] fill-time re-evaluation failed for %s, falling back to "
                     "creation-time ml_prob: %s", sig.get("signal_ref"), _refresh_exc,
                 )
+
+            # Minimum fill delay (reversal-engine/040). Signals reaching
+            # their entry within moments of creation lose money consistently;
+            # the mechanism is unknown, so this is off unless turned on.
+            _soon = _gov.fill_too_soon(sig.get("created_at"), _time.time(), rs)
+            if _soon:
+                re_db.update_live_exec(sig["id"], status="filled_too_soon")
+                _log.info("[RE-Engine] %s", _soon)
+                return
 
             # ML gate: block live execution when predicted R-multiple < 0 (expected loss)
             if fresh_prob is not None and float(fresh_prob) < _ML_BLOCK_THRESHOLD:

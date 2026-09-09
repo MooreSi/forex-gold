@@ -16,8 +16,10 @@ the sessions usually can't. Choose a safe provisional default, proceed, and reco
 
 ## The five rules that matter most
 
-1. **Never place, close or modify a real or demo MT5 order** — not to test, not
-   "just once". Tests use fakes and sentinels.
+1. **Never place, close or modify a real trade on a live account.** Testing on
+   the **demo** account is allowed (owner, 2026-09-09). The automated suite
+   still touches no broker at all — it uses fakes and sentinels, because it
+   runs unattended on CI and on other people's machines.
 2. **Never edit a test to make a change pass.** A failing test means the change
    is wrong, or the test knows something you don't.
 3. **Write the test first and watch it fail.** A test that has never been red
@@ -182,7 +184,7 @@ Each of these cost real time in a past session:
 - the change touches order placement, closing or position sizing
 - a test would have to be modified to pass
 - a ratchet baseline would have to rise
-- verifying it needs a real or demo broker connection
+- verifying it needs a LIVE broker connection (demo is yours to use)
 - you are about to say "this should be fine" about money
 
 **If the user says "yes" or "go ahead" to a plan that includes any of the

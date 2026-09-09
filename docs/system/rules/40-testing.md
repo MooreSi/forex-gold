@@ -92,7 +92,11 @@ test being bent — and it changes no assertion. Say so in the commit.
 
 ## Safety in tests
 
-**No test may place, close or modify a real or demo MT5 order.**
+**No test may place, close or modify ANY MT5 order — live or demo.**
+
+Rule 1's 2026-09-09 relaxation permits demo trading for development. It does
+not permit it *from the suite*, which runs unattended and against whatever
+account is configured. See `20-trading-safety.md`.
 
 - Bridges are fakes with canned responses.
 - Order-path collaborators are sentinels that record calls.

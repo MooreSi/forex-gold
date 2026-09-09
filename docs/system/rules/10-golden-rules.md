@@ -125,7 +125,8 @@ Stop and ask the owner when:
 - the change touches order placement, closing, or position sizing
 - a test would have to be modified to pass
 - a ratchet baseline would have to rise
-- the work needs a real or demo broker connection to verify
+- the work needs a LIVE broker connection to verify (demo does not need asking,
+  per rule 1 as amended 2026-09-09)
 - you are about to say "this should be fine" about money
 
 Asking costs a message. The alternatives have cost real money in this

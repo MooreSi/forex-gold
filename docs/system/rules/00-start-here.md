@@ -24,7 +24,8 @@ particular tool.
 
 ## The thirty-second version
 
-- **Never** place, close or modify a real or demo order to test something.
+- **Never** place, close or modify a real trade on a live account. Test on the
+  demo account instead — never in the automated suite, which uses fakes.
 - **Never** edit a test to make a change pass.
 - Write the test first, and **watch it fail** before you make it pass.
 - Run the full suite and all four gates before committing.

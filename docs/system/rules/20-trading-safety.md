@@ -32,7 +32,14 @@ If your change needs it edited, your change is out of scope.
 
 ## Test rules for these surfaces
 
-**No test may place, close or modify a real or demo order. Ever.**
+**No test in the suite may place, close or modify ANY order — live or demo.**
+
+Rule 1 was relaxed on 2026-09-09 to allow demo-account trading for development
+and testing. That relaxation does not reach the suite. `pytest` runs unattended,
+on CI, on other people's machines, and on whatever account happens to be
+configured; a test that opens an order is a test that opens an order on a
+terminal nobody is watching. Demo verification is a **deliberate, attended**
+act, done by a person or an agent that has just checked the account number.
 
 - Bridges are fakes returning canned dicts.
 - Order calls are sentinels that record and return.

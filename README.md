@@ -117,7 +117,8 @@ Everything an agent or a new contributor needs is in [docs/](docs/).
 | [docs/system/rules/50-workflow.md](docs/system/rules/50-workflow.md) | how a change gets made |
 | [docs/todo/](docs/todo/) | what we are building and why — the plan packs and their SPEC.md files |
 
-The short version: **never** place a real or demo order to test something,
+The short version: **never** place a real trade on a live account (demo is
+fine, the suite is not),
 **never** edit a test to make a change pass, write the test first and watch it
 fail, and run all the checks before committing.
 

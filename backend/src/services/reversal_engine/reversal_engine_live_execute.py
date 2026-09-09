@@ -147,10 +147,19 @@ class _LiveExecuteMixin:
                             or (fresh_htf == "bearish" and direction == "BUY" and level_score < 0.75)):
                         re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
                         re_db.update_live_exec(sig["id"], status="bias_skipped")
+                        # bugs/038: say WHICH of the two rules refused. The
+                        # owner's trend gate never looks at level_score, so
+                        # printing "< 0.75" for it stated a falsehood (0.95 <
+                        # 0.75) and credited the level-score bypass with a
+                        # refusal it had not made. These lines are the only
+                        # visible evidence that the gate is working at all.
+                        _why = _bias_block or (
+                            f"counter-bias level_score={level_score:.2f} < 0.75"
+                        )
                         _log.info(
-                            "[RE-Engine] bias gate blocked live exec %s -- htf now %s vs "
-                            "direction=%s, level_score=%.2f < 0.75",
-                            sig.get("signal_ref"), fresh_htf, direction, level_score,
+                            "[RE-Engine] bias gate blocked live exec %s -- htf now %s "
+                            "vs direction=%s: %s",
+                            sig.get("signal_ref"), fresh_htf, direction, _why,
                         )
                         return
 

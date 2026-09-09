@@ -110,6 +110,19 @@ def pro_model_status() -> dict:
 
 def pro_model_fit(*args, **kwargs):
     """Refit from the captured corpus. Expensive; the panel offers it as an
-    explicit button rather than running it on render."""
+    explicit button rather than running it on render.
+
+    BLOCKS for about five seconds on the live corpus. Anything running on the
+    event loop wants pro_model_fit_in_background instead (bugs/030)."""
     from backend.src.services.reversal_engine import pro_model as _pm
     return _pm.fit(*args, **kwargs)
+
+
+def pro_model_fit_in_background(force: bool = False) -> None:
+    """Start a refit and return at once.
+
+    For UI handlers: they run on the shared asyncio loop, so a synchronous fit
+    there freezes the EA socket reader and the monitor loop too, not just the
+    page that asked for it."""
+    from backend.src.services.reversal_engine import pro_model as _pm
+    _pm.fit_in_background(force=force)

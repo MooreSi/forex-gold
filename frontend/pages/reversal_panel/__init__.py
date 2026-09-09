@@ -192,7 +192,11 @@ def render() -> None:
             if e.value:
                 try:
                     from backend.src.controllers import engines_controller as pro_model
-                    pro_model.pro_model_fit(force=True)
+                    # Started, not awaited: this handler runs on the shared
+                    # event loop, so a synchronous ~5s train freezes the EA
+                    # socket reader and the monitor loop as well as this page
+                    # (bugs/030).
+                    pro_model.pro_model_fit_in_background(force=True)
                 except Exception as exc:
                     # Toggling the setting still succeeded; only the immediate
                     # refit failed, and it retrains on its own schedule anyway.

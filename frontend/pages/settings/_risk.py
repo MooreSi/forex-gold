@@ -213,12 +213,30 @@ def _render_risk_settings_subcard(rs: dict) -> None:
             min=0, max=3600, step=30, format="%.0f",
         ).classes("w-full")
 
+        resting_recheck = ui.checkbox(
+            "Re-check resting orders before they fill",
+            value=bool(rs.get("resting_revalidation_enabled", 1)),
+        ).classes("text-sm text-gray-300")
+        resting_recheck.tooltip(
+            "A limit order can wait up to an hour at the broker, and MT5 fills "
+            "it without asking the app again — so the trading schedule, the "
+            "news blackout, the fill delay, the R:R filters and the last M5 "
+            "candle are never re-asked, even though a queued signal is judged "
+            "on all of them. With this on, an order is re-judged as price "
+            "approaches it and withdrawn if the setup has gone, then put back "
+            "if conditions recover before it would have expired. You get a "
+            "Telegram message either way. On by default: it does not refuse "
+            "trades the app would otherwise take, it applies checks to an "
+            "order already placed."
+        )
+
         def save_risk():
             try:
                 settings_ctl.update_risk_settings({
                     "min_fill_delay_enabled":         int(bool(fill_gate.value)),
                     "min_fill_delay_s":               float(fill_secs.value or 300),
                     "htf_bias_gate_enabled":          int(bool(htf_gate.value)),
+                    "resting_revalidation_enabled":   int(bool(resting_recheck.value)),
                     "risk_governor_enabled":          int(bool(risk_gov.value)),
                     "max_daily_loss_pct":             float(max_dd.value      or 0),
                     "max_total_drawdown_pct":         float(max_tot_dd.value  or 0),

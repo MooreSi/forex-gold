@@ -197,7 +197,20 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                     if _rest_ea is not None:
                         await _rr.revalidate_resting_orders(
                             _rest_ea, rs,
-                            bias=await _gov.current_htf_bias(ctx.bridge, rs))
+                            bias=await _gov.current_htf_bias(ctx.bridge, rs),
+                            # limit-orders/040: the sweep now asks the same
+                            # gates a queued signal is judged on, and schedule,
+                            # news, R:R and momentum all need the market.
+                            #
+                            # The candle cache is refreshed further down this
+                            # cycle, so these are the previous cycle's bars --
+                            # up to one cycle stale against an M5 series, which
+                            # is not a distinction M5 can express. Reading them
+                            # here rather than moving the sweep keeps its
+                            # placement, which is deliberate: the case it
+                            # exists for is a resting order with nothing open.
+                            tick=tick,
+                            dpm_candles=ctx.get_dpm_candles() if ctx.get_dpm_candles else None)
                 except Exception:
                     log.debug("Resting-order revalidation failed", exc_info=True)
             # Will the pending-signal watcher run at the end of this cycle?

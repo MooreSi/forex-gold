@@ -29,11 +29,23 @@ import pytest
 from backend.src.services.broker import ea_bridge
 
 
+# What this app ships, read from the same authority `ea_build_status` reads:
+# the repo's own EA source. Hardcoding it here meant the version bump to v1.07
+# (limit-orders/030) failed a test about STALENESS, and worse, the `expected=`
+# argument the fake carried was never consulted by the code under test at all
+# -- the assertion passed only because the repo happened to sit at that
+# version. It would have rotted on every future bump for a reason unrelated to
+# what it checks.
+from backend.src.services.broker.ea_bridge._version import _expected_ea_version
+
+SHIPPED = _expected_ea_version()
+OLDER = "1.05"
+
+
 class _Bridge:
-    def __init__(self, ok, running=None, expected=None):
+    def __init__(self, ok, running=None):
         self.ea_version_ok = ok
         self.ea_version = running
-        self.ea_source_version = expected
 
 
 @pytest.fixture
@@ -46,24 +58,24 @@ def bridge(monkeypatch):
 
 class TestReadingTheBuildState:
     def test_a_stale_build_is_reported_stale(self, bridge):
-        bridge(_Bridge(ok=False, running="1.05", expected="1.06"))
+        bridge(_Bridge(ok=False, running=OLDER))
 
         stale, detail = ea_bridge.ea_build_status()
 
         assert stale is True
-        assert "1.05" in detail and "1.06" in detail
+        assert OLDER in detail and SHIPPED in detail
 
     def test_the_detail_names_the_fix(self, bridge):
         """An operator seeing this must know what to do without reading the
         source -- the whole failure is that the instruction was only in a log."""
-        bridge(_Bridge(ok=False, running="1.05", expected="1.06"))
+        bridge(_Bridge(ok=False, running=OLDER))
 
         _stale, detail = ea_bridge.ea_build_status()
 
         assert "deploy_ea" in detail
 
     def test_a_matching_build_is_not_stale(self, bridge):
-        bridge(_Bridge(ok=True, running="1.06", expected="1.06"))
+        bridge(_Bridge(ok=True, running=SHIPPED))
 
         assert ea_bridge.ea_build_status()[0] is False
 

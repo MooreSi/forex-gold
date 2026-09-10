@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.06"
+#property version   "1.07"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,12 +40,12 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.06"
+#define EA_VERSION "1.07"
 // Hand-maintained, and bumped in the same edit as EA_VERSION: __DATETIME__
 // says when the .ex5 was COMPILED, which tells you nothing about how old
 // the source behind it is. This says when the source last changed, so the
 // two together answer "is the running build the current one".
-#define EA_VERSION_DATE "2026-09-04"
+#define EA_VERSION_DATE "2026-09-10"
 
 #include <Trade\Trade.mqh>
 
@@ -1280,6 +1280,57 @@ void HandleOpenTrade(const string json)
 // never gets touched cleans itself up broker-side rather than resting
 // forever — expire_minutes matches core_limit_order_signal.py's own 4h
 // default (same window the Python-simulated zone-wait signals already use).
+//+------------------------------------------------------------------+
+//| Fill in a resting order's EA Template fields from the payload.    |
+//| limit-orders/030.                                                 |
+//|                                                                   |
+//| Two callers: HandlePlacePendingOrder, when a SINGLE-mode template |
+//| channel's "[LIMITS]" message places a resting order, and          |
+//| HandleRestorePendingOrder, which rebuilds one after this EA has   |
+//| restarted. Both must produce the same PendingOrder or a recompile |
+//| mid-rest silently demotes a template order to an untemplated one, |
+//| and the difference would only show at the fill, possibly hours    |
+//| later.                                                            |
+//|                                                                   |
+//| Nothing here is new state: PendingOrder has carried every one of  |
+//| these fields since the grid path was written, and                 |
+//| CheckPendingOrders() already copies all of them into the          |
+//| ManagedTrade it promotes. Only HandlePlacePendingOrder's hardcoded|
+//| isTemplate=false stood between a resting template order and being |
+//| managed as one.                                                   |
+//|                                                                   |
+//| anchorPrice is the RESTING price, not current market. A limit     |
+//| order opens where it rests, so that is what breakeven and the     |
+//| trail must measure from -- the same reasoning as Python's         |
+//| template_levels.PriceRef, which puts this order's SL and TPs      |
+//| there too.                                                        |
+//|                                                                   |
+//| tplGridGroup stays -1: this is one order, not a leg with siblings,|
+//| so nothing may cancel or group-close alongside it.                |
+//+------------------------------------------------------------------+
+void ApplyTemplateToPending(PendingOrder &p, const string &json,
+                            const double anchorPrice, const double sl)
+{
+   p.isTemplate = true;
+   p.tplTpslMode = JsonGetString(json, "tpl_tpsl_mode", "on");
+   p.tplAnchor = JsonGetString(json, "tpl_anchor", "unified");
+   p.tplAnchorPrice = anchorPrice;
+   p.tplTrailMode = JsonGetString(json, "tpl_trail_mode", "off");
+   p.tplBeMode = JsonGetString(json, "tpl_be_mode", "entry");
+   p.tplBeBufferPts = JsonGetDouble(json, "tpl_be_buffer_pts", 1.0);
+   p.tplBeTrigger = (int)JsonGetLong(json, "tpl_be_trigger", 1);
+   p.tplCancelPending = JsonGetLong(json, "tpl_cancel_pending", 0) != 0;
+   p.tplGridGroup = -1;
+   p.tplGroupTpAction = JsonGetLong(json, "tpl_group_tp_action", 0) != 0;
+   p.tplHarvestEnabled = JsonGetLong(json, "tpl_harvest_enabled", 0) != 0;
+   p.tplHarvestThreshold = JsonGetDouble(json, "tpl_harvest_threshold", 50.0);
+   p.tplOrigSlDist = MathAbs(anchorPrice - sl);
+   // The raw payload, kept so TplS/TplD/TplI/TplB can read any tpl_ key on
+   // demand -- which is what lets a field added to core_ea_templates.DEFAULTS
+   // reach this EA with no recompile.
+   p.tplCfg = json;
+}
+
 void HandlePlacePendingOrder(const string json)
 {
    string trade_id  = JsonGetString(json, "trade_id");
@@ -1328,12 +1379,26 @@ void HandlePlacePendingOrder(const string json)
    // this protocol (see be_at_pos above).
    p.closeFullOnLast = JsonHasKey(json, "close_full_on_last")
       ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
-   // This is the Limit Runner / ORB pending-order path, never a template --
-   // MQL5 zero-initialises struct members by default so this is already
-   // implied (isTemplate=false, tplGridGroup=0), but set it explicitly so
+   // Limit Runner and ORB reach here with no template, and MQL5 zero-
+   // initialises struct members anyway, but set it explicitly so
    // ManageTrade()'s isTemplate dispatch check never depends on that.
    p.isTemplate = false;
    p.tplGridGroup = -1;
+   // A SINGLE-mode EA Template resting as a limit order (limit-orders/030).
+   // Until 2026-09-10 this path hardcoded isTemplate=false unconditionally,
+   // on the reasoning that a template channel's "[LIMITS]" message never got
+   // here -- Python routed it to a market fill instead. limit-orders/010
+   // changed that: the keyword now decides the entry mechanic and the
+   // template decides the management, so the order rests AND is template-
+   // managed once it fills.
+   //
+   // closeFullOnLast is deliberately left as the explicit close_full_on_last
+   // read above rather than tpl_close_full_on_last. On this path that flag
+   // comes from the SIGNAL -- a literal "TP OPEN" line -- which the grid path
+   // has no equivalent of, and the template must not overrule what the
+   // channel actually said about leaving a runner open.
+   if(StringFind(strategy, "template:") == 0)
+      ApplyTemplateToPending(p, json, price, sl);
 
    int n = ArraySize(g_pending);
    ArrayResize(g_pending, n + 1);
@@ -1513,6 +1578,20 @@ void HandleRestorePendingOrder(const string json)
          ? (JsonGetLong(json, "close_full_on_last", 1) != 0) : true;
       p.isTemplate = false;
       p.tplGridGroup = -1;
+      // Same template rebuild as HandlePlacePendingOrder (limit-orders/030).
+      // Without it, an EA restart while a template order rested would put the
+      // order back under tracking with its template silently stripped, and
+      // the loss would surface only at the fill. Python re-sends the tpl_*
+      // fields with each restore_pending_order for exactly this.
+      //
+      // The anchor is the order's own resting price, which is what
+      // OrderSelect() has just confirmed is still on the book.
+      // Read from the payload, like every other field in this handler:
+      // Python is the durable source of truth here, and the restore message
+      // carries the order's own resting price and stop.
+      if(StringFind(strategy, "template:") == 0)
+         ApplyTemplateToPending(p, json, JsonGetDouble(json, "price"),
+                                JsonGetDouble(json, "stop_loss"));
 
       int n = ArraySize(g_pending);
       ArrayResize(g_pending, n + 1);

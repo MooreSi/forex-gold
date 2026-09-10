@@ -378,16 +378,34 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                 # whatever channel-override/active-strategy _resolve_strategy_
                 # and_skip_reason_impl above just computed, since the strategy
                 # here is format-triggered, not channel-configured — EXCEPT
-                # when the channel has an EA Template assigned (Trading >
-                # Strategy > Channel Strategy > "Template: <name>"): a
-                # template fully replaces strategy dispatch by design (see
-                # core_ea_templates.py's module docstring), so it must win
-                # over the format-triggered default too, not just over the
-                # built-in strategies. Fixed 2026-07-24 — a template-assigned
-                # channel's "[LIMITS]"-formatted signals were silently always
-                # executing as Limit Runner instead, so a configured Grid
-                # template never actually ran for them.
-                if parsed.get("tp_open") is not None and not _ea_templates.is_template_override(strategy):
+                # when the channel has a GRID EA Template assigned (Trading >
+                # Strategy > Channel Strategy > "Template: <name>"). Fixed
+                # 2026-07-24 — a template-assigned channel's "[LIMITS]"-
+                # formatted signals were silently always executing as Limit
+                # Runner instead, so a configured Grid template never actually
+                # ran for them.
+                #
+                # Narrowed from "any template" to "a grid template"
+                # (limit-orders/010, owner 2026-09-10). The 2026-07-24 fix was
+                # right about grid and wrong about single, and the two cases
+                # are opposites: a grid template IS a pending-order strategy
+                # (it stages resting legs across the zone, see
+                # scan_auto_execute.py's _tpl_grid branch), while a single
+                # template is a market-fill strategy with NO resting path
+                # behind it. So a "[LIMITS]" message on a single template lost
+                # its limit wording, fell through to the market branch, and
+                # was gap-fired up to MAX_GAP_FIRE_PTS past its own zone.
+                # Confirmed live 2026-09-10: GOLD DIGGERS INSTITUTIONAL,
+                # "BUY LIMITS GOLD @ 4415/4410 AREA", filled at market 4428.76
+                # with SL and all three TPs shifted +13.7 to match.
+                #
+                # **The keyword decides the entry mechanic; the template
+                # decides the management.** A single template still governs
+                # the fill completely — see limit_order_signal._resolve_
+                # management, which now returns it — so nothing about the
+                # template's authority is lost, only its claim over WHEN the
+                # trade is entered.
+                if parsed.get("tp_open") is not None and not _ea_templates.is_grid_template(strategy):
                     strategy      = STRATEGY_LIMIT_RUNNER
                     strategy_name = STRATEGY_NAMES[STRATEGY_LIMIT_RUNNER]
                     _exec_result = await _handle_limit_order_signal_impl(

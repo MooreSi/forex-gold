@@ -30,7 +30,8 @@ class _FakeBridge:
     """
 
     def __init__(self, partial_close_result=None, *,
-                 modify_order_result=None, modify_order_raises=False):
+                 modify_order_result=None, modify_order_raises=False,
+                 tick=None):
         self._result = partial_close_result or {
             "success": True, "close_price": None, "lots_closed": None}
         # modify_order defaults to success, which is what every existing caller
@@ -40,8 +41,19 @@ class _FakeBridge:
         # its source comment points at.
         self._modify_result = modify_order_result or {"success": True}
         self._modify_raises = modify_order_raises
+        # A canned tick for the paths that read one (2026-09-10). Added here
+        # rather than as a sixteenth local variant: "returns a specific tick"
+        # was listed above as a genuine reason to write your own, but the only
+        # thing that actually varies is the NUMBER, and a parameter expresses
+        # that better than another class. None keeps every existing caller
+        # exactly as it was -- get_tick then answers None, which is what a
+        # bridge with no quote does.
+        self._tick = tick
         self.partial_close_calls = []
         self.modify_order_calls = []
+
+    async def get_tick(self):
+        return self._tick
 
     async def partial_close(self, ticket, lots):
         self.partial_close_calls.append({"ticket": ticket, "lots": lots})

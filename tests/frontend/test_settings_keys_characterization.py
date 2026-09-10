@@ -98,6 +98,11 @@ EXPECTED_KEYS = {
     "profit_close_usd",
     "pw_label",
     "resend_api_key",
+    "resting_revalidation_enabled",  # added 2026-09-10 with the "Re-check
+                                     # resting orders before they fill"
+                                     # toggle. Declared here deliberately, as
+                                     # this file's docstring requires.
+                                     # limit-orders/040.
     "risk_governor_enabled",
     "send_provider",
     "send_time",

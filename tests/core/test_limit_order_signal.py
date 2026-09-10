@@ -63,12 +63,19 @@ class _FakeEA:
 
     async def place_pending_order(self, trade_id, direction, price, lot_size, stop_loss,
                                   tps, pcts, be_at_pos, strategy, expire_minutes=240.0,
-                                  close_full_on_last=True, trail_mode=None):
+                                  close_full_on_last=True, trail_mode=None,
+                                  template=None):
+        # `template` added 2026-09-10 (limit-orders/020): the real
+        # place_pending_order now carries an EA Template for a single-mode
+        # template resting as a limit order. A double that does not accept it
+        # rejects every call, which is what this fake did until the signature
+        # was brought back into line.
         self.calls.append(dict(
             trade_id=trade_id, direction=direction, price=price, lot_size=lot_size,
             stop_loss=stop_loss, tps=dict(tps), pcts=list(pcts), be_at_pos=be_at_pos,
             strategy=strategy, expire_minutes=expire_minutes,
             close_full_on_last=close_full_on_last, trail_mode=trail_mode,
+            template=template,
         ))
         if self._raise:
             raise self._raise

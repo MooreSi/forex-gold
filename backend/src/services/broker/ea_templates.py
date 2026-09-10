@@ -383,6 +383,38 @@ def override_for_template(name: str) -> str:
     return f"{TEMPLATE_OVERRIDE_PREFIX}{name}"
 
 
+def is_grid_template(override: str | None) -> bool:
+    """True when `override` names a template whose mode is "grid".
+
+    The distinction that limit-orders/010 turns on. A GRID template is a
+    pending-order strategy by construction -- it stages resting BuyLimit/
+    SellLimit legs across the signal's own zone -- so a "[LIMITS]"-shaped
+    message on one is already a resting order and must keep its own placement
+    branch. A SINGLE template is a market-fill strategy with no resting path
+    behind it at all, so the same message on one used to fall through to the
+    market branch and gap-fire up to MAX_GAP_FIRE_PTS past its zone (live
+    2026-09-10: a BUY zone of 4410-4415 filled at 4428.76).
+
+    One definition, because two call sites ask it -- scan_messages.py, which
+    decides whether the format-triggered Limit Runner strategy wins, and
+    scan_auto_execute.py, which decides whether to stage grid legs. They must
+    give the same answer for the same channel; core_instant_followup.py's own
+    VPS-forwarding twin is what drifting copies of one question look like.
+
+    Anything that is not a template override is not a grid template, and a
+    template that cannot be read is treated as not-grid: the caller's
+    fallback is the resting order, which is the safer of the two for a message
+    that literally says LIMITS.
+    """
+    if not is_template_override(override):
+        return False
+    try:
+        tpl = get_ea_template(template_name_from_override(override))
+    except Exception:
+        return False
+    return bool(tpl) and str(tpl.get("mode") or "") == "grid"
+
+
 def _row_to_template(row) -> dict:
     d = db_module.row_to_dict(row)
     for f in _BOOL_FIELDS:

@@ -422,10 +422,7 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin):
             # sending a Python bool silently evaluated false on the EA
             # side (StringToInteger("true") == 0), so harvest and grid
             # cancel-pending never fired regardless of the setting.
-            for _k, _v in template.items():
-                if _k in ("name", "created_at", "updated_at"):
-                    continue          # bookkeeping, not behaviour
-                msg[f"tpl_{_k}"] = (1 if _v else 0) if isinstance(_v, bool) else _v
+            _forward_template_fields(msg, template)
             # Grid mode, zone-spanned staging (2026-07-28) -- the signal's own
             # stated entry zone. When present, HandleOpenTemplateGrid stages
             # the legs ACROSS this zone rather than stepping grid_step_pts
@@ -467,6 +464,7 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin):
                                   expire_minutes: float = 240.0,
                                   close_full_on_last: bool = True,
                                   trail_mode: Optional[str] = None,
+                                  template: Optional[dict] = None,
                                   timeout: float = 5.0) -> dict:
         """Ask the EA to place a genuine resting BuyLimit/SellLimit order —
         unlike open_trade(), this does NOT fill immediately, so the returned
@@ -509,6 +507,11 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin):
         fallback does). Sent as an int (0/1), matching this EA's minimal
         JSON parser (no native boolean support — see be_at_pos above it).
 
+        template: the full EA Template field dict, forwarded as flat tpl_*
+        fields exactly as open_trade() does. Sent for a single-mode template
+        resting as a limit order (limit-orders/020). The EA reads them only
+        once limit-orders/030 lands -- see the call site below.
+
         trail_mode: same meaning as open_trade()'s own trail_mode param
         (None/omitted = trail to previous TP; "midpoint_lag2" = Adaptive
         Runner 2's rule) — needed because place_pending_order() is now
@@ -530,6 +533,16 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin):
                 msg[f"tp{n}"] = tps[n]
         for i, p in enumerate(pcts, start=1):
             msg[f"pct{i}"] = p
+        if template is not None:
+            # Same generic tpl_<key> encoding open_trade uses (limit-orders/
+            # 020). The EA only ACTS on these once limit-orders/030 lands its
+            # MQL5 half -- HandlePlacePendingOrder still hardcodes
+            # p.isTemplate = false -- so until then they ride the wire and are
+            # ignored, which its parser does harmlessly with any key it does
+            # not read. Sent from here regardless: a template resolved in
+            # Python and dropped at the boundary is the same bug one layer
+            # down, and it would be invisible.
+            _forward_template_fields(msg, template)
         ack_event = asyncio.Event()
         ack_box: dict = {}
 
@@ -699,6 +712,21 @@ from backend.src.services.broker.ea_bridge._version import (  # noqa: E402
     ea_build_status,
     template_blocked_by_stale_build,
 )
+
+
+def _forward_template_fields(msg: dict, template: dict) -> None:
+    """Write a template's fields into `msg` as flat tpl_<key> entries.
+
+    One copy, because two order calls now send a template: open_trade (a
+    market fill or a grid) and place_pending_order (a single-mode template
+    resting as a limit order, limit-orders/020). The rules below are the
+    reason this is generic rather than a field list, and they were each paid
+    for once already -- see open_trade's call site for the history.
+    """
+    for _k, _v in template.items():
+        if _k in ("name", "created_at", "updated_at"):
+            continue          # bookkeeping, not behaviour
+        msg[f"tpl_{_k}"] = (1 if _v else 0) if isinstance(_v, bool) else _v
 
 
 def get_effective_ea_status() -> tuple[bool, str]:

@@ -723,6 +723,13 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN min_fill_delay_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN min_fill_delay_s REAL NOT NULL DEFAULT 300.0",
     ]),
+
+    # Re-judge a resting order before it fills; withdraw it if the setup has
+    # gone. ON by default: it refuses no trade the app would otherwise take.
+    # Own column, not htf_bias_gate_enabled's -- limit-orders/040.
+    (37, "Re-check resting orders before they fill, on by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN resting_revalidation_enabled INTEGER NOT NULL DEFAULT 1",
+    ]),
 ]
 
 # The schema generation a fully migrated database carries = the last step.

@@ -413,6 +413,11 @@ def test_restore_pending_order_wire_format():
     bridge = _healthy_bridge()
     row = {
         "trade_id": "t1", "ea_ticket": 999, "direction": "BUY",
+        # `price` added to the payload 2026-09-10 (limit-orders/030): the EA's
+        # ApplyTemplateToPending anchors a restored template order's breakeven
+        # and trail on the price it rests at. A real vantage_pending_orders row
+        # has always carried this column; the fixture simply never did.
+        "price": 4148.0,
         "lot_size": 0.10, "stop_loss": 4141.0, "strategy": "limit_runner",
         "be_at_pos": 0, "tp_open": 1,
         "tps_json": json.dumps({1: 4151.0, 2: 4155.0, 3: 4160.0}),
@@ -426,7 +431,11 @@ def test_restore_pending_order_wire_format():
     assert sent["direction"] == "BUY"
     assert sent["lot_size"] == 0.10
     assert sent["stop_loss"] == 4141.0
+    assert sent["price"] == 4148.0
     assert sent["strategy"] == "limit_runner"
+    assert not [k for k in sent if k.startswith("tpl_")], (
+        "a non-template order's restore payload carries template fields"
+    )
     assert sent["be_at_pos"] == 0
     assert sent["close_full_on_last"] == 0  # tp_open=1 -> last TP doesn't close everything
     assert sent["tp1"] == 4151.0 and sent["tp2"] == 4155.0 and sent["tp3"] == 4160.0
@@ -437,6 +446,7 @@ def test_restore_pending_order_close_full_on_last_when_no_tp_open():
     bridge = _healthy_bridge()
     row = {
         "trade_id": "t2", "ea_ticket": 1000, "direction": "SELL",
+        "price": 4155.0,
         "lot_size": 0.10, "stop_loss": 4160.0, "strategy": "orb_fixed",
         "be_at_pos": 0, "tp_open": 0,
         "tps_json": json.dumps({1: 4150.0}),

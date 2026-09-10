@@ -50,6 +50,12 @@ class RestoreMixin:
             "trade_id": row["trade_id"],
             "ticket": row["ea_ticket"],
             "direction": row["direction"],
+            # The order's own resting price (limit-orders/030). Never sent
+            # before, because nothing on this path needed it: the EA reads the
+            # live order from the book. ApplyTemplateToPending does need it --
+            # a template's breakeven and trail measure from where the order
+            # opens, which for a resting order is where it rests.
+            "price": row["price"],
             "lot_size": row["lot_size"],
             "stop_loss": row["stop_loss"],
             "strategy": row["strategy"],
@@ -60,6 +66,39 @@ class RestoreMixin:
             msg[f"tp{n_str}"] = price
         for i, p in enumerate(pcts, start=1):
             msg[f"pct{i}"] = p
+        # A single-mode EA Template resting as a limit order carries its
+        # template, and must still carry it after an EA restart -- otherwise a
+        # recompile mid-rest silently demotes it to an untemplated order and
+        # the loss shows up only at the fill, hours later. Deploying 030 is
+        # itself a recompile, so this window is not hypothetical.
+        #
+        # Re-fetched BY NAME from the strategy string rather than stored
+        # alongside the order: `vantage_pending_orders.strategy` already holds
+        # "template:<name>", and a second copy of the values in that table
+        # would go stale the moment the user edited the template -- the order
+        # would resume under numbers that exist nowhere in the UI.
+        #
+        # A template that has since been deleted restores with no tpl_* fields
+        # rather than not restoring at all: losing the template is bad, losing
+        # the order's tracking entirely is the gap this whole method exists to
+        # close.
+        from backend.src.services.broker import ea_templates as _tpl_mod
+        strategy = row.get("strategy") or ""
+        if _tpl_mod.is_template_override(strategy):
+            try:
+                template = _tpl_mod.get_ea_template(
+                    _tpl_mod.template_name_from_override(strategy))
+            except Exception:
+                template = None
+            if template:
+                from backend.src.services.broker.ea_bridge import _forward_template_fields
+                _forward_template_fields(msg, template)
+            else:
+                log.warning(
+                    "[EABridge] restoring %s under %s with no template -- it is "
+                    "no longer in the database; the order stays tracked but the "
+                    "EA will not manage it as a template",
+                    row.get("trade_id"), strategy)
         await self._send(msg)
 
     async def _restore_pending_orders(self) -> None:

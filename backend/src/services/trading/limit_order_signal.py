@@ -62,6 +62,8 @@ from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.positions.core_closed_market_queue import queue_closed_market_limit, should_queue
 from backend.src.services.risk.strategy_params import get_strategy_params
+from backend.src.services.trading import template_levels as _template_levels
+from backend.src.services.trading.open_trade import resolve_template_tps
 from backend.src.utils.models import CONTRACT_SIZE, MAX_TP, STRATEGY_LIMIT_RUNNER
 
 log = logging.getLogger(__name__)
@@ -140,10 +142,32 @@ def _resolve_management(
 
     from backend.src.services.broker.ea_templates import is_template_override
     if is_template_override(override):
-        # Should be unreachable -- engine.py routes template channels away
-        # from this module entirely -- but a template's settings live in a
-        # different shape altogether, so never try to ladder one here.
-        return default
+        # Reachable since limit-orders/010: a "[LIMITS]" message on a
+        # SINGLE-mode template now rests here instead of executing at market,
+        # and the template manages the fill. (A GRID template still never
+        # reaches this module -- it stages its own legs, and scan_messages.py
+        # routes it away.)
+        #
+        # The template supplies its own stop, ladder and sizing above; what it
+        # needs from here is only the strategy stamp, which goes onto
+        # vantage_pending_orders and is read back at fill time to decide how
+        # the position is managed. A wrong value there mismanages the trade
+        # silently, which is the whole reason place_pending_order takes it
+        # explicitly.
+        #
+        # pcts/be_at_pos are Limit Runner's shape, not the template's: the EA
+        # manages a template entirely from its tpl_* fields and never reads
+        # t.pcts/t.beAtPos on that branch, exactly as this function already
+        # hands inert placeholders to every other non-ladder strategy. They
+        # still carry the TP OPEN reserve, because the reserve is a property
+        # of the SIGNAL rather than of the ladder -- see the docstring above
+        # -- so a runner leg survives whichever branch ends up reading them.
+        return (
+            override,
+            _limit_runner_pcts(n, tp_open, params),
+            max(int(params.get("be_at_pos", 1)) - 1, 0),
+            None,
+        )
 
     from backend.src.services.trading.open_trade import (
         _EA_LADDER_PCTS, _EA_LADDER_BE_AT_POS, _EA_LADDER_TRAIL_MODE,
@@ -162,6 +186,30 @@ def _resolve_management(
         _EA_LADDER_BE_AT_POS[override],
         _EA_LADDER_TRAIL_MODE.get(override),
     )
+
+
+def _template_for_channel(channel_name: str) -> dict | None:
+    """The SINGLE-mode EA Template governing this channel, or None.
+
+    Grid templates return None on purpose: they never reach this module (see
+    scan_messages.py's routing), and returning one here would apply a grid's
+    geometry to a single resting order. Any lookup failure is also None -- the
+    order then rests on the signal's own levels, which is the behaviour this
+    module had before limit-orders/020 and a safe answer to "I could not read
+    the template".
+    """
+    from backend.src.services.broker import ea_templates as _tpl_mod
+    from backend.src.services.channels.repo import get_channel_strategy_override
+    try:
+        override = get_channel_strategy_override(channel_name)
+        if not _tpl_mod.is_template_override(override):
+            return None
+        if _tpl_mod.is_grid_template(override):
+            return None
+        return _tpl_mod.get_ea_template(_tpl_mod.template_name_from_override(override))
+    except Exception:
+        log.warning("[LimitRunner] could not resolve the template for %r", channel_name)
+        return None
 
 
 async def handle_limit_order_signal(
@@ -236,17 +284,53 @@ async def handle_limit_order_signal(
     if not tps:
         return {"skip_reason": "Limit order skipped — signal has no TP levels."}
 
-    n = len(tps)
     tp_open = bool(parsed.get("tp_open"))
-    manage_strategy, pcts, be_at_pos, trail_mode = _resolve_management(
-        channel_name, n, tp_open,
-    )
 
     # Near edge of the quoted AREA -- the price side reached first as the
     # market approaches the zone from outside it (BUY: top of the zone,
     # SELL: bottom), same boundary price_in_entry_range() already treats as
     # "in zone" for the Python-simulated path (core_scan_messages_auto_execute.py).
     price = entry_high if direction == "BUY" else entry_low
+
+    # ── EA Template levels (limit-orders/020) ────────────────────────────
+    # Since 010, a "[LIMITS]"-shaped message on a SINGLE-mode template channel
+    # routes here instead of executing at market. The keyword decided the
+    # entry mechanic; the template decides everything else about the trade --
+    # its stop, its ladder and its size -- exactly as it would on a market
+    # fill. Without this the order would rest and then fill under Limit
+    # Runner's own even split and the generic risk_per_trade_pct, ignoring the
+    # template entirely: the same mismatch bugs/023 found on the IME path.
+    #
+    # **Measured from `price`, not from the tick.** A template states
+    # distances; a resting order fills where it rests, which may be an hour
+    # and many points from the current market. Owner decision 2026-09-10
+    # (docs/todo/limit-orders/QUESTIONS.md #1). Live that gap was 13.74
+    # points, which would have put a 60-pip BUY stop at 4422.74 -- above its
+    # own entry.
+    #
+    # No candles reach this path, so `use_dynamic_atr` has no ATR to use and
+    # falls back to sl_pips, which template_sl_at handles. Worth knowing
+    # rather than worth plumbing candles here: an ATR read at placement time
+    # describes a market the order will not fill in anyway.
+    _template = _template_for_channel(channel_name)
+    if _template is not None:
+        _tpl_tps, _, _ = resolve_template_tps(
+            _template, direction, _template_levels.PriceRef(price),
+            [parsed.get(f"tp{i}") for i in range(1, MAX_TP + 1)],
+            channel_name,
+        )
+        if _tpl_tps:
+            tps = {int(k): float(v) for k, v in _tpl_tps.items()}
+        # sl_pips = 0 is unset, not an instruction to invent a stop -- the
+        # signal's own then stands, unchanged from resolution.py.
+        _tpl_sl = _template_levels.template_sl_at(_template, direction, price)
+        if _tpl_sl is not None:
+            stop_loss = _tpl_sl
+
+    n = len(tps)
+    manage_strategy, pcts, be_at_pos, trail_mode = _resolve_management(
+        channel_name, n, tp_open,
+    )
 
     # Higher-timeframe bias gate. Placed before BOTH exits below -- the
     # pending order and the realignment branch that turns a breached limit
@@ -260,10 +344,24 @@ async def handle_limit_order_signal(
         return {"skip_reason": f"Limit order skipped — {_bias_block}"}
 
     balance = await get_trading_balance_fn()
-    lot = suggest_lot_size_fn(price, stop_loss, balance, float(rs.get("risk_per_trade_pct", 0.5)))
-    strategy_lot = float(rs.get("strategy_lot_size", 0))
-    if strategy_lot > 0:
-        lot = strategy_lot
+    # A template sizes from its own Entries & Lots fields, not the generic
+    # risk-based path -- the same rule and the same order scan_auto_execute.py
+    # applies on the market path (limit-orders/020). risk_pct wins when set;
+    # otherwise the anchor lot, capped at the account's own ceiling so a
+    # template edited to a large anchor cannot walk past it.
+    if _template is not None:
+        _tpl_risk_pct = float(_template.get("risk_pct") or 0)
+        if _tpl_risk_pct > 0:
+            lot = suggest_lot_size_fn(price, stop_loss, balance, _tpl_risk_pct)
+        else:
+            lot = min(float(_template.get("lot_anchor") or 0.01),
+                      float(rs.get("max_lot_size", 0.10)))
+    else:
+        lot = suggest_lot_size_fn(price, stop_loss, balance,
+                                  float(rs.get("risk_per_trade_pct", 0.5)))
+        strategy_lot = float(rs.get("strategy_lot_size", 0))
+        if strategy_lot > 0:
+            lot = strategy_lot
 
     if bool(rs.get("lk_entry_realignment", 0)) and bridge is not None:
         tick = await bridge.get_tick()
@@ -285,6 +383,12 @@ async def handle_limit_order_signal(
             expire_minutes=_DEFAULT_EXPIRE_MINUTES,
             close_full_on_last=not tp_open,
             trail_mode=trail_mode,
+            # The EA reads these only once limit-orders/030 lands its MQL5
+            # half; until then they ride the wire and are ignored. Sending
+            # them from here regardless is deliberate -- a template resolved
+            # in Python and then dropped at the boundary is the same bug one
+            # layer down, and it would be invisible.
+            template=_template,
         )
     except Exception as exc:
         log.warning("[LimitRunner] place_pending_order failed for tg_id=%s: %s", tg_id, exc)

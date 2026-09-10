@@ -28,6 +28,63 @@ def fetch_working_pending_orders() -> list[dict]:
         ]
 
 
+def fetch_revalidatable_pending_orders() -> list[dict]:
+    """Every resting order the pre-fill sweep may act on (limit-orders/040).
+
+    Two statuses, not one. `working` is on the broker's book and can be
+    withdrawn; `withdrawn` is one this app pulled and may put back if the
+    condition that pulled it clears before the order's original life runs out.
+    `cancelled` is deliberately absent -- that is the user cancelling or the
+    broker expiring, and neither comes back.
+    """
+    with db() as conn:
+        return [
+            row_to_dict(r) for r in conn.execute(
+                "SELECT * FROM vantage_pending_orders "
+                "WHERE status IN ('working','withdrawn')"
+            ).fetchall()
+        ]
+
+
+def mark_pending_order_withdrawn(trade_id: str, reason: str, now: float) -> None:
+    """Pulled from the book, but still alive.
+
+    Deliberately NOT apply_pending_cancelled: that writes status='cancelled'
+    AND cancels the signal behind it. Both are final, and a withdrawal is not
+    -- the setup is exactly what may come back. The signal row is left
+    untouched here for that reason.
+    """
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_pending_orders SET status='withdrawn' WHERE trade_id=?",
+            (trade_id,),
+        )
+
+
+def mark_pending_order_rearmed(trade_id: str, ticket, now: float) -> None:
+    """Back on the book under a NEW broker ticket.
+
+    The ticket must be updated with the status: a row left carrying the dead
+    one would send the next cancel at an order that no longer exists, and the
+    live one would stay on the book unwatched.
+    """
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_pending_orders SET status='working',ea_ticket=? WHERE trade_id=?",
+            (ticket, trade_id),
+        )
+
+
+def mark_pending_order_expired(trade_id: str, now: float) -> None:
+    """Withdrawn and now past the life it was placed with. A terminal state,
+    so the sweep stops reconsidering it on every cycle."""
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_pending_orders SET status='expired',resolved_at=? WHERE trade_id=?",
+            (now, trade_id),
+        )
+
+
 def fetch_pending_order(trade_id: str) -> dict:
     with db() as conn:
         return row_to_dict(

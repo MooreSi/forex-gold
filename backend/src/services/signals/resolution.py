@@ -35,6 +35,7 @@ from backend.src.services.risk.governor import (
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
+from backend.src.services.trading.template_levels import template_sl_at as _template_sl_at
 from backend.src.services.risk.schedule import check_trading_schedule, get_schedule_strategy_override
 from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
@@ -558,22 +559,16 @@ async def resolve_open_trade_params(
         # atr_sl_mult" per its own comment, when candle data is available to
         # compute one. Falls back to sl_pips (and, failing that, the
         # signal's own stop) if it isn't.
-        _tpl_sl_dist = None
-        if _template and bool(_template.get("use_dynamic_atr")) and dpm_candles:
-            from backend.src.services.dpm.engine import compute_atr
-            _tpl_atr = compute_atr(dpm_candles, period=int(_template.get("atr_period") or 14)) or 0.0
-            if _tpl_atr > 0:
-                _tpl_sl_dist = _tpl_atr * float(_template.get("atr_sl_mult") or 1.5)
-        if _tpl_sl_dist is None:
-            _tpl_sl_pips = float(_template.get("sl_pips") or 0) if _template else 0.0
-            if _tpl_sl_pips > 0:
-                _tpl_sl_dist = _tpl_sl_pips * PIPS_TO_PRICE_XAUUSD
-        if _tpl_sl_dist is not None:
-            _tpl_sl_ref = tick.ask if _dir == "BUY" else tick.bid
-            stop_loss_to_use = round(
-                _tpl_sl_ref - _tpl_sl_dist if _dir == "BUY" else _tpl_sl_ref + _tpl_sl_dist,
-                2,
-            )
+        #
+        # The conversion itself lives in template_levels.template_sl_at
+        # (limit-orders/020) so the resting-order path can reuse it with its
+        # own reference price -- a limit order fills where it rests, not where
+        # the tick is. This call is the market path and passes the tick, which
+        # is exactly what it always did.
+        _tpl_sl = _template_sl_at(
+            _template, _dir, tick.ask if _dir == "BUY" else tick.bid, dpm_candles)
+        if _tpl_sl is not None:
+            stop_loss_to_use = _tpl_sl
     elif strategy == STRATEGY_NO_SL_SCALE:
         # ADX > 30 gate: only open Trend Ratchet in confirmed trending conditions
         if dpm_candles:

@@ -99,19 +99,26 @@ class TestItLeavesEverythingElseAlone:
         assert _run(ea, _rows("BUY", "SELL"), "bearish", {}) == 0
         assert ea.cancelled == []
 
-    def test_with_the_gate_off_it_does_not_even_LOOK(self):
+    def test_with_everything_off_it_does_not_even_LOOK(self):
         """Cancelling nothing is not enough: `htf_bias_blocks` has its own
         toggle check, so the early return can be deleted and this sweep still
         cancels nothing -- while doing a database read every minute on every
         install that has the feature switched off. Proved by mutation; the
         assertion is that the fetch never happens.
+
+        Updated 2026-09-10 (limit-orders/040): the sweep now has TWO reasons to
+        run and a toggle for each -- the trend gate for the bias half, and
+        `resting_revalidation_enabled` for the schedule/news/R:R/momentum half,
+        which is ON by default. So "off" means both off, and `rs = {}` no
+        longer expresses it: an empty settings dict defaults the new one to on.
+        The behaviour being pinned is unchanged -- no database read when there
+        is nothing to do -- only what constitutes "nothing to do".
         """
         looked = []
         ea = _EA()
+        OFF = {"htf_bias_gate_enabled": 0, "resting_revalidation_enabled": 0}
 
-        n = _run(ea, _rows("BUY"), "bearish", {},
-                 )  # rs = {} -> gate off
-        assert n == 0
+        assert _run(ea, _rows("BUY"), "bearish", OFF) == 0
 
         # and again, watching whether the row source is touched at all
         import asyncio as _a
@@ -120,9 +127,30 @@ class TestItLeavesEverythingElseAlone:
             looked.append(1)
             return _rows("BUY")
 
-        _a.run(rr.revalidate_resting_orders(ea, {}, bias="bearish", fetch=_fetch))
+        _a.run(rr.revalidate_resting_orders(ea, OFF, bias="bearish", fetch=_fetch))
 
-        assert looked == [], "the sweep read the pending orders with the gate off"
+        assert looked == [], "the sweep read the pending orders with everything off"
+
+    def test_the_two_toggles_are_independent(self):
+        """The coupling limit-orders/040 exists to break: switching the trend
+        gate off must NOT switch the schedule/news re-check off with it, or
+        someone turning off a trend filter silently stops orders being pulled
+        out of a news blackout."""
+        looked = []
+        ea = _EA()
+
+        def _fetch():
+            looked.append(1)
+            return _rows("BUY")
+
+        import asyncio as _a
+        _a.run(rr.revalidate_resting_orders(
+            ea, {"htf_bias_gate_enabled": 0, "resting_revalidation_enabled": 1},
+            bias="bearish", fetch=_fetch))
+
+        assert looked == [1], (
+            "the trend gate being off stopped the sweep looking at all"
+        )
 
     def test_an_order_agreeing_with_the_bias_stays(self):
         ea = _EA()

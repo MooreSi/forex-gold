@@ -437,11 +437,11 @@ async def execute_auto_signal(
                         # "wait for price" mechanism now -- MT5 itself watches
                         # for the fill, not this Python poll. No gap adjustment,
                         # no queue-and-wait: the zone IS the resting order.
-                        _tpl_grid = False
-                        if ea_templates.is_template_override(strategy):
-                            _tpl = ea_templates.get_ea_template(
-                                ea_templates.template_name_from_override(strategy))
-                            _tpl_grid = bool(_tpl) and _tpl.get("mode") == "grid"
+                        # One definition, shared with scan_messages.py's
+                        # limit-order routing (limit-orders/010) -- both ask
+                        # "is this channel on a grid template?" and a second
+                        # local copy is how the two come to disagree.
+                        _tpl_grid = ea_templates.is_grid_template(strategy)
 
                         if _tpl_grid:
                             signals_repo.insert_activated_grid_signal(

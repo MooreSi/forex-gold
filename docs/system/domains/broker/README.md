@@ -214,3 +214,37 @@ Variance of a few hundredths of a point is fill slippage, not drift.
 2026-09-08 on the assumption it had drifted, and it had not — the governing
 template simply said `sl_pips=50`. Having the ladder checked against the config
 once, from data, saves the next person that detour.
+
+
+## The EA moves stops silently, and TP1 can arm the trail (2026-09-10)
+
+Two things that make a live stop differ from the template's `sl_pips` with
+nothing wrong:
+
+**1. Nothing logs a stop move.** Traced on ticket 1977022272: opened with
+`SL=4438.26`, the broker later reported `4431.23`, and neither the app log nor
+the EA log carries a single line about it. If you are trying to work out why a
+stop is where it is, the EA log will not tell you — compare the open line
+against `/positions` instead.
+
+**2. `tp1_trigger_level` arms the trail regardless of `trail_activation`.**
+`GD Instituational - single` sets `trail_activation = 100` pips but also
+`tp1_trigger_level = 1`, and the EA OR's them:
+
+```cpp
+if(!trailArmed) {
+   int tplTrigLevel = TplI(t.tplCfg, "tp1_trigger_level", 0);
+   if(tplTrigLevel > 0 && tplTrigLevel <= MAX_TPS)
+      trailArmed = t.triggered[tplTrigLevel - 1];
+}
+```
+
+So the trail starts once TP1 triggers, at 3 points of profit, not at the 100
+pips the activation field suggests. Deliberate, added 2026-08-04: on
+"Asian - Grid" the activation distance sat beyond the last defined TP, so the
+runner never armed and every winner capped at the same ~$43.
+
+**Consequence worth holding:** the risk on a trade that has cleared TP1 is
+usually smaller than its `sl_pips`, so any analysis dividing by the ORIGINAL
+stop distance is measuring the wrong denominator. See
+[reversal-engine/020](../../../todo/reversal-engine/020-losses-exceed-the-stop.md).

@@ -455,19 +455,48 @@ def get_htf_bias(h1_candles: list[dict], h4_candles: Optional[list[dict]] = None
         return "neutral"
 
     candles = h1_candles[-20:] if len(h1_candles) > 20 else h1_candles
-    highs = [float(c.get("high", c.get("h", 0))) for c in candles]
-    lows  = [float(c.get("low",  c.get("l", 0))) for c in candles]
 
-    # Simple higher-high / higher-low check over rolling 5-candle windows
-    n = len(highs)
+    # CLOSES, not wicks (bugs/044, owner 2026-09-10).
+    #
+    # This compared the highest HIGH and lowest LOW of each half, and required
+    # both a lower high and a lower low to call a downtrend. On 2026-09-10 gold
+    # fell 60.90 points over fourteen H1 bars while this returned "neutral" --
+    # and neutral does not block, so 28 BUYs were taken for -$240.45 through
+    # the gate that exists to stop exactly that.
+    #
+    # The whole difference was one second-half wick 3.53 points, 0.080%, above
+    # the first half's high. The same window closed 41.84 points down and made
+    # a 65.76-point lower low. Comparing closes, mean close per half, a 0.1%
+    # tolerance, or either-condition-instead-of-both all read bearish; only the
+    # wick comparison did not.
+    #
+    # A wick is where price was REJECTED; a close is where it settled. Chosen
+    # over a tolerance or loosening "both" to "either" because it needs no new
+    # threshold. This deliberately makes more windows "decided", so the gate
+    # blocks more than it did.
+    closes = [float(c.get("close", c.get("c", 0)) or 0.0) for c in candles]
+
+    n = len(closes)
     if n < 8:
         return "neutral"
 
+    # FALL BACK TO WICKS IF THERE ARE NO CLOSES, rather than to zero.
+    # Some callers hand this bare {"high": .., "low": ..} dicts. Reading a
+    # missing close as 0.0 would make every window "neutral", and neutral does
+    # not block -- silently switching the whole gate OFF. Found by six existing
+    # tests going red, which is exactly what they were for.
+    if not all(closes):
+        highs = [float(c.get("high", c.get("h", 0)) or 0.0) for c in candles]
+        lows  = [float(c.get("low",  c.get("l", 0)) or 0.0) for c in candles]
+        upper, lower = highs, lows
+    else:
+        upper, lower = closes, closes
+
     mid = n // 2
-    h_first  = max(highs[:mid])
-    h_second = max(highs[mid:])
-    l_first  = min(lows[:mid])
-    l_second = min(lows[mid:])
+    h_first  = max(upper[:mid])
+    h_second = max(upper[mid:])
+    l_first  = min(lower[:mid])
+    l_second = min(lower[mid:])
 
     hh = h_second > h_first
     hl = l_second > l_first

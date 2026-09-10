@@ -38,6 +38,7 @@ import json
 import logging
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -64,6 +65,23 @@ SHARED_TABLES = (
     "app_config",
     "vantage_fee_settings",
 )
+
+# `app_config` above is copied because it carries the trading schedule, the
+# Telegram group selection and the strategy parameters -- install-wide things.
+# These keys inside it are not: they measure what ONE ACCOUNT reached.
+#
+# bugs/042: `peak_balance` is a monotonic drawdown watermark that nothing
+# lowers. It travelled with the seed, so account 26004592 opened holding
+# 25470480's $2,403.25 against a balance under $1,000 -- a 63% drawdown that
+# would have halted trading on the first close once the Risk Governor was
+# switched on. The watermark is re-anchored whenever a database is opened for
+# an account it was not measured on; `close_trade._update_peak_balance` sets
+# it again from the live balance on that account's next close.
+ACCOUNT_SCOPED_CONFIG_KEYS = ("peak_balance",)
+
+# Which account the keys above were measured on. Absent means "unknown", which
+# on an install that predates this stamp is exactly the case bugs/042 found.
+WATERMARK_OWNER_KEY = "peak_balance_account"
 
 # Deliberately NOT copied: vantage_simulated_trades, vantage_signals,
 # vantage_partial_closes, vantage_pending_orders, vantage_simulation_account,
@@ -175,7 +193,75 @@ def _seed_shared_tables(source: Path, target: Path) -> None:
         conn.close()
 
 
-def resolve_db_path(data_dir: Path, env: str, login: Optional[str]) -> Path:
+@contextmanager
+def _transaction(conn: sqlite3.Connection):
+    """The writes inside land together, or not at all.
+
+    `db.transaction()` is the alias used everywhere else, but it binds the
+    thread-local connection to the database the app has already opened. This
+    module runs BEFORE that, on a file chosen by its own return value, so it
+    holds its own connection. sqlite3's connection context manager is the same
+    guarantee: commit on a clean exit, rollback on an exception.
+    """
+    with conn:
+        yield conn
+
+
+def reanchor_account_scoped_config(path: Path, login: str) -> None:
+    """Drop the account-scoped watermark if it was measured on another account.
+
+    Called on every resolve that names an account, so it heals an install that
+    predates the stamp as well as one that gains a second login. It runs at
+    most one write per boot: once the stamp matches, this is a read.
+
+    Between the clear and that account's next close the total-drawdown halt
+    has no watermark to measure from and cannot fire. That is the same state a
+    fresh install is in, and it is the safe direction to be wrong in here --
+    the alternative is the halt firing against a number from another account.
+
+    Never raises. This runs on the boot path that decides which database the
+    app opens.
+    """
+    try:
+        conn = sqlite3.connect(path)
+    except Exception as exc:
+        log.warning("[accounts] could not open %s to check the drawdown "
+                    "watermark (%s) — leaving it as it is.", path.name, exc)
+        return
+    try:
+        if "app_config" not in _table_names(conn):
+            return
+        row = conn.execute("SELECT value FROM app_config WHERE key=?",
+                           (WATERMARK_OWNER_KEY,)).fetchone()
+        owner = row[0] if row else None
+        if owner == login:
+            return
+        with _transaction(conn):
+            for key in ACCOUNT_SCOPED_CONFIG_KEYS:
+                conn.execute("DELETE FROM app_config WHERE key=?", (key,))
+            conn.execute(
+                "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)",
+                (WATERMARK_OWNER_KEY, login))
+        if owner is None:
+            log.info("[accounts] %s carried a drawdown watermark from before "
+                     "the per-account split. Cleared; it re-anchors from the "
+                     "live balance on account %s's next close (bugs/042).",
+                     path.name, login)
+        else:
+            log.info("[accounts] %s carried account %s's drawdown watermark. "
+                     "Cleared for account %s (bugs/042).",
+                     path.name, owner, login)
+    except Exception as exc:
+        log.warning("[accounts] could not re-anchor the drawdown watermark in "
+                    "%s (%s) — leaving it as it is.", path.name, exc)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _resolve_file(data_dir: Path, env: str, login: str) -> Path:
     """The database file for this environment and MT5 login.
 
     With no login -- first run, or credentials not entered yet -- the
@@ -227,3 +313,18 @@ def resolve_db_path(data_dir: Path, env: str, login: Optional[str]) -> Path:
         log.error("[accounts] could not resolve a database for %s/%s (%s) — "
                   "falling back to %s.", env, login, exc, default.name)
         return default
+
+
+def resolve_db_path(data_dir: Path, env: str, login: Optional[str]) -> Path:
+    """THE entry point: the file to open, with its account-scoped state sound.
+
+    One place, because two call sites each doing their own resolution is what
+    produced bugs/031. The re-anchor is here rather than at the call sites for
+    the same reason.
+    """
+    data_dir = Path(data_dir)
+    login = (str(login).strip() if login is not None else "")
+    path = _resolve_file(data_dir, env, login)
+    if login:
+        reanchor_account_scoped_config(path, login)
+    return path

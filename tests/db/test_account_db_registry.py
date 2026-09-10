@@ -36,9 +36,13 @@ def data_dir(tmp_path):
     return tmp_path
 
 
-def _make_db(path, *, trades=0):
+def _make_db(path, *, trades=0, peak_balance=None):
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE vantage_simulated_trades (trade_id TEXT)")
+    conn.execute("CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT)")
+    if peak_balance is not None:
+        conn.execute("INSERT INTO app_config VALUES ('peak_balance', ?)",
+                     (str(peak_balance),))
     conn.execute("CREATE TABLE vantage_risk_settings (id INTEGER, risk REAL)")
     conn.execute("CREATE TABLE ea_trade_templates (name TEXT)")
     conn.execute("CREATE TABLE mt5_credentials (id INTEGER, login TEXT)")
@@ -220,3 +224,189 @@ class TestItNeverRaises:
         path = reg.resolve_db_path(data_dir, "demo", "99999999")
 
         assert path.name == "forex_trader_demo_99999999.db"
+
+
+class TestThePeakBalanceWatermarkIsAccountScoped:
+    """bugs/042 — the drawdown watermark followed the account split.
+
+    `peak_balance` is monotonic and nothing lowers it. It lives in
+    `app_config`, which the seed copies as an install-wide table, so account
+    26004592's database opened holding **$2,403.25** from 25470480 — against a
+    balance under $1,000, a 63% drawdown that would halt trading on the first
+    close the moment the Risk Governor was switched on.
+
+    The watermark describes what ONE ACCOUNT reached. It is re-anchored
+    whenever the database is opened for an account it was not measured on, and
+    `close_trade._update_peak_balance` sets it again from the live balance on
+    the next close.
+    """
+
+    def _resolve_second_account(self, data_dir, peak_balance):
+        source = data_dir / "forex_trader_demo.db"
+        _make_db(source, trades=1309, peak_balance=peak_balance)
+        reg.resolve_db_path(data_dir, "demo", "25470480")
+        return reg.resolve_db_path(data_dir, "demo", "99999999")
+
+    def _peak(self, path):
+        conn = sqlite3.connect(path)
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='peak_balance'").fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+
+    def test_the_watermark_does_not_follow_a_new_account(self, data_dir):
+        new = self._resolve_second_account(data_dir, 2403.25)
+
+        assert self._peak(new) is None
+
+    def test_an_inherited_watermark_on_an_existing_file_is_re_anchored(self, data_dir):
+        """Simon's install, exactly: the file already exists and already holds
+        another account's watermark, so there is nothing left to seed."""
+        existing = data_dir / "forex_trader_demo_26004592.db"
+        _make_db(existing, peak_balance=2403.25)
+        (data_dir / "accounts.json").write_text(
+            '{"demo": {"25470480": "forex_trader_demo.db",'
+            ' "26004592": "forex_trader_demo_26004592.db"}}', encoding="utf-8")
+        _make_db(data_dir / "forex_trader_demo.db", peak_balance=2403.25)
+
+        resolved = reg.resolve_db_path(data_dir, "demo", "26004592")
+
+        assert resolved == existing
+        assert self._peak(existing) is None
+
+    def test_the_account_is_stamped_so_the_clear_happens_once(self, data_dir):
+        """The clear is a one-time heal, not a boot-time reset.
+
+        An unstamped database predates the stamp, so its watermark cannot be
+        attributed and the first resolve clears it — that is the case above.
+        What must not happen is a clear on every boot: the watermark would
+        never survive long enough to measure a drawdown from. The stamp is what
+        stops it, and `test_a_watermark_set_after_the_stamp_survives` is the
+        test that pins the consequence."""
+        existing = data_dir / "forex_trader_demo.db"
+        _make_db(existing, peak_balance=2403.25)
+
+        reg.resolve_db_path(data_dir, "demo", "25470480")
+
+        conn = sqlite3.connect(existing)
+        owner = conn.execute(
+            "SELECT value FROM app_config WHERE key='peak_balance_account'").fetchone()
+        conn.close()
+
+        assert owner[0] == "25470480"
+
+    def test_a_watermark_set_after_the_stamp_survives(self, data_dir):
+        """The re-anchor must not fight `_update_peak_balance`: a watermark
+        this account earned itself is still there on the next boot."""
+        existing = data_dir / "forex_trader_demo.db"
+        _make_db(existing, peak_balance=2403.25)
+        reg.resolve_db_path(data_dir, "demo", "25470480")
+
+        conn = sqlite3.connect(existing)
+        conn.execute("INSERT OR REPLACE INTO app_config VALUES ('peak_balance', '1100.0')")
+        conn.commit()
+        conn.close()
+
+        reg.resolve_db_path(data_dir, "demo", "25470480")
+
+        assert self._peak(existing) == "1100.0"
+
+    def test_a_database_with_no_app_config_still_resolves(self, data_dir):
+        """Never raises. This decides which database the app opens."""
+        existing = data_dir / "forex_trader_demo.db"
+        conn = sqlite3.connect(existing)
+        conn.execute("CREATE TABLE vantage_simulated_trades (trade_id TEXT)")
+        conn.commit()
+        conn.close()
+
+        assert reg.resolve_db_path(data_dir, "demo", "25470480") == existing
+
+    def test_no_login_stamps_nothing(self, data_dir):
+        """With no login there is no account to attribute a watermark to, and
+        the no-login path is documented as recording nothing."""
+        existing = data_dir / "forex_trader_demo.db"
+        _make_db(existing, peak_balance=2403.25)
+
+        reg.resolve_db_path(data_dir, "demo", "")
+
+        assert self._peak(existing) == "2403.25"
+
+    def test_a_second_account_pointed_at_the_same_file_re_anchors(self, data_dir):
+        """The stamp names an account, not "some account": a file stamped for
+        25470480 does not keep its watermark when opened for 26004592."""
+        path = data_dir / "forex_trader_demo.db"
+        _make_db(path, peak_balance=2403.25)
+
+        reg.reanchor_account_scoped_config(path, "25470480")
+        conn = sqlite3.connect(path)
+        conn.execute("INSERT OR REPLACE INTO app_config VALUES ('peak_balance', '2403.25')")
+        conn.commit()
+        conn.close()
+
+        reg.reanchor_account_scoped_config(path, "26004592")
+
+        assert self._peak(path) is None
+
+    def test_an_unopenable_file_leaves_the_watermark_alone(self, data_dir):
+        """Never raises: this runs on the path that decides which database the
+        app opens, and a crash here is a dead app."""
+        not_a_database = data_dir / "forex_trader_demo.db"
+        not_a_database.mkdir()
+
+        resolved = reg.resolve_db_path(data_dir, "demo", "25470480")
+
+        assert resolved == not_a_database
+        assert not_a_database.is_dir()
+
+    def test_an_app_config_it_cannot_read_leaves_the_watermark_alone(self, data_dir):
+        """An app_config of an unexpected shape must not take the app down, and
+        must not half-clear anything."""
+        path = data_dir / "forex_trader_demo.db"
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE app_config (key TEXT)")   # no value column
+        conn.execute("INSERT INTO app_config VALUES ('peak_balance')")
+        conn.commit()
+        conn.close()
+
+        reg.reanchor_account_scoped_config(path, "25470480")
+
+        conn = sqlite3.connect(path)
+        rows = conn.execute("SELECT key FROM app_config").fetchall()
+        conn.close()
+        assert rows == [("peak_balance",)]
+
+    def test_a_connection_that_refuses_to_close_does_not_take_the_app_down(
+            self, data_dir, monkeypatch):
+        """The module's promise is "never raises", and the close is the one
+        step that runs after the work is already done."""
+        path = data_dir / "forex_trader_demo.db"
+        _make_db(path, peak_balance=2403.25)
+
+        real_connect = sqlite3.connect
+
+        class _RefusesToClose:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            def __enter__(self):
+                return self._conn.__enter__()
+
+            def __exit__(self, *a):
+                return self._conn.__exit__(*a)
+
+            def close(self):
+                self._conn.close()
+                raise sqlite3.OperationalError("cannot close database")
+
+        monkeypatch.setattr(reg.sqlite3, "connect",
+                            lambda p, *a, **k: _RefusesToClose(real_connect(p, *a, **k)))
+
+        reg.reanchor_account_scoped_config(path, "25470480")
+
+        monkeypatch.undo()
+        assert self._peak(path) is None          # the work still landed

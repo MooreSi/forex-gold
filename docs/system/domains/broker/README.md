@@ -187,3 +187,30 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 ## Open questions
 
 - The `scalp_runner` "silently orphaned trade" investigation is still open — the EA's diagnostic heartbeat is marked "remove once closed".
+
+
+## Verified: the EA honours the template's TP ladder exactly (2026-09-10)
+
+Checked against live partial closes on the demo account, because several demos
+assume it and none of them had proved it from data:
+
+| template | configured | observed |
+|---|---|---|
+| `30 TP1 SL50 and Trail` | tp1 40 pips / 70% | 4.00-4.08 pts, 0.07 lots |
+| | tp2 50 pips / 10% | 5.01-5.13 pts, 0.01 lots |
+| `GD Instituational - single` | tp1 30 pips / 10% | 3.00-3.05 pts, 0.01 lots |
+
+**Gold is 10 pips to the point**, so `tp1_pips=40` is 4.00 points of price.
+That conversion is the thing worth remembering: a template's numbers are pips,
+everything in the logs and the trade rows is points, and the factor is ten.
+
+The lot fractions come out of `tp1_pct`/`tp2_pct` applied to the base lot
+(0.10 here), so 70% is 0.07 and 10% is 0.01. Both matched on every partial
+close in a 24-hour window.
+
+Variance of a few hundredths of a point is fill slippage, not drift.
+
+**Why it is written down:** the SL of a template trade was investigated on
+2026-09-08 on the assumption it had drifted, and it had not — the governing
+template simply said `sl_pips=50`. Having the ladder checked against the config
+once, from data, saves the next person that detour.

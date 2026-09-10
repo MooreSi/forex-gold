@@ -18,6 +18,7 @@ import time
 import pytest
 
 from backend.src.db import database as db
+from backend.src.services.broker.mt5_performance import BROKER_OFFSET
 from backend.src.runtime import TradingRuntime
 
 
@@ -178,7 +179,19 @@ def test_compute_mt5_performance_returns_empty_dict_on_bridge_error(fresh_db, en
 
 
 def _two_trade_bridge(now):
-    """One +100 winner then one -50 loser, both closed inside the day."""
+    """One +100 winner then one -50 loser, both closed inside the day.
+
+    `now` is REAL unix time, but MT5 deals carry BROKER time (UTC+3 stored
+    as-if-UTC), and `broker_day_cutoff` compares against that space. Confirmed
+    against the live bridge 2026-09-10: the newest deals carry stamps about
+    three hours ahead of real time.
+
+    Without `+ BROKER_OFFSET` these fake deals sat three hours *before* the
+    cutoff, so this test **failed between local midnight and 03:00 and passed
+    the rest of the day** — caught at 01:51 while running the suite overnight.
+    It was not testing the daily window, it was testing the hour it ran at.
+    """
+    now = now + BROKER_OFFSET
     return _FakeBridge(
         account={"balance": 1000.0, "equity": 1050.0},
         deals=[
@@ -216,10 +229,25 @@ def test_roi_is_measured_against_the_reconstructed_period_start(fresh_db, engine
     assert perf["roi_pct"] == 5.26
 
 
-def test_the_daily_block_counts_only_todays_closes(fresh_db, engine):
+def test_the_daily_block_counts_only_todays_closes(fresh_db, engine, monkeypatch):
     """The page's Daily P&L card. daily_pnl_24h is kept as an alias for the
-    email scheduler and must stay equal to daily_pnl."""
-    engine._bridge = _two_trade_bridge(time.time())
+    email scheduler and must stay equal to daily_pnl.
+
+    The cutoff is PINNED rather than derived. This test is about the
+    aggregation — how many closes land in the window and what they sum to —
+    and `broker_day_cutoff`'s own arithmetic has seventeen tests of its own in
+    `tests/services/broker/test_today_cutoff.py`.
+
+    Deriving it here made this test depend on the hour it ran at: with the
+    real cutoff, deals placed 15 and 30 minutes before `now` fall outside
+    today's window whenever `now` is within 30 minutes of local midnight.
+    Pinning removes that without weakening what is being checked.
+    """
+    from backend.src.services.broker import mt5_performance as _perf
+    _fixed_now = time.time()
+    monkeypatch.setattr(_perf, "broker_day_cutoff",
+                        lambda *a, **k: _fixed_now + BROKER_OFFSET - 7200)
+    engine._bridge = _two_trade_bridge(_fixed_now)
     perf = asyncio.run(TradingRuntime.compute_mt5_performance(engine, days=90))
     assert perf["daily_closed"] == 2
     assert perf["daily_pnl"] == 50.0

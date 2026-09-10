@@ -609,6 +609,25 @@ class _ManagementMixin:
         else:
             outcome = "be"
 
+        # One last excursion, measured from the broker's OWN exit.
+        #
+        # _record_live_excursion samples once per 5s outcome loop, so a move
+        # that reaches the stop and closes between two samples was never
+        # recorded -- biasing mae_pts downwards for exactly the fast moves that
+        # hit stops. reversal-engine/020 plans to compare mae_pts against
+        # sl_dist to decide whether stops are honoured, and would have read a
+        # correctly honoured stop as one that was never reached.
+        #
+        # pnl_pts is already the signed distance from the same entry_ref the
+        # sampler uses, so the pair is (favourable, adverse) exactly as there.
+        # record_excursion only ever WIDENS (SQL MAX) and clamps negatives to
+        # zero, so this cannot narrow a deeper excursion already seen.
+        try:
+            re_db.record_excursion(sig_id, pnl_pts, -pnl_pts)
+        except Exception as exc:
+            _log.debug("[RE-Engine] closing excursion not recorded id=%s: %s",
+                       sig_id, exc)
+
         re_db.close_signal(
             sig_id, float(close_price or entry_ref), outcome, pnl_pts,
             net_pnl_dollars=net_pnl, pnl_dollars=net_pnl, balance_delta=net_pnl,

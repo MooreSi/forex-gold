@@ -75,9 +75,13 @@ def _run_migrations() -> None:
         # ml_engine which level type had just won or lost -- which is why
         # record_ref_signal was only ever called with was_win=None and the
         # `wins` counter behind ref_level_win_rate sat at 0 forever.
-        # Mirrored in reversal_engine/database.py's own migration list, which
-        # is a structural twin of this one.
+        # Mirrored in reversal_engine/database.py's migration list, its twin.
         "ALTER TABLE re_signals ADD COLUMN correlated_ref_level_type TEXT",
+        # Excursion watermarks (2026-09-10): record_excursion() wrote these
+        # and nothing created them -- a fresh install failed silently on "no
+        # such column". See reversal-engine/020.
+        "ALTER TABLE re_signals ADD COLUMN mfe_pts REAL",
+        "ALTER TABLE re_signals ADD COLUMN mae_pts REAL",
     ]
     for stmt in migrations:
         try:

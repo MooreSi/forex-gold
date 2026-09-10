@@ -560,8 +560,18 @@ class _ManagementMixin:
         # comment_for_trade), the same link the History channel lookup uses.
         leg_tickets = await self._template_leg_tickets(sig, ticket)
 
-        if any(int(p.get("ticket", 0)) in leg_tickets for p in live_positions):
+        _open_leg = next((p for p in live_positions
+                          if int(p.get("ticket", 0)) in leg_tickets), None)
+        if _open_leg is not None:
             self._live_missing_streak.pop(ticket, None)
+            # The stop actually in force. sl_dist is the stop at OPEN, and the
+            # EA trails without logging, so this is the only record of where
+            # the stop really was. Same five-second sample as the excursion.
+            try:
+                re_db.record_last_seen_sl(sig_id, _open_leg.get("sl"))
+            except Exception as exc:
+                _log.debug("[RE-Engine] last_seen_sl not recorded id=%s: %s",
+                           sig_id, exc)
             # Still open, and this is the ONLY moment the live path sees a
             # running price -- so it is where the excursion has to be taken.
             self._record_live_excursion(sig, tick)

@@ -69,19 +69,19 @@ def _run_migrations() -> None:
         "ALTER TABLE re_signals ADD COLUMN ml_prob_at_fill REAL",
         "ALTER TABLE re_signals ADD COLUMN htf_bias_at_fill TEXT",
         # The REF level type this signal correlated against (2026-07-31).
-        # Classified at correlation time by reversal_engine_correlate's
-        # _classify_ref_level but previously discarded straight after being
-        # counted, so when the signal later closed there was no way to tell
-        # ml_engine which level type had just won or lost -- which is why
-        # record_ref_signal was only ever called with was_win=None and the
-        # `wins` counter behind ref_level_win_rate sat at 0 forever.
-        # Mirrored in reversal_engine/database.py's migration list, its twin.
+        # Classified by _classify_ref_level then discarded, so on close nothing
+        # could tell ml_engine which level type won -- record_ref_signal was
+        # always called with was_win=None and ref_level_win_rate's `wins` sat
+        # at 0 forever. Mirrored in reversal_engine/database.py's twin list.
         "ALTER TABLE re_signals ADD COLUMN correlated_ref_level_type TEXT",
         # Excursion watermarks (2026-09-10): record_excursion() wrote these
         # and nothing created them -- a fresh install failed silently on "no
         # such column". See reversal-engine/020.
         "ALTER TABLE re_signals ADD COLUMN mfe_pts REAL",
         "ALTER TABLE re_signals ADD COLUMN mae_pts REAL",
+        # The stop actually in force (2026-09-10). sl_dist is the stop at
+        # OPEN and the EA trails silently. See reversal-engine/020.
+        "ALTER TABLE re_signals ADD COLUMN last_seen_sl REAL",
     ]
     for stmt in migrations:
         try:
@@ -262,23 +262,6 @@ def move_sl_to_be(sig_id: int, be_price: float | None = None) -> None:
 def set_stop_loss(sig_id: int, price: float) -> None:
     """Trail the stop (e.g. to TP1 after the TP4 partial books)."""
     get_db().run("UPDATE re_signals SET stop_loss=? WHERE id=?", round(price, 2), sig_id)
-
-
-def record_excursion(sig_id: int, favourable_pts: float, adverse_pts: float) -> None:
-    """Widen this signal's max favourable / adverse excursion watermarks.
-
-    Both are stored as positive point distances from the entry reference.
-    MAX/MIN in SQL rather than read-modify-write so a concurrent poll cannot
-    narrow a watermark that another already widened, and so a NULL (first
-    observation) is simply replaced.
-    """
-    get_db().run(
-        "UPDATE re_signals SET "
-        "  mfe_pts = MAX(COALESCE(mfe_pts, 0), ?), "
-        "  mae_pts = MAX(COALESCE(mae_pts, 0), ?) "
-        "WHERE id=?",
-        round(max(0.0, favourable_pts), 2), round(max(0.0, adverse_pts), 2), sig_id,
-    )
 
 
 def book_partial_close(sig_id: int, leg_net_dollars: float, frac_closed: float,
@@ -798,3 +781,12 @@ def fetch_trade_id_and_strategy_for_signal(signal_id: str) -> tuple:
             "WHERE signal_id=?", (signal_id,),
         ).fetchone()
         return (row[0], row[1]) if row else (None, None)
+
+
+
+# Sampled-while-open measurements live in measure_repo (2026-09-10, this file
+# was at its 800-line ceiling). Re-exported so callers keep one import.
+from backend.src.services.reversal_engine.measure_repo import (  # noqa: E402
+    record_excursion,
+    record_last_seen_sl,
+)

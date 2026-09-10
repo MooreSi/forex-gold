@@ -512,7 +512,25 @@ def main():
             # the screen is locked.  Browsers throttle background tabs, so the
             # default 3 s reconnect window and 20 s uvicorn ping timeout cause
             # spurious "Connection lost" overlays on Windows clients.
-            reconnect_timeout=30,          # wait 30 s before showing reconnect overlay
+            #
+            # TWO LAYERS, and the tighter one decides. ws_ping_timeout is
+            # uvicorn's; NiceGUI's transport is socket.io, and nicegui.nicegui
+            # derives engine.io's own deadline from reconnect_timeout:
+            #
+            #     sio.eio.ping_interval = max(reconnect_timeout * 0.8, 4)
+            #     sio.eio.ping_timeout  = max(reconnect_timeout * 0.4, 2)
+            #
+            # At the previous reconnect_timeout=30 that was a 12 s pong window
+            # against uvicorn's 60 s, so the 60 s never applied and a
+            # backgrounded tab -- throttled to a timer a minute or worse --
+            # was dropped and rebuilt. That rebuild re-renders every panel in
+            # one tick and stalls the event loop for ~2 s (bugs/030 cause 3).
+            # Reported by the owner as "come back to the page and it reloads".
+            #
+            # 150 makes engine.io's window 60 s, matching the ws_ping_timeout
+            # deliberately chosen beside it. The cost is that a genuinely
+            # closed tab's server-side state lingers ~2.5 min.
+            reconnect_timeout=150,         # -> engine.io pings 120 s, pong window 60 s
             ws_ping_interval=30,           # server→browser ping every 30 s
             ws_ping_timeout=60,            # allow 60 s for a pong before closing
         )

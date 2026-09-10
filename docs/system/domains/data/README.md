@@ -74,6 +74,8 @@ CREATE TABLE pass.
 - `DB_PATH` in `config/__init__.py` is a pre-`load()` fallback only; the real path resolves from `account_env`.
 - `schema_version.version` = the **last applied migration step number** (2026-08-11; previously a constant 1). A DB stamped at N resumes from N+1; all steps stay idempotent so re-running old steps is safe but the stamp is the record. Backfills are NOT versioned — they run every boot on purpose (a legacy-shaped row can arrive later via restore/sync).
 
+- **The migration steps live in `backend/migrations/steps.py`, not `registry.py` (2026-09-10).** A pure move: the list had reached 661 of registry.py's 800 lines, and the next migration would have crossed the LOC ceiling — a wall every future migration hits rather than a problem with any one of them. `registry.py` keeps the machinery that applies them (`apply_migration`, `run`, the stamp, the critical-schema check) and re-exports `MIGRATIONS`, so `backend.migrations.registry.MIGRATIONS` and every other import path are unchanged. `_rename_gdc_column` moved with the list because it *is* step 1, and leaving it behind would have made the two modules import each other. Adding a migration now means editing `steps.py`; `registry.py` is 120 lines and should stay that way.
+
 ## Open questions
 
 - None currently flagged. (Cross-engine database consolidation is tracked under the engines domain.)

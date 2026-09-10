@@ -378,9 +378,15 @@ class EventsMixin:
                         log.warning("[EABridge] schedule-blocked close failed for %s: %s", trade_id, e)
                     return
 
+            # The flap tail (limit-orders/050). An order withdrawn and put back
+            # more than once announced only the first of each, so this is the
+            # one place the total is reported -- suppressing the noise must not
+            # also suppress the fact that it happened. Empty for an order that
+            # rested undisturbed, which is most of them.
             asyncio.create_task(telegram_alerts.send_message(
                 f"Limit order FILLED — {row['direction']} {row['lot_size']:g} lots @ "
-                f"{fill_price:.2f} (ticket {ticket}), SL {row['stop_loss']:.2f}",
+                f"{fill_price:.2f} (ticket {ticket}), SL {row['stop_loss']:.2f}"
+                f"{telegram_alerts.fmt_flap_note(row.get('withdraw_count'))}",
                 trade_id, "pending_order_filled",
             ))
         except Exception as e:

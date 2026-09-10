@@ -378,6 +378,72 @@ def fmt_template_leg_note(row: dict, leg_label: str, title: str,
     return "\n".join(lines)
 
 
+def fmt_limit_withdrawn(row: dict, reason: str) -> str:
+    """A resting order was pulled off the book before it could fill.
+
+    limit-orders/050. Every other consequential event here announces itself;
+    a withdrawal used to reach the log alone, so from the owner's side an
+    order simply stopped existing and the next thing he saw was a setup not
+    filling when price reached its zone.
+
+    `reason` is the refusing gate's OWN words, threaded through from
+    `cancel_pending_order` -- there is nothing to invent, and inventing a
+    generic line is how bugs/038 named the wrong rule.
+    """
+    lines = [
+        "*XAUUSD — Limit Order Withdrawn*",
+        f"Direction: {row.get('direction', '?')}",
+        f"Resting at: {float(row.get('price') or 0):.2f}",
+        f"SL: {row.get('stop_loss')}",
+        f"Reason: {_md_esc(reason)}",
+    ]
+    if row.get("channel_name"):
+        lines.append(f"Channel: {_md_esc(row['channel_name'])}")
+    lines.append(
+        "_The setup is still alive — it goes back on the book if conditions "
+        "recover before it would have expired._"
+    )
+    lines.append(f"Node: {_node_label()}")
+    return "\n".join(lines)
+
+
+def fmt_limit_rearmed(row: dict, minutes_left: float) -> str:
+    """The same order back on the book, on its ORIGINAL clock.
+
+    The remaining life is the point of the message rather than decoration: a
+    re-placed order keeps the expiry it was placed with, so "it's back" can
+    mean back with four minutes to live.
+    """
+    lines = [
+        "*XAUUSD — Limit Order Back On*",
+        f"Direction: {row.get('direction', '?')}",
+        f"Resting at: {float(row.get('price') or 0):.2f}",
+        f"SL: {row.get('stop_loss')}",
+        f"Expires in: {minutes_left:.0f} min (its original expiry, not a fresh one)",
+    ]
+    if row.get("channel_name"):
+        lines.append(f"Channel: {_md_esc(row['channel_name'])}")
+    lines.append(
+        "_Further withdrawals and re-placements of this order are not "
+        "announced; the total is reported when it fills._"
+    )
+    lines.append(f"Node: {_node_label()}")
+    return "\n".join(lines)
+
+
+def fmt_flap_note(withdraw_count) -> str:
+    """The one-line tail added to a fill message when the order flapped.
+
+    Empty for an order that rested undisturbed, which is most of them -- the
+    note has to earn its place in a message the owner reads on every fill.
+    """
+    n = int(withdraw_count or 0)
+    if n <= 1:
+        return ""
+    return (f" (withdrawn and re-placed {n} times while resting — "
+            f"only the first of each was announced)")
+
+
 def fmt_instant_followup(instant_trade: dict, parsed: dict, channel_name: str) -> str:
     """Format a 'Trade Updated' notification for an instant entry that received full SL/TP."""
     direction     = instant_trade.get("direction", "?")

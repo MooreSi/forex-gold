@@ -56,7 +56,9 @@ def mark_pending_order_withdrawn(trade_id: str, reason: str, now: float) -> None
     """
     with db() as conn:
         conn.execute(
-            "UPDATE vantage_pending_orders SET status='withdrawn' WHERE trade_id=?",
+            "UPDATE vantage_pending_orders "
+            "SET status='withdrawn',withdraw_count=withdraw_count+1 "
+            "WHERE trade_id=?",
             (trade_id,),
         )
 

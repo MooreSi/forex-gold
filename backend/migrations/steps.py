@@ -712,4 +712,16 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (37, "Re-check resting orders before they fill, on by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN resting_revalidation_enabled INTEGER NOT NULL DEFAULT 1",
     ]),
+
+    # How many times this resting order has been withdrawn and put back. Damps
+    # the Telegram alerts -- the first withdrawal and the first re-placement
+    # are announced, then the signal goes quiet and the total is reported once
+    # when it fills. On the row rather than in a module global so a restart
+    # mid-flap neither restarts the noise nor loses the number.
+    #
+    # One counter answers both questions: a withdrawal is the first when this
+    # is 0, a re-placement the first when it is 1. limit-orders/050.
+    (38, "Count how often a resting order has flapped", [
+        "ALTER TABLE vantage_pending_orders ADD COLUMN withdraw_count INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

@@ -204,6 +204,37 @@ def _minutes_left(row: dict) -> float:
     return _DEFAULT_EXPIRE_MINUTES - (time.time() - created) / 60.0
 
 
+def _alerts():
+    """Imported lazily. `telegram/alerts.py` pulls in the database and the
+    HTTP client, and this module is imported by the monitor cycle."""
+    from backend.src.services.telegram import alerts as _a
+    return _a
+
+
+async def _announce(text: str, row: dict, event_type: str, when: bool) -> None:
+    """Send one alert, or deliberately stay quiet, without ever raising.
+
+    `when` is the damping decision, made by the caller from the order's own
+    flap count (owner, 2026-09-10: the first withdrawal and the first
+    re-placement are announced, then this signal goes quiet until it fills).
+    Damping reaches the MESSAGE only -- the order has already been withdrawn
+    or re-placed by the time this is called, and a suppressed alert must never
+    change that.
+
+    An alert is not worth breaking the sweep for: this runs on a loop, and
+    `revalidate_resting_orders` promises never to raise. A silent Telegram
+    failure is bad (bugs/020: 107 rejected alerts nobody knew about) so it is
+    logged at warning, not swallowed quietly.
+    """
+    if not when:
+        return
+    try:
+        await _alerts().send_message(text, row.get("trade_id"), event_type)
+    except Exception as exc:
+        log.warning("[Resting] could not announce %s for %s: %s",
+                    event_type, row.get("trade_id"), exc)
+
+
 async def _mark(fn, *args) -> None:
     """Write a resting order's new status, never raising.
 
@@ -245,6 +276,12 @@ async def _withdraw(ea, repo, row: dict, reason: str) -> bool:
     # CLAUDE.md warns about, and a silent one would be indistinguishable from
     # a working one. Until 050 lands, a withdrawal is visible in the log only.
     log.info("[Resting] withdrew %s ticket=%s — %s", row["trade_id"], ticket, reason)
+    # Announce the FIRST withdrawal of this order and stay quiet after
+    # (limit-orders/050). `withdraw_count` is the count BEFORE this one, since
+    # the row was read at the top of the sweep, so 0 means this is the first.
+    await _announce(_alerts().fmt_limit_withdrawn(row, reason),
+                    row, "limit_order_withdrawn",
+                    when=int(row.get("withdraw_count") or 0) == 0)
     return True
 
 
@@ -290,6 +327,12 @@ async def _rearm(ea, repo, row: dict, rs: dict, bias: Optional[str], tick: Any,
                 ack.get("ticket"), time.time())
     log.info("[Resting] re-armed %s ticket=%s with %.1f minutes left",
              row["trade_id"], ack.get("ticket"), left)
+    # The first re-placement follows the first withdrawal, so the same counter
+    # answers both: it reads 1 here exactly once. No second column, and no
+    # state that a restart could forget mid-flap.
+    await _announce(_alerts().fmt_limit_rearmed(row, left),
+                    row, "limit_order_rearmed",
+                    when=int(row.get("withdraw_count") or 0) == 1)
     return True
 
 

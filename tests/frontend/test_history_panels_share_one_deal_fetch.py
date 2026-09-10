@@ -19,7 +19,9 @@ latency one. The TTL below is deliberately scoped to this one panel's history
 fetch and nothing else.
 
 The chart still redraws on its own 15 s timer; only the year-long fetch behind
-it is shared.
+it is shared -- and since the trade table and the calendar run the same 15 s
+timer against the same endpoint, the cache is shared by all three, keyed by
+`days` because they ask for different periods.
 """
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ import asyncio
 
 import pytest
 
-from frontend.pages.history import _equity_curve as ec
+from frontend.pages.history import _deal_cache as ec
 
 
 class _Bridge:
@@ -99,3 +101,33 @@ class TestItStaysAWindowWorthHaving:
                 pass
 
         assert _Boom.calls == 2, "a failure was cached and hid the retry"
+
+
+class TestThePanelsShareIt:
+    """The trade table and the calendar poll the same endpoint on the same 15 s
+    timer. Three panels each fetching independently is what the measurement
+    found."""
+
+    def test_different_periods_are_cached_separately(self):
+        """The trade table asks for whatever the user selected; a 90-day answer
+        must never be served to a 365-day request."""
+        b = _Bridge()
+        clock = {"t": 1000.0}
+
+        asyncio.run(ec.cached_deal_history(b, 365, now=lambda: clock["t"]))
+        asyncio.run(ec.cached_deal_history(b, 90, now=lambda: clock["t"]))
+
+        assert b.calls == 2, "a different period was served from the same entry"
+
+    def test_all_three_panels_use_it(self):
+        import inspect
+        from frontend.pages.history import _equity_curve, _trade_table, _calendar
+
+        for mod in (_equity_curve, _trade_table, _calendar):
+            src = inspect.getsource(mod)
+            assert "cached_deal_history(" in src, (
+                f"{mod.__name__} still fetches deal history for itself"
+            )
+            assert "_bridge.get_deal_history(" not in src, (
+                f"{mod.__name__} still has a direct uncached fetch"
+            )

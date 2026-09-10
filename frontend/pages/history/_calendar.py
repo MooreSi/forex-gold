@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 
 from nicegui import ui
 
+from frontend.pages.history._deal_cache import cached_deal_history
+
 from backend.src.controllers import history_controller as history_ctl
 from backend.src.controllers import system_controller as sys_ctl
 from frontend.components.empty_state import render_empty_state
@@ -53,7 +55,7 @@ def _render_calendar(engine):
             today_d   = sys_ctl.local_today()
             first     = date(year, month, 1)
             days_back = max((today_d - first).days + 35, 35)
-            deals     = await engine._bridge.get_deal_history(int(days_back)) or []
+            deals     = await cached_deal_history(engine._bridge, int(days_back))
 
             if deals:
                 by_pos: dict[int, list] = {}

@@ -5,6 +5,8 @@ from typing import Optional
 
 from nicegui import ui
 
+from frontend.pages.history._deal_cache import cached_deal_history
+
 from backend.src.controllers import history_controller as history_ctl
 from backend.src.controllers.history_controller import (
     CONTRACT_SIZE,
@@ -157,7 +159,7 @@ def _render_trade_table(engine):
             order_type_map = await history_ctl.ticket_order_type_map(_days_now)
             comm_rate  = await history_ctl.platform_fee_rate()
             try:
-                deals = await engine._bridge.get_deal_history(int(days_sel.value)) or []
+                deals = await cached_deal_history(engine._bridge, int(days_sel.value))
                 if deals:
                     by_pos: dict[int, list] = {}
                     for d in deals:

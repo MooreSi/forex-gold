@@ -5,41 +5,12 @@ from nicegui import ui
 
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import history_controller as history_ctl
+from frontend.pages.history._deal_cache import cached_deal_history
 
 import logging
 
 _log = logging.getLogger(__name__)
 
-# One year of deal history, shared between redraws.
-#
-# refresh_chart runs on a 15 s timer and each run pulled get_deal_history(365)
-# -- a full year of deals, four times a minute, forever, to redraw a curve that
-# only changes when a trade closes. Measured 2026-09-10: that alone was 4.3
-# calls a minute at idle, and one page load produced 388 bridge round-trips in
-# 25 seconds (bugs/030).
-#
-# SAFE HERE BECAUSE THIS IS A DISPLAY READ. monitor_cycle also reads the broker,
-# to manage open trades, and serving that from a cache would mean acting on a
-# stale book -- a money bug rather than a latency one. This TTL is scoped to
-# this panel's history fetch and nothing else.
-_DEAL_CACHE_TTL_S = 60.0
-_deal_cache: dict = {}
-
-
-async def cached_deal_history(bridge, days: int, now=None):
-    """`bridge.get_deal_history(days)`, shared for _DEAL_CACHE_TTL_S.
-
-    A failure is NOT cached: caching an error would blank the chart for the
-    whole window instead of retrying on the next redraw.
-    """
-    import time as _t
-    _now = (now or _t.time)()
-    hit = _deal_cache.get(days)
-    if hit and (_now - hit[0]) < _DEAL_CACHE_TTL_S:
-        return hit[1]
-    deals = await bridge.get_deal_history(days) or []
-    _deal_cache[days] = (_now, deals)
-    return deals
 
 
 def _render_equity_curve(engine):

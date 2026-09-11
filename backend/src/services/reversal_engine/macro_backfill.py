@@ -182,6 +182,52 @@ def backfill(rows, series_by_symbol: dict,
     return report
 
 
+def _closes_from_frame(df) -> list:
+    """`[(unix_ts, close)]` from a yfinance frame, whatever shape it is in.
+
+    yfinance 1.7 returns **MultiIndex columns** -- `('Close', '^VIX')` --
+    even when asked for a single ticker, so `row["Close"]` yields a
+    one-element Series rather than a float. The first version of this
+    module did exactly that, `float()` on the Series raised, the broad
+    `except` swallowed it, and every symbol came back empty: the repair
+    reported 4,288 rows with "no data" and wrote nothing, which is
+    indistinguishable from Yahoo genuinely having no history.
+
+    A guessed dataframe shape. Extracted here and tested against both
+    layouts so the guess cannot recur silently.
+
+    Rows with no price are dropped rather than read as zero -- a NaN hour
+    is a gap in the feed, and a VIX of 0.0 in the training set is worse
+    than the neutral it would be replacing.
+    """
+    if df is None or getattr(df, "empty", True):
+        return []
+    try:
+        cols = df.columns
+        if hasattr(cols, "levels"):
+            # Take the Close level; one ticker per call, so one column.
+            if "Close" not in cols.get_level_values(0):
+                return []
+            close = df.xs("Close", axis=1, level=0).iloc[:, 0]
+        else:
+            if "Close" not in cols:
+                return []
+            close = df["Close"]
+        out = []
+        for ts, value in close.items():
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                continue
+            if v != v or v <= 0:        # NaN or nonsense
+                continue
+            out.append((ts.timestamp(), v))
+        return out
+    except Exception as e:              # noqa: BLE001
+        log.debug("[RE-Macro] could not read a history frame: %s", e)
+        return []
+
+
 def fetch_history(start_ts: float, end_ts: float) -> dict:
     """Hourly closes per symbol from yfinance, or {} if it is unavailable.
 
@@ -203,10 +249,12 @@ def fetch_history(start_ts: float, end_ts: float) -> dict:
         try:
             df = yf.download(symbol, start=start, end=end, interval="1h",
                              progress=False, auto_adjust=False)
-            if df is None or df.empty:
-                continue
-            out[symbol] = [(idx.timestamp(), float(row["Close"]))
-                           for idx, row in df.iterrows()]
+            closes = _closes_from_frame(df)
+            if closes:
+                out[symbol] = closes
+            else:
+                log.warning("[RE-Macro] %s returned no usable hourly history "
+                            "for the requested window", symbol)
         except Exception as e:                    # noqa: BLE001
             log.debug("[RE-Macro] %s history unavailable: %s", symbol, e)
     return out

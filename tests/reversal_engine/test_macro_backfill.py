@@ -167,3 +167,61 @@ class TestItIsADryRunUntilToldOtherwise:
         report = mb.backfill([{"id": 1, "created_at": T0, "ml_features_json": "{"}],
                              series({}), write_fn=lambda x: None, apply=True)
         assert report["unreadable"] == 1
+
+
+class TestReadingWhatYahooActuallyReturns:
+    """**Found by running it, 2026-09-11.** The first version of
+    `fetch_history` did `row["Close"]` over `df.iterrows()`. yfinance 1.7
+    returns MultiIndex columns -- `('Close', '^VIX')` -- even for a single
+    ticker, so that expression yields a one-element Series rather than a
+    float, `float()` on it raised, the broad `except` swallowed it, and
+    every symbol came back empty. The repair reported 4,288 rows with "no
+    data" and wrote nothing, which looked exactly like Yahoo having no
+    history for the period.
+
+    A guessed dataframe shape, in other words. The seam is extracted and
+    tested so the guess cannot recur silently.
+    """
+
+    def _frame(self, multiindex: bool):
+        pd = pytest.importorskip("pandas")
+        idx = pd.to_datetime(["2026-09-01T09:00:00Z", "2026-09-01T10:00:00Z"])
+        if multiindex:
+            cols = pd.MultiIndex.from_tuples(
+                [("Close", "^VIX"), ("High", "^VIX")])
+            return pd.DataFrame([[15.1, 15.4], [16.2, 16.5]], index=idx, columns=cols)
+        return pd.DataFrame({"Close": [15.1, 16.2], "High": [15.4, 16.5]}, index=idx)
+
+    def test_it_reads_multiindex_columns(self):
+        out = mb._closes_from_frame(self._frame(multiindex=True))
+        assert [c for _ts, c in out] == pytest.approx([15.1, 16.2])
+
+    def test_it_still_reads_a_flat_frame(self):
+        out = mb._closes_from_frame(self._frame(multiindex=False))
+        assert [c for _ts, c in out] == pytest.approx([15.1, 16.2])
+
+    def test_the_timestamps_come_back_as_unix_seconds(self):
+        """Derived, not hardcoded: the first version of this assertion
+        carried a hand-typed epoch that was a day out, and a wrong constant
+        in a test about timestamps is the least useful kind of wrong."""
+        import datetime as dt
+        expected = dt.datetime(2026, 9, 1, 9, 0, tzinfo=dt.timezone.utc).timestamp()
+        out = mb._closes_from_frame(self._frame(multiindex=True))
+        assert out[0][0] == pytest.approx(expected)
+        assert out[1][0] - out[0][0] == pytest.approx(3600.0)
+
+    def test_a_frame_with_no_close_column_yields_nothing(self):
+        pd = pytest.importorskip("pandas")
+        df = pd.DataFrame({"Open": [1.0]}, index=pd.to_datetime(["2026-09-01T09:00:00Z"]))
+        assert mb._closes_from_frame(df) == []
+
+    def test_rows_with_no_price_are_dropped_rather_than_read_as_zero(self):
+        """A NaN hour is a gap in the feed. Reading it as 0.0 would put a
+        VIX of zero into the training set."""
+        pd = pytest.importorskip("pandas")
+        idx = pd.to_datetime(["2026-09-01T09:00:00Z", "2026-09-01T10:00:00Z"])
+        df = pd.DataFrame({"Close": [float("nan"), 16.2]}, index=idx)
+        assert [c for _ts, c in mb._closes_from_frame(df)] == pytest.approx([16.2])
+
+    def test_an_empty_or_missing_frame_is_not_an_error(self):
+        assert mb._closes_from_frame(None) == []

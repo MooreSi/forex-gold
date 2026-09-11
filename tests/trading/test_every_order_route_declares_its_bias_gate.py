@@ -18,10 +18,10 @@ is on. That is the only thing that would have caught all three.
 
 **The exemptions are a real position, not a shrug.** A manual order is the
 operator overriding the system on purpose, and refusing it because the H1 trend
-disagrees would be a surprising thing for a button to do. That reading has NOT
-been confirmed by the owner — it is recorded here so the question is visible
-rather than implied by absence. See the note at the end of
-`docs/todo/reversal-engine/080-no-trend-gate-on-the-telegram-path.md`.
+disagrees would be a surprising thing for a button to do. **The owner confirmed
+that reading on 2026-09-11** ("A — keep manual exempt"), so the three manual
+routes below are a settled position rather than an assumed one. See the note at
+the end of `docs/todo/reversal-engine/080-no-trend-gate-on-the-telegram-path.md`.
 """
 from __future__ import annotations
 

@@ -35,6 +35,24 @@ EXPECTED_KEYS = {
     "bridge_backend",
     "chat_id",
     "circuit_breaker_cooldown_mins",
+    # The fourteen capability switches added 2026-09-11 with
+    # Trading > Risk > Reversal Engine Capabilities (migration 41). Declared
+    # here deliberately, as this file's docstring requires. Every one
+    # defaults to off; see docs/todo/reversal-engine/210.
+    "correlated_exposure_cap_lots",
+    "entry_trigger_deceleration",
+    "entry_trigger_enabled",
+    "entry_trigger_max_range_ratio",
+    "entry_trigger_rejection",
+    "event_tier_gate_enabled",
+    "liquidity_map_levels_enabled",
+    "meta_label_gate_enabled",
+    "meta_label_threshold",
+    "re_atr_barriers_enabled",
+    "re_atr_stop_mult",
+    "re_atr_tp1_mult",
+    "session_liquidity_gate_enabled",
+    "vol_target_sizing_enabled",
     "circuit_breaker_enabled",
     "circuit_breaker_losses",
     "claude_model",

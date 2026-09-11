@@ -7,6 +7,7 @@ alongside the strategy settings -- and is re-exported from the package.
 from nicegui import ui
 
 from backend.src.controllers import settings_controller as settings_ctl
+from ._capabilities import render_capabilities_subcard as _render_capabilities_subcard
 
 _RISK_SUBCARD_CLASSES = "flex-1 min-w-72 bg-gray-800 p-3 rounded-lg"
 
@@ -39,6 +40,12 @@ def render_risk_card(card_classes: str = "w-full"):
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
             _render_internal_exposure_subcard(rs)
             _render_dpm_subcard(rs)
+            # The capability switches from docs/todo/reversal-engine/200.
+            # They live beside the other behaviour gates rather than in
+            # Settings > Expert Tunables because they are tier-2 trading
+            # behaviour, not calibration constants -- see
+            # docs/system/rules/60-adding-a-tunable.md.
+            _render_capabilities_subcard(rs)
             # Out of Hours was the third sub-card here from 2026-09-07 until
             # 2026-09-11, when the owner removed it: "we already have a
             # schedule which does the same thing and is more detailed". This

@@ -26,7 +26,15 @@ REPO = Path(__file__).resolve().parents[2]
 TESTS = REPO / "tests"
 
 # Shrinking baselines — lower them as migrations land; never raise them.
-FRESH_DB_LOCAL_DEFS_MAX = 66
+# 66 -> 37 on 2026-09-11. Twenty-nine files carried a fixture that was the
+# conftest one minus `reset_db_worker_thread_connection()` and with a bare
+# `os.remove` — the exact pair that produced 50 Windows teardown errors on the
+# first Windows CI run this repo completed. They inherit `tests/conftest.py`'s
+# now. The 37 that remain are genuine variants: five still use `os.remove`
+# without the worker reset but each does extra work in the fixture body
+# (seeding a channel config, clearing an EA-bridge singleton, resetting a
+# strategy-params cache), so none can be deleted without reading it.
+FRESH_DB_LOCAL_DEFS_MAX = 37
 FAKE_BRIDGE_CLASSES_MAX = 50
 
 

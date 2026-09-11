@@ -9,33 +9,11 @@ a real one. The live message that prompted this (2026-07-29, trade
 for a 0.03-lot trade whose real loss was $15.63 -- every one of those three
 numbers wrong, and the ✅/❌ verdict driven by the fabricated figure.
 """
-import os
-import tempfile
 
 import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as ta
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 def _placeholder_trade(**over):

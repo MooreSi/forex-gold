@@ -3,36 +3,12 @@ identically to the SimulationEngine methods characterized in
 test_sim_account_characterization.py -- see
 docs/todo/refactor/core-fees-risk-governor-migration/020-*.md.
 """
-import os
-import tempfile
 import time
 
 import pytest
 
 from backend.src.db import database as db
 from backend.src.services.trading import sim_account as sa
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 def _insert_signal(sig_id="sig-1", direction="BUY"):

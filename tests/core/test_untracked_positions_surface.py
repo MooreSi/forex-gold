@@ -8,36 +8,12 @@ The SimulationEngine.__new__() instance/self._bridge is replaced by passing
 a plain _FakeBridge directly as the `bridge` argument.
 """
 import asyncio
-import os
-import tempfile
 import time
 
 import pytest
 
 from backend.src.db import database as db
 from backend.src.services.broker import untracked as up
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    db._rs_cache = None
-    db._rs_cache_ts = 0.0
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 class _FakeBridge:

@@ -5,33 +5,11 @@ answers when the AI layer is unavailable.
 No AI is called here and no order is placed: this is the layer that has to
 behave correctly precisely when the API does not.
 """
-import os
-import tempfile
 
 import pytest
 
 from backend.src.db import database as db
 from backend.src.services.positions import core_auto_template as auto
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 # ── the mapping itself ───────────────────────────────────────────────────

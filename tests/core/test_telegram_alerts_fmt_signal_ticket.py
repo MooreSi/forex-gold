@@ -3,33 +3,11 @@ all -- the caller (engine.py) had it on `trade_result["mt5_ticket"]` and
 simply never threaded it through. Every other trade-notification
 formatter (fmt_trade_open, fmt_instant_followup) already states the
 ticket; this was the one gap."""
-import os
-import tempfile
 
 import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as ta
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 _PARSED = {"direction": "BUY", "entry_low": 2399.0, "entry_high": 2401.0,

@@ -8,33 +8,11 @@ of its move in partials at prices the final exit never revisits, so the raw
 price move understates -- or, as in test_partials_price_move_zero_but_pips_
 positive, completely inverts -- what the trade actually achieved.
 """
-import os
-import tempfile
 
 import pytest
 
 from backend.src.db import database as db
 from backend.src.services.telegram import alerts as ta
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 def _trade(**over):

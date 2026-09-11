@@ -7,8 +7,6 @@ this: before it existed at module level the calendar had no comment fallback
 at all, so every EA Template sibling leg showed "Unknown" there while the
 table beside it named the channel correctly (found live 2026-08-06).
 """
-import os
-import tempfile
 import time
 
 import pytest
@@ -19,26 +17,6 @@ from frontend.pages import history
 # frontend-never-imports-the-database contract was restored
 # (2026-08-25 merge); the page keeps the shaping.
 from backend.src.services.analytics import trade_history_repo as _hist_repo
-
-
-def _reset_thread_local_connection():
-    conn = getattr(db._thread_local, "conn", None)
-    if conn is not None:
-        conn.close()
-        del db._thread_local.conn
-    if hasattr(db._thread_local, "depth"):
-        del db._thread_local.depth
-
-
-@pytest.fixture
-def fresh_db():
-    _reset_thread_local_connection()
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    _reset_thread_local_connection()
-    os.remove(path)
 
 
 def _insert_trade(trade_id, tg_source, strategy, signal_id=None, max_tp_hit=None):

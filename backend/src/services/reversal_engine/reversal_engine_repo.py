@@ -152,25 +152,6 @@ def reconcile_balance_with_trades() -> Optional[float]:
         return None
 
 
-def get_max_drawdown() -> float:
-    try:
-        rows = get_db().all("SELECT balance FROM re_balance_log ORDER BY ts")
-        if not rows:
-            return 0.0
-        peak = _STARTING_BALANCE
-        max_dd = 0.0
-        for r in rows:
-            b = float(r[0])
-            if b > peak:
-                peak = b
-            dd = peak - b
-            if dd > max_dd:
-                max_dd = dd
-        return max_dd
-    except Exception:
-        return 0.0
-
-
 # ── Signal CRUD ───────────────────────────────────────────────────────────────
 
 def create_signal(data: dict) -> int:
@@ -403,84 +384,6 @@ def get_recent_win_rate(n: int = 20) -> float:
         return 0.5
     wins = sum(1 for r in rows if r[0] == "win")
     return wins / len(rows)
-
-
-def get_stats() -> dict:
-    try:
-        r = get_db().get("""
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
-                SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
-                SUM(CASE WHEN outcome='be' THEN 1 ELSE 0 END) as bes,
-                SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN status='triggered' THEN 1 ELSE 0 END) as triggered,
-                AVG(CASE WHEN status='closed' THEN net_pnl_dollars END) as avg_pnl,
-                SUM(CASE WHEN status='closed' THEN net_pnl_dollars ELSE 0 END) as total_pnl,
-                SUM(CASE WHEN correlation_confirmed=1 THEN 1 ELSE 0 END) as correlated
-            FROM re_signals
-        """)
-        closed = (r["wins"] or 0) + (r["losses"] or 0) + (r["bes"] or 0)
-        win_rate = (r["wins"] / closed * 100) if closed > 0 else 0.0
-        corr_rate = (r["correlated"] / r["total"] * 100) if r["total"] else 0.0
-        return {
-            "total": r["total"] or 0,
-            "wins": r["wins"] or 0,
-            "losses": r["losses"] or 0,
-            "bes": r["bes"] or 0,
-            "pending": r["pending"] or 0,
-            "triggered": r["triggered"] or 0,
-            "win_rate": win_rate,
-            "avg_pnl": r["avg_pnl"] or 0.0,
-            "total_pnl": r["total_pnl"] or 0.0,
-            "correlated": r["correlated"] or 0,
-            "correlation_rate": corr_rate,
-        }
-    except Exception:
-        return {"total": 0, "wins": 0, "losses": 0, "bes": 0, "pending": 0,
-                "triggered": 0, "win_rate": 0, "avg_pnl": 0, "total_pnl": 0,
-                "correlated": 0, "correlation_rate": 0}
-
-
-# ── Performance breakdowns ─────────────────────────────────────────────────────
-
-def get_perf_by_session() -> list[dict]:
-    rows = get_db().all("""
-        SELECT session,
-               SUM(CASE WHEN outcome='win'  THEN 1 ELSE 0 END) as wins,
-               SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
-               AVG(net_pnl_dollars) as avg_pnl,
-               SUM(net_pnl_dollars) as total_pnl
-        FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
-        GROUP BY session ORDER BY total_pnl DESC
-    """)
-    return [dict(r) for r in rows]
-
-
-def get_perf_by_bias() -> list[dict]:
-    rows = get_db().all("""
-        SELECT htf_bias,
-               SUM(CASE WHEN outcome='win'  THEN 1 ELSE 0 END) as wins,
-               SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
-               AVG(net_pnl_dollars) as avg_pnl,
-               SUM(net_pnl_dollars) as total_pnl
-        FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
-        GROUP BY htf_bias ORDER BY total_pnl DESC
-    """)
-    return [dict(r) for r in rows]
-
-
-def get_perf_by_level_type() -> list[dict]:
-    rows = get_db().all("""
-        SELECT level_type,
-               SUM(CASE WHEN outcome='win'  THEN 1 ELSE 0 END) as wins,
-               SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
-               AVG(net_pnl_dollars) as avg_pnl,
-               SUM(net_pnl_dollars) as total_pnl
-        FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
-        GROUP BY level_type ORDER BY total_pnl DESC
-    """)
-    return [dict(r) for r in rows]
 
 
 # ── Correlation daily stats ───────────────────────────────────────────────────
@@ -794,4 +697,15 @@ def fetch_trade_id_and_strategy_for_signal(signal_id: str) -> tuple:
 from backend.src.services.reversal_engine.measure_repo import (  # noqa: E402
     record_excursion,
     record_last_seen_sl,
+)
+
+# The panel's read-side statistics live in stats_repo (2026-09-11, this file
+# was three lines under its ceiling). Re-exported so every caller keeps one
+# import, exactly as measure_repo's writers are above.
+from backend.src.services.reversal_engine.stats_repo import (  # noqa: E402
+    get_max_drawdown,
+    get_perf_by_bias,
+    get_perf_by_level_type,
+    get_perf_by_session,
+    get_stats,
 )

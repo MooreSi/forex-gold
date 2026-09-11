@@ -84,3 +84,84 @@ def template_sl_at(template: Optional[dict], direction: str, ref_px: float,
         return None
     up = direction.upper() == "BUY"
     return round(ref_px - dist if up else ref_px + dist, 2)
+
+
+def atr_scaled_ladder(template: Optional[dict], atr: float, ref: float,
+                      sign: int, tps: dict) -> dict:
+    """The anchor TP ladder, sized to volatility instead of to fixed pips.
+
+    `use_dynamic_atr` already sizes the STOP and TP LEVEL 1 from ATR --
+    "Dynamic ATR sizing of SL/TP1", the field's own documented scope. Every
+    level above TP1 keeps a fixed pip distance, so on a volatile day the
+    stop and the first target move out and the rest of the ladder does not.
+    R is then constant at TP1 and drifts everywhere above it, which is the
+    same payoff inversion `docs/todo/reversal-engine/200` section 1.1 set
+    out to remove.
+
+    `atr_ladder_scale` (default False, so no existing template changes)
+    rescales the WHOLE ladder by the factor that puts TP1 on its ATR
+    multiple. The relative spacing somebody tuned by hand survives
+    untouched; only the size of the thing changes. Level 1 comes out
+    identical either way, which is what makes this safe to layer over the
+    existing override rather than replacing it.
+
+    The ANCHOR ladder only. Pending-leg levels travel to the EA as pips
+    measured from its own staging base and are not resolved to prices here,
+    so scaling them would need the EA to agree; the recommended preset is
+    single-entry and does not use them.
+
+    Refuses rather than guesses in three cases: no ATR, no ladder, or no
+    `tp1_pips` to define the shape relative to. In the last case there is no
+    reference to preserve, and inventing one would silently move every level
+    on a template whose author never set a first target.
+    """
+    if not template or not tps or atr <= 0:
+        return tps
+    if not bool(template.get("use_dynamic_atr")):
+        return tps
+
+    target_dist = atr_tp1_distance(template, atr) or 0.0
+    factor = atr_scale_factor(template, atr)
+
+    if factor is None:
+        # The behaviour that already existed: level 1 only.
+        out = dict(tps)
+        out[1] = ref + sign * target_dist
+        return out
+
+    return {n: ref + sign * abs(price - ref) * factor for n, price in tps.items()}
+
+
+def atr_sl_distance(template: Optional[dict], atr: float) -> Optional[float]:
+    """The stop distance in PRICE that `use_dynamic_atr` implies, or None.
+
+    One definition, shared by the live path (`template_sl_at`) and the
+    backtest walk. Two copies of this rule is how a backtest ends up
+    measuring a stop the live trade never had.
+    """
+    if not template or atr <= 0 or not bool(template.get("use_dynamic_atr")):
+        return None
+    return atr * float(template.get("atr_sl_mult") or 1.5)
+
+
+def atr_tp1_distance(template: Optional[dict], atr: float) -> Optional[float]:
+    """The first target's distance in PRICE, or None."""
+    if not template or atr <= 0 or not bool(template.get("use_dynamic_atr")):
+        return None
+    return atr * float(template.get("atr_tp1_mult") or 1.5)
+
+
+def atr_scale_factor(template: Optional[dict], atr: float) -> Optional[float]:
+    """What to multiply every pips-derived TP distance by, or None.
+
+    None means "do not rescale the ladder": either `atr_ladder_scale` is
+    off, or there is no `tp1_pips` to define the shape relative to and so
+    no shape to preserve.
+    """
+    target = atr_tp1_distance(template, atr)
+    if target is None or not bool(template.get("atr_ladder_scale")):
+        return None
+    tp1_pips = float(template.get("tp1_pips") or 0.0)
+    if tp1_pips <= 0:
+        return None
+    return target / (tp1_pips * PIPS_TO_PRICE_XAUUSD)

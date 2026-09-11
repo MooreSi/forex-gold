@@ -28,6 +28,7 @@ from typing import Any, Optional
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.trading import signal_state_repo
+from backend.src.services.trading import template_levels
 from backend.src.services.trading.send_dedup import (
     _FallbackDecision, _bridge_order_comment, _resolve_fallback_send,
     SendOutcomeUnknown,
@@ -187,13 +188,11 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
                enumerate(msg_tps[:ea_templates.MAX_TP_LEVELS], start=1)}
     else:
         tps = _pips_ladder("tp")
-        # atr_tp1_mult (2026-08-04 -- existed as a template field with no
-        # implementation; atr_sl_mult's SL equivalent was fixed already).
-        # Only level 1 -- "Dynamic ATR sizing of SL/TP1", the template's own
-        # documented scope, not the whole ladder.
-        if atr and atr > 0 and bool(template.get("use_dynamic_atr")):
-            atr_mult = float(template.get("atr_tp1_mult") or 1.5)
-            tps[1] = ref + sign * (atr * atr_mult)
+        # Level 1 from atr_tp1_mult (2026-08-04, the template's own
+        # documented scope), or the whole ladder rescaled around it when
+        # atr_ladder_scale is on (2026-09-11). Both in one place because
+        # they are one decision: see template_levels.atr_scaled_ladder.
+        tps = template_levels.atr_scaled_ladder(template, atr or 0.0, ref, sign, tps)
 
     pcts = None
     if tps:

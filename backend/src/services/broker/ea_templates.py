@@ -193,6 +193,14 @@ DEFAULTS: dict = {
     "atr_period":        14,
     "atr_sl_mult":       1.5,
     "atr_tp1_mult":      1.5,
+    # Extends use_dynamic_atr past its original SL/TP1 scope to the WHOLE
+    # anchor ladder (2026-09-11), preserving the ladder's relative spacing
+    # and rescaling it so TP1 lands on its ATR multiple. Without it the stop
+    # and TP1 scale with volatility while TP2 upward do not, so R is
+    # constant at the first target and drifts above it -- the same payoff
+    # inversion docs/todo/reversal-engine/200 section 1.1 exists to remove.
+    # False keeps every template saved before this field identical.
+    "atr_ladder_scale":  False,
     # Minimum distance to keep from price when placing/adjusting a stop
     # (InpDefaultGuardPips), and the hard floor the EA will never tighten
     # inside (InpSafetyCapPips). These are what stop a breakeven move
@@ -294,7 +302,8 @@ _SL_STAGE_REMOVE_TP_FIELDS = tuple(
 _BOOL_FIELDS  = (
     "tg_cmd_enabled", "harvest_enabled", "cancel_pending", "group_tp_action",
     "sig_guard", "anc_shave", "auto_sl", "partials", "close_full_on_last",
-    "use_dynamic_atr", "use_emergency_sl", "gold_half_pip_anchor",
+    "use_dynamic_atr", "atr_ladder_scale", "use_emergency_sl",
+    "gold_half_pip_anchor",
     "tp_from_telegram", "tp_pen_from_telegram",
 ) + _SL_STAGE_REMOVE_TP_FIELDS
 _FLOAT_FIELDS = (

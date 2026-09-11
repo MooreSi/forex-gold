@@ -82,6 +82,11 @@ def _run_migrations() -> None:
         # The stop actually in force (2026-09-10). sl_dist is the stop at
         # OPEN and the EA trails silently. See reversal-engine/020.
         "ALTER TABLE re_signals ADD COLUMN last_seen_sl REAL",
+        # How the excursion was obtained (2026-09-11): the five-second live
+        # sampler, or a reconstruction from broker tick history. NULL means
+        # the sampler, which is the only thing that wrote one before this
+        # column existed. See measure_repo and reversal-engine/200.
+        "ALTER TABLE re_signals ADD COLUMN excursion_source TEXT",
     ]
     for stmt in migrations:
         try:

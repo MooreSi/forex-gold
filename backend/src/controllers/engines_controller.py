@@ -126,3 +126,40 @@ def pro_model_fit_in_background(force: bool = False) -> None:
     page that asked for it."""
     from backend.src.services.reversal_engine import pro_model as _pm
     _pm.fit_in_background(force=force)
+
+
+async def reversal_research_study(**kwargs) -> str:
+    """Run the reversal engine's phase-1 research study and render it.
+
+    Reads history, writes two measurement columns, places nothing. See
+    services/reversal_engine/research_lab.py and
+    docs/todo/reversal-engine/200.
+
+    The bridge comes from the running engine rather than the caller: the
+    study needs the same broker connection the engine trades on, and a UI
+    that had to find one would be reaching past this layer to do it.
+    """
+    from backend.src.services.reversal_engine import research_lab as _lab
+    engine = _re_svc.get_instance()
+    bridge = getattr(engine, "_bridge", None) if engine else None
+    if bridge is None:
+        return ("The reversal engine is not running, so there is no broker "
+                "connection to read history through. Start it and try again.")
+    return _lab.render(await _lab.run_study(bridge, **kwargs))
+
+
+def reversal_shadow_report() -> list:
+    """Champion vs challenger, over the signals both have seen."""
+    from backend.src.services.reversal_engine import shadow as _shadow
+    return _shadow.report()
+
+
+def reversal_macro_backfill(apply: bool = False) -> dict:
+    """Repair the macro features of stored training vectors.
+
+    `apply=False` reports what would change and writes nothing. Applying it
+    changes what the ML gate learns at its next retrain, so the default is
+    the report. See services/reversal_engine/macro_backfill.py.
+    """
+    from backend.src.services.reversal_engine import macro_backfill as _mb
+    return _mb.run(apply=apply)

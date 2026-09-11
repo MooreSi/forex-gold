@@ -60,3 +60,25 @@ per-strategy parameters, Expert Tunables, custom strategies, retention).
 ## Open questions
 
 - The Expert Tunables clamp ranges are "documented guesses, flagged for review" — the bounds themselves are unvalidated.
+
+## Capability switches (2026-09-11)
+
+Migration 41 added a column per new capability from
+`docs/todo/reversal-engine/200`, every one defaulting to off, and
+`risk/capability_gates.py` is the only place they are read. Two properties
+are pinned by tests and are load-bearing:
+
+- a DEFAULT settings row leaves every gate inert, including `sizing_inputs`,
+  which returns inputs that multiply a lot size by exactly 1.0
+- a settings row MISSING those columns behaves the same, so a client that
+  has not run migration 41 trades exactly as it did
+
+New modules: `sizing_policy.py` (volatility, drawdown and correlated-exposure
+adjustments that MODIFY a base lot size rather than computing one --
+`fees_sizing.suggest_lot_size` stays the single sizing rule),
+`session_liquidity.py` (rollover, weekend reopen, period end -- illiquidity on
+a clock, which no news filter can see) and `event_tiers.py` (per-tier windows
+composed over `news_calendar`'s events, wider AFTER a release than before it).
+
+**`sizing_policy` is not wired to the order path.** That is deliberate and it
+needs a demo session; see `docs/todo/reversal-engine/210`.

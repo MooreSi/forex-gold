@@ -274,3 +274,66 @@ async def _render_ml_section(ml_container) -> None:
             ui.label(feat_txt).classes("text-xs text-gray-600 leading-relaxed")
     except Exception as e:
         _log.debug("[reversal panel] ML status section refresh failed: %s", e)
+
+
+def _render_research_section(container) -> None:
+    """The research study card: one button, one report.
+
+    On demand rather than on refresh. The study reads broker tick history
+    for every closed trade it measures, which is minutes of round trips --
+    not something to run on a panel timer. Synchronous because it only
+    BUILDS the card; the button's own handler is what awaits the study.
+
+    It places nothing, closes nothing and changes no setting. What it
+    writes is two measurement columns on rows that had none.
+    """
+    with container:
+        ui.label("Research study").classes(
+            "text-xs font-semibold text-gray-400 uppercase tracking-wider")
+        ui.label(
+            "Reconstructs how far each closed trade actually travelled from "
+            "broker tick history, prices what each fill cost, attributes the "
+            "results by cohort, and fits the stop and target to what price "
+            "did. Reads only; it places nothing."
+        ).classes("text-xs text-gray-500 mb-2")
+
+        output = ui.label("").classes(
+            "text-xs font-mono whitespace-pre text-gray-300 overflow-x-auto")
+
+        async def _run() -> None:
+            button.disable()
+            output.set_text("Running. This reads tick history per trade and "
+                            "takes a few minutes.")
+            try:
+                output.set_text(
+                    await engines_controller.reversal_research_study())
+            except Exception as e:                # noqa: BLE001
+                _log.warning("[reversal panel] research study failed: %s", e)
+                output.set_text(f"The study could not complete: {e}")
+            finally:
+                button.enable()
+
+        button = ui.button("Run study", icon="science", on_click=_run) \
+            .classes("text-xs bg-slate-700 text-white px-3") \
+            .props("dense unelevated")
+
+        shadow_box = ui.column().classes("w-full mt-3")
+
+        def _shadow() -> None:
+            shadow_box.clear()
+            rows = engines_controller.reversal_shadow_report()
+            with shadow_box:
+                ui.label("Champion vs challenger").classes(
+                    "text-xs font-semibold text-gray-400 uppercase tracking-wider")
+                for r in sorted(rows, key=lambda x: not x["is_champion"]):
+                    mean_r = "no decisions yet" if r["mean_r"] is None \
+                        else f"{r['mean_r']:+.3f}R"
+                    label = r["variant"] + (" (live)" if r["is_champion"] else "")
+                    ui.label(f"{label}: took {r['n_taken']}, skipped "
+                             f"{r['n_skipped']}, {mean_r}, "
+                             f"net {r['net']:+.2f}").classes(
+                        "text-xs text-gray-400 font-mono")
+
+        ui.button("Shadow report", icon="compare_arrows", on_click=_shadow) \
+            .classes("text-xs bg-slate-800 text-white px-3 mt-2") \
+            .props("dense unelevated")

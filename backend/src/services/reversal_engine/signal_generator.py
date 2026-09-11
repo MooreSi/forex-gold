@@ -69,7 +69,43 @@ def entry_zone_from_level(level_price: float, atr: float, direction: str) -> tup
     return entry_low, entry_high
 
 
-def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float) -> dict:
+def atr_barriers(atr: float, cfg: dict | None) -> tuple[float, list[float]] | None:
+    """`(sl_dist, tp_offsets)` sized from volatility, or None to leave the
+    existing geometry alone.
+
+    Section 1.1 of `docs/todo/reversal-engine/200`, enabled by the owner's
+    2026-09-11 directive that this engine no longer has to resemble Gold
+    Diggers. The stop becomes `atr * stop_mult` and the ladder is rescaled
+    so TP1 lands at `atr * tp1_mult`, which makes R constant instead of
+    varying 0.43 to 0.75 with level score.
+
+    **The ladder's SHAPE is preserved, not replaced.** The relative spacing
+    in `_TP_OFFSETS` is the one part of the reference channel's geometry
+    that encodes something real -- how far gold tends to run once a level
+    holds -- and the reach data behind it (median 0.43R, only 9.4% reaching
+    1.0R) was measured on this instrument, not borrowed.
+
+    Returns None rather than a guess when the ATR or a multiple is missing
+    or zero. Sizing a stop off a zero ATR puts it at the entry price, which
+    is not a tight stop, it is an immediate loss.
+    """
+    if not cfg or not cfg.get("enabled"):
+        return None
+    try:
+        a = float(atr or 0.0)
+        stop_mult = float(cfg.get("stop_mult") or 0.0)
+        tp1_mult = float(cfg.get("tp1_mult") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if a <= 0 or stop_mult <= 0 or tp1_mult <= 0:
+        return None
+
+    scale = (a * tp1_mult) / _TP_OFFSETS[0]
+    return a * stop_mult, [o * scale for o in _TP_OFFSETS]
+
+
+def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float,
+                         offsets: list[float] | None = None) -> dict:
     """
     Build the 8-level TP cascade matching the reference channel format.
 
@@ -89,7 +125,7 @@ def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float) -> di
     be sized honestly.
     """
     tps = {}
-    for i, offset in enumerate(_TP_OFFSETS, start=1):
+    for i, offset in enumerate(offsets or _TP_OFFSETS, start=1):
         if direction == "BUY":
             tps[f"tp{i}"] = round(entry_mid + offset, 2)
         else:
@@ -154,7 +190,16 @@ def build_signal(level: dict, direction: str, context: dict) -> dict:
     else:
         entry_low, entry_high = entry_zone_from_level(level_price, atr, direction)
         entry_mid  = round((entry_low + entry_high) / 2, 2)
-        sl_dist    = sl_distance_for_level(level_score)
+        # ATR barriers when the owner has turned them on; otherwise the
+        # level-score stop this engine has always used. See atr_barriers().
+        #
+        # The RAW context value, not `atr` above: that one falls back to 8.0
+        # when the context carries none, which is a harmless default for
+        # widening an entry zone and a silent fiction to size a real stop
+        # from. No ATR must mean no ATR barriers, not a stop measured off a
+        # number nobody observed.
+        _fitted = atr_barriers(context.get("atr"), context.get("atr_barriers"))
+        sl_dist = _fitted[0] if _fitted else sl_distance_for_level(level_score)
 
     if direction == "BUY":
         stop_loss = round(entry_mid - sl_dist, 2)
@@ -162,9 +207,14 @@ def build_signal(level: dict, direction: str, context: dict) -> dict:
         stop_loss = round(entry_mid + sl_dist, 2)
 
     if is_gd2:
+        # Untouched on purpose: GD2's zone is a measured FVG/breaker overlap
+        # and its targets are already R-multiples of that zone's own width.
+        # There is no inversion here to fix, and replacing a real confluence
+        # zone with an ATR guess would be a downgrade.
         tps = calculate_gd2_tp_structure(direction, entry_mid, sl_dist)
     else:
-        tps = calculate_tp_cascade(direction, entry_mid, sl_dist)
+        tps = calculate_tp_cascade(direction, entry_mid, sl_dist,
+                                   offsets=_fitted[1] if _fitted else None)
 
     tp1_dist = abs(tps["tp1"] - entry_mid)
     rr_tp1   = round(tp1_dist / sl_dist, 2) if sl_dist > 0 else 0.0

@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Optional
 
 from backend.src.services.broker import ea_bridge as _bridge
+from backend.src.services.broker import ea_template_presets as _presets
 from backend.src.services.broker import ea_templates as _templates
 
 __all__ = [
@@ -48,11 +49,13 @@ __all__ = [
     "DEFAULTS",
     "EXPORT_EXTENSION",
     "MAX_TP_LEVELS",
+    "BUILTIN_PRESET_NAME",
 ]
 
 DEFAULTS = _templates.DEFAULTS
 EXPORT_EXTENSION = _templates.EXPORT_EXTENSION
 MAX_TP_LEVELS = _templates.MAX_TP_LEVELS
+BUILTIN_PRESET_NAME = _presets.PRESET_NAME
 
 
 # ── EA connection: read-only ─────────────────────────────────────────────────
@@ -126,6 +129,10 @@ def save_ea_template(*args, **kwargs):
 
 def delete_ea_template(*args, **kwargs):
     return _templates.delete_ea_template(*args, **kwargs)
+
+
+def install_builtin_template(*args, **kwargs):
+    return _presets.install(*args, **kwargs)
 
 
 def export_templates(*args, **kwargs):

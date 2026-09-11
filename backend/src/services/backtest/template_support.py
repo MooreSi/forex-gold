@@ -92,11 +92,18 @@ _GRID_REASON = (
 )
 
 
-def can_simulate(template: Optional[dict]) -> tuple[bool, list[str]]:
+def can_simulate(template: Optional[dict],
+                 atr_available: bool = False) -> tuple[bool, list[str]]:
     """(supported, reasons). Reasons are empty when supported.
 
     Every reason is listed, not just the first: fixing one field at a time
     to discover the next is a guessing game.
+
+    `atr_available` says the caller can supply the ATR the template would
+    be sized from. The bar walk can -- `engine._atr14` computes exactly
+    that number a few lines from the call site -- so `use_dynamic_atr` is
+    only a refusal when nobody can. The default is False, so every existing
+    caller behaves as it did.
     """
     if not template:
         return False, ["no template was supplied"]
@@ -114,6 +121,8 @@ def can_simulate(template: Optional[dict]) -> tuple[bool, list[str]]:
         pass
 
     for field, why in UNSUPPORTED_WHEN_ON.items():
+        if field == "use_dynamic_atr" and atr_available:
+            continue
         if _on(template.get(field)):
             reasons.append(why)
 

@@ -40,6 +40,8 @@ from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 from backend.src.services.reversal_engine import level_detector as ld
 from backend.src.services.reversal_engine import ml_engine as re_ml
 from backend.src.services.reversal_engine import re_macro
+from backend.src.services.reversal_engine import cycle_setup as _setup
+from backend.src.services.risk import capability_gates as _caps
 from backend.src.services.reversal_engine import signal_generator as sg
 from backend.src.services.reversal_engine.reversal_engine_correlate import _CorrelationMixin
 from backend.src.services.reversal_engine.reversal_engine_live_execute import _LiveExecuteMixin
@@ -294,8 +296,21 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             self._status_msg = f"Cap: {len(open_sigs)} open signals"
             return
 
+        # Risk settings, read once: they decide both which extra levels
+        # join the candidate list and whether the signal's barriers are
+        # sized from ATR. Both default to today's behaviour.
+        try:
+            from backend.src.db import database as _cdb_rs
+            _rs = _cdb_rs.get_risk_settings() or {}
+        except Exception:
+            _rs = {}
+
         # Get candidate levels
-        candidates = ld.get_candidate_levels(h1_candles, price, htf_bias=htf, m15_candles=m15_candles)
+        _extra = (await _setup.liquidity_map_levels(self._bridge, time.time())
+                  if _caps.liquidity_map_enabled(_rs) else [])
+        candidates = ld.get_candidate_levels(h1_candles, price, htf_bias=htf,
+                                             m15_candles=m15_candles,
+                                             extra_levels=_extra)
         self._cached["levels"] = candidates
         # Full, unfiltered level set (asia/swing/round/congestion, no proximity
         # or score cutoff) -- used by _classify_ref_level() for REF-level
@@ -312,14 +327,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             })
             return
 
-        context = {
-            "atr":            atr,
-            "adx":            adx,
-            "htf_bias":       htf,
-            "h1_bias":        htf,  # use H1 as proxy
-            "session":        session,
-            "price_at_signal": price,
-        }
+        context = _setup.cycle_context(atr, adx, htf, session, price, _rs)
 
         # Deactivate stale levels
         re_db.deactivate_old_levels()

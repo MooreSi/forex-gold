@@ -724,4 +724,75 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (38, "Count how often a resting order has flapped", [
         "ALTER TABLE vantage_pending_orders ADD COLUMN withdraw_count INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # An ATR-sized LADDER, not just an ATR-sized TP1. use_dynamic_atr sizes
+    # the stop and TP1 from ATR and stops there, so on a volatile day the
+    # stop and first target move out and TP2 upward do not -- R constant at
+    # the first target and drifting above it. Off, so every existing
+    # template is byte-identical. docs/todo/reversal-engine/200 section 2.
+    (39, "ATR-scaled anchor ladder (2026-09-11), off by default", [
+        "ALTER TABLE ea_trade_templates ADD COLUMN atr_ladder_scale INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # Measured execution cost, per fill. Nothing in the app has ever
+    # compared the price asked for with the price received:
+    # fees_sizing.calculate_fees charges a CONSTANT estimated_slippage_
+    # points to every trade. reversal-engine/020 is trying to explain 0.53
+    # points of leakage per loss with no measurement of this at all.
+    # Written by services/broker/tca.py; read-only everywhere else.
+    (40, "Execution quality: measured slippage and spread per fill", [
+        """CREATE TABLE IF NOT EXISTS execution_quality (
+            trade_id         TEXT PRIMARY KEY,
+            mt5_ticket       INTEGER,
+            measured_at      REAL NOT NULL,
+            open_time        REAL,
+            direction        TEXT,
+            strategy         TEXT,
+            bucket           TEXT,
+            requested_price  REAL,
+            fill_price       REAL,
+            slippage_pts     REAL,
+            spread_open_pts  REAL,
+            spread_close_pts REAL,
+            spread_cost_pts  REAL,
+            cost_pts         REAL,
+            sl_dist          REAL,
+            cost_r           REAL,
+            fill_delay_s     REAL,
+            measured         INTEGER NOT NULL DEFAULT 0
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_execquality_open ON execution_quality(open_time)",
+    ]),
+
+    # Every new capability from docs/todo/reversal-engine/200, each one OFF
+    # and each default byte-identical to today's behaviour. Nothing in this
+    # step changes what the app trades; they are the switches a demo session
+    # turns on one at a time, which is the only way any of them can be
+    # attributed afterwards.
+    (41, "Reversal-engine capability switches, all off (2026-09-11)", [
+        # Section 1.1: barriers fitted to our own excursion data instead of
+        # the reference channel's fixed point offsets.
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_atr_barriers_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_atr_stop_mult REAL NOT NULL DEFAULT 1.2",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_atr_tp1_mult REAL NOT NULL DEFAULT 1.2",
+        # Section 4.2: confirmation at the level, not just arrival at it.
+        "ALTER TABLE vantage_risk_settings ADD COLUMN entry_trigger_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN entry_trigger_rejection INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN entry_trigger_deceleration INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN entry_trigger_max_range_ratio REAL NOT NULL DEFAULT 0.5",
+        # Section 5.2: the meta-labeller, which replaces the R regression.
+        "ALTER TABLE vantage_risk_settings ADD COLUMN meta_label_gate_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN meta_label_threshold REAL NOT NULL DEFAULT 0.5",
+        # Section 5.6: illiquidity that arrives on a clock, and per-tier
+        # event windows.
+        "ALTER TABLE vantage_risk_settings ADD COLUMN session_liquidity_gate_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN event_tier_gate_enabled INTEGER NOT NULL DEFAULT 0",
+        # Section 5.4. The cap is in lots and 0 means OFF, matching every
+        # other cap in this table.
+        "ALTER TABLE vantage_risk_settings ADD COLUMN vol_target_sizing_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN correlated_exposure_cap_lots REAL NOT NULL DEFAULT 0",
+        # Section 4.1: the previous-day/week, VWAP and initial-balance
+        # levels joining the candidate list.
+        "ALTER TABLE vantage_risk_settings ADD COLUMN liquidity_map_levels_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

@@ -350,7 +350,8 @@ def get_unicorn_candidates(m15_candles: list[dict], current_price: float) -> lis
     }]
 
 
-def get_all_levels(h1_candles: list[dict], current_price: float) -> list[dict]:
+def get_all_levels(h1_candles: list[dict], current_price: float,
+                   extra_levels: Optional[list[dict]] = None) -> list[dict]:
     """
     Every known candidate S/R level (asia/swing/round/congestion), deduped,
     with no proximity or score filtering applied -- the raw material
@@ -359,6 +360,14 @@ def get_all_levels(h1_candles: list[dict], current_price: float) -> list[dict]:
     price against "what levels exist right now", not just the handful the
     bot itself was close enough to act on) don't have to reimplement the
     asia+swing+round+congestion assembly themselves.
+
+    `extra_levels` are `{price, type, strength}` dicts from somewhere else --
+    today `services/market/liquidity_map.py`'s previous-day/week, opening and
+    initial-balance levels (docs/todo/reversal-engine/200 section 4.1). They
+    join here rather than being scored separately so they go through the same
+    dedup, scoring, proximity filter and ranking as everything else; a
+    parallel path is how two level sets end up with two different meanings
+    for "score". None by default, so nothing changes for existing callers.
     """
     if not h1_candles or current_price <= 0:
         return []
@@ -368,7 +377,7 @@ def get_all_levels(h1_candles: list[dict], current_price: float) -> list[dict]:
     round_levels        = get_round_levels(current_price)
     congestion_zones     = get_congestion_zones(h1_candles)
 
-    candidates: list[dict] = []
+    candidates: list[dict] = list(extra_levels or [])
 
     # Asia levels
     if asia_low > 0:
@@ -399,6 +408,7 @@ def get_candidate_levels(
     htf_bias: str = "neutral",
     max_candidates: int = 8,
     m15_candles: Optional[list[dict]] = None,
+    extra_levels: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Main entry point. Returns the top candidate S/R levels sorted by score.
@@ -412,7 +422,7 @@ def get_candidate_levels(
         return []
 
     asia_low, asia_high = get_asia_range(h1_candles)
-    candidates = get_all_levels(h1_candles, current_price)
+    candidates = get_all_levels(h1_candles, current_price, extra_levels)
 
     # Score and annotate
     scored = []

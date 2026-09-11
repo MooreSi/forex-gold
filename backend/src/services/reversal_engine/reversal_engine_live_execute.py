@@ -18,6 +18,7 @@ import logging
 import time as _time
 
 from backend.src.services.risk import governor as _gov
+from backend.src.services.risk import capability_gates as _caps
 import time
 import uuid
 from datetime import datetime, timezone
@@ -31,6 +32,25 @@ from backend.src.services.positions.momentum_exhaustion import check_momentum_ex
 _log = logging.getLogger("reversal_engine")
 
 _ML_BLOCK_THRESHOLD = 0.0     # block live execution if predicted R-multiple < 0
+
+
+def upcoming_events(rs: dict) -> list:
+    """Calendar events shaped for `event_tiers.check`, or [].
+
+    Fetched only when that gate is on: `get_events` can reach the network,
+    and a feed call on every fill attempt for a gate nobody enabled is a
+    cost with no benefit. `mins_until` is derived here because the calendar
+    stores absolute timestamps and the tier windows are relative.
+    """
+    if not rs.get("event_tier_gate_enabled"):
+        return []
+    try:
+        from backend.src.utils.news_calendar import get_events
+        now = _time.time()
+        return [dict(ev, mins_until=(float(ev.get("ts", 0)) - now) / 60.0)
+                for ev in get_events()]
+    except Exception:
+        return []
 
 
 class _LiveExecuteMixin:
@@ -261,6 +281,60 @@ class _LiveExecuteMixin:
                 _log.info("[RE-Engine] %s", _soon)
                 return
 
+            # ── The new gates, and the shadow log ────────────────────
+            #
+            # All three are EVALUATED before any of them returns, so the
+            # champion/challenger log below sees the same fact set the live
+            # decision did. Recording at each early return instead would
+            # record "would take" for a variant whose later gates were
+            # never run, which reads as an endorsement it never gave.
+            #
+            # The liquidity gate therefore sits here rather than beside the
+            # news blackout. It costs a blocked signal the fill-time
+            # re-evaluation it would previously have skipped -- a few bridge
+            # calls on a rare path, in exchange for a comparison that means
+            # something. It changes no decision.
+            _liq_reason = _caps.liquidity_blocks(_time.time(), rs,
+                                                 upcoming_events(rs))
+            _trigger_reason = await self._entry_trigger_blocks(sig, rs)
+            _meta_on, _meta_threshold = _caps.meta_label_gate(rs)
+            from backend.src.services.reversal_engine import meta_label
+            _meta_p = meta_label.score_signal(sig)
+
+            from backend.src.services.reversal_engine import shadow
+            shadow.record_all(str(sig.get("signal_ref") or ""), {
+                "ml_prob": fresh_prob,
+                "meta_prob": _meta_p,
+                "trigger_passed": _trigger_reason is None,
+                "liquidity_blocked": bool(_liq_reason),
+            })
+
+            if _liq_reason:
+                re_db.update_live_exec(sig["id"], status="skipped:liquidity")
+                _log.info("[RE-Engine] liquidity gate blocked live exec %s -- %s",
+                          sig.get("signal_ref"), _liq_reason)
+                return
+
+            # Confirmation at the level, not just arrival at it (section
+            # 4.2). A confirmation the app could not evaluate because its
+            # own feed failed is not evidence against the setup, so a
+            # bridge error passes -- exactly as the news gate does.
+            if _trigger_reason:
+                re_db.update_live_exec(sig["id"], status="skipped:no_trigger")
+                _log.info("[RE-Engine] entry trigger blocked live exec %s -- %s",
+                          sig.get("signal_ref"), _trigger_reason)
+                return
+
+            # The meta-labeller (section 5.2): act or do not act, as a
+            # question of its own. None -- no opinion -- until it has costed
+            # trades to learn from, and no opinion never blocks.
+            if _meta_on and _meta_p is not None and _meta_p < _meta_threshold:
+                re_db.update_live_exec(sig["id"], status="meta_skipped")
+                _log.info("[RE-Engine] meta-label gate blocked live exec "
+                          "%s (p=%.3f < %.2f)", sig.get("signal_ref"),
+                          _meta_p, _meta_threshold)
+                return
+
             # ML gate: block live execution when predicted R-multiple < 0 (expected loss)
             if fresh_prob is not None and float(fresh_prob) < _ML_BLOCK_THRESHOLD:
                 re_db.update_live_exec(sig["id"], status="ml_skipped")
@@ -324,6 +398,31 @@ class _LiveExecuteMixin:
                 re_db.update_live_exec(sig["id"], status=f"error:{exc}")
             except Exception:
                 pass
+
+    async def _entry_trigger_blocks(self, sig: dict, rs: dict) -> Optional[str]:
+        """A reason the level is not confirmed, or None.
+
+        None on every failure path, and deliberately: a check that could not
+        run is not a check that failed, and turning a bridge hiccup into a
+        silent trading halt would be a worse bug than the one this gate
+        exists to fix.
+        """
+        cfg = _caps.entry_trigger_config(rs)
+        if cfg is None:
+            return None
+        try:
+            from backend.src.services.market import entry_trigger as _et
+            candles = await self._bridge.get_candles("M1", 30)
+            level = float(sig.get("level_price") or 0.0)
+            atr = float(sig.get("atr") or 0.0)
+            if level <= 0:
+                return None
+            result = _et.confirm(candles or [], level,
+                                 str(sig.get("direction") or "BUY"), atr, cfg)
+            return None if result.passed else result.reason
+        except Exception as e:                    # noqa: BLE001
+            _log.debug("[RE-Engine] entry trigger could not be evaluated: %s", e)
+            return None
 
     async def _maybe_stage_grid_template(self, sig_id: int, tick, price: float) -> bool:
         """Dispatch a just-created signal immediately when the Reversal Engine

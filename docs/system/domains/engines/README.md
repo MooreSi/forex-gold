@@ -92,3 +92,31 @@ recorded candles against the live strategy management rules.
 
 - Database consolidation across engines (QUESTIONS.md #6) — the raw-sqlite3 cross-engine read is "worth a future pack" once revisited.
 - Whether the preserved breakout balance double-counting bug should now be fixed.
+
+## Reversal engine: the 2026-09-11 capability build
+
+`docs/todo/reversal-engine/210` is the inventory. The things worth knowing
+here rather than there:
+
+- **The engine no longer copies Gold Diggers** (owner, 2026-09-11 --
+  `docs/simon-handover/029`). `signal_generator`'s fixed TP cascade and
+  level-score stop are the channel's geometry; `atr_barriers` replaces both
+  with volatility multiples when `re_atr_barriers_enabled` is on. It is off.
+  `score_level`'s type weights are still calibrated against the channel's
+  hit rate and were deliberately left alone.
+- **`use_dynamic_atr` is implemented in Python, not the EA.**
+  `trading/template_levels.template_sl_at` sizes the stop and
+  `open_trade.resolve_template_tps` sizes TP1. The EA reads resolved prices
+  and knows nothing about ATR. A grep of `ForexTraderBridge.mq5` for "ATR"
+  finds only the display panel, which reads like a missing feature and is
+  not one.
+- **`cycle_setup.py` holds the per-cycle context and the extra levels**, not
+  the service. The service was five lines under its 800-line ceiling.
+- **The new gates all live behind `risk/capability_gates.py`**, which is the
+  one place the switches are read. A settings row missing those columns
+  entirely behaves exactly as it did.
+- **The live path records a shadow decision for five variants on every fill
+  attempt**, from facts it has already computed. The liquidity gate moved to
+  sit beside the other two new gates so all three are evaluated before any
+  of them returns -- otherwise a challenger gets recorded as "would take" on
+  a signal whose later gates were never run.

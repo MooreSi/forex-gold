@@ -534,14 +534,14 @@ def _get_ticks_range(from_ts: float, to_ts: float,
     """Fetch every tick between two Unix (true UTC) timestamps, bounded to
     one day.
 
-    Unlike _get_candles_range, this uses mt5.copy_ticks_range() directly
-    rather than working around a from-position + offset dance: the
+    Unlike _get_candles_range, this uses mt5.copy_ticks_range() directly: the
     documented copy_rates_range() bug is a NAIVE-datetime interpretation
-    problem, and passing tz-aware UTC datetimes here was confirmed correct
-    against the live terminal by the 2026-09-03 probe (returned ticks landed
-    exactly in the requested UTC window, not offset by the broker's server
-    time). If that ever stops being true, this needs the same offset
-    correction _get_candles_range applies.
+    problem, and tz-aware UTC datetimes were confirmed correct against the
+    live terminal by the 2026-09-03 probe. If that stops being true, this
+    needs the same offset correction _get_candles_range applies.
+
+    last/volume/flags pass through (2026-09-11) -- COPY_TICKS_ALL already asks
+    for them; services/market/order_flow.py probes whether this feed has them.
     """
     if not _ensure_connected():
         return None
@@ -554,7 +554,7 @@ def _get_ticks_range(from_ts: float, to_ts: float,
         if ticks is None:
             return None
         return [
-            {"time": float(t["time"]), "bid": float(t["bid"]), "ask": float(t["ask"])}
+            {"time": float(t["time"]), "bid": float(t["bid"]), "ask": float(t["ask"]), "last": float(t["last"]), "volume": float(t["volume"]), "flags": int(t["flags"])}
             for t in ticks
         ]
     except Exception as e:

@@ -168,6 +168,23 @@ def _render_ea_templates_card() -> None:
 
     _import_dialog, _import_uploader = _build_import_dialog()
 
+    def _install_preset() -> None:
+        """Create the built-in "Reversal ATR v1" template.
+
+        Bound to no channel, so it trades nothing until it is selected --
+        which on a live account is a demo session's decision. See
+        docs/todo/reversal-engine/200 section 2.
+        """
+        try:
+            et.install_builtin_template()
+        except ValueError as e:
+            ui.notify(str(e), type="warning")
+            return
+        ui.notify(f"Created {et.BUILTIN_PRESET_NAME}. It is assigned to no "
+                  f"channel and trades nothing until you select it.",
+                  type="positive")
+        _load(et.BUILTIN_PRESET_NAME)
+
     def _open_import_dialog() -> None:
         # Clear any previous run's file chip so a second import starts
         # from an empty picker rather than the last file's name.
@@ -215,6 +232,16 @@ def _render_ea_templates_card() -> None:
                     .props("dense unelevated").tooltip(
                         "Save every template in the Load list to a "
                         f"{et.EXPORT_EXTENSION} file you can share or keep as a backup."
+                    )
+                ui.button(
+                    "Add Built-in", icon="auto_awesome",
+                    on_click=_install_preset,
+                ).classes("text-xs bg-slate-700 text-white px-3") \
+                    .props("dense unelevated").tooltip(
+                        f"Create \"{et.BUILTIN_PRESET_NAME}\" -- the ATR-sized, "
+                        "two-rung template from the reversal-engine review. "
+                        "It is assigned to no channel and trades nothing "
+                        "until you select it."
                     )
 
             # ── Section header helper ────────────────────────────────────

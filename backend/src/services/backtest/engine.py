@@ -367,7 +367,12 @@ def _simulate_template(
     if not template:
         return None
     try:
-        res = _walk(template, candles[fill_bar:], fill_price, is_buy, balance)
+        # The ATR at the fill, for a template sized from volatility. The
+        # bar walk can supply one -- _atr14 is the same number the live
+        # path derives -- so use_dynamic_atr is simulatable here even
+        # though the tick walk still refuses it. reversal-engine/200 s2.
+        res = _walk(template, candles[fill_bar:], fill_price, is_buy, balance,
+                    atr=_atr14(candles, fill_bar))
     except UnsupportedTemplate:
         return None
 
@@ -651,7 +656,9 @@ def _template_refusal(strategy: str, tick_mode: bool) -> str:
         from backend.src.services.backtest.template_simulator import (
             unsupported_reason as _why,
         )
-        return _why(template, tick_mode)
+        # The bar walk can always compute an ATR at the fill; the tick
+        # walk has no candle series to derive one from.
+        return _why(template, tick_mode, atr_available=not tick_mode)
     except Exception:
         return ""
 

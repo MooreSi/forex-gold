@@ -132,6 +132,20 @@ def create_schema(get_db: Callable[[], Any]) -> None:
         reason          TEXT
     );
 
+    -- Champion/challenger shadow decisions (2026-09-11). One row per
+    -- variant per signal; UNIQUE so a retried fill attempt cannot
+    -- double-count whichever variant the retry happened to favour.
+    -- See reversal_engine/shadow.py.
+    CREATE TABLE IF NOT EXISTS re_shadow_decisions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts          REAL NOT NULL,
+        signal_ref  TEXT NOT NULL,
+        variant     TEXT NOT NULL,
+        would_take  INTEGER NOT NULL,
+        reason      TEXT,
+        UNIQUE(signal_ref, variant)
+    );
+
     CREATE TABLE IF NOT EXISTS re_daily_research (
         date                TEXT PRIMARY KEY,
         discipline_score    REAL,

@@ -109,19 +109,35 @@ def _f(template: dict, key: str, default: float = 0.0) -> float:
         return default
 
 
-def _ladder(template: dict, entry: float, sign: float) -> list[tuple[float, float]]:
+def _ladder(template: dict, entry: float, sign: float,
+            atr: float = 0.0) -> list[tuple[float, float]]:
     """[(price, fraction_of_original_lot)] for each defined TP, in order.
 
     A level counts as defined when its pips are non-zero -- the same test
     `hasTp[]` makes on the EA side.
+
+    With an ATR and `use_dynamic_atr`, level 1 lands on its ATR multiple,
+    and with `atr_ladder_scale` the whole ladder is rescaled around it. The
+    rule comes from `trading/template_levels`, the same module the live
+    path uses: two copies of it is how a backtest ends up measuring a
+    ladder the live trade never had.
     """
+    from backend.src.services.trading import template_levels as _tl
+
     out: list[tuple[float, float]] = []
+    factor = _tl.atr_scale_factor(template, atr)
+    tp1_dist = _tl.atr_tp1_distance(template, atr)
     for n in range(1, _MAX_TP_LEVELS + 1):
         pips = _f(template, f"tp{n}_pips", 0.0)
         if pips <= 0:
             continue
-        price = entry + sign * pips_to_price(pips)
-        out.append((price, _f(template, f"tp{n}_pct", 0.0) / 100.0))
+        dist = pips_to_price(pips)
+        if factor is not None:
+            dist *= factor
+        elif n == 1 and tp1_dist is not None:
+            dist = tp1_dist
+        out.append((entry + sign * dist,
+                    _f(template, f"tp{n}_pct", 0.0) / 100.0))
     return out
 
 
@@ -136,7 +152,8 @@ def _lot_for(template: dict, sl_distance: float, balance: float) -> float:
     return round(min(_MAX_LOT, max(_MIN_LOT, lot)), 2)
 
 
-def unsupported_reason(template: dict, tick_mode: bool = False) -> str:
+def unsupported_reason(template: dict, tick_mode: bool = False,
+                       atr_available: bool = False) -> str:
     """Why this walk would refuse `template`, or "" when it would not.
 
     The same decision _guard makes, asked without running a simulation, so a
@@ -147,14 +164,18 @@ def unsupported_reason(template: dict, tick_mode: bool = False) -> str:
     "this walk cannot model it".
     """
     try:
-        _guard(template, tick_mode)
+        _guard(template, tick_mode, atr_available)
     except UnsupportedTemplate as exc:
         return str(exc)
     return ""
 
 
-def _guard(template: dict, tick_mode: bool = False) -> None:
-    ok, reasons = can_simulate(template)
+def _guard(template: dict, tick_mode: bool = False,
+           atr_available: bool = False) -> None:
+    # A tick series has no candles to derive an ATR from, the same argument
+    # that makes trail_mode=candle unsimulatable on ticks -- so the tick
+    # walk never claims one however the caller asks.
+    ok, reasons = can_simulate(template, atr_available and not tick_mode)
     if not ok:
         raise UnsupportedTemplate("; ".join(reasons))
     mode = str(template.get("trail_mode") or "off").strip().lower()
@@ -175,19 +196,27 @@ def _guard(template: dict, tick_mode: bool = False) -> None:
 
 
 def simulate(template: dict, bars: list, entry: float, is_buy: bool,
-             balance: float = 10_000.0) -> TemplateResult:
+             balance: float = 10_000.0, atr: float = 0.0) -> TemplateResult:
     """Walk `bars` under `template`, starting from a fill at `entry`.
 
     Raises UnsupportedTemplate rather than approximating anything.
+
+    `atr` is the volatility at the fill, in PRICE. When the template has
+    `use_dynamic_atr` on, it sizes the stop and the ladder exactly as the
+    live path does; at 0.0 the walk falls back to `sl_pips` and refuses a
+    dynamic-ATR template outright, which is what it did before.
     """
-    _guard(template)
+    _guard(template, atr_available=atr > 0)
+
+    from backend.src.services.trading import template_levels as _tl
 
     sign = 1.0 if is_buy else -1.0
-    sl_distance = pips_to_price(_f(template, "sl_pips", 0.0))
+    sl_distance = (_tl.atr_sl_distance(template, atr)
+                   or pips_to_price(_f(template, "sl_pips", 0.0)))
     lot = _lot_for(template, sl_distance, balance)
 
     stop: Optional[float] = (entry - sign * sl_distance) if sl_distance > 0 else None
-    ladder = _ladder(template, entry, sign)
+    ladder = _ladder(template, entry, sign, atr)
     triggered = [False] * len(ladder)
 
     ladder_on = str(template.get("tpsl_mode") or "on").strip().lower() != "off"

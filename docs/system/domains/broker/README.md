@@ -248,3 +248,33 @@ runner never armed and every winner capped at the same ~$43.
 usually smaller than its `sl_pips`, so any analysis dividing by the ORIGINAL
 stop distance is measuring the wrong denominator. See
 [reversal-engine/020](../../../todo/reversal-engine/020-losses-exceed-the-stop.md).
+
+## Execution cost is now measured (2026-09-11)
+
+`services/trading/fees_sizing.calculate_fees` charges
+`estimated_slippage_points` -- a CONSTANT from fee settings, default 5.0 -- to
+every trade, and the spread it charges is whatever the caller passed in at
+open. Nothing anywhere compared the price asked for with the price received.
+
+`broker/tca.py` measures it: signed slippage against the decision price, the
+spread quoted at both ends from `get_tick_at`, and the round trip as a
+fraction of the stop that defined R. `tca_repo.py` stores one row per trade
+in `execution_quality` (migration 40).
+
+Two rules in it are worth keeping:
+
+- **the round trip is HALF the spread at each end**, not a full spread twice.
+  Buy at the ask, sell at the bid, measured against mid to mid.
+- **unmeasured is not free.** Every field is None when the tick that would
+  have priced it is gone, and `summarise` counts those separately instead of
+  averaging them in as zero.
+
+`ea_template_presets.py` holds built-in templates. `install()` creates the
+row and binds it to nothing: a template assigned to no channel trades
+nothing, which is what makes shipping one safe on a live account.
+
+`mt5_bridge._get_ticks_range` now passes `flags`, `last` and `volume`
+through. It always requested `COPY_TICKS_ALL`; it was dropping three of the
+fields in a dict comprehension, which made any order-flow measurement
+impossible. Whether this feed populates them is still unmeasured --
+`market/order_flow.probe_feed` answers it.

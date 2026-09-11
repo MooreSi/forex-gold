@@ -28,7 +28,8 @@ _log = logging.getLogger(__name__)
 
 from backend.src.controllers import sync_controller as sync_ctl
 
-from ._sections import _render_history_section, _render_ml_section
+from ._sections import (_render_history_section, _render_ml_section,
+                        _render_research_section)
 from ._shared import _dir_color, _fmt_ts, _level_type_badge, _pnl_color, _pnl_str
 
 _STARTING_BALANCE = 1000.0
@@ -348,6 +349,18 @@ def render() -> None:
                     "text-sm font-bold text-yellow-300 mb-2"
                 )
                 analytics_container = ui.column().classes("w-full gap-3")
+
+            # ── Research study ────────────────────────────────────────────────
+            # Phase 1 of docs/todo/reversal-engine/200: excursion, execution
+            # cost, attribution and fitted barriers, on demand. Rendered once
+            # at build time rather than on the refresh timer -- it is a
+            # button, and the study behind it takes minutes.
+            with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):
+                ui.label("Research").classes(
+                    "text-sm font-bold text-yellow-300 mb-2"
+                )
+                research_container = ui.column().classes("w-full gap-1")
+                _render_research_section(research_container)
 
             # ── Cycle log ─────────────────────────────────────────────────────
             with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):

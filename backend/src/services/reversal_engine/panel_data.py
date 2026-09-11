@@ -83,4 +83,23 @@ async def get_realised_pnl() -> dict:
     vantage_simulated_trades correspond to orders that really went to MT5.
     """
     from backend.src.services.analytics import read_repo as _reads
-    return await to_db_thread(_reads.realised_pnl_for_source, "Reversal Engine")
+    from backend.src.services.reversal_engine.stats_repo import stats_epoch
+    since = await to_db_thread(stats_epoch)
+    return await to_db_thread(_reads.realised_pnl_for_source,
+                              "Reversal Engine", since)
+
+
+async def reset_stats() -> float:
+    """Start this panel's numbers again from now. Returns the new epoch.
+
+    Reporting only: no signal row, stored feature vector, reconstructed
+    excursion or attribution history is removed. See
+    `stats_repo.reset_stats` for why that distinction is load-bearing.
+
+    Offloaded like every other accessor here -- the controller layer must
+    not import a repo, a contract enforced at zero, so the hop belongs on
+    this side of the boundary.
+    """
+    from backend.src.services.reversal_engine.stats_repo import reset_stats as _reset
+    return await to_db_thread(_reset)
+

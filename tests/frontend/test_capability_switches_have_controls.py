@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-SOURCE = (REPO / "frontend/pages/settings/_capabilities.py").read_text(encoding="utf-8")
+SOURCE = (REPO / "frontend/pages/reversal_panel/_capabilities.py").read_text(encoding="utf-8")
 
 # The columns migration 41 added, read from the migration LIST rather than
 # from a source file -- a list copied by hand is a list that drifts, and a
@@ -55,12 +55,46 @@ class TestItIsHonestAboutWhatTheseDo:
         assert "demo" in SOURCE.lower()
 
     def test_it_is_rendered_somewhere_a_user_can_reach(self):
-        risk = (REPO / "frontend/pages/settings/_risk.py").read_text(encoding="utf-8")
-        assert "_render_capabilities_subcard" in risk
+        """Signal Generator > Reversal Engine since 2026-09-11. It used to
+        sit on the Trading page, a long way from the panel that shows
+        whether any of it is working."""
+        panel = (REPO / "frontend/pages/reversal_panel/__init__.py").read_text(
+            encoding="utf-8")
+        assert "render_capabilities_subcard" in panel
 
     def test_it_reaches_the_backend_through_the_controller(self):
         """frontend-reaches-the-backend-through-controllers is enforced at
         zero by the import-contract gate; asserted here too so the reason
         is visible where the code is."""
         assert "settings_ctl.update_risk_settings" in SOURCE
+        assert "backend.src.services" not in SOURCE
+
+
+class TestTheAiControls:
+    """Owner request 2026-09-11: a Recommend button that uses the ML
+    evidence and the AI together, and an AI switch that hands the settings
+    over permanently."""
+
+    def test_recommend_is_offered_and_writes_nothing_by_itself(self):
+        assert "reversal_ai_recommend" in SOURCE
+        # Apply is a separate, deliberate press.
+        assert "reversal_ai_apply" in SOURCE
+        assert SOURCE.index("reversal_ai_recommend") < SOURCE.index("reversal_ai_apply")
+
+    def test_the_ai_switch_is_wired_to_its_own_column(self):
+        assert 're_ai_tuning_enabled' in SOURCE
+
+    def test_the_ai_switch_warns_that_it_acts_without_confirmation(self):
+        """It changes live trading settings every fifteen minutes with
+        nobody watching. The tooltip has to say so."""
+        lowered = SOURCE.lower()
+        assert "15 minutes" in lowered
+        assert "real money" in lowered
+
+    def test_the_card_says_what_the_ai_cannot_touch(self):
+        lowered = SOURCE.lower()
+        assert "sizing" in lowered and "live execution" in lowered
+
+    def test_the_page_reaches_the_ai_through_the_controller(self):
+        assert "engines_ctl." in SOURCE
         assert "backend.src.services" not in SOURCE

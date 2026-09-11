@@ -71,6 +71,11 @@ def _setup_logger() -> None:
 _CYCLE_INTERVAL_S     = 60      # main cycle: 1 minute
 _OUTCOME_INTERVAL_S   = 5       # outcome/trigger loop
 _CORR_INTERVAL_S      = 30      # correlation check loop
+# How often the AI re-reads the market and adjusts the capability switches,
+# when the owner has turned that on. Fifteen minutes was the request; it is
+# also roughly the cadence at which the evidence it reasons from (the
+# attribution table, the fitted barriers) can actually change.
+_AI_TUNE_INTERVAL_S   = 900
 _SIGNAL_MAX_AGE_S     = 7200    # 2-hour pending expiry
 _LEVEL_COOLDOWN_S     = 1800    # 30 min before same level re-signals
 _MAX_OPEN_SIGNALS     = 6       # cap concurrent open positions
@@ -169,6 +174,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             loop.create_task(self._cycle_loop()),
             loop.create_task(self._outcome_loop()),
             loop.create_task(self._correlation_loop()),
+            loop.create_task(self._ai_tune_loop()),
         ]
         _log.info("[RE-Engine] started")
 
@@ -647,6 +653,25 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             await self._manage_triggered_signal(sig, tick)
 
     # ── Correlation loop ──────────────────────────────────────────────────────
+
+    async def _ai_tune_loop(self) -> None:
+        """Fifteen-minute loop: let the AI re-tune the capability switches.
+
+        Inert unless `re_ai_tuning_enabled` is on, which it is not by
+        default. The settings read happens per pass rather than once, so
+        turning the switch off stops it at the next tick without a restart.
+        """
+        from backend.src.services.reversal_engine import ai_tuner
+        while self.is_running:
+            await asyncio.sleep(_AI_TUNE_INTERVAL_S)
+            try:
+                result = await ai_tuner.tune_once(self._bridge)
+                if result.get("applied"):
+                    _log.info("[RE-Engine] AI tuning applied %s", result["applied"])
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                _log.debug("[RE-Engine] AI tuning error: %s", exc)
 
     async def _correlation_loop(self) -> None:
         """30-second loop: match our signals against actual the reference channel signals.

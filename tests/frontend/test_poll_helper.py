@@ -227,10 +227,14 @@ class TestTheBlockingSitesUseIt:
         assert "_refresh" not in names
 
     def test_both_pages_use_the_shared_helper(self):
+        """reversal_panel dropped off this list on 2026-09-11: its only
+        blocking poll site was the Learn From Pro Signals status line, and
+        that toggle was removed when the feature stopped being used. The
+        list follows the sites; a page with nothing to poll does not need
+        the helper."""
         import pathlib
 
-        for page in ("frontend/pages/reversal_panel/__init__.py",
-                     "frontend/pages/news.py"):
+        for page in ("frontend/pages/news.py",):
             src = pathlib.Path(page).read_text(encoding="utf-8")
             code = "\n".join(ln for ln in src.splitlines()
                              if not ln.strip().startswith("#"))

@@ -136,9 +136,14 @@ def _update_balance(delta: float, reason: str, signal_id: Optional[int] = None) 
 
 def reconcile_balance_with_trades() -> Optional[float]:
     try:
+        # Only trades since the reporting epoch. This runs on every init(),
+        # so without the filter a reset would be silently undone by the next
+        # restart and look as though it had never worked.
+        from backend.src.services.reversal_engine.stats_repo import stats_epoch
         row = get_db().get(
             "SELECT COALESCE(SUM(net_pnl_dollars),0) FROM re_signals "
-            "WHERE status='closed' AND net_pnl_dollars IS NOT NULL"
+            "WHERE status='closed' AND net_pnl_dollars IS NOT NULL "
+            "  AND close_time >= ?", stats_epoch()
         )
         total_pnl = float(row[0]) if row and row[0] else 0.0
         correct = round(_STARTING_BALANCE + total_pnl, 4)

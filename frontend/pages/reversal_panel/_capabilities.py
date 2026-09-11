@@ -1,9 +1,14 @@
-"""The capability switches from docs/todo/reversal-engine/200.
+"""The Reversal Engine's capability switches.
+
+Lives with the engine it configures (Signal Generator > Reversal Engine,
+owner request 2026-09-11), not on the Trading page. It was next to the
+other behaviour gates there, which put it a long way from the panel that
+shows whether any of it is working.
 
 Migration 41 added fourteen columns to `vantage_risk_settings`, one per
-capability, and they shipped with no UI -- so the only way to turn any of
-them on was to edit the trading database by hand. A switch nobody can reach
-is not a switch.
+capability from `docs/todo/reversal-engine/200`, and they shipped with no
+UI -- so the only way to turn any of them on was to edit the trading
+database by hand. A switch nobody can reach is not a switch.
 
 Every one of these is OFF and every default is byte-identical to the
 behaviour it replaces, so this card changes nothing until somebody moves a
@@ -14,11 +19,16 @@ switch rather than a restatement of its name.
 `backend/src/services/risk/capability_gates.py` is the only place these are
 read; this is the only place they are written.
 """
+import logging
+
 from nicegui import ui
 
+from backend.src.controllers import engines_controller as engines_ctl
 from backend.src.controllers import settings_controller as settings_ctl
 
-_SUBCARD = "flex-1 min-w-72 bg-gray-800 p-3 rounded-lg"
+_log = logging.getLogger(__name__)
+
+_SUBCARD = "w-full bg-gray-800 p-3 rounded-lg"
 
 
 def render_capabilities_subcard(rs: dict) -> None:
@@ -241,3 +251,89 @@ def render_capabilities_subcard(rs: dict) -> None:
 
         ui.button("Save Capabilities", on_click=_save).classes(
             "bg-purple-700 text-white mt-3 px-4 py-2")
+
+        ui.separator().classes("my-3")
+
+        # ── Let the AI do it ─────────────────────────────────────────
+        ui.label("Let the AI set these").classes(
+            "text-xs font-semibold text-gray-400 uppercase tracking-wider")
+
+        ai_out = ui.label("").classes(
+            "text-xs font-mono whitespace-pre text-gray-300 mt-1")
+        pending: dict = {}
+
+        async def _recommend() -> None:
+            """One-shot: the measured evidence plus the AI, as a proposal.
+            Writes nothing until Apply."""
+            rec_btn.disable()
+            ai_out.set_text("Reading the evidence and asking the AI...")
+            try:
+                rec = await engines_ctl.reversal_ai_recommend()
+            except Exception as e:                # noqa: BLE001
+                _log.warning("[RE-Panel] recommend failed: %s", e)
+                ai_out.set_text(f"Could not get a recommendation: {e}")
+                rec_btn.enable()
+                return
+            pending.clear()
+            pending.update(rec.get("settings") or {})
+            if rec.get("error"):
+                ai_out.set_text(f"{rec['error']}")
+            elif not pending:
+                ai_out.set_text("The AI proposed no change.\n"
+                                + (rec.get("rationale") or ""))
+            else:
+                lines = [f"  {k} -> {v}" for k, v in sorted(pending.items())]
+                ai_out.set_text("Proposed:\n" + "\n".join(lines)
+                                + "\n\n" + (rec.get("rationale") or ""))
+                apply_btn.enable()
+            rec_btn.enable()
+
+        def _apply() -> None:
+            if not pending:
+                return
+            written = engines_ctl.reversal_ai_apply(dict(pending))
+            ui.notify(f"Applied {len(written)} setting(s). Reopen the tab to "
+                      f"see the controls move.", type="positive")
+            pending.clear()
+            apply_btn.disable()
+
+        with ui.row().classes("items-center gap-2 mt-2 flex-wrap"):
+            rec_btn = ui.button("Recommend", icon="insights",
+                                on_click=_recommend) \
+                .classes("text-xs bg-indigo-700 text-white px-3") \
+                .props("dense unelevated")
+            rec_btn.tooltip(
+                "Puts the measured evidence in front of the configured AI: "
+                "the fitted stop and target from the excursion data, the "
+                "per-cohort attribution, the measured round-trip cost, the "
+                "meta-labeller's verdict on itself, and the current spread. "
+                "It proposes settings and explains why. Nothing is written "
+                "until you press Apply."
+            )
+
+            apply_btn = ui.button("Apply", icon="check", on_click=_apply) \
+                .classes("text-xs bg-green-800 text-white px-3") \
+                .props("dense unelevated")
+            apply_btn.disable()
+
+            ai_auto = ui.switch(
+                "AI", value=bool(rs.get("re_ai_tuning_enabled", 0)),
+                on_change=lambda e: (
+                    settings_ctl.update_risk_settings(
+                        {"re_ai_tuning_enabled": 1 if e.value else 0}),
+                    ui.notify(
+                        "AI tuning ON -- it will re-read the market and "
+                        "change these settings every 15 minutes"
+                        if e.value else "AI tuning off",
+                        type="warning" if e.value else "info")),
+            ).props("dense").classes("text-xs")
+            ai_auto.tooltip(
+                "Hands these settings to the AI permanently: it re-reads the "
+                "market every 15 minutes and changes them itself, with no "
+                "confirmation. It can only touch the switches on this card "
+                "-- position sizing and live execution are outside what it "
+                "is allowed to write, whatever it asks for, and any number "
+                "it returns is clamped to the same range this form allows "
+                "you. It still changes how real money is traded, so turn it "
+                "on on demo and watch it."
+            )

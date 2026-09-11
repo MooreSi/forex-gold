@@ -103,4 +103,12 @@ _RECENT: list[tuple[int, str, object]] = [
     (43, "Per-level-type refusal list, empty by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN re_blocked_level_types TEXT NOT NULL DEFAULT ''",
     ]),
+
+    # The AI tuning switch (owner request 2026-09-11): when on, the
+    # configured AI re-reads the market every fifteen minutes and adjusts
+    # the capability switches itself. Off, and it can never touch sizing or
+    # live execution -- see services/reversal_engine/ai_tuner.TUNABLE.
+    (44, "AI capability tuning, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_ai_tuning_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

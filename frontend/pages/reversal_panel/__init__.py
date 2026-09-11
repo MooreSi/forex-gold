@@ -22,12 +22,12 @@ import logging
 
 from nicegui import ui
 
-from frontend.components.poll import poll
 
 _log = logging.getLogger(__name__)
 
 from backend.src.controllers import sync_controller as sync_ctl
 
+from ._capabilities import render_capabilities_subcard
 from ._sections import (_render_history_section, _render_ml_section,
                         _render_research_section)
 from ._shared import _dir_color, _fmt_ts, _level_type_badge, _pnl_color, _pnl_str
@@ -132,96 +132,6 @@ def render() -> None:
         ui.button("Stop Engine",    icon="stop",         on_click=_stop).classes("text-xs")
         ui.button("Run Now",        icon="refresh",      on_click=_run_now).classes("text-xs")
 
-    # ── Learn From Pro Signals ────────────────────────────────────────────────
-    # The toggle described in reversal_engine/pro_model.py: every captured
-    # Gold Diggers signal refits that classifier, and its verdict enters this
-    # engine's feature vector as `pro_likeness`. Deliberately sits with the
-    # engine controls rather than in Settings -- it changes what this engine
-    # learns from, so it belongs where its effect is visible.
-    with ui.row().classes("px-4 py-1 gap-3 items-center flex-wrap"):
-        def _learn_on() -> bool:
-            try:
-                return bool(engines_controller.get_risk_settings().get("re_learn_from_ref_signals", 0))
-            except Exception:
-                return False
-
-        learn_status_lbl = ui.label("").classes("text-xs font-mono text-gray-500")
-
-        # Split into a read half and a render half so the 30s poll can run the
-        # reads off the event loop: both _learn_on() and pro_model_status() go
-        # to the database, and on the loop they stall every other page.
-        def _learn_status_read() -> dict:
-            """Reads only — runs in a worker thread. Touches no UI."""
-            if not _learn_on():
-                return {"on": False}
-            try:
-                from backend.src.controllers import engines_controller as pro_model
-                return {"on": True, "st": pro_model.pro_model_status()}
-            except Exception as e:
-                return {"on": True, "error": str(e)}
-
-        def _learn_status_render(d: dict) -> None:
-            """Renders only — runs on the event loop, where NiceGUI is safe."""
-            if not d.get("on"):
-                learn_status_lbl.set_text("off — pro_likeness held at neutral")
-                learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
-                return
-            if "error" in d:
-                learn_status_lbl.set_text(f"unavailable: {d['error']}")
-                learn_status_lbl.classes(replace="text-xs font-mono text-gray-500")
-                return
-            st = d["st"]
-            c = st.get("corpus") or {}
-            base = (f"corpus {c.get('pos', 0)} pro / {c.get('neg', 0)} background · "
-                    f"outcomes {c.get('wins', 0)}W-{c.get('losses', 0)}L "
-                    f"({c.get('pending', 0)} unresolved)")
-            if st.get("ready"):
-                learn_status_lbl.set_text(f"live · AUC {st['auc']:.3f} on n={st['n']} · {base}")
-                learn_status_lbl.classes(replace="text-xs font-mono text-green-400")
-            else:
-                learn_status_lbl.set_text(f"collecting — {st.get('reason')} · {base}")
-                learn_status_lbl.classes(replace="text-xs font-mono text-yellow-500")
-
-        def _refresh_learn_status() -> None:
-            """Immediate, synchronous refresh — for first render and the toggle,
-            where the user is waiting for the answer anyway."""
-            _learn_status_render(_learn_status_read())
-
-        def _toggle_learn(e) -> None:
-            engines_controller.update_risk_settings(
-                {"re_learn_from_ref_signals": 1 if e.value else 0})
-            if e.value:
-                try:
-                    from backend.src.controllers import engines_controller as pro_model
-                    # Started, not awaited: this handler runs on the shared
-                    # event loop, so a synchronous ~5s train freezes the EA
-                    # socket reader and the monitor loop as well as this page
-                    # (bugs/030).
-                    pro_model.pro_model_fit_in_background(force=True)
-                except Exception as exc:
-                    # Toggling the setting still succeeded; only the immediate
-                    # refit failed, and it retrains on its own schedule anyway.
-                    # Logged rather than swallowed so a persistently broken fit
-                    # is visible instead of looking like it worked.
-                    _log.warning("[RE-Panel] pro_model refit after enabling "
-                                 "Learn From Pro Signals failed: %s", exc)
-            ui.notify("Learning from professional signals "
-                      f"{'enabled' if e.value else 'disabled'}",
-                      type="positive" if e.value else "info")
-            _refresh_learn_status()
-
-        ui.switch("Learn From Pro Signals", value=_learn_on(),
-                  on_change=_toggle_learn).props("dense").classes("text-xs")
-        ui.icon("info_outline", size="xs").classes("text-blue-400 cursor-help").tooltip(
-            "Learns from every Gold Diggers VIP / INSTITUTIONAL signal received: "
-            "what the market looked like when they fired, weighted by whether "
-            "that call then reached TP1 before its stop. Enters this engine's ML "
-            "model as one feature (pro_likeness), never as training rows of its "
-            "own. Stays neutral until the corpus is large enough to be honest "
-            "and the model beats chance out of sample."
-        )
-        _refresh_learn_status()
-        poll(30.0, _learn_status_read, _learn_status_render)
 
     ui.separator()
 
@@ -349,6 +259,15 @@ def render() -> None:
                     "text-sm font-bold text-yellow-300 mb-2"
                 )
                 analytics_container = ui.column().classes("w-full gap-3")
+
+            # ── Capabilities ──────────────────────────────────────────────────
+            # The switches from docs/todo/reversal-engine/200. Moved here
+            # from Trading > Risk on 2026-09-11 (owner request): they
+            # configure this engine, so they belong beside the panel that
+            # shows whether any of them is working.
+            with ui.card().classes("w-full bg-gray-800 p-3 rounded-lg"):
+                render_capabilities_subcard(
+                    engines_controller.get_risk_settings())
 
             # ── Research study ────────────────────────────────────────────────
             # Phase 1 of docs/todo/reversal-engine/200: excursion, execution

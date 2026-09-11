@@ -242,20 +242,26 @@ def fetch_realised_pnl_last_24h(cutoff: float) -> float:
     return float(row[0] or 0.0)
 
 
-def realised_pnl_for_source(source: str) -> dict:
+def realised_pnl_for_source(source: str, since: float = 0.0) -> dict:
     """Closed-trade count, total P&L and per-trade average for one channel.
 
     Reads vantage_simulated_trades on purpose. An engine's own database records
     every signal it produced and prices them all at the virtual lot, whether or
     not the trade was ever placed; only rows here correspond to orders that
     really went to MT5.
+
+    `since` is a close-time floor, for an engine whose panel has been reset
+    to report from a fresh start (see reversal_engine/stats_repo). 0.0 --
+    the default -- counts everything, which is what every other caller
+    wants and what this did before the parameter existed.
     """
     with db() as conn:
         row = conn.execute(
             "SELECT COUNT(*) n, COALESCE(SUM(net_pnl), 0) total "
             "FROM vantage_simulated_trades "
-            "WHERE status='closed' AND tg_source=?",
-            (source,),
+            "WHERE status='closed' AND tg_source=? "
+            "  AND COALESCE(close_time, 0) >= ?",
+            (source, float(since or 0.0)),
         ).fetchone()
     n = int(row[0] or 0)
     total = float(row[1] or 0.0)

@@ -51,7 +51,9 @@ PAGE_LANDMARKS = {
     "ai_trade_analysis": ("AI Trade Analysis", "XAUUSD \u00b7 Per-channel signal quality"),
     "breakout_panel":    ("Engine Parameters", "M5 candle gate + 3s velocity monitor"),
     "chart":             ("RSI 14", "FVG:"),
-    "reversal_panel":    ("Active Candidate Levels", "Learn From Pro Signals"),
+    # Learn From Pro Signals was removed 2026-09-11 (no longer used); the
+    # capability switches moved onto this page in the same change.
+    "reversal_panel":    ("Active Candidate Levels", "Reversal Engine Capabilities"),
     "telegram":          ("Telegram Authentication", "Step 1: Send login code"),
 }
 

@@ -45,7 +45,9 @@ def stats_epoch() -> float:
 
 def get_max_drawdown() -> float:
     try:
-        rows = get_db().all("SELECT balance FROM re_balance_log ORDER BY ts")
+        rows = get_db().all(
+            "SELECT balance FROM re_balance_log WHERE ts >= ? ORDER BY ts",
+            stats_epoch())
         if not rows:
             return 0.0
         peak = _STARTING_BALANCE
@@ -76,7 +78,8 @@ def get_stats() -> dict:
                 SUM(CASE WHEN status='closed' THEN net_pnl_dollars ELSE 0 END) as total_pnl,
                 SUM(CASE WHEN correlation_confirmed=1 THEN 1 ELSE 0 END) as correlated
             FROM re_signals
-        """)
+            WHERE created_at >= ?
+        """, stats_epoch())
         closed = (r["wins"] or 0) + (r["losses"] or 0) + (r["bes"] or 0)
         win_rate = (r["wins"] / closed * 100) if closed > 0 else 0.0
         corr_rate = (r["correlated"] / r["total"] * 100) if r["total"] else 0.0
@@ -110,8 +113,9 @@ def get_perf_by_session() -> list[dict]:
                AVG(net_pnl_dollars) as avg_pnl,
                SUM(net_pnl_dollars) as total_pnl
         FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
+          AND close_time >= ?
         GROUP BY session ORDER BY total_pnl DESC
-    """)
+    """, stats_epoch())
     return [dict(r) for r in rows]
 
 
@@ -123,8 +127,9 @@ def get_perf_by_bias() -> list[dict]:
                AVG(net_pnl_dollars) as avg_pnl,
                SUM(net_pnl_dollars) as total_pnl
         FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
+          AND close_time >= ?
         GROUP BY htf_bias ORDER BY total_pnl DESC
-    """)
+    """, stats_epoch())
     return [dict(r) for r in rows]
 
 
@@ -136,6 +141,32 @@ def get_perf_by_level_type() -> list[dict]:
                AVG(net_pnl_dollars) as avg_pnl,
                SUM(net_pnl_dollars) as total_pnl
         FROM re_signals WHERE status='closed' AND outcome IN ('win','loss','be')
+          AND close_time >= ?
         GROUP BY level_type ORDER BY total_pnl DESC
-    """)
+    """, stats_epoch())
     return [dict(r) for r in rows]
+
+
+def reset_stats(now: Optional[float] = None) -> float:
+    """Start the panel's numbers again from here. Returns the new epoch.
+
+    Three things happen and nothing else: the epoch moves to `now`, the
+    virtual balance goes back to the starting figure, and that is recorded
+    in the balance log so the drawdown has a baseline to measure from.
+
+    **No row is deleted.** Every signal, every stored feature vector, every
+    reconstructed excursion and the whole attribution history survive
+    untouched. They are the only record of how this engine has behaved, and
+    the excursion half was rebuilt from broker tick history that reaches
+    back 30 days and no further -- it is not recoverable a second time.
+    """
+    ts = float(now if now is not None else time.time())
+    with get_db().transaction():
+        set_config(_EPOCH_KEY, str(ts))
+        set_config("virtual_balance", str(_STARTING_BALANCE))
+        get_db().run(
+            "INSERT INTO re_balance_log (ts, balance, change_amt, reason) "
+            "VALUES (?,?,?,?)", ts, _STARTING_BALANCE, 0.0, "stats reset")
+    _log.info("[RE-Stats] reporting reset to %.0f; balance back to %.2f. "
+              "No signal rows were removed.", ts, _STARTING_BALANCE)
+    return ts

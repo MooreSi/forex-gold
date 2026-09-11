@@ -15,6 +15,13 @@ user's alone. The EA reconnects after ten seconds of Python silence.
 
 The refit still happens, and `force=True` is still honoured -- it is simply
 started rather than awaited.
+
+**The toggle itself was removed on 2026-09-11** (owner: the feature is no
+longer used). The controller's non-blocking fit stays, because pro_model is
+still fitted on the signal-capture path, and the rule this file exists for
+is unchanged: the five-second train must never be called from anything
+running on the event loop. The panel half of the test now checks the toggle
+is really gone rather than checking how it behaves.
 """
 from __future__ import annotations
 
@@ -43,22 +50,31 @@ class TestTheControllerOffersANonBlockingFit:
         assert hasattr(engines_controller, "pro_model_fit")
 
 
-class TestThePanelUsesIt:
+class TestThePanelNoLongerOffersTheToggle:
+    """Removed 2026-09-11 at the owner's request: "Learn from pro signals"
+    is no longer used, so `re_learn_from_ref_signals` stays 0 and
+    `pro_likeness` stays at its neutral for every signal.
+
+    Pinned rather than deleted so the removal is deliberate and visible. If
+    the toggle ever comes back it must come back through
+    `pro_model_fit_in_background`, which is what the class above protects."""
+
     @staticmethod
-    def _toggle_source() -> str:
+    def _panel_source() -> str:
         from frontend.pages import reversal_panel
 
-        src = inspect.getsource(reversal_panel)
-        start = src.index("def _toggle_learn")
-        return src[start:start + 1200]
+        return inspect.getsource(reversal_panel)
 
-    def test_the_toggle_does_not_call_the_blocking_fit(self):
-        body = "\n".join(l for l in self._toggle_source().splitlines()
-                         if not l.strip().startswith("#"))
+    def test_the_toggle_is_gone(self):
+        src = self._panel_source()
+        assert "_toggle_learn" not in src
+        assert "Learn From Pro Signals" not in src
 
-        assert "pro_model_fit(" not in body, (
-            "the toggle still runs the ~5s train on the event loop"
-        )
-
-    def test_the_toggle_starts_a_background_fit(self):
-        assert "pro_model_fit_in_background" in self._toggle_source()
+    def test_the_panel_never_calls_the_blocking_fit(self):
+        """The rule that survives the removal. A five-second RandomForest
+        train on a NiceGUI handler freezes the UI, the EA socket reader and
+        the monitor loop together; the EA reconnects after ten seconds of
+        Python silence."""
+        body = "\n".join(l for l in self._panel_source().splitlines()
+                          if not l.strip().startswith("#"))
+        assert "pro_model_fit(" not in body

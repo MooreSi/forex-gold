@@ -163,3 +163,37 @@ def reversal_macro_backfill(apply: bool = False) -> dict:
     """
     from backend.src.services.reversal_engine import macro_backfill as _mb
     return _mb.run(apply=apply)
+
+
+async def reversal_ai_recommend() -> dict:
+    """Ask the configured AI for capability settings, using the measured
+    evidence. Writes nothing -- the caller decides whether to apply it."""
+    from backend.src.services.reversal_engine import ai_tuner as _tuner
+    engine = _re_svc.get_instance()
+    bridge = getattr(engine, "_bridge", None) if engine else None
+    return await _tuner.recommend(bridge, get_risk_settings())
+
+
+def reversal_ai_apply(settings: dict) -> dict:
+    """Write a recommendation the user has accepted.
+
+    Re-sanitised here rather than trusted: what reaches this function has
+    been through a UI and back, and the allowlist is the only thing
+    standing between a model's output and a live trading setting.
+    """
+    from backend.src.services.reversal_engine import ai_tuner as _tuner
+    clean = _tuner.sanitise(settings)
+    if clean:
+        update_risk_settings(clean)
+    return clean
+
+
+async def reversal_reset_stats() -> float:
+    """Start the Reversal Engine panel's numbers again from now.
+
+    Reporting only: no signal row, stored feature vector, reconstructed
+    excursion or attribution history is removed. See
+    services/reversal_engine/stats_repo.reset_stats.
+    """
+    return await reversal.reset_stats()
+

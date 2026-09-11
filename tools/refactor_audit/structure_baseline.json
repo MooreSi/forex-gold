@@ -59,7 +59,18 @@
         "flagged the next unreviewed growth in the code that issues licences",
         "and grants admin authority.",
         "The tests are deferred, not cancelled -- docs/todo/testing/012.",
-        "When they land, this entry should come back down."
+        "When they land, this entry should come back down.",
+        "",
+        "CORRECTION 2026-09-11: 'It has ZERO tests' is no longer true, and had",
+        "been false for nine days. remote/server.py is at 83% coverage",
+        "(docs/todo/testing/012), and the enforced baseline has already",
+        "followed the file down from 1256 to 1204 -- tight, no slack to remove.",
+        "What blocks the split is not tests any more: it is the TWELVE module",
+        "globals the file rebinds across 28 of its 41 functions. Measured",
+        "2026-09-11 -- only 143 lines are state-free, scattered over 10",
+        "unrelated functions, so moving every one of them leaves 1061 lines and",
+        "no coherent section. The state must become a module both halves",
+        "import before a seam exists at all."
       ]
     },
     "backend/src/services/cluster/sync/server.py": {

@@ -82,3 +82,23 @@ composed over `news_calendar`'s events, wider AFTER a release than before it).
 
 **`sizing_policy` is not wired to the order path.** That is deliberate and it
 needs a demo session; see `docs/todo/reversal-engine/210`.
+
+## Saving the Risk card writes every field on it (2026-09-11)
+
+`save_risk()` in `frontend/pages/settings/_risk.py` writes back all
+thirteen of its fields from whatever the form currently shows, and the
+form is built once from a single `get_risk_settings()` read at render
+time. If that read is stale, ticking one checkbox and pressing Save
+silently reverts every other setting on the card.
+
+Observed once, on a live demo account: turning on
+`min_fill_delay_enabled` set `htf_bias_gate_enabled` back to 0, a setting
+the owner had turned on two days earlier and the only one with a measured
+positive edge on the account. Restored within a minute. A fresh page load
+renders the card correctly, so it does not reproduce on demand -- which is
+what makes it dangerous rather than merely annoying.
+
+The fix is for the handler to re-read at save time and write only what
+actually changed. Until that lands, treat any Save on this card as a write
+to all of it and check the rest afterwards.
+

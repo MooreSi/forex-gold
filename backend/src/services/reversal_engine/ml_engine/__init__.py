@@ -39,17 +39,10 @@ _version = "re_ml_v9"
 from backend.src.services.reversal_engine import ml_handover as _ho  # noqa: E402
 
 
-# Dollars per point for a virtual signal. Mirrors reversal_engine_manage.py's
-# `gross = pnl_pts * _VIRTUAL_LOT * 100` -- duplicated as a constant rather
-# than imported because that module imports this one (circular otherwise).
-_VIRTUAL_LOT = 0.1
-_DOLLARS_PER_POINT = _VIRTUAL_LOT * 100
-
-# Guard against a corrupt sl_dist/net_pnl_dollars producing an absurd label.
-# Deliberately wider than any real observation to date (worst -5.75R, best
-# +5.01R) so it never silently truncates a genuine tail -- the whole point of
-# this label is that real tails are bigger than the old one could express.
-_R_LABEL_CLAMP = 12.0
+# _VIRTUAL_LOT / _DOLLARS_PER_POINT / _R_LABEL_CLAMP moved to _training_data.py
+# with the label that uses them, and are re-exported further down. They were
+# briefly defined in both places during the 2026-09-11 split, which is harmless
+# only until one of them is edited.
 _train_history: list[dict] = []
 
 # REF pattern counters: level_type → {trades, wins, touches}
@@ -155,76 +148,13 @@ def _load_all() -> None:
 
 # ── Feature extraction ────────────────────────────────────────────────────────
 
-_LEVEL_TYPES = ["asia_low", "asia_high", "swing_high", "swing_low",
-                "round_10", "round_5", "congestion"]
-
-FEATURE_NAMES = [
-    "level_score",          # 0-1
-    "level_type_asia",      # 1 if asia_low or asia_high
-    "level_type_swing",     # 1 if swing
-    "level_type_round",     # 1 if round number
-    "htf_bias_score",       # bullish=+1, neutral=0, bearish=-1
-    "direction_score",      # BUY=+1, SELL=-1
-    "bias_aligned",         # 1 if bias aligns with direction
-    "session_score",        # overlap=1.5, london=1.0, ny=0.8, asian=0.5, off=0
-    "adx_norm",             # adx/50 clamped [0,1]
-    "atr_norm",             # atr/20 clamped [0,1]
-    "hour_sin",             # sin(hour * 2π/24)
-    "hour_cos",             # cos(hour * 2π/24)
-    "distance_norm",        # level distance / atr, clamped [0,5]
-    "recent_win_rate",      # last 20 closed signals
-    "ref_level_win_rate",   # historical REF win rate for this level type
-    "rr_tp1",               # risk:reward to TP1 clamped [0,5]
-    "minutes_since_ref_norm",   # minutes since the last real REF signal / 240, clamped [0,1]
-    "ref_signals_today_norm",   # real REF signals received so far today / 10, clamped [0,1]
-    "news_proximity_norm",      # minutes to next high-impact event / 120, clamped [0,1]; 0=imminent, 1=safe
-    "regime_score",             # trending=1.0, ranging=0.0, volatile=0.5 (derived from ADX+ATR)
-    "equity_drawdown_pct",      # current drawdown from peak equity [0,1]
-    "concurrent_agreement",     # +1 same-dir signal from another engine in last 15min, -1 opposite, 0 none
-    "ref_discipline_score",     # 0-1, AI-derived nightly: how closely the reference channel/GD2 stuck to stated SL/sizing that day
-    "ref_aggression_score",     # 0-1, AI-derived nightly: how aggressively they scaled in/chased entries that day
-    # ── FVG context (v6, 2026-08-04) — see ict_patterns.fvg_context ──────
-    "fvg_confluence",           # 1.0 entry inside an aligned unfilled FVG, 0.5 inside any, 0 none
-    "fvg_dist_norm",            # distance to nearest aligned FVG in ATR units, clamped [0,5]; 5 = none
-    "fvg_fresh",                # nearest aligned FVG: 1.0 untested, 0.5 filled, 0.0 inverted; 0.5 = none
-    "fvg_size_norm",            # its height in ATR units, clamped [0,3]; 0 = none
-    # ── Reference-channel entry structure (v7, 2026-08-05) ───────────────
-    # How this moment compares with conditions the professional channels
-    # actually fire in, per direction. See reversal_engine/pro_profile.py --
-    # these stay at 0.0 until that module judges its sample trustworthy, so
-    # early rows carry no information rather than a regime artifact.
-    "pro_rsi_delta",            # (rsi - their median) / their sd, clamped [-3,3]
-    "pro_adx_delta",            # same for ADX
-    "pro_fvg_delta",            # our FVG confluence minus theirs
-    "pro_profile_ready",        # 1.0 when the profile is live, else 0.0
-    # ── Pro-likeness (v8, 2026-08-06) — see reversal_engine/pro_model.py ──
-    # P(a reference channel would fire in this moment), from a classifier
-    # trained on their captured entries against background samples. 0.5 --
-    # indistinguishable from "exactly average" -- whenever the learning
-    # toggle is off, the corpus gates are unmet, or the model cannot beat a
-    # coin out of sample. All three mean the same thing to a model: no
-    # information, so they must produce the same number.
-    "pro_likeness",
-    # ── Macro context (v9, 2026-09-05) — see reversal_engine/re_macro.py ──
-    *MACRO_FEATURE_NAMES,
-]
-
-# Neutral value for every feature, used to back-fill rows labeled under an
-# earlier _version so a feature addition does not throw away training
-# history. Keyed by name rather than position so it cannot silently drift.
-#
-# THIS IS WHY NEW FEATURES MUST ONLY EVER BE APPENDED to FEATURE_NAMES,
-# never inserted mid-list: padding a short old vector on the right is only
-# correct if the existing positions still mean what they meant when that
-# row was written.
-_FEATURE_NEUTRAL = {
-    "fvg_confluence": 0.0, "fvg_dist_norm": 5.0,
-    "fvg_fresh": 0.5, "fvg_size_norm": 0.0,
-    "pro_rsi_delta": 0.0, "pro_adx_delta": 0.0,
-    "pro_fvg_delta": 0.0, "pro_profile_ready": 0.0,
-    "pro_likeness": 0.5,
-    **MACRO_NEUTRAL,
-}
+# The vector's shape lives in _feature_schema.py: two modules need it (this one
+# to build a vector, _training_data.py to right-pad a historical one) and it
+# carries no state. Re-exported here because every caller and every test reads
+# `ml_engine.FEATURE_NAMES`.
+from ._feature_schema import (  # noqa: E402
+    _LEVEL_TYPES, FEATURE_NAMES, _FEATURE_NEUTRAL,
+)
 
 
 def learning_from_ref_enabled() -> bool:
@@ -403,93 +333,13 @@ def ref_match_rate_for_type(level_type: str) -> Optional[float]:
 
 # ── Training ──────────────────────────────────────────────────────────────────
 
-def _realised_r(row: dict) -> Optional[float]:
-    """Realised R for a closed signal: actual net dollars banked (partials
-    included) divided by the dollars that signal's own initial stop put at
-    risk. Returns None when the row can't express it.
-
-    This is what the model is trained on as of v5. It differs from the
-    planned rr_tp1 in three ways that all matter: it counts scale-outs at the
-    fraction actually closed rather than the full planned target, it charges
-    spread/commission/slippage, and it lets a loss exceed -1.0R when the stop
-    fills past sl_dist (which on real rows it routinely does)."""
-    try:
-        risk = float(row.get("sl_dist") or 0.0) * _DOLLARS_PER_POINT
-        if risk <= 0:
-            return None
-        net = row.get("net_pnl_dollars")
-        if net is None:
-            return None
-        return max(-_R_LABEL_CLAMP, min(_R_LABEL_CLAMP, float(net) / risk))
-    except (TypeError, ValueError):
-        return None
-
-
-def _get_training_data():
-    """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
-    try:
-        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
-        rows = re_db.get_ml_training_data()
-        X, y = [], []
-        for r in rows:
-            feats = r.get("ml_features_json")
-            if not feats:
-                continue
-            try:
-                f = json.loads(feats)
-            except Exception:
-                continue
-            # Older rows were labeled under a previous _version with fewer
-            # features. Discarding them (the pre-v6 behaviour) meant every
-            # feature addition silently threw the entire training history
-            # away -- at v6 that would have been all 752 labeled signals,
-            # leaving the model with nothing until months of new ones
-            # accumulated. Pad them with the documented neutral for each
-            # missing feature instead, which is truthful: those rows really
-            # do have no FVG context recorded. Only right-padding is valid,
-            # and only because features are append-only (see
-            # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
-            # from a newer build and still can't be interpreted, so it is
-            # still skipped.
-            if len(f) > len(FEATURE_NAMES):
-                continue
-            if len(f) < len(FEATURE_NAMES):
-                f = f + [_FEATURE_NEUTRAL.get(n, 0.0)
-                         for n in FEATURE_NAMES[len(f):]]
-            outcome = r.get("outcome", "")
-            if outcome not in ("win", "loss", "be"):
-                continue
-            label = _realised_r(r)
-            if label is None:
-                continue
-            X.append(f)
-            y.append(label)
-        return X, y
-    except Exception as exc:
-        _log.debug("[RE-ML] training data error: %s", exc)
-        return [], []
-
-
-def _labeled_count_from_db() -> int:
-    """How many closed signals are actually trainable right now.
-
-    _labeled_count is an in-memory counter that _save_all() persists, and
-    record_ref_signal() also triggers a save -- so any process that saves
-    before it has a real count (a fresh module whose meta load found nothing,
-    or the first run after a _version bump discards the old meta) writes a 0
-    over a perfectly good number. That then suppresses batch retraining until
-    _RETRAIN_EVERY fresh outcomes accumulate, even though hundreds of
-    trainable rows are sitting in the DB. Observed live 2026-07-31: a
-    retrained model with n=576 came back as labeled=0 with the ML panel
-    claiming it needed 15 more signals before its first training.
-
-    The DB is the real source of truth, so use it to repair the counter
-    rather than trusting whatever was last written to the pickle."""
-    try:
-        X, _ = _get_training_data()
-        return len(X)
-    except Exception:
-        return 0
+# The label and the training set live in _training_data.py -- no model state,
+# no globals, so they move cleanly. Re-exported: the label tests read
+# `ml_engine._realised_r`.
+from ._training_data import (  # noqa: E402
+    _VIRTUAL_LOT, _DOLLARS_PER_POINT, _R_LABEL_CLAMP,
+    _realised_r, _get_training_data, _labeled_count_from_db,
+)
 
 
 def _retrain() -> None:

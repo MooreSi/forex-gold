@@ -77,6 +77,19 @@ SHARED_TABLES = (
 # switched on. The watermark is re-anchored whenever a database is opened for
 # an account it was not measured on; `close_trade._update_peak_balance` sets
 # it again from the live balance on that account's next close.
+# `peak_balance` is the only one that needs this. The other account-shaped keys
+# in app_config were checked on 2026-09-11 and every one self-corrects, which is
+# why they are deliberately NOT listed here:
+#   daily_loss_baseline_ts / giveback_baseline_ts -- read through
+#     `max(day_start, baseline)`, so a baseline older than today's broker day is
+#     ignored. The live pair was two weeks stale and had no effect.
+#   mt5_total_deposits_cache -- a one-hour TTL; recomputes against the account
+#     it is opened on.
+#   trade_pause_until / risk_halt_reason -- an inherited pause expires, and
+#     until it does it errs toward NOT trading. Clearing it would be a change in
+#     the permissive direction, which is the owner's call, not a repair.
+# `peak_balance` is the odd one out because it is monotonic: nothing lowers it
+# and no window expires it, so it is wrong forever (bugs/042).
 ACCOUNT_SCOPED_CONFIG_KEYS = ("peak_balance",)
 
 # Which account the keys above were measured on. Absent means "unknown", which

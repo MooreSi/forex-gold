@@ -84,14 +84,17 @@ EXPECTED_KEYS = {
     "min_s",
     "mt5_bottle_path",
     "mt5_bridge_url",
-    "ooh_date_active",     # the eight ooh_* keys added 2026-09-07 with the
-    "ooh_date_from",       # Out of Hours card. Declared here deliberately, as
-    "ooh_date_to",         # this file's docstring requires. Out of Hours had
-    "ooh_enabled",         # NO interface at all until then -- every one of
-    "ooh_end_time",        # these was settable only by editing the database,
-    "ooh_start_time",      # while monitor_cycle.py:206 used them to choose
-    "ooh_strategy",        # which strategy manages a trade. handover/020.
-    "ooh_timezone",
+    # The eight ooh_* keys were added 2026-09-07 with the Out of Hours card
+    # and REMOVED again 2026-09-11, with the card, on the owner's instruction
+    # ("we already have a schedule which does the same thing and is more
+    # detailed"). Declared here rather than silently dropped, because this
+    # test's whole job is to make a key leaving the page a deliberate act.
+    #
+    # WHAT THAT MEANS, and it is not nothing: `get_effective_strategy` still
+    # reads all eight and `monitor_cycle` still calls it, so they are back to
+    # being settable only by editing the database. They do nothing while
+    # `ooh_enabled` is 0, which is its live value. handover/020 carries the
+    # full record.
     "orb_report_enabled",
     "p90_s",
     "port",

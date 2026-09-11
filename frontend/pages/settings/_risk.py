@@ -7,7 +7,6 @@ alongside the strategy settings -- and is re-exported from the package.
 from nicegui import ui
 
 from backend.src.controllers import settings_controller as settings_ctl
-from ._out_of_hours import render_out_of_hours_card
 
 _RISK_SUBCARD_CLASSES = "flex-1 min-w-72 bg-gray-800 p-3 rounded-lg"
 
@@ -19,7 +18,7 @@ def render_risk_card(card_classes: str = "w-full"):
     same way) rather than one long scrolling card:
 
     Row 1: Risk Settings | Circuit Breaker | Toxic-Hour Blocklist
-    Row 2: Internal Engine Exposure | Dynamic Position Management | Out of Hours
+    Row 2: Internal Engine Exposure | Dynamic Position Management
 
     `card_classes` now sizes the OUTER wrapper (was previously the single
     inner ui.card()'s classes, back when this was one card) -- importable by
@@ -40,11 +39,15 @@ def render_risk_card(card_classes: str = "w-full"):
         with ui.row().classes("w-full gap-4 flex-wrap items-start"):
             _render_internal_exposure_subcard(rs)
             _render_dpm_subcard(rs)
-            # Out of Hours had NO interface at all until 2026-09-07 -- every
-            # field settable only by editing the database, while
-            # monitor_cycle.py:206 used it to pick the managing strategy.
-            # Its own module because this file is already 493 lines.
-            render_out_of_hours_card()
+            # Out of Hours was the third sub-card here from 2026-09-07 until
+            # 2026-09-11, when the owner removed it: "we already have a
+            # schedule which does the same thing and is more detailed". This
+            # is the only place render_risk_card is rendered, so that removed
+            # it from the app entirely. `_out_of_hours.py` and its test are
+            # left in place, unrendered, so restoring it is one line; the
+            # resolver behind it is still live and still reads ooh_enabled,
+            # which is 0. See handover/020 and
+            # tests/frontend/test_risk_card_has_no_out_of_hours.py.
 
 
 def _render_risk_settings_subcard(rs: dict) -> None:

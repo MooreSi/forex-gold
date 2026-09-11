@@ -47,7 +47,7 @@ RR_BYPASS_SOURCES: frozenset = frozenset({
 })
 
 
-def rr_filter_bypassed(source_name: str) -> bool:
+def rr_filter_bypassed(source_name: str, ignore_ime: bool = False) -> bool:
     """True when `source_name`'s TP/SL should be taken as-is, unscored.
 
     Two ways to qualify:
@@ -76,10 +76,21 @@ def rr_filter_bypassed(source_name: str) -> bool:
     app opened no GDI trade at all in that window while its sibling channel
     Gold Diggers VIP -- which only differs by being in the static set above
     -- kept trading.
+
+    `ignore_ime` suspends the SECOND arm only (2026-09-11, owner). A signal
+    that sat in the queue across a blind gap -- a pause, an auto-execute
+    toggle, a restart -- is no longer being taken "the moment it lands", so
+    the reason the IME arm exists has gone with the gap. The static set above
+    bypasses for an unrelated reason (those channels supply their own levels,
+    which staleness does not change) and is deliberately left alone. Called
+    with True only from the pending-activation watcher's re-validation path;
+    every other caller keeps today's behaviour.
     """
     _src_lower = (source_name or "").lower()
     if any(ch in _src_lower for ch in RR_BYPASS_SOURCES):
         return True
+    if ignore_ime:
+        return False
     if not source_name:
         return False
     try:
@@ -337,6 +348,7 @@ def check_pre_trade_filters(
     tp1,
     actual_price: Optional[float] = None,
     source_name: str = "",
+    ignore_ime_bypass: bool = False,
 ) -> Optional[str]:
     """
     Evaluate two structural risk filters before opening any trade.
@@ -346,6 +358,12 @@ def check_pre_trade_filters(
         Skipped for channels that supply their own TP/SL levels from a
         signal provider service, or that are running Immediate Market Entry
         -- see rr_filter_bypassed.
+
+        `ignore_ime_bypass` forwards to that function and suspends the IME
+        arm of the bypass (2026-09-11, owner). It is passed only for a
+        signal being re-validated after a blind gap -- see
+        signals/gap_revalidation.py -- where "take it the moment it lands"
+        no longer describes what is happening.
 
     Filter 2 -- Directional cap (max 2 unprotected same-direction trades)
         Blocks a new trade when 2 or more currently-open trades in the same
@@ -357,7 +375,7 @@ def check_pre_trade_filters(
 
     # ── Filter 1: Minimum TP1 R:R ─────────────────────────────────────────
     _MIN_RR = expert_params.get("min_tp1_rr")
-    if tp1 is not None and not rr_filter_bypassed(source_name):
+    if tp1 is not None and not rr_filter_bypassed(source_name, ignore_ime_bypass):
         ref_price = float(actual_price) if actual_price is not None \
                     else (entry_low + entry_high) / 2.0
         sl_dist   = abs(ref_price - float(stop_loss))

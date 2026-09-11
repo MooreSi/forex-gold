@@ -33,6 +33,7 @@ from typing import Any, Awaitable, Callable, Optional
 from backend.src.db import database as db_module
 from backend.src.services.signals import repo as signals_repo
 from backend.src.services.signals import tg_repo
+from backend.src.services.signals import gap_revalidation as _gap
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_grid_template_dispatch import grid_template
@@ -281,6 +282,14 @@ async def try_activate_pending_signals(
     """
     now = time.time()
     pending = signals_repo.get_pending_signals_awaiting_zone_fill()
+    # Did this watcher just come back from somewhere? A pause (monitor_cycle
+    # skips this function entirely while trading is halted), auto-execute
+    # switched off, or a restart all leave the queue unexamined for as long
+    # as they last, and every signal still in it on the way back has to
+    # re-prove itself before it can execute. Called before the empty-queue
+    # return so the last-run stamp keeps advancing on quiet cycles -- without
+    # that, an idle hour would look identical to an outage.
+    _gap.observe_watcher_run(now, [str(s.get("signal_id") or "") for s in pending])
     if not pending:
         return False
 
@@ -343,6 +352,7 @@ async def try_activate_pending_signals(
                 ))
             retry_after.pop(sig["signal_id"], None)
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
+            _gap.clear(sig["signal_id"])
             continue
 
         # Back off after a failed activation attempt instead of retrying
@@ -478,7 +488,20 @@ async def try_activate_pending_signals(
         _pw_src = sig.get("source_name") or ""
         _pw_strategy = effective_strategy
         _act_px = tick.ask if sig["direction"].upper() == "BUY" else tick.bid
-        _bypass_rr = (
+        # Re-validation after a blind gap (owner, 2026-09-11). A signal that
+        # sat in the queue while the watcher could not run -- a pause, an
+        # auto-execute toggle, a restart -- gets no exemption from this
+        # filter, whichever of the four reasons would normally grant one.
+        # The exemptions all rest on a premise staleness removes: a template
+        # or runner strategy replaces the signal's levels, and IME means the
+        # fill is being taken the moment the signal lands. Neither describes
+        # a setup that has been waiting out a halt, and these are precisely
+        # the signals with the long expiry windows (1h template, 4h runner)
+        # that survive one. Suspending the bypass here is what makes the
+        # re-validation bite: without it, the gate would be inert for exactly
+        # the signals it exists for.
+        _stale_after_gap = _gap.needs_revalidation(sig["signal_id"])
+        _bypass_rr = not _stale_after_gap and (
             _grid_tpl is not None
             or _pw_strategy in _PRE_TRADE_FILTER_BYPASS_STRATEGIES
             or ea_templates.is_template_override(_pw_strategy)
@@ -489,10 +512,16 @@ async def try_activate_pending_signals(
             float(sig["stop_loss"]), sig.get("tp1"),
             actual_price=_act_px,
             source_name=_pw_src,
+            # The channel-level IME bypass inside the filter would otherwise
+            # skip the R:R test again on the way past -- see
+            # governor.rr_filter_bypassed. The static RR_BYPASS_SOURCES
+            # channels keep their exemption either way.
+            ignore_ime_bypass=_stale_after_gap,
         )
         if filter_err:
-            log.debug("[PendingWatcher] Signal %s skipped — %s",
-                      sig["signal_id"][:8], filter_err)
+            log.info("[PendingWatcher] Signal %s held — %s%s",
+                     sig["signal_id"][:8], filter_err,
+                     " (re-validating after a blind gap)" if _stale_after_gap else "")
             continue
 
         # Guard: if _execute_live already opened a trade for this signal,
@@ -594,6 +623,7 @@ async def try_activate_pending_signals(
             ))
             retry_after.pop(sig["signal_id"], None)
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
+            _gap.clear(sig["signal_id"])
         except Exception as exc:
             _exc_msg = str(exc)
             # Undo the gap-fire write so the next attempt re-measures from the
@@ -645,6 +675,7 @@ async def try_activate_pending_signals(
             signals_repo.expire_signal(sig["signal_id"])
             retry_after.pop(sig["signal_id"], None)
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
+            _gap.clear(sig["signal_id"])
             log.error("[PendingWatcher] Signal %s abandoned after %d failed "
                       "activation attempts — last error: %s",
                       sig["signal_id"][:8], _fails, exc)

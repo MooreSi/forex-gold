@@ -164,3 +164,47 @@ class TestTheEngineLoopEntryPoint:
             raise RuntimeError("db gone")
         monkeypatch.setattr("backend.src.db.database.get_risk_settings", _boom)
         assert "error" in asyncio.run(ai_tuner.tune_once(bridge=None))
+
+
+class TestTheEvidenceItIsGiven:
+    """The 2026-09-11 run proposed a 2.0x ATR target that neither the reach
+    data nor the exit-policy sweep supports. The model reasoned correctly;
+    it was shown only the fitted barriers. Both are now in the payload."""
+
+    def _evidence(self, monkeypatch, summary):
+        monkeypatch.setattr(
+            "backend.src.services.reversal_engine.research_lab.last_summary",
+            lambda: summary)
+        for name, value in (("excursion_observations", []),
+                            ("closed_executed_rows", [])):
+            monkeypatch.setattr(
+                f"backend.src.services.reversal_engine.measure_repo.{name}",
+                lambda *a, **k: value)
+        monkeypatch.setattr(
+            "backend.src.services.broker.tca_repo.mean_cost_r",
+            lambda *a, **k: (0.3, 100))
+        return asyncio.run(ai_tuner.gather_evidence(bridge=None, rs={}))
+
+    def test_the_reach_distribution_reaches_the_model(self, monkeypatch):
+        ev = self._evidence(monkeypatch, {
+            "reach": {"n": 500, "median_r": 0.43,
+                      "reached": {"1.0R": 0.094}}})
+        assert ev["reach"]["median_r"] == 0.43
+
+    def test_the_exit_policy_sweep_reaches_the_model(self, monkeypatch):
+        ev = self._evidence(monkeypatch, {
+            "sweep": [{"stop_pts": 2.0, "target_pts": 12.0,
+                       "expectancy": 0.48, "ci_low": -0.36, "ci_high": 1.33}]})
+        assert ev["exit_policy_sweep"][0]["target_pts"] == 12.0
+
+    def test_with_no_study_run_it_says_so_rather_than_sending_nothing(self, monkeypatch):
+        """Silence would read as "there is no reach data", which the model
+        cannot distinguish from "nothing travels anywhere"."""
+        ev = self._evidence(monkeypatch, {})
+        assert "no research study" in ev["study_note"]
+
+    def test_the_prompt_tells_it_how_to_read_them(self):
+        prompt = ai_tuner._build_prompt({"reach": {}, "exit_policy_sweep": []})
+        assert "median reach" in prompt
+        assert "straddle zero" in prompt
+        assert "DIAGNOSIS" in prompt

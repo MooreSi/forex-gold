@@ -133,3 +133,56 @@ class TestPolicySweep:
         by_stop = {r.stop_pts: r.expectancy for r in rows}
         assert by_stop[3.0] == pytest.approx(4.0 - 0.2)
         assert by_stop[6.0] == pytest.approx(2.0 - 0.1)
+
+
+class TestReachDistribution:
+    """How far trades actually travel, as a distribution rather than a mean.
+
+    This is the number that decides where a TARGET goes, and it was the
+    piece missing from what the AI tuner was shown on 2026-09-11: given
+    only the fitted barriers it proposed a 2.0x ATR target, which the reach
+    data does not support. `signal_generator`'s own docstring cites the
+    same statistic -- "only 9.4% of signals ever travel 1.0R, median 0.43R"
+    -- as the reason the ladder was left short in the first place.
+    """
+
+    def _obs(self, mfe, sl=5.0, outcome="win"):
+        return {"mfe_pts": mfe, "mae_pts": 1.0, "sl_dist": sl,
+                "outcome": outcome, "atr": 8.0}
+
+    def test_it_reports_the_share_reaching_each_multiple(self):
+        sample = [self._obs(5.0), self._obs(10.0), self._obs(2.5), self._obs(0.5)]
+        out = bfit.reach_distribution(sample)
+        assert out["reached"]["1.0R"] == pytest.approx(0.5)
+        assert out["reached"]["2.0R"] == pytest.approx(0.25)
+        assert out["reached"]["0.5R"] == pytest.approx(0.75)
+
+    def test_it_reports_the_median_reach(self):
+        sample = [self._obs(1.0), self._obs(5.0), self._obs(10.0)]
+        assert out_median(sample) == pytest.approx(1.0)
+
+    def test_losers_count_too(self):
+        """Unlike the barrier fit, which deliberately uses winners only.
+        A target has to be reachable by the whole population, not just by
+        the trades that happened to work under the old rule."""
+        sample = [self._obs(10.0, outcome="win"),
+                  self._obs(0.1, outcome="loss"),
+                  self._obs(0.1, outcome="loss"),
+                  self._obs(0.1, outcome="loss")]
+        assert bfit.reach_distribution(sample)["reached"]["1.0R"] == pytest.approx(0.25)
+
+    def test_a_row_with_no_stop_distance_is_excluded(self):
+        sample = [self._obs(5.0), self._obs(5.0, sl=0.0)]
+        assert bfit.reach_distribution(sample)["n"] == 1
+
+    def test_an_empty_sample_reports_nothing_rather_than_zero_percent(self):
+        """0% reaching 1R and "no data" are completely different claims
+        about a strategy."""
+        out = bfit.reach_distribution([])
+        assert out["n"] == 0
+        assert out["reached"] == {}
+        assert out["median_r"] is None
+
+
+def out_median(sample):
+    return bfit.reach_distribution(sample)["median_r"]

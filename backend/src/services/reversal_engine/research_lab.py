@@ -19,6 +19,7 @@ a research tool nobody runs twice.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Optional
@@ -34,10 +35,12 @@ log = logging.getLogger("reversal_engine")
 
 RE_STRATEGY_HINT = "reversal"
 # Replaying an exit policy needs the whole tick path of every trade in the
-# sample, which is one bridge round trip each. Bounded so a study is minutes
-# rather than hours; raise it deliberately when the answer matters more than
-# the wait.
-SWEEP_SAMPLE = 60
+# sample, which is one bridge round trip each. Raised from 60 to 250 on
+# 2026-09-11: at 60 paths every cell's 95% interval straddled zero, so the
+# sweep could not distinguish any exit rule from no edge and was not worth
+# acting on. Measured cost is about 0.19s per fetch, so 250 is under a
+# minute of the study's runtime.
+SWEEP_SAMPLE = 250
 DEFAULT_STOPS = (2.0, 3.0, 4.0, 5.0, 6.0, 8.0)
 DEFAULT_TARGETS = (3.0, 4.0, 6.0, 8.0, 12.0)
 
@@ -155,6 +158,8 @@ async def run_study(bridge, backfill_limit: int = 500,
     report["barrier_fit"] = fit.__dict__
     report["n_excursions"] = len(obs)
 
+    report["reach"] = barrier_fit.reach_distribution(obs)
+
     paths = await _paths_for(bridge, closed, sweep_sample)
     report["n_paths"] = len(paths)
     if paths:
@@ -171,7 +176,43 @@ async def run_study(bridge, backfill_limit: int = 500,
             cost_pts=cost_r * mean_sl, bootstrap=1000)[:10]]
         report["sweep_no_breakeven_vs_breakeven"] = _breakeven_penalty(
             paths, cost_r * mean_sl)
+
+    _save_summary(report)
     return report
+
+
+# What the AI tuner reads. Stored rather than recomputed: the sweep is
+# hundreds of bridge round trips, and asking for a recommendation must not
+# mean waiting a minute for numbers that change on the scale of days. The
+# timestamp travels with it so the model can see how stale it is.
+SUMMARY_KEY = "last_study_summary"
+
+
+def _save_summary(report: dict) -> None:
+    """Persist the slow parts of the study for `ai_tuner.gather_evidence`."""
+    try:
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+        re_db.set_config(SUMMARY_KEY, json.dumps({
+            "ran_at": report.get("ran_at"),
+            "n_closed": report.get("n_closed"),
+            "n_paths": report.get("n_paths"),
+            "reach": report.get("reach"),
+            "barrier_fit": report.get("barrier_fit"),
+            "sweep": (report.get("sweep") or [])[:6],
+            "breakeven_penalty": report.get("sweep_no_breakeven_vs_breakeven"),
+        }, default=str))
+    except Exception as e:                        # noqa: BLE001
+        log.debug("could not persist the study summary: %s", e)
+
+
+def last_summary() -> dict:
+    """The last study's slow numbers, or {} if none has been run."""
+    try:
+        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+        raw = re_db.get_config(SUMMARY_KEY, "")
+        return json.loads(raw) if raw else {}
+    except Exception:                             # noqa: BLE001
+        return {}
 
 
 def _breakeven_penalty(paths, cost_pts: float) -> dict:
@@ -243,6 +284,17 @@ def render(report: dict) -> str:
                   f"({fit.get('target_atr_mult')} x ATR)",
                   f"  implied R:R {fit.get('rr')} from "
                   f"{fit.get('n_winners')} winners", ""]
+
+    reach = report.get("reach") or {}
+    if reach.get("n"):
+        pct = " ".join(f"{k} {v * 100:.0f}%"
+                       for k, v in (reach.get("reached") or {}).items())
+        lines += ["how far trades actually travel (favourable excursion, in R)",
+                  f"  median {reach['median_r']:.3f}R, mean {reach['mean_r']:.3f}R, "
+                  f"n={reach['n']}",
+                  f"  {pct}",
+                  "  a target above the median is a target most trades never see",
+                  ""]
 
     sweep = report.get("sweep") or []
     if sweep:

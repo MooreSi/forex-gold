@@ -192,6 +192,29 @@ async def gather_evidence(bridge, rs: Optional[dict] = None) -> dict:
     except Exception as e:                        # noqa: BLE001
         ev["attribution"] = {"error": str(e)}
 
+    # The slow half of the evidence: how far trades actually travel, and
+    # what the exit-policy sweep found. Read from the last study rather
+    # than recomputed -- the sweep is hundreds of bridge round trips.
+    #
+    # Without these the model is asked where to put a target while being
+    # shown only the fitted barriers, which is how the 2026-09-11 run
+    # proposed a 2.0x ATR target that neither the reach data nor the sweep
+    # supports. It reasoned correctly from half a picture.
+    try:
+        from backend.src.services.reversal_engine import research_lab
+        summary = research_lab.last_summary()
+        ev["reach"] = summary.get("reach") or {}
+        ev["exit_policy_sweep"] = summary.get("sweep") or []
+        ev["breakeven_penalty"] = summary.get("breakeven_penalty") or {}
+        ev["study_ran_at"] = summary.get("ran_at")
+        if not summary:
+            ev["study_note"] = ("no research study has been run, so the reach "
+                                "distribution and the exit-policy sweep are "
+                                "unavailable. Recommend a target only if the "
+                                "evidence you do have supports it.")
+    except Exception as e:                        # noqa: BLE001
+        ev["reach"] = {"error": str(e)}
+
     try:
         from backend.src.services.broker import tca_repo
         mean_r, n = tca_repo.mean_cost_r()
@@ -241,6 +264,18 @@ def _build_prompt(evidence: dict) -> str:
         "reports ready=false.\n"
         "- re_blocked_level_types refuses a level type outright. Use it only "
         "where the attribution is clear and n is large.\n"
+        "- `reach` is how far trades ACTUALLY travel in R, all trades, not "
+        "just winners. A target above the median reach is a target most "
+        "trades never see, whatever the fitted barriers imply.\n"
+        "- `fitted_barriers` is a DIAGNOSIS, not a target. A stop far wider "
+        "than the target means winners go a long way against before working "
+        "and then barely travel; it says the entries are wrong, and it is "
+        "not a stop width to adopt.\n"
+        "- `exit_policy_sweep` is measured expectancy per stop/target pair, "
+        "in POINTS, net of cost, best first. A row whose ci_low and ci_high "
+        "straddle zero is not evidence; say so rather than acting on it.\n"
+        "- Where the reach data, the sweep and the fit disagree, prefer "
+        "changing nothing and say which two disagree.\n"
     )
 
 

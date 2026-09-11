@@ -199,3 +199,52 @@ def sweep(trades: Sequence[dict], stops: Sequence[float],
 
     rows.sort(key=lambda r: r.expectancy, reverse=True)
     return rows
+
+
+# The multiples a target could plausibly be placed at. Deliberately finer
+# below 1R than above it: the interesting question on this instrument is
+# whether price gets anywhere at all, not whether it reaches 5R.
+REACH_LEVELS = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0)
+
+
+def reach_distribution(observations: Iterable[dict]) -> dict:
+    """How far trades actually travelled, in R, as a distribution.
+
+    This is the number that decides where a TARGET goes, and a mean will
+    not do it: a population whose median reach is 0.43R and whose mean is
+    dragged up by a handful of runners will accept a target the median
+    trade never sees.
+
+    **Every trade counts, winners and losers alike** -- unlike
+    `fit_barriers`, which uses winners only because a loser's ADVERSE
+    excursion is bounded by wherever the stop was. Favourable excursion has
+    no such ceiling, so excluding losers here would quietly ask "how far do
+    the trades that worked travel", which is a different and much more
+    flattering question.
+
+    `reached["1.0R"]` is the FRACTION of trades whose best moment reached
+    one R. An empty sample reports nothing rather than 0%: "none of them
+    got there" and "we have not looked" are different claims.
+    """
+    rows = []
+    for r in observations or ():
+        try:
+            sl = float(r.get("sl_dist") or 0.0)
+            mfe = float(r.get("mfe_pts")) if r.get("mfe_pts") is not None else None
+        except (TypeError, ValueError):
+            continue
+        if sl <= 0 or mfe is None:
+            continue
+        rows.append(mfe / sl)
+
+    if not rows:
+        return {"n": 0, "reached": {}, "median_r": None}
+
+    return {
+        "n": len(rows),
+        "median_r": round(quantile(rows, 0.5), 4),
+        "mean_r": round(sum(rows) / len(rows), 4),
+        "reached": {f"{lvl}R": round(sum(1 for r in rows if r >= lvl) / len(rows), 4)
+                    for lvl in REACH_LEVELS},
+    }
+

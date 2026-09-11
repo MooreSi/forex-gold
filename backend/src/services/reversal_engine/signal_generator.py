@@ -115,14 +115,33 @@ def calculate_tp_cascade(direction: str, entry_mid: float, sl_dist: float,
     while TP1 stays at 3pt, so TP1 is 0.75R on a weak level and 0.43R on a
     strong one. The better the level, the worse its payoff.
 
-    Left as fixed offsets deliberately, not from inertia: the reach data says
+    Left as fixed offsets deliberately, not from inertia: the reach data said
     only 9.4% of signals ever travel 1.0R (median 0.43R), so scaling the
     cascade up to a constant R would move every target beyond where price
     actually goes and cut the win rate from 70.5% to single digits. The edge
     is a small, high-probability move. Fixing the inversion means narrowing
     the STOP on strong levels, not widening their targets -- which needs the
-    mae_pts now being recorded (see reversal_engine/database.py) before it can
-    be sized honestly.
+    mae_pts now being recorded before it can be sized honestly.
+
+    **That reach figure is superseded (2026-09-11).** Measured again on 750
+    executed trades whose excursion was reconstructed from broker tick
+    history rather than sampled every five seconds:
+
+        median reach 0.562R, and 42.4% reach 1.0R
+        (26.1% reach 2.0R, 15.7% reach 3.0R)
+
+    Four and a half times the old figure. The original was computed before
+    the live path recorded excursion at all (see data-inspect/003: of 745
+    executed signals only 52 carried an MFE, none after 2026-08-28), so it
+    rested on a small and badly selected sample.
+
+    The argument above is therefore weaker than it reads, and the case for a
+    wider target is live rather than settled: the exit-policy sweep's best
+    cells all want a target far beyond the median, and every one of them has
+    a confidence interval straddling zero with the two chronological halves
+    disagreeing in sign. Neither number is safe to act on yet. Do not "fix"
+    this by widening the ladder on the strength of the new reach figure
+    alone -- see docs/todo/reversal-engine/210.
     """
     tps = {}
     for i, offset in enumerate(offsets or _TP_OFFSETS, start=1):

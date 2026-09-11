@@ -100,14 +100,30 @@ def normalised_at(ts: float, series_by_symbol: dict) -> list[float]:
 
 
 def needs_backfill(vector: Sequence[float]) -> bool:
-    """True when this vector's macro slots are all still the neutral.
+    """True when this vector carries no real macro reading.
 
-    A short pre-v9 vector has no macro slots at all and returns False:
-    padding it here rather than in `ml_engine/_training_data` would apply
-    the widening twice.
+    That covers two populations, and the second is the larger one:
+
+      * a full-width vector whose five macro slots are all still the
+        neutral, and
+      * a SHORT pre-v9 vector, which has no macro slots at all.
+
+    The short case originally returned False, on the reasoning that
+    `_training_data` already pads those at training time. Measured on the
+    live database on 2026-09-11 that was wrong in the way that mattered:
+    3,359 of 5,000 stored vectors are 33-wide against 698 at full width,
+    so skipping them made the repair a no-op on 96% of the population
+    `data-inspect/003` identified. Training's padding is neutral-filled
+    and thrown away after every run; repairing the stored row puts real
+    values in it, once.
+
+    A vector LONGER than the schema is from a newer build, cannot be
+    interpreted, and is left alone.
     """
-    if len(vector) < FULL_WIDTH:
+    if len(vector) > FULL_WIDTH:
         return False
+    if len(vector) < FULL_WIDTH:
+        return True
     slots = list(vector[MACRO_START:FULL_WIDTH])
     return all(abs(float(v) - MACRO_NEUTRAL[name]) < 1e-9
                for v, name in zip(slots, MACRO_FEATURE_NAMES))
@@ -145,7 +161,16 @@ def backfill(rows, series_by_symbol: dict,
             report["no_data"] += 1
             continue
 
-        updated = list(vector)
+        # Widen a short vector exactly as training would, THEN put real
+        # values in the macro block. Same padding function, so a repaired
+        # row and an in-memory padded one cannot mean different things.
+        from backend.src.services.reversal_engine.ml_engine._feature_schema import (
+            pad_to_schema)
+        padded = pad_to_schema(vector)
+        if padded is None:
+            report["skipped"] += 1
+            continue
+        updated = list(padded)
         updated[MACRO_START:FULL_WIDTH] = fresh
         if apply:
             write_fn((int(row["id"]), updated))

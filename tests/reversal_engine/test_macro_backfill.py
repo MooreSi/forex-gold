@@ -87,10 +87,25 @@ class TestFindingWhatNeedsFixing:
         real[2] = real[2] + 0.25
         assert mb.needs_backfill(self._vector(real)) is False
 
-    def test_a_short_pre_v9_vector_is_not_mistaken_for_a_neutral_one(self):
-        """A 33-wide vector has no macro slots at all. Padding it here
-        rather than in `_training_data` would apply the widening twice."""
-        assert mb.needs_backfill([0.0] * 33) is False
+    def test_a_short_pre_v9_vector_needs_backfilling_too(self):
+        """**Corrected 2026-09-11 against live data.** This originally
+        asserted the opposite, on the reasoning that a 33-wide vector has
+        no macro slots so padding it here would duplicate what
+        `_training_data` does at training time.
+
+        Running the study on the real database showed why that was wrong:
+        3,359 of 5,000 stored vectors are 33-wide and only 698 are 38-wide,
+        so skipping short ones made the repair a no-op on 96% of exactly
+        the population data-inspect/003 identified. The padding
+        `_training_data` applies is neutral-filled and thrown away after
+        every training run; repairing the stored row puts REAL values in
+        it, once."""
+        assert mb.needs_backfill([0.0] * 33) is True
+
+    def test_a_vector_longer_than_the_schema_is_still_skipped(self):
+        """From a newer build. It cannot be interpreted, and padding runs
+        one way only."""
+        assert mb.needs_backfill([0.0] * 40) is False
 
 
 class TestItIsADryRunUntilToldOtherwise:
@@ -104,6 +119,22 @@ class TestItIsADryRunUntilToldOtherwise:
         assert report["would_update"] == 1
         assert written == []
         assert report["dry_run"] is True
+
+    def test_a_short_vector_is_widened_and_its_macro_slots_filled(self):
+        """Widened with the documented neutral for every feature added
+        between its own width and the macro block, exactly as
+        `_training_data` would -- then the macro five get REAL values."""
+        rows = [{"id": 3, "created_at": T0 + HOUR,
+                 "ml_features_json": json.dumps([0.5] * 33)}]
+        written = []
+        report = mb.backfill(rows, series({"^VIX": [18.0, 44.0]}),
+                             write_fn=written.append, apply=True)
+        assert report["updated"] == 1
+        _sig_id, vector = written[0]
+        assert len(vector) == 38
+        vix_idx = 33 + MACRO_FEATURE_NAMES.index("vix_level")
+        assert vector[vix_idx] == pytest.approx(1.0)
+        assert vector[:33] == [0.5] * 33
 
     def test_applying_it_writes_the_recomputed_vector(self):
         rows = [{"id": 7, "created_at": T0 + HOUR,

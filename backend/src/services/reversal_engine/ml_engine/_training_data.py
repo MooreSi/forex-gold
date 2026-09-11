@@ -22,7 +22,7 @@ import json
 import logging
 from typing import Optional
 
-from ._feature_schema import FEATURE_NAMES, _FEATURE_NEUTRAL
+from ._feature_schema import FEATURE_NAMES, _FEATURE_NEUTRAL, pad_to_schema
 
 _log = logging.getLogger(__name__)
 
@@ -87,11 +87,9 @@ def _get_training_data():
             # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
             # from a newer build and still can't be interpreted, so it is
             # still skipped.
-            if len(f) > len(FEATURE_NAMES):
+            f = pad_to_schema(f)
+            if f is None:
                 continue
-            if len(f) < len(FEATURE_NAMES):
-                f = f + [_FEATURE_NEUTRAL.get(n, 0.0)
-                         for n in FEATURE_NAMES[len(f):]]
             outcome = r.get("outcome", "")
             if outcome not in ("win", "loss", "be"):
                 continue

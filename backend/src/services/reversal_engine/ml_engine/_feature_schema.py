@@ -89,3 +89,24 @@ _FEATURE_NEUTRAL = {
     "pro_likeness": 0.5,
     **MACRO_NEUTRAL,
 }
+
+
+def pad_to_schema(vector):
+    """Right-pad a short vector with each missing feature's neutral, or
+    None when it cannot be interpreted.
+
+    Lifted verbatim out of `_training_data._get_training_data` on
+    2026-09-11 so `macro_backfill` repairs a stored row exactly the way
+    training pads one in memory. Two copies of this would be two
+    definitions of what an old row means.
+
+    A vector LONGER than the current schema is from a newer build and is
+    still uninterpretable, so it returns None rather than being truncated.
+    """
+    f = list(vector)
+    if len(f) > len(FEATURE_NAMES):
+        return None
+    if len(f) < len(FEATURE_NAMES):
+        f = f + [_FEATURE_NEUTRAL.get(n, 0.0)
+                 for n in FEATURE_NAMES[len(f):]]
+    return f

@@ -72,6 +72,7 @@ async def measure_costs(bridge, limit: int = 500) -> dict:
     """
     rows = tca_repo.trades_awaiting_cost_measurement(limit)
     measured = unmeasured = 0
+    costs = []
     for t in rows:
         lo = float(t.get("entry_low") or 0.0)
         hi = float(t.get("entry_high") or 0.0)
@@ -90,11 +91,14 @@ async def measure_costs(bridge, limit: int = 500) -> dict:
         tca_repo.record_fill_cost(cost, mt5_ticket=t.get("mt5_ticket"),
                                   strategy=str(t.get("strategy") or ""),
                                   sl_dist=sl)
+        costs.append(cost)
         measured += 1 if cost.measured else 0
         unmeasured += 0 if cost.measured else 1
     mean_r, n = tca_repo.mean_cost_r()
+    split = tca.summarise(costs)
     return {"considered": len(rows), "measured": measured,
-            "no_ticks": unmeasured, "mean_cost_r": mean_r, "n_costed": n}
+            "no_ticks": unmeasured, "mean_cost_r": mean_r, "n_costed": n,
+            "split": split}
 
 
 async def _paths_for(bridge, rows, limit: int) -> list[dict]:
@@ -217,7 +221,16 @@ def render(report: dict) -> str:
                   f"{c.get('n_costed', 0)} costed in total",
                   f"  mean round-trip cost: "
                   + ("not yet measurable" if mean is None else f"{mean:.3f}R"),
-                  ""]
+                  ]
+        for bucket, st in sorted((c.get("split") or {}).items()):
+            if not st.get("n"):
+                continue
+            lines.append(
+                f"    {bucket or 'all':<22} spread {st['mean_spread_pts']:+.3f}pt  "
+                f"broker slippage {st['mean_broker_slippage_pts']:+.3f}pt  "
+                f"entry drift {st['mean_entry_drift_pts']:+.3f}pt  "
+                f"(n={st['n']})")
+        lines.append("")
 
     fit = report.get("barrier_fit") or {}
     if fit.get("refusal"):

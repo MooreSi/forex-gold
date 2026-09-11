@@ -311,6 +311,12 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         candidates = ld.get_candidate_levels(h1_candles, price, htf_bias=htf,
                                              m15_candles=m15_candles,
                                              extra_levels=_extra)
+        # Level types the owner has refused on the evidence of the
+        # attribution table. Empty by default. Applied here rather than
+        # at execution so a refused type never becomes a signal at all,
+        # and so the virtual record does not fill with trades the owner
+        # has already said no to.
+        candidates = _setup.filter_blocked_types(candidates, _rs)
         self._cached["levels"] = candidates
         # Full, unfiltered level set (asia/swing/round/congestion, no proximity
         # or score cutoff) -- used by _classify_ref_level() for REF-level

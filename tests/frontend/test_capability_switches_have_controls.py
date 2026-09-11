@@ -20,11 +20,16 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SOURCE = (REPO / "frontend/pages/settings/_capabilities.py").read_text(encoding="utf-8")
 
-# The columns migration 41 added, read from the migration itself rather than
-# restated here -- a list copied by hand is a list that drifts.
-MIGRATION = (REPO / "backend/migrations/steps.py").read_text(encoding="utf-8")
-STEP_41 = MIGRATION.split('(41, "Reversal-engine capability switches')[1].split("]),")[0]
-COLUMNS = re.findall(r"ADD COLUMN (\w+)", STEP_41)
+# The columns migration 41 added, read from the migration LIST rather than
+# from a source file -- a list copied by hand is a list that drifts, and a
+# file parsed by hand breaks the moment the file is split, which is exactly
+# what happened to the first version of this on 2026-09-11 when steps.py hit
+# its line ceiling and migrations 39 onward moved to steps_recent.py.
+from backend.migrations.steps import MIGRATIONS  # noqa: E402
+
+_STEP_41 = next(step for number, _t, step in MIGRATIONS if number == 41)
+COLUMNS = [m.group(1) for stmt in _STEP_41
+           for m in [re.search(r"ADD COLUMN (\w+)", stmt)] if m]
 
 
 def test_the_migration_actually_added_fourteen_columns():

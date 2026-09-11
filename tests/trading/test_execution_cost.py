@@ -117,7 +117,8 @@ class TestAggregation:
     def _c(self, cost_r, key, measured=True):
         return tca.FillCost(trade_id="x", direction="BUY", open_time=0.0,
                             requested_price=0.0, fill_price=0.0,
-                            slippage_pts=0.0, spread_open_pts=0.0,
+                            slippage_pts=0.0, broker_slippage_pts=0.0,
+                            entry_drift_pts=0.0, spread_open_pts=0.0,
                             spread_close_pts=0.0, spread_cost_pts=0.0,
                             cost_pts=0.0, cost_r=cost_r, fill_delay_s=0.0,
                             measured=measured, bucket=key)
@@ -135,3 +136,60 @@ class TestAggregation:
         out = tca.summarise(rows)
         assert out["london"]["n"] == 1
         assert out["london"]["unmeasured"] == 1
+
+
+class TestTheCostSplitsIntoTwoDifferentProblems:
+    """The 0.372R measured on 2026-09-11 was one number covering two causes
+    with different fixes, and the study's own write-up had to caveat it.
+
+      * **broker slippage** -- the fill against the price the broker was
+        actually QUOTING at that instant. A execution-quality problem.
+      * **entry drift** -- that quote against the price the decision was
+        made at. Not the broker's doing at all: it is the signal chasing,
+        or arriving late, or firing at market outside its own zone.
+
+    They add up to the figure already reported, so nothing published
+    changes meaning; it just becomes actionable.
+    """
+
+    def test_a_fill_at_the_quoted_ask_has_no_broker_slippage(self):
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4}})
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.4),
+                                    requested_price=3300.0, sl_dist=5.0))
+        assert c.broker_slippage_pts == pytest.approx(0.0)
+        assert c.entry_drift_pts == pytest.approx(0.4)
+
+    def test_a_fill_worse_than_the_quote_is_broker_slippage(self):
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4}})
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.9),
+                                    requested_price=3300.0, sl_dist=5.0))
+        assert c.broker_slippage_pts == pytest.approx(0.5)
+        assert c.entry_drift_pts == pytest.approx(0.4)
+
+    def test_a_sell_is_measured_against_the_bid(self):
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4},
+                          1600.0: {"bid": 3290.0, "ask": 3290.4}})
+        c = asyncio.run(tca.measure(bridge, _trade(direction="SELL",
+                                                   entry_price=3299.8),
+                                    requested_price=3300.0, sl_dist=5.0))
+        # Sold at 3299.8 when the bid was 3300.0: 0.2 worse than quoted.
+        assert c.broker_slippage_pts == pytest.approx(0.2)
+        assert c.entry_drift_pts == pytest.approx(0.0)
+
+    def test_the_two_parts_still_add_up_to_the_published_slippage(self):
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4}})
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3301.1),
+                                    requested_price=3300.0, sl_dist=5.0))
+        assert (c.broker_slippage_pts + c.entry_drift_pts
+                == pytest.approx(c.slippage_pts))
+
+    def test_without_a_tick_at_the_fill_neither_part_is_guessed(self):
+        """The total is still unknown too, so this is not a regression --
+        it is the same refusal, now in three places instead of one."""
+        c = asyncio.run(tca.measure(_Bridge({}), _trade(),
+                                    requested_price=3300.0, sl_dist=5.0))
+        assert c.broker_slippage_pts is None
+        assert c.entry_drift_pts is None

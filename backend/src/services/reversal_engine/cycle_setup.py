@@ -80,3 +80,23 @@ async def liquidity_map_levels(bridge, now: float) -> list[dict]:
     except Exception as e:                        # noqa: BLE001
         _log.debug("[RE-Engine] liquidity map unavailable: %s", e)
         return []
+
+
+def filter_blocked_types(candidates: list, rs: dict) -> list:
+    """Drop candidates whose level type the owner has refused.
+
+    A candidate with NO type is kept. An untyped level is a bug somewhere
+    upstream, and dropping it here would hide that bug while quietly
+    reducing what the engine trades -- the combination this repo's rules
+    exist to prevent.
+    """
+    blocked = _caps.blocked_level_types(rs or {})
+    if not blocked:
+        return candidates
+    out = []
+    for c in candidates or []:
+        t = str(c.get("type") or "").strip().lower()
+        if t and t in blocked:
+            continue
+        out.append(c)
+    return out

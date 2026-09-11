@@ -49,6 +49,9 @@ EXPECTED_KEYS = {
     "meta_label_gate_enabled",
     "meta_label_threshold",
     "re_atr_barriers_enabled",
+    "re_blocked_level_types",   # added 2026-09-11 with the per-level-type
+                                # refusal list (migration 43), on the
+                                # evidence of the attribution table.
     "re_atr_stop_mult",
     "re_atr_tp1_mult",
     "session_liquidity_gate_enabled",

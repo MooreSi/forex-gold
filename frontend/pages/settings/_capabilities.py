@@ -191,6 +191,31 @@ def render_capabilities_subcard(rs: dict) -> None:
             "more signals."
         )
 
+        ui.separator().classes("my-3")
+
+        # ── Level types ──────────────────────────────────────────────
+        ui.label("Level types to refuse").classes(
+            "text-xs font-semibold text-gray-400 uppercase tracking-wider")
+
+        blocked = ui.select(
+            options=list(settings_ctl.KNOWN_LEVEL_TYPES),
+            value=[t for t in str(rs.get("re_blocked_level_types") or "").split(",")
+                   if t.strip()],
+            multiple=True, label="Do not trade these",
+        ).classes("w-full").props("dense outlined use-chips")
+        blocked.tooltip(
+            "Measured over 785 closed live trades on 2026-09-11: round_5 is "
+            "the worst cohort on the book at -0.157R and -$1,323 over 210 "
+            "trades, and it is also the type the scorer rates HIGHEST, "
+            "because those weights were fitted against how often a Telegram "
+            "channel fired near a level rather than against whether the "
+            "trade made money. unicorn is the best at +0.559R over 18. "
+            "Refusing a type here is the reversible version of refitting "
+            "every weight in the scorer. Empty refuses nothing. Check the "
+            "Research study's attribution table before changing it -- these "
+            "numbers move."
+        )
+
         def _save() -> None:
             try:
                 settings_ctl.update_risk_settings({
@@ -208,6 +233,7 @@ def render_capabilities_subcard(rs: dict) -> None:
                     "vol_target_sizing_enabled":     int(bool(vol_sizing.value)),
                     "correlated_exposure_cap_lots":  float(corr_cap.value or 0.0),
                     "liquidity_map_levels_enabled":  int(bool(levels_on.value)),
+                    "re_blocked_level_types":        ",".join(blocked.value or []),
                 })
                 ui.notify("Capability switches saved", type="positive")
             except (TypeError, ValueError) as err:

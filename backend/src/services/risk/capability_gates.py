@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Optional
 
 from backend.src.services.market import entry_trigger as _trigger
+from backend.src.services.market import liquidity_map as _lmap
 from backend.src.services.risk import event_tiers as _events
 from backend.src.services.risk import session_liquidity as _liquidity
 from backend.src.services.risk import sizing_policy as _sizing
@@ -116,3 +117,34 @@ def sizing_inputs(rs: dict, atr: float, reference_atr: float,
         open_correlated_lots=open_correlated_lots,
         correlated_cap_lots=_num(rs, "correlated_exposure_cap_lots", 0.0),
     )
+
+
+# Every level type the detector can emit. A type missing from here is a
+# type nobody can refuse, which is how a control silently stops covering
+# the thing it was built for the next time a level source is added. The
+# liquidity-map half is imported rather than restated for that reason.
+KNOWN_LEVEL_TYPES: tuple[str, ...] = (
+    "asia_low", "asia_high", "swing_high", "swing_low",
+    "round_10", "round_5", "congestion", "unicorn",
+) + tuple(_lmap.LEVEL_TYPES)
+
+
+def blocked_level_types(rs: dict) -> set:
+    """Level types the engine must not trade, from a comma-separated list.
+
+    Empty by default, so nothing is refused until somebody names it.
+
+    This exists because the first thing the live study measured that
+    nothing in the app could act on was per-level-type outcome:
+    `score_level` rates `round_5` highest of all at 0.78 and it is the
+    worst cohort on the book (210 trades, -0.157R, -$1,323), because those
+    weights were fitted against how often a Telegram channel fired near a
+    level rather than against whether the trade made money.
+
+    Refitting the weights changes every score in the system. Refusing a
+    named type is the smaller, reversible move the evidence already
+    supports, and it is a list the owner controls rather than a number a
+    model moved.
+    """
+    raw = rs.get("re_blocked_level_types") or ""
+    return {part.strip().lower() for part in str(raw).split(",") if part.strip()}

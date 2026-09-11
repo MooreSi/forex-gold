@@ -79,3 +79,38 @@ CREATE TABLE pass.
 ## Open questions
 
 - None currently flagged. (Cross-engine database consolidation is tracked under the engines domain.)
+
+## The default database path is a fallback, not a spare (2026-09-11)
+
+**Deleting `forex_trader_demo.db` makes the app boot onto a brand-new empty
+database.** Learned the hard way, on the live demo account.
+
+`account_registry._resolve_file` returns `default_db_path(...)` whenever the
+MT5 login is not yet known, and at boot it is not: the app starts, opens a
+database, and only then does the EA say which account it is attached to. So
+the default path is on the hot path of every single startup, whatever the
+registry says. It is not the "old" file, and it is not spare.
+
+What happened: the 25470480 database WAS the default path and was archived
+as an old account. The next boot found no file there, created one, migrated
+it to head, and ran against it -- no trades, no templates, no channel
+bindings, and every live-execution flag at its schema default. It was inert
+for the minute it ran (verified: zero trades, zero signals, no broker
+positions) purely because those defaults are off, which is the only reason
+this is a story about a scare rather than about money.
+
+It also explains an older puzzle. The archived database sat at schema
+version 35 while the account in use was at 41: whichever file the app does
+NOT open at boot simply never gets migrated, so a second account's database
+silently lags and the settings columns its features need are absent. That is
+why migrations 36, 37 and 38 were missing from it, and why the switches for
+reversal-engine items 040, 050 and 100 could not have been turned on there
+even though the code shipped.
+
+**Resolved by consolidating**: there is now one demo database, and the
+registry maps the live account to the default filename, so the fallback and
+the resolved path are the same file and cannot diverge.
+
+If a second account is ever used again, the thing to fix first is that
+migrations run against the file the app resolves to, not the file it happened
+to open first.

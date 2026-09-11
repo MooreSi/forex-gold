@@ -37,6 +37,9 @@ class FillCost:
     requested_price: float
     fill_price: float
     slippage_pts: Optional[float]
+    # The two halves of slippage_pts, which they sum to exactly.
+    broker_slippage_pts: Optional[float]
+    entry_drift_pts: Optional[float]
     spread_open_pts: Optional[float]
     spread_close_pts: Optional[float]
     spread_cost_pts: Optional[float]
@@ -57,6 +60,25 @@ def slippage_pts(direction: str, requested: float, filled: float) -> float:
     """
     sign = 1.0 if str(direction).upper() == "BUY" else -1.0
     return round((float(filled) - float(requested)) * sign, 5)
+
+
+def quoted_side(tick: Optional[dict], direction: str) -> Optional[float]:
+    """The price the broker was quoting for THIS side at that instant.
+
+    A buy is filled at the ask and a sell at the bid. Comparing a fill
+    against the mid, or against the wrong side, manufactures half a spread
+    of slippage that never happened.
+    """
+    if not tick:
+        return None
+    try:
+        bid = float(tick.get("bid") or 0.0)
+        ask = float(tick.get("ask") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if bid <= 0 or ask <= 0:
+        return None
+    return ask if str(direction).upper() == "BUY" else bid
 
 
 def _spread(tick: Optional[dict]) -> Optional[float]:
@@ -103,6 +125,18 @@ async def measure(bridge, trade: dict, requested_price: float,
 
     slip = slippage_pts(direction, requested_price, fill) if requested_price else None
 
+    # One number, two causes, two different fixes. Broker slippage is the
+    # fill against what was actually being quoted; entry drift is that
+    # quote against the price the decision was made at -- not the broker's
+    # doing at all, but the signal chasing, arriving late, or firing at
+    # market outside its own zone. They sum to `slip` by construction.
+    quoted = quoted_side(open_tick, direction)
+    broker_slip = entry_drift = None
+    if quoted is not None and fill > 0:
+        broker_slip = slippage_pts(direction, quoted, fill)
+        if requested_price:
+            entry_drift = slippage_pts(direction, requested_price, quoted)
+
     # Buy at the ask, sell at the bid. Against a mid-to-mid benchmark that is
     # half a spread each way, not a full spread twice.
     spread_cost = None
@@ -124,7 +158,9 @@ async def measure(bridge, trade: dict, requested_price: float,
     return FillCost(
         trade_id=str(trade.get("trade_id") or ""), direction=direction,
         open_time=open_time, requested_price=float(requested_price or 0.0),
-        fill_price=fill, slippage_pts=slip, spread_open_pts=s_open,
+        fill_price=fill, slippage_pts=slip,
+        broker_slippage_pts=broker_slip, entry_drift_pts=entry_drift,
+        spread_open_pts=s_open,
         spread_close_pts=s_close, spread_cost_pts=spread_cost,
         cost_pts=cost_pts, cost_r=cost_r, fill_delay_s=delay,
         measured=cost_pts is not None, bucket=bucket,
@@ -142,7 +178,8 @@ def summarise(costs: Iterable[FillCost]) -> dict:
     for c in costs:
         row = out.setdefault(c.bucket, {"n": 0, "unmeasured": 0,
                                         "_cost_r": 0.0, "_slip": 0.0,
-                                        "_spread": 0.0})
+                                        "_spread": 0.0, "_broker": 0.0,
+                                        "_drift": 0.0})
         if not c.measured or c.cost_r is None:
             row["unmeasured"] += 1
             continue
@@ -150,10 +187,14 @@ def summarise(costs: Iterable[FillCost]) -> dict:
         row["_cost_r"] += c.cost_r
         row["_slip"] += c.slippage_pts or 0.0
         row["_spread"] += c.spread_cost_pts or 0.0
+        row["_broker"] += c.broker_slippage_pts or 0.0
+        row["_drift"] += c.entry_drift_pts or 0.0
 
     for row in out.values():
         n = row["n"]
         row["mean_cost_r"] = round(row.pop("_cost_r") / n, 5) if n else None
         row["mean_slippage_pts"] = round(row.pop("_slip") / n, 5) if n else None
         row["mean_spread_pts"] = round(row.pop("_spread") / n, 5) if n else None
+        row["mean_broker_slippage_pts"] = round(row.pop("_broker") / n, 5) if n else None
+        row["mean_entry_drift_pts"] = round(row.pop("_drift") / n, 5) if n else None
     return out

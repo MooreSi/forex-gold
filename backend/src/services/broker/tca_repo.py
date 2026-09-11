@@ -24,12 +24,15 @@ def record_fill_cost(cost, mt5_ticket=None, strategy: str = "",
             "INSERT INTO execution_quality ("
             " trade_id, mt5_ticket, measured_at, open_time, direction,"
             " strategy, bucket, requested_price, fill_price, slippage_pts,"
+            " broker_slippage_pts, entry_drift_pts,"
             " spread_open_pts, spread_close_pts, spread_cost_pts, cost_pts,"
             " sl_dist, cost_r, fill_delay_s, measured"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(trade_id) DO UPDATE SET"
             " measured_at=excluded.measured_at,"
             " slippage_pts=excluded.slippage_pts,"
+            " broker_slippage_pts=excluded.broker_slippage_pts,"
+            " entry_drift_pts=excluded.entry_drift_pts,"
             " spread_open_pts=excluded.spread_open_pts,"
             " spread_close_pts=excluded.spread_close_pts,"
             " spread_cost_pts=excluded.spread_cost_pts,"
@@ -37,7 +40,9 @@ def record_fill_cost(cost, mt5_ticket=None, strategy: str = "",
             " measured=excluded.measured",
             (cost.trade_id, mt5_ticket, time.time(), cost.open_time,
              cost.direction, strategy, cost.bucket, cost.requested_price,
-             cost.fill_price, cost.slippage_pts, cost.spread_open_pts,
+             cost.fill_price, cost.slippage_pts,
+             cost.broker_slippage_pts, cost.entry_drift_pts,
+             cost.spread_open_pts,
              cost.spread_close_pts, cost.spread_cost_pts, cost.cost_pts,
              sl_dist, cost.cost_r, cost.fill_delay_s,
              1 if cost.measured else 0),

@@ -10,6 +10,7 @@ from backend.src.services.cluster import node as _node
 from backend.src.services.notifications import config as _notify
 from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import retention as _retention
+from backend.src.services.risk import capability_gates as _caps
 from backend.src.services.risk import settings as _risk
 import backend.src.config as _cfg_file
 
@@ -27,7 +28,12 @@ __all__ = [
     "reset_expert_param", "reset_all_expert_params",
     "load_config", "get_config", "save_config", "is_debug",
     "DATA_DIR", "USER_DATA_DIR",
+    "KNOWN_LEVEL_TYPES",
 ]
+
+# Re-exported, not restated: a level type missing from the frontend's copy
+# would be one nobody can refuse. Rationale lives in capability_gates.
+KNOWN_LEVEL_TYPES = _caps.KNOWN_LEVEL_TYPES
 
 
 def get_app_config(key: str) -> Optional[str]:

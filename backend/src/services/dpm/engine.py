@@ -15,7 +15,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-# Hard bounds for XAUUSD (safety rails only)
+# Hard bounds for XAUUSD (safety rails only).
+#
+# The two pairs are in DIFFERENT units, which is the trap this module fell
+# into once already: the trail bounds are a distance in gold price ($/oz,
+# subtracted straight from the bid), while the BE bounds are account dollars
+# of unrealised P&L, which is what the handler compares the trigger against.
 _MIN_TRAIL = 2.0
 _MAX_TRAIL = 50.0
 _MIN_BE    = 2.0
@@ -415,7 +420,30 @@ def compute_adaptive_params(
     if post_tp1:
         trail_distance = max(_MIN_TRAIL, round(trail_distance * 0.5, 1))
 
-    be_trigger = round(atr * base_be_mult * s_mult * dxy_bias, 1)
+    # `atr` is dollars per ounce; `be_trigger_usd` is compared by the handler
+    # against pnl(), which is account dollars -- price move x lots x
+    # CONTRACT_SIZE. Converting here is what makes those two comparable
+    # (2026-09-11). Without it the threshold was the PRICE distance being
+    # tested against an ACCOUNT figure, so it was only right at 0.01 lots and
+    # was wrong by a factor of lots x 100 everywhere else: on the 0.1 lots
+    # this account trades, breakeven armed after about a tenth of the
+    # intended move -- roughly 25 cents of gold, which is noise. The
+    # calibration half of this module has always done the conversion (see
+    # run_calibration's `hypothetical_be`, whose comment claims to match this
+    # function), so the multiplier it optimises and feeds back in through
+    # get_calibrated_multipliers was tuned for a threshold that was not the
+    # one in force.
+    #
+    # `remaining_lots` rather than `lot_size` because the handler's own
+    # comparison uses it; they are equal until the first partial, which is
+    # also the only cycle record_dpm_entry snapshots. 0.01 is the fallback --
+    # the smallest tradeable size, and the one the old formula implied.
+    _be_lots = float(trade.get("remaining_lots") or trade.get("lot_size") or 0.01)
+    be_trigger = round(atr * base_be_mult * s_mult * dxy_bias * _be_lots * 100.0, 1)
+    # The clamp is in account dollars, which is the band [2, 30] reads as.
+    # Note it now binds earlier in price terms as size grows: on 0.1 lots the
+    # cap is reached at an ATR near $4.6, so a fast session arms breakeven on
+    # the cap rather than on the ATR formula.
     be_trigger = max(_MIN_BE, min(be_trigger, _MAX_BE))
 
     swing_sl = find_swing_sl(candles, direction, entry_price, current)

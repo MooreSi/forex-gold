@@ -307,6 +307,7 @@ from backend.src.services.cluster.sync_repo import (  # noqa: E402,F401
     record_consolidated_trade,
     get_consolidated_ticket_maps,
     get_consolidated_extra_maps,
+    get_consolidated_trade,
     get_consolidated_trades,
     get_active_trader,
     set_active_trader,

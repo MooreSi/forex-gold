@@ -128,6 +128,16 @@ async def sync_profit(trade_id: str, mt5_ticket: int, bridge: Any) -> Optional[f
             "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
             trade_id, _estimate, mt5_profit, _correction,
         )
+        # The trade row and the balance are corrected above; the consolidated
+        # ledger still holds whatever record_close could compute at close
+        # time, and nothing else ever revisits it. bugs/025 left three rows at
+        # ~-$44,800 there against real losses of $264-$636. See
+        # sync.ledger.amend_trade_pnl -- it amends, never inserts.
+        try:
+            from backend.src.services.cluster.sync.ledger import amend_trade_pnl
+            amend_trade_pnl(trade_id, mt5_profit)
+        except Exception as _le:
+            log.debug("[ProfitSync] ledger amend failed for %s: %s", trade_id, _le)
     return mt5_profit if all_settled else None
 
 

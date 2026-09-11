@@ -184,6 +184,23 @@ def get_consolidated_extra_maps() -> tuple[dict[str, str], dict[str, float]]:
     return max_tp_map, rr_map
 
 
+def get_consolidated_trade(node_id: str, trade_id: str) -> dict | None:
+    """One node's own ledger row for a trade, or None.
+
+    Exists so a correction can AMEND a row that is already there rather than
+    upserting a fresh one: a row this node never pushed at close has no
+    engine, direction or strategy to supply, and `record_consolidated_trade`
+    would happily write those as empty strings into the cross-node ledger.
+    See `sync.ledger.amend_trade_pnl`."""
+    _ensure_sync_tables()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM consolidated_trades WHERE node_id=? AND trade_id=?",
+            (node_id, trade_id),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
 def get_consolidated_trades(days: int = 0) -> list[dict]:
     _ensure_sync_tables()
     cutoff = time.time() - days * 86400 if days > 0 else 0

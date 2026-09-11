@@ -120,3 +120,23 @@ here rather than there:
   sit beside the other two new gates so all three are evaluated before any
   of them returns -- otherwise a challenger gets recorded as "would take" on
   a signal whose later gates were never run.
+
+## The reporting epoch (2026-09-11)
+
+`reversal_engine/stats_repo.stats_epoch()` is a timestamp; every number on
+the Reversal Engine panel ignores anything closed before it, and
+`reset_stats()` moves it to now and puts the virtual balance back to
+$1,000. **It deletes nothing.**
+
+Two consequences worth knowing before touching either side:
+
+- `reconcile_balance_with_trades()` is epoch-filtered, because it runs on
+  every `init()` and would otherwise silently restore the pre-reset balance
+  at the next restart -- the reset would look as though it had never
+  happened.
+- `get_recent_win_rate()` is deliberately NOT filtered. It is a feature in
+  the model'''s vector, not a number on a panel, and a reporting reset must
+  not quietly change what the model is told about the market. Anything else
+  added to the panel should follow the same split: reporting reads the
+  epoch, features do not.
+

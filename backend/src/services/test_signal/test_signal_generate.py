@@ -16,6 +16,7 @@ from backend.src.services.dpm.engine import compute_atr
 
 from backend.src.services.test_signal import test_signal_repo as tdb
 from backend.src.services.test_signal import adaptive_params as ap
+from backend.src.services.test_signal import _gates
 from backend.src.services.test_signal.signal_generator import (
     compute_htf_bias,
     compute_h4_bias,
@@ -293,15 +294,12 @@ class _GenerateMixin:
         candidate.setdefault("adx",       adx)
 
         # ── 7a2. Extreme-trend gate for mean-reversion patterns ────────────────
-        _extreme_adx = ap.get("extreme_trend_adx")
-        _extreme_trend = (
-            htf_bias != "neutral" and h4_bias == htf_bias and adx >= _extreme_adx
+        reason = _gates.extreme_trend_blocks(
+            htf_bias=htf_bias, h4_bias=h4_bias, adx=adx,
+            trigger_pattern=candidate.get("trigger_pattern"),
+            threshold=ap.get("extreme_trend_adx"),
         )
-        if _extreme_trend and candidate.get("trigger_pattern") in ("bounce", "liquidity_sweep"):
-            reason = (
-                f"Extreme trend block: H1+H4 both {htf_bias}, ADX {adx:.0f} >= {_extreme_adx:.0f} "
-                f"— {candidate['trigger_pattern']} pattern unsafe (levels don't hold in persistent trends)"
-            )
+        if reason:
             self._status_detail = reason
             log_entry["suppressed_reason"] = reason
             log_entry["result"] = "extreme_trend_block"
@@ -312,50 +310,35 @@ class _GenerateMixin:
             return
 
         # ── 7b. Dual-bias counter-trend gate ──────────────────────────────────
-        _db_threshold = ap.get("dual_bias_adx_block")
-        _dual_bias_trending = (
-            htf_bias != "neutral"
-            and h4_bias == htf_bias
-            and adx >= _db_threshold
+        reason = _gates.dual_bias_blocks(
+            direction=candidate["direction"], htf_bias=htf_bias, h4_bias=h4_bias,
+            adx=adx, trigger_pattern=candidate.get("trigger_pattern"),
+            threshold=ap.get("dual_bias_adx_block"),
         )
-        if _dual_bias_trending:
-            _is_counter = (
-                (candidate["direction"] == "BUY"  and htf_bias == "bearish")
-                or (candidate["direction"] == "SELL" and htf_bias == "bullish")
-            )
-            if _is_counter and candidate.get("trigger_pattern") != "liquidity_sweep":
-                reason = (
-                    f"Dual-bias block: H1+H4 both {htf_bias}, ADX {adx:.0f} ≥ {_db_threshold:.0f} "
-                    f"— counter-trend {candidate['direction']} blocked"
-                )
-                self._status_detail = reason
-                log_entry["suppressed_reason"] = reason
-                log_entry["result"] = "dual_bias_block"
-                tdb.log_analysis(log_entry)
-                _log.debug("[TestSignal] %s", reason)
-                self._status = "running"
-                self._last_cycle_at = time.time()
-                return
+        if reason:
+            self._status_detail = reason
+            log_entry["suppressed_reason"] = reason
+            log_entry["result"] = "dual_bias_block"
+            tdb.log_analysis(log_entry)
+            _log.debug("[TestSignal] %s", reason)
+            self._status = "running"
+            self._last_cycle_at = time.time()
+            return
 
         # ── 7c. Asian session: trend-aligned signals only ─────────────────────
-        if session == "asian" and htf_bias != "neutral":
-            _asian_counter = (
-                (candidate["direction"] == "BUY"  and htf_bias == "bearish")
-                or (candidate["direction"] == "SELL" and htf_bias == "bullish")
-            )
-            if _asian_counter and candidate.get("trigger_pattern") != "liquidity_sweep":
-                reason = (
-                    f"Asian counter-bias block: HTF {htf_bias}, signal {candidate['direction']} — "
-                    "only trend-aligned signals in Asian session"
-                )
-                self._status_detail = reason
-                log_entry["suppressed_reason"] = reason
-                log_entry["result"] = "asian_bias_block"
-                tdb.log_analysis(log_entry)
-                _log.debug("[TestSignal] %s", reason)
-                self._status = "running"
-                self._last_cycle_at = time.time()
-                return
+        reason = _gates.asian_counter_bias_blocks(
+            session=session, direction=candidate["direction"], htf_bias=htf_bias,
+            trigger_pattern=candidate.get("trigger_pattern"),
+        )
+        if reason:
+            self._status_detail = reason
+            log_entry["suppressed_reason"] = reason
+            log_entry["result"] = "asian_bias_block"
+            tdb.log_analysis(log_entry)
+            _log.debug("[TestSignal] %s", reason)
+            self._status = "running"
+            self._last_cycle_at = time.time()
+            return
 
         # ── 8. Risk levels ────────────────────────────────────────────────────
         direction = candidate["direction"]

@@ -140,3 +140,73 @@ Two consequences worth knowing before touching either side:
   added to the panel should follow the same split: reporting reads the
   epoch, features do not.
 
+
+## The Bounce engine's three counter-trend gates (2026-09-12)
+
+`test_signal_generate.generate` refuses a trigger it has already found in three
+places, and until now all three were inline boolean expressions inside a method
+that cannot be called without candles, a bridge and a database. Nothing tested
+them; the package sits at 25.6% coverage. They are now
+`services/test_signal/_gates.py` — `extreme_trend_blocks`, `dual_bias_blocks`,
+`asian_counter_bias_blocks` — each returning the reason it refused or None,
+which is the shape `risk/governor.htf_bias_blocks` and `risk/capability_gates`
+already use.
+
+**Behaviour is unchanged and that is a fact, not a reading.**
+`tests/test_signal/test_generate_gates.py` evaluates the original expressions,
+copied verbatim from before the move, against the extracted functions over
+every combination of their inputs (150 for the Asian gate, 720 each for the
+other two). Four mutants killed. A fifth survives and is equivalent: the
+`htf_bias == "neutral"` guard in the Asian gate is redundant against
+`_is_counter_bias`, kept because the original carried it, and flagged in a
+comment so nobody re-derives that.
+
+The three are easy to confuse and differ in ways that matter:
+
+| | fires on | direction | a liquidity sweep |
+|---|---|---|---|
+| `extreme_trend_blocks` | H1+H4 agree, ADX >= tunable | ignored | **refused too** |
+| `dual_bias_blocks` | H1+H4 agree, ADX >= tunable | counter only | exempt |
+| `asian_counter_bias_blocks` | the Asian session | counter only | exempt |
+
+The sweep asymmetry is deliberate: a sweep's premise is a level holding against
+the crowd, and the extreme-trend gate exists precisely because levels stop
+holding in a persistent trend.
+
+**The open question, now visible.** `asian_counter_bias_blocks` refuses
+counter-bias signals between 00:00 and 07:00 UTC and has done since before
+anything was measured. The Reversal Engine's own numbers over the same hours
+say the opposite — see the risk domain README and
+`capability_gates.asian_bias_exempt`. The two engines trade different setups,
+so it is possible both are right; nothing on this engine was changed on the
+strength of the other's data. It is the owner's call:
+`docs/simon-handover/033`.
+
+## The engines are not as isolated as the top of this file says (2026-09-12)
+
+> *"Each owns an isolated SQLite database, its own adaptive parameters, and its
+> own ML model, with no cross-training."*
+
+The databases and the models are isolated. **The adaptive parameters are not.**
+
+`breakout_signal/signal_generator.py` re-exports `session_quality` and
+`session_is_active` from `test_signal/signal_generator.py`, and
+`session_quality` reads `ap.get("allow_asian")` — a **Bounce** parameter, held
+in the **Bounce** database, written by the **Bounce** engine's Claude tuner
+from **Bounce** trade outcomes. The only live caller is
+`breakout_signal_velocity.py:55`, in the Breakout engine.
+
+Today it changes nothing at either engine, for two separate reasons, and that
+is its own problem: the Bounce engine never calls either function (its
+session rule is inline, now `_gates.asian_counter_bias_blocks`), and the
+Breakout velocity monitor refuses the Asian session unconditionally on the line
+after it asks. So the parameter is tuned, clamped, logged to the learning
+history, and connected to nothing. `docs/todo/bugs/045`.
+
+The comment above those imports says *"pure functions with no side effects,
+importing is safe and DRY"*. It is true of `compute_adx` and the rest of that
+list. It is not true of `session_quality`, which reads another engine's store.
+
+**If you wire `session_is_active` into the Bounce engine** — an obvious
+tidy-up — 38% of that engine's signals disappear immediately, because the
+stored value is `0.0`. Read bugs/045 first.

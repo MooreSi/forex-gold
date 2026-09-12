@@ -187,20 +187,28 @@ class _CorrelationMixin:
 
                     break  # one REF match per RE signal
 
-        # avg_lead_time_s is signed: negative = we're ahead of the reference channel on average
-        avg_lead = sum(lead_times) / len(lead_times) if lead_times else None
-
         # Query actual daily counts from DB rather than from the rolling 4h window.
         # The 4h window ages out confirmed signals within the same day, causing
         # re_correlated to be overwritten to 0 once correlations are >4h old.
+        #
+        # 2026-09-12: ref_predicted and avg_lead_time_s had exactly the same
+        # problem and were left behind by that fix -- both were computed in the
+        # loop above and upserted over the day's real values on every run. In
+        # the live database they read 0 and NULL on ALL 51 days on record, so
+        # the measurement of whether this engine LEADS the channel it exists to
+        # predict had never recorded a value. They come from the day's own rows
+        # now, like re_correlated. `predicted` and `lead_times` above are left
+        # in place because they are this pass's own view and nothing else reads
+        # them; the row no longer takes its answer from them.
         corr_total = re_db.count_today_correlated()
         today_sent = re_db.count_today_signals()
         corr_rate  = corr_total / today_sent if today_sent else 0.0
+        led_today, avg_lead = re_db.today_lead_stats()
 
         re_db.upsert_daily_correlation(
             today,
             ref_signals_sent=ref_today_count,
-            ref_predicted=predicted,
+            ref_predicted=led_today,
             re_correlated=corr_total,
             avg_lead_time_s=avg_lead,
             correlation_rate=round(corr_rate, 3),

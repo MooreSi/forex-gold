@@ -420,6 +420,46 @@ def count_today_signals() -> int:
         return 0
 
 
+def today_lead_stats(now_ts: Optional[float] = None) -> tuple[int, Optional[float]]:
+    """(how many of today's correlations this engine fired FIRST, mean signed lead).
+
+    Answered from the day's own rows, not from the correlator's rolling 4-hour
+    window. `_correlate` runs on that window and upserts one row per day, so
+    anything computed inside the loop is overwritten with the window's view
+    every time it runs -- which is why `re_correlated` was already moved to a
+    database count, with a comment saying exactly that. `ref_predicted` and
+    `avg_lead_time_s` were left behind, and in the live database they read 0
+    and NULL on all 51 days on record: the measurement of whether this engine
+    leads the channel it exists to predict has never recorded a value.
+
+    The mean is SIGNED -- negative is ahead. An absolute mean would report an
+    engine that is 100s early and 100s late as 100s early.
+
+    `now_ts` decides which day is "today"; the default is now. It exists so the
+    tests do not depend on the date they run on.
+    """
+    try:
+        from datetime import datetime, timezone
+        ref = (datetime.fromtimestamp(float(now_ts), tz=timezone.utc)
+               if now_ts is not None else datetime.now(timezone.utc))
+        day_start = ref.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        row = get_db().get(
+            "SELECT SUM(CASE WHEN correlation_time_delta_s < 0 THEN 1 ELSE 0 END), "
+            "       AVG(correlation_time_delta_s) "
+            "FROM re_signals "
+            "WHERE created_at >= ? AND correlation_confirmed=1 "
+            "  AND correlation_time_delta_s IS NOT NULL",
+            day_start,
+        )
+        if not row:
+            return 0, None
+        led = int(row[0] or 0)
+        mean = float(row[1]) if row[1] is not None else None
+        return led, mean
+    except Exception:
+        return 0, None
+
+
 def count_today_correlated() -> int:
     """COUNT of confirmed correlations among signals created today (UTC)."""
     try:

@@ -22,6 +22,7 @@ from backend.src.controllers.system_controller import app_version as _app_versio
 
 _APP_VERSION = _app_version()
 
+from ._header_pnl import net_deposited_from_deals
 from ._shared import _CASH_REGISTER_JS, STATIC_DIR
 
 log = logging.getLogger(__name__)
@@ -552,18 +553,13 @@ def build_header(*, power_dialog, pause_dialog, root,
                 if _net_deposited[0] is None or now_m - _deposit_fetch_at[0] > 300:
                     try:
                         all_deals = await engine._bridge.get_deal_history(3650) or []
-                        credits = sum(
-                            float(d.get("profit", 0))
-                            for d in all_deals
-                            if d.get("type") == 2 and float(d.get("profit", 0)) > 0
-                        )
-                        debits = sum(
-                            abs(float(d.get("profit", 0)))
-                            for d in all_deals
-                            if d.get("type") == 2 and float(d.get("profit", 0)) < 0
-                        )
-                        if credits > 0:
-                            _net_deposited[0] = credits - debits
+                        # The filter itself lives in _header_pnl, where a test
+                        # can reach it -- bugs/030 cause 3. Same number, same
+                        # "no credits means no answer" rule; the only change is
+                        # that it is now pinned by something that runs.
+                        _nd = net_deposited_from_deals(all_deals)
+                        if _nd is not None:
+                            _net_deposited[0] = _nd
                             _deposit_fetch_at[0] = now_m
                     except Exception as _dep_exc:
                         # Header P&L keeps its last value — say so in the log

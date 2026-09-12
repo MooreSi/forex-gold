@@ -44,8 +44,40 @@ def _pkg():
     return ea_bridge
 
 
+class _AlertedTickets:
+    """Which tickets have already been warned about, this episode.
+
+    A set with two named operations instead of a bare one, so the call sites
+    read as what they mean: `add_if_new` returns True exactly once per ticket,
+    and `clear_one` ends that ticket's episode when the condition resolves.
+    """
+
+    def __init__(self) -> None:
+        self._seen: set = set()
+
+    def add_if_new(self, ticket) -> bool:
+        key = str(ticket)
+        if key in self._seen:
+            return False
+        self._seen.add(key)
+        return True
+
+    def clear_one(self, ticket) -> None:
+        self._seen.discard(str(ticket))
+
+
 class EventsMixin:
     """EABridge's inbound-event handlers. Not instantiated on its own."""
+
+    def _unverified_tickets(self) -> _AlertedTickets:
+        """Lazily created: EABridge builds its own state in __init__, and the
+        handler tests build a stripped node that does not call it. Creating it
+        on first use keeps both honest without a second place to forget."""
+        existing = getattr(self, "_unverified_alerted", None)
+        if existing is None:
+            existing = _AlertedTickets()
+            self._unverified_alerted = existing
+        return existing
 
     async def _dispatch(self, msg: dict) -> None:
         t = msg.get("type")
@@ -276,15 +308,28 @@ class EventsMixin:
                         "the row open rather than recording an exit at $0",
                         reason, trade_id[:8], msg.get("ticket"),
                     )
-                    asyncio.create_task(telegram_alerts.send_message(
-                        f"EA reported ticket {msg.get('ticket')} as gone ({reason}), but the "
-                        f"broker has no closing deal for it. This trade stays OPEN and "
-                        f"unmanaged — no P&L has been recorded. Check MT5: if the position "
-                        f"is still there it needs a look; if it really closed, its deal "
-                        f"history has not arrived yet.",
-                        trade_id, "ea_close_unverified",
-                    ))
+                    # Once per ticket per episode, not once per poll. The EA
+                    # re-reports a ticket it cannot see on every
+                    # CheckForClosures cycle, so this fired 17 times in six
+                    # minutes for one ticket on 2026-09-07 -- and every one
+                    # failed to send, because the network outage that made the
+                    # broker unreachable is the same one that made Telegram
+                    # unreachable (bugs/050). The GUARD above is not damped:
+                    # every repeat still asks the broker and still books
+                    # nothing. Only the saying-so is.
+                    if self._unverified_tickets().add_if_new(msg.get("ticket")):
+                        asyncio.create_task(telegram_alerts.send_message(
+                            f"EA reported ticket {msg.get('ticket')} as gone ({reason}), but the "
+                            f"broker has no closing deal for it. This trade stays OPEN and "
+                            f"unmanaged — no P&L has been recorded. Check MT5: if the position "
+                            f"is still there it needs a look; if it really closed, its deal "
+                            f"history has not arrived yet.",
+                            trade_id, "ea_close_unverified",
+                        ))
                     return
+                # It verified, so the episode is over: a later failure on this
+                # same ticket is new news and says so.
+                self._unverified_tickets().clear_one(msg.get("ticket"))
                 close_price = verified
             # A leg's close IS this trade's close when the leg owns the row's
             # ticket -- record it against the parent id, never the suffixed

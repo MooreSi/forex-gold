@@ -261,3 +261,70 @@ class TestASiblingLegIsStillJustANote:
         assert node._engine.record_close_calls == []
         assert bridge.history_calls == []
         assert [a["kind"] for a in alerts] == ["ea_close_sibling_leg"]
+
+
+class TestItSaysItOncePerTicket:
+    """bugs/050. The EA re-reports a ticket it cannot see on every
+    `CheckForClosures` cycle, so this alert used to fire per poll for as long
+    as the condition lasted -- seventeen times in six minutes for one ticket on
+    2026-09-07, roughly one every eleven seconds.
+
+    The trade itself was fine: the guard refused all seventeen and the position
+    closed properly nine minutes later at -$48.00. The alerts were the problem.
+    Same shape as bugs/035 and the limit-order flap damped by `withdraw_count`.
+    """
+
+    async def test_the_second_report_of_the_same_ticket_is_quiet(self, alerts):
+        bridge = _Bridge([_deal(entry=0, price=ENTRY, ts=1_757_000_000.0)])
+        node = _Node(bridge)
+
+        await _closed(node)
+        await _closed(node)
+
+        assert [a["kind"] for a in alerts] == ["ea_close_unverified"]
+
+    async def test_the_guard_itself_still_runs_every_time(self, alerts):
+        """Damping the ALERT must not damp the refusal. Every repeat still asks
+        the broker and still books nothing -- going quiet about a condition is
+        not the same as deciding it has passed."""
+        bridge = _Bridge([_deal(entry=0, price=ENTRY, ts=1_757_000_000.0)])
+        node = _Node(bridge)
+
+        await _closed(node)
+        await _closed(node)
+        await _closed(node)
+
+        assert bridge.history_calls == [TICKET, TICKET, TICKET]
+        assert node._engine.record_close_calls == []
+
+    async def test_a_different_ticket_gets_its_own_alert(self, alerts):
+        """Quiet per ticket, not quiet altogether. Two positions stranded at
+        once is worse news than one, and must not be reported as less."""
+        other = TICKET + 1
+        bridge = _Bridge([_deal(entry=0, price=ENTRY, ts=1_757_000_000.0),
+                          {"position_id": other, "entry": 0, "price": ENTRY,
+                           "time": 1_757_000_000.0, "volume": 0.1,
+                           "profit": 0.0, "swap": 0.0, "fee": 0.0}])
+        node = _Node(bridge, row=_row(mt5_ticket=other))
+
+        await _closed(node, ticket=other)
+        node._row = _row()
+        await _closed(node)
+
+        assert [a["kind"] for a in alerts] == [
+            "ea_close_unverified", "ea_close_unverified"]
+
+    async def test_a_ticket_that_verifies_later_can_warn_again(self, alerts):
+        """The damper is per episode, not for the life of the process. A
+        ticket that goes unverified, settles, and later goes unverified again
+        is a new event and says so."""
+        bridge = _Bridge([_deal(entry=0, price=ENTRY, ts=1_757_000_000.0)])
+        node = _Node(bridge)
+
+        await _closed(node)
+        bridge._deals.append(_deal(entry=1, price=4471.05, ts=1_757_003_600.0))
+        await _closed(node)
+        bridge._deals = [_deal(entry=0, price=ENTRY, ts=1_757_000_000.0)]
+        await _closed(node)
+
+        assert [a["kind"] for a in alerts].count("ea_close_unverified") == 2

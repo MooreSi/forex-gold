@@ -58,6 +58,19 @@ def count_unprotected_same_direction(direction: str) -> int:
 
 
 def sum_realised_pnl_since(day_start: float) -> float:
+    """Today's closed P&L for the daily-loss halt -- from `net_pnl`, not
+    `realised_pnl`, whatever this function is called.
+
+    `profit_sync` replaces `net_pnl` and `mt5_profit` with the broker's own
+    figure when the deal history settles, and leaves `realised_pnl` holding the
+    estimate made at close time. On the live ledger (2026-09-12) the two
+    disagreed on 114 of 295 closed rows, once by $54 and with the opposite sign.
+    Summing the column this function is named after would quietly move a
+    protective limit off the broker's truth and onto the app's guess.
+
+    Pinned by tests/risk/test_daily_loss_reads_the_brokers_figure.py, because
+    every other test of the halt monkeypatches this function away.
+    """
     with db() as conn:
         return conn.execute(
             "SELECT COALESCE(SUM(net_pnl), 0) FROM vantage_simulated_trades "

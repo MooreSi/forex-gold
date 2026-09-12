@@ -9,6 +9,7 @@ sys.platform checks.
 
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -470,6 +471,36 @@ def mask_account(value) -> str:
     """
     text = str(value or "")
     return ("*" * max(0, len(text) - 3)) + text[-3:] if len(text) > 3 else "***"
+
+
+_TG_TOKEN_RE = re.compile(r"(/bot\d+):[A-Za-z0-9_-]+")
+
+
+def scrub_log_secrets(text) -> str:
+    """Log text with any credential in it removed, for anything leaving the box.
+
+    `cluster/remote/client._build_diagnostics` uploads the last 3,000 raw log
+    lines to the admin server. httpx logs the full request URL at INFO on every
+    Telegram poll, and a bot token lives in the path:
+
+        GET https://api.telegram.org/bot<id>:<secret>/getUpdates?...
+
+    7,245 lines of the live log carried one on 2026-09-12, 166 of them inside
+    that 3,000-line slice. A bot token is full control of the bot -- read what
+    it can see, post as it. Same class as `mask_account` and `mask_email`
+    above, which were added for the two things Q005 #1 happened to name; this
+    one was on the same pages and was not.
+
+    **The bot id is kept and only the secret goes.** Support has to know which
+    bot a log came from; the number before the colon is public in any Telegram
+    username lookup, and the half after it is the credential.
+
+    Narrow on purpose: a rule that went after anything token-shaped would
+    redact `name='Task-1004'`, and those lines are the evidence for bugs/030.
+    """
+    if not text:
+        return ""
+    return _TG_TOKEN_RE.sub(r"\1:***", str(text))
 
 
 def mask_email(value) -> str:

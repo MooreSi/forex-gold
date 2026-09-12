@@ -438,6 +438,7 @@ def _log_level(line: str) -> str:
 
 def _build_diagnostics() -> dict:
     import platform
+    from backend.src.utils.os_utils import scrub_log_secrets
     from datetime import datetime, timedelta
     commit_sha, commit_note = _commit_report()
     data = {
@@ -459,7 +460,9 @@ def _build_diagnostics() -> dict:
             raw = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
             # Full raw log (last 150 KB worth of lines) for the download button
             raw_tail = raw[-3000:]
-            data["log_raw"] = "\n".join(raw_tail)
+            # Verbatim, so it must be scrubbed: this slice carried a live
+            # Telegram bot token 166 times on 2026-09-12. bugs/058.
+            data["log_raw"] = scrub_log_secrets("\n".join(raw_tail))
             # Filtered view: past 24 h, errors/warnings/significant info
             kept: list[str] = []
             for ln in reversed(raw[-8000:]):
@@ -472,7 +475,9 @@ def _build_diagnostics() -> dict:
                     kept.append(ln)
                 elif level == "INFO" and not any(n in ln for n in _DIAG_NOISY):
                     kept.append(ln)
-            data["log_lines"] = list(reversed(kept))[-500:]
+            # Belt and braces: the filter above catches httpx lines by their
+            # "HTTP/1." marker, and a WARNING carrying a URL would not match.
+            data["log_lines"] = [scrub_log_secrets(ln) for ln in list(reversed(kept))[-500:]]
     except Exception:
         pass
     return make(MSG_DIAGNOSTICS, data=data)

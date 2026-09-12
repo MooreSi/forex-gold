@@ -193,3 +193,94 @@ class TestTheCostSplitsIntoTwoDifferentProblems:
                                     requested_price=3300.0, sl_dist=5.0))
         assert c.broker_slippage_pts is None
         assert c.entry_drift_pts is None
+
+
+class TestTheQuoteHasToBeFromTheRightMoment:
+    """Live, 2026-09-12. The decomposition above has run on four trades since
+    it shipped, and all four are impossible:
+
+        req 4371.54  fill 4371.54  slippage 0.00
+        broker slippage +35.91     entry drift -35.91
+
+    All four were MARKET orders with a real slippage of 0.00 to 1.63 points
+    against a spread of ~0.22, and the split claims the broker was quoting 24
+    to 72 points away from the price we both asked for and got. A market order
+    fills at the quote; a 72-point gap between fill and quote does not happen.
+    What does happen is a quote read from the wrong moment -- the two halves
+    then come out large, equal and opposite, because they are defined to sum to
+    the real slippage.
+
+    `mt5.copy_ticks_from` returns the first tick AT OR AFTER the timestamp with
+    no bound on how far after, and the bridge has a documented history of MT5
+    reading timestamps in its own server convention
+    (`_get_candles_range`, 2026-07-07, which was feeding wrong prices into the
+    TP safety net). Either explanation produces exactly this.
+
+    The tick carries its own `time`. Nothing looked at it. Now the
+    decomposition refuses when the quote is from somewhere else, and says so in
+    the log. `docs/todo/bugs/052`.
+
+    The SPREAD is deliberately left alone: it comes from the same tick, but it
+    feeds cost_r, which feeds meta-label training, and narrowing that dataset
+    is a change to what the gate learns from. That is in the bug, for the
+    owner.
+    """
+
+    def test_a_quote_from_hours_away_is_refused(self):
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4, "time": 1000.0 - 10800},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4, "time": 1600.0}})
+
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.9),
+                                    requested_price=3300.0, sl_dist=5.0))
+
+        assert c.broker_slippage_pts is None
+        assert c.entry_drift_pts is None
+
+    def test_the_published_slippage_survives_the_refusal(self):
+        """Only the SPLIT is unknown. The fill against the requested price does
+        not depend on any tick, and neither does the spread's own arithmetic --
+        refusing the decomposition must not quietly blank the numbers already
+        being reported."""
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4, "time": 1000.0 - 10800},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4, "time": 1600.0}})
+
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.9),
+                                    requested_price=3300.0, sl_dist=5.0))
+
+        assert c.slippage_pts == pytest.approx(0.9)
+        assert c.spread_open_pts == pytest.approx(0.4)
+        assert c.cost_r is not None
+
+    def test_a_quote_from_the_same_moment_is_used(self):
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4, "time": 1000.0},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4, "time": 1600.0}})
+
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.9),
+                                    requested_price=3300.0, sl_dist=5.0))
+
+        assert c.broker_slippage_pts == pytest.approx(0.5)
+
+    def test_a_quote_a_few_seconds_late_is_still_the_fill_quote(self):
+        """A tick a second or two after the fill is the nearest real quote and
+        is what this measurement has always used. The guard is for a quote from
+        another part of the day, not for ordinary tick spacing."""
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4, "time": 1002.0},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4, "time": 1600.0}})
+
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.9),
+                                    requested_price=3300.0, sl_dist=5.0))
+
+        assert c.broker_slippage_pts == pytest.approx(0.5)
+
+    def test_a_tick_that_does_not_say_when_it_is_from_is_used_as_before(self):
+        """Every tick the real bridge returns carries `time`. A tick without
+        one cannot be checked, and refusing it would delete the measurement
+        wherever the field is absent rather than wherever the quote is wrong.
+        Checked where it can be checked; unchanged where it cannot."""
+        bridge = _Bridge({1000.0: {"bid": 3300.0, "ask": 3300.4},
+                          1600.0: {"bid": 3310.0, "ask": 3310.4}})
+
+        c = asyncio.run(tca.measure(bridge, _trade(entry_price=3300.9),
+                                    requested_price=3300.0, sl_dist=5.0))
+
+        assert c.broker_slippage_pts == pytest.approx(0.5)

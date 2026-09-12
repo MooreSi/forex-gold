@@ -94,6 +94,54 @@ def _spread(tick: Optional[dict]) -> Optional[float]:
     return round(ask - bid, 5)
 
 
+# How far a quote may sit from the fill and still be the fill's quote. Ticks on
+# this instrument are sub-second in an active session, so a couple of seconds is
+# ordinary spacing and anything beyond it is a different part of the day.
+MAX_QUOTE_AGE_S = 30.0
+
+
+def _tick_is_contemporary(tick: Optional[dict], when: float,
+                          trade_id=None) -> bool:
+    """Is this tick actually from the moment we asked about?
+
+    `mt5.copy_ticks_from` returns the first tick AT OR AFTER the timestamp with
+    no bound on how far after, and MT5 has a documented history in this repo of
+    reading timestamps in its own server convention rather than UTC
+    (`mt5_bridge._get_candles_range`, 2026-07-07, which was feeding wrong
+    prices into the TP safety net). Nothing here checked, and the four live
+    decompositions this produced were all impossible: market fills with 0.00
+    to 1.63 points of real slippage, split into a broker component and a drift
+    component 24 to 72 points apart. They sum correctly because they are
+    defined to; individually they were measuring another hour. bugs/052.
+
+    A tick with no `time` is used as before. Every tick the real bridge returns
+    carries one; refusing those without it would delete the measurement where
+    the field is absent rather than where the quote is wrong.
+    """
+    if not tick:
+        return False
+    raw = tick.get("time")
+    # Kept explicit although the except below would reach the same answer --
+    # a mutant that deletes these two lines survives, and that is an equivalent
+    # mutant rather than a hole. "No timestamp" is a different fact from "a
+    # timestamp that will not parse", and saying so here means the next reader
+    # does not have to derive it from an exception handler.
+    if raw in (None, ""):
+        return True
+    try:
+        gap = abs(float(raw) - float(when))
+    except (TypeError, ValueError):
+        return True
+    if gap <= MAX_QUOTE_AGE_S:
+        return True
+    log.warning(
+        "tca: quote for %s is %.0fs from the fill (%.0f vs %.0f) — not the "
+        "fill's quote, so the broker/drift split is left unmeasured (bugs/052)",
+        trade_id or "?", gap, float(raw), float(when),
+    )
+    return False
+
+
 async def _tick_at(bridge, ts: Optional[float]) -> Optional[dict]:
     if not ts:
         return None
@@ -130,7 +178,8 @@ async def measure(bridge, trade: dict, requested_price: float,
     # quote against the price the decision was made at -- not the broker's
     # doing at all, but the signal chasing, arriving late, or firing at
     # market outside its own zone. They sum to `slip` by construction.
-    quoted = quoted_side(open_tick, direction)
+    quoted = quoted_side(open_tick, direction) if _tick_is_contemporary(
+        open_tick, open_time, trade.get("trade_id")) else None
     broker_slip = entry_drift = None
     if quoted is not None and fill > 0:
         broker_slip = slippage_pts(direction, quoted, fill)

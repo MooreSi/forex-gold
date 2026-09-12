@@ -61,6 +61,24 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 
 ## Known things & gotchas
 
+- **Bumping `EA_VERSION` is a live change to a running account, not a source
+  edit (2026-09-12).** The moment the repo's `.mq5` declares a version the
+  chart's `.ex5` does not, three things happen on the owner's machine without
+  anyone deploying anything: the top-bar EA badge goes stale
+  (`ea_build_status`), **every EA Template order is refused** with
+  "EA Template refused: the chart is running EA vX but this app ships vY"
+  (`template_refusal_for_stale_ea`, bugs/033), and on the macOS/Wine bridge
+  `ea_deploy.reload_decision` will **restart the MT5 terminal** once, as soon
+  as the book happens to be empty — roughly two minutes with nothing managing
+  anything. All three are correct behaviour: a template is managed entirely by
+  the build on the chart, so running one against a replaced build is worse.
+  The consequence for how we work is the point: **an unattended session must
+  not commit a change to `mql5/ForexTraderBridge.mq5`.** It stops template
+  trading on whatever account is running until someone is at the terminal for
+  `tools/deploy_ea.sh` + F7. EA work is scheduled with the owner, in the same
+  sitting as the deploy — see `docs/todo/bugs/041`, which is blocked on exactly
+  this.
+
 - **The running bridge process can be older than `mt5_bridge.py`, and it fails
   by 404 rather than by looking broken (2026-09-04, live).** The bridge had
   been up since 16:28:08 on 09-03; `/ticks` was added at 16:38 that same day

@@ -48,6 +48,22 @@ def readers_of(name: str, *, exclude: tuple[str, ...]) -> list[str]:
             if path not in exclude and rx.search(text)]
 
 
+_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+@lru_cache(maxsize=1)
+def _tokens() -> tuple[tuple[str, frozenset], ...]:
+    """Every identifier-shaped word in each file, once.
+
+    A regex per name over every file is O(names x files) and measured at 40
+    seconds for the controller gate's 255 names -- ten per cent of the whole
+    suite for one check. Tokenising each file once and testing membership is
+    the same answer in under a second.
+    """
+    return tuple((path, frozenset(_WORD_RE.findall(text)))
+                 for path, text in _sources())
+
+
 def references_to(name: str, *, exclude: tuple[str, ...]) -> list[str]:
     """Files mentioning `name` as a whole word, ignoring `exclude`.
 
@@ -56,6 +72,5 @@ def references_to(name: str, *, exclude: tuple[str, ...]) -> list[str]:
     this can say "nothing anywhere mentions this" with confidence, and must
     not claim more than that.
     """
-    rx = re.compile(rf"\b{re.escape(name)}\b")
-    return [path for path, text in _sources()
-            if path not in exclude and rx.search(text)]
+    return [path for path, words in _tokens()
+            if path not in exclude and name in words]

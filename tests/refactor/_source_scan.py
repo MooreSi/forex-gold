@@ -1,7 +1,15 @@
-"""Where an adaptive parameter's name appears in the source tree.
+"""Where a name appears in the source tree.
 
-Split out of `test_every_tunable_is_read.py` so the scan can be exercised by
-that file's own negative controls rather than being trusted.
+Two searches, because two questions are asked of this repo and they are not
+the same one:
+
+* `readers_of` finds a name used as a STRING LITERAL -- how an adaptive
+  parameter is read (`ap.get("min_rr")`).
+* `references_to` finds a name used as an IDENTIFIER -- how an exported
+  function is called (`panel_data.change_signature`).
+
+Split out of the tests that use them so the scans can be exercised by their
+own negative controls rather than trusted.
 """
 from __future__ import annotations
 
@@ -36,5 +44,18 @@ def readers_of(name: str, *, exclude: tuple[str, ...]) -> list[str]:
     missed -- none is, and one would be worth objecting to on its own.
     """
     rx = re.compile(rf"""["']{re.escape(name)}["']""")
+    return [path for path, text in _sources()
+            if path not in exclude and rx.search(text)]
+
+
+def references_to(name: str, *, exclude: tuple[str, ...]) -> list[str]:
+    """Files mentioning `name` as a whole word, ignoring `exclude`.
+
+    Deliberately looser than a call graph: the name counts whether it is
+    called, passed, re-exported or only named in a docstring. A gate built on
+    this can say "nothing anywhere mentions this" with confidence, and must
+    not claim more than that.
+    """
+    rx = re.compile(rf"\b{re.escape(name)}\b")
     return [path for path, text in _sources()
             if path not in exclude and rx.search(text)]

@@ -39,7 +39,7 @@ import pytest
 
 from backend.src.services.breakout_signal import adaptive_params as bo_params
 from backend.src.services.test_signal import adaptive_params as bounce_params
-from tests.refactor._tunable_scan import CATALOGUE_FILES, readers_of
+from tests.refactor._source_scan import CATALOGUE_FILES, readers_of
 
 # Known dead, each with a bug tracking the decision. Shrink-only: when one is
 # deleted or wired up, remove it here. Adding to this set is the regression

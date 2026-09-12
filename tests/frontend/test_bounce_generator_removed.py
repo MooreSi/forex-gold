@@ -19,6 +19,14 @@ done here:
     fixed order, so reordering it would desynchronise paired nodes.
 
 Nothing about breakout or reversal changes.
+
+**Scope, corrected 2026-09-12.** Everything above is true of the bulk start and
+is tested below. It is NOT true of the engine as a whole, and the docstring
+used to read as though it were: `app.py` auto-starts the bounce engine on every
+launch without consulting `start_stopped_engines()`, and it was found doing
+exactly that -- one analysis cycle a minute, ten days after this panel was
+deleted. See `docs/todo/bugs/046`. No test here was changed; this paragraph
+only stops the file claiming a property it never checked.
 """
 from __future__ import annotations
 

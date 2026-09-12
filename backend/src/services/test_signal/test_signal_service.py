@@ -28,7 +28,10 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from backend.src.db.database import to_db_thread as _mdb_thread
 from backend.src.services.test_signal import test_signal_repo as tdb
+from backend.src.services.test_signal._silence import format_silence_warning
+from backend.src.services.test_signal import silence_repo as _silence_db
 from backend.src.services.test_signal import ml_engine as ml
 from backend.src.services.test_signal.test_signal_learn import _LearnMixin
 from backend.src.services.test_signal.test_signal_velocity import _VelocityMixin
@@ -69,6 +72,12 @@ _MIN_ZONE_DWELL         = 2
 _MIN_LOT                = 0.01
 
 
+# How often the watchdog repeats the "this engine has stopped producing"
+# line. Six hours: often enough that a day of silence is visible in the
+# log, rare enough that a fortnight of it does not bury everything else.
+_SILENCE_REPEAT_SECS = 6 * 3600
+
+
 class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _LearnMixin):
     def __init__(self, bridge: "MT5BridgeClient"):
         self._bridge        = bridge
@@ -83,6 +92,9 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
         self._status: str = "stopped"
         self._status_detail: str = ""
         self._closed_trade_count: int = 0
+        # Last time the watchdog said this engine had stopped producing.
+        # 0.0 means "not yet", so the first check after a start reports.
+        self._silence_warned_at: float = 0.0
         self._refresh_callbacks: list = []
         self._main_engine = None
         self._zone_dwell: dict[int, int] = {}
@@ -199,6 +211,32 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
                         name, f" ({exc})" if exc else "",
                     )
                     setattr(self, attr, asyncio.create_task(coro_fn()))
+            await self._report_silence()
+
+    async def _report_silence(self) -> None:
+        """Say once every six hours when this engine has stopped producing.
+
+        This engine has no panel -- it was removed on 2026-09-02 -- so the log
+        is the only place it can say anything about itself. It went sixteen
+        days without a signal, refusing all 514 candidates it found, and
+        nothing anywhere said so (docs/simon-handover/034).
+
+        Read on the DB worker thread, not here: this runs on the shared event
+        loop that order dispatch also uses, and a synchronous query on it is
+        bugs/030. Never raises -- a watchdog that dies of its own reporting
+        stops watching.
+        """
+        try:
+            now = time.time()
+            if now - self._silence_warned_at < _SILENCE_REPEAT_SECS:
+                return
+            report = await _mdb_thread(_silence_db.get_silence_report)
+            msg = format_silence_warning(report)
+            if msg:
+                self._silence_warned_at = now
+                _log.warning("TestSignalEngine: %s", msg)
+        except Exception as exc:
+            _log.debug("TestSignalEngine: silence check failed: %s", exc)
 
     # ── Analysis cycle ────────────────────────────────────────────────────────
 

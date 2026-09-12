@@ -7,9 +7,6 @@ _run_batch_analysis) heavily externally coupled -- left uncovered by
 design. Covered: module-level pure functions and _close_signal's balance
 math run against a real isolated DB.
 """
-import os
-import tempfile
-
 import pytest
 
 from backend.src.services.test_signal import test_signal_repo as db
@@ -25,19 +22,6 @@ from backend.src.services.test_signal.test_signal_service import (
 from backend.src.services.test_signal.test_signal_generate import _calc_lot_size
 from backend.src.services.test_signal.test_signal_manage import _calc_pnl_dollars, _compute_cost_pts
 from backend.src.services.test_signal.test_signal_velocity import _compute_swing_levels
-from tests.conftest import remove_db_file
-
-
-@pytest.fixture
-def fresh_db():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db.init(path)
-    yield db
-    # `db` here is test_signal_repo, whose adapter holds the file open until
-    # released; Windows cannot unlink while a handle is live.
-    db.close_db()
-    remove_db_file(path)
 
 
 @pytest.fixture

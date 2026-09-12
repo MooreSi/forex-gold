@@ -7,9 +7,17 @@ used them.
 
 The bounce SERVICE still exists and keeps its slot in
 `engines_controller._ENGINE_SERVICES` -- the sync server and the mode toggle
-bind engines by that fixed order -- but it is excluded from
-`start_stopped_engines()`, so it cannot run with no panel to show that it is
-running. See tests/frontend/test_bounce_generator_removed.py.
+bind engines by that fixed order -- and it is excluded from
+`start_stopped_engines()`, the power/mode toggle's path. See
+tests/frontend/test_bounce_generator_removed.py.
+
+**That exclusion does not stop it running, and this file used to say it did.**
+`app.py` starts the bounce engine on every launch unless `sg_engine_enabled` is
+"0", and that key is only ever written by a Stop Engine button that no longer
+exists on any screen. Confirmed live on 2026-09-12: the engine had been
+analysing once a minute for the ten days since this panel was deleted.
+`docs/todo/bugs/046` -- it is the owner's call whether to stop it, and
+`sg_live_execution` is 0, so it places no orders meanwhile.
 """
 from __future__ import annotations
 
@@ -33,8 +41,9 @@ def render(get_engine: Callable) -> None:
     """Entry point — renders the Breakout and Reversal Engine tabs.
 
     Bounce was removed 2026-09-02 on the owner's instruction. Its service is
-    still present but is excluded from engines_controller.start_stopped_engines,
-    so it cannot be started with no panel to show that it is running.
+    still present and excluded from engines_controller.start_stopped_engines --
+    which stops the power/mode toggle starting it, and does NOT stop app.py's
+    own auto-start, which has been running it headless ever since. bugs/046.
     """
     from frontend.pages import breakout_panel
     from frontend.pages import reversal_panel

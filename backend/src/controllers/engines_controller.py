@@ -75,6 +75,7 @@ def sub_engines() -> tuple:
 # started by it -- placing live MT5 orders with nothing on screen saying so.
 # Its service and its position in _ENGINE_SERVICES are deliberately untouched;
 # the sync server and the mode toggle bind engines by that fixed order.
+# THIS path only -- app.py starts bounce directly every launch (bugs/046).
 _NOT_BULK_STARTED = ("bounce",)
 
 

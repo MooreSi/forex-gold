@@ -26,6 +26,11 @@ REPO = Path(__file__).resolve().parents[2]
 TESTS = REPO / "tests"
 
 # Shrinking baselines — lower them as migrations land; never raise them.
+# 37 -> 36 on 2026-09-12: the Bounce engine's two test files shared one copy
+# via a new tests/test_signal/conftest.py. That variant opens
+# test_signal_repo rather than the main db module, so it cannot inherit the
+# canonical fixture -- but it can be written once for the package instead of
+# once per file, which is what this ratchet is actually asking for.
 # 66 -> 37 on 2026-09-11. Twenty-nine files carried a fixture that was the
 # conftest one minus `reset_db_worker_thread_connection()` and with a bare
 # `os.remove` — the exact pair that produced 50 Windows teardown errors on the
@@ -34,7 +39,7 @@ TESTS = REPO / "tests"
 # without the worker reset but each does extra work in the fixture body
 # (seeding a channel config, clearing an EA-bridge singleton, resetting a
 # strategy-params cache), so none can be deleted without reading it.
-FRESH_DB_LOCAL_DEFS_MAX = 37
+FRESH_DB_LOCAL_DEFS_MAX = 36
 FAKE_BRIDGE_CLASSES_MAX = 50
 
 

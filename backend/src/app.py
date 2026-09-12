@@ -325,6 +325,22 @@ def _remote_client_enabled(config) -> bool:
     return True
 
 
+async def _link_checkout_at_startup() -> None:
+    """Fire-and-forget wrapper: nothing about the app depends on this working,
+    so a failure is a log line, never a startup failure."""
+    try:
+        from backend.src.services.positions.core_app_update import link_checkout
+        result = await link_checkout()
+    except Exception as e:
+        log.debug("[startup] Checkout linking could not run: %s", e)
+        return
+    if result["linked"]:
+        log.info("[startup] Linked this install to GitHub at %s — updates are "
+                 "available from Settings > Update", result["sha"][:7])
+    elif result["reason"] != "already-linked":
+        log.info("[startup] This install is not linked to GitHub (%s)", result["reason"])
+
+
 async def startup() -> None:
     global _engine, _tg_reader
     config = cfg_module.load()
@@ -506,6 +522,15 @@ async def startup() -> None:
     # loop every cycle (backend review 2026-08-08, #5).
     from backend.src.utils import news_calendar as _news
     _news.ensure_started()
+
+    # Link this install to GitHub if it has never been linked (2026-09-12).
+    # The installers copy files, they never clone, so a fresh download has no
+    # .git and the Update page used to answer that with a manual "Set Up
+    # Updates" button. This changes no code: it claims the commit whose tree
+    # the installed files already are, and gives up if no recent commit
+    # matches — see core_app_update.link_checkout(). Backgrounded because it
+    # does a `git fetch`, and startup must not wait on the network.
+    asyncio.create_task(_link_checkout_at_startup())
 
     # Remote admin: server only starts on admin machine (KeyGen present + password set).
     # Client only runs on non-admin machines — the admin Mac doesn't connect to itself.

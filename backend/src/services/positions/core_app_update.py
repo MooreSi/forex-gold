@@ -226,9 +226,16 @@ async def check_for_update() -> dict:
                 "update itself. macOS: run 'xcode-select --install'. Windows: "
                 "re-run 'Setup & Start FOREX.bat', which installs it."
             )}
+        # Linking normally happens by itself on startup (link_checkout()), and
+        # without moving the working tree. Reaching here means that could not
+        # identify which commit this install is -- the files have been edited,
+        # or they are older than the last _LINK_SEARCH_DEPTH commits, or GitHub
+        # was unreachable at the time. The button is the manual way out and it
+        # is NOT the same operation: it force-checkouts origin's HEAD.
         return {"available": False, "bootstrap": True, "error": (
-            "this install is not linked to GitHub yet -- press Set Up Updates "
-            "to link it and pull the latest version."
+            "this install could not be matched to a commit on GitHub, so it is "
+            "not linked yet. Update to Latest pulls the current version and "
+            "links it; anything changed in this folder is replaced."
         )}
 
     rc, _, err = await _run_git("fetch", "origin", _BRANCH)
@@ -395,6 +402,136 @@ async def commits_behind(sha: str) -> Optional[int]:
         return int(out.strip())
     except ValueError:
         return None
+
+
+# ── Linking a downloaded install to GitHub ───────────────────────────────────
+# The installers copy files, they never clone, so a fresh download has no .git
+# and nothing to compare against origin. Until 2026-09-12 the Update page
+# answered that with a manual "Set Up Updates" button, which ran apply_update()
+# -- and apply_update() force-checkouts origin's HEAD over the working tree.
+# On a machine whose files are a few commits old, pressing it is a silent code
+# update on a machine that may be trading.
+#
+# link_checkout() does the honest half only: create the repository, fetch
+# origin, and claim the commit whose tree the installed files ALREADY are,
+# found by comparing content rather than assuming a download is current. HEAD
+# then tells the truth, check_for_update() works, the header badge and the
+# admin console's Up to date / Outdated badge are right, and not one byte of
+# the working tree has moved. Updating stays a deliberate press of Update.
+#
+# When nothing recent matches it puts back the .git it made, because a
+# repository with an unborn HEAD is worse than none -- check_for_update() would
+# stop offering the bootstrap and fail on `rev-parse HEAD` instead -- and
+# because claiming origin/main for files that are not origin/main is the exact
+# mismatch this was written to remove.
+
+_LINK_SEARCH_DEPTH = 50   # a download older than this is a manual decision
+
+
+def _index_blobs(ls_files_output: str) -> dict:
+    """{path: blob sha} from `git ls-files -s` ("<mode> <sha> <stage>\t<path>")."""
+    blobs = {}
+    for line in ls_files_output.splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if path and len(parts) >= 2:
+            blobs[path] = parts[1]
+    return blobs
+
+
+def _tree_blobs(ls_tree_output: str) -> dict:
+    """{path: blob sha} from `git ls-tree -r` ("<mode> <type> <sha>\t<path>").
+
+    The mode is dropped on both sides deliberately. Unzipping a GitHub archive
+    can land the `.command` launchers as 100644 where the tree has 100755, and
+    comparing modes would make a byte-identical download match no commit at all.
+    """
+    blobs = {}
+    for line in ls_tree_output.splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if path and len(parts) >= 3 and parts[1] == "blob":
+            blobs[path] = parts[2]
+    return blobs
+
+
+def _discard_new_git_dir() -> None:
+    git_dir = _REPO_ROOT / ".git"
+    try:
+        if git_dir.is_dir():
+            shutil.rmtree(git_dir)
+    except Exception as e:                      # pragma: no cover -- best effort
+        log.warning("[Update] could not remove the half-built .git: %s", e)
+
+
+async def link_checkout() -> dict:
+    """Give a copied install a git checkout at the commit it already is.
+
+    Returns {"linked": bool, "sha": str, "reason": str}. `reason` is one of
+    "already-linked", "no-git", "init-failed", "remote-failed", "fetch-failed",
+    "empty-tree", "no-matching-commit", "linked". Never raises and never
+    modifies the working tree: the caller runs it on every startup.
+    """
+    if (_REPO_ROOT / ".git").exists():
+        return {"linked": False, "sha": "", "reason": "already-linked"}
+    if not shutil.which("git"):
+        return {"linked": False, "sha": "", "reason": "no-git"}
+
+    def _give_up(reason: str) -> dict:
+        _discard_new_git_dir()
+        return {"linked": False, "sha": "", "reason": reason}
+
+    rc, _, err = await _run_git("init")
+    if rc != 0:
+        log.info("[Update] could not create a checkout here: %s", err.strip()[:200])
+        return _give_up("init-failed")
+
+    rc, _, err = await _run_git("remote", "add", "origin", f"{_GITHUB_REPO_URL}.git")
+    if rc != 0:
+        return _give_up("remote-failed")
+
+    rc, _, err = await _run_git("fetch", "origin", _BRANCH)
+    if rc != 0:
+        log.info("[Update] could not reach GitHub to link this install: %s",
+                 err.strip()[:200])
+        return _give_up("fetch-failed")
+
+    # `add -A` only writes the index; it honours .gitignore, so .venv, the
+    # config and the databases stay out of the comparison.
+    rc, _, _ = await _run_git("add", "-A")
+    if rc != 0:
+        return _give_up("index-failed")
+    rc, out, _ = await _run_git("ls-files", "-s")
+    installed = _index_blobs(out) if rc == 0 else {}
+    if not installed:
+        return _give_up("empty-tree")
+
+    rc, log_out, _ = await _run_git(
+        "log", f"origin/{_BRANCH}", f"-n{_LINK_SEARCH_DEPTH}", "--pretty=format:%H",
+    )
+    if rc != 0:
+        return _give_up("no-matching-commit")
+
+    match = ""
+    for sha in log_out.split():
+        rc, tree_out, _ = await _run_git("ls-tree", "-r", sha)
+        if rc == 0 and _tree_blobs(tree_out) == installed:
+            match = sha
+            break
+    if not match:
+        log.info("[Update] this install's files match no commit in the last %d on "
+                 "origin/%s — leaving it unlinked", _LINK_SEARCH_DEPTH, _BRANCH)
+        return _give_up("no-matching-commit")
+
+    # Point a real branch at it rather than leaving a detached HEAD, so a later
+    # update has something to fast-forward and `git status` is meaningful.
+    await _run_git("update-ref", f"refs/heads/{_BRANCH}", match)
+    await _run_git("symbolic-ref", "HEAD", f"refs/heads/{_BRANCH}")
+    await _run_git("reset", "--mixed")
+    await _run_git("branch", f"--set-upstream-to=origin/{_BRANCH}", _BRANCH)
+    log.info("[Update] linked this install to origin/%s at %s (no files changed)",
+             _BRANCH, match[:7])
+    return {"linked": True, "sha": match, "reason": "linked"}
 
 
 async def apply_update(restart: bool = True) -> dict:

@@ -34,9 +34,13 @@ def _update_action(state: dict) -> str:
 
     "update"    -- origin has commits this checkout does not.
     "bootstrap" -- there is no checkout here yet, and a git binary to make one.
-                   apply_update() creates it (git init + remote add + force
-                   checkout) and lands on origin's HEAD, which is the same
-                   thing the admin console's Update button asks a client to do.
+                   Since 2026-09-12 startup links a copied install on its own
+                   (core_app_update.link_checkout(), which moves no files), so
+                   reaching this state means the files matched no recent commit.
+                   apply_update() then creates the checkout (git init + remote
+                   add + force checkout) and lands on origin's HEAD, which is
+                   the same thing the admin console's Update button asks a
+                   client to do -- and which does replace the working tree.
     ""          -- up to date, or a failure the user has to resolve first
                    (no git installed, a fetch that could not reach GitHub).
 
@@ -95,7 +99,7 @@ def _render_github_update_card() -> None:
                 if _state.get("checking"):
                     ui.badge("Checking...", color="grey").classes("text-xs")
                 elif _state.get("bootstrap"):
-                    ui.badge("Setup needed", color="blue").classes("text-xs")
+                    ui.badge("Not linked", color="blue").classes("text-xs")
                 elif _state.get("error"):
                     ui.badge("Check failed", color="red").classes("text-xs")
                 elif _state.get("available"):
@@ -124,8 +128,13 @@ def _render_github_update_card() -> None:
                         on_click=lambda: _apply(),
                     ).props("dense unelevated").classes("bg-green-700 text-white text-xs")
                 elif action == "bootstrap":
+                    # Not a setup step the user is meant to find: linking
+                    # happens on startup and changes nothing (2026-09-12). This
+                    # is the fallback for an install that could not be matched
+                    # to a commit, and it force-checkouts, so it is named for
+                    # what it does rather than for what it fixes.
                     ui.button(
-                        "Set Up Updates", icon="link",
+                        "Update to Latest", icon="download",
                         on_click=lambda: _apply(),
                     ).props("dense unelevated").classes("bg-blue-700 text-white text-xs")
 
@@ -176,8 +185,10 @@ def _render_github_update_card() -> None:
             ui.notify("Update applied — restarting...", type="positive")
 
         ui.label(
-            "Pulls directly from the GitHub repository above via git. "
-            "Update reinstalls dependencies and restarts the app automatically "
+            "Pulls directly from the GitHub repository above via git. This "
+            "install links itself to GitHub the first time it starts, without "
+            "changing any of its files — there is nothing to set up. Update "
+            "reinstalls dependencies and restarts the app automatically "
             "— your browser reconnects on its own a few seconds later."
         ).classes("text-xs text-gray-500 leading-relaxed mt-1")
 

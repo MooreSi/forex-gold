@@ -79,6 +79,42 @@ def liquidity_map_enabled(rs: dict) -> bool:
     return _on(rs, "liquidity_map_levels_enabled")
 
 
+def asian_bias_exempt(rs: dict, session: Optional[str]) -> bool:
+    """Does `session` opt out of the higher-timeframe trend rule entirely?
+
+    `governor.htf_bias_blocks` was measured over the whole clock. Split by
+    session it inverts: in 00-07 UTC trades WITH the bias are 693 at -$6.26
+    (CI [-9.40, -3.12], both chronological halves negative) and trades
+    against it 621 at -$0.50 (CI straddles zero), while everywhere else
+    against-the-bias is 1,154 at -$4.81 (CI [-7.48, -2.14]). Measured
+    2026-09-12 over all 5,414 `re_signals` rows.
+
+    So this stands the rule DOWN in Asia. It does not invert it: -$0.50 with
+    an interval straddling zero is "no evidence of an edge", not an edge.
+
+    Three conditions, and the middle one is load-bearing. **The trend gate
+    must itself be on**, because the Reversal Engine's live path also
+    carries the original `level_score < 0.75` counter-bias bypass
+    (reversal-engine/090) and stands that down on this same answer. With the
+    gate off that bypass is the only rule there is, and it predates this
+    change by a month; exempting it here would switch off something nobody
+    asked about.
+
+    Session is compared to the exact spelling `level_detector.get_session`
+    emits. A caller that cannot say what session it is in gets False, which
+    is today's behaviour -- the same fail-closed direction as an unknown
+    bias in `htf_bias_blocks`.
+
+    Off by default (rules/60-adding-a-tunable), migration 45, and it has
+    never been demoed.
+    """
+    if not _on(rs, "htf_bias_gate_enabled"):
+        return False
+    if not _on(rs, "htf_bias_asian_exempt"):
+        return False
+    return str(session or "").strip().lower() == "asian"
+
+
 def liquidity_blocks(now_ts: float, rs: dict,
                      events: Optional[list] = None) -> Optional[str]:
     """A reason to stand aside on liquidity grounds, or None.

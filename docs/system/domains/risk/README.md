@@ -102,3 +102,51 @@ The fix is for the handler to re-read at save time and write only what
 actually changed. Until that lands, treat any Save on this card as a write
 to all of it and check the rest afterwards.
 
+
+## The trend gate points the wrong way in the Asian session (2026-09-12)
+
+`governor.htf_bias_blocks` was measured over the whole clock. Split by
+session it inverts, over all 5,414 `re_signals` rows:
+
+| session | with the bias | against it |
+|---|---|---|
+| asian (00-07 UTC) | n=693, **-$6.26**, CI [-9.40, -3.12] | n=621, -$0.50, CI [-3.69, 2.69] |
+| every other | n=1,480, -$1.02, CI [-3.30, 1.27] | n=1,154, **-$4.81**, CI [-7.48, -2.14] |
+
+Both bolded cells hold their sign across chronological halves; neither of
+the other two does anything but straddle zero. So outside Asia the gate
+refuses the cohort that loses $4.81 a trade, and inside it the gate refuses
+the cohort that loses nothing while admitting the one that loses $6.26 --
+about $5.76 a trade across 1,314 signals.
+
+`capability_gates.asian_bias_exempt` (migration 45,
+`htf_bias_asian_exempt`, **off**) stands the rule down for that window. It
+does NOT invert it: -$0.50 with an interval straddling zero is not an edge.
+
+Three things about it are load-bearing:
+
+- **It is read in `capability_gates`, not inside `htf_bias_blocks`.** Six
+  order routes share that function and the measurement above is Reversal
+  Engine data. Only the Reversal Engine's live path consults the exemption;
+  pinned by `tests/risk/test_htf_bias_gate_asian_exemption.py`.
+- **The Reversal Engine refuses a counter-bias trade in TWO places** --
+  the gate, and the original `level_score < 0.75` bypass
+  (reversal-engine/090) beside it. While the gate is on the second is a
+  strict subset of the first and changes no outcome; exempt only the first
+  and the second becomes load-bearing again, silently turning the switch
+  into "counter-bias in Asia, but only on strong levels". Both stand down
+  together. A source-shape assertion cannot see this -- it survived the
+  first mutation pass -- so it is pinned behaviourally in
+  `tests/reversal_engine/test_asian_bias_exemption_on_the_live_path.py`.
+- **The exemption requires the trend gate to be on.** With the gate off
+  the level-score bypass is the only rule there is, and it predates this
+  change; exempting it would disable something nobody asked about.
+
+Caveat on the numbers: almost all of that P&L is the engine's virtual
+ledger. Only a minority of signals reach the broker, so this is the
+population the engine simulates, not a realised curve.
+
+**The Bounce engine holds the opposite rule for the same hours** --
+`test_signal/test_signal_generate.py` blocks counter-bias signals in the
+Asian session specifically. Open question for the owner, recorded in
+`docs/simon-handover/033`.

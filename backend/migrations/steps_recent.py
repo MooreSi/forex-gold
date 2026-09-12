@@ -111,4 +111,15 @@ _RECENT: list[tuple[int, str, object]] = [
     (44, "AI capability tuning, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN re_ai_tuning_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # The trend gate points the wrong way in the Asian session. Measured
+    # 2026-09-12 over all 5,414 re_signals rows: in 00-07 UTC trades WITH
+    # the bias are 693 at -$6.26 (CI [-9.40,-3.12], both halves negative)
+    # and trades against it 621 at -$0.50 (CI straddles zero); outside
+    # those hours it is the other way round. Off, so the gate keeps
+    # refusing counter-trend trades everywhere until the owner says
+    # otherwise. See services/risk/governor.htf_bias_blocks.
+    (45, "Asian-session exemption for the trend gate, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN htf_bias_asian_exempt INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

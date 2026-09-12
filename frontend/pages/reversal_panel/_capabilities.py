@@ -149,6 +149,25 @@ def render_capabilities_subcard(rs: dict) -> None:
             "left off inside this gate until the attribution says it costs "
             "anything."
         )
+        asian_exempt = ui.checkbox(
+            "…but not in the Asian session: ignore the trend there",
+            value=bool(rs.get("htf_bias_asian_exempt", 0)),
+        ).classes("text-sm text-gray-300")
+        asian_exempt.tooltip(
+            "Does NOTHING unless Trading > Risk Settings > "
+            "'Only trade with the trend' is also on. It stands that gate "
+            "down for 00-07 UTC and changes nothing else, anywhere. "
+            "Measured 2026-09-12 over "
+            "all 5,414 signals: in the Asian session trades WITH the trend "
+            "are 693 at -$6.26 each and trades against it 621 at -$0.50, and "
+            "outside those hours it is the other way round, against-the-trend "
+            "1,154 at -$4.81. So the gate points the wrong way in Asia. This "
+            "only STOPS refusing counter-trend trades there; it does not "
+            "prefer them, because -$0.50 with an interval straddling zero is "
+            "not an edge. The Bounce engine currently holds the opposite rule "
+            "for the same hours -- one for Simon."
+        )
+
         events_on = ui.checkbox(
             "Widen the news blackout for the events that matter",
             value=bool(rs.get("event_tier_gate_enabled", 0)),
@@ -239,6 +258,7 @@ def render_capabilities_subcard(rs: dict) -> None:
                     "meta_label_gate_enabled":       int(bool(meta_on.value)),
                     "meta_label_threshold":          float(meta_threshold.value or 0.5),
                     "session_liquidity_gate_enabled": int(bool(liquidity_on.value)),
+                    "htf_bias_asian_exempt":         int(bool(asian_exempt.value)),
                     "event_tier_gate_enabled":       int(bool(events_on.value)),
                     "vol_target_sizing_enabled":     int(bool(vol_sizing.value)),
                     "correlated_exposure_cap_lots":  float(corr_cap.value or 0.0),

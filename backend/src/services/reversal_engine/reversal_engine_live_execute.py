@@ -162,9 +162,24 @@ class _LiveExecuteMixin:
                     # and all six lost. When the owner's gate is ON the shared rule
                     # decides; when it is OFF the original bypass behaviour stands, so
                     # nothing changes until he turns it on.
-                    _bias_block = _gov.htf_bias_blocks(direction, fresh_htf, rs)
-                    if _bias_block or ((fresh_htf == "bullish" and direction == "SELL" and level_score < 0.75)
-                            or (fresh_htf == "bearish" and direction == "BUY" and level_score < 0.75)):
+                    # 2026-09-12: and the whole branch stands down in the
+                    # Asian session when the owner asks for it. BOTH rules,
+                    # not just the gate -- while the gate is on the
+                    # level_score bypass below is a strict subset of it, so
+                    # exempting only the gate would quietly turn this switch
+                    # into "high-scoring levels only". Measured over all
+                    # 5,414 signals: in 00-07 UTC with-the-bias is 693 at
+                    # -$6.26 and against-it 621 at -$0.50; outside those
+                    # hours it is the other way round. Off by default, and
+                    # see capability_gates.asian_bias_exempt for why the
+                    # switch is read there rather than inside the shared
+                    # governor rule five other order routes also call.
+                    _asian_exempt = _caps.asian_bias_exempt(rs, fresh_session)
+                    _bias_block = None if _asian_exempt else \
+                        _gov.htf_bias_blocks(direction, fresh_htf, rs)
+                    if _bias_block or (not _asian_exempt and (
+                            (fresh_htf == "bullish" and direction == "SELL" and level_score < 0.75)
+                            or (fresh_htf == "bearish" and direction == "BUY" and level_score < 0.75))):
                         re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
                         re_db.update_live_exec(sig["id"], status="bias_skipped")
                         # bugs/038: say WHICH of the two rules refused. The

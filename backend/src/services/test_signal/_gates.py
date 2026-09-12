@@ -83,7 +83,13 @@ def dual_bias_blocks(*, direction: str, htf_bias: str, h4_bias: str, adx: float,
 def asian_counter_bias_blocks(*, session: Optional[str], direction: str,
                               htf_bias: str,
                               trigger_pattern: Optional[str]) -> Optional[str]:
-    """Trend-aligned signals only, between 00:00 and 07:00 UTC.
+    """Trend-aligned signals only, in this engine's Asian session.
+
+    **23:00-07:59 UTC**, which is `signal_generator.get_session`'s window and
+    not the Reversal Engine's. That one calls 00:00-07:59 Asian
+    (`level_detector.get_session`), so the two engines' "same hours" differ by
+    the 23:00 hour. It matters when comparing their records, and it is why each
+    was measured against its own session column rather than a shared clock.
 
     See the module docstring: this is the rule the Reversal Engine's data
     disagrees with, and the disagreement is an open question for the owner

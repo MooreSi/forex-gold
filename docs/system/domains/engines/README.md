@@ -174,8 +174,11 @@ the crowd, and the extreme-trend gate exists precisely because levels stop
 holding in a persistent trend.
 
 **The open question, now visible.** `asian_counter_bias_blocks` refuses
-counter-bias signals between 00:00 and 07:00 UTC and has done since before
-anything was measured. The Reversal Engine's own numbers over the same hours
+counter-bias signals in this engine's Asian session and has done since before
+anything was measured. Note the two engines do not agree on when that is:
+`test_signal/signal_generator.get_session` calls **23:00-07:59** Asian, and
+`reversal_engine/level_detector.get_session` calls it **00:00-07:59**. The
+23:00 hour is in one engine's rule and outside the other's. The Reversal Engine's own numbers over the same hours
 say the opposite — see the risk domain README and
 `capability_gates.asian_bias_exempt`. The two engines trade different setups,
 so it is possible both are right; nothing on this engine was changed on the

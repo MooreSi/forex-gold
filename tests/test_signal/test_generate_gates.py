@@ -9,7 +9,8 @@ package sits at 25.6% coverage.
 That matters right now for one of them in particular. The Asian-session rule
 here says the opposite of what the Reversal Engine's own numbers say about the
 same hours (`docs/simon-handover/033`): this engine refuses counter-bias
-signals between 00:00 and 07:00 UTC, and it has done since before anything was
+signals in its Asian session -- 23:00-07:59 UTC, an hour wider than the
+Reversal Engine's 00:00-07:59 -- and it has done since before anything was
 measured. Whichever way the owner decides that, the rule should be readable and
 pinned first -- an unmeasured rule that nothing tests is the worst of both.
 

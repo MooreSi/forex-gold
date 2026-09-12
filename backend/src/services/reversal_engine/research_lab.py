@@ -19,6 +19,7 @@ a research tool nobody runs twice.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -154,11 +155,17 @@ async def run_study(bridge, backfill_limit: int = 500,
         measure_repo.training_vectors(), {}, write_fn=lambda _x: None)
 
     obs = measure_repo.excursion_observations()
-    fit = barrier_fit.fit_barriers(obs)
+    # Off the loop from here down. Everything below is pure arithmetic over
+    # lists already in memory -- barrier_fit imports random, dataclasses and
+    # typing and nothing else -- so a thread returns identical results. On the
+    # loop it does not: the sweep replays every tick path once per stop/target
+    # pair, which measured 24.9s at the path lengths _paths_for builds, and
+    # froze order dispatch for 21.5s live on 2026-09-12 (bugs/030).
+    fit = await asyncio.to_thread(barrier_fit.fit_barriers, obs)
     report["barrier_fit"] = fit.__dict__
     report["n_excursions"] = len(obs)
 
-    report["reach"] = barrier_fit.reach_distribution(obs)
+    report["reach"] = await asyncio.to_thread(barrier_fit.reach_distribution, obs)
 
     paths = await _paths_for(bridge, closed, sweep_sample)
     report["n_paths"] = len(paths)
@@ -171,11 +178,11 @@ async def run_study(bridge, backfill_limit: int = 500,
         # make: a tighter stop pays proportionally more.
         mean_sl = sum(abs(float(r.get("sl_dist") or 0.0)) for r in closed[:len(paths)])
         mean_sl = mean_sl / len(paths) if paths else 0.0
-        report["sweep"] = [r.__dict__ for r in barrier_fit.sweep(
-            paths, DEFAULT_STOPS, DEFAULT_TARGETS,
-            cost_pts=cost_r * mean_sl, bootstrap=1000)[:10]]
-        report["sweep_no_breakeven_vs_breakeven"] = _breakeven_penalty(
-            paths, cost_r * mean_sl)
+        report["sweep"] = [r.__dict__ for r in (await asyncio.to_thread(
+            barrier_fit.sweep, paths, DEFAULT_STOPS, DEFAULT_TARGETS,
+            cost_pts=cost_r * mean_sl, bootstrap=1000))[:10]]
+        report["sweep_no_breakeven_vs_breakeven"] = await asyncio.to_thread(
+            _breakeven_penalty, paths, cost_r * mean_sl)
 
     _save_summary(report)
     return report

@@ -259,6 +259,10 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
 
     local_ids = {r[6] for r in rows}
     agg: dict[str, dict] = {}
+    # Bound before EITHER loop: the ledger loop below uses _session_for_hour,
+    # and binding it inside the local-rows loop meant a window with no local
+    # trade raised UnboundLocalError there. bugs/056.
+    _session_for_hour, _trade_pts = _analytics_helpers()
     for tg_source, direction, entry, close, pnl, ct, _tid in rows:
         src = _normalise_tg_source(tg_source or "Manual Signal")
         a = agg.setdefault(src, {
@@ -267,7 +271,6 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
             "sessions": {"london": 0.0, "ny": 0.0, "overlap": 0.0, "asian": 0.0},
         })
         pnl = float(pnl or 0)
-        _session_for_hour, _trade_pts = _analytics_helpers()
         pts = _trade_pts(direction, float(entry or 0), float(close or 0))
         a["trades"]  += 1
         a["net_pnl"] += pnl

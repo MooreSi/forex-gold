@@ -78,9 +78,16 @@ def _this_is_the_admin_machine() -> bool:
     to the composition root from here would make the module that gates
     startup depend on the module that performs it.
 
-    The two facts are the same ones `app.py` uses, checked directly:
+    The facts are the same ones `app.py` uses, checked directly:
+      * this is the licence-issuer machine by hardware (licence/issuer.py);
       * KeyGen's admin module is present next to FOREX or in ~/Documents;
       * an admin password has been set (remote/admin_password.hash, non-empty).
+
+    The hardware pin leads because the other two are not evidence on their own
+    (2026-09-12): `~/Documents` is iCloud-synced, so KeyGen arrives on every Mac
+    on the owner's Apple ID, and a stale password hash never expires. A client
+    that answers True here brings up the ISSUER behind the activation screen
+    instead of the client that would fetch it a licence.
 
     Never raises: this decides which agent the activation screen brings up,
     and that screen is the only way back in.
@@ -89,7 +96,10 @@ def _this_is_the_admin_machine() -> bool:
         from pathlib import Path as _P
 
         from backend.src.config import USER_DATA_DIR as _udd
+        from backend.src.config.licence.issuer import is_licence_issuer_machine
 
+        if not is_licence_issuer_machine():
+            return False
         forex_root = _P(__file__).parent.parent.parent.parent
         keygen = any((c / "forex_admin.py").exists() for c in (
             forex_root.parent / "KeyGen", _P.home() / "Documents" / "KeyGen"))

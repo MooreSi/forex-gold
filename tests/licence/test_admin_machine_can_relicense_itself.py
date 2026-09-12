@@ -219,6 +219,14 @@ class TestDetectingTheAdminMachine:
         assert guard._this_is_the_admin_machine() is False
 
     def test_both_present_is_the_admin_machine(self, tmp_path, monkeypatch):
+        """Declared to be the issuer machine as well (2026-09-12): the hardware
+        pin leads this predicate now, so without it the answer would depend on
+        whose Mac ran the suite."""
+        from backend.src.config.licence import issuer as issuer_mod
+        monkeypatch.delenv("FOREX_ADMIN_MACHINE_FINGERPRINT", raising=False)
+        monkeypatch.setattr(issuer_mod, "_read_fingerprint",
+                            lambda: issuer_mod.ADMIN_MACHINE_FINGERPRINT)
+
         home = tmp_path / "home"
         (home / "Documents" / "KeyGen").mkdir(parents=True)
         (home / "Documents" / "KeyGen" / "forex_admin.py").write_text("")

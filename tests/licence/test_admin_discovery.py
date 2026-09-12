@@ -27,7 +27,15 @@ from backend.src import app as app_mod
 
 @pytest.fixture
 def fake_keygen(tmp_path, monkeypatch):
-    """A KeyGen directory with a working forex_admin.py, found via $HOME."""
+    """A KeyGen directory with a working forex_admin.py, found via $HOME, on a
+    machine declared to be the licence issuer -- the console is pinned to
+    hardware too since 2026-09-12, and this file exists precisely so the answer
+    does not depend on which machine runs the suite."""
+    from backend.src.config.licence import issuer as issuer_mod
+    monkeypatch.delenv("FOREX_ADMIN_MACHINE_FINGERPRINT", raising=False)
+    monkeypatch.setattr(issuer_mod, "_read_fingerprint",
+                        lambda: issuer_mod.ADMIN_MACHINE_FINGERPRINT)
+
     home = tmp_path / "home"
     kg = home / "Documents" / "KeyGen"
     kg.mkdir(parents=True)

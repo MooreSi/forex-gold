@@ -34,7 +34,18 @@ from backend.src import config as cfg_mod
 
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
-    """A machine with a KeyGen folder and its own (empty) user-data dir."""
+    """A machine with a KeyGen folder and its own (empty) user-data dir.
+
+    Declared to BE the licence-issuer machine (2026-09-12): the console is
+    pinned to hardware as well as to the marker, and without this the answers
+    below would depend on whose Mac ran the suite -- the exact machine
+    dependence `test_admin_discovery.py`'s docstring exists to describe.
+    """
+    from backend.src.config.licence import issuer as issuer_mod
+    monkeypatch.delenv("FOREX_ADMIN_MACHINE_FINGERPRINT", raising=False)
+    monkeypatch.setattr(issuer_mod, "_read_fingerprint",
+                        lambda: issuer_mod.ADMIN_MACHINE_FINGERPRINT)
+
     home = tmp_path / "home"
     kg = home / "Documents" / "KeyGen"
     kg.mkdir(parents=True)

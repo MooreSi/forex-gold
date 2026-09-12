@@ -29,6 +29,9 @@ import backend.src.services.reversal_engine.reversal_engine_service as _re_engin
 import backend.src.services.cluster.remote.client as _remote_client
 import backend.src.services.cluster.remote.server as _remote_server
 from backend.src.services.cluster.remote.auth import password_is_set
+from backend.src.config.licence.issuer import (
+    is_licence_issuer_machine as _is_licence_issuer_machine,
+)
 
 log = logging.getLogger(__name__)
 
@@ -133,11 +136,20 @@ def _is_somebody_elses_client() -> bool:
 def _find_admin_open_fn():
     """Look for KeyGen/forex_admin.py next to the FOREX directory.
     Adds KeyGen to sys.path if found and returns open_admin_dialog, else None.
-    Refused outright on a machine that is somebody else's remote client."""
+    Refused outright on any machine that is not the licence issuer."""
     if _is_somebody_elses_client():
         log.info("[Admin] This machine is a remote client — the local KeyGen "
                  "console is not offered here; an admin grant is (Grant Admin "
                  "on the admin console)")
+        return None
+    # The hardware pin, not the folder (2026-09-12). A KeyGen folder on a
+    # client Mac is an iCloud artefact; this is also what keeps that machine
+    # on the client side of startup()'s server-or-client choice, so it keeps
+    # reporting to the console instead of becoming a second one.
+    if not _is_licence_issuer_machine():
+        log.info("[Admin] Not the licence-issuer machine — the local KeyGen "
+                 "console and the admin server are not offered here; this "
+                 "install runs as a client (see licence/issuer.py)")
         return None
     forex_root = Path(__file__).parent.parent.parent  # forex_trader/core/app_lifecycle.py → FOREX/
     candidates = [

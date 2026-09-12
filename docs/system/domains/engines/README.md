@@ -243,3 +243,33 @@ Things worth knowing, found by writing them:
 - **`find_unicorn_setup` gives up rather than quoting a zone it does not
   believe.** A confluence wider than 15 points or narrower than 0.5 falls back
   to the FVG's own bounds, and if that fails the same test it returns None.
+
+## What the champion/challenger shadow log can and cannot answer (2026-09-12)
+
+`reversal_engine/shadow.record_all` sits deep inside `_live_execute`, below the
+bias gate, the ML floor, the momentum gate, the exposure guard, the schedule,
+the news blackout and the fill-delay check, and above the liquidity gate, the
+entry trigger and the meta-label gate. That position is deliberate and the code
+says why: recording at each early return would log "would take" for a variant
+whose later gates never ran, which reads as an endorsement it never gave.
+
+**The consequence is not written down anywhere, so here it is: a challenger can
+only differ on the last three gates.** Any variant whose difference is upstream
+— a different bias policy, a different ML floor placement, a different schedule
+— never sees the signals it would have decided differently about, because those
+signals returned before the recorder. The log cannot say it was wrong; it
+cannot say anything at all.
+
+That bears directly on `docs/simon-handover/033`. The Asian-session exemption
+is a **bias gate** variant, which is upstream. Shadow-logging it would produce
+nothing, whichever way it was set, so a live demo session really is the only
+way to attribute it — which is what that file recommends, now for a second
+reason.
+
+State as of 2026-09-12: 60 rows, 12 signals, all on 2026-09-11 between 14:31
+and 18:45 (the afternoon it shipped). Three of the five arms — `confirmed
+entries`, `liquidity aware`, `meta 0.55` — have **not disagreed with the
+champion once**. Only `ML floor 0.50` differs, refusing six of the twelve. So
+the comparison is not yet discriminating between four of its five arms, and a
+reader glancing at it should know the sample is one afternoon rather than a
+week.

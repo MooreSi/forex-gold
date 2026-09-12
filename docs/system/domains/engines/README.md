@@ -213,3 +213,33 @@ list. It is not true of `session_quality`, which reads another engine's store.
 **If you wire `session_is_active` into the Bounce engine** — an obvious
 tidy-up — 38% of that engine's signals disappear immediately, because the
 stored value is `0.0`. Read bugs/045 first.
+
+## The ICT chain, and a hole in its first stage (2026-09-12)
+
+`reversal_engine/ict_patterns.py` is four decisions in a row —
+`detect_equal_levels` → `detect_liquidity_sweep` →
+`detect_market_structure_shift` → FVG/breaker confluence — and
+`find_unicorn_setup` runs all four. Its output becomes a real order: this is
+the only engine with live execution on. It sat at 56.6% coverage with the whole
+chain untested; `tests/reversal_engine/test_ict_pattern_chain.py` now covers it
+(21 cases, seven mutants killed).
+
+Things worth knowing, found by writing them:
+
+- **`detect_equal_levels` cannot see exactly equal highs.** The candidate list
+  goes through `set()`, so two candles whose highs round to the same 0.1
+  collapse to one value and the pool never forms. 110.0 + 110.4 is a pool;
+  110.0 + 110.0 is nothing. `docs/todo/bugs/047` — not fixed, because dropping
+  the `set()` changes which pools exist and rescales every touch count on the
+  live path.
+- **The sweep test is close-back, not wick-through.** A candle that pokes
+  through a pool and closes beyond it is a break, and is deliberately not a
+  sweep — trading it as a reversal would be trading into a trend.
+- **The two filters fail in opposite directions, on purpose.**
+  `detect_market_structure_shift` fails CLOSED on insufficient history (it is a
+  confirmation: no evidence means no shift), while the breakout engine's
+  `_adx_rising` fails OPEN (it is a veto, and one that blocks when it cannot
+  judge stops the engine trading at all).
+- **`find_unicorn_setup` gives up rather than quoting a zone it does not
+  believe.** A confluence wider than 15 points or narrower than 0.5 falls back
+  to the FVG's own bounds, and if that fails the same test it returns None.

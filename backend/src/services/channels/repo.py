@@ -246,24 +246,27 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
     cutoff = _t.time() - days * 86400
     with db() as conn:
         rows = conn.execute(
-            "SELECT tg_source, direction, entry_price, close_price, net_pnl, close_time, trade_id "
+            "SELECT tg_source, direction, entry_price, close_price, net_pnl, close_time, trade_id, mt5_ticket "
             "FROM vantage_simulated_trades "
             "WHERE status='closed' AND mt5_ticket IS NOT NULL AND close_time >= ?",
             (cutoff,),
         ).fetchall()
         ledger_rows = conn.execute(
-            "SELECT tg_source, direction, pnl_dollars, close_time, trade_id "
-            "FROM consolidated_trades WHERE mt5_ticket IS NOT NULL AND close_time >= ?",
+            "SELECT tg_source, direction, pnl_dollars, close_time, trade_id, mt5_ticket "
+            "FROM consolidated_trades WHERE COALESCE(mt5_ticket, 0) != 0 AND close_time >= ?",
             (cutoff,),
         ).fetchall()
 
     local_ids = {r[6] for r in rows}
+    # ...and by ticket: one broker trade reaches the ledger under two ids (the
+    # vantage trade_id and the engine's own ref), so id alone counted it twice.
+    local_tickets = {int(r[7]) for r in rows if r[7]}
     agg: dict[str, dict] = {}
     # Bound before EITHER loop: the ledger loop below uses _session_for_hour,
     # and binding it inside the local-rows loop meant a window with no local
     # trade raised UnboundLocalError there. bugs/056.
     _session_for_hour, _trade_pts = _analytics_helpers()
-    for tg_source, direction, entry, close, pnl, ct, _tid in rows:
+    for tg_source, direction, entry, close, pnl, ct, _tid, _tkt in rows:
         src = _normalise_tg_source(tg_source or "Manual Signal")
         a = agg.setdefault(src, {
             "source": src, "trades": 0, "wins": 0, "losses": 0,
@@ -285,8 +288,8 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
             sess = _session_for_hour(_dt.fromtimestamp(float(ct), tz=_tz.utc).hour)
             a["sessions"][sess] += pnl
 
-    for tg_source, direction, pnl, ct, tid in ledger_rows:
-        if tid in local_ids:
+    for tg_source, direction, pnl, ct, tid, tkt in ledger_rows:
+        if tid in local_ids or (tkt and int(tkt) in local_tickets):
             continue
         src = _normalise_tg_source(tg_source or "Manual Signal")
         a = agg.setdefault(src, {

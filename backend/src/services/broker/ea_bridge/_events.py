@@ -742,6 +742,24 @@ class EventsMixin:
                 else:
                     log.warning("[EABridge] pending_order_cancelled for unknown trade_id=%s", trade_id)
                 return
+            # Our own withdrawal echoing back, not a cancellation. Revalidation
+            # pulls the order off the broker's book -- that IS how you withdraw
+            # one -- and the EA then sees an order it tracked with no matching
+            # position, which it cannot tell from an expiry or a manual cancel.
+            # Applying that report would undo the withdrawal: the row and its
+            # signal both go to 'cancelled', out of the sweep's
+            # ('working','withdrawn') set, with no way back. It did, ten times
+            # out of ten, from the day the feature shipped (bugs/051) --
+            # silently reversing the owner's 2026-09-10 decision that a failed
+            # re-check withdraws and re-arms rather than cancelling.
+            if str(row.get("status") or "") == "withdrawn":
+                log.info(
+                    "[EABridge] pending_order_cancelled(%s) for %s is this app's own "
+                    "withdrawal echoing back — leaving it withdrawn so the sweep can "
+                    "re-arm it", reason, str(trade_id)[:8],
+                )
+                self._pending_orders.pop(trade_id, None)
+                return
             now = time.time()
 
             from backend.src.services.broker import repo as broker_repo

@@ -75,6 +75,21 @@ _MIN_LOT                = 0.01
 # How often the watchdog repeats the "this engine has stopped producing"
 # line. Six hours: often enough that a day of silence is visible in the
 # log, rare enough that a fortnight of it does not bury everything else.
+# The Bounce panel was removed on 2026-09-02 (owner). The service stays -- its
+# database, its history and its slot in the fixed (breakout, bounce, reversal)
+# order the sync server binds by are all untouched -- but it does not run.
+#
+# The guard is HERE rather than at the callers because there were three of
+# them and one was a watchdog: engines_controller excluded it from the bulk
+# start and said so in a comment, while app.py auto-started it on every launch
+# AND re-started it every five minutes if it found it stopped. It ran headless
+# for twelve days on that arithmetic (bugs/046). Defend the place, not each
+# path -- the same lesson as bugs/014, 019 and 051.
+#
+# Reviving it is this one line, and tests/test_signal/test_the_engine_stays_stopped.py
+# asserts that the way back works rather than just claiming it.
+PANEL_REMOVED = True
+
 _SILENCE_REPEAT_SECS = 6 * 3600
 
 
@@ -112,6 +127,17 @@ class TestSignalEngine(_GenerateMixin, _ManagementMixin, _VelocityMixin, _LiveEx
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> None:
+        if PANEL_REMOVED:
+            # Said out loud, not swallowed: being started invisibly is how
+            # this engine spent twelve days analysing for a panel nobody
+            # could open.
+            self._status = "stopped"
+            self._status_detail = (
+                "Bounce panel was removed 2026-09-02 — this engine does not "
+                "start (services/test_signal.PANEL_REMOVED, bugs/046)"
+            )
+            _log.info("TestSignalEngine: not started — %s", self._status_detail)
+            return
         if self._running:
             # Self-heal: recreate any tasks that exited while the engine was
             # supposed to be running.

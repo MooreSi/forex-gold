@@ -583,7 +583,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         sig_id = bdb.create_signal(sig_data)
 
         try:
-            from backend.src.services.test_signal.market_context import get_context as _get_ctx
+            from backend.src.services.market.macro_context import get_context as _get_ctx
             _market_ctx = _get_ctx()
         except Exception:
             _market_ctx = {}

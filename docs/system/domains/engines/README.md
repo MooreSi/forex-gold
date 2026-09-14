@@ -1,18 +1,23 @@
 # Engines
 
 **Living file — update when this domain teaches you something.**
-Covers: `backend/src/services/test_signal/` (Bounce),
-`breakout_signal/`, `reversal_engine/`, `backtest/`.
+Covers: `backend/src/services/breakout_signal/`, `reversal_engine/`,
+`backtest/`.
 
 ## What it is
 
-Three independent research engines each generate their own XAUUSD signals,
+Two independent research engines each generate their own XAUUSD signals,
 track them virtually, learn from outcomes, and — only when their own
 live-execution toggle is on — place real MT5 orders through the main engine:
 
-- **Bounce / TestSignal** — mean-reversion off key levels
 - **Breakout** — trend-following break-and-go / break-and-retest
 - **Reversal Engine** — Gold Diggers VIP / GD2 ICT emulation
+
+There were three. **Bounce / TestSignal** (mean-reversion off key levels) lost
+its panel on 2026-09-02, was stopped on 2026-09-13 and was deleted on
+2026-09-14 — `docs/todo/bugs/046` is the whole arc. Its name still occupies
+position 1 of 3 in `engines_controller._ENGINE_SERVICES`, bound to `None`,
+because the sync protocol binds engines by that fixed order.
 
 Each owns an isolated SQLite database, its own adaptive parameters, and its
 own ML model, with no cross-training. A separate backtest package replays
@@ -20,16 +25,14 @@ recorded candles against the live strategy management rules.
 
 ## Where the code lives
 
-- `services/test_signal/test_signal_service.py` — `TestSignalEngine` (Bounce) orchestrator, watchdog self-healing `start()` re-entry
-- `services/test_signal/test_signal_generate.py` / `_manage.py` / `_live_execute.py` / `_velocity.py` / `_learn.py` — M15/M5 generation, TP/SL/time-stop management, the one real-order path, 3s velocity monitor, Claude batch tuning every 10 closed trades
-- `services/test_signal/signal_generator.py`, `ml_engine.py` (42-feature LightGBM+SGD), `adaptive_params.py`, `claude_reviewer.py`, `market_context.py` (yfinance), `news_filter.py` (Forex Factory), `auth.py`, `database.py`
+- `services/market/` — the primitives both engines share, owned by neither: `sessions.py` (`get_session`, `session_quality`, `session_is_active`), `levels.py` (`compute_htf_bias`, `identify_key_levels`, `is_news_window`), `indicators.py` (`compute_h4_bias`, `compute_adx`, `compute_macd_hist`, `detect_regime`), `macro_context.py` (yfinance), `news_window.py` (Forex Factory). All five were inside `test_signal/` until 2026-09-14, which is why deleting that package had to be a move first and a delete second.
 - `services/breakout_signal/` — same shape: orchestrator, manage/live_execute/velocity/learn, generator, `bo_config` params, 22-feature ML, `bo_`-prefixed store, and `backtest.py` (walk-forward harness)
 - `services/reversal_engine/` — orchestrator (levels → pending zone signals → trigger → outcomes → REF correlation), TP1–TP8 ladder management, live execute, `level_detector.py` / `ict_patterns.py` (FVG-iFVG-sweep-breaker "Unicorn"), nightly 22:00 Europe/London Telegram+image research sweep, dual-axis ML, `re_`-prefixed store
 - `services/backtest/engine.py` / `simulators.py` / `repo.py` — XAUUSD backtest engine, per-strategy `_simulate_*` walkers, main-DB signal reads
 
 ## Constraints / must not change
 
-- **Total isolation between engines**: separate SQLite DBs (`test_signal.db`, `breakout_signal.db`, `reversal_engine.db`), no shared tables or connections, no cross-contamination of ML labels or params.
+- **Total isolation between engines**: separate SQLite DBs (`breakout_signal.db`, `reversal_engine.db`), no shared tables or connections, no cross-contamination of ML labels or params. `test_signal.db` still exists on disk and still holds the Bounce engine's 173 signals; nothing reads it but `analytics/signal_lab_repo.py`.
 - Each engine has exactly one real-money surface file (`*_live_execute.py`), gated on its own live-execution toggle. Everything else is virtual tracking with read-only bridge access.
 - Adaptive params: every Claude-recommended value is clamped to its `[min, max]` envelope before being applied — "the engine never operates outside the safe envelope."
 - Backtest design principles: signals tested only forward from creation time; pre-filtered to the loaded candle window; corrupt signals rejected up front; lot size recomputed on current equity after every trade; commission always deducted.
@@ -176,7 +179,7 @@ holding in a persistent trend.
 **The open question, now visible.** `asian_counter_bias_blocks` refuses
 counter-bias signals in this engine's Asian session and has done since before
 anything was measured. Note the two engines do not agree on when that is:
-`test_signal/signal_generator.get_session` calls **23:00-07:59** Asian, and
+`market/sessions.get_session` calls **23:00-07:59** Asian, and
 `reversal_engine/level_detector.get_session` calls it **00:00-07:59**. The
 23:00 hour is in one engine's rule and outside the other's. The Reversal Engine's own numbers over the same hours
 say the opposite — see the risk domain README and
@@ -185,7 +188,7 @@ so it is possible both are right; nothing on this engine was changed on the
 strength of the other's data. It is the owner's call:
 `docs/simon-handover/033`.
 
-## The engines are not as isolated as the top of this file says (2026-09-12)
+## The engines were not as isolated as the top of this file said (2026-09-12, resolved 2026-09-14)
 
 > *"Each owns an isolated SQLite database, its own adaptive parameters, and its
 > own ML model, with no cross-training."*
@@ -206,13 +209,22 @@ Breakout velocity monitor refuses the Asian session unconditionally on the line
 after it asks. So the parameter is tuned, clamped, logged to the learning
 history, and connected to nothing. `docs/todo/bugs/045`.
 
-The comment above those imports says *"pure functions with no side effects,
-importing is safe and DRY"*. It is true of `compute_adx` and the rest of that
-list. It is not true of `session_quality`, which reads another engine's store.
+The comment above those imports said *"pure functions with no side effects,
+importing is safe and DRY"*. It was true of `compute_adx` and the rest of that
+list. It was not true of `session_quality`, which read another engine's store.
 
-**If you wire `session_is_active` into the Bounce engine** — an obvious
-tidy-up — 38% of that engine's signals disappear immediately, because the
-stored value is `0.0`. Read bugs/045 first.
+**Resolved 2026-09-14 by deleting the Bounce engine.** `session_quality` is now
+in `market/sessions.py` and reads no parameter at all: the stored `0.0` is a
+named constant, `ASIAN_SESSION_QUALITY = "low"`, preserving today's behaviour
+exactly. The claim at the top of this file is now true of the two engines that
+remain — they share `services/market/`, which is pure functions over candles
+and holds no engine's state.
+
+The lesson generalises past this instance: **a function one engine imports from
+another engine's package is a coupling whatever its docstring says.** The tell
+here was not the import, which looked harmless, but that one of the ten names
+in it reached for a store. Nine did not. Reviewing the list as a list is how
+that survived for months.
 
 ## The ICT chain, and a hole in its first stage (2026-09-12)
 

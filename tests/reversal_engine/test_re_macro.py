@@ -107,10 +107,10 @@ class TestCycleContext:
 
     def test_it_is_fetched_once_per_refresh_window(self, monkeypatch):
         """The Reversal cycle is 60s. Without this, an expired
-        market_context TTL means a network fetch every minute."""
+        macro_context TTL means a network fetch every minute."""
         calls = []
         monkeypatch.setattr(
-            re_macro.market_context, "get_context",
+            re_macro.macro_context, "get_context",
             lambda: (calls.append(1), {"vix_level": 21.0})[1],
         )
 
@@ -124,7 +124,7 @@ class TestCycleContext:
     def test_it_refetches_once_the_window_expires(self, monkeypatch):
         calls = []
         monkeypatch.setattr(
-            re_macro.market_context, "get_context",
+            re_macro.macro_context, "get_context",
             lambda: (calls.append(1), {"vix_level": 21.0})[1],
         )
         asyncio.run(re_macro.get_cycle_context())
@@ -137,7 +137,7 @@ class TestCycleContext:
         loop with position management, so a stalled loop is not cosmetic."""
         seen = {}
         monkeypatch.setattr(
-            re_macro.market_context, "get_context",
+            re_macro.macro_context, "get_context",
             lambda: (seen.update(thread=threading.current_thread().name), {})[1],
         )
 
@@ -152,14 +152,14 @@ class TestCycleContext:
         def boom():
             raise RuntimeError("yfinance down")
 
-        monkeypatch.setattr(re_macro.market_context, "get_context", boom)
+        monkeypatch.setattr(re_macro.macro_context, "get_context", boom)
         assert asyncio.run(re_macro.get_cycle_context()) == {}
 
     def test_a_failing_fetch_does_not_discard_the_last_good_context(self, monkeypatch):
         """Degrading to neutrals for one cycle is acceptable; throwing away a
         context that is still inside its window is not."""
         monkeypatch.setattr(
-            re_macro.market_context, "get_context", lambda: {"vix_level": 21.0}
+            re_macro.macro_context, "get_context", lambda: {"vix_level": 21.0}
         )
         good = asyncio.run(re_macro.get_cycle_context())
         assert good == {"vix_level": 21.0}
@@ -167,6 +167,6 @@ class TestCycleContext:
         def boom():
             raise RuntimeError("yfinance down")
 
-        monkeypatch.setattr(re_macro.market_context, "get_context", boom)
+        monkeypatch.setattr(re_macro.macro_context, "get_context", boom)
         monkeypatch.setattr(re_macro, "_ctx_ts", re_macro.time.time() - re_macro._REFRESH_S - 1)
         assert asyncio.run(re_macro.get_cycle_context()) == {"vix_level": 21.0}

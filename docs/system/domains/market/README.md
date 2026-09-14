@@ -27,6 +27,33 @@ and nothing could be measured against anything else.
 - `order_flow.py` -- feed capability probe, cumulative delta (measured or tick-rule), spread dynamics
 - `correlation.py` -- cross-asset correlation and a correlation-aware exposure number
 - `validation.py` -- purged/embargoed k-fold, walk-forward, deflated Sharpe, probability of backtest overfitting, uniqueness weights
+- `sessions.py`, `levels.py`, `indicators.py`, `macro_context.py`, `news_window.py` -- arrived 2026-09-14 from the deleted Bounce engine (see below)
+
+## Five modules arrived from a deleted engine (2026-09-14)
+
+`sessions.py`, `levels.py`, `indicators.py`, `macro_context.py` and
+`news_window.py` were written inside `services/test_signal/` (the Bounce
+engine) and were imported from there, across the package boundary, by the
+Breakout and Reversal engines. When Bounce was deleted
+(`docs/todo/bugs/046`) they moved here rather than dying with it.
+
+They fit the domain's definition and always did: candles or a symbol in, a
+number or a word out. Two things about them are worth knowing:
+
+- **`macro_context.py` and `news_window.py` reach the network** (yfinance,
+  Forex Factory). That is the one place this domain's "pure functions over
+  candles" description does not hold literally. Both cache, both fall back to
+  a hardcoded answer, and neither raises -- a signal must still be generated
+  with the wire down.
+- **`sessions.session_quality` used to read an adaptive parameter** out of the
+  Bounce engine's database. It no longer reads anything: the value that store
+  actually held is now the constant `ASIAN_SESSION_QUALITY = "low"`, with the
+  history in the module docstring. `docs/todo/bugs/045`.
+
+`sessions.get_session` is **one of four disagreeing definitions** of a trading
+session in this app (the others are in `reversal_engine/level_detector`,
+`dpm/engine` and `channels/strategy_ai`). Moving it here did not reconcile
+them and deliberately did not pre-empt `docs/todo/bugs/057`.
 
 ## Constraints
 

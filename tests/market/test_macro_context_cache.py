@@ -1,10 +1,14 @@
-"""market_context's 15-minute cache must actually prevent a fetch.
+"""macro_context's 15-minute cache must actually prevent a fetch.
 
 The module docstring has promised a 15-minute cache since it was written, but
 `_get_hourly_closes` stored only the LAST close as a packed float. The hit
 branch could not rebuild the list it is supposed to return, so it fell straight
 through to a re-fetch -- the comment on that line said as much. Every
 `get_context()` was therefore five live yfinance round trips.
+
+Moved here 2026-09-14 with the module itself, when the Bounce engine that
+happened to contain it was deleted (`docs/todo/bugs/046`). Nothing about the
+test changed but the import.
 
 Breakout survived it by calling once per signal creation. Anything on a timer
 would not: spec docs/todo/001-reversal-macro-context.md wants this on the
@@ -20,7 +24,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from backend.src.services.test_signal import market_context as mc
+from backend.src.services.market import macro_context as mc
 
 
 class _FakeTicker:

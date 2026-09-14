@@ -1,18 +1,18 @@
 """Canned news in debug mode (stage2 phase5/020).
 
-Both news fetch sites — `utils/news_calendar` and `test_signal/news_filter` —
+Both news fetch sites — `utils/news_calendar` and `services/market/news_window` —
 must answer from canned data in debug with the network untouched, and must
 exercise the proximity code path (an event ~2h out) rather than skip it. Debug
 off: the real source is consulted exactly as before (negative controls).
 
 **Rewritten by the 2026-08-25 upstream merge, and the reason matters.** These
 tests used to patch `news_calendar._from_mt5` / `_from_finnhub` /
-`_from_forexfactory` and `news_filter._CACHE` / `_fetch_calendar`. Upstream
+`_from_forexfactory` and `news_window._CACHE` / `_fetch_calendar`. Upstream
 deleted every one of those seams (9e8172e): `_from_mt5` called a bridge method
 that does not exist, Finnhub's calendar is a premium endpoint, and
 `_from_forexfactory` read the feed's currency field as `currency` when the feed
 names it `country` — which is precisely why the blackout never fired on live
-data. `news_filter` is now a thin delegate to `news_calendar`.
+data. `news_window` is now a thin delegate to `news_calendar`.
 
 So the seams changed; the guarantees did not. Each test below asserts the same
 thing it always did, against the seam that exists now: `get_events` is the one
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from backend.src.services.test_signal import news_filter
+from backend.src.services.market import news_window
 from backend.src.utils import news_calendar
 
 
@@ -66,20 +66,20 @@ def test_a_failing_source_is_not_fatal():
 
 
 def test_news_filter_delegates_to_the_one_calendar():
-    """news_filter must not hold a second feed, cache or parser of its own --
+    """news_window must not hold a second feed, cache or parser of its own --
     carrying two was what let the currency-key bug hide in one of them."""
     # The delegates bind news_calendar's functions at import time, so the
     # seam to assert on is the bound alias -- that binding IS the delegation.
-    with patch.object(news_filter, "_get_current_event", return_value={"title": "FOMC"}) as ce:
-        assert news_filter.get_current_event() == {"title": "FOMC"}
+    with patch.object(news_window, "_get_current_event", return_value={"title": "FOMC"}) as ce:
+        assert news_window.get_current_event() == {"title": "FOMC"}
     ce.assert_called_once()
-    with patch.object(news_filter, "_is_high_impact_window", return_value=True) as hw:
-        assert news_filter.is_high_impact_window() is True
+    with patch.object(news_window, "_is_high_impact_window", return_value=True) as hw:
+        assert news_window.is_high_impact_window() is True
     hw.assert_called_once()
     # And the aliases really are news_calendar's own functions, not copies.
-    assert news_filter._get_current_event is news_calendar.get_current_event
-    assert news_filter._is_high_impact_window is news_calendar.is_high_impact_window
-    assert not hasattr(news_filter, "_CACHE"), "news_filter must keep no cache of its own"
+    assert news_window._get_current_event is news_calendar.get_current_event
+    assert news_window._is_high_impact_window is news_calendar.is_high_impact_window
+    assert not hasattr(news_window, "_CACHE"), "news_window must keep no cache of its own"
 
 
 # ── Offline FOMC fallback (Q004 follow-up) ────────────────────────────────────

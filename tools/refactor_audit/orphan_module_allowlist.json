@@ -31,13 +31,6 @@
       "loc": 226,
       "class": "unwired-tool",
       "reason": "Walk-forward harness to validate breakout recalibrations BEFORE they touch live trading; its docstring documents manual invocation (run_walkforward/report). Likely a dev tool, not dead. The frontend backtest page uses a different system (services.backtest)."
-    },
-    {
-      "module": "backend.src.services.test_signal.auth",
-      "file": "backend/src/services/test_signal/auth.py",
-      "loc": 51,
-      "class": "unwired-needs-owner-decision",
-      "reason": "Password protection for the TEST module (PBKDF2 + hardware-fingerprint salt). Zero references -- appears disconnected. Owner: intentionally removed, or a dropped wire?"
     }
   ]
 }

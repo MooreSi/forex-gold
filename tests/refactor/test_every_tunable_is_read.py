@@ -9,10 +9,17 @@ lever it spends a decision on and believes it has pulled.
     signals, 38% of everything it has ever made. bugs/045.
   * `hour_filter_enabled` — the Breakout engine deleted its copy on
     2026-07-16 with the note *"the nightly AI tuner had set it to 0 believing
-    it was disabling a filter"*. The Bounce engine still has one. bugs/048.
-  * `daily_loss_stop_usd` — both catalogues describe a daily loss stop, each
-    citing the day it would have prevented. Neither engine implements one.
+    it was disabling a filter"*. The Bounce engine still had one. bugs/048.
+  * `daily_loss_stop_usd` — both catalogues described a daily loss stop, each
+    citing the day it would have prevented. Neither engine implemented one.
     bugs/048.
+
+**Two of those three are closed by deletion, not by a fix.** The Bounce engine
+and its catalogue went on 2026-09-14, taking `allow_asian` and its
+`hour_filter_enabled` with them. That is a real resolution -- a lever the
+tuner can no longer be handed -- but it is not the same as the lever having
+been wired up, and the bug files say so. `daily_loss_stop_usd` survives in the
+Breakout catalogue and is still dead.
 
 A parameter's description is also read by a person, on the engine's own
 parameters panel. A described protection that does not exist is worse than an
@@ -38,20 +45,16 @@ import re
 import pytest
 
 from backend.src.services.breakout_signal import adaptive_params as bo_params
-from backend.src.services.test_signal import adaptive_params as bounce_params
 from tests.refactor._source_scan import CATALOGUE_FILES, readers_of
 
 # Known dead, each with a bug tracking the decision. Shrink-only: when one is
 # deleted or wired up, remove it here. Adding to this set is the regression
 # this file exists to stop.
 KNOWN_DEAD = {
-    ("bounce", "hour_filter_enabled"),    # bugs/048
-    ("bounce", "daily_loss_stop_usd"),    # bugs/048
     ("breakout", "daily_loss_stop_usd"),  # bugs/048
 }
 
 _CATALOGUES = {
-    "bounce": bounce_params,
     "breakout": bo_params,
 }
 
@@ -95,8 +98,8 @@ class TestTheScannerCanSee:
     def test_the_catalogues_themselves_are_excluded(self):
         """Otherwise every parameter is trivially "read" by its own
         definition, and this whole file passes vacuously."""
-        assert readers_of("hour_filter_enabled", exclude=())
-        assert not readers_of("hour_filter_enabled", exclude=CATALOGUE_FILES)
+        assert readers_of("daily_loss_stop_usd", exclude=())
+        assert not readers_of("daily_loss_stop_usd", exclude=CATALOGUE_FILES)
 
 
 @pytest.mark.parametrize("engine", sorted(_CATALOGUES))

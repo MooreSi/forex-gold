@@ -32,7 +32,6 @@
     "backend/src/services/risk": 88.8,
     "backend/src/services/signals": 89.9,
     "backend/src/services/telegram": 53.7,
-    "backend/src/services/test_signal": 23.7,
     "backend/src/services/trading": 89.7,
     "backend/src/utils": 65.4,
     "frontend": 43.0

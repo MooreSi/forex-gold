@@ -1,23 +1,24 @@
 """A `panel_data` module exists to serve a panel. If the panel goes, it goes.
 
 Each engine has one `panel_data.py` whose `__all__` is the exact surface its
-panel calls — the module docstring in `test_signal/panel_data.py` says so:
-every entry is "one named operation the panel performs". So an entry nothing
-mentions is not a private helper left over from a refactor; it is a read that
-lost its reader.
+panel calls — every entry is "one named operation the panel performs". So an
+entry nothing mentions is not a private helper left over from a refactor; it is
+a read that lost its reader.
 
-That happened. Bounce's panel was deleted on 2026-09-02
-(`docs/todo/bugs/046`) and three of its reads outlived it, including the one
-that would fix `docs/todo/bugs/030`:
+That happened. Bounce's panel was deleted on 2026-09-02 (`docs/todo/bugs/046`)
+and three of its reads outlived it — `change_signature`, `param_specs` and
+`ml_features_for_signal`.
 
-  * `change_signature` — *"a cheap comparable snapshot used to decide whether
-    the panel needs a re-render… it IS the diffing check"*. The Reversal and
-    Breakout panels clear and rebuild six containers on a timer and account for
-    30% of the app's event-loop stalls. The mechanism that would stop them was
-    built, works, and is wired to a panel that no longer exists.
-  * `param_specs`, `ml_features_for_signal` — same cause, no such consolation.
+**Closed 2026-09-14 by deleting the engine**, `panel_data.py` included, so the
+known-dead set is now empty. Worth recording what went with it:
+`change_signature` was *"a cheap comparable snapshot used to decide whether the
+panel needs a re-render… it IS the diffing check"*. The Reversal and Breakout
+panels still clear and rebuild six containers on a timer and still account for
+about 30% of the app's event-loop stalls. A working diffing check existed, for
+the wrong panel, and now does not exist at all. If `bugs/030` is picked up
+again, that mechanism is in this file's git history rather than in the tree.
 
-The other two engines are clean: 17 of 17 and 13 of 13 exported names are
+The two remaining engines are clean: 17 of 17 and 13 of 13 exported names are
 referenced. This is a shrink-only ratchet — the known-dead set may lose entries
 and must never gain one.
 """
@@ -31,18 +32,13 @@ import pytest
 from tests.refactor._source_scan import REPO, references_to
 
 _MODULES = (
-    "backend/src/services/test_signal/panel_data.py",
     "backend/src/services/breakout_signal/panel_data.py",
     "backend/src/services/reversal_engine/panel_data.py",
 )
 
-# Known dead, all orphaned by the same deletion. Remove an entry when it is
-# wired up or deleted; never add one.
-KNOWN_DEAD = {
-    ("test_signal", "change_signature"),
-    ("test_signal", "param_specs"),
-    ("test_signal", "ml_features_for_signal"),
-}
+# Empty since 2026-09-14, and the point is to keep it that way. Remove an entry
+# when it is wired up or deleted; never add one.
+KNOWN_DEAD: set[tuple[str, str]] = set()
 
 
 def _engine_of(path: str) -> str:
@@ -87,10 +83,15 @@ class TestTheScannerCanSee:
 
     def test_excluding_the_defining_file_is_what_makes_it_mean_anything(self):
         """Without the exclusion every name is trivially "referenced" by its
-        own definition and this whole file passes on nothing."""
-        own = "backend/src/services/test_signal/panel_data.py"
-        assert references_to("change_signature", exclude=())
-        assert not references_to("change_signature", exclude=(own,))
+        own definition and this whole file passes on nothing.
+
+        Phrased as "the defining file drops out" rather than "the name goes
+        dead": every surviving export has a live caller, which is the property
+        the gate is for, so there is no longer a name that goes to zero."""
+        own = "backend/src/services/reversal_engine/panel_data.py"
+        name = importlib.import_module(own[:-3].replace("/", ".")).__all__[0]
+        assert own in references_to(name, exclude=())
+        assert own not in references_to(name, exclude=(own,))
 
 
 @pytest.mark.parametrize("path", _MODULES)

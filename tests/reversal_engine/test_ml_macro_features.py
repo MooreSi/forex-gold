@@ -103,10 +103,12 @@ class TestBackFillOfOlderRows:
 
 
 class TestEngineIsolation:
-    def test_breakout_and_bounce_vectors_are_unchanged(self):
+    def test_the_breakout_vector_is_unchanged(self):
         """Engines share no ML labels or parameters. The macro read is a
-        shared *import*, not shared state."""
+        shared *import*, not shared state.
+
+        This checked Bounce's 42-wide vector too until that engine was
+        deleted on 2026-09-14. Breakout is the only other engine left, so it
+        is the only one this can still contrast against."""
         from backend.src.services.breakout_signal import ml_engine as bo
-        from backend.src.services.test_signal import ml_engine as ts
         assert len(bo.FEATURE_NAMES) == 22
-        assert len(ts.FEATURE_NAMES) == 42

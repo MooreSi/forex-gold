@@ -377,8 +377,9 @@ _ENGINES: tuple = (
      lambda: _engine_running("backend.src.services.reversal_engine.reversal_engine_service")),
     ("Breakout Engine",
      lambda: _engine_running("backend.src.services.breakout_signal.breakout_signal_service")),
-    ("Bounce Engine",
-     lambda: _engine_running("backend.src.services.test_signal.test_signal_service")),
+    # No Bounce Engine entry: its code was deleted on 2026-09-14 (bugs/046).
+    # The channel NAME survives in channels/repo.py -- closed trades carry it
+    # as their tg_source -- but there is no longer an engine to probe.
     ("ORB/IVB Report", _orb_enabled),
 )
 

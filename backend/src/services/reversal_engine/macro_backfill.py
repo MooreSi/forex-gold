@@ -11,7 +11,7 @@ can hurt through variance.
 
 The fix is not a sixth series. It is giving the five that exist real values,
 from the same source they come from live (`yfinance`, which serves hourly
-history) and with the same arithmetic (`market_context`'s own scales: 0.5%
+history) and with the same arithmetic (`macro_context`'s own scales: 0.5%
 an hour for DXY, 0.2% for TIP). Reconstructing them differently would make
 the back-filled rows and the live rows two different features sharing one
 name, which is worse than the neutrals.
@@ -29,15 +29,15 @@ from typing import Callable, Optional, Sequence
 
 from backend.src.services.reversal_engine.re_macro import (
     MACRO_FEATURE_NAMES, MACRO_NEUTRAL, _normalise)
-from backend.src.services.test_signal.market_context import _NEUTRAL
+from backend.src.services.market.macro_context import _NEUTRAL
 
 log = logging.getLogger("reversal_engine")
 
-# Raw (un-normalised) neutrals, from market_context's own table rather than
+# Raw (un-normalised) neutrals, from macro_context's own table rather than
 # restated, so the two cannot drift.
 NEUTRAL_RAW: dict = dict(_NEUTRAL)
 
-# yfinance symbols, matching market_context.get_context exactly.
+# yfinance symbols, matching macro_context.get_context exactly.
 SYMBOLS = {
     "dxy_momentum": "DX-Y.NYB",
     "us10y_level": "^TNX",
@@ -46,7 +46,7 @@ SYMBOLS = {
     "tip_momentum": "TIP",
 }
 
-# Percent move in one hour that maps to +-1.0, per market_context.
+# Percent move in one hour that maps to +-1.0, per macro_context.
 MOMENTUM_SCALE = {"dxy_momentum": 0.5, "tip_momentum": 0.2}
 
 FULL_WIDTH = 38
@@ -233,7 +233,7 @@ def fetch_history(start_ts: float, end_ts: float) -> dict:
 
     Separated from `backfill` so the reconstruction is testable without a
     network, which is the only way the arithmetic above can be pinned
-    against `market_context`'s.
+    against `macro_context`'s.
     """
     try:
         import yfinance as yf

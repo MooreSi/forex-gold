@@ -1,4 +1,4 @@
-"""Engine panels' API -- shared by the Breakout, Reversal and Bounce panels.
+"""Engine panels' API -- shared by the Breakout and Reversal panels.
 
 The panels used to reach `run_db(fn)` here, handing this layer an arbitrary
 callable to run on the DB worker thread. That inverted the dependency: the
@@ -14,22 +14,27 @@ from backend.src.services.breakout_signal import panel_data as breakout
 from backend.src.services.reversal_engine import panel_data as reversal
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
 from backend.src.services.risk import settings as _risk
-from backend.src.services.test_signal import panel_data as bounce
-from backend.src.services.test_signal import test_signal_service as _bc_svc
 
-__all__ = ["breakout", "reversal", "bounce",
+__all__ = ["breakout", "reversal",
            "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
            "get_engine", "engines_running", "sub_engines",
            "start_stopped_engines", "stop_running_engines"]
 
-# The three signal engines by their user-facing names, in the fixed
-# (breakout, bounce, reversal) order the mode toggle and the sync server
-# have always bound them.
+
+# The signal engines by name, in the fixed (breakout, bounce, reversal) order
+# the mode toggle and the sync server have always bound them. Bounce's code was
+# deleted on 2026-09-14; its NAME stays because dropping the slot would shift
+# Reversal into its position on a paired node still running the old build.
 _ENGINE_SERVICES = {
     "breakout": _bo_svc,
-    "bounce": _bc_svc,
+    "bounce": None,
     "reversal": _re_svc,
 }
+
+
+def _instance(svc) -> Any:
+    """An engine, or None -- for an empty slot as much as an unbuilt one."""
+    return svc.get_instance() if svc is not None else None
 
 
 def get_risk_settings() -> dict:
@@ -53,12 +58,12 @@ def update_risk_settings(fields: dict) -> None:
 def get_engine(name: str) -> Any:
     """The named engine's live instance (its panel needs status attributes
     and its refresh-callback hook)."""
-    return _ENGINE_SERVICES[name].get_instance()
+    return _instance(_ENGINE_SERVICES[name])
 
 
 def engines_running() -> dict:
     return {
-        name: bool(getattr(svc.get_instance(), "is_running", False))
+        name: bool(getattr(_instance(svc), "is_running", False))
         for name, svc in _ENGINE_SERVICES.items()
     }
 
@@ -66,16 +71,11 @@ def engines_running() -> dict:
 def sub_engines() -> tuple:
     """(breakout, bounce, reversal) instances in the fixed binding order the
     sync server's server_start has always received them."""
-    return tuple(svc.get_instance() for svc in _ENGINE_SERVICES.values())
+    return tuple(_instance(svc) for svc in _ENGINE_SERVICES.values())
 
 
-# Bounce lost its panel on 2026-09-02 (owner's instruction). It is excluded
-# from the bulk start rather than deleted: this function is what the power /
-# mode toggle calls, and a Bounce engine with no UI would otherwise still be
-# started by it -- placing live MT5 orders with nothing on screen saying so.
-# Its service and its position in _ENGINE_SERVICES are deliberately untouched;
-# the sync server and the mode toggle bind engines by that fixed order.
-# THIS path only -- app.py starts bounce directly every launch (bugs/046).
+# Belt and braces: the slot is empty, so the loop would skip it anyway. The
+# exclusion keeps the safety property asserted rather than incidental.
 _NOT_BULK_STARTED = ("bounce",)
 
 
@@ -83,14 +83,14 @@ def start_stopped_engines() -> None:
     for name, svc in _ENGINE_SERVICES.items():
         if name in _NOT_BULK_STARTED:
             continue
-        eng = svc.get_instance()
+        eng = _instance(svc)
         if eng is not None and not getattr(eng, "is_running", False):
             eng.start()
 
 
 def stop_running_engines() -> None:
     for svc in _ENGINE_SERVICES.values():
-        eng = svc.get_instance()
+        eng = _instance(svc)
         if eng is not None and getattr(eng, "is_running", False):
             eng.stop()
 

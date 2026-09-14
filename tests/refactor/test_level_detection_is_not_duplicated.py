@@ -1,5 +1,5 @@
 """
-The Bounce engine and the Reversal engine each detect price levels. A standing
+`market/levels.py` and the Reversal engine each detect price levels. A standing
 refactor task (docs/todo/refactor/stage1/phase3-expansion-tax/020-consolidate-engine-shared-code.md)
 describes level detection as existing "three times (drifted?)" and proposes
 moving one "blessed" implementation to a shared home.
@@ -12,7 +12,7 @@ back to.
 
 That matters because both feed live signal generation:
 
-    identify_key_levels   -> Bounce, Breakout (service + backtest)
+    identify_key_levels   -> Breakout (service + backtest)
     get_all_levels        -> Reversal
 
 Replacing either with the other would change which trades those engines take.
@@ -20,15 +20,21 @@ That is a trading-behaviour decision for the owner plus a demo session, not a
 tidy-up. If a future change makes these two agree, one of these tests should go
 red and the person who made it agree should have to say so out loud.
 
-The third site, `test_signal_velocity._compute_swing_levels`, is covered by
-`test_velocity_swings_are_not_pivot_detection` -- it shares the name but not the
-job.
+**Renamed 2026-09-14, when the Bounce engine was deleted.** These helpers were
+never Bounce's -- Breakout imported `identify_key_levels` across the package
+boundary -- so they moved to `services/market/levels.py` rather than dying with
+the engine. The variables below still read `bounce_` because that is the
+implementation being contrasted and renaming them would make the diff of this
+file larger than the change it records.
+
+There was a third site, `test_signal_velocity._compute_swing_levels`. It went
+with the engine; nothing in the tree defines that name any more, so the test
+that pinned it has gone too rather than being pointed at something similar.
 """
 import pytest
 
 from backend.src.services.reversal_engine import level_detector as ld
-from backend.src.services.test_signal import signal_generator as bounce
-from backend.src.services.test_signal import test_signal_velocity as velocity
+from backend.src.services.market import levels as bounce
 
 
 # A fixed H1 series. Values are literal on purpose -- a generated series would
@@ -174,25 +180,6 @@ def test_round_level_strengths_are_on_different_scales():
     assert bounce_strengths == {1}
     assert reversal_strengths == {2, 3}
     assert not (bounce_strengths & reversal_strengths)
-
-
-# ── The third site ────────────────────────────────────────────────────────────
-
-def test_velocity_swings_are_not_pivot_detection(candles):
-    """
-    `_compute_swing_levels` shares a name with the other two and does something
-    else entirely: the plain high and low of the last 20 M15 bars, no pivot
-    test, no strength, no type. It is a sweep tripwire, not a level list.
-    """
-    hi, lo = velocity._compute_swing_levels(candles)
-
-    recent = candles[-20:]
-    assert hi == max(c["high"] for c in recent)
-    assert lo == min(c["low"] for c in recent)
-
-    # It returns a bare pair, not the {price,type,strength} dicts the other two
-    # produce -- there is no shape in which these are interchangeable.
-    assert isinstance(hi, float) and isinstance(lo, float)
 
 
 # ── Negative control ──────────────────────────────────────────────────────────

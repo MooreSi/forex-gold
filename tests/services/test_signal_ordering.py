@@ -9,7 +9,8 @@ total tie, and SQLite is free to return the rows in any order it likes.
 That surfaced as `test_get_all_signals_respects_limit_newest_first` failing
 intermittently in `tests/test_signal/`, `tests/reversal_engine/` and
 `tests/breakout_signal/` across four full-suite runs -- three files, one
-shared defect. Each passes when its module runs alone, because a cold database
+shared defect. (The Bounce engine and its repo were deleted on 2026-09-14, so
+two of the three remain.) Each passes when its module runs alone, because a cold database
 slows the inserts past a tick boundary; a warm cache puts all three in one tick.
 
 It is not only a test artefact. The signal tables render in this order, so a
@@ -27,7 +28,6 @@ import pytest
 
 from backend.src.services.breakout_signal import breakout_signal_repo
 from backend.src.services.reversal_engine import reversal_engine_repo
-from backend.src.services.test_signal import test_signal_repo
 
 PINNED = 1785835911.5   # one instant; every row shares it
 
@@ -42,10 +42,6 @@ ENGINES = [
     pytest.param(reversal_engine_repo, "create_signal",
                  lambda ref: {"direction": "BUY", "signal_ref": ref},
                  id="reversal_engine"),
-    pytest.param(test_signal_repo, "insert_signal",
-                 lambda ref: {"direction": "BUY", "entry_low": 2399.0, "entry_high": 2401.0,
-                              "entry_mid": 2400.0, "stop_loss": 2390.0, "signal_ref": ref},
-                 id="test_signal"),
 ]
 
 

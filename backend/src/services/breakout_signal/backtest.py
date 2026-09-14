@@ -38,9 +38,11 @@ from backend.src.services.breakout_signal import adaptive_params as ap
 from backend.src.services.breakout_signal.signal_generator import (
     check_breakout_go, check_breakout_retest, calculate_breakout_risk_levels,
 )
-from backend.src.services.test_signal.signal_generator import (
-    compute_htf_bias, compute_h4_bias, compute_adx, compute_macd_hist,
-    identify_key_levels, compute_atr,
+from backend.src.services.market.indicators import (
+    compute_h4_bias, compute_adx, compute_macd_hist,
+)
+from backend.src.services.market.levels import (
+    compute_htf_bias, identify_key_levels, compute_atr,
 )
 
 COST_PTS = 0.35          # spread + fees per round trip, points

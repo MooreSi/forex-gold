@@ -37,12 +37,12 @@ _db.init(_db_path)
 
 # The signal services each namespace their own connection (see
 # backend/src/db/connection.py) and each has its own init_db. Rendering the
-# tabs reads all three, so all three need pointing at the temp file too.
+# tabs reads both, so both need pointing at the temp file too. There were
+# three until the Bounce engine was deleted on 2026-09-14.
 from backend.src.services.breakout_signal import breakout_signal_repo as _bo  # noqa: E402
 from backend.src.services.reversal_engine import reversal_engine_repo as _rev  # noqa: E402
-from backend.src.services.test_signal import test_signal_repo as _ts  # noqa: E402
 
-for _repo in (_bo, _rev, _ts):
+for _repo in (_bo, _rev):
     _repo.init(_db_path)   # init(), not init_db(): this one also builds the schema
 
 # The tab panels ask for the engine while rendering. A MagicMock is enough to

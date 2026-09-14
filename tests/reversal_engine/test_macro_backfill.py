@@ -41,7 +41,7 @@ def series(symbol_closes):
 
 class TestTheArithmeticMatchesTheLivePath:
     def test_dxy_momentum_is_the_hourly_return_over_a_half_percent(self):
-        """`market_context._dxy_momentum`: 0.5% in an hour is +-1.0."""
+        """`macro_context._dxy_momentum`: 0.5% in an hour is +-1.0."""
         s = series({"DX-Y.NYB": [100.0, 100.5]})
         assert mb.raw_at(T0 + HOUR, s)["dxy_momentum"] == pytest.approx(1.0)
 

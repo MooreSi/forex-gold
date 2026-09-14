@@ -106,10 +106,8 @@ class TestSessionsUseUTC:
     visible in one place."""
 
     def test_get_session_is_explicitly_utc(self):
-        from backend.src.services.test_signal import signal_generator as sg
-
         src = pathlib.Path(
-            REPO / "backend/src/services/test_signal/signal_generator.py"
+            REPO / "backend/src/services/market/sessions.py"
         ).read_text(encoding="utf-8")
         body_start = src.index("def get_session()")
         body = src[body_start:body_start + 400]
@@ -119,13 +117,15 @@ class TestSessionsUseUTC:
             "docs/simon-handover/017 needs revisiting"
         )
 
-    def test_the_counter_bias_windows_are_utc_too(self):
-        from backend.src.services.test_signal import signal_indicators as si
-
+    def test_the_news_window_fallback_is_utc_too(self):
+        """`_counter_bias_allowed` used to stand here. It read the Bounce
+        engine's adaptive parameters, so it went with that engine on
+        2026-09-14. `is_news_window`'s hardcoded fallback is the other
+        surviving hour-of-day window in the same file's neighbourhood."""
         src = pathlib.Path(
-            REPO / "backend/src/services/test_signal/signal_indicators.py"
+            REPO / "backend/src/services/market/levels.py"
         ).read_text(encoding="utf-8")
-        start = src.index("def _counter_bias_allowed")
+        start = src.index("def is_news_window")
         assert "timezone.utc" in src[start:start + 800]
 
 

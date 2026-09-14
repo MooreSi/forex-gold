@@ -19,10 +19,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
-# The two parameter catalogues. A name appearing only here is a definition, not
-# a reader -- excluding them is what makes the scan mean anything.
+# The parameter catalogues. A name appearing only here is a definition, not a
+# reader -- excluding them is what makes the scan mean anything. There were two
+# until 2026-09-14, when the Bounce engine and its catalogue were deleted.
 CATALOGUE_FILES = (
-    "backend/src/services/test_signal/adaptive_params.py",
     "backend/src/services/breakout_signal/adaptive_params.py",
 )
 

@@ -8,7 +8,7 @@ It had no view of the dollar, real yields or gold-specific volatility -- the
 variables that decide whether a technically clean level holds or gets run
 through. Bounce has consumed all five of these since it was written and
 Breakout three of them since its v15; this module is the Reversal Engine's
-read of the same source, `services/test_signal/market_context.py`.
+read of the same source, `services/market/macro_context.py`.
 
 Why this is a separate module rather than more lines in `ml_engine.py`: that
 file sits at 787 lines against the structure gate's `LOC_CEILING = 800` and is
@@ -34,7 +34,7 @@ import asyncio
 import logging
 import time
 
-from backend.src.services.test_signal import market_context
+from backend.src.services.market import macro_context
 
 _log = logging.getLogger("reversal_engine")
 
@@ -46,7 +46,7 @@ MACRO_FEATURE_NAMES = [
     "tip_momentum",   # TIP ETF 1h return [-1,+1]; rising = real yields falling = gold tailwind
 ]
 
-# (divisor, low, high) per feature. The divisor is 1.0 where market_context
+# (divisor, low, high) per feature. The divisor is 1.0 where macro_context
 # already returns a normalised value.
 _SCALE = {
     "dxy_momentum": (1.0,  -1.0, 1.0),
@@ -62,14 +62,14 @@ def _normalise(name: str, raw: float) -> float:
     return max(low, min(high, raw / divisor))
 
 
-# Normalised forms of market_context._NEUTRAL, derived rather than restated so
+# Normalised forms of macro_context._NEUTRAL, derived rather than restated so
 # the two cannot drift apart.
 MACRO_NEUTRAL = {
-    name: _normalise(name, float(market_context._NEUTRAL[name]))
+    name: _normalise(name, float(macro_context._NEUTRAL[name]))
     for name in MACRO_FEATURE_NAMES
 }
 
-# How often the macro series are actually worth re-reading. market_context
+# How often the macro series are actually worth re-reading. macro_context
 # caches for 15 minutes of its own, so this mainly keeps the blocking call out
 # of the per-candidate path -- see get_cycle_context.
 _REFRESH_S = 15 * 60
@@ -112,7 +112,7 @@ async def get_cycle_context() -> dict:
     Called once per engine cycle above the candidate loop, never per
     candidate. Two reasons it is async and thread-offloaded:
 
-      * `market_context.get_context()` is blocking HTTP. The Reversal cycle
+      * `macro_context.get_context()` is blocking HTTP. The Reversal cycle
         shares its event loop with position management, so stalling it is not
         cosmetic.
       * the Reversal cycle is `_CYCLE_INTERVAL_S = 60`, so without a window of
@@ -127,7 +127,7 @@ async def get_cycle_context() -> dict:
     if _ctx_cache and (now - _ctx_ts) < _REFRESH_S:
         return _ctx_cache
     try:
-        ctx = await asyncio.to_thread(market_context.get_context)
+        ctx = await asyncio.to_thread(macro_context.get_context)
         if ctx:
             _ctx_cache = ctx
             _ctx_ts = now

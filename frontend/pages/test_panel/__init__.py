@@ -5,19 +5,17 @@ panel. Bounce was removed on the owner's instruction (2026-09-02); its
 `_sections.py` and `_shared.py` went with it, since nothing outside the panel
 used them.
 
-The bounce SERVICE still exists and keeps its slot in
-`engines_controller._ENGINE_SERVICES` -- the sync server and the mode toggle
-bind engines by that fixed order -- and it is excluded from
-`start_stopped_engines()`, the power/mode toggle's path. See
-tests/frontend/test_bounce_generator_removed.py.
+Removing the panel did not stop the engine: `app.py` started it on every launch
+without consulting `start_stopped_engines()`, and it was found still analysing
+once a minute ten days later. It was stopped on 2026-09-13 and its code was
+deleted on 2026-09-14 -- `docs/todo/bugs/046` has the arc.
 
-**That exclusion does not stop it running, and this file used to say it did.**
-`app.py` starts the bounce engine on every launch unless `sg_engine_enabled` is
-"0", and that key is only ever written by a Stop Engine button that no longer
-exists on any screen. Confirmed live on 2026-09-12: the engine had been
-analysing once a minute for the ten days since this panel was deleted.
-`docs/todo/bugs/046` -- it is the owner's call whether to stop it, and
-`sg_live_execution` is 0, so it places no orders meanwhile.
+Its NAME still holds position 1 of 3 in `engines_controller._ENGINE_SERVICES`,
+bound to nothing: the sync server and the mode toggle bind engines by that
+fixed order, so dropping the slot would put Reversal in Bounce's position on a
+paired node still running the old build. See
+tests/frontend/test_bounce_generator_removed.py and
+tests/refactor/test_the_bounce_engine_backend_is_gone.py.
 """
 from __future__ import annotations
 

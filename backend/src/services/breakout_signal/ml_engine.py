@@ -189,7 +189,7 @@ def _session_score(session: str) -> float:
 def extract_features(signal_data: dict, market_ctx: Optional[dict] = None) -> Optional[list[float]]:
     """
     Extract ML features from a signal dict (bo_signals row or sig_data at creation).
-    market_ctx: optional dict from market_context.get_context() — provides macro features.
+    market_ctx: optional dict from macro_context.get_context() — provides macro features.
     Returns None if essential fields are missing or ATR is zero.
     """
     try:

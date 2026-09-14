@@ -232,32 +232,6 @@ class TelemetryMixin:
             return {}
 
     @staticmethod
-    def _bounce_stats() -> dict:
-        try:
-            from backend.src.services.test_signal import test_signal_repo as tdb
-            from backend.src.services.test_signal import adaptive_params as ap
-            from backend.src.services.test_signal import ml_engine as ml
-            return {
-                "virtual_balance":     tdb.get_virtual_balance(),
-                "max_drawdown":        tdb.get_max_drawdown(),
-                "consecutive_losses":  tdb.get_consecutive_losses(),
-                "stats":               tdb.get_stats(),
-                "open_signals":        tdb.get_open_signals(),
-                "all_signals":         tdb.get_all_signals(limit=100),
-                "perf_by_session":     tdb.get_perf_by_session(),
-                "perf_by_bias":        tdb.get_perf_by_bias(),
-                "perf_by_level_type":  tdb.get_perf_by_level_type(),
-                "perf_by_regime":      tdb.get_perf_by_regime(),
-                "params":              ap.get_all(),
-                "regime_overrides":    ap.get_regime_overrides(),
-                "ml_summary":          ml.summary(),
-                "ml_metrics":          ml.get_ml_metrics(),
-            }
-        except Exception as e:
-            log.debug("[SyncServer] bounce stats snapshot failed: %s", e)
-            return {}
-
-    @staticmethod
     def _reversal_engine_stats() -> dict:
         try:
             from backend.src.services.reversal_engine import reversal_engine_repo as re_db
@@ -291,7 +265,12 @@ class TelemetryMixin:
     async def _signal_gen_stats_payload(self) -> dict:
         return {
             "breakout": await asyncio.to_thread(self._breakout_stats),
-            "bounce":   await asyncio.to_thread(self._bounce_stats),
+            # The Bounce engine's code was deleted on 2026-09-14 (bugs/046).
+            # The KEY stays: a paired node on the old build indexes this
+            # payload by name, and a missing key is a KeyError in its panel
+            # rather than an empty panel. An empty dict is what its snapshot
+            # already sent whenever the engine was unavailable.
+            "bounce":   {},
             "reversal_engine":  await asyncio.to_thread(self._reversal_engine_stats),
         }
 

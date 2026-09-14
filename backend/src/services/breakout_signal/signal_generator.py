@@ -8,7 +8,11 @@ Two entry types:
                        pulled back to retest it; enter on bounce from the level
 
 Shared utilities (HTF bias, ADX, MACD, key levels, session) are imported
-from the existing test_signal.signal_generator to avoid duplication.
+from `services/market` to avoid duplication. They used to be imported from
+the Bounce engine's package -- not because they belonged to it, but because
+that is where they were first written. When the Bounce engine was removed
+(2026-09-14) they moved to `market/`, which is where every engine can reach
+them without depending on another engine.
 No state is modified here — pure analysis functions only.
 """
 from __future__ import annotations
@@ -18,19 +22,23 @@ from typing import Optional
 
 from backend.src.services.breakout_signal import adaptive_params as ap
 
-# ── Re-export shared utilities from the bounce engine (read-only) ──────────────
+# ── Re-export shared market primitives (read-only) ───────────────────────────
 # These are pure functions with no side effects. Importing is safe and DRY.
-from backend.src.services.test_signal.signal_generator import (
-    compute_htf_bias,
+from backend.src.services.market.indicators import (
     compute_h4_bias,
     compute_adx,
     compute_macd_hist,
     detect_regime,
+)
+from backend.src.services.market.levels import (
+    compute_htf_bias,
     identify_key_levels,
+    is_news_window,
+)
+from backend.src.services.market.sessions import (
     get_session,
     session_quality,
     session_is_active,
-    is_news_window,
 )
 
 

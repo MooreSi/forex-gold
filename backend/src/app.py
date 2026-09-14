@@ -23,7 +23,6 @@ from backend.src.db import database as db_module
 from backend.src.runtime import TradingRuntime
 from backend.src.services.telegram.reader import TelegramReader
 
-import backend.src.services.test_signal.test_signal_service as _test_engine_module
 import backend.src.services.breakout_signal.breakout_signal_service as _breakout_engine_module
 import backend.src.services.reversal_engine.reversal_engine_service as _re_engine_module
 import backend.src.services.cluster.remote.client as _remote_client
@@ -255,15 +254,6 @@ async def _signal_engine_watchdog_loop() -> None:
     while True:
         await asyncio.sleep(300)
         try:
-            from backend.src.services.test_signal import test_signal_repo as _tdb
-            if _tdb.get_config("sg_engine_enabled", "1") != "0":
-                te = _test_engine_module.get_instance()
-                if te and not te.is_running:
-                    log.warning("[AppWatchdog] Bounce engine not running — auto-restarting")
-                    te.start()
-        except Exception as _e:
-            log.debug("[AppWatchdog] Bounce health check error: %s", _e)
-        try:
             from backend.src.services.breakout_signal import breakout_signal_repo as _bodb_wd
             if _bodb_wd.get_config("bo_engine_enabled", "1") != "0":
                 bo = _breakout_engine_module.get_instance()
@@ -390,10 +380,6 @@ async def startup() -> None:
     _tg_reader = _make_tg_reader(config)
     _engine.set_telegram_reader(_tg_reader)
 
-    # Initialise test signal DB immediately (before any async ops that might
-    # fail) so the TEST tab can render even if the MT5 bridge is offline.
-    _test_engine_module.init(_engine._bridge)
-
     # Initialise breakout signal DB (completely isolated from bounce engine).
     # breakout_signal_service.init() initializes its own repo DB internally.
     from backend.src.config import DATA_DIR as _DATA_DIR
@@ -441,22 +427,10 @@ async def startup() -> None:
     except Exception as _e:
         log.error("[startup] TradingRuntime startup failed: %s", _e)
 
-    te = _test_engine_module.get_instance()
-    te.set_main_engine(_engine)
-
-    # Respect the persistent on/off preference saved by the Stop Engine button.
-    # Default is enabled (first run or preference not set).
-    from backend.src.services.test_signal import test_signal_repo as _tdb
-    if _tdb.get_config("sg_engine_enabled", "1") != "0":
-        te.start()
-        # Report what HAPPENED, not what was attempted. start() declines when
-        # the engine's panel has been removed (services/test_signal.PANEL_REMOVED,
-        # bugs/046), and a log line claiming it started is the same class of
-        # untrue statement that let it run headless for twelve days.
-        log.info("[startup] Signal engine %s",
-                 "auto-started" if te.is_running else "did not start: " + te.status_detail)
-    else:
-        log.info("[startup] Signal engine auto-start suppressed (user disabled)")
+    # The Bounce engine used to be started here. Its panel went on 2026-09-02,
+    # it was stopped on 2026-09-13 (bugs/046) and its code was deleted on
+    # 2026-09-14. Nothing replaces it: Breakout and Reversal below are the two
+    # signal engines this app now runs.
 
     # Auto-start breakout engine — respect the persistent on/off preference.
     from backend.src.services.breakout_signal import breakout_signal_repo as _bodb2
@@ -499,7 +473,10 @@ async def startup() -> None:
                 port = int(db_module.get_app_config("sync_server_port") or 8765)
                 srv = _sync_srv_mod.init(
                     main_engine=_engine, breakout_engine=bo_eng,
-                    bounce_engine=te, re_engine=re_eng,
+                    # bounce_engine stays in the signature and stays None:
+                    # the engine was deleted 2026-09-14 but a paired node on
+                    # the old build still names the slot (bugs/046).
+                    bounce_engine=None, re_engine=re_eng,
                 )
                 await srv.start(host, port, token)
                 log.info("[startup] Sync server auto-started on port %d", port)
@@ -552,9 +529,6 @@ async def startup() -> None:
 
 
 async def shutdown() -> None:
-    te = _test_engine_module.get_instance()
-    if te:
-        te.stop()
     bo = _breakout_engine_module.get_instance()
     if bo:
         bo.stop()

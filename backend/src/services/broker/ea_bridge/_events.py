@@ -144,6 +144,8 @@ class EventsMixin:
             await self._on_pending_order_filled(msg)
         elif t == "pending_order_cancelled":
             await self._on_pending_order_cancelled(msg)
+        elif t == "basket_closed":
+            self._on_basket_closed(msg)
         elif t == "grid_leg_skipped":
             # The EA declined to place one of a grid's resting legs. Until
             # 2026-08-04 this only reached the terminal's own Experts log,
@@ -715,6 +717,26 @@ class EventsMixin:
             f"ever opened, no P&L).",
             trade_id, "template_grid_no_fill",
         ))
+
+    def _on_basket_closed(self, msg: dict) -> None:
+        """The EA is about to close several positions as ONE action.
+
+        Its legs would otherwise arrive indistinguishable from manual closes,
+        and the breaker would count each one -- see basket_breaker, which holds
+        the reasoning and the decision. Never raises: a malformed message on
+        the EA's inbound path must not cost every event behind it.
+        """
+        try:
+            basket_id = str(msg.get("basket_id") or "")
+            tickets = msg.get("tickets") or []
+            if not basket_id or not tickets:
+                log.warning("[EABridge] basket_closed with no %s — ignored",
+                            "id" if not basket_id else "tickets")
+                return
+            from backend.src.services.risk import basket_breaker
+            basket_breaker.register(basket_id, float(msg.get("net") or 0.0), tickets)
+        except Exception as e:                    # noqa: BLE001
+            log.warning("[EABridge] basket_closed handling failed: %s", e)
 
     async def _on_pending_order_cancelled(self, msg: dict) -> None:
         """A resting Limit Runner order was removed from the broker's book

@@ -338,7 +338,19 @@ async def record_close(trade_id: str, close_price: float, reason: str, ctx: Clos
     if close_recorded and row.get("mt5_ticket"):
         try:
             total_pnl = round(float(row.get("net_pnl", 0)) + net_pnl, 4)
-            new_cb = await db_module.to_db_thread(db_module.record_live_trade_outcome, won=total_pnl >= 0)
+            # Through basket_breaker, not record_live_trade_outcome directly.
+            # Several positions closing in ONE action -- Global Harvest,
+            # equity_protect, check_basket_harvest -- is an account-level
+            # decision, not N trade outcomes, and counting its legs separately
+            # meant a PROFITABLE basket pushed the account toward a halt: an
+            # 80-cent leg inside a +$107.19 basket cost fifteen minutes of live
+            # execution on 2026-09-10 (bugs/041, owner's option B). A ticket in
+            # no registered basket takes exactly the path it took before, so
+            # this is inert until an EA that announces its baskets is deployed.
+            from backend.src.services.risk import basket_breaker
+            new_cb = await db_module.to_db_thread(
+                basket_breaker.score_close,
+                row.get("mt5_ticket"), total_pnl >= 0)
             if new_cb.get("just_triggered"):
                 cooldown_mins = new_cb.get("cooldown_mins", 60)
                 threshold = new_cb.get("losses_threshold", 3)

@@ -449,7 +449,12 @@ async def startup() -> None:
     from backend.src.services.test_signal import test_signal_repo as _tdb
     if _tdb.get_config("sg_engine_enabled", "1") != "0":
         te.start()
-        log.info("[startup] Signal engine auto-started")
+        # Report what HAPPENED, not what was attempted. start() declines when
+        # the engine's panel has been removed (services/test_signal.PANEL_REMOVED,
+        # bugs/046), and a log line claiming it started is the same class of
+        # untrue statement that let it run headless for twelve days.
+        log.info("[startup] Signal engine %s",
+                 "auto-started" if te.is_running else "did not start: " + te.status_detail)
     else:
         log.info("[startup] Signal engine auto-start suppressed (user disabled)")
 

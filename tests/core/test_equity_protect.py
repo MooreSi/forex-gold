@@ -167,3 +167,88 @@ def test_basket_harvest_ignores_position_missing_from_bridge(fresh_db):
     closer = _Closer()
     asyncio.run(check_basket_harvest(trades, bridge, closer))
     assert closer.calls == []  # 50.0 < 100.0 threshold, 402 excluded entirely
+
+
+# ── the basket the breaker is told about (bugs/041) ──────────────────────
+#
+# Both of these close several positions in ONE action, on a COMBINED figure --
+# which is the same thing Global Harvest does in the EA, and the same reason
+# the circuit breaker must not count their legs separately. These two are
+# Python-side, so they register the basket directly; no EA message is involved.
+
+from backend.src.services.risk import basket_breaker  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_baskets():
+    basket_breaker.forget_all()
+    yield
+    basket_breaker.forget_all()
+
+
+def test_basket_harvest_tells_the_breaker_before_it_closes(fresh_db):
+    """Registered BEFORE the closes, not after: a leg that closes and records
+    while the basket is still unknown is a leg the breaker has already
+    counted."""
+    _save_template("Staged Ratchet 100-500", basket_harvest_threshold=500.0)
+    trades = [
+        _trade("t1", "template:Staged Ratchet 100-500", "CHAN", 201),
+        _trade("t2", "template:Staged Ratchet 100-500", "CHAN", 202),
+    ]
+    bridge = _FakeBridge([{"ticket": 201, "profit": 600.0},
+                          {"ticket": 202, "profit": -50.0}])
+
+    seen = []
+
+    class _Recorder(_Closer):
+        async def __call__(self, trade_id, reason):
+            seen.append(basket_breaker.registered_ticket_count())
+            await super().__call__(trade_id, reason)
+
+    asyncio.run(check_basket_harvest(trades, bridge, _Recorder()))
+
+    assert seen and seen[0] == 2, "the basket was not registered before the first close"
+
+
+def test_basket_harvest_registers_the_combined_total_not_a_leg(fresh_db):
+    _save_template("Staged Ratchet 100-500", basket_harvest_threshold=500.0)
+    trades = [
+        _trade("t1", "template:Staged Ratchet 100-500", "CHAN", 201),
+        _trade("t2", "template:Staged Ratchet 100-500", "CHAN", 202),
+    ]
+    bridge = _FakeBridge([{"ticket": 201, "profit": 600.0},
+                          {"ticket": 202, "profit": -50.0}])
+
+    asyncio.run(check_basket_harvest(trades, bridge, _Closer()))
+
+    nets = [basket_breaker.basket_net(b) for b in ("bh-CHAN-template:Staged Ratchet 100-500",)]
+    assert nets[0] == pytest.approx(550.0)
+
+
+def test_equity_protect_registers_its_basket_too(fresh_db):
+    """The loss direction. Its net is negative, so the breaker leaves the
+    counter untouched rather than clearing it -- but it still must not count
+    each leg as a separate consecutive loss."""
+    _save_template("Guarded", equity_protect=100.0)
+    trades = [
+        _trade("t1", "template:Guarded", "CHAN", 301),
+        _trade("t2", "template:Guarded", "CHAN", 302),
+    ]
+    bridge = _FakeBridge([{"ticket": 301, "profit": -80.0},
+                          {"ticket": 302, "profit": -70.0}])
+
+    asyncio.run(check_equity_protect(trades, bridge, _Closer()))
+
+    assert basket_breaker.basket_net("ep-CHAN-template:Guarded") == pytest.approx(-150.0)
+
+
+def test_a_group_below_its_threshold_registers_nothing(fresh_db):
+    """No close, no basket. A registration left behind by a check that did
+    nothing would swallow the next ordinary close on those tickets."""
+    _save_template("Staged Ratchet 100-500", basket_harvest_threshold=500.0)
+    trades = [_trade("t1", "template:Staged Ratchet 100-500", "CHAN", 201)]
+    bridge = _FakeBridge([{"ticket": 201, "profit": 10.0}])
+
+    asyncio.run(check_basket_harvest(trades, bridge, _Closer()))
+
+    assert basket_breaker.registered_ticket_count() == 0

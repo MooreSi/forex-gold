@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.07"
+#property version   "1.08"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,12 +40,12 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.07"
+#define EA_VERSION "1.08"
 // Hand-maintained, and bumped in the same edit as EA_VERSION: __DATETIME__
 // says when the .ex5 was COMPILED, which tells you nothing about how old
 // the source behind it is. This says when the source last changed, so the
 // two together answer "is the running build the current one".
-#define EA_VERSION_DATE "2026-09-10"
+#define EA_VERSION_DATE "2026-09-14"
 
 #include <Trade\Trade.mqh>
 
@@ -3175,6 +3175,32 @@ void CheckGlobalHarvest()
    Print("[EABridge] global harvest threshold reached (combined $", total,
          " >= $", g_globalHarvestThresholdUsd, " across ", count,
          " position(s)) -- closing all");
+
+   // Say WHICH tickets, and what the basket is worth, BEFORE closing any of
+   // them. By the time a harvested leg reaches Python it is indistinguishable
+   // from a manual close -- the reason is derived from the deal comment and
+   // comes out "MT5_close" either way -- so without this the circuit breaker
+   // counts each leg separately, and a PROFITABLE basket pushes the account
+   // toward a halt. An 80-cent leg inside a +$107.19 basket cost fifteen
+   // minutes of live execution on 2026-09-10. bugs/041.
+   //
+   // Sent before the loop, not inside it: the first close can be recorded on
+   // the Python side before the last one is even sent, and a leg that arrives
+   // while the basket is still unknown is a leg already counted.
+   string ids = "";
+   for(int k = PositionsTotal() - 1; k >= 0; k--)
+   {
+      ulong kt = PositionGetTicket(k);
+      if(kt == 0) continue;
+      if(!PositionSelectByTicket(kt)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if(ids != "") ids += ",";
+      ids += (string)kt;
+   }
+   if(ids != "")
+      SendJson("{\"type\":\"basket_closed\",\"basket_id\":\"gh-" +
+               (string)TimeCurrent() + "-" + (string)count + "\",\"net\":" +
+               DoubleToString(total, 2) + ",\"tickets\":[" + ids + "]}");
 
    // Re-walked from the top: closing changes PositionsTotal() and every
    // index above the one just closed, so the sum above cannot be reused as

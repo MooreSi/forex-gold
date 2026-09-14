@@ -77,6 +77,30 @@ async def _group_floating_totals(
     return live, totals
 
 
+def _register_basket(basket_id: str, total: float, live_trades: list[dict]) -> None:
+    """Tell the circuit breaker these closes are ONE action worth `total`.
+
+    Both checks here close several positions on a combined figure -- the same
+    shape as the EA's Global Harvest -- so the breaker must score the basket
+    once on its net rather than counting each leg. A losing leg inside a
+    winning basket used to push the account toward a halt (bugs/041).
+
+    BEFORE the closes, deliberately: a leg that closes and records while the
+    basket is still unknown is a leg that has already been counted.
+
+    Never raises. Failing to register costs the old behaviour for one basket;
+    failing to CLOSE costs the position the threshold just fired on.
+    """
+    try:
+        from backend.src.services.risk import basket_breaker
+        basket_breaker.register(
+            basket_id, float(total),
+            [t.get("mt5_ticket") for t in live_trades],
+        )
+    except Exception as e:                        # noqa: BLE001
+        log.warning("[Basket] could not register %s: %s", basket_id, e)
+
+
 async def check_equity_protect(
     open_trades: list[dict], bridge: Any, close_trade_fn: Callable[[str, str], Awaitable[Any]],
 ) -> None:
@@ -101,6 +125,7 @@ async def check_equity_protect(
             "[EquityProtect] %s / %s floating $%.2f <= -$%.2f -- closing %d position(s)",
             tg_source, tpl_name, total, threshold, len(live_trades),
         )
+        _register_basket(f"ep-{tg_source}-{strategy}", total, live_trades)
         for t in live_trades:
             try:
                 await close_trade_fn(t["trade_id"], "equity_protect")
@@ -134,6 +159,7 @@ async def check_basket_harvest(
             "[BasketHarvest] %s / %s floating $%.2f >= $%.2f -- closing %d position(s)",
             tg_source, tpl_name, total, threshold, len(live_trades),
         )
+        _register_basket(f"bh-{tg_source}-{strategy}", total, live_trades)
         for t in live_trades:
             try:
                 await close_trade_fn(t["trade_id"], "basket_harvest")

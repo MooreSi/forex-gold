@@ -71,8 +71,8 @@ The working method:
    safe default is chosen and the system is built to run on it.
 3. **Make sure it runs** — every provisional default is one the app works under
    today (green suite, boots, safe on demo).
-4. **Hand the queue over** — the owner's brother (who holds the trading and
-   business calls) reviews [simon-handover/](simon-handover/) in one pass and confirms or
+4. **Hand the queue over** — the owner (who holds the trading and business
+   calls) reviews [simon-handover/](simon-handover/) in one pass and confirms or
    overrides each. An answered question is annotated, never deleted.
 
 A provisional default is never a silent one: each file in `simon-handover/` records

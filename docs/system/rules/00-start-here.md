@@ -59,9 +59,9 @@ Asking costs one message. The alternative has cost real money here before.
 
 ## Questions you cannot answer go in `docs/simon-handover/`
 
-The person running the sessions (Darren) is refactoring this for his brother **Simon**, who holds
-the live account, the credentials and the licence, and who makes every trading, risk and money
-decision. **Darren usually cannot answer those questions — Simon does.**
+**Simon** owns this system. He holds the live account, the credentials and the licence, and he
+makes every trading, risk and money decision. **An agent cannot answer those questions — Simon
+does.**
 
 So when you hit a decision that isn't yours to make from the code, the rules or a safe default —
 especially anything about trading policy, risk numbers, money-path behaviour or licensing — **do not

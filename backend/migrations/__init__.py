@@ -1,6 +1,6 @@
 """Database schema: base DDL, the numbered migration registry, and backfills.
 
-Moved out of backend/src/db/ (2026-08-11, Darren's call) so schema
+Moved out of backend/src/db/ (2026-08-11, the developer's call) so schema
 *evolution* lives apart from the runtime data-access layer:
 
 - schema_sql.py  — the base CREATE TABLE DDL. Deliberately WITHOUT the

@@ -10,7 +10,7 @@ place a trade, touch MT5, or change the backend. Break anything you like.
 hunch. Test the idea in this folder against the recorded data. If a test
 shows genuinely positive results — across different days, not just one lucky
 afternoon — *then* ask the AI agent to promote it into the main system
-(properly versioned, with Simon/Darren sign-off on anything money-related).
+(properly versioned, with Simon sign-off on anything money-related).
 
 ## How to use it
 

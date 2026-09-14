@@ -12,6 +12,9 @@ from nicegui import ui
 
 from backend.src.controllers import sync_controller as sync_ctl
 
+from frontend.components.render_cache import (SectionCache,
+                                              diff_rendering_enabled)
+
 from ._sections import _render_history, _render_ml
 from ._shared import _bo_type_badge, _dir_color, _fmt_ts, _pnl_color, _pnl_str
 
@@ -32,6 +35,12 @@ _STARTING_BALANCE = 1000.0
 
 def render() -> None:
     eng = engines_controller.get_engine("breakout")
+
+    # Skip rebuilding a container whose data has not moved (bugs/030). Off
+    # unless the owner has turned it on; see frontend/components/render_cache.
+    # One cache per render, so two browser tabs on this panel track their own
+    # containers rather than one telling the other it is already drawn.
+    diff = SectionCache(enabled=diff_rendering_enabled())
 
     # ── Header ────────────────────────────────────────────────────────────────
     with ui.row().classes(
@@ -66,6 +75,8 @@ def render() -> None:
         pnl_pct   = round(pnl_total / _STARTING_BALANCE * 100, 1)
         max_dd    = await engines_controller.breakout.max_drawdown()
         stats     = await engines_controller.breakout.stats()
+        if not diff.changed("balance", (balance, pnl_total, pnl_pct, max_dd, stats)):
+            return
         balance_row.clear()
         with balance_row:
             bal_color = "text-green-400" if balance >= _STARTING_BALANCE else "text-red-400"
@@ -121,6 +132,8 @@ def render() -> None:
         stats   = await engines_controller.breakout.stats()
         balance = await engines_controller.breakout.virtual_balance()
         pnl_tot = round(balance - _STARTING_BALANCE, 2)
+        if not diff.changed("stats", (stats, balance, pnl_tot)):
+            return
         stats_row.clear()
         with stats_row:
             for label, value, color, tip in [
@@ -165,6 +178,8 @@ def render() -> None:
 
             async def _render_active():
                 sigs = await engines_controller.breakout.open_signals()
+                if not diff.changed("active", sigs):
+                    return
                 active_area.clear()
                 with active_area:
                     if not sigs:
@@ -248,7 +263,7 @@ def render() -> None:
             )
             history_area = ui.column().classes("w-full")
 
-            asyncio.create_task(_render_history(history_area=history_area))
+            asyncio.create_task(_render_history(history_area=history_area, diff=diff))
 
         # ── Right: analytics + log ────────────────────────────────────────────
         with ui.column().classes("w-96 shrink-0 border-l border-gray-700 p-4 gap-5"):
@@ -264,6 +279,8 @@ def render() -> None:
                 by_adx     = await engines_controller.breakout.perf_by_adx_band()
                 by_session = await engines_controller.breakout.perf_by_session()
                 by_bias    = await engines_controller.breakout.perf_by_bias()
+                if not diff.changed("analytics", (by_type, by_adx, by_session, by_bias)):
+                    return
                 analytics_area.clear()
                 with analytics_area:
 
@@ -310,6 +327,8 @@ def render() -> None:
 
             async def _render_ap():
                 all_p = await engines_controller.breakout.adaptive_params()
+                if not diff.changed("params", all_p):
+                    return
                 ap_area.clear()
                 with ap_area:
                     with ui.element("table").classes("w-full text-xs"):
@@ -355,7 +374,7 @@ def render() -> None:
             )
             ml_area = ui.column().classes("w-full gap-2")
 
-            asyncio.create_task(_render_ml(ml_area=ml_area))
+            asyncio.create_task(_render_ml(ml_area=ml_area, diff=diff))
 
             ui.separator().classes("border-gray-700 my-1")
 
@@ -369,6 +388,8 @@ def render() -> None:
 
             async def _render_log():
                 entries = await engines_controller.breakout.analysis_log(limit=40)
+                if not diff.changed("log", entries):
+                    return
                 log_area.clear()
                 with log_area:
                     if not entries:
@@ -426,10 +447,10 @@ def render() -> None:
             await _render_balance()
             await _render_stats()
             await _render_active()
-            await _render_history(history_area=history_area)
+            await _render_history(history_area=history_area, diff=diff)
             await _render_analytics()
             await _render_ap()
-            await _render_ml(ml_area=ml_area)
+            await _render_ml(ml_area=ml_area, diff=diff)
             await _render_log()
 
             # Update live/virtual execution label in header
@@ -466,6 +487,11 @@ def render() -> None:
                         f"Last: {_fmt_ts(eng.last_cycle_at)}  {eng.status_detail or ''}"
                     )
         except Exception as e:
+            # One try/except covers all eight renders, so a throw part-way
+            # leaves an unknown number of containers half-built while the
+            # cache believes they are drawn. Forgetting every section is the
+            # only honest answer: the next pass rebuilds the lot.
+            diff.forget_all()
             _log.debug("[breakout panel] status line refresh failed: %s", e)
 
     # ── Control handlers ──────────────────────────────────────────────────────

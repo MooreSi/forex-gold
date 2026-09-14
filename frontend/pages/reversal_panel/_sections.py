@@ -23,10 +23,20 @@ from ._shared import (
     _pnl_color,
     _pnl_str,
 )
-async def _render_history_section(history_container) -> None:
+async def _render_history_section(history_container, diff=None) -> None:
+    """`diff` is a `SectionCache`, or None to rebuild unconditionally.
+
+    The clear moved in here from the caller along with the guard, because the
+    two have to agree: clearing outside and skipping inside would empty the
+    table and leave it empty. Pure over `closed` -- every cell comes off a row
+    and the formatting helpers are pure. bugs/030.
+    """
     try:
         all_sigs = await engines_controller.reversal.all_signals(limit=80)
         closed   = [s for s in all_sigs if s.get("status") == "closed"][:60]
+        if diff is not None and not diff.changed("history", closed):
+            return
+        history_container.clear()
 
         if closed:
             with history_container:
@@ -124,12 +134,24 @@ async def _render_history_section(history_container) -> None:
             with history_container:
                 ui.label("No closed signals yet").classes("text-xs text-gray-600 italic")
     except Exception as e:
+        # The digest is stored before the render, so a throw part-way through
+        # would leave this container half-built and the cache calling it done.
+        if diff is not None:
+            diff.forget("history")
         _log.debug("[reversal panel] signal history table refresh failed: %s", e)
 
-async def _render_ml_section(ml_container) -> None:
+async def _render_ml_section(ml_container, diff=None) -> None:
+    """`diff` is a `SectionCache`, or None to rebuild unconditionally.
+
+    Pure over `(ml_sum, mets)`. The clear moved in here with the guard, for
+    the same reason as the history section above. bugs/030.
+    """
     try:
         ml_sum = await engines_controller.reversal.ml_summary()
         mets   = await engines_controller.reversal.ml_metrics()
+        if diff is not None and not diff.changed("ml", (ml_sum, mets)):
+            return
+        ml_container.clear()
         with ml_container:
             with ui.row().classes("w-full gap-2 flex-wrap"):
                 ui.badge(
@@ -273,6 +295,10 @@ async def _render_ml_section(ml_container) -> None:
             feat_txt = ", ".join(ml_sum.get("features", []))
             ui.label(feat_txt).classes("text-xs text-gray-600 leading-relaxed")
     except Exception as e:
+        # The digest is stored before the render, so a throw part-way through
+        # would leave this container half-built and the cache calling it done.
+        if diff is not None:
+            diff.forget("ml")
         _log.debug("[reversal panel] ML status section refresh failed: %s", e)
 
 

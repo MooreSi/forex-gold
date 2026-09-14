@@ -18,9 +18,17 @@ from ._shared import (
     _pnl_color,
     _pnl_str,
 )
-async def _render_history(*, history_area) -> None:
+async def _render_history(*, history_area, diff=None) -> None:
+    """`diff` is a `SectionCache`, or None to rebuild unconditionally.
+
+    The render below is a pure function of `closed` -- every value it draws
+    comes off a row, and `_fmt_ts` / `_pnl_*` are pure. That is what makes it
+    safe to skip. bugs/030.
+    """
     sigs   = await engines_controller.breakout.all_signals(limit=80)
     closed = [s for s in sigs if s.get("status") not in ("pending", "triggered")]
+    if diff is not None and not diff.changed("history", closed):
+        return
     history_area.clear()
     with history_area:
         if not closed:
@@ -126,9 +134,16 @@ async def _render_history(*, history_area) -> None:
                                     lbl.tooltip(live_reason)
 
 
-async def _render_ml(*, ml_area) -> None:
+async def _render_ml(*, ml_area, diff=None) -> None:
+    """`diff` is a `SectionCache`, or None to rebuild unconditionally.
+
+    Pure over `(s, mets)`: the scorecard chips and the learning trend are both
+    drawn from those two dicts and nothing else. bugs/030.
+    """
     s    = await engines_controller.breakout.ml_summary()
     mets = await engines_controller.breakout.ml_metrics()
+    if diff is not None and not diff.changed("ml", (s, mets)):
+        return
     ml_area.clear()
     with ml_area:
 

@@ -24,6 +24,9 @@ from typing import Callable
 from nicegui import ui
 
 from backend.src.controllers import engines_controller as engines_controller
+from backend.src.controllers import settings_controller as settings_ctl
+from frontend.components.render_cache import (DIFF_RENDERING_KEY,
+                                              diff_rendering_enabled)
 
 
 import logging
@@ -33,18 +36,47 @@ _log = logging.getLogger(__name__)
 _STARTING_BALANCE = 1000.0
 
 
+def _render_diff_toggle() -> None:
+    """The switch for bugs/030's panel diffing, on the page it changes.
+
+    Here rather than in Settings deliberately. bugs/030 asks for this to be
+    turned on with the owner watching the panel, because the failure mode is a
+    stale number on a trading screen rather than an error — so the switch sits
+    above the two panels it affects, and the panels pick it up on their next
+    build rather than live, which is what the reload note says.
+    """
+    on = diff_rendering_enabled()
+
+    def _toggle(e) -> None:
+        settings_ctl.set_app_config(DIFF_RENDERING_KEY, "1" if e.value else "0")
+        ui.notify(
+            "Panel diffing on — reload the page to apply. Watch the numbers: "
+            "if any stop updating, switch it off." if e.value
+            else "Panel diffing off — reload the page to apply.",
+            type="info",
+        )
+
+    with ui.row().classes("w-full items-center gap-2 px-4 py-1 bg-gray-900"):
+        ui.switch("Only redraw panels when their data changes", value=on,
+                  on_change=_toggle).props("dense").classes("text-xs")
+        ui.label(
+            "Reduces this page's share of the app's event-loop stalls "
+            "(bugs/030). Takes effect on reload."
+        ).classes("text-xs text-gray-600 italic")
+
+
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render(get_engine: Callable) -> None:
     """Entry point — renders the Breakout and Reversal Engine tabs.
 
-    Bounce was removed 2026-09-02 on the owner's instruction. Its service is
-    still present and excluded from engines_controller.start_stopped_engines --
-    which stops the power/mode toggle starting it, and does NOT stop app.py's
-    own auto-start, which has been running it headless ever since. bugs/046.
+    Bounce's panel went 2026-09-02, its engine was stopped 2026-09-13 and its
+    code was deleted 2026-09-14. bugs/046.
     """
     from frontend.pages import breakout_panel
     from frontend.pages import reversal_panel
+
+    _render_diff_toggle()
 
     with ui.tabs().classes("bg-gray-900 border-b border-gray-700") as sg_tabs:
         t_breakout = ui.tab("Breakout", icon="trending_up")

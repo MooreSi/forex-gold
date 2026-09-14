@@ -27,6 +27,9 @@ _log = logging.getLogger(__name__)
 
 from backend.src.controllers import sync_controller as sync_ctl
 
+from frontend.components.render_cache import (SectionCache,
+                                              diff_rendering_enabled)
+
 from ._capabilities import render_capabilities_subcard
 from ._sections import (_render_history_section, _render_ml_section,
                         _render_research_section)
@@ -292,6 +295,12 @@ def render() -> None:
 
     # ── Refresh logic ─────────────────────────────────────────────────────────
 
+    # Skip rebuilding a container whose data has not moved (bugs/030). Off
+    # unless the owner has turned it on; see frontend/components/render_cache.
+    # One cache per render, so two browser tabs on this panel track their own
+    # containers rather than one telling the other it is already drawn.
+    diff = SectionCache(enabled=diff_rendering_enabled())
+
     async def _refresh_all():
         # Live execution label (reflects current risk setting, not render-time
         # snapshot) — same bullet-text style as Bounce/Breakout, for a
@@ -389,159 +398,168 @@ def render() -> None:
             _log.debug("[reversal panel] signal stat cards refresh failed: %s", e)
 
         # Active levels from engine cache
-        levels_container.clear()
         try:
+            # The engine's cache, not the database: `active_levels()` was
+            # fetched here too and its result never read -- a worker-thread
+            # round trip on every refresh, on the loop this diffing exists to
+            # unblock. Removed 2026-09-14; nothing rendered from it.
             cached_levels = eng._cached.get("levels", []) if eng else []
-            db_levels     = await engines_controller.reversal.active_levels()
             display_lvls  = cached_levels[:6] if cached_levels else []
+            if diff.changed("levels", display_lvls):
+                levels_container.clear()
 
-            if display_lvls:
-                with levels_container:
-                    for lvl in display_lvls:
-                        badge_text, badge_color = _level_type_badge(lvl.get("type", ""))
-                        with ui.row().classes("w-full items-center gap-2 py-0.5"):
-                            ui.badge(badge_text, color=badge_color).classes("text-xs font-mono")
-                            ui.label(f"{lvl.get('price', 0):.2f}").classes(
-                                f"text-sm font-mono font-bold {_dir_color(lvl.get('direction', 'BUY'))}"
-                            )
-                            ui.label(f"Score:{lvl.get('score', 0):.2f}").classes("text-xs text-gray-500")
-                            ui.label(f"{lvl.get('distance_pts', 0):.1f}pts away").classes("text-xs text-gray-600")
-            else:
-                with levels_container:
-                    ui.label("No candidate levels — engine not running or no price data").classes(
-                        "text-xs text-gray-600 italic"
-                    )
+                if display_lvls:
+                    with levels_container:
+                        for lvl in display_lvls:
+                            badge_text, badge_color = _level_type_badge(lvl.get("type", ""))
+                            with ui.row().classes("w-full items-center gap-2 py-0.5"):
+                                ui.badge(badge_text, color=badge_color).classes("text-xs font-mono")
+                                ui.label(f"{lvl.get('price', 0):.2f}").classes(
+                                    f"text-sm font-mono font-bold {_dir_color(lvl.get('direction', 'BUY'))}"
+                                )
+                                ui.label(f"Score:{lvl.get('score', 0):.2f}").classes("text-xs text-gray-500")
+                                ui.label(f"{lvl.get('distance_pts', 0):.1f}pts away").classes("text-xs text-gray-600")
+                else:
+                    with levels_container:
+                        ui.label("No candidate levels — engine not running or no price data").classes(
+                            "text-xs text-gray-600 italic"
+                        )
         except Exception as e:
+            diff.forget("levels")
             _log.debug("[reversal panel] candidate levels list refresh failed: %s", e)
 
         # Open signals
-        open_container.clear()
         try:
             open_sigs = await engines_controller.reversal.open_signals()
-            if open_sigs:
-                with open_container:
-                    for sig in open_sigs:
-                        direction = sig.get("direction", "")
-                        border    = "border-green-700" if direction == "BUY" else "border-red-700"
-                        badge_text, badge_color = _level_type_badge(sig.get("level_type", ""))
+            if diff.changed("open", open_sigs):
+                open_container.clear()
+                if open_sigs:
+                    with open_container:
+                        for sig in open_sigs:
+                            direction = sig.get("direction", "")
+                            border    = "border-green-700" if direction == "BUY" else "border-red-700"
+                            badge_text, badge_color = _level_type_badge(sig.get("level_type", ""))
 
-                        with ui.card().classes(f"w-full bg-gray-900 border-l-2 {border} p-2"):
-                            with ui.row().classes("items-center gap-2 mb-1"):
-                                ui.badge(direction, color="green" if direction == "BUY" else "red"
-                                         ).classes("text-xs")
-                                ui.badge(badge_text, color=badge_color).classes("text-xs")
-                                ui.label(sig.get("signal_ref", "")).classes(
-                                    "text-xs text-gray-600 font-mono"
-                                )
-                                status = sig.get("status", "")
-                                ui.badge(status, color="yellow" if status == "pending" else "blue"
-                                         ).classes("text-xs ml-auto")
-                                _exec_badge = _live_exec_badge(sig.get("live_exec_status") or "")
-                                if _exec_badge:
-                                    _bt, _bc, _tip = _exec_badge
-                                    ui.badge(_bt, color=_bc).classes("text-xs").tooltip(_tip)
+                            with ui.card().classes(f"w-full bg-gray-900 border-l-2 {border} p-2"):
+                                with ui.row().classes("items-center gap-2 mb-1"):
+                                    ui.badge(direction, color="green" if direction == "BUY" else "red"
+                                             ).classes("text-xs")
+                                    ui.badge(badge_text, color=badge_color).classes("text-xs")
+                                    ui.label(sig.get("signal_ref", "")).classes(
+                                        "text-xs text-gray-600 font-mono"
+                                    )
+                                    status = sig.get("status", "")
+                                    ui.badge(status, color="yellow" if status == "pending" else "blue"
+                                             ).classes("text-xs ml-auto")
+                                    _exec_badge = _live_exec_badge(sig.get("live_exec_status") or "")
+                                    if _exec_badge:
+                                        _bt, _bc, _tip = _exec_badge
+                                        ui.badge(_bt, color=_bc).classes("text-xs").tooltip(_tip)
 
-                            with ui.row().classes("text-xs text-gray-400 gap-4 flex-wrap"):
-                                ui.label(f"Entry: {sig.get('entry_low', 0):.2f}–{sig.get('entry_high', 0):.2f}")
-                                ui.label(f"SL: {sig.get('stop_loss', 0):.2f}")
-                                ui.label(f"TP1: {sig.get('tp1', 0):.2f}")
-                                ui.label(f"TP7: {sig.get('tp7') or sig.get('tp6', '—')}")
-                                ui.label(f"Level: {sig.get('level_price', 0):.2f}")
-                                ui.label(f"Score: {sig.get('level_score', 0):.2f}")
-            else:
-                with open_container:
-                    ui.label("No open signals").classes("text-xs text-gray-600 italic")
+                                with ui.row().classes("text-xs text-gray-400 gap-4 flex-wrap"):
+                                    ui.label(f"Entry: {sig.get('entry_low', 0):.2f}–{sig.get('entry_high', 0):.2f}")
+                                    ui.label(f"SL: {sig.get('stop_loss', 0):.2f}")
+                                    ui.label(f"TP1: {sig.get('tp1', 0):.2f}")
+                                    ui.label(f"TP7: {sig.get('tp7') or sig.get('tp6', '—')}")
+                                    ui.label(f"Level: {sig.get('level_price', 0):.2f}")
+                                    ui.label(f"Score: {sig.get('level_score', 0):.2f}")
+                else:
+                    with open_container:
+                        ui.label("No open signals").classes("text-xs text-gray-600 italic")
         except Exception as e:
+            diff.forget("open")
             _log.debug("[reversal panel] open signals list refresh failed: %s", e)
 
         # Signal history — same column set/shape as Bounce (test_panel.py) and
         # Breakout (breakout_panel.py)'s history tables, adapted to Reversal Engine's
         # own fields (level_type/level_price instead of pattern/broken_level,
         # plus the REF correlation lead/lag column those two don't have).
-        history_container.clear()
-        await _render_history_section(history_container)
+        await _render_history_section(history_container, diff=diff)
 
         # ML status — scorecard chips + "Is it learning?" trend, same shape as
         # Bounce/Breakout's ML Learning panels (ported from breakout_panel.py).
-        ml_container.clear()
-        await _render_ml_section(ml_container)
+        await _render_ml_section(ml_container, diff=diff)
 
         # Performance Analytics — By Session / By Bias / By Level Type, same
         # shape as Bounce/Breakout's Performance Analytics card.
-        analytics_container.clear()
         try:
             by_session = await engines_controller.reversal.perf_by_session()
             by_bias    = await engines_controller.reversal.perf_by_bias()
             by_level   = await engines_controller.reversal.perf_by_level_type()
-            with analytics_container:
-                def _perf_table(title: str, rows: list[dict], key_col: str):
-                    if not rows:
-                        return
-                    ui.label(title).classes(
-                        "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1"
-                    )
-                    with ui.element("table").classes("w-full text-xs mt-1"):
-                        with ui.element("thead"):
-                            with ui.element("tr").classes("text-gray-500 border-b border-gray-700"):
-                                for h in [key_col.replace("_", " ").title(), "W", "L", "Avg $", "Total $"]:
-                                    ui.element("th").classes("text-left px-1 py-0.5").text = h
-                        with ui.element("tbody"):
-                            for r in rows:
-                                total_pnl = float(r.get("total_pnl") or 0)
-                                avg_pnl   = float(r.get("avg_pnl")   or 0)
-                                with ui.element("tr").classes("border-b border-gray-800"):
-                                    for val, cls in [
-                                        (str(r.get(key_col) or "?"), "text-gray-300"),
-                                        (str(r.get("wins",   0)),    "text-green-400"),
-                                        (str(r.get("losses", 0)),    "text-red-400"),
-                                        (f"${avg_pnl:+.2f}",         _pnl_color(avg_pnl)),
-                                        (f"${total_pnl:+.2f}",       _pnl_color(total_pnl) + " font-semibold"),
-                                    ]:
-                                        with ui.element("td").classes(f"px-1 py-0.5 {cls}"):
-                                            ui.label(val)
+            if diff.changed("analytics", (by_session, by_bias, by_level)):
+                analytics_container.clear()
+                with analytics_container:
+                    def _perf_table(title: str, rows: list[dict], key_col: str):
+                        if not rows:
+                            return
+                        ui.label(title).classes(
+                            "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1"
+                        )
+                        with ui.element("table").classes("w-full text-xs mt-1"):
+                            with ui.element("thead"):
+                                with ui.element("tr").classes("text-gray-500 border-b border-gray-700"):
+                                    for h in [key_col.replace("_", " ").title(), "W", "L", "Avg $", "Total $"]:
+                                        ui.element("th").classes("text-left px-1 py-0.5").text = h
+                            with ui.element("tbody"):
+                                for r in rows:
+                                    total_pnl = float(r.get("total_pnl") or 0)
+                                    avg_pnl   = float(r.get("avg_pnl")   or 0)
+                                    with ui.element("tr").classes("border-b border-gray-800"):
+                                        for val, cls in [
+                                            (str(r.get(key_col) or "?"), "text-gray-300"),
+                                            (str(r.get("wins",   0)),    "text-green-400"),
+                                            (str(r.get("losses", 0)),    "text-red-400"),
+                                            (f"${avg_pnl:+.2f}",         _pnl_color(avg_pnl)),
+                                            (f"${total_pnl:+.2f}",       _pnl_color(total_pnl) + " font-semibold"),
+                                        ]:
+                                            with ui.element("td").classes(f"px-1 py-0.5 {cls}"):
+                                                ui.label(val)
 
-                _perf_table("By Session",    by_session, "session")
-                _perf_table("By HTF Bias",   by_bias,    "htf_bias")
-                _perf_table("By Level Type", by_level,   "level_type")
-                if not (by_session or by_bias or by_level):
-                    ui.label("No closed signals yet").classes("text-xs text-gray-600 italic")
+                    _perf_table("By Session",    by_session, "session")
+                    _perf_table("By HTF Bias",   by_bias,    "htf_bias")
+                    _perf_table("By Level Type", by_level,   "level_type")
+                    if not (by_session or by_bias or by_level):
+                        ui.label("No closed signals yet").classes("text-xs text-gray-600 italic")
         except Exception as e:
+            diff.forget("analytics")
             _log.debug("[reversal panel] performance breakdown tables refresh failed: %s", e)
 
         # Cycle log
-        log_container.clear()
         try:
             log_entries = await engines_controller.reversal.analysis_log(limit=30)
-            with log_container:
-                for entry in log_entries:
-                    is_signal = entry.get("result") == "signal"
-                    bg = "bg-gray-700" if is_signal else "bg-gray-900"
-                    with ui.card().classes(f"w-full {bg} p-2 rounded mb-1"):
-                        with ui.row().classes("items-center gap-2 mb-0.5"):
-                            ui.label(_fmt_ts(entry.get("ts"))).classes(
-                                "text-xs font-mono text-gray-500"
-                            )
-                            ui.label(f"{entry.get('session', '?')}|{entry.get('htf_bias', '?')}").classes(
-                                "text-xs text-gray-500"
-                            )
-                            if is_signal:
-                                ui.badge("SIGNAL", color="green").classes("text-xs")
-                            res = entry.get("result", "")
-                            if res and res != "signal":
-                                ui.label(res).classes("text-xs text-gray-600 italic")
+            if diff.changed("log", log_entries):
+                log_container.clear()
+                with log_container:
+                    for entry in log_entries:
+                        is_signal = entry.get("result") == "signal"
+                        bg = "bg-gray-700" if is_signal else "bg-gray-900"
+                        with ui.card().classes(f"w-full {bg} p-2 rounded mb-1"):
+                            with ui.row().classes("items-center gap-2 mb-0.5"):
+                                ui.label(_fmt_ts(entry.get("ts"))).classes(
+                                    "text-xs font-mono text-gray-500"
+                                )
+                                ui.label(f"{entry.get('session', '?')}|{entry.get('htf_bias', '?')}").classes(
+                                    "text-xs text-gray-500"
+                                )
+                                if is_signal:
+                                    ui.badge("SIGNAL", color="green").classes("text-xs")
+                                res = entry.get("result", "")
+                                if res and res != "signal":
+                                    ui.label(res).classes("text-xs text-gray-600 italic")
 
-                        lvls = entry.get("levels", [])
-                        if lvls:
-                            lvl_txt = "  ".join(
-                                f"{l.get('t', '?')}@{l.get('p', 0):.0f}({l.get('s', 0):.2f})"
-                                for l in lvls[:3]
-                            )
-                            ui.label(lvl_txt).classes("text-xs text-gray-500 font-mono")
+                            lvls = entry.get("levels", [])
+                            if lvls:
+                                lvl_txt = "  ".join(
+                                    f"{l.get('t', '?')}@{l.get('p', 0):.0f}({l.get('s', 0):.2f})"
+                                    for l in lvls[:3]
+                                )
+                                ui.label(lvl_txt).classes("text-xs text-gray-500 font-mono")
 
-                        reason = entry.get("reason")
-                        if reason:
-                            ui.label(reason).classes("text-xs text-gray-600 italic")
+                            reason = entry.get("reason")
+                            if reason:
+                                ui.label(reason).classes("text-xs text-gray-600 italic")
         except Exception as e:
+            diff.forget("log")
             _log.debug("[reversal panel] cycle analysis log refresh failed: %s", e)
 
     def _safe_refresh():

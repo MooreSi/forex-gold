@@ -50,3 +50,6 @@ FOREX Trader.app/
 # trusts. It lives offline, outside this repo.
 ca_key.pem
 **/ca_key.pem
+
+# Local MT5 EA parameter presets -- machine-specific, not source
+mql5/*.set

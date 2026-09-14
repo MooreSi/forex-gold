@@ -123,6 +123,27 @@ here rather than there:
   sit beside the other two new gates so all three are evaluated before any
   of them returns -- otherwise a challenger gets recorded as "would take" on
   a signal whose later gates were never run.
+- **`ai_tuner.auto_tune` logs every pass, including the ones that change
+  nothing** (2026-09-14). It used to log only an APPLIED setting, which made
+  four different outcomes identical silence: the model weighed the evidence
+  and declined, the provider was down, the response could not be parsed, and
+  `sanitise` dropped the whole proposal. On a loop that runs every fifteen
+  minutes against an engine with `re_live_execution` on, that is the
+  difference between a working tuner and a dead one. `_ai_tune_loop` still
+  discards `result["error"]` -- the log line is inside `auto_tune`, where the
+  rationale actually is, which also keeps the service under its ceiling.
+- **Until then, the only way to prove the tuner had run was the httpx log.**
+  `gather_evidence` leaves a signature immediately before its provider POST:
+  `GET /candles/XAUUSD?timeframe=H1&count=60`, then `GET /ticks?from=…&to=…`
+  over a 900-second window, then `GET /tick/XAUUSD`. Matching those against
+  engine-start + n*900s is how the 2026-09-14 session confirmed two live
+  passes that had written nothing and said nothing. Worth keeping: the same
+  trick identifies any loop that calls an AI provider.
+- **Neither `reversal_ai_apply` nor the Save Capabilities button logs
+  anything**, so a switch that changed cannot be attributed to the AI or to
+  the owner after the fact. Only the absence of an `[RE-AI]` line rules the
+  tuner out. Not fixed -- recorded because it cost a session's worth of
+  inference to establish once.
 
 ## The reporting epoch (2026-09-11)
 

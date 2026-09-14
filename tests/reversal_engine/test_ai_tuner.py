@@ -208,3 +208,51 @@ class TestTheEvidenceItIsGiven:
         assert "median reach" in prompt
         assert "straddle zero" in prompt
         assert "DIAGNOSIS" in prompt
+
+
+class TestItSaysWhatItDecided:
+    """A pass that changes nothing must still leave a trace.
+
+    The fifteen-minute loop runs against an engine with live execution on,
+    and until this existed only an APPLIED setting was logged. A model that
+    deliberately proposed nothing, a response whose JSON could not be read,
+    and a proposal that `sanitise` dropped in full were the same silence --
+    so there was no way to tell a working tuner from a dead provider. See
+    the session of 2026-09-14, where two confirmed passes reached DeepSeek
+    and returned 200 and left nothing in the log at all.
+    """
+
+    def test_a_pass_that_changes_nothing_logs_its_reasoning(self, monkeypatch, caplog):
+        monkeypatch.setattr(ai_tuner, "_write_settings", lambda d: None)
+
+        async def _fake(bridge, rs=None):
+            return {"settings": {}, "evidence": {},
+                    "rationale": "the fit and the sweep disagree"}
+        monkeypatch.setattr(ai_tuner, "recommend", _fake)
+
+        with caplog.at_level("INFO", logger=ai_tuner.log.name):
+            asyncio.run(ai_tuner.auto_tune(bridge=None,
+                                           rs={"re_ai_tuning_enabled": 1}))
+
+        assert any("the fit and the sweep disagree" in r.getMessage()
+                   for r in caplog.records), \
+            "a no-change pass left no record of why"
+
+    def test_a_provider_failure_is_not_logged_as_no_change_needed(
+            self, monkeypatch, caplog):
+        """The distinction that matters: a broken provider must not read
+        like a model that considered the evidence and declined."""
+        monkeypatch.setattr(ai_tuner, "_write_settings", lambda d: None)
+
+        async def _fake(bridge, rs=None):
+            return {"settings": {}, "rationale": "", "evidence": {},
+                    "error": "could not read JSON from the response"}
+        monkeypatch.setattr(ai_tuner, "recommend", _fake)
+
+        with caplog.at_level("INFO", logger=ai_tuner.log.name):
+            asyncio.run(ai_tuner.auto_tune(bridge=None,
+                                           rs={"re_ai_tuning_enabled": 1}))
+
+        assert any("could not read JSON from the response" in r.getMessage()
+                   for r in caplog.records), \
+            "a provider failure was indistinguishable from a quiet pass"

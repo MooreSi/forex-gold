@@ -325,8 +325,19 @@ async def auto_tune(bridge, rs: Optional[dict] = None) -> dict:
 
     settings = sanitise(rec.get("settings"))
     if not settings:
+        # A pass that changes nothing still has to say so. Until this line
+        # existed only an APPLIED setting was logged, which made a model
+        # that weighed the evidence and declined look exactly like a dead
+        # provider or an unparseable response -- on a loop running every
+        # fifteen minutes against live execution. The error is reported
+        # separately from the rationale because those are the two cases
+        # that must never be confused.
+        error = rec.get("error", "")
+        log.info("[RE-AI] auto-tune changed nothing%s -- %s",
+                 f" (error: {error})" if error else "",
+                 (rec.get("rationale") or "no rationale given")[:200])
         return {"applied": {}, "rationale": rec.get("rationale", ""),
-                "error": rec.get("error", "")}
+                "error": error}
 
     _write_settings(settings)
     log.info("[RE-AI] auto-tune applied %s -- %s", settings,

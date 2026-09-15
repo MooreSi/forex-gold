@@ -49,6 +49,12 @@ import pytest
 #                         reversal_panel above.
 PAGE_LANDMARKS = {
     "ai_trade_analysis": ("AI Trade Analysis", "XAUUSD \u00b7 Per-channel signal quality"),
+    # Added 2026-09-15 BEFORE splitting backtest.py into a package (docs/todo/003
+    # phase 2), for the reason in this file's docstring: a split needs something
+    # that can tell a working page from a broken one, and this page had nothing.
+    # Both strings render unconditionally -- "Strategy Comparison" and "Signal
+    # Quality Filter" are only built after a run, so neither can serve here.
+    "backtest":          ("Simulate all loaded XAUUSD strategies", "Run Backtest"),
     "breakout_panel":    ("Engine Parameters", "M5 candle gate + 3s velocity monitor"),
     "chart":             ("RSI 14", "FVG:"),
     # Learn From Pro Signals was removed 2026-09-11 (no longer used); the

@@ -154,8 +154,20 @@ class TestThePickerListsTemplates:
     that cannot be entered without a running server."""
 
     def _code(self) -> str:
-        src = (pathlib.Path(__file__).resolve().parents[2]
-               / "frontend" / "pages" / "backtest.py").read_text(encoding="utf-8")
+        """Every module of the page package, comments stripped.
+
+        Reads the whole package rather than one file: the page became
+        `pages/backtest/` on 2026-09-15 (docs/todo/003 phase 2), and a grep
+        pinned to a single module would stop seeing code the moment a section
+        moved out of it -- passing vacuously rather than going red, which for
+        the `not in` assertion below would be a silent loss of the test.
+        """
+        pkg = (pathlib.Path(__file__).resolve().parents[2]
+               / "frontend" / "pages" / "backtest")
+        assert pkg.is_dir(), f"page package is missing: {pkg}"
+        mods = sorted(pkg.glob("*.py"))
+        assert mods, f"no modules in {pkg}"
+        src = "\n".join(m.read_text(encoding="utf-8") for m in mods)
         return "\n".join(ln for ln in src.splitlines()
                          if not ln.strip().startswith("#"))
 

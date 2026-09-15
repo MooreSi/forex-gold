@@ -162,6 +162,19 @@ def render(get_engine) -> None:
                         "Also filters point-entry signals (entry_low == entry_high, no zone) and zero-SL instant orders."
                     )
 
+                split_inp = ui.number(
+                    "In-sample split (%)", value=0, min=0, max=90, step=5, format="%.0f"
+                ).classes("w-full")
+                with ui.tooltip():
+                    ui.label(
+                        "0 = off. Above 0, the signals are cut by creation time at this "
+                        "percentage and each half is run as its own account from the same "
+                        "starting balance. The headline table is unchanged; a second table "
+                        "reports the two halves. Use it when the settings being compared "
+                        "were themselves chosen by looking at this window -- the earlier "
+                        "half then measures the choosing as well as the strategy."
+                    )
+
             ui.label("EA Templates to compare").classes("text-blue-300 text-sm font-semibold mt-3 mb-1")
             strategy_checks: dict[str, ui.checkbox] = {}
             _choices = _template_choices()
@@ -508,6 +521,7 @@ def render(get_engine) -> None:
                         spread_pts          = float(spread_inp.value or 0.4),
                         lots_per_trade      = lots,
                         commission_per_lot  = comm,
+                        split_fraction      = float(split_inp.value or 0) / 100.0,
                     )
                 run_status_lbl.text = (
                     f"Done — {fstats.valid} of {fstats.total} signals valid for this candle window "

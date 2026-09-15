@@ -12,6 +12,7 @@ from typing import Optional
 from nicegui import ui
 
 from backend.src.controllers import backtest_controller as bt
+from frontend.pages.backtest._split import render_split
 
 TEMPLATE_PREFIX = "template:"
 
@@ -193,6 +194,14 @@ def _render_results(
                                 ui.label(f"{s.sharpe:.2f}")
                             with ui.element("td").classes(f"px-3 py-2 text-center {_pnl_cls(s.total_pnl)} font-bold"):
                                 ui.label(f"${s.final_balance:,.2f}")
+
+        # ── In sample vs out of sample ────────────────────────────────────────
+        # Below the headline table, never in place of it: the combined number
+        # is what every figure previously recorded in engine.py's comments
+        # refers to. Absent unless a split was asked for. See _split.py.
+        for strategy, s in stats.items():
+            if s.split is not None:
+                render_split(_strategy_label(strategy), s.split)
 
         # ── Per-strategy trade logs ───────────────────────────────────────────
         for strategy, s in stats.items():

@@ -156,6 +156,9 @@ class StrategyStats:
     # showing a real drawdown is an argument FOR the template that could not
     # be simulated at all. See template_simulator.unsupported_reason.
     unsupported_reason: str = ""
+    # In-sample / out-of-sample halves, when a split was asked for -- docs/todo/003.
+    # Forward ref: split.py imports this module, so the type cannot be imported here.
+    split: Optional["SplitStats"] = None
 
 
 # ── Signal pre-filter ─────────────────────────────────────────────────────────
@@ -579,12 +582,19 @@ def run_backtest(
     spread_pts:         float = 0.4,
     lots_per_trade:     float = 0.0,
     commission_per_lot: float = 7.0,
+    split_fraction:     float = 0.0,
+    split_min_trades:   int   = 0,    # 0 = split.MIN_TRADES_PER_SIDE
 ) -> dict[str, StrategyStats]:
     """
     Simulate every signal under every requested strategy.
     Each strategy gets an independent account; results are not cross-contaminated.
     Lot size is calculated on current account equity after every trade (not fixed).
     Commission is deducted from every trade P&L.
+
+    split_fraction > 0 additionally runs each half of the signals, split by
+    creation time, as its own account from the same starting balance -- see
+    services/backtest/split.py and docs/todo/003. Zero means no split and
+    changes nothing. The combined result stays the headline either way.
     """
     out: dict[str, StrategyStats] = {}
 
@@ -601,6 +611,18 @@ def run_backtest(
 
         stats = _compute_stats(strategy, trades, starting_balance)
         stats.unsupported_reason = _template_refusal(strategy, tick_mode=False)
+        if split_fraction > 0.0:
+            # Lazy: split.py imports this module's dataclasses at load time.
+            from backend.src.services.backtest.split import (
+                MIN_TRADES_PER_SIDE, split_stats)
+            stats.split = split_stats(
+                stats=stats, signals=signals, fraction=split_fraction,
+                min_trades=split_min_trades or MIN_TRADES_PER_SIDE,
+                run_side=lambda subset, _s=strategy: run_backtest(
+                    subset, candles, [_s], starting_balance, risk_pct,
+                    spread_pts, lots_per_trade, commission_per_lot,
+                )[_s],
+            )
         out[strategy] = stats
 
     return out

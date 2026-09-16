@@ -20,9 +20,12 @@ carries an excursion.
 
 Three filters, each keeping a different fiction out of the fit:
 
-  * `live_exec_status='executed'` -- a virtual signal's path is whatever the
+  * `live_exec_status='success'` -- a virtual signal's path is whatever the
     engine imagined, and pooling those with real fills produces a
-    distribution describing a population that never traded.
+    distribution describing a population that never traded. `'success'` is
+    this engine's word for it; `'executed'` is the reversal engine's, and
+    stating the reversal engine's here is what shipped a filter that matched
+    nothing (docs/todo/bugs/062).
   * `status='closed'` -- an open trade's path is not finished.
   * `mfe_pts IS NULL` -- nothing already measured is overwritten.
 

@@ -62,9 +62,21 @@ def _ticks(prices, start=1000.0, spread=0.4):
             for i, p in enumerate(prices)]
 
 
+# "success" is what breakout_signal_live_execute writes when the order
+# reached the broker, and what breakout_signal_service's two closure-sync
+# reads require. It is spelled out here, not imported from the repo module,
+# on purpose: this file's job is to hold the value the ENGINE writes, and a
+# test that imports the same constant the query uses only proves the two
+# agree with each other -- which is exactly what let docs/todo/bugs/062
+# through twelve mutants and a full checks run.
+EXECUTED = "success"
+# A real value from the live table: 123 of its 124 rows carry it.
+NOT_EXECUTED = "skipped:live_off"
+
+
 def _executed(fresh_repo, direction="BUY", trigger=3300.0,
               trigger_time=1000.0, close_time=1010.0, status="closed",
-              exec_status="executed"):
+              exec_status=EXECUTED):
     sig_id = fresh_repo.create_signal({
         "signal_ref": f"BO-{direction}-{trigger_time}", "direction": direction,
         "breakout_type": "sweep", "entry_mid": trigger, "stop_loss": trigger - 5,
@@ -93,7 +105,15 @@ class TestWhichSignalsQualify:
         """A virtual signal's path is whatever the engine imagined. Pooling
         those with real fills produces a distribution describing a population
         that never traded."""
-        _executed(fresh_repo, exec_status="ml_skipped")
+        _executed(fresh_repo, exec_status=NOT_EXECUTED)
+        assert mrepo.signals_awaiting_excursion_backfill() == []
+
+    def test_the_reversal_engines_word_for_it_does_not_count_here(self, fresh_repo):
+        """'executed' is what re_signals carries; bo_signals has never held
+        it. The filter said 'executed' for a day, so it matched none of the
+        124 stored signals and would have matched none of the live ones
+        either (docs/todo/bugs/062)."""
+        _executed(fresh_repo, exec_status="executed")
         assert mrepo.signals_awaiting_excursion_backfill() == []
 
     def test_an_open_signal_is_not_backfilled(self, fresh_repo):
@@ -211,7 +231,7 @@ class TestWhatItFeeds:
         """
         real = _executed(fresh_repo, trigger_time=1000.0)
         ghost = _executed(fresh_repo, trigger_time=2000.0,
-                          exec_status="ml_skipped")
+                          exec_status=NOT_EXECUTED)
         for sid in (real, ghost):
             mrepo.record_backfilled_excursion(sid, 4.0, 2.0)
         obs = mrepo.excursion_observations()
@@ -220,4 +240,15 @@ class TestWhatItFeeds:
     def test_coverage_reports_how_many_are_measured(self, fresh_repo):
         _executed(fresh_repo)
         asyncio.run(bf.backfill(_Bridge(_ticks([3300.0, 3305.0]))))
+        assert sum(mrepo.excursion_coverage().values()) == 1
+
+    def test_coverage_counts_only_what_actually_executed(self, fresh_repo):
+        """The third query carried the same wrong status word and nothing
+        held it to a real one, so it reported coverage over a population it
+        could never select."""
+        measured = _executed(fresh_repo, trigger_time=1000.0)
+        skipped = _executed(fresh_repo, trigger_time=2000.0,
+                            exec_status=NOT_EXECUTED)
+        for sid in (measured, skipped):
+            mrepo.record_backfilled_excursion(sid, 4.0, 2.0)
         assert sum(mrepo.excursion_coverage().values()) == 1

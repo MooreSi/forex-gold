@@ -212,6 +212,8 @@ async def gather_evidence(bridge, rs: Optional[dict] = None) -> dict:
                                 "distribution and the exit-policy sweep are "
                                 "unavailable. Recommend a target only if the "
                                 "evidence you do have supports it.")
+        else:
+            _note_the_age(ev, summary.get("ran_at"))
     except Exception as e:                        # noqa: BLE001
         ev["reach"] = {"error": str(e)}
 
@@ -250,6 +252,48 @@ async def gather_evidence(bridge, rs: Optional[dict] = None) -> dict:
     return ev
 
 
+# The study now runs nightly (services/reversal_engine/study_schedule.py), so
+# anything past a day and a bit means a run was missed rather than that the
+# schedule is slow. Generous enough not to cry stale over a late finish or a
+# restart, tight enough that two missed nights cannot pass unremarked.
+STALE_AFTER_S = 36 * 3600.0
+
+
+def _note_the_age(ev: dict, ran_at) -> None:
+    """How old the stored study is, and whether that is a problem.
+
+    This used to fire ONLY when the summary was missing entirely. A study
+    that had run once and then gone stale reached the model as a bare
+    `study_ran_at` epoch float with nothing telling it to discount anything
+    -- on 2026-09-16 that was a sweep from 2026-09-12, presented as the
+    current reach evidence.
+
+    Scheduling the study shortens the gap. It cannot close it, because a
+    scheduled job that FAILS leaves yesterday's numbers looking exactly as
+    current as today's would. The age has to travel with the numbers.
+
+    Unknown age is not fresh: a summary written before `ran_at` was recorded
+    cannot be shown to be current, so it is reported as stale rather than
+    quietly trusted.
+    """
+    try:
+        age_s = time.time() - float(ran_at)
+    except (TypeError, ValueError):
+        ev["study_note"] = ("the stored research study carries no timestamp, "
+                            "so its age cannot be established. Treat the reach "
+                            "distribution and the exit-policy sweep as stale.")
+        return
+
+    ev["study_age_hours"] = round(age_s / 3600.0, 1)
+    if age_s > STALE_AFTER_S:
+        ev["study_note"] = (
+            f"the research study is {ev['study_age_hours']:.0f} hours old and "
+            "is stale -- it runs nightly, so this means a run was missed. The "
+            "reach distribution and the exit-policy sweep below describe "
+            "trades up to that point and not since. Weigh them accordingly, "
+            "and prefer changing nothing over acting on them alone.")
+
+
 def _build_prompt(evidence: dict) -> str:
     return (
         "Measured evidence for the XAUUSD reversal engine:\n\n"
@@ -276,6 +320,11 @@ def _build_prompt(evidence: dict) -> str:
         "straddle zero is not evidence; say so rather than acting on it.\n"
         "- Where the reach data, the sweep and the fit disagree, prefer "
         "changing nothing and say which two disagree.\n"
+        "- `study_age_hours` is how old `reach` and `exit_policy_sweep` are. "
+        "They come from a nightly study, so a `study_note` calling them stale "
+        "means a run was missed and those numbers describe a market that has "
+        "moved since. Stale evidence is a reason to change nothing, never a "
+        "reason to guess.\n"
     )
 
 

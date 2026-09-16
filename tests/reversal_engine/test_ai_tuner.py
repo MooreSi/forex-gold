@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -256,3 +257,73 @@ class TestItSaysWhatItDecided:
         assert any("could not read JSON from the response" in r.getMessage()
                    for r in caplog.records), \
             "a provider failure was indistinguishable from a quiet pass"
+
+
+class TestItSaysHowOldTheEvidenceIs:
+    """`study_note` used to fire only when the study was MISSING. A study
+    that had run once and then gone stale reached the model as a bare
+    `study_ran_at` float with nothing telling it to discount the numbers.
+
+    On 2026-09-16 the stored sweep was from 2026-09-12 and was still being
+    presented as the reach evidence. Scheduling the study shortens that gap;
+    it does not close it, because a scheduled job that FAILS leaves
+    yesterday's numbers looking exactly as current as today's would.
+    """
+
+    def _evidence(self, monkeypatch, summary):
+        monkeypatch.setattr(
+            "backend.src.services.reversal_engine.research_lab.last_summary",
+            lambda: summary)
+        for name, value in (("excursion_observations", []),
+                            ("closed_executed_rows", [])):
+            monkeypatch.setattr(
+                f"backend.src.services.reversal_engine.measure_repo.{name}",
+                lambda *a, **k: value)
+        monkeypatch.setattr(
+            "backend.src.services.broker.tca_repo.mean_cost_r",
+            lambda *a, **k: (0.3, 100))
+        return asyncio.run(ai_tuner.gather_evidence(bridge=None, rs={}))
+
+    def _summary(self, age_s):
+        return {"ran_at": time.time() - age_s,
+                "reach": {"n": 500, "median_r": 0.43},
+                "sweep": [{"stop_pts": 2.0, "target_pts": 12.0}]}
+
+    def test_a_study_from_this_morning_carries_no_warning(self, monkeypatch):
+        ev = self._evidence(monkeypatch, self._summary(3 * 3600))
+        assert "study_note" not in ev
+
+    def test_a_study_from_four_days_ago_says_it_is_stale(self, monkeypatch):
+        ev = self._evidence(monkeypatch, self._summary(4 * 86400))
+        assert "stale" in ev["study_note"].lower()
+
+    def test_the_warning_names_the_age_so_the_model_can_weigh_it(self, monkeypatch):
+        ev = self._evidence(monkeypatch, self._summary(4 * 86400))
+        assert "96" in ev["study_note"]
+
+    def test_the_age_is_reported_even_when_the_study_is_fresh(self, monkeypatch):
+        """The model is told how old the numbers are on every pass, not only
+        when they are bad enough to complain about."""
+        ev = self._evidence(monkeypatch, self._summary(3 * 3600))
+        assert round(ev["study_age_hours"]) == 3
+
+    def test_a_summary_with_no_timestamp_is_treated_as_stale(self, monkeypatch):
+        """A summary written by a version that did not record `ran_at` cannot
+        be shown to be current, and unknown age is not the same as fresh."""
+        ev = self._evidence(monkeypatch, {"reach": {"n": 500}})
+        assert "stale" in ev["study_note"].lower()
+
+    def test_no_study_at_all_still_says_no_study_was_run(self, monkeypatch):
+        """The original message is the right one for the original case and
+        must not be replaced by the staleness wording."""
+        ev = self._evidence(monkeypatch, {})
+        assert "no research study" in ev["study_note"]
+
+    def test_the_prompt_tells_it_to_discount_stale_evidence(self):
+        """Built from an EMPTY evidence dict on purpose. `_build_prompt` dumps
+        the evidence into the prompt verbatim, so passing a `study_note` in and
+        then finding it in the output asserts nothing about the instructions --
+        it finds its own input. The guidance has to be in the Notes section."""
+        prompt = ai_tuner._build_prompt({})
+        assert "study_age_hours" in prompt
+        assert "stale" in prompt.lower()

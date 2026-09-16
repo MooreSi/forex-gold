@@ -1,4 +1,16 @@
-"""Daily Reversal Engine Telegram research sweep (22:00 Europe/London).
+"""The Reversal Engine's daily jobs (22:00 Europe/London), on one timer.
+
+Two of them now: the Telegram research sweep this module was built for, and
+the phase-1 research study (`study_schedule`), which was button-only until
+2026-09-16 and had gone four days stale while the AI tuner kept presenting
+its numbers as current.
+
+They share this minute timer rather than each claiming an asyncio task in
+runtime.py, and they share the hour for the same reason: 22:00 London is the
+daily settlement break, the one hour where the study's several hundred
+bridge round trips are not competing with signal dispatch. Each keeps its
+own app_config date key and its own try/except, so neither can take the
+other's day down with it.
 
 Moved off the runtime in M4 B9e. The runtime keeps a shell that owns the
 asyncio task; this owns what the task does.
@@ -18,6 +30,9 @@ from typing import Any, Awaitable, Callable
 import asyncio
 
 from backend.src.services.reversal_engine.research import reversal_engine_research_sweep as _reversal_engine_research_sweep_impl
+from backend.src.services.reversal_engine.study_schedule import (
+    reversal_engine_study_sweep as _reversal_engine_study_sweep_impl,
+)
 
 
 log = logging.getLogger(__name__)
@@ -47,10 +62,20 @@ async def reversal_engine_research_loop(engine: Any, is_running: Callable[[], bo
     """
     await asyncio.sleep(90)  # let the app settle before the first check
     while is_running():
+        # Two independent daily jobs sharing one timer, each with its own
+        # try/except and its own app_config date key. Telegram being down
+        # must not take the research study's day with it, and vice versa --
+        # a single shared except would have exactly that effect.
         try:
             await _reversal_engine_research_sweep_impl(engine)
         except asyncio.CancelledError:
             break
         except Exception as e:
             log.warning("_reversal_engine_research_loop error: %s", e)
+        try:
+            await _reversal_engine_study_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_reversal_engine_study_sweep error: %s", e)
         await asyncio.sleep(60)

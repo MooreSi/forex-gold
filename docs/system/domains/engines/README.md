@@ -123,6 +123,34 @@ here rather than there:
   sit beside the other two new gates so all three are evaluated before any
   of them returns -- otherwise a challenger gets recorded as "would take" on
   a signal whose later gates were never run.
+- **The research study runs nightly, and the tuner now says how old it is**
+  (2026-09-16). `research_lab.run_study` is the only producer of the reach
+  distribution and the exit-policy sweep, and `ai_tuner.gather_evidence` can
+  only READ the stored summary -- it cannot refresh it. While the study was
+  button-only it went four days stale (last run 2026-09-12) and the tuner
+  kept presenting that sweep as the current reach evidence, which is the
+  slow-fuse version of the 2026-09-11 failure already recorded in
+  `ai_tuner`'s own docstring: a 2.0x ATR target proposed from half a picture.
+  `study_schedule.py` now runs it once a day from the minute timer
+  `research_loop` already owns, deduped by the `re_study_last` app_config key
+  and gated to the local node, and `gather_evidence` reports
+  `study_age_hours` on every pass plus a `study_note` past 36 hours.
+  **The schedule does not make the engine self-tuning** -- `_ai_tune_loop` is
+  still inert behind `re_ai_tuning_enabled`, which is not even a column in
+  `vantage_risk_settings`, so nothing acts on the study automatically. It
+  makes the Recommend button honest.
+- **22:00 Europe/London is the settlement break, not just "late"** (2026-09-16).
+  17:00 New York is 21:00 UTC under EDT and 22:00 UTC under EST, and London
+  local tracks that shift both ways, which is why both nightly jobs use
+  London time rather than UTC. Over the seven days to 2026-09-16 the engine's
+  `re_analysis_log` produced **2 signals in the 21:00 UTC hour** against 17-72
+  in every other hour. That is the mitigation for the study's bridge load and
+  the limit is worth stating: bugs/030 moved the study's CPU-heavy arithmetic
+  off the loop on 2026-09-12 and deliberately left its database and bridge
+  reads on it. ~250 sequential `get_ticks_range` calls at ~0.19s each still
+  saturate the bridge for minutes; they await properly so they cannot freeze
+  dispatch, but scheduling them into the quiet hour is not the same as making
+  them cheap.
 - **`ai_tuner.auto_tune` logs every pass, including the ones that change
   nothing** (2026-09-14). It used to log only an APPLIED setting, which made
   four different outcomes identical silence: the model weighed the evidence

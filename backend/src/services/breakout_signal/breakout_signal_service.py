@@ -28,6 +28,7 @@ import backend.src.config as cfg_module
 from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 from backend.src.services.breakout_signal import adaptive_params as ap
 from backend.src.services.breakout_signal import ml_engine as bo_ml
+from backend.src.services.market.indicators import H4_BIAS_MIN_CANDLES
 from backend.src.services.breakout_signal.signal_generator import (
     compute_htf_bias,
     compute_h4_bias,
@@ -80,6 +81,13 @@ def init(bridge: "MT5BridgeClient") -> "BreakoutEngine":
         bo_ml.init(data_dir)
         _instance = BreakoutEngine(bridge)
     return _instance
+
+
+# Enough H4 history for `compute_h4_bias` to actually evaluate its EMAs, with
+# a margin. Derived from the indicator's own requirement rather than restated:
+# a hardcoded 40 against a 52-candle warmup is what made the breakout engine's
+# H4 bias the starvation fallback on 122 of 122 signals (docs/todo/bugs/060).
+_H4_CANDLES = H4_BIAS_MIN_CANDLES + 8
 
 
 class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _LearnMixin):
@@ -213,7 +221,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             tick        = await self._bridge.get_tick()
             m5_candles  = await self._bridge.get_candles("M5",  80)
             h1_candles  = await self._bridge.get_candles("H1", 120)
-            h4_candles  = await self._bridge.get_candles("H4",  40)
+            h4_candles  = await self._bridge.get_candles("H4",  _H4_CANDLES)
 
             if not tick or not m5_candles or not h1_candles:
                 self.status_detail = "No market data"

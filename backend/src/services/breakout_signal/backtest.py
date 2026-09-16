@@ -40,6 +40,7 @@ from backend.src.services.breakout_signal.signal_generator import (
 )
 from backend.src.services.market.indicators import (
     compute_h4_bias, compute_adx, compute_macd_hist,
+    H4_BIAS_MIN_CANDLES,
 )
 from backend.src.services.market.levels import (
     compute_htf_bias, identify_key_levels, compute_atr,
@@ -158,7 +159,7 @@ def run_walkforward(candles: dict, overrides: Optional[dict] = None) -> list[dic
             if len(h1c) < 60:
                 continue
             hi4 = bisect.bisect_right(h4_times, ts - 14400)
-            h4c = h4[max(0, hi4 - 40):hi4]
+            h4c = h4[max(0, hi4 - (H4_BIAS_MIN_CANDLES + 8)):hi4]
 
             htf = compute_htf_bias(h1c)
             h4b = compute_h4_bias(h4c) if h4c else "neutral"

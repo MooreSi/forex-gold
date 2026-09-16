@@ -18,12 +18,23 @@ from backend.src.services.market.levels import _ema
 
 # ── H4 bias ───────────────────────────────────────────────────────────────────
 
+# EMA50 needs 50 periods plus warmup before it means anything, so below this
+# `compute_h4_bias` refuses to guess and returns "neutral".
+#
+# Named rather than inlined because the number used to live here as a bare
+# `52` while the callers asked for 40, and nothing connected the two: the
+# breakout engine's H4 bias was the starvation fallback on 122 of 122 closed
+# signals and nobody could see it (docs/todo/bugs/060). One constant, and a
+# test that every caller clears it.
+H4_BIAS_MIN_CANDLES = 52
+
+
 def compute_h4_bias(h4_candles: list[dict]) -> str:
     """H4 HTF bias using EMA20/50 with full data warmup — same logic as H1."""
-    if len(h4_candles) < 52:
+    if len(h4_candles) < H4_BIAS_MIN_CANDLES:
         return "neutral"
     closes = [float(c["close"]) for c in h4_candles if c.get("close")]
-    if len(closes) < 52:
+    if len(closes) < H4_BIAS_MIN_CANDLES:
         return "neutral"
     ema20 = _ema(closes, 20)
     ema50 = _ema(closes, 50)

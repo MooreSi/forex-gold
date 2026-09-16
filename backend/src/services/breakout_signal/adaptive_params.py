@@ -96,7 +96,24 @@ PARAMS: dict[str, dict] = {
         "desc": "Minimum Claude quality score (0–1) required to take a breakout signal",
     },
     "require_dual_bias": {
-        "default": 1.0, "min": 0.0, "max": 1.0,
+        # 2026-09-16: default 1.0 -> 0.0, and this is a change that keeps
+        # behaviour rather than altering it (golden rule 3).
+        #
+        # This setting has read "strict" since it was written and has never
+        # rejected a single signal. Its four gate sites test
+        # `h4_bias in ("bullish", "neutral")`, and `h4_bias` was the
+        # starvation fallback "neutral" on 122 of 122 closed signals --
+        # `get_candles("H4", 40)` against a 52-candle warmup
+        # (docs/todo/bugs/060). "neutral" is in the allow-list for BOTH
+        # directions, so strict mode was vacuous.
+        #
+        # Repairing the H4 feed in the same change would have turned a filter
+        # nobody had ever seen work into a live one, silently, with no
+        # decision taken. So the default now states what the engine has
+        # actually been doing for its whole life. Turning it back to 1.0 is a
+        # real strategy change: it wants the backfill and attribution in
+        # bugs/060 first, then the owner, then a demo session.
+        "default": 0.0, "min": 0.0, "max": 1.0,
         "desc": "Require BOTH H1 and H4 bias to agree with direction (1=strict, 0=H1 only)",
     },
     "min_break_atr_frac": {

@@ -178,7 +178,10 @@ class _LiveExecuteMixin:
         try:
             m5_fresh = await self._bridge.get_candles("M5", 80)
             h1_fresh = await self._bridge.get_candles("H1", 120)
-            h4_fresh = await self._bridge.get_candles("H4", 40)
+            # Same window the cycle uses, derived from the indicator's own
+            # warmup rather than restated (docs/todo/bugs/060).
+            from backend.src.services.market.indicators import H4_BIAS_MIN_CANDLES
+            h4_fresh = await self._bridge.get_candles("H4", H4_BIAS_MIN_CANDLES + 8)
             if m5_fresh and h1_fresh:
                 from backend.src.services.dpm.engine import compute_atr
                 from backend.src.services.breakout_signal.signal_generator import (

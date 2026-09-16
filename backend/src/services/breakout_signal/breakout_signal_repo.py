@@ -142,6 +142,12 @@ def init(db_path: str) -> None:
         ("strategy",          "TEXT DEFAULT 'conservative'"),
         ("partial_pnl_dollars", "REAL DEFAULT 0"),
         ("remaining_frac",      "REAL DEFAULT 1.0"),
+        # Excursion measurement (2026-09-16). The reversal engine has had
+        # these since 2026-09-11; this engine never did, which is why it has
+        # no reach distribution and its tp1_mult has been a guess.
+        ("mfe_pts",             "REAL"),
+        ("mae_pts",             "REAL"),
+        ("excursion_source",    "TEXT"),
     ]:
         if col not in cols:
             get_db().run(f"ALTER TABLE bo_signals ADD COLUMN {col} {defn}")

@@ -33,6 +33,9 @@ from backend.src.services.reversal_engine.research import reversal_engine_resear
 from backend.src.services.reversal_engine.study_schedule import (
     reversal_engine_study_sweep as _reversal_engine_study_sweep_impl,
 )
+from backend.src.services.breakout_signal.excursion_sweep import (
+    breakout_excursion_sweep as _breakout_excursion_sweep_impl,
+)
 
 
 log = logging.getLogger(__name__)
@@ -78,4 +81,10 @@ async def reversal_engine_research_loop(engine: Any, is_running: Callable[[], bo
             break
         except Exception as e:
             log.warning("_reversal_engine_study_sweep error: %s", e)
+        try:
+            await _breakout_excursion_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_breakout_excursion_sweep error: %s", e)
         await asyncio.sleep(60)

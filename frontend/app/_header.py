@@ -24,6 +24,7 @@ _APP_VERSION = _app_version()
 
 from ._header_pnl import net_deposited_from_deals
 from ._shared import _CASH_REGISTER_JS, STATIC_DIR
+from frontend.components.timer_probe import timer as _timer
 
 log = logging.getLogger(__name__)
 
@@ -243,8 +244,8 @@ def build_header(*, power_dialog, pause_dialog, root,
             _pending_update["remote_sha"] = result.get("remote_sha", "")
             update_badge.set_visibility(bool(result.get("available")))
 
-        ui.timer(2.0, _check_github_update, once=True)
-        ui.timer(600.0, _check_github_update)  # re-check every 10 minutes
+        _timer(2.0, _check_github_update, once=True)
+        _timer(600.0, _check_github_update)  # re-check every 10 minutes
 
         ui.space()
 
@@ -637,6 +638,6 @@ def build_header(*, power_dialog, pause_dialog, root,
             # header refresh showing stale balances silently is worse — log it.
             log.warning("header refresh failed (values on screen may be stale): %s", _hdr_exc)
 
-    ui.timer(2.0, _refresh_header)
+    _timer(2.0, _refresh_header)
 
     return _help_open

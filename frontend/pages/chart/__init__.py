@@ -27,6 +27,7 @@ from backend.src.controllers.trading_controller import is_stuck_placeholder
 
 from ._overlays import _build_fvg_areas, _build_mark_lines
 from ._trades_panel import _refresh_trades_panel
+from frontend.components.timer_probe import timer as _timer
 
 log = logging.getLogger(__name__)
 
@@ -561,8 +562,8 @@ def render(get_engine: Callable):
             log.debug("[chart] live price tick refresh failed: %s", e)
 
     # ── Wire timers ───────────────────────────────────────────────────────────
-    ui.timer(10.0, _refresh_candles)
-    ui.timer(3.0,  _refresh_fast)
+    _timer(10.0, _refresh_candles)
+    _timer(3.0,  _refresh_fast)
 
     asyncio.ensure_future(_refresh_candles())
     asyncio.ensure_future(_refresh_fvgs())

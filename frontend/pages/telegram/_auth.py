@@ -11,6 +11,7 @@ from ._feed import (
     _render_slot_feed,
     _render_stored_messages,
 )
+from frontend.components.timer_probe import timer as _timer
 
 
 def _render_send_code_step(reader, on_done: Callable):
@@ -164,7 +165,7 @@ def _render_connected(reader):
                     )
 
     asyncio.create_task(_update_slot_status())
-    ui.timer(2.0, _update_slot_status)
+    _timer(2.0, _update_slot_status)
 
     # ── Pending unrecognised messages ─────────────────────────────────────────
     _pending_card = ui.card().classes(
@@ -191,7 +192,7 @@ def _render_connected(reader):
     with _pending_card:
         _pending_container
 
-    ui.timer(5.0, _refresh_pending)
+    _timer(5.0, _refresh_pending)
     asyncio.create_task(_refresh_pending())
 
     # ── Group selector (compact) ───────────────────────────────────────────────

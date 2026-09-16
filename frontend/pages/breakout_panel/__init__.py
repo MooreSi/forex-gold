@@ -19,6 +19,7 @@ from ._sections import _render_history, _render_ml
 from ._shared import _bo_type_badge, _dir_color, _fmt_ts, _pnl_color, _pnl_str
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -225,9 +226,10 @@ def render() -> None:
 
                                 with ui.column().classes("flex-1 gap-1"):
                                     with ui.row().classes("items-center gap-2 flex-wrap"):
-                                        ui.element("span").classes(
+                                        with ui.element("span").classes(
                                             f"text-xs font-semibold px-1.5 py-0.5 rounded {badge_cls}"
-                                        ).text = badge_text
+                                        ):
+                                            ui.label(badge_text)
                                         ui.label(f"${entry:.2f}").classes("text-white font-semibold")
                                         sl_label = f"SL ${sl:.2f}" + (" (moved)" if sl_moved else "")
                                         ui.label(sl_label).classes("text-red-300 text-xs")
@@ -294,7 +296,8 @@ def render() -> None:
                             with ui.element("thead"):
                                 with ui.element("tr").classes("text-gray-500 border-b border-gray-700"):
                                     for h in [key_col.replace("_", " ").title(), "W", "L", "Avg $", "Total $"]:
-                                        ui.element("th").classes("text-left px-1 py-0.5").text = h
+                                        with ui.element("th").classes("text-left px-1 py-0.5"):
+                                            ui.label(h)
                             with ui.element("tbody"):
                                 for r in rows:
                                     total_pnl = float(r.get("total_pnl") or 0)
@@ -335,7 +338,8 @@ def render() -> None:
                         with ui.element("thead"):
                             with ui.element("tr").classes("text-gray-600 border-b border-gray-800"):
                                 for h in ["Parameter", "Current", "Default"]:
-                                    ui.element("th").classes("text-left px-1 py-0.5").text = h
+                                    with ui.element("th").classes("text-left px-1 py-0.5"):
+                                        ui.label(h)
                         with ui.element("tbody"):
                             for key, info in all_p.items():
                                 cur  = info["value"]
@@ -562,4 +566,4 @@ def render() -> None:
         eng.add_refresh_callback(_safe_refresh)
         asyncio.create_task(_refresh_all())
 
-    ui.timer(30, _safe_refresh)
+    _timer(30, _safe_refresh)

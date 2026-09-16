@@ -9,6 +9,7 @@ from frontend.components.empty_state import render_empty_state
 from ._shared import _uk
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -147,5 +148,5 @@ def _render_tg_signals(engine):
                         "hover:bg-red-700"
                     ).props("dense flat")
 
-    ui.timer(3.0, refresh)
+    _timer(3.0, refresh)
     asyncio.ensure_future(refresh())

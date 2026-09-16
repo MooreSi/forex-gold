@@ -18,6 +18,7 @@ from ._shared import (
     _stat_cell,
     _uk,
 )
+from frontend.components.timer_probe import timer as _timer
 
 
 def _render_remote_trade_card(pos: dict, remote: dict) -> None:
@@ -377,5 +378,5 @@ def _render_active_trades(engine):
                             )
 
 
-    ui.timer(5.0, refresh)
+    _timer(5.0, refresh)
     asyncio.ensure_future(refresh())

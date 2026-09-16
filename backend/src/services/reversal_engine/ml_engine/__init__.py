@@ -572,6 +572,7 @@ def get_ml_metrics() -> dict:
     _blank = {
         "n_data":           0,
         "win_rate_series":  [],
+        "win_flag_series":  [],
         "pred_r_series":    [],
         "actual_r_series":  [],
         "signal_ids":       [],
@@ -621,8 +622,11 @@ def get_ml_metrics() -> dict:
         return {
             "n_data":           n,
             "win_rate_series":  win_rate_series,
+            # Raw per-signal outcomes. The panel rolls these over its own
+            # window; a cumulative mean cannot be un-averaged back into them.
+            "win_flag_series":  list(actuals_win),
             "pred_r_series":    [round(p, 3) for p in pred_rs],
-            "actual_r_series":  [round(r, 1) for r in actual_rs],
+            "actual_r_series":  [round(r, 3) for r in actual_rs],
             "signal_ids":       signal_ids,
             "mean_pred_r":      mean_pred_r,
             "mean_actual_r":    mean_actual_r,

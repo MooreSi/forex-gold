@@ -6,6 +6,8 @@ container. Bodies are verbatim.
 """
 from nicegui import ui
 
+from frontend.components import learning_chart as _learning_chart
+
 from backend.src.controllers import engines_controller
 
 from ._shared import (
@@ -200,61 +202,24 @@ async def _render_ml(*, ml_area, diff=None) -> None:
                   f"Trained: {'yes' if s.get('trained') else 'no'}.")
 
         # ── Is it learning? ────────────────────────────────────────
+        # Rolling window, labelled axes, shared with the Reversal panel.
+        # Both panels carried a byte-identical copy of this chart and a
+        # cumulative mean that could not move; see learning_chart.py.
         sig_ids      = mets.get("signal_ids", [])
-        win_rates    = mets.get("win_rate_series", [])
         pred_r_ser   = mets.get("pred_r_series", [])
         actual_r_ser = mets.get("actual_r_series", [])
+        win_rates    = mets.get("win_rate_series", [])
+        _learning_chart.render(mets)
 
         if sig_ids:
-            ui.label("Is it learning?").classes(
-                "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1"
-            )
             n = len(sig_ids)
-            W, H = 280, 50
-
-            def _to_svg_points(series: list, lo: float, hi: float,
-                               w: int, h: int) -> str:
-                if not series or hi == lo:
-                    return ""
-                pts = []
-                for i, v in enumerate(series):
-                    if v is None:
-                        continue
-                    x = int(i / max(len(series) - 1, 1) * w)
-                    y = int(h - (v - lo) / (hi - lo) * h)
-                    pts.append(f"{x},{y}")
-                return " ".join(pts)
-
-            wr_pts = _to_svg_points(win_rates, 0, 100, W, H)
-            cum_r: list = []
-            running = 0.0
-            for v in actual_r_ser:
-                running += v
-                cum_r.append(round(running / len(cum_r + [0]), 3))
-            ar_pts = _to_svg_points(cum_r, -1.0, 1.0, W, H)
-
-            svg = f"""<svg width="{W}" height="{H}" viewBox="0 0 {W} {H}"
-                                   xmlns="http://www.w3.org/2000/svg"
-                                   style="background:#1f2937;border-radius:4px">
-                          <line x1="0" y1="{H//2}" x2="{W}" y2="{H//2}"
-                                stroke="#374151" stroke-width="1" stroke-dasharray="4,4"/>
-                          {f'<polyline points="{wr_pts}" fill="none" stroke="#4ade80" stroke-width="1.5"/>' if wr_pts else ''}
-                          {f'<polyline points="{ar_pts}" fill="none" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="3,2"/>' if ar_pts else ''}
-                        </svg>"""
-            ui.html(svg).tooltip(
-                "Green = cumulative win rate (target >50%). "
-                "Orange dashed = mean actual R-multiple (target >0)."
-            )
-            with ui.row().classes("gap-3 text-xs"):
-                ui.label("— win rate").classes("text-green-400")
-                ui.label("--- actual R").classes("text-orange-400")
-
             last_n = min(5, n)
             with ui.element("table").classes("w-full text-xs mt-1"):
                 with ui.element("thead"):
                     with ui.element("tr").classes("text-gray-600 border-b border-gray-800"):
                         for h_label in ["Signal", "Win%", "Pred R", "Act R"]:
-                            ui.element("th").classes("text-left px-1 py-0.5").text = h_label
+                            with ui.element("th").classes("text-left px-1 py-0.5"):
+                                ui.label(h_label)
                 with ui.element("tbody"):
                     for i in range(n - last_n, n):
                         _pr = pred_r_ser[i] if i < len(pred_r_ser) else None

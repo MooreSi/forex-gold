@@ -18,6 +18,7 @@ from ._auth import (
 )
 from ._feed import _render_channels_active_section
 from ._keywords import _render_parsing_settings_section
+from frontend.components.timer_probe import timer as _timer
 
 __all__ = ["render"]
 
@@ -77,7 +78,7 @@ def render(get_tg_reader: Callable):
                     elif state == AUTH_AWAITING_2FA:
                         _render_verify_2fa_step(reader, _render_wizard)
 
-    ui.timer(1.0, _render_wizard)
+    _timer(1.0, _render_wizard)
     _render_wizard()
 
 

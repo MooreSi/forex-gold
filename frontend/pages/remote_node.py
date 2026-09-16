@@ -12,6 +12,7 @@ from nicegui import ui
 
 from backend.src.controllers import remote_node_controller as rn_controller
 from backend.src.controllers import sync_controller as sync_ctl
+from frontend.components.timer_probe import timer as _timer
 
 log = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ def render(get_engine=None) -> None:
                                     f"Memory: {mem_used:,.0f} / {mem_total:,.0f} MB ({mem_pct:.0f}%)"
                                 ).classes("text-xs font-bold").style(f"color:{mem_col}")
 
-            ui.timer(2.0, _tick_status)
+            _timer(2.0, _tick_status)
 
         # ── Centralized signal generation ────────────────────────────────────
         with ui.card().classes("w-full bg-gray-800 p-4 rounded-lg"):

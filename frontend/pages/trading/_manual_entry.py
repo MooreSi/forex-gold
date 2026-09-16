@@ -18,6 +18,7 @@ from backend.src.controllers import sync_controller as sync_ctl
 
 # Sibling sections of this page.
 from ._shared import _stat_cell
+from frontend.components.timer_probe import timer as _timer
 
 log = logging.getLogger(__name__)
 
@@ -340,7 +341,7 @@ def _render_market_order_form(engine):
             except Exception as e:
                 log.debug("[trading] manual-entry price refresh failed: %s", e)
 
-        ui.timer(3.0, _refresh_price)
+        _timer(3.0, _refresh_price)
 
     ui.label(
         "Places an order immediately at the current market price using your active "
@@ -556,7 +557,7 @@ def _render_orb_report(engine):
 
                     auto_chk.on_value_change(_auto_toggle)
 
-    ui.timer(60.0, refresh)
+    _timer(60.0, refresh)
 async def _background_commentary(engine, signal_id: str):
     try:
         from backend.src.controllers import settings_controller as cfg_module

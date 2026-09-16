@@ -32,8 +32,10 @@ from frontend.components.render_cache import (SectionCache,
 
 from ._capabilities import render_capabilities_subcard
 from ._sections import (_render_history_section, _render_ml_section,
-                        _render_research_section)
+                        _render_research_section,
+                        render_open_signal_card as _render_open_signal_card)
 from ._shared import _dir_color, _fmt_ts, _level_type_badge, _pnl_color, _pnl_str
+from frontend.components.timer_probe import timer as _timer
 
 _STARTING_BALANCE = 1000.0
 
@@ -41,34 +43,6 @@ _STARTING_BALANCE = 1000.0
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
-
-def _live_exec_badge(exec_st: str) -> Optional[tuple[str, str, str]]:
-    """(badge_text, badge_color, tooltip) for a non-executed live_exec_status,
-    or None if there's nothing worth flagging (empty, or already executed/
-    virtual-by-design). Mirrors the reasons written by _try_live_execute /
-    _try_re_limit_order in reversal_engine_live_execute.py."""
-    if not exec_st or exec_st in ("executed",) or exec_st.startswith("limit_order_placed"):
-        return None
-    if exec_st == "skipped:live_disabled":
-        return None  # live execution off entirely -- not a per-signal problem
-    if exec_st == "ml_skipped":
-        return ("ML BLOCKED", "orange", "ML gate blocked live execution: predicted R-multiple < 0")
-    if exec_st == "bias_skipped":
-        return ("BIAS BLOCKED", "orange", "Fill-time bias re-check disagreed with the signal direction")
-    if "circuit breaker" in exec_st.lower():
-        return ("CIRCUIT BREAKER", "red", exec_st)
-    if exec_st.startswith("limit_order_skip"):
-        return ("LIMIT ORDER SKIPPED", "red", exec_st.split(":", 1)[-1])
-    if exec_st.startswith("limit_order_rejected"):
-        return ("EA REJECTED", "red", exec_st.split(":", 1)[-1])
-    if exec_st.startswith("limit_order_error"):
-        return ("LIMIT ORDER ERROR", "red", exec_st.split(":", 1)[-1])
-    if exec_st.startswith("open_failed"):
-        return ("OPEN FAILED", "red", exec_st)
-    if exec_st.startswith("error"):
-        return ("ERROR", "red", exec_st.split(":", 1)[-1] if ":" in exec_st else exec_st)
-    return ("NOT EXECUTED", "grey", exec_st)
-
 
 # ── Main render ───────────────────────────────────────────────────────────────
 
@@ -436,33 +410,7 @@ def render() -> None:
                 if open_sigs:
                     with open_container:
                         for sig in open_sigs:
-                            direction = sig.get("direction", "")
-                            border    = "border-green-700" if direction == "BUY" else "border-red-700"
-                            badge_text, badge_color = _level_type_badge(sig.get("level_type", ""))
-
-                            with ui.card().classes(f"w-full bg-gray-900 border-l-2 {border} p-2"):
-                                with ui.row().classes("items-center gap-2 mb-1"):
-                                    ui.badge(direction, color="green" if direction == "BUY" else "red"
-                                             ).classes("text-xs")
-                                    ui.badge(badge_text, color=badge_color).classes("text-xs")
-                                    ui.label(sig.get("signal_ref", "")).classes(
-                                        "text-xs text-gray-600 font-mono"
-                                    )
-                                    status = sig.get("status", "")
-                                    ui.badge(status, color="yellow" if status == "pending" else "blue"
-                                             ).classes("text-xs ml-auto")
-                                    _exec_badge = _live_exec_badge(sig.get("live_exec_status") or "")
-                                    if _exec_badge:
-                                        _bt, _bc, _tip = _exec_badge
-                                        ui.badge(_bt, color=_bc).classes("text-xs").tooltip(_tip)
-
-                                with ui.row().classes("text-xs text-gray-400 gap-4 flex-wrap"):
-                                    ui.label(f"Entry: {sig.get('entry_low', 0):.2f}–{sig.get('entry_high', 0):.2f}")
-                                    ui.label(f"SL: {sig.get('stop_loss', 0):.2f}")
-                                    ui.label(f"TP1: {sig.get('tp1', 0):.2f}")
-                                    ui.label(f"TP7: {sig.get('tp7') or sig.get('tp6', '—')}")
-                                    ui.label(f"Level: {sig.get('level_price', 0):.2f}")
-                                    ui.label(f"Score: {sig.get('level_score', 0):.2f}")
+                            _render_open_signal_card(sig)
                 else:
                     with open_container:
                         ui.label("No open signals").classes("text-xs text-gray-600 italic")
@@ -499,7 +447,8 @@ def render() -> None:
                             with ui.element("thead"):
                                 with ui.element("tr").classes("text-gray-500 border-b border-gray-700"):
                                     for h in [key_col.replace("_", " ").title(), "W", "L", "Avg $", "Total $"]:
-                                        ui.element("th").classes("text-left px-1 py-0.5").text = h
+                                        with ui.element("th").classes("text-left px-1 py-0.5"):
+                                            ui.label(h)
                             with ui.element("tbody"):
                                 for r in rows:
                                     total_pnl = float(r.get("total_pnl") or 0)
@@ -582,4 +531,4 @@ def render() -> None:
 
     asyncio.create_task(_refresh_all())
 
-    ui.timer(30, _safe_refresh)
+    _timer(30, _safe_refresh)

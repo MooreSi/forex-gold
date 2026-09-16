@@ -13,6 +13,7 @@ from backend.src.controllers.history_controller import (
 )
 
 from ._shared import _entry_deal_comments
+from frontend.components.timer_probe import timer as _timer
 
 
 def _render_trade_table(engine):
@@ -412,5 +413,5 @@ def _render_trade_table(engine):
 
         days_sel.on("update:model-value", lambda _: asyncio.create_task(refresh_table()))
         refresh_btn.on("click", _on_refresh_click)
-        ui.timer(15.0, refresh_table)
+        _timer(15.0, refresh_table)
         asyncio.ensure_future(refresh_table())

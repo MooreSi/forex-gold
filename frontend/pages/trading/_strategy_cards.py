@@ -10,6 +10,7 @@ from backend.src.controllers.trading_controller import (
 )
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -314,7 +315,7 @@ def _render_channel_strategy_card(engine, all_names: dict, rs: dict) -> None:
         )
         eval_status
 
-    ui.timer(60, _refresh_tooltips_from_db)
+    _timer(60, _refresh_tooltips_from_db)
 def _rec_label_text(rec: dict, strat_opts: dict) -> str:
     """Format the recommendation label under each channel dropdown."""
     strat = rec.get("strategy", "")

@@ -103,7 +103,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         except Exception as e:
             log.debug("[trading] circuit-breaker banner refresh failed: %s", e)
 
-    ui.timer(5.0, _refresh_account)
+    _timer(5.0, _refresh_account)
     asyncio.ensure_future(_refresh_account())
 
     ui.separator().classes("my-1")
@@ -202,6 +202,7 @@ from ._shared import _pnl_colour
 from ._strategy import _render_strategy
 from ._tg_signals import _render_tg_signals
 from ._signals_card import render_signals_card
+from frontend.components.timer_probe import timer as _timer
 
 
 

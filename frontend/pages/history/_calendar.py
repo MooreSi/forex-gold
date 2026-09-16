@@ -20,6 +20,7 @@ from ._shared import (
 )
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -458,4 +459,4 @@ def _render_calendar(engine):
         source_lbl
 
     asyncio.ensure_future(reload(force=True))
-    ui.timer(15.0, reload)  # silent background poll — only redraws if data changed
+    _timer(15.0, reload)  # silent background poll — only redraws if data changed

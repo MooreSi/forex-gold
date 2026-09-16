@@ -10,6 +10,7 @@ from nicegui import ui
 from backend.src.controllers import telegram_controller as tg_controller
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def _render_slot_feed(reader, slot: int):
                             ui.label(f"{sender}:").classes("text-yellow-300 font-semibold")
                         ui.label(text).classes("text-gray-300 text-xs break-words")
 
-        ui.timer(2.0, refresh)
+        _timer(2.0, refresh)
         asyncio.create_task(refresh())
 
 

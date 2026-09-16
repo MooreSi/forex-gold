@@ -8,6 +8,7 @@ from backend.src.controllers import history_controller as history_ctl
 from frontend.pages.history._deal_cache import cached_deal_history
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -141,5 +142,5 @@ def _render_equity_curve(engine):
             except Exception as e:
                 _log.debug("[history] equity-curve chart update failed: %s", e)
 
-        ui.timer(15.0, refresh_chart)
+        _timer(15.0, refresh_chart)
         asyncio.ensure_future(refresh_chart())

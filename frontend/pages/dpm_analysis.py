@@ -8,6 +8,7 @@ from nicegui import ui
 
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import dpm_controller as dpm_controller
+from frontend.components.timer_probe import timer as _timer
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -426,4 +427,4 @@ def render() -> None:
 
     # Initial load + periodic refresh
     asyncio.create_task(_refresh())
-    ui.timer(30.0, _refresh)
+    _timer(30.0, _refresh)

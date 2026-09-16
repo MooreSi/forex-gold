@@ -6,6 +6,7 @@ from backend.src.controllers import history_controller as history_ctl
 from frontend.components.empty_state import render_empty_state
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -246,4 +247,4 @@ def _render_heatmap(engine):
         now = _dt.now()
         if now.hour == 8 and now.minute < 2:
             _refresh_heatmap_analysis(force=True)
-    ui.timer(60, _daily_8am_check)
+    _timer(60, _daily_8am_check)

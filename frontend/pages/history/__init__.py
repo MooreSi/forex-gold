@@ -20,6 +20,7 @@ from ._shared import (
 from ._trade_table import _render_trade_table
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def render(get_engine: Callable):
         except Exception as e:
             _log.debug("[history] performance summary refresh failed: %s", e)
 
-    ui.timer(15.0, refresh_perf)
+    _timer(15.0, refresh_perf)
     asyncio.ensure_future(refresh_perf())
 
     # ── Equity Curve — always visible, full-width, above the sub-tabs ────────────

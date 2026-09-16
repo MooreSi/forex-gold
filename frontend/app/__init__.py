@@ -61,6 +61,7 @@ _nicegui_core.sio.eio.max_http_buffer_size = 10_000_000  # 10MB, was 1MB
 from backend.src.controllers import settings_controller as cfg_module
 from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers import settings_controller as settings_ctl
+from backend.src.controllers import schedule_controller as schedule_ctl
 from frontend.pages import backtest as backtest_page
 from frontend.pages import news as news_page
 
@@ -87,6 +88,7 @@ import time as _time
 from ._about import _render_about
 
 from ._header import build_header
+from frontend.components.timer_probe import timer as _timer
 _FAVICON_VERSION = int(_time.time())
 _FAVICON_HTML = (
     f'<link rel="icon" type="image/png" href="/static/favicon.png?v={_FAVICON_VERSION}">'
@@ -429,7 +431,7 @@ def main_page():
         # always visible, next to About.
         with ui.row().classes(
             "items-center gap-1.5 px-3 shrink-0 cursor-pointer"
-        ).style("border-left:1px solid #374151") as cb_row:
+        ).style("border-left:1px solid #374151").mark("trading-status-badge") as cb_row:
             cb_icon = ui.icon("shield", size="xs").classes("text-green-400")
             cb_top_lbl = ui.label("Circuit Breaker OK").classes(
                 "text-xs font-semibold leading-none text-green-400"
@@ -445,7 +447,8 @@ def main_page():
             raw = settings_ctl.get_app_config("trade_pause_until")
             gov_paused = raw is not None and float(raw or 0) > _time.time()
             cb_paused = bool(cb.get("is_active"))
-            if not (cb_paused or gov_paused):
+            target = schedule_ctl.daily_profit_target_state()
+            if not (cb_paused or gov_paused or target["reached"]):
                 ui.notify("Trading is not currently paused", type="info")
                 return
             reasons = []
@@ -454,6 +457,11 @@ def main_page():
             if cb_paused:
                 reasons.append(
                     f"Circuit breaker active ({cb.get('losses_threshold')} consecutive losses)"
+                )
+            if target["reached"]:
+                reasons.append(
+                    f"Daily profit target reached (${target['pnl']:.2f} of "
+                    f"${target['target']:.2f}) — resuming trades for the rest of today"
                 )
             _resume_confirm_reason_lbl.text = " / ".join(reasons)
             _resume_confirm_dialog.open()
@@ -509,6 +517,24 @@ def main_page():
                 # rather than freezing at whatever the calendar last said. No
                 # resume_ts (the feed-down hardcoded fallback knows a window is
                 # open, not when it ends) means the box shows with no timer.
+                # The daily profit target (Trading > Schedule) also holds
+                # every automated entry, for the whole of the rest of the day
+                # -- so "Circuit Breaker OK" was the same false all-clear the
+                # news box was added to fix, only longer-lived. It ranks BELOW
+                # a halt (that is a loss guard, this is a win) and ABOVE a
+                # blackout (that lifts itself in minutes, this needs a Resume).
+                try:
+                    _target = await schedule_ctl.daily_profit_target_state_async()
+                except Exception:
+                    _target = {"reached": False}
+                if _target["reached"]:
+                    cb_icon.classes(replace="text-sky-400")
+                    cb_icon.props("name=emoji_events")
+                    cb_top_lbl.text = "Profit Target Reached"
+                    cb_top_lbl.classes(
+                        replace="text-xs font-semibold leading-none text-sky-400")
+                    return
+
                 _news = _news_pause_state_safe()
                 if _news["paused"]:
                     _left = float(_news["resume_ts"] or 0) - now
@@ -526,13 +552,13 @@ def main_page():
                 cb_top_lbl.text = "Circuit Breaker OK"
                 cb_top_lbl.classes(replace="text-xs font-semibold leading-none text-green-400")
 
-        ui.timer(5.0, _refresh_cb_badge)
+        _timer(5.0, _refresh_cb_badge)
         # once=True rather than a bare call: _refresh_cb_badge became `async
         # def` on 2026-09-01 (it reads the database, and a sync timer callback
         # does that on the event loop). A bare call now builds a coroutine and
         # drops it, so the badge would stay blank until the first 5s tick.
         # Pinned by tests/refactor/test_unawaited_coroutines.py.
-        ui.timer(0.1, _refresh_cb_badge, once=True)
+        _timer(0.1, _refresh_cb_badge, once=True)
 
     def _on_tab_change(e):
         if e.value != "History":

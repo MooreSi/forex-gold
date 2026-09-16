@@ -17,6 +17,7 @@ from backend.src.controllers.remote_controller import (
     app_version, get_or_create_token, get_status, get_stored_email,
     request_registration,
 )
+from frontend.components.timer_probe import timer as _timer
 
 
 def _read_changelog() -> list[str]:
@@ -193,7 +194,7 @@ def _render_github_update_card() -> None:
         ).classes("text-xs text-gray-500 leading-relaxed mt-1")
 
         _draw()
-        ui.timer(0.1, _check, once=True)
+        _timer(0.1, _check, once=True)
 
 
 def render():
@@ -472,4 +473,4 @@ def render():
                             )
 
         _refresh()
-        ui.timer(5, _refresh)
+        _timer(5, _refresh)

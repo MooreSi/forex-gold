@@ -2,6 +2,7 @@
 from nicegui import ui
 from backend.src.controllers import trading_controller as trading_ctl
 from backend.src.controllers import sync_controller as sync_ctl
+from frontend.components.timer_probe import timer as _timer
 
 
 def render_signals_card() -> None:
@@ -87,7 +88,7 @@ def render_signals_card() -> None:
                     _live = bool(_rs.get("bo_live_execution", 0))
                     badge.text = "BO LIVE ON" if _live else "BO LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
-                ui.timer(30, _sync_bo_badge)
+                _timer(30, _sync_bo_badge)
 
                 ui.button("Toggle", icon="swap_horiz", on_click=toggle_bo_live).classes(
                     "text-xs mt-1"
@@ -176,7 +177,7 @@ def render_signals_card() -> None:
                     _live = bool(_rs.get("re_live_execution", 0))
                     badge.text = "RE LIVE ON" if _live else "RE LIVE OFF"
                     badge.props(f"color={'green' if _live else 'grey'}")
-                ui.timer(30, _sync_re_badge)
+                _timer(30, _sync_re_badge)
 
                 ui.button("Toggle", icon="swap_horiz", on_click=toggle_re_live).classes(
                     "text-xs mt-1"

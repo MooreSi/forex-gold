@@ -10,6 +10,7 @@ from ._shared import (
 )
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -237,5 +238,5 @@ def _render_pending_signals(engine):
                             "bg-gray-600 text-white text-xs px-3 py-1"
                         )
 
-    ui.timer(5.0, refresh)
+    _timer(5.0, refresh)
     asyncio.ensure_future(refresh())

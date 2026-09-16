@@ -11,6 +11,8 @@ import logging
 from backend.src.controllers import engines_controller as engines_controller
 from nicegui import ui
 
+from frontend.components import learning_chart as _learning_chart
+
 _log = logging.getLogger(__name__)
 
 from ._shared import (
@@ -18,6 +20,7 @@ from ._shared import (
     _fmt_duration,
     _fmt_ts,
     _level_type_badge,
+    _live_exec_badge,
     _ml_thresh,
     _outcome_color,
     _pnl_color,
@@ -213,60 +216,24 @@ async def _render_ml_section(ml_container, diff=None) -> None:
                       f"once {_ml_thresh['min_train_samples']} minimum reached.")
 
             # ── Is it learning? ────────────────────────────────────────────
+            # Rolling window, labelled axes, shared with the Breakout panel.
+            # Both panels carried a byte-identical copy of this chart and a
+            # cumulative mean that could not move; see learning_chart.py.
             sig_ids      = mets.get("signal_ids", [])
-            win_rates    = mets.get("win_rate_series", [])
             pred_r_ser   = mets.get("pred_r_series", [])
             actual_r_ser = mets.get("actual_r_series", [])
+            win_rates    = mets.get("win_rate_series", [])
+            _learning_chart.render(mets)
 
             if sig_ids:
-                ui.label("Is it learning?").classes(
-                    "text-xs font-semibold text-gray-400 uppercase tracking-wider mt-1"
-                )
                 n = len(sig_ids)
-                W, H = 280, 50
-
-                def _to_svg_points(series: list, lo: float, hi: float, w: int, h: int) -> str:
-                    if not series or hi == lo:
-                        return ""
-                    pts = []
-                    for i, v in enumerate(series):
-                        if v is None:
-                            continue
-                        x = int(i / max(len(series) - 1, 1) * w)
-                        y = int(h - (v - lo) / (hi - lo) * h)
-                        pts.append(f"{x},{y}")
-                    return " ".join(pts)
-
-                wr_pts = _to_svg_points(win_rates, 0, 100, W, H)
-                cum_r: list = []
-                running = 0.0
-                for v in actual_r_ser:
-                    running += v
-                    cum_r.append(round(running / len(cum_r + [0]), 3))
-                ar_pts = _to_svg_points(cum_r, -1.0, 1.0, W, H)
-
-                svg = f"""<svg width="{W}" height="{H}" viewBox="0 0 {W} {H}"
-                               xmlns="http://www.w3.org/2000/svg"
-                               style="background:#1f2937;border-radius:4px">
-                      <line x1="0" y1="{H//2}" x2="{W}" y2="{H//2}"
-                            stroke="#374151" stroke-width="1" stroke-dasharray="4,4"/>
-                      {f'<polyline points="{wr_pts}" fill="none" stroke="#4ade80" stroke-width="1.5"/>' if wr_pts else ''}
-                      {f'<polyline points="{ar_pts}" fill="none" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="3,2"/>' if ar_pts else ''}
-                    </svg>"""
-                ui.html(svg).tooltip(
-                    "Green = cumulative win rate (target >50%). "
-                    "Orange dashed = mean actual R-multiple (target >0)."
-                )
-                with ui.row().classes("gap-3 text-xs"):
-                    ui.label("— win rate").classes("text-green-400")
-                    ui.label("--- actual R").classes("text-orange-400")
-
                 last_n = min(5, n)
                 with ui.element("table").classes("w-full text-xs mt-1"):
                     with ui.element("thead"):
                         with ui.element("tr").classes("text-gray-600 border-b border-gray-800"):
                             for h_label in ["Signal", "Win%", "Pred R", "Act R"]:
-                                ui.element("th").classes("text-left px-1 py-0.5").text = h_label
+                                with ui.element("th").classes("text-left px-1 py-0.5"):
+                                    ui.label(h_label)
                     with ui.element("tbody"):
                         for i in range(n - last_n, n):
                             _pr = pred_r_ser[i] if i < len(pred_r_ser) else None
@@ -363,3 +330,108 @@ def _render_research_section(container) -> None:
         ui.button("Shadow report", icon="compare_arrows", on_click=_shadow) \
             .classes("text-xs bg-slate-800 text-white px-3 mt-2") \
             .props("dense unelevated")
+
+
+def render_open_signal_card(sig: dict) -> None:
+    """One open reversal signal, in the Breakout panel's card shape.
+
+    Owner request 2026-09-16. The old card was a left-border strip with a
+    flat row of six numbers; this is the Breakout card's layout -- direction
+    block, price line, context line, reference/status column -- carrying the
+    Reversal Engine's own evidence rather than the Breakout engine's.
+
+    The difference is not cosmetic. Breakout decides on a broken level, ADX
+    and a quality score. Reversal decides on a LEVEL and its SCORE, gates on
+    an ML probability, and correlates against the reference channel. Those
+    are the fields on the card, and `level_score` in particular is the number
+    `capability_gates` blocks on -- without it the card cannot say why the
+    signal exists.
+
+    The entry stays a RANGE. A reversal signal is a zone, and collapsing it
+    to the single price the Breakout card shows would misreport the setup.
+
+    Every field is read defensively: `get_open_signals` is `SELECT *` on a
+    table that has gained columns five times, and a card that raises takes
+    the whole tab down with it.
+    """
+    def _f(key, default=0.0):
+        try:
+            v = sig.get(key)
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    direction = str(sig.get("direction") or "")
+    is_buy    = direction.upper() == "BUY"
+    border    = "border-green-800" if is_buy else "border-red-800"
+    dir_bg    = "bg-green-800" if is_buy else "bg-red-900"
+    status    = str(sig.get("status") or "pending")
+    sig_ref   = str(sig.get("signal_ref") or "")
+    badge_text, badge_color = _level_type_badge(str(sig.get("level_type") or ""))
+
+    with ui.card().classes(f"w-full bg-gray-800 rounded-lg p-4 border {border}"):
+        with ui.row().classes("w-full items-start gap-4"):
+            with ui.column().classes(
+                f"rounded-lg px-3 py-2 {dir_bg} items-center min-w-16"
+            ):
+                ui.label(direction or "?").classes(
+                    f"text-sm font-bold {_dir_color(direction)}")
+                ui.label("XAUUSD").classes("text-xs text-gray-400")
+
+            with ui.column().classes("flex-1 gap-1"):
+                with ui.row().classes("items-center gap-2 flex-wrap"):
+                    ui.badge(badge_text, color=badge_color).classes("text-xs")
+                    lo, hi = _f("entry_low"), _f("entry_high")
+                    if lo is not None and hi is not None:
+                        ui.label(f"${lo:.2f}–${hi:.2f}").classes(
+                            "text-white font-semibold")
+                    sl = _f("stop_loss")
+                    if sl is not None:
+                        moved = " (moved)" if sig.get("sl_moved_to_be") else ""
+                        ui.label(f"SL ${sl:.2f}{moved}").classes("text-red-300 text-xs")
+                    for key, label, cls in (("tp1", "TP1", "text-green-300"),
+                                            ("tp3", "TP3", "text-green-400"),
+                                            ("tp7", "TP7", "text-green-500")):
+                        v = _f(key)
+                        if v:
+                            ui.label(f"{label} ${v:.2f}").classes(f"{cls} text-xs")
+                    rr = _f("rr_tp1")
+                    if rr:
+                        ui.label(f"R:R {rr:.1f}:1").classes(
+                            "text-blue-300 text-xs font-mono")
+
+                with ui.row().classes("items-center gap-2 flex-wrap"):
+                    lvl = _f("level_price")
+                    if lvl:
+                        ui.label(
+                            f"Level: ${lvl:.2f} ({sig.get('level_type') or 'level'})"
+                        ).classes("text-orange-300 text-xs")
+                    score = _f("level_score")
+                    if score is not None:
+                        ui.label(f"Score {score:.2f}").classes(
+                            "text-yellow-300 text-xs font-mono")
+                    prob = _f("ml_prob")
+                    if prob is not None:
+                        ui.label(f"ML {prob:+.3f}").classes(
+                            "text-purple-300 text-xs font-mono")
+                    adx = _f("adx")
+                    if adx:
+                        ui.label(f"ADX {adx:.1f}").classes(
+                            "text-purple-300 text-xs font-mono")
+                    ui.label(f"HTF: {sig.get('htf_bias') or '?'}").classes(
+                        "text-gray-400 text-xs")
+                    ui.label(f"H1: {sig.get('h1_bias') or '?'}").classes(
+                        "text-gray-400 text-xs")
+                    ui.label(f"Session: {sig.get('session') or '?'}").classes(
+                        "text-gray-400 text-xs")
+                    _corr = "confirmed" if sig.get("correlation_confirmed") else "none"
+                    ui.label(f"REF corr: {_corr}").classes("text-gray-400 text-xs")
+
+            with ui.column().classes("items-end gap-1 shrink-0"):
+                if sig_ref:
+                    ui.label(sig_ref).classes("text-xs font-mono text-gray-500")
+                ui.label(status.upper()).classes("text-xs font-mono text-blue-300")
+                _exec = _live_exec_badge(str(sig.get("live_exec_status") or ""))
+                if _exec:
+                    _bt, _bc, _tip = _exec
+                    ui.badge(_bt, color=_bc).classes("text-xs").tooltip(_tip)

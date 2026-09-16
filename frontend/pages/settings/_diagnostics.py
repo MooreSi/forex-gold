@@ -12,6 +12,7 @@ from ._log_export import export_logs
 from ._shared import _pu
 
 import logging
+from frontend.components.timer_probe import timer as _timer
 
 _log = logging.getLogger(__name__)
 
@@ -73,8 +74,7 @@ def _render_diagnostics(engine):
             live_diag_card.classes(remove="hidden")
             asyncio.create_task(_render_live_lines())
             if _live_diag_timer[0] is None:
-                from nicegui import ui as _ui
-                _live_diag_timer[0] = _ui.timer(5.0, _render_live_lines)
+                _live_diag_timer[0] = _timer(5.0, _render_live_lines)
         else:
             live_diag_card.classes(add="hidden")
             if _live_diag_timer[0]:

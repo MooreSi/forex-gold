@@ -5,6 +5,7 @@ without importing back out of the package -- which is a circular import, since
 __init__ imports _sections.
 """
 from datetime import datetime
+from typing import Optional
 
 
 from backend.src.controllers import engines_controller
@@ -72,3 +73,34 @@ def _level_type_badge(ltype: str) -> tuple[str, str]:
         "congestion": ("CONGST",  "orange"),
     }
     return colors.get(ltype, (ltype[:7].upper(), "grey"))
+
+
+# Moved here from reversal_panel/__init__.py 2026-09-16 (pure move, no
+# logic change): the open-position card moved to _sections.py and needs
+# it, and importing it back out of the package __init__ would be circular.
+def _live_exec_badge(exec_st: str) -> Optional[tuple[str, str, str]]:
+    """(badge_text, badge_color, tooltip) for a non-executed live_exec_status,
+    or None if there's nothing worth flagging (empty, or already executed/
+    virtual-by-design). Mirrors the reasons written by _try_live_execute /
+    _try_re_limit_order in reversal_engine_live_execute.py."""
+    if not exec_st or exec_st in ("executed",) or exec_st.startswith("limit_order_placed"):
+        return None
+    if exec_st == "skipped:live_disabled":
+        return None  # live execution off entirely -- not a per-signal problem
+    if exec_st == "ml_skipped":
+        return ("ML BLOCKED", "orange", "ML gate blocked live execution: predicted R-multiple < 0")
+    if exec_st == "bias_skipped":
+        return ("BIAS BLOCKED", "orange", "Fill-time bias re-check disagreed with the signal direction")
+    if "circuit breaker" in exec_st.lower():
+        return ("CIRCUIT BREAKER", "red", exec_st)
+    if exec_st.startswith("limit_order_skip"):
+        return ("LIMIT ORDER SKIPPED", "red", exec_st.split(":", 1)[-1])
+    if exec_st.startswith("limit_order_rejected"):
+        return ("EA REJECTED", "red", exec_st.split(":", 1)[-1])
+    if exec_st.startswith("limit_order_error"):
+        return ("LIMIT ORDER ERROR", "red", exec_st.split(":", 1)[-1])
+    if exec_st.startswith("open_failed"):
+        return ("OPEN FAILED", "red", exec_st)
+    if exec_st.startswith("error"):
+        return ("ERROR", "red", exec_st.split(":", 1)[-1] if ":" in exec_st else exec_st)
+    return ("NOT EXECUTED", "grey", exec_st)

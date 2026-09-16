@@ -14,6 +14,7 @@ from ._mt5 import _render_mt5
 from ._risk import render_risk_card
 from ._security import _render_security
 from ._telegram import _render_tg_bot
+from frontend.components.timer_probe import timer as _timer
 
 # The package's whole public surface. render() is the page; render_risk_card
 # is rendered by the trading page too. Everything else is an internal of a
@@ -73,7 +74,7 @@ def render(get_engine: Callable, get_tg_reader: Callable):
         if e.value == t_diag:
             asyncio.create_task(_run_diag())
             if _diag_refresh_timer[0] is None:
-                _diag_refresh_timer[0] = ui.timer(15.0, _run_diag)
+                _diag_refresh_timer[0] = _timer(15.0, _run_diag)
         elif _diag_refresh_timer[0] is not None:
             # Only bridge/EA/tick calls, no heavier work -- fine to keep
             # cheap, but no reason to poll it while the user isn't looking.

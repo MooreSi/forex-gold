@@ -38,6 +38,8 @@ from typing import Any, Callable, Optional
 
 from nicegui import ui
 
+from frontend.components.timer_probe import timed as _timed
+
 log = logging.getLogger(__name__)
 
 _SENTINEL = object()
@@ -85,9 +87,23 @@ def make_tick(produce: Callable[[], Any],
 def poll(interval_s: float,
          produce: Callable[[], Any],
          apply: Callable[[Any], None],
+         *,
+         label: Optional[str] = None,
          **timer_kwargs) -> Optional[Any]:
     """Register a `ui.timer` that reads off the loop and renders on it.
 
     Returns the timer so the caller can cancel or deactivate it.
     """
-    return ui.timer(interval_s, make_tick(produce, apply), **timer_kwargs)
+    # Named after `produce`, not after the tick. Every poll's tick is the same
+    # `make_tick.<locals>._tick`, so without this all four polls arrive in the
+    # log under one indistinguishable name -- the exact problem
+    # `timer_probe` exists to end, reintroduced one level in. The read is on a
+    # worker thread, so what a slow tick here attributes is the RENDER.
+    return ui.timer(interval_s,
+                    _timed(make_tick(produce, apply), label=label or _poll_label(produce)),
+                    **timer_kwargs)
+
+
+def _poll_label(produce: Callable[[], Any]) -> str:
+    from frontend.components.timer_probe import _label_for
+    return f"poll({_label_for(produce)})"

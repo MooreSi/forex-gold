@@ -261,6 +261,78 @@ def set_daily_profit_target(value: float, _from_sync: bool = False) -> None:
     _maybe_forward_trading_schedule(_from_sync)
 
 
+# The daily target is the one gate here that holds every automated entry for
+# the rest of the day rather than until the next window. The operator can say
+# "I know, carry on" -- recorded as the DAY it was taken on, not a flag, so it
+# expires at midnight on the trading clock by construction. Nothing has to
+# clear it, and nothing can leave it set into tomorrow. Same reasoning as
+# computing profit on demand instead of keeping a running counter.
+DAILY_TARGET_RESUMED_KEY = "trading_schedule_daily_target_resumed_day"
+
+
+def _day_key(now: datetime) -> str:
+    return now.strftime("%Y-%m-%d")
+
+
+def is_daily_profit_target_resumed(now: Optional[datetime] = None) -> bool:
+    """Has the operator already resumed past today's daily target?"""
+    now = now or _clock.now()
+    return db_module.get_app_config(DAILY_TARGET_RESUMED_KEY) == _day_key(now)
+
+
+def resume_past_daily_profit_target(
+    now: Optional[datetime] = None, _from_sync: bool = False,
+) -> None:
+    """Let automated entries through for the rest of today despite the daily
+    target having been reached. Deliberately does NOT touch the per-window
+    targets or the window hours -- those are separate gates with their own
+    reasons, and clearing them from one click would be a surprise."""
+    now = now or _clock.now()
+    db_module.set_app_config(DAILY_TARGET_RESUMED_KEY, _day_key(now))
+    _maybe_forward_trading_schedule(_from_sync)
+
+
+def daily_profit_target_state(now: Optional[datetime] = None) -> dict:
+    """What the header badge renders: {reached, overridden, pnl, target}.
+
+    `reached` is true only when this gate is ACTUALLY holding orders -- the
+    schedule is on, a target is set, the day has cleared it, and it has not
+    been resumed past. A badge keyed to anything looser announces a halt that
+    is not in force, which is the false positive news_pause_state exists to
+    avoid (see tests/utils/test_news_pause_badge_state.py).
+
+    Never raises: this is on the shell's 5s timer, and a failed read must cost
+    the badge rather than the header.
+    """
+    blank = {"reached": False, "overridden": False, "pnl": 0.0, "target": 0.0}
+    try:
+        now = now or _clock.now()
+        if not is_trading_schedule_enabled():
+            return blank
+        target = get_daily_profit_target()
+        if target <= 0:
+            return blank
+        pnl = _day_realized_pnl(now)
+        overridden = is_daily_profit_target_resumed(now)
+        return {
+            "reached": pnl >= target and not overridden,
+            "overridden": overridden,
+            "pnl": pnl,
+            "target": target,
+        }
+    except Exception as e:
+        log.debug("[Schedule] daily target state read failed: %s", e)
+        return blank
+
+
+async def daily_profit_target_state_async() -> dict:
+    """The same state, read off the event loop -- it reaches synchronous
+    SQLite, and the shell polls it every 5s. Same relationship as
+    risk/settings.py's circuit_breaker_state / circuit_breaker_state_async."""
+    from backend.src.db.database import to_db_thread
+    return await to_db_thread(daily_profit_target_state)
+
+
 _applying_sync_trading_schedule = False  # re-entrancy guard — see set_trading_schedule/set_trading_schedule_enabled
 
 
@@ -289,6 +361,7 @@ def trading_schedule_snapshot() -> dict:
         "enabled": is_trading_schedule_enabled(),
         "schedule": get_trading_schedule(),
         "daily_target": get_daily_profit_target(),
+        "daily_target_resumed_day": db_module.get_app_config(DAILY_TARGET_RESUMED_KEY) or "",
     }
 
 
@@ -302,6 +375,12 @@ def apply_trading_schedule_snapshot(snapshot: dict) -> None:
         set_trading_schedule_enabled(bool(snapshot["enabled"]), _from_sync=True)
     if "daily_target" in snapshot:
         set_daily_profit_target(float(snapshot["daily_target"] or 0), _from_sync=True)
+    # Absent, not empty, is how a peer that predates this field speaks. Reading
+    # that as "clear it" would re-arm a target the operator has deliberately
+    # resumed past, on the very next sync tick.
+    if "daily_target_resumed_day" in snapshot:
+        db_module.set_app_config(
+            DAILY_TARGET_RESUMED_KEY, str(snapshot["daily_target_resumed_day"] or ""))
 
 
 def _forward_trading_schedule_over_sync() -> None:
@@ -442,7 +521,7 @@ def check_trading_schedule(
     # this gate and falls straight through to the per-window target(s) below,
     # exactly as before this feature existed.
     daily_target = get_daily_profit_target()
-    if daily_target > 0:
+    if daily_target > 0 and not is_daily_profit_target_resumed(now):
         day_pnl = _day_realized_pnl(now)
         if day_pnl >= daily_target:
             return False, (

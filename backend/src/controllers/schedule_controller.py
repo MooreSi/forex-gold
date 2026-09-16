@@ -17,6 +17,8 @@ __all__ = [
     "DAY_NAMES", "get_trading_schedule", "set_trading_schedule",
     "is_trading_schedule_enabled", "set_trading_schedule_enabled",
     "get_daily_profit_target", "set_daily_profit_target", "parse_hm",
+    "daily_profit_target_state", "daily_profit_target_state_async",
+    "resume_past_daily_profit_target",
     "describe_trading_clock", "set_trading_clock_offset",
 ]
 
@@ -48,6 +50,22 @@ def get_daily_profit_target(*args, **kwargs):
 def set_daily_profit_target(*args, **kwargs):
     """The target that halts trading for the day once reached."""
     return _schedule.set_daily_profit_target(*args, **kwargs)
+
+
+def daily_profit_target_state(*args, **kwargs):
+    """What the header badge shows: whether the daily target is holding
+    orders right now, and the two figures behind that."""
+    return _schedule.daily_profit_target_state(*args, **kwargs)
+
+
+async def daily_profit_target_state_async(*args, **kwargs):
+    """The same, read off the event loop for the shell's 5s poll."""
+    return await _schedule.daily_profit_target_state_async(*args, **kwargs)
+
+
+def resume_past_daily_profit_target(*args, **kwargs):
+    """Carry on trading for the rest of today despite the daily target."""
+    return _schedule.resume_past_daily_profit_target(*args, **kwargs)
 
 
 def parse_hm(value: str):

@@ -21,6 +21,7 @@ from nicegui import app, ui
 
 from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.controllers import trading_controller as trading_ctl
+from backend.src.controllers import schedule_controller as schedule_ctl
 
 
 def build_power_dialog(root):
@@ -171,8 +172,10 @@ def build_resume_confirm_dialog():
     # Separate from _pause_dialog above: that dialog only knows about the
     # governor's trade_pause_until halt. The header badge also reflects the
     # circuit breaker (a different mechanism, circuit_breaker_active_until in
-    # vantage_risk_settings), so this popup clears whichever of the two is
-    # actually active rather than assuming it is always the governor.
+    # vantage_risk_settings) and the trading schedule's daily profit target (a
+    # third, computed on demand from the day's realised P&L), so this popup
+    # clears whichever of the three is actually active rather than assuming it
+    # is always the governor.
     with ui.dialog() as _resume_confirm_dialog, ui.card().classes(
         "bg-gray-800 p-5 rounded-lg min-w-80"
     ):
@@ -186,14 +189,21 @@ def build_resume_confirm_dialog():
             raw = settings_ctl.get_app_config("trade_pause_until")
             if raw is not None and float(raw or 0) > _time.time():
                 settings_ctl.set_app_config("trade_pause_until", "0")
+            # The third thing the badge can be reporting. Only lifts the DAILY
+            # target, and only for today -- the per-window targets and the
+            # window hours are separate gates and stay as they are.
+            if schedule_ctl.daily_profit_target_state()["reached"]:
+                schedule_ctl.resume_past_daily_profit_target()
             _resume_confirm_dialog.close()
             ui.notify("Trading resumed", type="positive")
 
         with ui.row().classes("gap-2 mt-3"):
+            # Marked because the Pause dialog above carries a button with the
+            # same caption; without it a test cannot say which one it pressed.
             ui.button(
                 "Resume Trading", icon="play_arrow",
                 on_click=_do_confirm_resume,
-            ).classes("bg-green-700 text-white px-4 py-2")
+            ).classes("bg-green-700 text-white px-4 py-2").mark("resume-confirm-button")
             ui.button("Cancel", on_click=_resume_confirm_dialog.close).classes(
                 "bg-gray-700 text-white px-4 py-2"
             )

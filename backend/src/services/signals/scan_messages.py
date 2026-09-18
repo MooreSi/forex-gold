@@ -27,8 +27,10 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 import asyncio
+import hashlib
 import re
 import time
+from collections import OrderedDict
 
 from backend.src.services.signals.parser import SIGNAL_PREFIX
 from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
@@ -61,6 +63,42 @@ from backend.src.services.telegram.keyword_triggers import (
 
 
 log = logging.getLogger(__name__)
+
+
+# ── High-risk skip: log once, not once per scan cycle ───────────────────────
+# The skip below happens BEFORE the dedup lookup that marks a message
+# processed, so the message stays in the reader's fetch window and is
+# re-decided about once a second for as long as it is there. Unsuppressed,
+# that produced 204,359 identical lines in one day (bugs/065) -- 80% of the
+# log -- from nine messages, and buried every real fault in the file.
+#
+# Same idiom, same reasons, as scan_parse_classify's bare-direction memory
+# (bugs/015): bounded, keyed on the message BODY as well as the id so an
+# edit that is still high-risk reports itself once more, and with a reset
+# seam because module state otherwise leaks between tests.
+_HIGH_RISK_LOG_MEMORY = 512
+_high_risk_logged: "OrderedDict[tuple[str, str], None]" = OrderedDict()
+
+
+def _high_risk_key(tg_id: str, text: str) -> tuple[str, str]:
+    digest = hashlib.blake2s(text.encode("utf-8", "replace"), digest_size=8)
+    return (str(tg_id), digest.hexdigest())
+
+
+def _note_high_risk_skip(tg_id: str, text: str) -> bool:
+    """True the first time this message body is skipped, False on every rescan."""
+    key = _high_risk_key(tg_id, text)
+    if key in _high_risk_logged:
+        return False
+    _high_risk_logged[key] = None
+    while len(_high_risk_logged) > _HIGH_RISK_LOG_MEMORY:
+        _high_risk_logged.popitem(last=False)
+    return True
+
+
+def reset_high_risk_log_memory() -> None:
+    """Test seam. Module state would otherwise leak between tests."""
+    _high_risk_logged.clear()
 
 
 @dataclass
@@ -139,7 +177,8 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                 continue
 
             if exclude_high_risk and "high risk" in text.lower():
-                log.info("[engine] Skipping high-risk signal tg_id=%s", tg_id)
+                if _note_high_risk_skip(tg_id, text):
+                    log.info("[engine] Skipping high-risk signal tg_id=%s", tg_id)
                 continue
 
             slot         = slot_groups.get(group_id, 1)

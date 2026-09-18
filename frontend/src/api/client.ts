@@ -91,4 +91,7 @@ export const api = {
     request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
+  // No body: a DELETE that carries one is ambiguous about what it deletes, and
+  // every delete in this API names its subject in the path.
+  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };

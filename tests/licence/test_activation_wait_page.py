@@ -1,7 +1,9 @@
 """The page the browser sits on while the app restarts into its new licence.
 
-`/licence-activated` is plain HTML with no socket.io, deliberately, so it
-survives the NiceGUI process dying underneath it. Its whole job is to notice
+`/licence-activated` is plain HTML with no live connection, deliberately, so it
+survives the activation process dying underneath it. (It survived NiceGUI's
+socket.io the same way; the screen was ported to plain HTML on 2026-09-18 and
+these assertions moved to `activation_server` unchanged.) Its whole job is to notice
 when the replacement process is up and take the user there. It had two ways of
 failing to do that, and both end the same way: the user stares at "Licence
 Activated / Loading..." until they relaunch the app by hand.
@@ -28,7 +30,7 @@ behaviour of the interpreter that runs it.
 """
 from __future__ import annotations
 
-from backend.src.config.licence import guard
+from backend.src.config.licence import activation_server
 
 
 def _script_code(html: str) -> str:
@@ -46,21 +48,39 @@ def _script_code(html: str) -> str:
 class TestTheProbeTellsTheTwoProcessesApart:
 
     def test_the_activation_process_answers_the_probe(self):
-        assert guard._activation_probe() == {"stage": "activation"}
+        from fastapi.testclient import TestClient
+
+        app = activation_server.build_app("machine-1")
+        with TestClient(app) as client:
+            r = client.get(activation_server.PROBE_PATH)
+
+        assert r.json() == {"stage": "activation"}
+
+    def test_the_app_that_replaces_it_does_not(self):
+        """The other half of the same signal, and the half that was broken:
+        the React app's SPA fallback answered 200 for this path, so the wait
+        page would have sat there for ever."""
+        from fastapi.testclient import TestClient
+
+        from backend.src.api.server import build_app as build_real
+
+        real = build_real(engine_provider=lambda: None, install_auth_gate=False)
+        with TestClient(real, raise_server_exceptions=False) as client:
+            assert client.get(activation_server.PROBE_PATH).status_code == 404
 
     def test_the_probe_lives_under_the_activation_only_path(self):
         """The signal is "this path 404s now", so it must be a path the main
         app has no reason to serve. Anything under /licence-activated/ is
         registered by the activation screen alone."""
-        assert guard._ACTIVATION_PROBE_PATH.startswith("/licence-activated/")
+        assert activation_server.PROBE_PATH.startswith("/licence-activated/")
 
 
 class TestTheWaitPageWaitsForTheRightThing:
 
     def test_it_polls_the_probe_and_not_the_root(self):
-        code = _script_code(guard._activation_html())
+        code = _script_code(activation_server.waiting_page())
 
-        assert guard._ACTIVATION_PROBE_PATH in code
+        assert activation_server.PROBE_PATH in code
         assert "fetch('/'" not in code and 'fetch("/"' not in code, (
             "the dying activation process answers / with 200, so polling it "
             "navigates away before the app it is waiting for exists"
@@ -68,9 +88,9 @@ class TestTheWaitPageWaitsForTheRightThing:
 
     def test_it_leaves_this_page_rather_than_reloading_it(self):
         """`/licence-activated` is not a route the main app serves."""
-        code = _script_code(guard._activation_html())
+        code = _script_code(activation_server.waiting_page())
 
-        assert "location.replace('/')" in code
+        assert 'location.replace("/")' in code or "location.replace('/')" in code
         assert "location.reload" not in code, (
             "reloading re-requests /licence-activated, which the app that "
             "just started does not serve — a 404 instead of the app"
@@ -80,12 +100,14 @@ class TestTheWaitPageWaitsForTheRightThing:
         """The escape hatch shown when the wait runs long. It is the last
         thing left if the poll logic is wrong, so it must not be wired to the
         same reload that fails."""
-        html = guard._activation_html()
+        html = activation_server.waiting_page()
 
         assert 'href="/"' in html
         assert "onclick" not in html
 
-    def test_the_template_placeholder_is_fully_substituted(self):
-        html = guard._activation_html()
+    def test_the_page_carries_no_unsubstituted_placeholder(self):
+        html = activation_server.waiting_page()
 
         assert "__PROBE_PATH__" not in html
+        assert "__BODY__" not in html
+        assert "__TITLE__" not in html

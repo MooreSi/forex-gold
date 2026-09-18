@@ -12,7 +12,6 @@ requires-python = ">=3.11"
 # remains the install source of truth; this list makes `pip install .` / wheel
 # builds pull the same runtime set instead of a broken subset.
 dependencies = [
-    "nicegui>=1.4.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
     "itsdangerous>=2.2.0",

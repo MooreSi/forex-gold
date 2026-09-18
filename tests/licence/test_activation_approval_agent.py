@@ -23,19 +23,24 @@ import pytest
 from backend.src.config.licence import guard
 
 
-class _App:
-    """Captures the handlers the guard registers with @ng_app.on_startup."""
+class _Screen:
+    """Runs the agents the way the activation server does.
 
-    def __init__(self):
-        self.handlers = []
+    `_agents_for_activation` RETURNS the callables rather than registering
+    NiceGUI startup hooks (2026-09-18), so this stands in for the server that
+    runs them — each independently, with a failure swallowed, because this
+    screen is the only way back into a stranded install.
+    """
 
-    def on_startup(self, fn):
-        self.handlers.append(fn)
-        return fn
+    def __init__(self, agents):
+        self.agents = list(agents)
 
     def run_all(self):
-        for fn in self.handlers:
-            fn()
+        for fn in self.agents:
+            try:
+                fn()
+            except Exception:
+                pass
 
 
 @pytest.fixture
@@ -51,10 +56,8 @@ def agents(monkeypatch):
 
 class TestTheAdminMachine:
     def test_the_registered_agent_is_started(self, agents):
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=True, known_client=False)
-        app.run_all()
+        screen = _Screen(guard._agents_for_activation(is_admin=True, known_client=False))
+        screen.run_all()
 
         assert agents == ["ran"]
 
@@ -63,25 +66,22 @@ class TestEveryOtherMachine:
     def test_a_known_client_does_not_start_it(self, agents):
         """It cannot issue a licence, and polling would fight the real admin
         for the bot token."""
-        app = _App()
         import backend.src.services.cluster.remote.client as rc
+
         original = rc.start
         rc.start = lambda: None
         try:
-            guard._start_agents_for_activation(app, is_admin=False,
-                                               known_client=True)
-            app.run_all()
+            _Screen(guard._agents_for_activation(
+                is_admin=False, known_client=True)).run_all()
         finally:
             rc.start = original
 
         assert agents == []
 
     def test_an_unknown_machine_does_not_start_it(self, agents):
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=False,
-                                           known_client=False)
-        app.run_all()
+        screen = _Screen(guard._agents_for_activation(is_admin=False,
+                                           known_client=False))
+        screen.run_all()
 
         assert agents == []
 
@@ -98,10 +98,8 @@ class TestItCannotStrandTheMachine:
         guard.register_activation_agent(_boom)
         import backend.src.services.cluster.remote.server as rs
         monkeypatch.setattr(rs, "start", lambda: None)
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=True, known_client=False)
-        app.run_all()   # must not raise
+        screen = _Screen(guard._agents_for_activation(is_admin=True, known_client=False))
+        screen.run_all()   # must not raise
 
     def test_one_failing_agent_does_not_stop_the_next(self, monkeypatch):
         monkeypatch.setattr(guard, "_activation_agents", [])
@@ -114,10 +112,8 @@ class TestItCannotStrandTheMachine:
         guard.register_activation_agent(lambda: ran.append("second"))
         import backend.src.services.cluster.remote.server as rs
         monkeypatch.setattr(rs, "start", lambda: None)
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=True, known_client=False)
-        app.run_all()
+        screen = _Screen(guard._agents_for_activation(is_admin=True, known_client=False))
+        screen.run_all()
 
         assert ran == ["second"]
 

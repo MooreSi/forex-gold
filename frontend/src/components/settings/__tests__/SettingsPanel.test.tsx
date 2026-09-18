@@ -9,6 +9,16 @@ const BODIES: Record<string, unknown> = {
   "/api/settings/telegram": { api_id: "12345", phone: "+44", api_hash_set: true },
   "/api/settings/email": { smtp_host: "smtp.example.com", smtp_port: "587", smtp_password_set: false },
   "/api/settings/expert-params": { re_min_adx: { value: 22, default: 20 } },
+  "/api/node/state": {
+    version: "1.4.2",
+    active_trader: "local",
+    sync_token_set: true,
+    registration: { approved: true },
+    registered_email: "simon@example.com",
+    autostart: { supported: true, installed: false, armed: false, check_interval_secs: 300 },
+  },
+  "/api/node/update": { current: "1.4.2", update: null, changes: [] },
+  "/api/node/sync-token": {},
   "/api/settings/diagnostics": {
     log: [["12:00:01", "Engine started"]],
     circuit_breaker: { tripped: true, reason: "3 consecutive losses" },
@@ -203,5 +213,91 @@ describe("diagnostics", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "Diagnostics" }));
 
     expect(await screen.findByText("Engine started")).toBeInTheDocument();
+  });
+});
+
+
+describe("node and updates", () => {
+  it("says a token is stored without ever showing it", async () => {
+    // It is shown exactly once, when it is created. This screen can only
+    // honestly report whether one exists.
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText(/never shown again/)).toBeInTheDocument();
+    expect(screen.queryByTestId("new-sync-token")).toBeNull();
+  });
+
+  it("shows a newly generated token once, with the warning", async () => {
+    overrides["/api/node/sync-token"] = {
+      token: "brand-new-token",
+      note: "Copy this into the other node now. It replaces any previous token.",
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /Generate a new token/ }));
+
+    const shown = await screen.findByTestId("new-sync-token");
+    expect(shown).toHaveTextContent("brand-new-token");
+    expect(shown).toHaveTextContent("replaces any previous token");
+  });
+
+  it("says an unpaired node is unpaired", async () => {
+    overrides["/api/node/state"] = {
+      ...(BODIES["/api/node/state"] as object), sync_token_set: false,
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText(/not paired/)).toBeInTheDocument();
+  });
+
+  it("will not request approval without an email, and says why", async () => {
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    const request = await screen.findByRole("button", { name: /Request approval/ });
+    expect(request).toBeDisabled();
+    expect(request).toHaveAttribute("title", expect.stringContaining("email address"));
+  });
+
+  it("says the app is up to date rather than leaving it blank", async () => {
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText(/up to date/)).toBeInTheDocument();
+  });
+
+  it("will not offer to apply an update that does not exist", async () => {
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    const apply = await screen.findByRole("button", { name: /Apply the update/ });
+    expect(apply).toBeDisabled();
+    expect(apply).toHaveAttribute("title", "There is no update to apply.");
+  });
+
+  it("offers to apply one when there is", async () => {
+    overrides["/api/node/update"] = {
+      current: "1.4.2", update: { version: "1.5.0" }, changes: ["Ported the News tab"],
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText(/1.5.0 is available/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Apply the update/ })).toBeEnabled();
+  });
+
+  it("says when autostart is not supported rather than offering a dead switch", async () => {
+    overrides["/api/node/state"] = {
+      ...(BODIES["/api/node/state"] as object),
+      autostart: { supported: false, installed: false, armed: false },
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText("Not supported on this platform.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Start the app when this machine boots/)).toBeNull();
   });
 });

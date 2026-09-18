@@ -6,7 +6,10 @@ import { PanelShell } from "@/components/shared/PanelShell";
 import { useTradingController } from "./hooks/useTradingController";
 import { ActiveTradesSection } from "./internal/ActiveTradesSection";
 import { SignalsSection } from "./internal/SignalsSection";
+import { PlaceLimitOrderDialog } from "./PlaceLimitOrderDialog";
 import { PlaceOrderDialog } from "./PlaceOrderDialog";
+import { ScheduleSection } from "./internal/ScheduleSection";
+import { TemplatesSection } from "./internal/TemplatesSection";
 import { cn } from "@/lib/cn";
 import { asArray } from "@/lib/asArray";
 import type { Trade } from "@/api/types";
@@ -14,6 +17,8 @@ import type { Trade } from "@/api/types";
 const SUB_TABS = [
   { id: "positions", label: "Positions" },
   { id: "signals", label: "Signals" },
+  { id: "schedule", label: "Schedule" },
+  { id: "templates", label: "EA templates" },
 ];
 
 /** Thin wrapper: composition, one piece of local UI state (which dialog is
@@ -21,6 +26,7 @@ const SUB_TABS = [
 export function TradingPanel() {
   const c = useTradingController();
   const [placing, setPlacing] = useState(false);
+  const [placingLimit, setPlacingLimit] = useState(false);
 
   return (
     <PanelShell
@@ -43,6 +49,12 @@ export function TradingPanel() {
             disabledReason={c.disabledReason}
           >
             <Plus size={13} /> Market order
+          </Button>
+          <Button
+            onClick={() => setPlacingLimit(true)}
+            disabledReason={c.disabledReason}
+          >
+            <Plus size={13} /> Limit order
           </Button>
         </>
       }
@@ -72,13 +84,41 @@ export function TradingPanel() {
           />
         </Tabs.Content>
         <Tabs.Content value="signals" className="min-h-0 flex-1 overflow-auto">
-          <SignalsSection signals={asArray<Record<string, unknown>>(c.signals.data)} />
+          <SignalsSection
+            signals={asArray<Record<string, unknown>>(c.signals.data)}
+            onChanged={() => void c.refreshAll()}
+          />
+        </Tabs.Content>
+        <Tabs.Content value="schedule" className="min-h-0 flex-1 overflow-auto">
+          <ScheduleSection
+            state={c.schedule}
+            onSetEnabled={(v) => void c.setScheduleEnabled(v)}
+            onSetSchedule={(v) => void c.setSchedule(v)}
+            onSetTarget={(v) => void c.setDailyTarget(v)}
+            onResumeToday={() => void c.resumeToday()}
+          />
+        </Tabs.Content>
+        <Tabs.Content value="templates" className="min-h-0 flex-1 overflow-auto">
+          <TemplatesSection
+            templates={c.templates}
+            eaConnected={c.eaConnected}
+            eaLastSeen={c.eaLastSeen}
+            onSave={c.saveTemplate}
+            onDelete={(name) => void c.deleteTemplate(name)}
+            onInstallBuiltin={() => void c.installBuiltin()}
+          />
         </Tabs.Content>
       </Tabs.Root>
 
       <PlaceOrderDialog
         open={placing}
         onOpenChange={setPlacing}
+        onPlaced={() => void c.refreshAll()}
+        disabledReason={c.disabledReason}
+      />
+      <PlaceLimitOrderDialog
+        open={placingLimit}
+        onOpenChange={setPlacingLimit}
         onPlaced={() => void c.refreshAll()}
         disabledReason={c.disabledReason}
       />

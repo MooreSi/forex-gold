@@ -4,6 +4,7 @@ import { cn } from "@/lib/cn";
 import { ConnectionsTab } from "./tabs/ConnectionsTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { Mt5Tab } from "./tabs/Mt5Tab";
+import { NodeTab } from "./tabs/NodeTab";
 import { RiskTab } from "./tabs/RiskTab";
 import { TunablesTab } from "./tabs/TunablesTab";
 
@@ -18,6 +19,7 @@ const TABS = [
   { id: "risk", label: "Risk", Panel: RiskTab },
   { id: "mt5", label: "MT5", Panel: Mt5Tab },
   { id: "connections", label: "Connections", Panel: ConnectionsTab },
+  { id: "node", label: "Node & updates", Panel: NodeTab },
   { id: "tunables", label: "Expert tunables", Panel: TunablesTab },
   { id: "diagnostics", label: "Diagnostics", Panel: DiagnosticsTab },
 ];

@@ -37,16 +37,27 @@ from backend.src.api.routers import chart as chart_router
 from backend.src.api.routers import engines as engines_router
 from backend.src.api.routers import history as history_router
 from backend.src.api.routers import news as news_router
+from backend.src.api.routers import node as node_router
 from backend.src.api.routers import parsing as parsing_router
 from backend.src.api.routers import orders as orders_router
+from backend.src.api.routers import schedule as schedule_router
 from backend.src.api.routers import settings as settings_router
 from backend.src.api.routers import system as system_router
+from backend.src.api.routers import templates as templates_router
 from backend.src.api.routers import trading as trading_router
 
 log = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BUNDLE_DIR = REPO_ROOT / "frontend" / "dist"
+
+# The path the pre-boot activation screen answers and this app must NOT. Taken
+# from that module rather than repeated, so the two cannot drift into a pair of
+# paths that never agree — and in that direction, because `config/` is below
+# `api/` in the import stack. See `_spa_fallback`.
+from backend.src.config.licence.activation_server import (  # noqa: E402
+    PROBE_PATH as ACTIVATION_PROBE,
+)
 STATIC_DIR = REPO_ROOT / "frontend" / "static"
 
 ROUTERS = (
@@ -58,8 +69,11 @@ ROUTERS = (
     engines_router.router,
     history_router.router,
     news_router.router,
+    node_router.router,
     parsing_router.router,
+    schedule_router.router,
     settings_router.router,
+    templates_router.router,
     trading_router.router,
     orders_router.router,
 )
@@ -193,7 +207,15 @@ def _mount_bundle(app: FastAPI, bundle: Path) -> None:
         path = request.url.path
         # An unknown /api path is a real 404 and says so. Answering it with the
         # index would hide a routing mistake behind a 200 and an empty panel.
-        if path.startswith("/api/") or path == "/healthz":
+        #
+        # ACTIVATION_PROBE is in the same list for a different and sharper
+        # reason: the pre-boot activation screen registers that path, and its
+        # "please wait, restarting" page polls it and redirects to the app the
+        # moment it 404s. Serving the SPA there would answer 200 for ever, and
+        # the operator would sit on a restarting page that never finishes. The
+        # real app 404ing this path IS the signal.
+        if (path.startswith("/api/") or path == "/healthz"
+                or path == ACTIVATION_PROBE):
             return JSONResponse(
                 status_code=404,
                 content={"error": {"kind": "not_found",

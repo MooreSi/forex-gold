@@ -1,4 +1,3 @@
 {
-  "no-nicegui-in-the-backend": 2,
   "utils-and-config-depend-on-nothing-above-them": 3
 }

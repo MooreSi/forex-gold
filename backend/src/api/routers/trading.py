@@ -12,6 +12,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 
 from backend.src.api.deps import engine as engine_dep
+from backend.src.api.errors import Refusal
 from backend.src.api.schemas.trading import (
     ChannelStrategyOverride, HaltState, RiskSettingsUpdate,
 )
@@ -100,3 +101,48 @@ async def app_config(key: str) -> dict:
 async def set_app_config(key: str, body: dict) -> dict:
     trading_ctl.set_app_config(key, str(body.get("value", "")))
     return {"key": key, "value": trading_ctl.get_app_config(key)}
+
+# ── Channel strategy recommendations ─────────────────────────────────────────
+
+@router.post("/channel-strategies/recommend")
+async def recommend_channel_strategies(body: dict) -> dict:
+    """Ask for a strategy recommendation per channel, from that channel's own
+    record. **Billable** when the configured provider is a paid model."""
+    sources = body.get("sources") or []
+    if not isinstance(sources, list) or not sources:
+        raise Refusal("Name at least one channel to evaluate.", status_code=400)
+    return {"billable": True,
+            "recommendations": await trading_ctl.get_channel_strategy_recs(sources)}
+
+
+@router.get("/channel-strategies/recommendations")
+async def channel_strategy_recommendations(sources: str = Query("")) -> dict:
+    """The recommendations already computed, from the local record. Free."""
+    wanted = [s for s in sources.split(",") if s]
+    return {"billable": False,
+            "recommendations": trading_ctl.get_channel_strategy_rec_map(wanted)}
+
+
+# ── Pending signals ──────────────────────────────────────────────────────────
+
+@router.put("/signals/{signal_id}")
+async def update_signal(signal_id: str, body: dict, eng: Any = Depends(engine_dep)) -> dict:
+    """Edit ONE pending signal's levels.
+
+    The signal id comes from the path, and an id in the BODY is discarded
+    rather than merged. A row editor that took the id from its payload is one
+    stale closure away from writing another row's values — the bug the NiceGUI
+    editor needed explicit widget captures to avoid. Discarding it also stops
+    the two colliding on the same keyword argument, which would surface as a
+    500 rather than as the silent wrong-row write it is protecting against.
+    """
+    fields = {k: v for k, v in (body or {}).items()
+              if k not in ("signal_id", "id")}
+    await eng.update_signal(signal_id, **fields)
+    return trading_ctl.get_signal(signal_id)
+
+
+@router.delete("/tg-signals/{row_id}")
+async def delete_tg_signal(row_id: int) -> dict:
+    trading_ctl.delete_tg_signal_row(row_id)
+    return {"deleted": row_id}

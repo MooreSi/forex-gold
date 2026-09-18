@@ -44,9 +44,6 @@ _CONTROLLERS = sorted(
 # tools/refactor_audit/orphan_module_allowlist.json: same cause, same debt,
 # same removal condition.
 AWAITING_REACT_PORT = {
-    ("broker_controller", "BUILTIN_PRESET_NAME"),
-    ("broker_controller", "ea_is_healthy"),
-    ("broker_controller", "ea_seconds_since_last_seen"),
     ("engines_controller", "stop_running_engines"),
     ("engines_controller", "sub_engines"),
     ("history_controller", "ticket_group_map"),
@@ -56,9 +53,7 @@ AWAITING_REACT_PORT = {
     ("history_controller", "ticket_source_map"),
     ("history_controller", "ticket_strategy_map"),
     ("notifications_controller", "ORB_CHART_CID"),
-    ("schedule_controller", "describe_trading_clock"),
     ("schedule_controller", "parse_hm"),
-    ("schedule_controller", "set_trading_clock_offset"),
     ("settings_controller", "get_app_config_async"),
     ("settings_controller", "switch_environment_db"),
     ("sync_controller", "is_centralized_remote_mode"),
@@ -66,15 +61,7 @@ AWAITING_REACT_PORT = {
     ("sync_controller", "link_state"),
     ("sync_controller", "note_remote_setting"),
     ("sync_controller", "server_stop"),
-    ("system_controller", "AUTOSTART_CHECK_INTERVAL_SECS"),
-    ("system_controller", "autostart_disable"),
-    ("system_controller", "autostart_enable"),
-    ("system_controller", "autostart_is_armed"),
-    ("system_controller", "autostart_is_installed"),
-    ("system_controller", "autostart_is_supported"),
     ("system_controller", "local_today"),
-    ("trading_controller", "get_channel_strategy_rec_map"),
-    ("trading_controller", "get_channel_strategy_recs"),
 }
 
 # Known dead. Each is a controller operation nothing calls and nothing wants.
@@ -126,11 +113,12 @@ class TestEveryControllerOperationIsCalled:
         """The honest number, recorded so it can be watched shrinking.
 
         47 operations lost their caller on 2026-09-18 when eight NiceGUI tabs
-        were deleted ahead of their React replacements. Porting those tabs the
-        same day took it to 31. That is the number to watch: it
-        may fall; it may not rise.
+        were deleted ahead of their React replacements. Porting those tabs took
+        it to 31, and finishing the Trading tab, the node/update panel and the
+        licence screens took it to 18. That is the number to
+        watch: it may fall; it may not rise.
         """
-        assert len(AWAITING_REACT_PORT) <= 31, (
+        assert len(AWAITING_REACT_PORT) <= 18, (
             "the React port debt grew — a new tab deletion, or a controller "
             "operation added with no router to call it"
         )

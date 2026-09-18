@@ -155,14 +155,18 @@ CONTRACTS: list[Contract] = [
         name="no-nicegui-in-the-backend",
         rationale=(
             "The backend must be runnable, testable and schedulable without a "
-            "UI framework present. Both current violations are function-local "
-            "imports for genuinely cross-cutting actions (the licence dialog "
-            "and app shutdown), which is why they are baselined rather than "
-            "banned outright -- but a module-level nicegui import in a service "
-            "would make the whole backend unimportable headless."
+            "UI framework present. This carried a baseline of 2 for as long as "
+            "the licence error and activation screens rendered with NiceGUI -- "
+            "they run before the app starts and were the last two sites. They "
+            "were ported to plain server-rendered HTML on 2026-09-18 "
+            "(config/licence/activation_server.py), which took the count to 0, "
+            "and the contract is enforced there now: nicegui is no longer a "
+            "dependency of this project at all, so any import of it would be an "
+            "ImportError rather than a style problem."
         ),
         source_packages=("backend",),
         forbidden=("nicegui",),
+        enforced_at_zero=True,
     ),
     Contract(
         name="utils-and-config-depend-on-nothing-above-them",

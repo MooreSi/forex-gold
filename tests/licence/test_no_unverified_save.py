@@ -33,6 +33,11 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 
 GUARDED_FILES = [
     "backend/src/config/licence/guard.py",
+    # The manual-activation save moved here on 2026-09-18 when the NiceGUI
+    # screen was replaced. It has to be in this list or the scan below stops
+    # seeing the one save site an operator can reach by typing into a form —
+    # which is the site this whole file exists for.
+    "backend/src/config/licence/activation.py",
     "backend/src/services/cluster/remote/client.py",
 ]
 

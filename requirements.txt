@@ -1,13 +1,7 @@
-# NiceGUI is NOT the dashboard any more — that is React, compiled into
-# frontend/dist and served by the FastAPI app below. It is still here for ONE
-# reason: the pre-boot licence error and activation screens in
-# backend/src/config/licence/guard.py are still NiceGUI pages, and they run
-# before the main app starts. Porting them is task 090 in
-# docs/todo/frontend/react-port/; when that lands this line goes and the
-# no-nicegui-in-the-backend contract drops to zero.
-nicegui>=1.4.0
-# The dashboard's own server. These arrived transitively through NiceGUI
-# before; named explicitly now that they are load-bearing on their own.
+# The dashboard's own server. These arrived transitively through NiceGUI until
+# 2026-09-18, when the last two NiceGUI screens (the pre-boot licence error and
+# activation pages) were ported to plain server-rendered HTML and the framework
+# was removed from this project entirely.
 fastapi>=0.115.0
 uvicorn>=0.30.0
 itsdangerous>=2.2.0

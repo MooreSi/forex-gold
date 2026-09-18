@@ -37,15 +37,15 @@ def _app_port() -> int:
 
 
 def _parse_activation_code(code: str):
+    """KEY, KEY|EXPIRY or KEY|EXPIRY|TYPE -> (key, expiry_date, licence_type).
+
+    Delegates to `activation.parse_activation_code`, which is where the manual
+    activation path reads it too. Two copies of this would be two answers to
+    "what does a bare key default its expiry to".
     """
-    Parse KEY, KEY|EXPIRY, or KEY|EXPIRY|TYPE → (key, expiry_date, licence_type).
-    Defaults: expiry='perpetual', type='Perpetual' for perpetual, 'Fixed Term' for dated.
-    """
-    parts = [p.strip() for p in code.strip().split("|")]
-    key    = parts[0]
-    expiry = parts[1] if len(parts) >= 2 else "perpetual"
-    ltype  = parts[2] if len(parts) >= 3 else ("Perpetual" if expiry == "perpetual" else "Fixed Term")
-    return key, expiry, ltype
+    from backend.src.config.licence.activation import parse_activation_code
+
+    return parse_activation_code(code)
 
 
 # ── What the activation screen brings up behind it ───────────────────────────
@@ -140,8 +140,10 @@ def _start_activation_agents() -> None:
                         getattr(fn, "__name__", fn), exc)
 
 
-def _start_agents_for_activation(ng_app, is_admin: bool, known_client: bool) -> None:
-    """Bring up whichever remote agent can get this machine relicensed.
+def _agents_for_activation(is_admin: bool, known_client: bool) -> list:
+    """The callables that bring up whichever remote agent can get this machine
+    relicensed. Returned rather than registered, so the server that runs them
+    is the caller's choice and this function can be tested without one.
 
     The admin machine starts its SERVER -- the console can then issue a licence
     to itself, and the existing self-heal push installs it. It does not also
@@ -151,42 +153,37 @@ def _start_agents_for_activation(ng_app, is_admin: bool, known_client: bool) -> 
     Everything else starts the client, exactly as before, so an admin-pushed
     licence can self-heal the install.
 
-    Failures are swallowed. This screen is the only way back in, and an
-    exception here replaces it with a traceback and strands the machine.
+    Failures are swallowed by the runner. This screen is the only way back in,
+    and an exception there replaces it with a traceback and strands the machine.
     """
     if is_admin:
-        @ng_app.on_startup
         def _autostart_admin_server():
-            try:
-                from backend.src.services.cluster.remote import server as _rs_auto
-                _rs_auto.start()
-                log.info(
-                    "Activation screen: this is the admin machine — starting the "
-                    "admin server so a licence can be issued to it locally."
-                )
-            except Exception as exc:
-                log.warning("Could not auto-start the admin server on the "
-                            "activation screen: %s", exc)
+            from backend.src.services.cluster.remote import server as _rs_auto
+            _rs_auto.start()
+            log.info(
+                "Activation screen: this is the admin machine — starting the "
+                "admin server so a licence can be issued to it locally."
+            )
 
-        @ng_app.on_startup
         def _autostart_activation_agents():
             # Admin only. A client machine cannot issue a licence, and a poller
             # there would compete with the real admin for the bot token.
             _start_activation_agents()
-        return
+
+        return [_autostart_admin_server, _autostart_activation_agents]
 
     if known_client:
-        @ng_app.on_startup
         def _autoconnect_known_client():
-            try:
-                from backend.src.services.cluster.remote import client as _rc_auto
-                _rc_auto.start()
-                log.info(
-                    "Activation screen: existing remote token found — "
-                    "connecting so an admin-pushed licence can self-heal this install."
-                )
-            except Exception as exc:
-                log.warning("Could not auto-start remote client on activation screen: %s", exc)
+            from backend.src.services.cluster.remote import client as _rc_auto
+            _rc_auto.start()
+            log.info(
+                "Activation screen: existing remote token found — "
+                "connecting so an admin-pushed licence can self-heal this install."
+            )
+
+        return [_autoconnect_known_client]
+
+    return []
 
 
 # ── Blocking error screen ─────────────────────────────────────────────────────
@@ -209,109 +206,23 @@ def _show_error_and_exit(reason: str, allow_register: bool = False) -> None:
         _show_registration_page(notice=reason)
         return
 
-    from nicegui import ui
+    import uvicorn
 
-    @ui.page("/")
-    def _error_page():
-        ui.dark_mode(True)
-        ui.query("body").style("background:#0f1117")
-        with ui.column().classes("absolute-center items-center gap-4 text-center max-w-md px-6"):
-            ui.icon("lock", size="4rem").classes("text-red-400")
-            ui.label("FOREX Trader — Licence Error").classes("text-2xl font-bold text-white")
-            ui.label(reason).classes("text-red-300 text-sm")
-            ui.label("Contact your administrator for assistance.").classes("text-gray-500 text-xs")
+    from backend.src.config.licence.activation_server import build_app
 
-    ui.run(host="0.0.0.0", port=_app_port(), title="FOREX Trader — Licence Error",
-           dark=True, reload=False)
+    log.info("Serving the licence error screen on port %s.", _app_port())
+    uvicorn.run(build_app("", error=reason), host="0.0.0.0", port=_app_port(),
+                log_level="warning", access_log=False)
     sys.exit(1)
 
 
 # ── Registration / activation screen ─────────────────────────────────────────
 
-_ACTIVATION_HTML = """<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>FOREX Trader &mdash; Activating</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#0f1117;color:#fff;font-family:system-ui,sans-serif;
-         display:flex;flex-direction:column;align-items:center;
-         justify-content:center;height:100vh;gap:16px}
-    h2{font-size:1.5rem;font-weight:700}
-    p{color:#9ca3af;font-size:.9rem}
-    .dot{display:inline-block;animation:blink 1.2s infinite}
-    .dot:nth-child(2){animation-delay:.4s}
-    .dot:nth-child(3){animation-delay:.8s}
-    @keyframes blink{0%,80%,100%{opacity:0}40%{opacity:1}}
-  </style>
-</head>
-<body>
-  <svg width="48" height="48" viewBox="0 0 24 24" fill="#3b82f6">
-    <path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6
-             6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1
-             0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
-  </svg>
-  <h2>Licence Activated</h2>
-  <p>Loading FOREX Trader<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
-  <p id="manual-link" style="display:none;margin-top:8px">
-    Taking longer than expected &mdash;
-    <a href="/" style="color:#3b82f6">click here to open FOREX Trader</a>
-  </p>
-  <script>
-    // Which process is answering on this port?
-    //
-    // The one serving THIS page answers the probe path with 200. The app it
-    // restarts into does not register that path at all, so it answers 404.
-    // A non-ok response is therefore positive proof the restart has landed.
-    //
-    // Polling '/' instead (as this did until 2026-09-04) asks a question both
-    // processes answer 200, and the dying one keeps answering it for the
-    // ~200 ms between this page loading and the process exiting -- so the
-    // first poll navigated away before the app being waited for existed.
-    //
-    // cache:'no-store' keeps the browser from serving a stale cached answer
-    // from the moment the old process was going down.
-    var PROBE = '__PROBE_PATH__';
-    var attempts = 0;
-    var t = setInterval(function(){
-      attempts++;
-      if(attempts === 12){
-        document.getElementById('manual-link').style.display = 'block';
-      }
-      fetch(PROBE, {cache: 'no-store'}).then(function(r){
-        if(!r.ok){
-          clearInterval(t);
-          // NOT location.reload(): this page's URL is /licence-activated,
-          // which only the activation screen ever serves. Reloading it once
-          // the real app is up re-requests a route that app does not have,
-          // and lands the user on a 404 instead of the app.
-          location.replace('/');
-        }
-      }).catch(function(){});   // nothing listening yet -- keep waiting
-    }, 800);
-  </script>
-</body>
-</html>"""
-
-# Registered by the activation screen and by nothing else. The wait page above
-# uses it to tell the process it is talking to apart from the one that replaces
-# it: 200 means "still the activation screen", 404 means "the app is up".
-_ACTIVATION_PROBE_PATH = "/licence-activated/probe"
-
-
-def _activation_probe() -> dict:
-    """Answer 200 for as long as this process is the one on the port."""
-    return {"stage": "activation"}
-
-
-def _activation_html() -> str:
-    """The wait page, with the probe path substituted in.
-
-    Kept as a substitution rather than an f-string because the template is
-    mostly CSS and JS, and both are full of braces.
-    """
-    return _ACTIVATION_HTML.replace("__PROBE_PATH__", _ACTIVATION_PROBE_PATH)
+# The wait page, its probe path and the activation form now live in
+# `activation_server.py` — one module that renders every pre-boot screen,
+# rather than a template here and a page builder there. `_ACTIVATION_HTML`,
+# `_activation_html`, `_activation_probe` and `_ACTIVATION_PROBE_PATH` went
+# with them on 2026-09-18.
 
 
 def _show_registration_page(notice: str = "") -> None:
@@ -321,12 +232,8 @@ def _show_registration_page(notice: str = "") -> None:
     a signing-scheme change, expired licence, machine change). Empty on a
     genuine first install.
     """
-    import asyncio
-    import os
     import sys
-    from nicegui import ui, app as _ng_app
-    from fastapi.responses import HTMLResponse
-    from backend.src.config.licence import store as _store_mod
+
     from backend.src.config.licence.fingerprint import get_fingerprint
 
     machine_id = get_fingerprint()
@@ -340,250 +247,26 @@ def _show_registration_page(notice: str = "") -> None:
     # that has no remote fix. Start the agent up front when a token exists so
     # the push can land on its own.
     _known_client = False
-    _stored_email = ""
-    _stored_nickname = ""
     try:
         from backend.src.services.cluster.remote import client as _rc_boot
         _known_client = _rc_boot._TOKEN_FILE.exists()
-        _stored_email = _rc_boot.get_stored_email()
-        _stored_nickname = _rc_boot.get_stored_nickname()
     except Exception as _rc_err:
         log.warning("Could not inspect remote client state on activation screen: %s", _rc_err)
 
-    # Plain HTML "please wait" page served while the process restarts.
-    # No socket.io — survives the NiceGUI process dying.
-    @_ng_app.get("/licence-activated")
-    def _lic_page():
-        return HTMLResponse(_activation_html())
+    agents = _agents_for_activation(
+        is_admin=_this_is_the_admin_machine(), known_client=_known_client)
 
-    # The wait page polls this to find out when it is no longer us answering.
-    # Registered here and nowhere else on purpose -- the main app 404ing it is
-    # the whole signal.
-    _ng_app.get(_ACTIVATION_PROBE_PATH)(_activation_probe)
+    import uvicorn
 
-    _start_agents_for_activation(_ng_app, is_admin=_this_is_the_admin_machine(),
-                                 known_client=_known_client)
+    from backend.src.config.licence.activation_server import build_app
 
-    @ui.page("/")
-    def _reg_page():
-        ui.dark_mode(True)
-        ui.query("body").style("background:#0f1117")
-
-        with ui.column().classes("absolute-center items-center gap-5 w-full max-w-md px-6"):
-            ui.icon("vpn_key", size="3.5rem").classes("text-blue-400")
-            ui.label("FOREX Trader").classes("text-3xl font-bold text-white tracking-tight")
-            ui.label("Licence activation required.").classes("text-gray-400 text-sm")
-
-            if notice:
-                with ui.card().classes(
-                    "w-full bg-amber-950 border border-amber-700 p-3 gap-1"
-                ):
-                    with ui.row().classes("items-center gap-2 no-wrap"):
-                        ui.icon("info", size="1.2rem").classes("text-amber-400")
-                        ui.label(notice).classes("text-amber-200 text-xs leading-snug")
-                    if _known_client:
-                        ui.label(
-                            "This machine is already known to your administrator — "
-                            "if they are online, a replacement licence may arrive "
-                            "automatically. Otherwise request one below."
-                        ).classes("text-amber-300/70 text-xs leading-snug")
-
-            # Machine ID — displayed for reference; also sent automatically in the request flow.
-            with ui.card().classes("w-full bg-gray-900 border border-gray-700 p-4 gap-2"):
-                ui.label("Your Machine ID").classes("text-xs text-gray-500 uppercase tracking-wide")
-                ui.label(
-                    "Your administrator uses this ID to generate your licence key."
-                ).classes("text-gray-400 text-xs")
-                with ui.row().classes("items-center gap-2 w-full mt-1"):
-                    ui.label(machine_id).classes(
-                        "font-mono text-xs text-green-400 flex-1 break-all select-all"
-                    )
-                    ui.button(
-                        icon="content_copy",
-                        on_click=lambda: (
-                            ui.clipboard.write(machine_id),
-                            ui.notify("Machine ID copied", type="positive", timeout=1500),
-                        ),
-                    ).props("flat round size=xs color=grey").tooltip("Copy to clipboard")
-
-            nickname_input = ui.input(
-                "Your Name / Nickname *",
-                placeholder="e.g. John or JohnTrader",
-                value=_stored_nickname,
-            ).props("outlined").classes("w-full text-sm")
-            ui.label(
-                "This will identify you in the admin panel and on your licence."
-            ).classes("text-gray-500 text-xs -mt-2")
-
-            email_input = ui.input(
-                "Email Address *",
-                placeholder="your@email.com",
-                value=_stored_email,
-            ).props("outlined").classes("w-full text-sm")
-
-            status_lbl = ui.label("").classes("text-sm min-h-5")
-
-            # Holder so a second click replaces the delivery watcher rather
-            # than stacking another timer alongside the first.
-            _delivery: dict = {"timer": None}
-
-            # ── Request Registration (automated flow) ──────────────────────────
-
-            async def _request_registration():
-                from backend.src.services.cluster.remote import client as _rc
-                nickname = nickname_input.value.strip()
-                email    = email_input.value.strip()
-                if len(nickname) < 2:
-                    status_lbl.set_text("Enter a name or nickname (at least 2 characters).")
-                    status_lbl.classes(replace="text-sm text-orange-400")
-                    nickname_input.props("error")
-                    return
-                nickname_input.props(remove="error")
-                if not email or "@" not in email:
-                    status_lbl.set_text("Enter a valid email address.")
-                    status_lbl.classes(replace="text-sm text-orange-400")
-                    return
-
-                status_lbl.set_text("Sending registration request...")
-                status_lbl.classes(replace="text-sm text-gray-400")
-
-                # request_registration() saves the email + nickname, cancels any existing
-                # connect loop, and starts a fresh one that will send
-                # MSG_REGISTER.  Do NOT also call _rc.start() — that would
-                # spawn a second loop and double the server failure count,
-                # triggering the rate-limiter before registration gets through.
-                _rc.request_registration(email, nickname)
-
-                # Do NOT claim the request was sent here. request_registration()
-                # only queues a connection attempt; the registration itself is
-                # transmitted later, and only if the client reaches the admin
-                # server (client.py sends MSG_REGISTER from exactly one place,
-                # in response to the server's reject). Confirmed live
-                # 2026-08-07: a user was told their request was awaiting
-                # approval while the admin server was down, so nothing had been
-                # transmitted and nothing ever arrived -- with no way to tell
-                # from the screen that anything was wrong. Watch the client's
-                # real status instead and report what actually happened.
-                status_lbl.set_text("Contacting administrator server...")
-                status_lbl.classes(replace="text-sm text-gray-400")
-
-                def _watch_delivery():
-                    st = _rc.get_status()
-                    if st.get("registration_sent_at"):
-                        status_lbl.set_text(
-                            "Request delivered — awaiting administrator approval. "
-                            "The app will activate automatically once approved."
-                        )
-                        status_lbl.classes(replace="text-sm text-green-400")
-                        if _delivery["timer"] is not None:
-                            _delivery["timer"].cancel()
-                        return
-                    err = str(st.get("last_error") or "")
-                    if err and err != "contacting administrator server":
-                        status_lbl.set_text(
-                            "Cannot reach the administrator server yet — still "
-                            f"retrying. ({err}) Leave this screen open; the "
-                            "request is sent automatically as soon as the "
-                            "server answers."
-                        )
-                        status_lbl.classes(replace="text-sm text-orange-400")
-
-                if _delivery["timer"] is not None:
-                    _delivery["timer"].cancel()
-                _delivery["timer"] = ui.timer(2.0, _watch_delivery)
-
-            ui.button(
-                "Request Registration", icon="send",
-                on_click=_request_registration,
-            ).props("color=blue").classes("w-full")
-
-            # ── Manual activation (fallback if server unreachable) ─────────────
-
-            with ui.expansion("Manual Activation", icon="vpn_key").classes(
-                "w-full text-gray-500 text-sm"
-            ):
-                code_input = ui.input(
-                    "Licence Key",
-                    placeholder="Paste the key provided by your administrator",
-                ).props("outlined").classes("w-full font-mono text-sm mt-2")
-
-                async def _activate():
-                    nickname = nickname_input.value.strip()
-                    email    = email_input.value.strip()
-                    raw      = code_input.value.strip()
-
-                    if len(nickname) < 2:
-                        status_lbl.set_text("Enter a name or nickname (at least 2 characters).")
-                        status_lbl.classes(replace="text-sm text-orange-400")
-                        return
-                    if not email or "@" not in email:
-                        status_lbl.set_text("Enter a valid email address.")
-                        status_lbl.classes(replace="text-sm text-orange-400")
-                        return
-                    if not raw:
-                        status_lbl.set_text("Enter your licence key.")
-                        status_lbl.classes(replace="text-sm text-orange-400")
-                        return
-
-                    key, expiry_date, licence_type = _parse_activation_code(raw)
-
-                    status_lbl.set_text("Verifying...")
-                    status_lbl.classes(replace="text-sm text-gray-400")
-
-                    if not _verify_licence_key(machine_id, expiry_date, key):
-                        status_lbl.set_text(
-                            "Invalid licence key — this key was not issued for this machine."
-                        )
-                        status_lbl.classes(replace="text-sm text-red-400")
-                        return
-
-                    _store_mod.save({
-                        "machine_id":   machine_id,
-                        "nickname":     nickname,
-                        "email":        email,
-                        "expiry_date":  expiry_date,
-                        "licence_type": licence_type,
-                        "licence_key":  key,
-                    })
-                    status_lbl.set_text("Activated! Launching...")
-                    status_lbl.classes(replace="text-sm text-green-400")
-                    await asyncio.sleep(1.0)
-                    try:
-                        os.execv(sys.executable, [sys.executable] + sys.argv)
-                    except OSError as _execv_err:
-                        log.error("os.execv failed after licence activation: %s", _execv_err)
-                        status_lbl.set_text(
-                            "Activated! Please close and reopen the app to continue."
-                        )
-                        status_lbl.classes(replace="text-sm text-yellow-400")
-
-                ui.button("Activate Manually", on_click=_activate).props(
-                    "color=grey outlined"
-                ).classes("w-full mt-1")
-
-            # ── Licence activation watcher ─────────────────────────────────
-            # Polls once per second for the remote client to push a licence.
-            # When the event is set (client.py saves the key), we navigate the
-            # browser to a self-contained "please wait" page BEFORE killing
-            # the process — avoids the NiceGUI "Connection lost" banner and
-            # gives the bat loop time to restart run.py cleanly.
-
-            async def _check_activation():
-                from backend.src.services.cluster.remote import client as _rc
-                from backend.src.services.cluster.remote.client import _do_restart as _restart
-                if _rc.licence_activated.is_set():
-                    _lic_timer.cancel()
-                    status_lbl.set_text("Licence activated! Loading main app...")
-                    status_lbl.classes(replace="text-sm text-green-400")
-                    await asyncio.sleep(0.4)
-                    ui.navigate.to("/licence-activated")
-                    await asyncio.sleep(0.6)
-                    _restart()
-
-            _lic_timer = ui.timer(1.0, _check_activation)
-
-    ui.run(host="0.0.0.0", port=_app_port(), title="FOREX Trader — Activate",
-           dark=True, reload=False)
+    log.info("Serving the licence activation screen on port %s "
+             "(machine %s, %s).", _app_port(), machine_id,
+             "known client" if _known_client else "first registration")
+    uvicorn.run(
+        build_app(machine_id, notice=notice, on_startup=agents),
+        host="0.0.0.0", port=_app_port(), log_level="warning", access_log=False,
+    )
     sys.exit(0)
 
 

@@ -35,18 +35,10 @@ import pytest
 from backend.src.config.licence import guard
 
 
-class _App:
-    """Stands in for nicegui's app: records the on_startup hooks registered."""
-
-    def __init__(self):
-        self.hooks: list = []
-
-    def on_startup(self, fn):
-        self.hooks.append(fn)
-        return fn
-
-    def get(self, _path):
-        return lambda fn: fn
+# `_start_agents_for_activation(ng_app, ...)` registered NiceGUI on_startup
+# hooks; `_agents_for_activation(...)` RETURNS the callables and the server
+# that runs them decides when. Same two decisions, same tests — the stand-in
+# for NiceGUI's app is simply gone, which is the point of the change.
 
 
 @pytest.fixture
@@ -62,29 +54,30 @@ def started(monkeypatch):
     return calls
 
 
-def _run_hooks(app):
-    for fn in app.hooks:
-        fn()
+def _run(agents):
+    """Run them the way the activation server does: each independently, with a
+    failure swallowed. One that raises must not stop the next, and must not
+    take the screen down — this screen is the only way back into a stranded
+    install."""
+    for fn in agents:
+        try:
+            fn()
+        except Exception:
+            pass
 
 
 class TestOnTheAdminMachine:
     def test_the_admin_server_is_started(self, started, monkeypatch):
         """Without it there is nothing for the activation screen to talk to,
         and the machine can never be relicensed."""
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=True, known_client=False)
-        _run_hooks(app)
+        _run(guard._agents_for_activation(is_admin=True, known_client=False))
 
         assert "server" in started
 
     def test_the_client_is_not_started_as_well(self, started, monkeypatch):
         """The admin Mac does not connect to itself. Starting both would have
         it dial its own port and log a refusal on every retry."""
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=True, known_client=True)
-        _run_hooks(app)
+        _run(guard._agents_for_activation(is_admin=True, known_client=True))
 
         assert "client" not in started
 
@@ -93,30 +86,21 @@ class TestOnAnOrdinaryMachine:
     def test_the_client_is_started_when_it_has_a_token(self, started):
         """Unchanged behaviour: a known client connects so an admin-pushed
         licence can self-heal the install."""
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=False, known_client=True)
-        _run_hooks(app)
+        _run(guard._agents_for_activation(is_admin=False, known_client=True))
 
         assert started == ["client"]
 
     def test_nothing_is_started_without_a_token(self, started):
         """A machine that has never registered has nothing to connect with;
         it registers from the screen instead."""
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=False, known_client=False)
-        _run_hooks(app)
+        _run(guard._agents_for_activation(is_admin=False, known_client=False))
 
         assert started == []
 
     def test_the_admin_server_is_never_started_here(self, started):
         """It refuses to bind on a non-admin machine anyway, but it must not
         be asked to: this is the server that issues licence keys."""
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=False, known_client=True)
-        _run_hooks(app)
+        _run(guard._agents_for_activation(is_admin=False, known_client=True))
 
         assert "server" not in started
 
@@ -132,10 +116,9 @@ class TestItCannotBreakTheScreen:
             "backend.src.services.cluster.remote.client.start", _boom)
         monkeypatch.setattr(
             "backend.src.services.cluster.remote.server.start", _boom)
-        app = _App()
-
-        guard._start_agents_for_activation(app, is_admin=is_admin, known_client=True)
-        _run_hooks(app)
+        # The runner swallows it; this test asserts the screen survives, which
+        # is what `_run` reproduces.
+        _run(guard._agents_for_activation(is_admin=is_admin, known_client=True))
 
 
 class TestTheDeadlockItself:

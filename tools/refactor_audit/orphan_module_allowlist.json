@@ -11,7 +11,8 @@
     "decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then.",
     "2026-09-18: 32 entries added with class 'awaiting-react-port'. They are the controllers and services that only a NiceGUI tab imported. Big-bang replace deleted those tabs before their React equivalents existed, so these modules have no caller for as long as task 080 is open. This is the single largest recorded debt in this file and it is meant to shrink to nothing.",
     "2026-09-18 (later the same day): the eight remaining tabs were ported, so 26 of the 32 'awaiting-react-port' entries now have callers and are gone from this file. 30 remain \u2014 they belong to surfaces the port reached differently (a deal-level trade table the boundary does not expose, and engine panel_data reads whose React equivalents ask the controller instead). Each is a question for whoever next touches that surface: wire it or delete it.",
-    "2026-09-18 (later the same day): the eight remaining tabs were ported, so 26 of the 32 'awaiting-react-port' entries now have callers and are gone from this file. 4 remain \u2014 surfaces the port reached differently, each a wire-it-or-delete-it question for whoever next touches them."
+    "2026-09-18 (later the same day): the eight remaining tabs were ported, so 26 of the 32 'awaiting-react-port' entries now have callers and are gone from this file. 4 remain \u2014 surfaces the port reached differently, each a wire-it-or-delete-it question for whoever next touches them.",
+    "2026-09-18 (final): the Trading tab's remaining sections, the node/update panel and the licence screens all landed, so every 'awaiting-react-port' entry but 1 is gone. What is left: backend.src.controllers.notifications_controller."
   ],
   "allowed": [
     {
@@ -39,27 +40,6 @@
       "module": "backend.src.controllers.notifications_controller",
       "file": "backend/src/controllers/notifications_controller.py",
       "loc": 70,
-      "class": "awaiting-react-port",
-      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
-    },
-    {
-      "module": "backend.src.controllers.remote_controller",
-      "file": "backend/src/controllers/remote_controller.py",
-      "loc": 44,
-      "class": "awaiting-react-port",
-      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
-    },
-    {
-      "module": "backend.src.controllers.remote_node_controller",
-      "file": "backend/src/controllers/remote_node_controller.py",
-      "loc": 46,
-      "class": "awaiting-react-port",
-      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
-    },
-    {
-      "module": "backend.src.controllers.schedule_controller",
-      "file": "backend/src/controllers/schedule_controller.py",
-      "loc": 89,
       "class": "awaiting-react-port",
       "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
     }

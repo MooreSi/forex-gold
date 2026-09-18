@@ -161,3 +161,20 @@ def test_no_chart_endpoint_accepts_a_write(make_client):
     for path in ("/api/chart/candles", "/api/chart/tick", "/api/chart/overlays",
                  "/api/chart/trades", "/api/chart/context"):
         assert client.post(path).status_code == 405, path
+
+
+# ── System reads that belong to no single tab ────────────────────────────────
+
+def test_the_release_list_is_served_with_the_running_version(make_client, monkeypatch):
+    """The About tab shows both together, and a version that does not match the
+    top of the changelog is the first sign of a bad build."""
+    from backend.src.api.routers import system as system_router
+
+    monkeypatch.setattr(system_router.system_ctl, "app_version", lambda: "1.4.2")
+    monkeypatch.setattr(system_router.system_ctl, "releases",
+                        lambda: [{"version": "1.4.2", "notes": ["Ported the News tab"]}])
+
+    body = make_client().get("/api/system/releases").json()
+
+    assert body["version"] == "1.4.2"
+    assert body["releases"][0]["notes"] == ["Ported the News tab"]

@@ -77,6 +77,13 @@ class TestItIsOnlyEverUsedForReporting:
             "backend/src/services/broker/mt5_performance.py",
             "backend/src/services/trading/bot_trading.py",       # !report
             "backend/src/services/notifications/scheduler.py",   # email
+            # The Analysis tab's one consolidated read (2026-09-18). Reporting:
+            # it renders the account's headline numbers for a chosen window and
+            # decides nothing. It is also the ONLY broker call that tab makes —
+            # see tests/api/routers/test_history.py, which pins that a full
+            # render costs one round-trip rather than the 4.3-a-minute the
+            # NiceGUI page cost (bugs/030).
+            "backend/src/api/routers/history.py",
         }
 
         assert found == expected, (

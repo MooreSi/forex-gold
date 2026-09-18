@@ -86,3 +86,101 @@ export interface MarketOrderRequest {
   take_profit?: number | null;
   source_name?: string;
 }
+
+export interface NewsEvent {
+  title: string;
+  currency: string;
+  impact: string;
+  ts: number;
+  forecast: string;
+  previous: string;
+  score: number;
+}
+
+export interface CurrentEvent extends NewsEvent {
+  mins_remaining: number | null;
+  mins_to_event: number | null;
+}
+
+export interface BlackoutSettings {
+  enabled: boolean;
+  impact: string;
+  minutes_before: number;
+  minutes_after: number;
+}
+
+export interface NewsState {
+  events: NewsEvent[];
+  current: CurrentEvent | null;
+  blackout: BlackoutSettings;
+  pause: Record<string, unknown>;
+}
+
+export interface BacktestOptions {
+  strategies: Record<string, unknown>[];
+  templates: Record<string, unknown>[];
+  timeframes: string[];
+  granularities: string[];
+  min_trades_per_side: number;
+  broker_tz_offset: number;
+}
+
+export interface StrategyResult {
+  strategy: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_pnl: number;
+  total_commission: number;
+  avg_win: number;
+  avg_loss: number;
+  profit_factor: number;
+  max_drawdown_pct: number;
+  sharpe: number;
+  final_balance: number;
+  equity_curve: number[];
+  unsupported_reason: string;
+  [key: string]: unknown;
+}
+
+export interface BacktestResult {
+  results: StrategyResult[];
+  filtered: Record<string, unknown>;
+  signals_loaded: number;
+  candles_loaded: number;
+  granularity: string;
+  note: string | null;
+}
+
+export interface ParsingChannel {
+  name: string;
+  parser: Record<string, unknown>;
+}
+
+export interface ParsingState {
+  reader: Record<string, unknown>;
+  configured: boolean;
+  settings: Record<string, unknown>;
+  lexicons: Record<string, string[]>;
+  lexicon_labels: Record<string, string>;
+  lexicon_help: Record<string, string>;
+  channels: ParsingChannel[];
+}
+
+export interface HourlyCell {
+  weekday: number;
+  hour: number;
+  session: string;
+  pnl: number;
+  n: number;
+  avg: number;
+}
+
+export interface HistoryState {
+  days: number;
+  performance: Record<string, unknown>;
+  hourly: HourlyCell[];
+  channels: Record<string, unknown>[];
+  ladder: Record<string, Record<string, unknown>>;
+}

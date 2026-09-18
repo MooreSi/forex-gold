@@ -30,9 +30,16 @@ from starlette.staticfiles import StaticFiles
 
 from backend.src.api import auth as gate
 from backend.src.api import deps, errors
+from backend.src.api.routers import ai as ai_router
 from backend.src.api.routers import auth as auth_router
+from backend.src.api.routers import backtest as backtest_router
 from backend.src.api.routers import chart as chart_router
+from backend.src.api.routers import engines as engines_router
+from backend.src.api.routers import history as history_router
+from backend.src.api.routers import news as news_router
+from backend.src.api.routers import parsing as parsing_router
 from backend.src.api.routers import orders as orders_router
+from backend.src.api.routers import settings as settings_router
 from backend.src.api.routers import system as system_router
 from backend.src.api.routers import trading as trading_router
 
@@ -45,10 +52,24 @@ STATIC_DIR = REPO_ROOT / "frontend" / "static"
 ROUTERS = (
     system_router.router,
     auth_router.router,
+    ai_router.router,
+    backtest_router.router,
     chart_router.router,
+    engines_router.router,
+    history_router.router,
+    news_router.router,
+    parsing_router.router,
+    settings_router.router,
     trading_router.router,
     orders_router.router,
 )
+
+
+def _default_reader_provider() -> Callable[[], Any]:
+    """The Telegram reader handle, imported lazily for the same reason as the
+    engine: building an app for a test must not start the application graph."""
+    from backend.src.app import get_tg_reader
+    return get_tg_reader
 
 
 def _default_engine_provider() -> Callable[[], Any]:
@@ -84,6 +105,7 @@ async def _lifecycle(app: FastAPI):                       # noqa: ANN201
 def build_app(
     *,
     engine_provider: Optional[Callable[[], Any]] = None,
+    reader_provider: Optional[Callable[[], Any]] = None,
     bundle_dir: Optional[Path] = None,
     session_secret: str = "dev-only-not-a-secret",
     install_auth_gate: bool = True,
@@ -104,6 +126,7 @@ def build_app(
     )
 
     deps.set_engine_provider(engine_provider or _default_engine_provider())
+    deps.set_reader_provider(reader_provider or _default_reader_provider())
     errors.install(app)
 
     # Middleware runs outermost-first in reverse registration order, so the

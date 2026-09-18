@@ -156,18 +156,23 @@ class TestThePickerListsTemplates:
     is "the picker reads the template store", which is a wiring claim."""
 
     def _code(self) -> str:
-        """The dashboard's source, whatever the dashboard currently is.
+        """The dashboard AND the endpoint that feeds it.
 
-        Was every module of `frontend/pages/backtest/` until 2026-09-18, when
-        the big-bang React replace deleted that package ahead of its React
-        equivalent. The requirements below are about the Backtest picker, not
-        about NiceGUI, so they follow the UI rather than being deleted with the
-        old one — and while the tab is unported, `_ported()` short-circuits
-        them so the gap stays visible instead of being asserted away.
+        Was every module of `frontend/pages/backtest/` until 2026-09-18. Under
+        React the picker is split: the browser renders what
+        `backend/src/api/routers/backtest.py` offers it, so a claim like "the
+        picker reads the template store" is now satisfied on the server side.
+        Searching only the TypeScript would report a requirement as dropped
+        when it had merely moved across the boundary — so both sides are
+        searched, and the assertions are unchanged.
         """
+        import pathlib as _pl
+
         from tests.refactor._react_port import web_sources
 
-        return web_sources()
+        api = (_pl.Path(__file__).resolve().parents[2]
+               / "backend" / "src" / "api" / "routers" / "backtest.py")
+        return web_sources() + "\n" + api.read_text(encoding="utf-8")
 
     @staticmethod
     def _ported() -> bool:

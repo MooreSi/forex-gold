@@ -13,40 +13,16 @@ export interface TabSpec {
 }
 
 export const TABS: TabSpec[] = [
-  {
-    id: "ai", label: "AI Analysis", icon: "bot",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/ai_trade_analysis/" },
-  },
+  { id: "ai", label: "AI Analysis", icon: "bot", notPorted: null },
   { id: "chart", label: "Chart", icon: "candlestick", notPorted: null },
   { id: "trading", label: "Trading", icon: "trending-up", notPorted: null },
-  {
-    id: "parsing", label: "Parsing", icon: "send",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/telegram/" },
-  },
-  {
-    id: "generator", label: "Signal Generator", icon: "flask",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/test_panel/" },
-  },
-  {
-    id: "backtest", label: "Backtest", icon: "bar-chart",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/backtest/" },
-  },
-  {
-    id: "analysis", label: "Analysis", icon: "history",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/history/" },
-  },
-  {
-    id: "settings", label: "Settings", icon: "settings",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/settings/" },
-  },
-  {
-    id: "news", label: "News", icon: "newspaper",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/pages/news.py" },
-  },
-  {
-    id: "about", label: "About", icon: "info",
-    notPorted: { task: "080-remaining-tabs", origin: "frontend/app/_about.py" },
-  },
+  { id: "parsing", label: "Parsing", icon: "send", notPorted: null },
+  { id: "generator", label: "Signal Generator", icon: "flask", notPorted: null },
+  { id: "backtest", label: "Backtest", icon: "bar-chart", notPorted: null },
+  { id: "analysis", label: "Analysis", icon: "history", notPorted: null },
+  { id: "settings", label: "Settings", icon: "settings", notPorted: null },
+  { id: "news", label: "News", icon: "newspaper", notPorted: null },
+  { id: "about", label: "About", icon: "info", notPorted: null },
 ];
 
 /** Chart is where the app opens, as it did under NiceGUI. */

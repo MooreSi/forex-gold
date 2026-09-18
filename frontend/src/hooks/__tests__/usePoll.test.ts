@@ -90,6 +90,47 @@ describe("usePoll", () => {
     expect(result.current.updatedAt).toBe(firstUpdate);
   });
 
+  it("starts a NEW poll when the key changes", async () => {
+    // The Chart tab's timeframe and the Analysis tab's window are both in the
+    // key. The first version of this hook held the entry in a ref, so a key
+    // change re-registered the OLD entry under the new key: no fetch, no
+    // error, and a panel still showing the previous window's data. That is the
+    // bug this test exists for.
+    const first = vi.fn().mockResolvedValue("7 days");
+    const second = vi.fn().mockResolvedValue("365 days");
+
+    const { result, rerender } = renderHook(
+      ({ key, fetcher }) => usePoll(key, fetcher, 5000),
+      { initialProps: { key: "window:7", fetcher: first } },
+    );
+    await waitFor(() => expect(result.current.data).toBe("7 days"));
+
+    rerender({ key: "window:365", fetcher: second });
+
+    await waitFor(() => expect(result.current.data).toBe("365 days"));
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns to the cached entry when the key changes back", async () => {
+    // And the other half: the registry is a cache, so going back to a window
+    // already loaded shows it immediately rather than blanking the panel.
+    const first = vi.fn().mockResolvedValue("7 days");
+    const second = vi.fn().mockResolvedValue("365 days");
+
+    const { result, rerender } = renderHook(
+      ({ key, fetcher }) => usePoll(key, fetcher, 5000),
+      { initialProps: { key: "back:7", fetcher: first } },
+    );
+    await waitFor(() => expect(result.current.data).toBe("7 days"));
+    rerender({ key: "back:365", fetcher: second });
+    await waitFor(() => expect(result.current.data).toBe("365 days"));
+
+    rerender({ key: "back:7", fetcher: first });
+
+    expect(result.current.data).toBe("7 days");
+    expect(first).toHaveBeenCalledTimes(1);
+  });
+
   it("stops the interval when the last subscriber unmounts", async () => {
     const fetcher = vi.fn().mockResolvedValue(1);
     const { unmount } = renderHook(() => usePoll("lonely", fetcher, 100));

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../AppShell";
 import { DEFAULT_TAB, TABS } from "../tabs";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { NotPortedPanel } from "@/components/shared/NotPortedPanel";
 import { resetPolls } from "@/hooks/usePoll";
 
 beforeEach(() => {
@@ -43,26 +44,40 @@ describe("the tab strip", () => {
   });
 });
 
-describe("tabs the port has not reached", () => {
-  it("says so, and names the task that will fill it", async () => {
-    // Hiding the tab would read as a lost feature. See QUESTIONS.md Q1.
+describe("every tab is ported", () => {
+  it("has no tab left marked as work in progress", () => {
+    // The port finished on 2026-09-18. This is the assertion that says so, and
+    // the one that fails the day somebody adds a tab and forgets to build it.
+    expect(TABS.filter((t) => t.notPorted !== null)).toEqual([]);
+  });
+
+  it("renders a real panel for every tab, not a placeholder", async () => {
     renderShell();
-    await userEvent.click(screen.getByRole("tab", { name: /^Settings/ }));
+
+    for (const tab of TABS) {
+      await userEvent.click(screen.getByRole("tab", { name: new RegExp(`^${tab.label}`) }));
+      expect(screen.queryByText(/has not been rebuilt in React yet/)).toBeNull();
+    }
+  });
+
+  it("shows no work-in-progress marker in the strip", () => {
+    renderShell();
+
+    expect(screen.queryAllByText("wip")).toHaveLength(0);
+  });
+});
+
+describe("the not-ported placeholder itself", () => {
+  it("still names the task and the origin, for whoever adds the next tab", () => {
+    // Kept although nothing uses it today: a tab added tomorrow needs somewhere
+    // honest to point at while it is being built, and deleting the component
+    // would mean the next person hides the tab instead.
+    render(
+      <NotPortedPanel tab="Something New" task="090-something" origin="frontend/pages/x.py" />,
+    );
+
     expect(screen.getByText(/has not been rebuilt in React yet/)).toBeInTheDocument();
-    expect(screen.getByText("080-remaining-tabs")).toBeInTheDocument();
-    expect(screen.getByText("frontend/pages/settings/")).toBeInTheDocument();
-  });
-
-  it("marks the unported tabs in the strip so the gap is visible before clicking", () => {
-    renderShell();
-    const wip = screen.getAllByText("wip");
-    expect(wip).toHaveLength(TABS.filter((t) => t.notPorted).length);
-  });
-
-  it("does NOT mark the two that are ported", () => {
-    // Negative control: a placeholder marker on every tab would make the test
-    // above pass while telling the operator nothing.
-    const ported = TABS.filter((t) => t.notPorted === null).map((t) => t.id);
-    expect(ported).toEqual(["chart", "trading"]);
+    expect(screen.getByText("090-something")).toBeInTheDocument();
+    expect(screen.getByText("frontend/pages/x.py")).toBeInTheDocument();
   });
 });

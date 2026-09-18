@@ -27,6 +27,16 @@ async def version() -> dict:
     return {"version": system_ctl.app_version()}
 
 
+@router.get("/releases")
+async def releases() -> dict:
+    """The changelog the About tab lists, newest first.
+
+    Content, not state: it ships with the build and never changes while the app
+    is running, so the dashboard fetches it once rather than polling it.
+    """
+    return {"version": system_ctl.app_version(), "releases": system_ctl.releases()}
+
+
 @router.get("/header")
 async def header(eng: Any = Depends(engine_dep)) -> dict:
     """Everything the header shows, in one read.

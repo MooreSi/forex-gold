@@ -4,12 +4,28 @@ import { AppHeader } from "./AppHeader";
 import { DEFAULT_TAB, TABS } from "./tabs";
 import { ChartPanel } from "@/components/chart/ChartPanel";
 import { TradingPanel } from "@/components/trading/TradingPanel";
+import { NewsPanel } from "@/components/news/NewsPanel";
+import { AboutPanel } from "@/components/about/AboutPanel";
+import { BacktestPanel } from "@/components/backtest/BacktestPanel";
+import { ParsingPanel } from "@/components/parsing/ParsingPanel";
+import { HistoryPanel } from "@/components/history/HistoryPanel";
+import { AiPanel } from "@/components/ai/AiPanel";
+import { EnginesPanel } from "@/components/engines/EnginesPanel";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { NotPortedPanel } from "@/components/shared/NotPortedPanel";
 import { cn } from "@/lib/cn";
 
 const PANELS: Record<string, ComponentType> = {
   chart: ChartPanel,
   trading: TradingPanel,
+  news: NewsPanel,
+  about: AboutPanel,
+  backtest: BacktestPanel,
+  parsing: ParsingPanel,
+  analysis: HistoryPanel,
+  ai: AiPanel,
+  generator: EnginesPanel,
+  settings: SettingsPanel,
 };
 
 /**

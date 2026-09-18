@@ -29,7 +29,8 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - `frontend/src/api/client.ts` — the one HTTP client. Nothing calls `fetch` directly. It is also where a 401 becomes "go to the login screen" and where a refusal is told apart from a failure.
 - `frontend/src/hooks/usePoll.ts` — the **only** polling primitive. One interval per key however many components subscribe, deduped in flight, paused while the tab is hidden.
 - `frontend/src/components/shared/` — `PanelShell`, `DialogShell`, `Button`, `StatCard`, `EmptyState`, `NotPortedPanel`, and `format.ts`, the single place money, prices and MT5 timestamps are formatted.
-- `frontend/src/components/<domain>/` — `shell/`, `chart/`, `trading/`. A domain folder is named after a business concept and matches the backend's vocabulary.
+- `frontend/src/components/<domain>/` — `shell/`, `chart/`, `trading/`, `news/`, `about/`, `backtest/`, `parsing/`, `history/`, `ai/`, `engines/`, `settings/`. A domain folder is named after a business concept and matches the backend's vocabulary.
+- `frontend/src/components/<domain>/content/` — copy and switch definitions transcribed from the NiceGUI pages **by parsing their source, not by retyping**: the Glossary's 47 terms, the 12 parsing switches, the reversal capabilities, the risk warning. A typo in a hand copy is a wrong definition nobody notices, and a missing switch is a feature that cannot be turned on.
 - `frontend/src/index.css` — the colour tokens. Dark only.
 - `frontend/static/` — favicon and icons, served at `/static`.
 - `frontend/dist/` — the compiled bundle. **Committed on purpose.**
@@ -52,13 +53,32 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - **A fair-value gap whose index is outside the candle window must be dropped, not returned without a timestamp (2026-09-18).** The response model requires `ts`, so one stale index failed validation for the *whole* overlay payload — EMAs and RSI included. One unplaceable zone should cost that zone.
 - **The API answers 401 with JSON, never a redirect.** A 302 to an HTML login page inside an XHR is how a session expiry becomes a login form rendered inside the trading panel.
 - **`auto_login_enabled` is read from the user's config file, so a test that depends on it must set it.** The first version of `test_an_unauthenticated_order_request_is_rejected` passed by accident on a machine where the operator had the setting on. Anything that reads the real config in a test is asserting something about whoever ran it.
-- **Guard the array boundary between the typed client and the untyped wire (2026-09-18).** A response that is an object where a list was expected makes `.map` throw *inside render*, and React tears down the whole tree — one wrong endpoint blanks the entire dashboard rather than one panel. `frontend/src/lib/asArray.ts` is that boundary. Found by a shell test whose stubbed fetch returned `{}` for everything.
+- **`usePoll` must look its entry up by key on every render, never hold it in a ref (2026-09-18).** The first version used `useRef`, which initialises once — so when the key changed (the Chart tab's timeframe, the Analysis tab's window) the hook registered the OLD entry under the NEW key, the effect's dependency never changed, and no fetch happened. The panel went on showing the previous window's data with no error anywhere. The Chart tab's timeframe buttons were silently inert for two commits.
+- **A numeric input's state is a string while it is being edited (2026-09-18).** `Number("1.")` is 1, so a field that stores a number drops the decimal point as it is typed and "1.25" arrives as 125 — a spread of 125 points instead of 1.25, which turns a profitable backtest into a disaster and still looks like a strategy result. `SettingsField` and the Backtest form both hold strings and convert once, on submit.
+- **A settings field must re-sync after every save, not only when the value changes (2026-09-18).** "The backend rejected your number" and "the backend agreed with what was stored" both leave the value where it was, so a field keyed on the value alone keeps the rejected input on screen: typing 99 into a risk field the service clamps to 2 left "99" in the box. `useSettingsResource` exposes a `version` counter for this.
+- **Guard the array boundary between the typed client and the untyped wire (2026-09-18).** A response that is an object where a list was expected makes `.map` throw *inside render*, and React tears down the whole tree — one wrong endpoint blanks the entire dashboard rather than one panel. `frontend/src/lib/asArray.ts` is that boundary — and `asObject` beside it, because a MISSING object field throws the same way (`Object.keys(undefined)`), which the shell test found by answering `{}` for every endpoint: exactly what a half-deployed backend looks like from the browser.
 - **MT5 timestamps are UTC+3 encoded as an epoch.** `formatBrokerTime` in `shared/format.ts` shifts them back; it is the port of `_uk()` from the NiceGUI `pages/trading/_shared.py`. Do not roll your own — formatting the raw stamp puts every trade three hours into the future, which looks plausible.
 - **The account badge has three states, not two.** A bridge that has not answered renders UNKNOWN in amber. A missing answer shown as "DEMO" is how somebody places a live order believing otherwise. Note that `is_demo` must be compared strictly: the string `"false"` is truthy.
 - **A settings switch that vanishes fails silently and expensively.** The DB column keeps its default, the backend keeps gating on it, and the page still renders. This bit the Parsing tab under NiceGUI (shipped 1e383fe with its whole settings body in a function nothing called, so `immediate_market_entry` could not be turned on and a bare "Buy Now" signal was missed). It is a React problem in exactly the same way: when the Settings tab is ported (task 080), pin every row of the category list reaching the screen, not just the most eye-catching card.
 - **A settings fixture must not use the code's own defaults.** Storing the values the component falls back to means a component that ignores the stored row produces identical output and the test passes. Proved by mutation under NiceGUI on 2026-09-07; the class of error is framework-independent.
 - **`test_panel.py` was the Bounce engine** — named after the service, not what the user calls it. The React tab is "Signal Generator". Name a component after what the user calls it.
 - Permanent LOC exemptions with written reasons: `mt5_bridge.py` (separate interpreter) and `runtime.py` (composition root).
+
+## What each tab is built on
+
+All ten tabs are React as of 2026-09-18. Three are narrower than their NiceGUI
+originals, and the reasons are about the boundary rather than effort — see
+`docs/todo/frontend/react-port/080-remaining-tabs.md` for the list, including
+the Analysis tab's missing deal-level trade table (it needs `get_deal_history`
+through a controller, which does not exist; the old page reached
+`engine._bridge` directly).
+
+**One consolidated read per tab.** The Analysis tab is the worked example:
+three NiceGUI panels each polled the bridge independently, costing 4.3 calls a
+minute at idle and 388 round-trips in 25 seconds on one page load (bugs/030).
+The React answer is structural rather than a cache — one endpoint assembles
+every panel and one shared poll reads it, asserted by
+`test_a_full_render_costs_one_trip_into_the_broker`.
 
 ## The controller layer is swept, not sampled
 

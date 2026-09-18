@@ -7,7 +7,7 @@
     "backend/migrations/registry.py": 96.4,
     "backend/migrations/schema_sql.py": 100.0,
     "backend/src/__init__.py": 100.0,
-    "backend/src/api": 88.4,
+    "backend/src/api": 93.0,
     "backend/src/app.py": 26.5,
     "backend/src/config": 42.7,
     "backend/src/controllers": 99.2,

@@ -19,7 +19,7 @@
  * consolidated response — assembled server-side where it is one cheap read —
  * not a new key here.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface PollEntry<T> {
   fetcher: () => Promise<T>;
@@ -94,29 +94,43 @@ export function resetPolls(): void {
   registry.clear();
 }
 
+function entryFor<T>(
+  key: string, fetcher: () => Promise<T>, intervalMs: number,
+): PollEntry<T> {
+  const existing = registry.get(key) as PollEntry<T> | undefined;
+  if (existing) return existing;
+  const entry: PollEntry<T> = {
+    fetcher,
+    intervalMs,
+    subscribers: new Set(),
+    state: { data: null, error: null, loading: false, updatedAt: null },
+    timer: null,
+    inFlight: null,
+  };
+  registry.set(key, entry as PollEntry<unknown>);
+  return entry;
+}
+
 export function usePoll<T>(
   key: string,
   fetcher: () => Promise<T>,
   intervalMs = 5000,
 ): PollState<T> & { refresh: () => Promise<void> } {
-  const existing = registry.get(key) as PollEntry<T> | undefined;
-  const entryRef = useRef<PollEntry<T>>(
-    existing ?? {
-      fetcher,
-      intervalMs,
-      subscribers: new Set(),
-      state: { data: null, error: null, loading: false, updatedAt: null },
-      timer: null,
-      inFlight: null,
-    },
-  );
-  if (!existing) registry.set(key, entryRef.current as PollEntry<unknown>);
-  const entry = registry.get(key) as PollEntry<T>;
+  // Looked up by key on EVERY render, not held in a ref.
+  //
+  // The first version kept the entry in `useRef`, which initialises once — so
+  // when the key changed (the Chart tab's timeframe, the Analysis tab's
+  // window) the hook registered the OLD entry under the NEW key, the effect's
+  // dependency never changed, and no fetch happened. The panel went on showing
+  // the previous window's data with no error anywhere. Found by
+  // `HistoryPanel.test.tsx > asks again for a different window`.
+  const entry = entryFor(key, fetcher, intervalMs);
+
+  const [state, setState] = useState<PollState<T>>(entry.state);
+
   // The newest fetcher wins, so a changed query string is picked up on the
   // next tick without tearing the interval down and restarting it.
   entry.fetcher = fetcher;
-
-  const [state, setState] = useState<PollState<T>>(entry.state);
 
   useEffect(() => {
     entry.subscribers.add(setState);

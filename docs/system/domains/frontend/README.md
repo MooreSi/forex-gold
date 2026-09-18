@@ -60,6 +60,33 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - **`test_panel.py` was the Bounce engine** — named after the service, not what the user calls it. The React tab is "Signal Generator". Name a component after what the user calls it.
 - Permanent LOC exemptions with written reasons: `mt5_bridge.py` (separate interpreter) and `runtime.py` (composition root).
 
+## The controller layer is swept, not sampled
+
+`tests/controllers/test_controller_forwarding.py` asserts the definition in
+`docs/system/rules/30-architecture.md` — *"a flat `<name>_controller.py` that
+names an operation and forwards it to one service"* — against all 213
+operations for which that is the whole specification. It resolves each call's
+target from the source (including the function-local imports, which are
+load-bearing here), replaces it, and binds both sides against their real
+signatures so "my `source` arrived as the service's `source`" is a check rather
+than a hope.
+
+**Two things it taught, worth keeping.** Deriving the expectation from the
+function body is not a test: the first version read "does it return?" from the
+AST, so a forwarder that dropped its `return` also dropped the assertion that
+would have caught it, and the mutation passed. The oracle moved to the return
+annotation. And a membership check is not a position check: a swapped pair of
+arguments passed until both calls were bound by name.
+
+It found `news_controller.save_config` forwarding to `_config.save_config`,
+which does not exist. Deleted — `settings_controller.save_config` is the one
+that works, and was what the page actually used.
+
+An operation that grows a branch leaves the sweep, and
+`test_the_complex_operations_are_the_ones_we_know_about` fails until somebody
+lists it and gives it a behavioural test. That is the intended friction: a
+controller acquiring logic should cost a conversation.
+
 ## Still NiceGUI, and why
 
 `backend/src/config/licence/guard.py` renders the **licence error screen and the

@@ -10,7 +10,7 @@
     "backend/src/api": 88.4,
     "backend/src/app.py": 26.5,
     "backend/src/config": 42.7,
-    "backend/src/controllers": 79.3,
+    "backend/src/controllers": 99.2,
     "backend/src/db": 94.7,
     "backend/src/runtime.py": 77.7,
     "backend/src/services/__init__.py": 100.0,

@@ -1,4 +1,23 @@
-@import "tailwindcss";
+/*
+ * `source(none)` plus explicit @source lines, rather than Tailwind's automatic
+ * detection.
+ *
+ * Automatic detection walks outward from this file and scans whatever it
+ * finds, which in this repository meant the NiceGUI pages: 21,000 lines of
+ * Python whose Tailwind utility classes are written as string literals. The
+ * generated stylesheet carried the whole colour scale and an unused `pulse`
+ * keyframe because of it, and after those files were deleted the output
+ * changed by 4.5KB with no change to the dashboard at all.
+ *
+ * That matters beyond tidiness: `frontend/dist` is committed and CI fails on a
+ * stale one, so a bundle whose content depends on files outside `src/` would
+ * be invalidated by an unrelated Python test that happens to contain the
+ * string "text-profit". Pinning the sources makes the stylesheet a function of
+ * the dashboard and nothing else.
+ */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
 
 /*
  * Semantic colours are frozen. green = profit, red = loss, yellow/amber =

@@ -129,6 +129,21 @@ def test_the_scanner_can_read_every_file_it_claims_to_scan():
     The count for frontend-reaches-the-backend-through-controllers was 53 on
     Windows and 60 on a UTF-8 platform for exactly this reason. Same code,
     same repo, different answer.
+
+    **This only bites a file with no imports at all.** `_module_names` reads
+    with an explicit `encoding="utf-8"`, so the scanner itself is safe; the
+    check below can only distinguish "unreadable" from "genuinely has no
+    imports" when the import list is empty. Sixteen files under `backend/src/`
+    still carry a character that cp1252 cannot decode (an arrow or a box-drawing
+    rule in a section comment) and pass here because they DO import something.
+    They are safe because the scanner names its encoding, not because their
+    bytes are portable — so a new tool that reads them without `encoding=` would
+    skip all sixteen on Windows and report clean.
+
+    `backend/src/api/__init__.py` is the one that failed, on 2026-09-18: a
+    package docstring with an architecture diagram, no imports, and a `←`
+    (U+2190, whose UTF-8 tail byte 0x90 is undefined in cp1252). It says `<--`
+    now.
     """
     unreadable = []
     for package in {p for c in ic.CONTRACTS for p in c.source_packages}:

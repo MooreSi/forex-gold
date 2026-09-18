@@ -4,7 +4,7 @@ The top of the stack, and the React dashboard's only way in:
 
     frontend/ (React, in the browser)
         │ HTTP/JSON
-    backend/src/api/          ← you are here
+    backend/src/api/          <-- you are here
         │ named questions
     backend/src/controllers/
         │

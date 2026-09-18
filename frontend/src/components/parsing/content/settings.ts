@@ -116,6 +116,19 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
     ],
   },
   {
+    badge: "RESEARCH",
+    tone: "remote",
+    toggles: [
+      {
+        key: "tg_decision_log_enabled",
+        label: "Signal Decision Log",
+        description:
+          "Records what the app decided about every Telegram signal — executed or blocked, on both the normal and the Immediate Market Buy/Sell path — what the trade then did, and what four gates that are currently switched OFF would have decided. It changes no trading decision and blocks nothing: it only writes down what happened, so a gate can be judged on this account's own trades before being switched on. Costs nothing on the order path; nothing is fetched.",
+        defaultOn: false,
+      },
+    ],
+  },
+  {
     badge: "MARKET GUARD",
     tone: "warning",
     toggles: [

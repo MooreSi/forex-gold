@@ -66,6 +66,11 @@ them and deliberately did not pre-empt `docs/todo/bugs/057`.
 
 - **The broker's tick stream carries no trade side, probably.** `mt5_bridge` requests `COPY_TICKS_ALL` and, since 2026-09-11, passes `flags`, `last` and `volume` through. Whether this Vantage feed actually populates them is unmeasured -- `order_flow.probe_feed` answers it in one call, and nothing should be built on delta until it has.
 - **Tick volume is a count of quote changes, not size.** Volume profile and VWAP say so through `volume_is_proxy`.
+  No better code fixes this: the feed carries no Last, so no trade side
+  exists to read. The only route to measured flow is a lit venue's own
+  data (CME GC futures) — off by default behind `re_cme_context_enabled`
+  and connected to nothing, pending a measurement of whether it predicts anything
+  (`docs/simon-handover/039-cme-futures-context-is-free-is-it-worth-building.md`).
 - **PBO comes out high on noise, not at 0.5.** In a finite sample the in-sample and out-of-sample halves partition the same draws, so a configuration that won in sample by luck gives that luck back on the complement. Measured at 0.85 on a 20-configuration noise fixture. Read the direction, not the digit.
 
 ## Open questions

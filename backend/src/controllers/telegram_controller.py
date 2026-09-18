@@ -14,7 +14,9 @@ __all__ = ["get_risk_settings", "update_risk_settings",
            "get_channel_parser_config", "save_channel_parser_config",
            "save_channel_learned_rule", "update_unrecognised_message",
            "get_reader_status", "get_pending_unrecognised",
-           "fetch_stored_messages", "send_message"]
+           "fetch_stored_messages", "send_message",
+           "decision_log_summary", "decision_log_report",
+           "decision_log_backfill"]
 
 
 def get_risk_settings() -> dict:
@@ -118,3 +120,28 @@ def get_telegram_channel_names(*args, **kwargs):
     """
     from backend.src.services.channels import performance as _perf
     return _perf.get_telegram_channel_names(*args, **kwargs)
+
+
+# ── Signal Decision Log (Parsing page) ───────────────────────────────────────
+# docs/todo/signal-validation/010. Three reads and one action, each
+# forwarding to exactly one service function: the controller names the
+# operation and does nothing else with it.
+
+
+def decision_log_summary() -> dict:
+    """How many decisions, split by path, and what declined them."""
+    from backend.src.services.signals import decision_log as _dlog
+    return _dlog.summary()
+
+
+def decision_log_report() -> list:
+    """Champion vs challenger, over the decisions whose trade has closed."""
+    from backend.src.services.signals import decision_shadow as _shadow
+    return _shadow.report()
+
+
+def decision_log_backfill() -> int:
+    """Rebuild decisions from past Telegram trades. Returns how many were
+    added; safe to run twice."""
+    from backend.src.services.signals import decision_backfill as _backfill
+    return _backfill.run()

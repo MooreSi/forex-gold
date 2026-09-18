@@ -172,3 +172,133 @@ def test_scans_multiple_messages_and_records_only_the_signals(fresh_db):
     assert res["scanned"] == 3
     assert res["recorded"] == 2
     assert {r["direction"] for r in _signals()} == {"BUY", "SELL"}
+
+
+# ── one bad message must not abandon the pass ────────────────────────────
+
+# Verbatim from telegram_messages id=1205040, 'Gold Diggers Scalping',
+# 2026-09-14T15:30:17Z. The entry line carries a typed full stop --
+# "4284.5." -- and _GD2_ENTRY_RANGE_RE's [\d.,]+ captures it, so parser._f
+# raises ValueError on it. Live, that killed every hourly backfill pass from
+# 2026-09-14 15:30 onwards: 15 parseable REF signals in the 72h window and
+# none of them recorded, because the loop's only guard was around the whole
+# of it (docs/todo/bugs/061).
+TYPO_MSG = ("Buy Gold Now\n\n4284.5. - 4278.5\n\nTP 4287\nTP 4290\nTP 4293\n"
+            "TP 4296\nTP open\n\nSL 4274")
+
+
+def test_the_typo_message_still_raises_in_the_parser():
+    """The containment fix below is worth nothing if this stops raising --
+    it would then be testing an empty branch. This pins the input, not the
+    parser: changing _f to accept a trailing full stop is a change to what
+    the LIVE scan can execute and is the owner's call, not this module's."""
+    with pytest.raises(ValueError):
+        parse_stored_message(TYPO_MSG, "gd2")
+
+
+def test_a_message_the_parser_chokes_on_does_not_lose_the_others(fresh_db):
+    _store_message(ENTRY_MSG, tg_id="1", minutes_ago=50)
+    _store_message(TYPO_MSG, tg_id="2", minutes_ago=40)
+    _store_message(ENTRY_MSG.replace("BUY", "SELL").replace("4021/4015", "4060/4066"),
+                   tg_id="3", minutes_ago=30)
+
+    res = backfill_ref_signals(lookback_hours=24)
+
+    assert res["recorded"] == 2, "the two good messages either side must survive"
+    assert res["unparseable"] == 1
+    assert {r["direction"] for r in _signals()} == {"BUY", "SELL"}
+
+
+def test_a_bad_message_before_every_good_one_still_records_them(fresh_db):
+    """Ordering matters: rows come back oldest-first, so a bad message early
+    in the window is the worst case -- it is what took the live pass from
+    15 recorded to 0."""
+    _store_message(TYPO_MSG, tg_id="1", minutes_ago=60)
+    _store_message(ENTRY_MSG, tg_id="2", minutes_ago=50)
+
+    res = backfill_ref_signals(lookback_hours=24)
+
+    assert res["recorded"] == 1
+    assert res["unparseable"] == 1
+
+
+# ── one pipeline for every channel, here too ─────────────────────────────
+
+# GD2's own layout: direction line, then a range, then TP/SL lines. Nothing
+# in it matches Format A/B.
+GD2_MSG = ("XAUUSD BUY NOW\n\n4284.0 - 4278.0\n\nTP1 4287\nTP2 4290\n"
+           "SL 4274")
+# Format A/B's layout: Direction/ENTRY/SL/TP keywords. Nothing in it is GD2.
+FORMAT_AB_MSG = ("Risk disclaimer\nCurrency: XAUUSD\nDirection: SELL\n"
+                 "ENTRY: 4340.0 - 4344.0\nSL: 4350.0\nTP1 4335\nTP2 4330")
+
+
+def test_a_gd2_layout_is_parsed_on_a_format_ab_channel():
+    """`classify_and_parse` stopped branching on the channel's configured
+    parser_format on 2026-08-27 (owner directive: the same parsing rules for
+    every channel) because a well-formed signal in the "wrong" layout for its
+    channel was being dropped. This module was written a month earlier, still
+    branched, and its docstring claimed to mirror that function
+    (docs/todo/bugs/061)."""
+    p = parse_stored_message(GD2_MSG, "format_ab")
+    assert p is not None and p["direction"] == "BUY"
+    assert p["stop_loss"] == 4274.0
+
+
+def test_a_format_ab_layout_is_parsed_on_a_gd2_channel():
+    p = parse_stored_message(FORMAT_AB_MSG, "gd2")
+    assert p is not None and p["direction"] == "SELL"
+    assert p["stop_loss"] == 4350.0
+
+
+# Verbatim shape from Gold Diggers VIP, the live format_ab channel, with the
+# currency swapped. The pair is the ONLY thing that should stop this being
+# recorded -- a message the parser cannot read anyway proves nothing about
+# the guard, which is how the first version of this test let a mutant that
+# deleted the guard survive.
+_EURUSD_MSG = ("This is not financial advice.\n\nDirection BUY\n\n"
+               "Currency: EURUSD\nENTRY : 1.0940-1.0930\n"
+               "TP1: 1.0960\nTP2: 1.0975\n\nSL:  1.0900")
+
+
+def test_the_same_message_in_xauusd_is_recorded():
+    """Half of the guard's test: without this, `is None` below would pass
+    even if the parser simply could not read the layout."""
+    p = parse_stored_message(_EURUSD_MSG.replace("EURUSD", "XAUUSD"), "format_ab")
+    assert p is not None and p["direction"] == "BUY"
+
+
+def test_non_xauusd_is_refused_whatever_the_channel_is_configured_as():
+    """The currency guard was inside the format_ab branch only, so a
+    non-XAUUSD signal on a gd2 channel got past it."""
+    for fmt in ("format_ab", "gd2", "auto"):
+        assert parse_stored_message(_EURUSD_MSG, fmt) is None, fmt
+
+
+def test_the_guard_catches_more_than_the_one_error_we_happen_to_have(
+        fresh_db, monkeypatch):
+    """A mutant narrowing the guard to `except ValueError` survived the two
+    tests above, because the one real malformed message we have raises a
+    ValueError. The property being defended is not "a ValueError is
+    contained" -- it is that NO failure on one message abandons the pass, the
+    same wording the live scan's guard carries. A parser fed years of
+    arbitrary channel text can raise TypeError, KeyError or AttributeError
+    just as easily.
+    """
+    import backend.src.services.positions.core_ref_signal_backfill as mod
+
+    real = mod.parse_stored_message
+
+    def _explode(text, fmt, prefix):
+        if "BOOM" in text:
+            raise TypeError("not a ValueError")
+        return real(text, fmt, prefix)
+
+    _store_message("BOOM", tg_id="1", minutes_ago=60)
+    _store_message(ENTRY_MSG, tg_id="2", minutes_ago=50)
+    monkeypatch.setattr(mod, "parse_stored_message", _explode)
+
+    res = backfill_ref_signals(lookback_hours=24)
+
+    assert res["recorded"] == 1
+    assert res["unparseable"] == 1

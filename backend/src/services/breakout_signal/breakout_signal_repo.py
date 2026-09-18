@@ -414,6 +414,23 @@ def store_ml_prob(signal_id: int, ml_prob: float) -> None:
     get_db().run("UPDATE bo_signals SET ml_prob=? WHERE id=?", round(ml_prob, 4), signal_id)
 
 
+# The value this engine's live-execute path writes to `live_exec_status`
+# when the order actually went to the broker. It is "success", not
+# "executed": "executed" is the REVERSAL engine's word for the same thing
+# (reversal_engine_live_execute.py), and `measure_repo` -- modelled on that
+# engine's -- filtered on it, so every excursion query matched zero rows on a
+# table where the value has never once appeared (docs/todo/bugs/062).
+#
+# Three production sites use the literal and are deliberately not edited
+# here, because they sit on the order path: the write in
+# breakout_signal_live_execute.py and the two closure-sync reads in
+# breakout_signal_service.py. If that value ever changes, they and this
+# constant have to change together -- the tests in
+# tests/breakout_signal/test_excursion_backfill.py spell "success" out for
+# exactly that reason rather than importing this name.
+LIVE_EXEC_SUCCESS = "success"
+
+
 def update_live_exec_result(
     signal_id: int,
     mt5_ticket: Optional[int],

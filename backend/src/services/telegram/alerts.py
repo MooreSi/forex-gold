@@ -277,13 +277,20 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
     # which looks like a broken trade rather than a staged one, so say what is
     # actually true and where the real numbers will come from. Same convention
     # as fmt_signal()'s grid-parent ticket line.
+    # A market entry (IME, manual) has no zone -- entry_low == entry_high ==
+    # the fill -- and "(range 4376.76-4376.76)" is noise, not information.
+    _lo, _hi = trade.get("entry_low"), trade.get("entry_high")
+    _entry_range = (
+        "" if _lo is None or _hi is None or _lo == _hi
+        else f"  (range {_lo}–{_hi})"
+    )
     ticket = trade.get("mt5_ticket")
     lines = [
         "XAUUSD — Trade Opened",
         f"Direction: {direction}",
         f"MT5 Ticket: {ticket}" if ticket else
         "MT5 Ticket: pending (template legs report their own ticket on fill)",
-        f"Entry: {entry}  (range {trade.get('entry_low')}–{trade.get('entry_high')})"
+        f"Entry: {entry}{_entry_range}"
         if entry else
         f"Entry: pending — legs staged across {trade.get('entry_low')}–{trade.get('entry_high')}",
         f"Lot: {trade.get('lot_size')}",
@@ -302,6 +309,27 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
     # connected EA ever get handed off; everything else stays Python-managed.
     lines.append(f"Executed via: {'EA' if trade.get('managed_by') == 'ea' else 'Python'}")
     lines.append(f"Node: {_node_label()}")
+    return "\n".join(lines)
+
+
+def fmt_instant_entry(trade: dict, tick, sl_note: str = "") -> str:
+    """An IME fill, reported in the same shape as any other execution.
+
+    IME used to send a three-line summary of its own, built from the values
+    in hand at order time -- which on a template trade are the placeholder
+    zeros, so it read "BUY at $0.00 | ticket pending" and carried no TP
+    ladder, spread, channel or node. Nothing about an execution report is
+    IME-specific; only how the entry was TRIGGERED is, so this is
+    fmt_trade_open() with that one line added.
+
+    `sl_note` is the caller's own wording for where the stop came from
+    (template / strategy / provisional, bugs/023) -- the one thing the old
+    summary said that fmt_trade_open does not.
+    """
+    lines = fmt_trade_open(trade, tick, {}).splitlines()
+    lines.insert(1, "Entry mode: Immediate Signal Entry (IME)")
+    if sl_note:
+        lines.append(sl_note)
     return "\n".join(lines)
 
 

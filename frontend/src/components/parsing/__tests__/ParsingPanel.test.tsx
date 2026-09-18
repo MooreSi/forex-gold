@@ -18,12 +18,33 @@ const STATE: ParsingState = {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let state: ParsingState;
+let decisionSummary: Record<string, unknown>;
+let decisionVariants: Record<string, unknown>[];
 
 beforeEach(() => {
   resetPolls();
   state = structuredClone(STATE);
+  decisionSummary = {
+    total: 12, executed: 5, blocked: 7, resolved: 3, awaiting_outcome: 2,
+    observed: 10, reconstructed: 2,
+    by_path: [{ path: "ime", executed: 2, blocked: 1 },
+              { path: "full", executed: 3, blocked: 6 }],
+    top_reasons: [{ reason: "outside trading hours", n: 4 }],
+  };
+  decisionVariants = [
+    { variant: "champion", is_champion: true, n_taken: 3, n_skipped: 1,
+      n_abstained: 0, mean_r: 0.42, net: 12.5 },
+    { variant: "news_gate", is_champion: false, n_taken: 0, n_skipped: 4,
+      n_abstained: 0, mean_r: null, net: 0 },
+  ];
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method && init.method !== "GET") {
+      if (String(url).startsWith("/api/decision-log/backfill")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ added: 7, note: "Rebuilt 7 past decision(s)." }),
+        };
+      }
       return { ok: true, status: 200, json: async () => ({}) };
     }
     if (url.startsWith("/api/parsing/state")) {
@@ -37,6 +58,12 @@ beforeEach(() => {
           total: 42,
         }),
       };
+    }
+    if (url.startsWith("/api/decision-log/summary")) {
+      return { ok: true, status: 200, json: async () => decisionSummary };
+    }
+    if (url.startsWith("/api/decision-log/report")) {
+      return { ok: true, status: 200, json: async () => ({ variants: decisionVariants }) };
     }
     if (url.startsWith("/api/parsing/unrecognised")) {
       return {
@@ -72,7 +99,13 @@ describe("the settings section", () => {
       expect(screen.getByTestId(`toggle-${key}`)).toBeInTheDocument();
     }
     expect(PARSING_KEYS).toContain("immediate_market_entry");
-    expect(PARSING_KEYS.length).toBe(12);
+    // 12 until the 2026-09-18 upstream merge added `tg_decision_log_enabled`
+    // under a new RESEARCH badge. The number is exact on purpose — the failure
+    // above was switches SILENTLY disappearing, so a `>=` here would not have
+    // caught it. Change it only alongside a switch that genuinely arrived or
+    // went, and say which in the commit.
+    expect(PARSING_KEYS).toContain("tg_decision_log_enabled");
+    expect(PARSING_KEYS.length).toBe(13);
   });
 
   it("puts every category badge on the screen too", async () => {
@@ -230,5 +263,90 @@ describe("an install with no reader", () => {
     render(<ParsingPanel />);
 
     expect(await screen.findByText("reader not configured")).toBeInTheDocument();
+  });
+});
+
+
+describe("the decision log", () => {
+  const open = async () => {
+    render(<ParsingPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Decision log" }));
+  };
+
+  it("says up front that it changes nothing", async () => {
+    // The one thing an operator needs to know before switching it on.
+    await open();
+
+    expect(await screen.findByText(/nothing here\s+changes a trade/i)).toBeInTheDocument();
+  });
+
+  it("shows what happened without needing a single closed trade", async () => {
+    await open();
+
+    expect(await screen.findByText(/12 decisions/)).toBeInTheDocument();
+    expect(screen.getByText(/5 executed, 7 declined/)).toBeInTheDocument();
+    expect(screen.getByText(/Immediate Market: 2 executed, 1 declined/)).toBeInTheDocument();
+    expect(screen.getByText(/outside trading hours/)).toBeInTheDocument();
+  });
+
+  it("tells a fresh install where to switch it on", async () => {
+    decisionSummary = {
+      total: 0, executed: 0, blocked: 0, resolved: 0, awaiting_outcome: 0,
+      observed: 0, reconstructed: 0, by_path: [], top_reasons: [],
+    };
+    await open();
+
+    expect(await screen.findByText(/Nothing recorded yet/)).toBeInTheDocument();
+  });
+
+  it("does not fetch the variant report until it is asked for", async () => {
+    // It says nothing for days and sits behind a live trading page. Loading
+    // it on render is a query per tab switch for a number that moves twice a
+    // day.
+    await open();
+    await screen.findByText(/12 decisions/);
+
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/report"))).toBe(false);
+  });
+
+  it("shows champion vs challenger when it is", async () => {
+    await open();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Champion vs challenger" }));
+
+    expect(await screen.findByText(/champion \(live\)/)).toBeInTheDocument();
+    expect(screen.getByText(/\+0\.420R/)).toBeInTheDocument();
+  });
+
+  it("says 'no decisions yet' rather than 0.000 for a variant with no evidence", async () => {
+    // Zero expectancy and no evidence are different statements. Rendering both
+    // as 0.000 invites somebody to act on evidence that does not exist.
+    await open();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Champion vs challenger" }));
+
+    const row = await screen.findByText(/news_gate/);
+    expect(row).toHaveTextContent("no decisions yet");
+    expect(row).not.toHaveTextContent("0.000R");
+  });
+
+  it("rebuilds from past trades and says how many were new", async () => {
+    await open();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rebuild from past trades" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Rebuilt 7 past decision(s)");
+    expect(writes().some((c) => String(c[0]).includes("/api/decision-log/backfill"))).toBe(true);
+  });
+
+  it("warns what the rebuild can and cannot reconstruct", async () => {
+    await open();
+
+    const button = await screen.findByRole("button", { name: "Rebuild from past trades" });
+    expect(button).toHaveAttribute("title", expect.stringContaining("record no opinion"));
+    expect(button).toHaveAttribute("title", expect.stringContaining("Safe to press twice"));
   });
 });

@@ -207,3 +207,47 @@ def mark_followup_applied(tg_id, signal_id: str) -> None:
             " WHERE tg_message_id=?",
             (signal_id, tg_id),
         )
+
+
+def telegram_trades_for_backfill(limit: int = 2000) -> list[dict]:
+    """Closed Telegram-sourced trades, joined back to the message that
+    produced them, for `decision_backfill`.
+
+    The join is `vantage_simulated_trades -> vantage_signals.signal_id ->
+    vantage_tg_signals`, which is the only route from a trade back to a
+    Telegram message id. `trade_spread_cache` is keyed on the broker ticket
+    and carries the spread on the fill -- see decision_backfill's header for
+    why that is close enough to the decision's spread to record, and why the
+    row is marked as a reconstruction anyway.
+    """
+    with db_module.db() as conn:
+        rows = conn.execute(
+            """
+            SELECT g.tg_message_id       AS tg_message_id,
+                   t.trade_id            AS trade_id,
+                   t.tg_source           AS channel_name,
+                   t.direction           AS direction,
+                   t.open_time           AS opened_at,
+                   t.entry_low           AS entry_low,
+                   t.entry_high          AS entry_high,
+                   t.entry_price         AS entry_price,
+                   t.initial_sl          AS stop_loss,
+                   t.tp1                 AS tp1,
+                   t.strategy            AS strategy,
+                   t.status              AS status,
+                   t.net_pnl             AS net_pnl,
+                   t.initial_risk        AS initial_risk,
+                   t.max_tp_hit          AS max_tp_hit,
+                   t.exit_reason         AS exit_reason,
+                   s.spread_points       AS spread_points
+              FROM vantage_simulated_trades t
+              JOIN vantage_tg_signals g ON g.signal_id = t.signal_id
+         LEFT JOIN trade_spread_cache s ON s.position_id = t.mt5_ticket
+             WHERE t.status = 'closed'
+               AND t.open_time IS NOT NULL
+          ORDER BY t.open_time DESC
+             LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [db_module.row_to_dict(r) for r in rows]

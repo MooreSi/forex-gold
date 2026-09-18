@@ -45,6 +45,60 @@ from backend.src.utils.models import (
 from backend.src.services.risk import expert_params
 
 
+async def _report_instant_entry(trade_id: Optional[str], tick, sl_note: str,
+                                fallback: str) -> None:
+    """Announce an IME fill as a full execution message.
+
+    Sent straight away when the row can already answer for itself, which is
+    every Python-managed trade. An EA Template row is INSERTed as a
+    placeholder (mt5_ticket=0, entry_price=0.0) and gains its real ticket
+    and fill price only when the first leg fills -- that one case waits in
+    the background rather than announcing "$0.00 | ticket pending".
+
+    A forwarded trade has no row on this node at all (it lives in the VPS's
+    DB), so it keeps the summary IME has always sent.
+    """
+    row = (await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+           if trade_id else None)
+    if row and not row.get("mt5_ticket"):
+        asyncio.create_task(
+            _send_instant_entry_alert(trade_id, tick, sl_note, fallback))
+        return
+    asyncio.create_task(telegram_alerts.send_message(
+        telegram_alerts.fmt_instant_entry(row, tick, sl_note) if row else fallback,
+        trade_id, "instant_entry",
+    ))
+
+
+async def _send_instant_entry_alert(trade_id: Optional[str], tick, sl_note: str,
+                                    fallback: str, timeout: float = 15.0,
+                                    poll: float = 1.0) -> None:
+    """Report an IME fill once the row can answer for itself.
+
+    An EA Template row is INSERTed as a placeholder (mt5_ticket=0,
+    entry_price=0.0); the real ticket and fill price arrive when the first
+    leg fills, normally within seconds. Every other opening path waits that
+    out (runtime._await_trade_promotion) -- IME did not, which is why a
+    template fill announced itself as "$0.00 | ticket pending". Bounded,
+    because a grid whose legs all sit unfilled is a legitimate state and
+    fmt_trade_open() reports it as such.
+
+    Re-reading the row also picks up levels a strategy sets just after the
+    fill (Conservative / Scalp Runner / Conservative Trial), so the TP
+    ladder in the message is the one actually working at the broker.
+    """
+    deadline = time.monotonic() + timeout
+    row = (await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+           if trade_id else None)
+    while row and not row.get("mt5_ticket") and time.monotonic() < deadline:
+        await asyncio.sleep(poll)
+        row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+    await telegram_alerts.send_message(
+        telegram_alerts.fmt_instant_entry(row, tick, sl_note) if row else fallback,
+        trade_id, "instant_entry",
+    )
+
+
 def ime_sl_bounds() -> tuple[float, float, float]:
     """(min pts, max pts, ATR multiplier) for the provisional stop an
     instant entry opens with. Were the constants 8.0 / 25.0 / 1.2; now
@@ -112,16 +166,59 @@ async def process_instant_entry(
         text, time.time(), direction, _status,
     )
 
+    # ── Research log (docs/todo/signal-validation/010) ──────────────────
+    # The facts are gathered HERE, above every gate below, so that each of
+    # this path's exits records the same fact set. That is
+    # reversal_engine_live_execute.py's rule and its reason: recording at
+    # each early return instead would log "would take" for a variant whose
+    # later gates were never run, which reads as an endorsement it never
+    # gave.
+    #
+    # Inert when the log is off -- `_dl_facts` stays None and `_dl` returns
+    # immediately. This is the path with no R:R filter and no opinion about
+    # the market beyond session, news, spread and bias, which makes it the
+    # one most worth measuring; it is also the one with 256 ms of its 269 ms
+    # budget spent at the broker, so nothing here fetches anything.
+    _dl_facts = None
+    try:
+        from backend.src.services.signals import decision_log as _dlog
+        if _dlog.enabled(rs):
+            _dl_facts = _dlog.inline_facts(rs, time.time(), tick=None)
+    except Exception:
+        log.debug("[IME] decision-log facts unavailable", exc_info=True)
+
+    def _dl(executed: bool, reason: str, trade_id=None, tick=None) -> None:
+        """Record this decision. Never raises, never changes control flow --
+        every call site still returns exactly as it did."""
+        if _dl_facts is None:
+            return
+        try:
+            from backend.src.services.signals import decision_log as _dlog2
+            facts = dict(_dl_facts)
+            if tick is not None and facts.get("spread_points") is None:
+                facts["spread_points"] = float(getattr(tick, "spread_points", 0) or 0)
+            _dlog2.record(
+                rs=rs, tg_id=tg_id, path="ime", channel_name=channel_name,
+                direction=direction, executed=executed, skip_reason=reason,
+                strategy=rs.get("trade_strategy"), parsed=None, tick=tick,
+                trade_id=trade_id, facts=facts,
+            )
+        except Exception:
+            log.debug("[IME] decision-log record failed", exc_info=True)
+
     if is_stale:
         log.debug("[IME] Stale instant tg_id=%s — recorded only", tg_id)
+        _dl(False, "stale instant message")
         return
     if not auto_execute:
         log.info("[IME] Instant %s detected — auto-execute OFF", direction)
+        _dl(False, "auto-execute off")
         return
 
     _ime_sess_ok, _ime_sess_name = db_module.is_session_allowed(rs)
     if not _ime_sess_ok:
         log.info("[IME] Instant %s blocked — %s market disabled", direction, _ime_sess_name)
+        _dl(False, f"{_ime_sess_name} market disabled")
         return
 
     # Trading Schedule gate — previously only reached via resolve_open_trade_params(),
@@ -131,6 +228,7 @@ async def process_instant_entry(
     _ime_sched_ok, _ime_sched_reason = check_trading_schedule(source=channel_name)
     if not _ime_sched_ok:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_sched_reason)
+        _dl(False, str(_ime_sched_reason))
         return
 
     # News blackout (Trading > News) — needs its own copy here for the same
@@ -141,6 +239,7 @@ async def process_instant_entry(
     _ime_news_ok, _ime_news_reason = check_news_blackout()
     if not _ime_news_ok:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_news_reason)
+        _dl(False, str(_ime_news_reason))
         return
 
     # Higher-timeframe bias gate — the fourth gate this path has to keep its
@@ -151,11 +250,13 @@ async def process_instant_entry(
     _ime_bias_block = _gov.htf_bias_blocks(direction, _ime_bias, rs)
     if _ime_bias_block:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_bias_block)
+        _dl(False, str(_ime_bias_block))
         return
 
     tick = await bridge.get_tick()
     if not tick:
         log.warning("[IME] Instant %s — no live price, skipped", direction)
+        _dl(False, "no live price")
         return
 
     # Spread guard — block instant entries during wide-spread news/spike events
@@ -164,6 +265,7 @@ async def process_instant_entry(
     if tick.spread_points > _max_spread:
         log.info("[IME] Instant %s blocked — spread %.1f pts > max %.1f pts",
                  direction, tick.spread_points, _max_spread)
+        _dl(False, f"spread {tick.spread_points:.1f} pts over {_max_spread:.0f}", tick=tick)
         return
 
     strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
@@ -201,10 +303,12 @@ async def process_instant_entry(
         if _template_ime is None:
             log.warning("[IME] Template '%s' no longer exists for channel %s — "
                         "skipping instant entry", _tpl_name_ime, channel_name)
+            _dl(False, f"template '{_tpl_name_ime}' missing", tick=tick)
             return
         if _template_ime["sig_guard"] and _sig_guard_blocks(channel_name, direction):
             log.info("[IME] Sig Guard: a template-managed trade is already open "
                       "for %s %s — skipping instant entry", channel_name, direction)
+            _dl(False, "Sig Guard: template trade already open", tick=tick)
             return
 
     open_trades  = get_open_trades()
@@ -214,6 +318,7 @@ async def process_instant_entry(
     max_trades   = int(rs.get("max_open_trades", 1))
     if open_count >= max_trades:
         log.info("[IME] Instant %s — max_trades (%d) reached, skipped", direction, max_trades)
+        _dl(False, f"max open trades ({max_trades}) reached", tick=tick)
         return
     strategy_lot = float(rs.get("strategy_lot_size", 0))
     if _template_ime is not None:
@@ -388,6 +493,7 @@ async def process_instant_entry(
         _lt_ime.mark(tg_id, "t8_ordered")
         exec_price  = float(trade_result.get("entry_price", entry_px))
         _ime_ticket = trade_result.get("mt5_ticket") or "pending"
+        _dl(True, "", trade_id=trade_result.get("trade_id"), tick=tick)
         log.info("[IME] Instant %s executed @ %.2f lot=%.2f ticket=%s SL=%.2f (%s)",
                  direction, exec_price, lot, _ime_ticket, provisional_sl,
                  f'from template "{_tpl_name_ime}"' if _template_ime is not None
@@ -406,12 +512,14 @@ async def process_instant_entry(
             _sl_note = "_(levels set by strategy immediately)_"
         else:
             _sl_note = f"_(provisional {_IME_SL_DIST:.1f} pts / -${_ime_max_loss:.0f} max — awaiting follow-up)_"
-        asyncio.create_task(telegram_alerts.send_message(
+        _ime_summary = (
             f"*Immediate Signal Entry*  ({telegram_alerts._md_esc(channel_name)})\n"
             f"*{direction}* at ${exec_price:.2f}  |  lot {lot:.2f}  |  ticket `{_ime_ticket}`\n"
-            f"SL: ${provisional_sl:.2f} {_sl_note}",
-            event_type="instant_entry",
-        ))
+            f"SL: ${provisional_sl:.2f} {_sl_note}"
+        )
+        await _report_instant_entry(
+            trade_result.get("trade_id"), tick, _sl_note, _ime_summary,
+        )
 
         # ── Conservative / Scalp Runner: post-fill SL/TP override (IME path) ─
         # open_trade_from_signal() is not called for IME trades, so we apply

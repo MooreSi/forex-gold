@@ -34,6 +34,7 @@ from backend.src.api.routers import ai as ai_router
 from backend.src.api.routers import auth as auth_router
 from backend.src.api.routers import backtest as backtest_router
 from backend.src.api.routers import chart as chart_router
+from backend.src.api.routers import decision_log as decision_log_router
 from backend.src.api.routers import engines as engines_router
 from backend.src.api.routers import history as history_router
 from backend.src.api.routers import news as news_router
@@ -68,6 +69,7 @@ ROUTERS = (
     ai_router.router,
     backtest_router.router,
     chart_router.router,
+    decision_log_router.router,
     engines_router.router,
     history_router.router,
     news_router.router,

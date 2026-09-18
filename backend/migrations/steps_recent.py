@@ -122,4 +122,34 @@ _RECENT: list[tuple[int, str, object]] = [
     (45, "Asian-session exemption for the trend gate, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN htf_bias_asian_exempt INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # CME futures context (owner request 2026-09-17). Spot XAUUSD on this
+    # broker publishes bid/ask and no Last, so there is no trade side and
+    # "volume" everywhere in this system is tick volume -- a count of quote
+    # changes, not size (see services/market/order_flow.py). GC futures are
+    # the lit venue where gold prints real size, and the only route to
+    # measured flow rather than a tick-rule proxy.
+    #
+    # NOTHING CONSUMES THIS YET. There is no CME feed in the repo; the
+    # column records the intent and capability_gates.cme_context_enabled is
+    # its only reader. Daily GC volume and open interest are free from CME;
+    # the open question is whether futures flow predicts anything about
+    # these trades, which nobody has measured -- docs/simon-handover/039.
+    (46, "CME futures context switch, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_cme_context_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # The Telegram decision log (2026-09-18), Parsing page. Records what the
+    # app decided about each Telegram signal and what the trade then did,
+    # plus what four gates that are currently OFF would have decided --
+    # champion and challenger, recorded, never acted on. See
+    # docs/todo/signal-validation/010.
+    #
+    # Off by default and inert when off: it sits on the order path, and the
+    # measured IME budget is 269 ms end to end with 256 ms of that the
+    # broker POST. The rows go to reversal_engine.db, which is one file
+    # across demo and live -- this column only says whether to write them.
+    (47, "Telegram decision log, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN tg_decision_log_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

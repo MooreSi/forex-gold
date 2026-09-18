@@ -5,6 +5,7 @@ import { asObject } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { useParsingController } from "./hooks/useParsingController";
 import { ChannelsSection } from "./internal/ChannelsSection";
+import { DecisionLogSection } from "./internal/DecisionLogSection";
 import { LexiconSection } from "./internal/LexiconSection";
 import { MessageFeedSection } from "./internal/MessageFeedSection";
 import { ParsingSettingsSection } from "./internal/ParsingSettingsSection";
@@ -16,6 +17,7 @@ const SUB_TABS = [
   { id: "phrases", label: "Trigger phrases" },
   { id: "feed", label: "Feed" },
   { id: "questions", label: "Questions" },
+  { id: "decisions", label: "Decision log" },
 ];
 
 export function ParsingPanel() {
@@ -78,6 +80,9 @@ export function ParsingPanel() {
           </Tabs.Content>
           <Tabs.Content value="questions" className="min-h-0 flex-1 overflow-auto">
             <UnrecognisedSection pending={c.pending} onResolve={c.resolve} />
+          </Tabs.Content>
+          <Tabs.Content value="decisions" className="min-h-0 flex-1 overflow-auto">
+            <DecisionLogSection />
           </Tabs.Content>
         </Tabs.Root>
       )}

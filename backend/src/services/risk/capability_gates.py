@@ -152,7 +152,41 @@ def sizing_inputs(rs: dict, atr: float, reference_atr: float,
         drawdown_pct=drawdown_pct if scale_on else 0.0,
         open_correlated_lots=open_correlated_lots,
         correlated_cap_lots=_num(rs, "correlated_exposure_cap_lots", 0.0),
+        # Outside `scale_on` on purpose: this is the account's ceiling, not
+        # one of the capability's adjustments. `suggest_lot_size` already
+        # applies it to the base lot, and it has to survive a policy whose
+        # volatility scalar can multiply that base by up to 1.5.
+        max_lots=_num(rs, "max_lot_size", 0.0),
     )
+
+
+def cme_context_enabled(rs: dict) -> bool:
+    """Should the engine read CME futures context? Off, and inert either way.
+
+    **Nothing consumes this yet, and that is deliberate.** There is no CME
+    client, no entitlement and no ingest in this repo, so turning the switch
+    on records the intent and changes no decision the engine makes. Same
+    shape as `vol_target_sizing_enabled`, which has said so on the card
+    since 2026-09-11.
+
+    Why the switch exists at all: spot XAUUSD on this broker publishes
+    bid/ask and no Last, so there is no trade side to read and "volume"
+    everywhere in this system is tick volume -- a count of quote changes,
+    not size. `services/market/order_flow.py` labels every result with the
+    method that produced it for that reason. GC futures are the lit venue
+    where gold prints real size, and the only route by which any of this
+    becomes a measurement instead of a proxy.
+
+    Why it stops here, and it is NOT cost: the data this would use --
+    daily GC volume and open interest -- is published free by CME. Only
+    real-time streaming is a paid entitlement and this engine has no use
+    for it. What is unanswered is whether futures flow predicts anything
+    about THESE trades, which nothing in this repo has measured, so
+    building the ingest first would be building on a guess. Recorded in
+    docs/simon-handover/039. Migration 46, off by default
+    (rules/60-adding-a-tunable), never demoed.
+    """
+    return _on(rs, "re_cme_context_enabled")
 
 
 # Every level type the detector can emit. A type missing from here is a

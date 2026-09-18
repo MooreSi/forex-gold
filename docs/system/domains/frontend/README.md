@@ -184,3 +184,28 @@ file needs the owner's sign-off and a demo session, the same as the close path.
 NAME stays although its code went on 2026-09-14, because `server_start` binds
 (breakout, bounce, reversal) positionally and a paired node on an older build
 would otherwise see Reversal shift into Bounce's place.
+
+
+## Catching up with `MooreSi/forex` (2026-09-18)
+
+`MooreSi/forex` keeps running the NiceGUI dashboard and keeps moving. Merging
+it into this branch is routine, and the cost is predictable: **it is
+proportional to how many UI-reachability tests the upstream work brought with
+it, not to how many lines it changed.**
+
+The first catch-up (`1d594cb`..`0622ea7`, ~5,600 lines) produced five conflicts
+— four NiceGUI files this branch has deleted, which stay deleted, and one
+`__all__` both sides had added to. Of 8,463 tests, five failed, every one of
+them a test that reads a NiceGUI page's source to prove a switch is reachable.
+
+Those tests are right to exist and must not be deleted: `docs/todo/refactor`
+records a guardrail that scanned a deleted directory and printed "all good" for
+months. **Re-point them at the React source and keep the assertions.**
+`tests/refactor/_react_port.py` has the helpers; `test_cme_context_switch.py`
+and `test_decision_log_is_wired.py` are the worked examples.
+
+One trap, found the hard way: a test that reads forward from the first
+occurrence of a key in a file will happily match a COMMENT above the real
+thing. A comment that quotes the phrases the test looks for satisfies it on its
+own, and the code underneath can then say anything. Do not restate a test's
+expected strings in a comment next to the thing it checks.

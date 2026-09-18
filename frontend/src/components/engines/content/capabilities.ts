@@ -49,4 +49,31 @@ export const CAPABILITIES: Capability[] = [
     description:
       "Scale the position with measured volatility instead of using a flat risk percentage.",
   },
+  {
+    key: "re_cme_context_enabled",
+    label: "Read CME futures context (not connected yet)",
+    // The wording is the point, not decoration. The failure it guards against
+    // is the owner turning this on, seeing no change, and concluding the
+    // engine is broken — or worse, believing a later decision was informed by
+    // data this build does not have. `test_cme_context_switch.py` reads the
+    // text below and fails if it stops admitting that, so do not soften it.
+    //
+    // That test takes the FIRST match for the key in this file and reads
+    // forward, so nothing above may repeat the phrases it looks for: a comment
+    // that quotes them satisfies the assertion on its own and the real
+    // description could then say anything at all.
+    description:
+      "This broker quotes spot gold bid/ask with no Last, so there is no trade " +
+      "side and every 'volume' in this app is tick volume — a count of quote " +
+      "changes, not size. GC futures are the lit venue where gold prints real " +
+      "size, and the only route to measured flow instead of a proxy. There is " +
+      "NO CME FEED in this build: no entitlement, no client, no ingest. " +
+      "Turning this on records the intent and CHANGES NOTHING the engine " +
+      "decides. The data it would use — daily GC volume and open interest — " +
+      "is published free by CME; only real-time streaming is a paid " +
+      "entitlement, and this engine does not need it. Whether it is worth " +
+      "building at all is still the owner's call: nothing has yet measured " +
+      "that futures flow predicts anything about these trades. See " +
+      "docs/simon-handover/039.",
+  },
 ];

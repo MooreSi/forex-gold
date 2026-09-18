@@ -187,3 +187,70 @@ class TestTheScannerCanSee:
     def test_a_table_that_does_not_exist_is_an_error_not_an_empty_set(self):
         with pytest.raises(AssertionError):
             _columns_of("table_this_app_has_never_had")
+
+
+# ── The same check, for every screen that writes the risk row ────────────────
+
+RISK_SPEC_FILES = {
+    "frontend/src/components/settings/content/risk.ts": "the Risk tab",
+    "frontend/src/components/engines/content/capabilities.ts":
+        "the Signal Generator's capability switches",
+    "frontend/src/components/parsing/content/settings.ts": "the parsing switches",
+    "frontend/src/components/parsing/internal/SignalsSourcesSection.tsx":
+        "the live-execution gates",
+}
+
+
+def _risk_columns() -> set[str]:
+    """Every column of `vantage_risk_settings`, including migrated ones."""
+    cols = _columns_of("vantage_risk_settings")
+    recent = _REPO / "backend" / "migrations" / "steps_recent.py"
+    if recent.exists():
+        cols |= set(re.findall(
+            r"ALTER TABLE vantage_risk_settings ADD COLUMN (\w+)",
+            recent.read_text(encoding="utf-8")))
+    return cols
+
+
+def _keys_in(path: str) -> set[str]:
+    """Every `key: "..."` in a screen's spec list."""
+    src = (_REPO / path).read_text(encoding="utf-8")
+    return set(re.findall(r'\bkey:\s*"(\w+)"', src))
+
+
+@pytest.mark.parametrize("path,what", sorted(RISK_SPEC_FILES.items()))
+def test_every_risk_setting_a_screen_offers_is_a_real_column(path, what):
+    """`update_risk_settings` runs `UPDATE vantage_risk_settings SET <keys>`.
+
+    A key that is not a column raises, so the operator gets a 500 and the
+    setting is silently not saved — while the box on screen still shows what
+    they typed until the next reload.
+
+    Found on 2026-09-18 in the Risk tab, which offered `risk_pct` (a column on
+    a different table entirely) and `daily_loss_limit_pct` (a column nowhere at
+    all). Two of its four fields threw on save. The real names are
+    `risk_per_trade_pct` and `max_daily_loss_pct`.
+    """
+    unknown = _keys_in(path) - _risk_columns()
+
+    assert not unknown, (
+        f"{what} offers {sorted(unknown)}, which vantage_risk_settings has no "
+        "column for — every save of one of those raises and loses the value"
+    )
+
+
+def test_the_column_reader_sees_the_risk_table(path=None):
+    """Negative control. Every assertion above is `not unknown`, which an empty
+    column set would satisfy for any screen at all."""
+    cols = _risk_columns()
+
+    assert {"risk_per_trade_pct", "max_daily_loss_pct", "max_open_trades"} <= cols
+    assert "daily_loss_limit_pct" not in cols
+    assert len(cols) > 50, "the risk row is wide; a short list means a bad parse"
+
+
+@pytest.mark.parametrize("path,what", sorted(RISK_SPEC_FILES.items()))
+def test_each_screen_actually_declares_some_keys(path, what):
+    """The other half of the negative control: a spec file whose shape changed
+    would silently offer nothing to check."""
+    assert _keys_in(path), f"no `key:` entries parsed out of {what}"

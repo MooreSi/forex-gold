@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 from backend.src.config import USER_DATA_DIR
+from backend.src.db import database as db_module
 from backend.src.utils import os_utils as _pu
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,11 @@ log = logging.getLogger(__name__)
 # Reverse-DNS label on macOS, plain name for Task Scheduler on Windows.
 LAUNCHD_LABEL = "com.forextrader.watchdog"
 WIN_TASK_NAME = "FOREXTraderWatchdog"
+
+# The stored toggle. `app.py` reads it on every boot and reconciles the OS to
+# it, so enabling without writing it removes the entry again at the next
+# restart -- see `_record`.
+SETTING_KEY = "auto_restart_enabled"
 
 # How often the OS scheduler runs the watchdog. Two minutes is a deliberate
 # floor, not a tuning knob: Windows Task Scheduler's /sc minute /mo takes whole
@@ -234,8 +240,34 @@ def is_installed() -> bool:
     return False
 
 
+def _record(enabled: bool) -> None:
+    """Store the toggle `app.py` reconciles against on every boot.
+
+    Installing the scheduler entry WITHOUT this is worse than doing nothing:
+    `sync_from_setting()` runs at startup and reconciles the OS to the stored
+    value, so an unrecorded enable removes itself at the next restart and
+    leaves a toggle reading ON with nothing behind it.
+
+    Never raises. The OS entry is already in place by the time this runs, so
+    the app IS supervised; reporting a failure for something that happened
+    would be the wrong answer, and the log line is how the lost record gets
+    noticed.
+    """
+    try:
+        db_module.set_app_config(SETTING_KEY, "1" if enabled else "0")
+    except Exception as exc:
+        log.warning("[Autostart] could not record the setting (%s) — the OS "
+                    "entry is in place but will be undone at the next restart",
+                    exc)
+
+
 def enable() -> None:
-    """Install the scheduler entry and arm the watchdog. Raises on failure."""
+    """Install the scheduler entry, arm the watchdog, and record it.
+
+    Raises if the OS refuses, and records nothing in that case: a toggle
+    showing ON with no scheduler entry behind it is the false sense of safety
+    this feature exists to remove.
+    """
     if not is_supported():
         raise RuntimeError(f"Auto-restart is not supported on {sys.platform}")
     if not watchdog_script().exists():
@@ -245,6 +277,7 @@ def enable() -> None:
     else:
         _win_install()
     arm()
+    _record(True)
     log.info("[Autostart] enabled — watchdog checks every %ss", CHECK_INTERVAL_SECS)
 
 
@@ -258,6 +291,7 @@ def disable() -> None:
             _win_uninstall()
     except Exception as exc:
         log.warning("[Autostart] uninstall error (flag is disarmed regardless): %s", exc)
+    _record(False)
     log.info("[Autostart] disabled")
 
 

@@ -283,3 +283,79 @@ def test_app_port_falls_back_when_config_is_unreadable(wd, monkeypatch):
         "backend.src.config.load", mock.Mock(side_effect=RuntimeError("bad yaml"))
     )
     assert wd._app_port() == 8888
+
+
+# ── The stored setting, which startup reconciles against ─────────────────────
+
+class TestTheSettingSurvivesARestart:
+    """`app.py` calls `sync_from_setting(get_app_config("auto_restart_enabled")
+    == "1")` on every boot, and reconciles the OS to whatever that says.
+
+    So installing the scheduler entry without writing the setting is worse than
+    doing nothing: the watchdog works until the next restart and then **removes
+    itself**, leaving a toggle that reads ON with no supervision behind it —
+    the exact false sense of safety this feature exists to remove.
+
+    The NiceGUI switch wrote the key by hand after the OS call succeeded. The
+    React port calls `autostart_enable()` through a router and cannot, so the
+    write belongs in the service where every caller gets it.
+    """
+
+    def test_enabling_records_it(self, monkeypatch, tmp_path):
+        written = {}
+        monkeypatch.setattr(autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(autostart, "watchdog_script", lambda: tmp_path / "w.sh")
+        (tmp_path / "w.sh").write_text("#!/bin/sh\n")
+        monkeypatch.setattr(autostart, "_mac_install", lambda: None)
+        monkeypatch.setattr(autostart, "_win_install", lambda: None)
+        monkeypatch.setattr(autostart, "arm", lambda: None)
+        monkeypatch.setattr(autostart.db_module, "set_app_config",
+                            lambda k, v: written.__setitem__(k, v))
+
+        autostart.enable()
+
+        assert written == {"auto_restart_enabled": "1"}
+
+    def test_disabling_records_it_too(self, monkeypatch):
+        written = {}
+        monkeypatch.setattr(autostart, "disarm", lambda: None)
+        monkeypatch.setattr(autostart, "_mac_uninstall", lambda: None)
+        monkeypatch.setattr(autostart, "_win_uninstall", lambda: None)
+        monkeypatch.setattr(autostart.db_module, "set_app_config",
+                            lambda k, v: written.__setitem__(k, v))
+
+        autostart.disable()
+
+        assert written == {"auto_restart_enabled": "0"}
+
+    def test_an_os_refusal_does_not_record_it_as_on(self, monkeypatch, tmp_path):
+        """A toggle showing ON with no scheduler entry behind it is the thing
+        this guards. `enable()` raises, so the setting must stay where it was."""
+        written = {}
+        monkeypatch.setattr(autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(autostart, "watchdog_script", lambda: tmp_path / "missing.sh")
+        monkeypatch.setattr(autostart.db_module, "set_app_config",
+                            lambda k, v: written.__setitem__(k, v))
+
+        with pytest.raises(RuntimeError):
+            autostart.enable()
+
+        assert written == {}
+
+    def test_a_failed_write_does_not_undo_the_install(self, monkeypatch, tmp_path):
+        """The OS entry is in place; the app is supervised. Losing the record
+        means it is undone at the next restart, which is bad — but raising here
+        would report a failure for something that DID happen."""
+        monkeypatch.setattr(autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(autostart, "watchdog_script", lambda: tmp_path / "w.sh")
+        (tmp_path / "w.sh").write_text("#!/bin/sh\n")
+        monkeypatch.setattr(autostart, "_mac_install", lambda: None)
+        monkeypatch.setattr(autostart, "_win_install", lambda: None)
+        monkeypatch.setattr(autostart, "arm", lambda: None)
+
+        def _boom(k, v):
+            raise RuntimeError("database locked")
+
+        monkeypatch.setattr(autostart.db_module, "set_app_config", _boom)
+
+        autostart.enable()   # must not raise

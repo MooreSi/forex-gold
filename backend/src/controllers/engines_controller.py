@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.src.services.breakout_signal import panel_data as breakout
+from backend.src.services.cluster import remote_control as _remote
 from backend.src.services.engines import registry as _engines
 from backend.src.services.reversal_engine import panel_data as reversal
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
@@ -17,7 +18,9 @@ from backend.src.services.risk import settings as _risk
 
 __all__ = ["breakout", "reversal",
            "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
-           "get_engine", "engines_running", "sub_engines", "ENGINE_NAMES"]
+           "get_engine", "engines_running", "sub_engines", "ENGINE_NAMES",
+           "control_target", "effective_settings", "set_engine_running",
+           "set_ai_eval", "AI_EVAL_KEYS", "RemoteControlFailed"]
 
 
 def get_risk_settings() -> dict:
@@ -34,12 +37,10 @@ def update_risk_settings(fields: dict) -> None:
 
 # ── Engine lifecycle (restructure phase1/010) ────────────────────────────────
 # Named operations instead of re-exported singletons, so no page loops over
-# engines choosing lifecycle again.
-#
-# The table itself and the two bulk loops moved to services/engines/registry.py
-# on 2026-09-18: the Local/Remote handover needs them, a service may not import
-# a controller, and the copy it grew instead was a second answer to "which
-# engines exist and which may be bulk-started".
+# engines choosing lifecycle again. The table and the two BULK loops live in
+# services/engines/registry.py and are deliberately not re-exported: their only
+# caller is the Local/Remote handover, which is a service and may not import a
+# controller. See docs/system/domains/frontend/README.md.
 
 
 # Which engines exist, in the fixed binding order. Re-exported so a router can
@@ -63,11 +64,32 @@ def sub_engines() -> tuple:
     return _engines.all_instances()
 
 
-# The bulk start/stop pair is NOT re-exported here. Their only caller was the
-# header's Local/Remote toggle, which now runs the full handover sequence in
-# services/cluster/handover.py and reaches the registry directly -- a service
-# may not import a controller. A forwarder no router calls is a route to
-# nowhere, so they went with the toggle rather than lingering as one.
+# ── Acting on the node that is actually trading ──────────────────────────────
+# When the VPS is the active trader this machine's sub-engines are stood down,
+# so a Start/Stop applied here "does nothing useful while looking like it
+# worked" (the sync server's own words). remote_control.py decides where a
+# control lands, and every operation below forwards that decision unchanged.
+
+AI_EVAL_KEYS = _remote.AI_EVAL_KEYS
+RemoteControlFailed = _remote.RemoteControlFailed
+
+
+def control_target() -> str:
+    """"local", "remote" or "centralized" -- which node a control will reach."""
+    return _remote.where()
+
+
+def effective_settings(local: dict) -> dict:
+    """The settings the engines are actually obeying."""
+    return _remote.effective_settings(local)
+
+
+async def set_engine_running(*args, **kwargs) -> dict:
+    return await _remote.set_engine_running(*args, **kwargs)
+
+
+async def set_ai_eval(*args, **kwargs) -> dict:
+    return await _remote.set_ai_eval(*args, **kwargs)
 
 
 async def reversal_realised_pnl() -> dict:

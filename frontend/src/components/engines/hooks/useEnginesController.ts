@@ -12,8 +12,21 @@ export interface EngineRow {
 
 export interface EnginesState {
   engines: EngineRow[];
+  /**
+   * The settings the engines are OBEYING, which in Remote mode are the peer's
+   * rather than this machine's row. The backend overlays them; this side just
+   * renders what it is given.
+   */
   settings: Record<string, unknown>;
   pro_model: Record<string, unknown>;
+  /**
+   * Which machine a control here will reach: "local", "remote" or
+   * "centralized". Absent on an older backend, which the panel reads as
+   * "local" — the state this tab has always assumed.
+   */
+  control_target?: string;
+  /** The engines whose AI-evaluation switch the sync protocol can carry. */
+  ai_eval_keys?: Record<string, string>;
 }
 
 export function useEnginesController() {

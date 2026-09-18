@@ -205,19 +205,17 @@ class TestLinkState:
         assert client.remote_status == {"balance": 10_250.44}
         assert client.remote_settings == {"bo_engine_enabled": "1"}
 
-    def test_noting_a_setting_writes_into_the_live_snapshot(self, client):
-        """The one write that IS meant to reach the client. Without it "the
-        next click recomputes the same 'current' and the toggle sticks
-        one-directional" — confirmed live: Bounce stuck OFF, Breakout stuck
-        ON, every click re-sending the same target state."""
-        sync_ctl.note_remote_setting("bo_engine_enabled", "0")
-
-        assert client.remote_settings["bo_engine_enabled"] == "0"
-
-    def test_and_the_next_read_sees_it(self, client):
-        sync_ctl.note_remote_setting("bo_engine_enabled", "0")
-
-        assert sync_ctl.link_state()["remote_settings"]["bo_engine_enabled"] == "0"
+    # `note_remote_setting` was tested here until 2026-09-18. It is the one
+    # write that IS meant to reach the client -- without it "the next click
+    # recomputes the same 'current' and the toggle sticks one-directional",
+    # confirmed live with Bounce stuck OFF and Breakout stuck ON.
+    #
+    # It moved into services/cluster/remote_control.py, because a browser
+    # cannot make that write and the only code that knows a write went to the
+    # peer at all is the routing. The requirement did NOT move: it is pinned
+    # harder there, by `test_the_ack_is_recorded_so_the_next_click_sees_it`
+    # (two clicks, second must invert) and `test_a_refused_toggle_does_not_
+    # record_anything`, which this file never covered.
 
     @pytest.mark.parametrize("state,expected", [
         ("connected", True),

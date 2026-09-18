@@ -39,6 +39,7 @@ class _Engine:
 def engines(monkeypatch):
     state = {
         "instances": {"breakout": _Engine(), "bounce": None, "reversal": _Engine()},
+        "target": "local",
         "settings": {"re_min_adx": 22},
         "pro_model": {"trained": True, "samples": 412},
         "bulk": [],
@@ -61,6 +62,27 @@ def engines(monkeypatch):
 
     monkeypatch.setattr(engines_router.engines_ctl, "get_engine",
                         lambda name: state["instances"].get(name))
+    # The registry holds the instances a start/stop actually reaches, since the
+    # command may land on the peer instead (services/cluster/remote_control.py).
+    # Patching only `get_engine` would leave the router asking one object and
+    # acting on another.
+    from backend.src.services.engines import registry as _registry
+
+    class _Svc:
+        def __init__(self, engine):
+            self._engine = engine
+
+        def get_instance(self):
+            return self._engine
+
+    monkeypatch.setattr(_registry, "_ENGINE_SERVICES", {
+        name: (None if engine is None else _Svc(engine))
+        for name, engine in state["instances"].items()
+    })
+    # Local by default: the remote-routing cases are in
+    # tests/services/cluster/test_remote_control.py and in the class below.
+    monkeypatch.setattr(engines_router.engines_ctl, "control_target",
+                        lambda: state["target"])
     monkeypatch.setattr(engines_router.engines_ctl, "engines_running",
                         lambda: {k: bool(getattr(v, "is_running", False))
                                  for k, v in state["instances"].items()})
@@ -240,3 +262,135 @@ def test_a_settings_write_forwards_only_what_it_was_given(make_client, engines):
     make_client().put("/api/engines/settings", json={"re_min_adx": 30})
 
     assert engines["written"] == [{"re_min_adx": 30}]
+
+
+class TestTheTabSaysWhichNodeItIsDriving:
+    """When the VPS is the active trader this node's engines are stood down, so
+    a control applied here does nothing useful while looking like it worked.
+    The routing itself is tested in `tests/services/cluster/test_remote_control.py`;
+    these are about the handler reaching it and the tab being told."""
+
+    def test_the_state_says_where_a_control_will_land(self, make_client, engines):
+        engines["target"] = "remote"
+
+        body = make_client().get("/api/engines/state").json()
+
+        assert body["control_target"] == "remote"
+
+    def test_the_state_names_the_two_engines_that_have_an_ai_switch(
+        self, make_client, engines,
+    ):
+        """The protocol carries `set_ai_eval` for exactly two of the three. A
+        tab that offered it on Reversal would offer a button that cannot work."""
+        keys = make_client().get("/api/engines/state").json()["ai_eval_keys"]
+
+        assert set(keys) == {"breakout", "bounce"}
+
+    def test_the_settings_shown_are_the_ones_the_engines_obey(
+        self, make_client, engines, monkeypatch,
+    ):
+        """In Remote mode that is the peer's snapshot, not this node's row.
+        Showing this node's would describe a machine nobody is watching."""
+        monkeypatch.setattr(engines_router.engines_ctl, "effective_settings",
+                            lambda local: {**local, "re_min_adx": 99})
+
+        body = make_client().get("/api/engines/state").json()
+
+        assert body["settings"]["re_min_adx"] == 99
+
+    def test_an_engine_not_built_here_can_still_be_started_on_the_peer(
+        self, make_client, engines, monkeypatch,
+    ):
+        """"Not built on this install" is a reason to refuse only when the
+        command was going to be applied here. Bounce is unbuilt locally and
+        the VPS may well have it."""
+        engines["target"] = "remote"
+        sent = []
+
+        async def _remote(name, running):
+            sent.append((name, running))
+            return {"engine": name, "running": running, "built": True,
+                    "where": "remote"}
+
+        monkeypatch.setattr(engines_router.engines_ctl, "set_engine_running", _remote)
+
+        res = make_client().post("/api/engines/running",
+                                 json={"engine": "bounce", "running": True})
+
+        assert res.status_code == 200
+        assert sent == [("bounce", True)]
+        assert res.json()["where"] == "remote"
+
+    def test_a_peer_that_refuses_reaches_the_operator_in_its_own_words(
+        self, make_client, engines, monkeypatch,
+    ):
+        engines["target"] = "remote"
+
+        async def _boom(name, running):
+            raise engines_router.engines_ctl.RemoteControlFailed(
+                "The remote node could not be reached (timed out).")
+
+        monkeypatch.setattr(engines_router.engines_ctl, "set_engine_running", _boom)
+
+        res = make_client().post("/api/engines/running",
+                                 json={"engine": "breakout", "running": True})
+
+        assert res.status_code == 409
+        assert "could not be reached" in res.json()["error"]["message"]
+
+    def test_the_ai_toggle_has_its_own_endpoint(self, make_client, engines, monkeypatch):
+        called = []
+
+        async def _toggle(engine, enabled):
+            called.append((engine, enabled))
+            return {"engine": engine, "key": "bo_claude_eval_enabled",
+                    "enabled": True, "where": "local"}
+
+        monkeypatch.setattr(engines_router.engines_ctl, "set_ai_eval", _toggle)
+
+        body = make_client().post("/api/engines/ai-eval",
+                                  json={"engine": "breakout"}).json()
+
+        # `enabled` omitted means "invert what is current", and the service is
+        # what reads the current value from the right node.
+        assert called == [("breakout", None)]
+        assert body["enabled"] is True
+
+    def test_an_unknown_engine_is_refused_before_anything_is_sent(
+        self, make_client, engines,
+    ):
+        res = make_client().post("/api/engines/running",
+                                 json={"engine": "nonsense", "running": True})
+
+        assert res.status_code == 400
+        assert engines["instances"]["breakout"].calls == []
+
+    def test_an_unknown_engine_is_refused_by_the_ai_toggle_too(
+        self, make_client, engines, monkeypatch,
+    ):
+        """Both endpoints take an engine name from the browser. Checking one
+        and not the other is how the unchecked one becomes the way in."""
+        called = []
+        monkeypatch.setattr(engines_router.engines_ctl, "set_ai_eval",
+                            lambda *a: called.append(a))
+
+        res = make_client().post("/api/engines/ai-eval", json={"engine": "nonsense"})
+
+        assert res.status_code == 400
+        assert called == []
+
+    def test_an_engine_with_no_ai_switch_is_refused_with_its_reason(
+        self, make_client, engines, monkeypatch,
+    ):
+        """Reversal is a known engine and has no such setting. A silent no-op
+        would read as a broken switch."""
+        async def _boom(engine, enabled):
+            raise engines_router.engines_ctl.RemoteControlFailed(
+                "AI evaluation is not a setting the reversal engine has.")
+
+        monkeypatch.setattr(engines_router.engines_ctl, "set_ai_eval", _boom)
+
+        res = make_client().post("/api/engines/ai-eval", json={"engine": "reversal"})
+
+        assert res.status_code == 409
+        assert "not a setting" in res.json()["error"]["message"]

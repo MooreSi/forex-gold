@@ -5,6 +5,7 @@ import { PanelShell } from "@/components/shared/PanelShell";
 import { asObject } from "@/lib/asArray";
 import { useEnginesController } from "./hooks/useEnginesController";
 import { CapabilitiesSection } from "./internal/CapabilitiesSection";
+import { ControlTargetBanner } from "./internal/ControlTargetBanner";
 import { EngineCard } from "./internal/EngineCard";
 
 export function EnginesPanel() {
@@ -20,6 +21,8 @@ export function EnginesPanel() {
         />
       ) : (
         <div className="space-y-4">
+          <ControlTargetBanner target={String(c.state.data.control_target ?? "local")} />
+
           <div className="grid gap-2 sm:grid-cols-3">
             {c.engines.map((e) => (
               <EngineCard

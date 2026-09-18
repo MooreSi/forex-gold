@@ -69,7 +69,6 @@ KNOWN_COMPLEX = [
     "sync_controller.is_connected",
     "sync_controller.link_state",
     "sync_controller.load_config",
-    "sync_controller.note_remote_setting",
     "sync_controller.push_ai_config",
     "sync_controller.request_model_snapshot",
     "sync_controller.request_resume",

@@ -213,3 +213,57 @@ describe("the reversal capabilities", () => {
     });
   });
 });
+
+describe("which machine these controls drive", () => {
+  it("says nothing at all when this machine is the one trading", async () => {
+    // The ordinary case. A banner on every render is a banner nobody reads.
+    render(<EnginesPanel />);
+    await screen.findByText("Breakout");
+
+    expect(screen.queryByTestId("control-target")).not.toBeInTheDocument();
+  });
+
+  it("says so when the controls will reach the remote node instead", async () => {
+    // Without this an operator presses Stop, the local stood-down copy is
+    // untouched, the VPS keeps generating, and the screen says stopped.
+    body = state({ control_target: "remote" });
+    render(<EnginesPanel />);
+
+    const banner = await screen.findByTestId("control-target");
+    expect(banner).toHaveTextContent(/act on\s+it/);
+    expect(banner).toHaveTextContent(/not on this machine/);
+  });
+
+  it("warns that a tunable other than the AI switch cannot travel", async () => {
+    // The sync protocol carries exactly one risk setting. Saving any other
+    // switch in Remote mode writes a row the trading node never reads.
+    body = state({ control_target: "remote" });
+    render(<EnginesPanel />);
+
+    expect(await screen.findByTestId("control-target"))
+      .toHaveTextContent(/no route between nodes/);
+  });
+
+  it("distinguishes centralized generation from plain remote", async () => {
+    // The VPS is trading, so the header says REMOTE — and these engines are
+    // the live ones, because generation moved here. Reading that as "remote"
+    // would send every control to a VPS whose engines stopped analysing.
+    body = state({ control_target: "centralized" });
+    render(<EnginesPanel />);
+
+    const banner = await screen.findByTestId("control-target");
+    expect(banner).toHaveTextContent(/generation has moved here/);
+    expect(banner).toHaveTextContent(/act on\s+this machine/);
+  });
+
+  it("treats a backend that does not say as local", async () => {
+    // An older backend has no such field, and the state this tab has always
+    // assumed is the one that renders no banner.
+    body = state();
+    delete (body as Partial<EnginesState>).control_target;
+    render(<EnginesPanel />);
+    await screen.findByText("Breakout");
+
+    expect(screen.queryByTestId("control-target")).not.toBeInTheDocument();
+  });
+});

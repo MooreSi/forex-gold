@@ -50,11 +50,22 @@ class AiSettings(BaseModel):
     settings: dict
 
 
-def _engine_or_refuse(name: str):
+class AiEval(BaseModel):
+    engine: str
+    # None means "invert what is current". See the handler.
+    enabled: bool | None = None
+
+
+def _known_or_refuse(name: str) -> None:
+    """Reject a name this build has no engine for, before anything is sent.
+
+    Separate from "not built on this install", which is a different answer and
+    only applies when the command was going to be applied here at all — in
+    Remote mode the engine that matters is the peer's.
+    """
     if name not in ENGINE_LABELS:
         raise Refusal(f"Unknown engine {name!r}. "
                       f"Known: {', '.join(ENGINE_LABELS)}.", status_code=400)
-    return engines_ctl.get_engine(name)
 
 
 @router.get("/state")
@@ -71,8 +82,17 @@ async def state() -> dict:
              "built": engines_ctl.get_engine(key) is not None}
             for key, label in ENGINE_LABELS.items()
         ],
-        "settings": await engines_ctl.get_risk_settings_async(),
+        # The settings the engines are OBEYING, which in Remote mode are the
+        # peer's. Showing this node's row while the VPS trades would describe a
+        # machine nobody is watching.
+        "settings": engines_ctl.effective_settings(
+            await engines_ctl.get_risk_settings_async()),
         "pro_model": engines_ctl.pro_model_status(),
+        # Which node a control will reach. Three states, not two:
+        # "centralized" is the VPS-trades-but-generation-moved-here case, where
+        # the header says REMOTE and these engines are still the live ones.
+        "control_target": engines_ctl.control_target(),
+        "ai_eval_keys": engines_ctl.AI_EVAL_KEYS,
     }
 
 
@@ -93,26 +113,61 @@ async def set_running(body: EngineAction) -> dict:
     exists for the app's own startup and the Local/Remote handover, and
     deliberately skips Bounce; a UI button wired to it would start engines the
     operator did not ask for.
+
+    **It may not land on this machine.** When the VPS is the active trader,
+    this node's sub-engines are stood down, so starting one here would start
+    something that generates nothing while the screen said it was running. The
+    controller routes the command to whichever node is actually trading; the
+    response says which, so the panel can too.
     """
-    engine = _engine_or_refuse(body.engine)
-    if engine is None:
+    _known_or_refuse(body.engine)
+
+    # "Not built here" is only a reason to refuse when the command was going to
+    # be applied here. In Remote mode the engine that matters is the peer's.
+    if (engines_ctl.control_target() != "remote"
+            and engines_ctl.get_engine(body.engine) is None):
         raise Refusal(
             f"The {ENGINE_LABELS[body.engine]} engine is not built on this "
             "install, so there is nothing to start.",
         )
-    if body.running:
-        engine.start()
-    else:
-        engine.stop()
-    return {"engine": body.engine,
-            "running": bool(engines_ctl.engines_running().get(body.engine, False))}
+    try:
+        return await engines_ctl.set_engine_running(body.engine, body.running)
+    except engines_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc)) from exc
 
 
 @router.put("/settings")
 async def update_settings(body: TunableUpdate) -> dict:
-    """Write engine tunables. Partial, one key at a time, as the switches save."""
+    """Write engine tunables. Partial, one key at a time, as the switches save.
+
+    **Local only, and that is a limit rather than a choice.** The sync protocol
+    carries exactly one risk setting between nodes — the AI-evaluation flag,
+    which has its own endpoint below. Everything else has no remote route, so
+    in Remote mode these write a row the trading node will not read. The
+    dashboard says so rather than pretending otherwise; `control_target` on
+    `/state` is what it says it with.
+    """
     engines_ctl.update_risk_settings(dict(body.model_dump()))
-    return await engines_ctl.get_risk_settings_async()
+    return engines_ctl.effective_settings(
+        await engines_ctl.get_risk_settings_async())
+
+
+@router.post("/ai-eval")
+async def set_ai_eval(body: AiEval) -> dict:
+    """Turn AI review of an engine's signals on or off, on the trading node.
+
+    `enabled` omitted means "invert what is current", which is what a toggle
+    wants — and the only form where reading "current" from the right place
+    matters. Taking it from this node's row while writing to the peer makes the
+    toggle one-directional: it recomputes the same current on every click and
+    re-sends the same target state for ever. That was confirmed live, with
+    Bounce stuck OFF and Breakout stuck ON.
+    """
+    _known_or_refuse(body.engine)
+    try:
+        return await engines_ctl.set_ai_eval(body.engine, body.enabled)
+    except engines_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc)) from exc
 
 
 @router.post("/reversal/fit")

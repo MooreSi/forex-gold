@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from backend.src.api.deps import engine as engine_dep
 from backend.src.api.errors import Refusal
+from backend.src.controllers import auth_controller as auth_ctl
 from backend.src.controllers import remote_controller as remote_ctl
 from backend.src.controllers import remote_node_controller as node_ctl
 from backend.src.controllers import settings_controller as settings_ctl
@@ -65,6 +66,29 @@ async def state() -> dict:
             "armed": system_ctl.autostart_is_armed(),
             "check_interval_secs": system_ctl.AUTOSTART_CHECK_INTERVAL_SECS,
         },
+    }
+
+
+@router.get("/licence")
+async def licence() -> dict:
+    """Who this install is licensed to, and until when.
+
+    **The key is masked here, not in the browser.** It is a credential like any
+    other, and the rule in this layer is that one never leaves the machine
+    whole. The first group is enough for the operator to match it against what
+    they were sent.
+    """
+    data = auth_ctl.load_licence() or {}
+    raw = str(data.get("licence_key") or "")
+    return {
+        "email": data.get("email", ""),
+        "licence_type": data.get("licence_type", ""),
+        "expiry_date": data.get("expiry_date", ""),
+        "machine_id": auth_ctl.get_fingerprint(),
+        "key_masked": (
+            (raw.split("-")[0] if "-" in raw else raw[:8])
+            + " - **** - **** - **** - **** - **** - **** - ****"
+        ) if raw else "",
     }
 
 

@@ -15,20 +15,19 @@ from backend.src.services.risk import settings as _risk
 import backend.src.config as _cfg_file
 
 __all__ = [
-    "get_app_config", "get_app_config_async", "set_app_config", "get_risk_settings",
-    "update_risk_settings", "get_active_trader", "set_active_trader",
-    "get_email_config", "save_email_config", "get_telegram_config",
-    "save_telegram_config", "get_mt5_credentials", "save_mt5_credentials",
-    "sync_bridge_credentials_file", "get_data_retention_days",
-    "set_data_retention_days", "reset_circuit_breaker",
-    "get_circuit_breaker_state", "switch_environment_db",
-    "fetch_signal_execution_lags", "fetch_realised_pnl_last_24h",
-    "live_log_lines",
+    "get_app_config", "get_app_config_async", "set_app_config",
+    "get_risk_settings", "update_risk_settings", "get_active_trader",
+    "set_active_trader", "get_email_config", "save_email_config",
+    "get_telegram_config", "save_telegram_config", "get_mt5_credentials",
+    "save_mt5_credentials", "sync_bridge_credentials_file",
+    "get_data_retention_days", "set_data_retention_days",
+    "reset_circuit_breaker", "get_circuit_breaker_state",
+    "switch_environment_db", "fetch_signal_execution_lags",
+    "fetch_realised_pnl_last_24h", "live_log_lines",
     "get_expert_param_catalogue", "save_expert_params",
-    "reset_expert_param", "reset_all_expert_params",
-    "load_config", "get_config", "save_config", "is_debug",
-    "DATA_DIR", "USER_DATA_DIR",
-    "KNOWN_LEVEL_TYPES",
+    "reset_expert_param", "reset_all_expert_params", "load_config",
+    "get_config", "save_config", "is_debug", "DATA_DIR", "USER_DATA_DIR",
+    "KNOWN_LEVEL_TYPES", "get_circuit_breaker_state_async",
 ]
 
 # Re-exported, not restated: a level type missing from the frontend's copy

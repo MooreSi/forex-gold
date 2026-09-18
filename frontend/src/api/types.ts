@@ -60,7 +60,19 @@ export interface HeaderState {
   bridge: Record<string, unknown> | null;
   tick: Tick | null;
   active_trader: string | null;
-  halt_reason: string;
+  /**
+   * Both halts at once, not just the risk governor's. The circuit breaker
+   * writes a different key, so reading only the governor left a tripped
+   * breaker invisible on every screen but Settings > Diagnostics.
+   */
+  pause: {
+    paused: boolean;
+    reason: string;
+    /** Unix seconds, or null when the halt has no stored expiry. */
+    until: number | null;
+    /** "governor" | "circuit-breaker" | "both" | "" */
+    source: string;
+  };
   remote_connected: boolean;
   ea_badge: EaBadge | null;
 }

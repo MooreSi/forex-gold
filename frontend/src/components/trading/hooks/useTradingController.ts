@@ -65,10 +65,18 @@ export function useTradingController() {
     if (h.reason) return h.reason;
     if (h.market_closed) return "The market is closed for the week.";
     const breaker = h.circuit_breaker;
-    if (breaker && breaker["tripped"] === true) {
-      return typeof breaker["reason"] === "string"
-        ? `Circuit breaker: ${breaker["reason"]}`
-        : "The circuit breaker has tripped.";
+    // `is_active` is the authoritative field and always has been. This read
+    // `tripped`, a key the repo has never returned, so a tripped breaker left
+    // Execute ENABLED with no explanation: the backend refused the order and
+    // the operator found out by pressing the button.
+    if (breaker && breaker["is_active"] === true) {
+      const mins = Math.ceil(Number(breaker["remaining_secs"] ?? 0) / 60);
+      const losses = Number(breaker["consec_losses"] ?? 0);
+      return (
+        "The circuit breaker has tripped" +
+        (losses ? ` after ${losses} consecutive losing trades` : "") +
+        (mins > 0 ? `. Live trading resumes in about ${mins} min.` : ".")
+      );
     }
     return null;
   }, [halt.data, halt.error]);

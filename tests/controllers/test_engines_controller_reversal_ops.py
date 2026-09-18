@@ -11,6 +11,7 @@ Nothing here reaches a broker, the network or an AI provider.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from unittest.mock import patch
 
 import pytest
@@ -53,17 +54,37 @@ class TestTheShadowReport:
 
 
 class TestTheMacroBackfill:
-    def test_it_is_a_dry_run_unless_told_otherwise(self):
-        with patch("backend.src.services.reversal_engine.macro_backfill.run",
-                   return_value={"dry_run": True}) as fwd:
-            ec.reversal_macro_backfill()
-        assert fwd.call_args.kwargs["apply"] is False
+    """Asserted on the SERVICE since 2026-09-18.
 
-    def test_applying_is_passed_through(self):
-        with patch("backend.src.services.reversal_engine.macro_backfill.run",
-                   return_value={"dry_run": False}) as fwd:
-            ec.reversal_macro_backfill(apply=True)
-        assert fwd.call_args.kwargs["apply"] is True
+    It was re-exported through the controller until then, and nothing called
+    it there: it is a manual repair tool, not a screen. A controller operation
+    exists for a router, and applying this changes what the ML gate learns at
+    its next retrain — not something to leave one HTTP route away.
+
+    The property below is unchanged and is the one that matters: **the default
+    reports and writes nothing.** A repair tool whose default is to repair is
+    one somebody runs to "see what it would do".
+    """
+
+    def test_it_is_a_dry_run_unless_told_otherwise(self):
+        from backend.src.services.reversal_engine import macro_backfill
+
+        apply_param = inspect.signature(macro_backfill.run).parameters["apply"]
+
+        assert apply_param.default is False
+
+    def test_applying_is_still_possible(self):
+        """Negative control for the one above: a function with no `apply` at
+        all would satisfy "the default does not write" trivially."""
+        from backend.src.services.reversal_engine import macro_backfill
+
+        assert "apply" in inspect.signature(macro_backfill.run).parameters
+
+    def test_it_is_not_reachable_through_the_controller(self):
+        assert not hasattr(ec, "reversal_macro_backfill"), (
+            "the repair tool is back on the controller, one route away from "
+            "a button that rewrites stored training vectors"
+        )
 
 
 class TestTheAiTuner:

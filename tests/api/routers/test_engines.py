@@ -93,8 +93,9 @@ def engines(monkeypatch):
                         lambda: state["pro_model"])
     monkeypatch.setattr(engines_router.engines_ctl, "pro_model_fit_in_background",
                         lambda force=False: state["fits"].append(("background", force)))
-    monkeypatch.setattr(engines_router.engines_ctl, "pro_model_fit",
-                        lambda *a, **k: state["fits"].append(("blocking", a, k)))
+    # The BLOCKING fit is deliberately not on the controller any more: no
+    # router may call it, so there is nothing here to stand in for. The test
+    # below asserts the tab reaches only the background one.
     # The bulk pair lives in the engine registry, not on the controller: its
     # only caller is the Local/Remote handover, and a service may not import a
     # controller. Recorded here so the tab can still be shown never to use it.

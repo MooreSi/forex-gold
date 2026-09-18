@@ -48,8 +48,21 @@ class TestTheControllerOffersANonBlockingFit:
 
     def test_the_blocking_one_is_still_available(self):
         """Nothing else should lose the ability to fit synchronously; the
-        point is only that the UI stops doing it."""
-        assert hasattr(engines_controller, "pro_model_fit")
+        point is only that the UI stops doing it.
+
+        It lives on the SERVICE. It was re-exported through the controller
+        until 2026-09-18, which was the wrong place for it in the end: a
+        controller operation exists for a router to call, and no router may
+        ever call this one. Removing it from that layer makes "the UI stops
+        doing it" structural rather than a matter of remembering.
+        """
+        from backend.src.services.reversal_engine import pro_model
+
+        assert callable(pro_model.fit)
+        assert not hasattr(engines_controller, "pro_model_fit"), (
+            "the blocking fit is back on the controller, where a router can "
+            "reach it -- five seconds of frozen event loop (bugs/030)"
+        )
 
 
 class TestThePanelNoLongerOffersTheToggle:

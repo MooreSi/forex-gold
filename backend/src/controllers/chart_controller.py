@@ -8,7 +8,10 @@ from backend.src.services.positions import core_indicators as _ind
 from backend.src.services.reversal_engine import ict_patterns as _ict
 from backend.src.services.risk import settings as _risk
 
-__all__ = ["get_active_trader", "get_risk_settings", "get_open_trades"]
+__all__ = [
+    "get_active_trader", "get_risk_settings", "get_open_trades",
+    "ema_series", "rsi_series", "detect_fvgs", "select_display_fvgs",
+]
 
 
 def get_active_trader() -> str:

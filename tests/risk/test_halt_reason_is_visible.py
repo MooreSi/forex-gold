@@ -198,8 +198,14 @@ class TestTheUiShowsIt:
         header = (self.API_ROOT / "routers" / "system.py").read_text(encoding="utf-8")
         halt = (self.API_ROOT / "routers" / "trading.py").read_text(encoding="utf-8")
 
-        assert "halt_reason" in header, "the header payload no longer carries the reason"
-        assert "trading_halt_reason" in halt, "the halt endpoint no longer asks for it"
+        # The header carries BOTH halts as of 2026-09-18 -- the risk governor's
+        # and the circuit breaker's, which are stored under different keys and
+        # of which only the governor's used to reach this payload. The claim
+        # this test makes is unchanged: the REASON has to get to the screen.
+        assert "trading_pause_status" in header, (
+            "the header payload no longer carries why trading stopped")
+        assert "trading_pause_status" in halt, (
+            "the halt endpoint no longer asks for it")
         assert system_router.router.prefix == "/api/system"
         assert trading_router.router.prefix == "/api/trading"
 
@@ -207,8 +213,12 @@ class TestTheUiShowsIt:
         src = (self.WEB_ROOT / "components" / "shell" / "AppHeader.tsx").read_text(
             encoding="utf-8")
 
-        assert "halt_reason" in src, (
+        assert "pause.reason" in src, (
             "the header badge no longer shows why trading stopped"
+        )
+        assert "pause.until" in src, (
+            "and it no longer says when trading resumes -- the 2026-09-01 "
+            "session got the time and not the cause; both are wanted"
         )
 
     def test_the_trading_controls_say_why_they_are_disabled(self):

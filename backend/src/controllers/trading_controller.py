@@ -12,59 +12,28 @@ from backend.src.services.analytics import reporting as _reporting
 from backend.src.services.positions import core_strategy_catalogue as _catalogue
 from backend.src.services.trading import engine_reads as _reads
 
-# The strategy vocabulary, re-exported so pages do not reach into
-# backend.src.utils.models directly. Constants are not a service, but the
-# frontend's doorway is this layer either way, and a renamed id now has one
-# place to change rather than thirteen import sites.
-from backend.src.utils.models import (  # noqa: F401
-    STRATEGY_ADAPTIVE_RUNNER,
-    STRATEGY_ADAPTIVE_RUNNER_2,
-    STRATEGY_BE_RUNNER,
-    STRATEGY_CONSERVATIVE,
-    STRATEGY_CONSERVATIVE_TRIAL,
-    STRATEGY_DESCRIPTIONS,
-    STRATEGY_FIXED_RR,
-    STRATEGY_LIMIT_RUNNER,
-    STRATEGY_NAMES,
-    STRATEGY_NO_SL_SCALE,
-    STRATEGY_ORB_FIXED,
-    STRATEGY_PROTECTED_SCALE,
-    STRATEGY_RE,
-    STRATEGY_REVERSAL_RUNNER,
-    STRATEGY_SCALE_OUT,
-    STRATEGY_SCALP_RUNNER,
-    STRATEGY_SIGNAL_CLIMBER,
-    STRATEGY_TRAIL_STOP,
-)
+# The strategy vocabulary is NOT re-exported here any more. Eighteen constants
+# were, so NiceGUI pages did not have to reach into backend.src.utils.models --
+# and the React port removed every one of those callers: the browser gets the
+# catalogue as JSON from `build_strategy_catalogue`. Services that need a
+# constant import it from utils.models directly, which they may.
+#
+# They were invisible to test_controller_operations_have_callers because its
+# scan is a substring search over backend/, and every name appears there in the
+# service that genuinely uses it.
 
 __all__ = [
     "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
-    "trading_halt_reason",
-    "get_app_config", "set_app_config", "get_circuit_breaker_state",
-    "get_effective_strategy", "get_custom_strategies", "delete_custom_strategy",
+    "trading_pause_status", "get_app_config", "set_app_config",
+    "get_circuit_breaker_state", "get_effective_strategy",
+    "get_custom_strategies", "delete_custom_strategy",
     "get_all_channel_strategy_settings", "get_channel_strategy_rec",
     "set_channel_strategy_override", "get_channel_strategy_recs",
-    "get_channel_strategy_rec_map",
-    "get_signal", "set_signal_commentary", "delete_tg_signal_row",
-    "get_open_trades", "get_signals", "get_tg_signals",
-    "STRATEGY_ADAPTIVE_RUNNER",
-    "STRATEGY_ADAPTIVE_RUNNER_2",
-    "STRATEGY_BE_RUNNER",
-    "STRATEGY_CONSERVATIVE",
-    "STRATEGY_CONSERVATIVE_TRIAL",
-    "STRATEGY_DESCRIPTIONS",
-    "STRATEGY_FIXED_RR",
-    "STRATEGY_LIMIT_RUNNER",
-    "STRATEGY_NAMES",
-    "STRATEGY_NO_SL_SCALE",
-    "STRATEGY_ORB_FIXED",
-    "STRATEGY_PROTECTED_SCALE",
-    "STRATEGY_RE",
-    "STRATEGY_REVERSAL_RUNNER",
-    "STRATEGY_SCALE_OUT",
-    "STRATEGY_SCALP_RUNNER",
-    "STRATEGY_SIGNAL_CLIMBER",
-    "STRATEGY_TRAIL_STOP",
+    "get_channel_strategy_rec_map", "get_signal", "set_signal_commentary",
+    "delete_tg_signal_row", "get_open_trades", "get_signals",
+    "get_tg_signals", "is_stuck_placeholder", "build_strategy_catalogue",
+    "describe_strategy", "evaluate_channels", "is_weekly_market_closed",
+    "validate_signal",
 ]
 
 
@@ -194,7 +163,15 @@ def validate_signal(*args, **kwargs):
     return _vs(*args, **kwargs)
 
 
-def trading_halt_reason() -> str:
-    """Why trading is stopped right now, or "" if it is not."""
-    from backend.src.services.risk import governor as _governor
-    return _governor.halt_reason()
+def trading_pause_status() -> dict:
+    """Why trading is stopped right now, and until when. Both halts.
+
+    Replaced `trading_halt_reason` on 2026-09-18. That one asked the risk
+    governor only, and the circuit breaker writes a different key -- so a
+    tripped breaker reached no screen but Settings > Diagnostics.
+
+    Display only. `governor.is_trading_paused()` and the breaker check inside
+    `open_trade` remain the enforcement, and both fail closed.
+    """
+    from backend.src.services.risk import pause_status as _pause
+    return _pause.summary()

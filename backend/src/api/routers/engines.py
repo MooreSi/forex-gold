@@ -192,6 +192,19 @@ async def reversal_study() -> dict:
     return {"report": await engines_ctl.reversal_research_study()}
 
 
+@router.post("/reversal/reset-stats")
+async def reversal_reset_stats() -> dict:
+    """Start the Reversal panel's numbers again from now.
+
+    **Reporting only.** No signal row, stored feature vector, reconstructed
+    excursion or attribution history is removed -- the engine's memory is
+    untouched and only the panel's counters restart. Saying which is the whole
+    point: "reset" next to a machine-learning engine reads as "forget what you
+    learned", and an operator who believed that would avoid pressing it.
+    """
+    return {"since": await engines_ctl.reversal_reset_stats()}
+
+
 @router.post("/reversal/ai/recommend")
 async def reversal_ai_recommend() -> dict:
     """Ask the configured model for capability settings. **Billable.** Writes

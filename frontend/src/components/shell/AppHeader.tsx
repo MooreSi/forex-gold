@@ -2,7 +2,7 @@ import { CircleDot, LogOut, Server, TriangleAlert } from "lucide-react";
 import { AccountBadge } from "./AccountBadge";
 import { ActiveTraderControl } from "./ActiveTraderControl";
 import { Button } from "@/components/shared/Button";
-import { formatPrice } from "@/components/shared/format";
+import { formatClock, formatPrice } from "@/components/shared/format";
 import { useAuth } from "@/contexts/AuthContext";
 import { useHeaderState } from "@/hooks/useHeaderState";
 import { cn } from "@/lib/cn";
@@ -53,10 +53,22 @@ export function AppHeader() {
         </span>
       )}
 
-      {data?.halt_reason && (
-        <span className="flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] text-warning">
+      {data?.pause?.paused && (
+        // Both halts. The circuit breaker writes a different key from the risk
+        // governor, so a header that read only the governor said nothing while
+        // automated entries were being refused.
+        <span
+          data-testid="pause-badge"
+          className="flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] text-warning"
+          title={data.pause.reason}
+        >
           <TriangleAlert size={12} />
-          {data.halt_reason}
+          {data.pause.reason}
+          {data.pause.until && (
+            // "Halted" without a resume time leaves the operator watching the
+            // screen to find out when it lifts.
+            <span className="text-ink-3">· until {formatClock(data.pause.until)}</span>
+          )}
         </span>
       )}
 

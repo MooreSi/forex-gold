@@ -41,7 +41,7 @@ async def halt_state() -> dict:
     closed but the breaker says fine.
     """
     return {
-        "reason": trading_ctl.trading_halt_reason(),
+        "reason": trading_ctl.trading_pause_status()["reason"],
         "market_closed": bool(trading_ctl.is_weekly_market_closed()),
         "circuit_breaker": trading_ctl.get_circuit_breaker_state(),
     }
@@ -117,10 +117,24 @@ async def recommend_channel_strategies(body: dict) -> dict:
 
 @router.get("/channel-strategies/recommendations")
 async def channel_strategy_recommendations(sources: str = Query("")) -> dict:
-    """The recommendations already computed, from the local record. Free."""
+    """The recommendations already computed, from the local record. Free.
+
+    Each carries its human label, so the browser never holds a mapping from
+    strategy id to name — one place to change when an id is renamed, which is
+    the whole reason the vocabulary is served as data rather than re-stated.
+    `describe_strategy` falls back to the raw key, so a recommendation naming a
+    strategy this build no longer has renders as itself instead of as blank.
+    """
     wanted = [s for s in sources.split(",") if s]
-    return {"billable": False,
-            "recommendations": trading_ctl.get_channel_strategy_rec_map(wanted)}
+    recs = trading_ctl.get_channel_strategy_rec_map(wanted)
+    catalogue = trading_ctl.build_strategy_catalogue(include_hidden=True)
+    labelled = {}
+    for source, rec in (recs or {}).items():
+        row = dict(rec) if isinstance(rec, dict) else {"strategy": rec}
+        label, summary = trading_ctl.describe_strategy(
+            str(row.get("strategy") or ""), catalogue)
+        labelled[source] = {**row, "label": label, "summary": summary}
+    return {"billable": False, "recommendations": labelled}
 
 
 # ── Pending signals ──────────────────────────────────────────────────────────

@@ -57,7 +57,11 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
         "bridge": health,
         "tick": tick.to_dict() if tick else None,
         "active_trader": settings_ctl.get_active_trader(),
-        "halt_reason": trading_ctl.trading_halt_reason(),
+        # BOTH halts, not just the governor's. The circuit breaker writes a
+        # different key, so a tripped breaker used to be invisible everywhere
+        # except Settings > Diagnostics -- a header that says nothing while
+        # automated entries are being refused.
+        "pause": trading_ctl.trading_pause_status(),
         "remote_connected": sync_ctl.is_connected(),
         # The badge's colour and words are DECIDED by the service, not here and
         # not in the browser. A stale EA build with a green badge is the screen

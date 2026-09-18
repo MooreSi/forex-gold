@@ -30,18 +30,18 @@ from backend.src.utils.models import CONTRACT_SIZE  # noqa: F401
 
 __all__ = [
     "parse_reason", "format_broker_ts", "format_duration", "to_date",
-    "broker_ts_to_local_date", "strategy_display_label", "trade_source_label",
-    "trade_channel_label",
-    "ticket_source_map", "ticket_strategy_map", "ticket_max_tp_map",
-    "ticket_rr_map", "ticket_order_type_map", "ticket_group_map",
-    "ticket_info",
-    "get_cached_spreads", "cache_spread", "platform_fee_rate",
-    "apply_fee",
-    "get_hourly_pnl_grid", "session_for_hour",
-    "get_app_config", "set_app_config",
-    "recompute_channel_performance", "get_channel_scorecard",
-    "get_channel_performance_map", "set_channel_paused",
-    "CONTRACT_SIZE",
+    "broker_ts_to_local_date", "strategy_display_label",
+    "trade_source_label", "trade_channel_label", "ticket_source_map",
+    "ticket_strategy_map", "ticket_max_tp_map", "ticket_rr_map",
+    "ticket_order_type_map", "ticket_group_map", "ticket_info",
+    "get_cached_spreads", "cache_spread", "platform_fee_rate", "apply_fee",
+    "get_hourly_pnl_grid", "session_for_hour", "get_app_config",
+    "set_app_config", "recompute_channel_performance",
+    "get_channel_scorecard", "get_channel_performance_map",
+    "set_channel_paused", "CONTRACT_SIZE", "template_group_map",
+    "comment_attribution_maps", "signal_lab_is_available",
+    "signal_lab_adx_and_bias_samples", "recent_tg_signals",
+    "strategy_ladder_reach",
 ]
 
 

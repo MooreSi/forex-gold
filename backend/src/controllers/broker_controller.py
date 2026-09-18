@@ -29,27 +29,13 @@ from backend.src.services.broker import ea_template_presets as _presets
 from backend.src.services.broker import ea_templates as _templates
 
 __all__ = [
-    # EA connection — read-only
     "get_effective_ea_status", "ea_build_status", "ea_badge_state",
-    "ea_is_healthy",
-    "ea_seconds_since_last_seen",
-    # EA connection — reaches the EA
-    "push_template",
-    "push_global_config",
-    # Template definitions
-    "list_ea_templates",
-    "get_ea_template",
-    "save_ea_template",
-    "delete_ea_template",
-    "export_templates",
-    "import_templates",
-    "export_filename",
-    "override_for_template",
-    "ladder_rr",
-    "DEFAULTS",
-    "EXPORT_EXTENSION",
-    "MAX_TP_LEVELS",
-    "BUILTIN_PRESET_NAME",
+    "ea_is_healthy", "ea_seconds_since_last_seen", "push_template",
+    "push_global_config", "list_ea_templates", "get_ea_template",
+    "save_ea_template", "delete_ea_template", "export_templates",
+    "import_templates", "export_filename", "override_for_template",
+    "ladder_rr", "DEFAULTS", "EXPORT_EXTENSION", "MAX_TP_LEVELS",
+    "BUILTIN_PRESET_NAME", "install_builtin_template",
 ]
 
 DEFAULTS = _templates.DEFAULTS

@@ -70,13 +70,55 @@ class TestChannelStrategyRecommendations:
                             lambda sources: {"GoldSignals": "scale_out"})
         monkeypatch.setattr(trading_router.trading_ctl, "get_channel_strategy_recs",
                             lambda sources: asked.append(sources))
+        monkeypatch.setattr(trading_router.trading_ctl, "build_strategy_catalogue",
+                            lambda **k: [{"key": "scale_out", "label": "Scale out",
+                                          "summary": "Take part off at TP1."}])
 
         body = make_client().get(
             "/api/trading/channel-strategies/recommendations?sources=GoldSignals").json()
 
         assert body["billable"] is False
-        assert body["recommendations"] == {"GoldSignals": "scale_out"}
+        assert body["recommendations"]["GoldSignals"]["strategy"] == "scale_out"
         assert asked == []
+
+    def test_each_recommendation_carries_its_human_label(
+        self, make_client, monkeypatch,
+    ):
+        """So the browser never holds a mapping from strategy id to name: one
+        place to change when an id is renamed."""
+        from backend.src.api.routers import trading as trading_router
+
+        monkeypatch.setattr(trading_router.trading_ctl, "get_channel_strategy_rec_map",
+                            lambda sources: {"GoldSignals": "scale_out"})
+        monkeypatch.setattr(trading_router.trading_ctl, "build_strategy_catalogue",
+                            lambda **k: [{"key": "scale_out", "label": "Scale out",
+                                          "summary": "Take part off at TP1."}])
+
+        rec = make_client().get(
+            "/api/trading/channel-strategies/recommendations?sources=GoldSignals"
+        ).json()["recommendations"]["GoldSignals"]
+
+        assert rec["label"] == "Scale out"
+        assert rec["summary"] == "Take part off at TP1."
+
+    def test_a_strategy_this_build_no_longer_has_renders_as_itself(
+        self, make_client, monkeypatch,
+    ):
+        """Not as blank. A stored recommendation naming a retired strategy is
+        a real state, and an empty cell reads as "no recommendation"."""
+        from backend.src.api.routers import trading as trading_router
+
+        monkeypatch.setattr(trading_router.trading_ctl, "get_channel_strategy_rec_map",
+                            lambda sources: {"GoldSignals": "retired_thing"})
+        monkeypatch.setattr(trading_router.trading_ctl, "build_strategy_catalogue",
+                            lambda **k: [{"key": "scale_out", "label": "Scale out",
+                                          "summary": ""}])
+
+        rec = make_client().get(
+            "/api/trading/channel-strategies/recommendations?sources=GoldSignals"
+        ).json()["recommendations"]["GoldSignals"]
+
+        assert rec["label"] == "retired_thing"
 
     def test_asking_for_a_new_recommendation_says_it_is_billable(
         self, make_client, monkeypatch,

@@ -16,11 +16,17 @@ from backend.src.services.reversal_engine import panel_data as reversal
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
 from backend.src.services.risk import settings as _risk
 
-__all__ = ["breakout", "reversal",
-           "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
-           "get_engine", "engines_running", "sub_engines", "ENGINE_NAMES",
-           "control_target", "effective_settings", "set_engine_running",
-           "set_ai_eval", "AI_EVAL_KEYS", "RemoteControlFailed"]
+__all__ = [
+    "breakout", "reversal", "get_risk_settings", "get_risk_settings_async",
+    "update_risk_settings", "get_engine", "engines_running", "sub_engines",
+    "ENGINE_NAMES", "control_target", "effective_settings",
+    "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",
+    "RemoteControlFailed", "reversal_realised_pnl", "pro_model_status",
+    "pro_model_fit_in_background",
+    "reversal_research_study", "reversal_shadow_report",
+    "reversal_ai_recommend", "reversal_ai_apply",
+    "reversal_reset_stats",
+]
 
 
 def get_risk_settings() -> dict:
@@ -36,11 +42,10 @@ def update_risk_settings(fields: dict) -> None:
 
 
 # ── Engine lifecycle (restructure phase1/010) ────────────────────────────────
-# Named operations instead of re-exported singletons, so no page loops over
-# engines choosing lifecycle again. The table and the two BULK loops live in
-# services/engines/registry.py and are deliberately not re-exported: their only
-# caller is the Local/Remote handover, which is a service and may not import a
-# controller. See docs/system/domains/frontend/README.md.
+# Named operations, not re-exported singletons, so no page loops over engines
+# choosing lifecycle again. The table and the BULK loops are in
+# services/engines/registry.py and deliberately not re-exported: their only
+# caller is the handover, a service, which may not import a controller.
 
 
 # Which engines exist, in the fixed binding order. Re-exported so a router can
@@ -65,10 +70,9 @@ def sub_engines() -> tuple:
 
 
 # ── Acting on the node that is actually trading ──────────────────────────────
-# When the VPS is the active trader this machine's sub-engines are stood down,
-# so a Start/Stop applied here "does nothing useful while looking like it
-# worked" (the sync server's own words). remote_control.py decides where a
-# control lands, and every operation below forwards that decision unchanged.
+# With the VPS trading, this machine's engines are stood down, so a Start/Stop
+# here "does nothing useful while looking like it worked" (the sync server's
+# own words). remote_control.py decides where a control lands.
 
 AI_EVAL_KEYS = _remote.AI_EVAL_KEYS
 RemoteControlFailed = _remote.RemoteControlFailed
@@ -106,14 +110,12 @@ def pro_model_status() -> dict:
     return _pm.status()
 
 
-def pro_model_fit(*args, **kwargs):
-    """Refit from the captured corpus. Expensive; the panel offers it as an
-    explicit button rather than running it on render.
-
-    BLOCKS for about five seconds on the live corpus. Anything running on the
-    event loop wants pro_model_fit_in_background instead (bugs/030)."""
-    from backend.src.services.reversal_engine import pro_model as _pm
-    return _pm.fit(*args, **kwargs)
+# `pro_model_fit` -- the BLOCKING refit -- is deliberately NOT here. It stops
+# the event loop for about five seconds, which takes the EA socket reader and
+# the monitor loop with it (bugs/030), so no router may call it and a
+# controller operation exists for a router. `pro_model_fit_in_background` is
+# the one this layer offers; services/reversal_engine/pro_model.fit is still
+# there for the command line.
 
 
 def pro_model_fit_in_background(force: bool = False) -> None:
@@ -152,15 +154,9 @@ def reversal_shadow_report() -> list:
     return _shadow.report()
 
 
-def reversal_macro_backfill(apply: bool = False) -> dict:
-    """Repair the macro features of stored training vectors.
-
-    `apply=False` reports what would change and writes nothing. Applying it
-    changes what the ML gate learns at its next retrain, so the default is
-    the report. See services/reversal_engine/macro_backfill.py.
-    """
-    from backend.src.services.reversal_engine import macro_backfill as _mb
-    return _mb.run(apply=apply)
+# `reversal_macro_backfill` is a manual repair tool, not a screen: applying it
+# changes what the ML gate learns at its next retrain. It lives in
+# services/reversal_engine/macro_backfill.py and is run deliberately.
 
 
 async def reversal_ai_recommend() -> dict:

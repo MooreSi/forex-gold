@@ -10,13 +10,15 @@ from backend.src.services.telegram import keywords as _keywords
 from backend.src.services.telegram import messages as _messages
 from backend.src.services.telegram import reader as _reader
 
-__all__ = ["get_risk_settings", "update_risk_settings",
-           "get_channel_parser_config", "save_channel_parser_config",
-           "save_channel_learned_rule", "update_unrecognised_message",
-           "get_reader_status", "get_pending_unrecognised",
-           "fetch_stored_messages", "send_message",
-           "decision_log_summary", "decision_log_report",
-           "decision_log_backfill"]
+__all__ = [
+    "get_risk_settings", "update_risk_settings",
+    "get_channel_parser_config", "save_channel_parser_config",
+    "save_channel_learned_rule", "update_unrecognised_message",
+    "get_reader_status", "get_pending_unrecognised",
+    "fetch_stored_messages", "send_message", "decision_log_summary",
+    "decision_log_report", "decision_log_backfill", "reader_is_configured",
+    "get_all_lexicons", "set_lexicon", "get_telegram_channel_names",
+]
 
 
 def get_risk_settings() -> dict:

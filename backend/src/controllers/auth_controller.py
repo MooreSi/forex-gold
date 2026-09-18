@@ -6,8 +6,10 @@ from backend.src.config.licence import fingerprint as _fingerprint
 from backend.src.config.licence import store as _lic
 from backend.src.services.auth import dashboard_auth as _auth
 
-__all__ = ["verify", "is_set", "set_password", "is_debug",
-           "needs_setup", "create_initial_password"]
+__all__ = [
+    "verify", "is_set", "set_password", "is_debug", "needs_setup",
+    "create_initial_password", "load_licence", "get_fingerprint",
+]
 
 
 def verify(username: str, password: str) -> bool:

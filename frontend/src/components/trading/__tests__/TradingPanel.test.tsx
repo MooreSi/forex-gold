@@ -317,3 +317,63 @@ describe("editing a pending signal", () => {
     expect(JSON.parse(writes()[0][1].body).tp1).toBeNull();
   });
 });
+
+describe("a halt the operator can see before they click", () => {
+  /**
+   * The backend refuses the order either way — `open_trade` checks the
+   * circuit breaker before both send paths. What was broken was the
+   * EXPLANATION: the tab read `circuit_breaker.tripped`, a key the repo has
+   * never returned (`is_active` is the authoritative one), so a tripped
+   * breaker left Execute enabled and the operator found out by pressing it.
+   *
+   * "A disabled Execute button with no explanation is indistinguishable from
+   * a broken one" is the rule this repo already states. An ENABLED button
+   * that cannot work is worse.
+   */
+  const withHalt = (halt: Record<string, unknown>) =>
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method && init.method !== "GET") {
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      if (url.startsWith("/api/trading/halt")) {
+        return { ok: true, status: 200, json: async () => halt };
+      }
+      if (url.startsWith("/api/trading/trades")) {
+        return { ok: true, status: 200, json: async () => [] };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+
+  it("greys the controls for a tripped circuit breaker, and says so", async () => {
+    // The governor is quiet — this halt comes ONLY from the breaker, which is
+    // the case the old `tripped` key could never see.
+    vi.stubGlobal("fetch", withHalt({
+      reason: "",
+      market_closed: false,
+      circuit_breaker: {
+        is_active: true, remaining_secs: 1800, consec_losses: 3,
+      },
+    }));
+
+    render(<TradingPanel />);
+
+    const button = await screen.findByRole("button", { name: /Market order/i });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute(
+      "title", expect.stringContaining("circuit breaker"));
+  });
+
+  it("leaves them alone when the breaker is merely enabled", async () => {
+    // Negative control. The breaker is enabled and untripped most of the time,
+    // and disabling the tab for that would make it useless.
+    vi.stubGlobal("fetch", withHalt({
+      reason: "",
+      market_closed: false,
+      circuit_breaker: { is_active: false, remaining_secs: 0 },
+    }));
+
+    render(<TradingPanel />);
+
+    expect(await screen.findByRole("button", { name: /Market order/i })).toBeEnabled();
+  });
+});

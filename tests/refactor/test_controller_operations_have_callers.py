@@ -44,30 +44,23 @@ _CONTROLLERS = sorted(
 # tools/refactor_audit/orphan_module_allowlist.json: same cause, same debt,
 # same removal condition.
 AWAITING_REACT_PORT = {
-    ("engines_controller", "stop_running_engines"),
-    ("engines_controller", "sub_engines"),
     ("history_controller", "ticket_group_map"),
     ("history_controller", "ticket_max_tp_map"),
     ("history_controller", "ticket_order_type_map"),
     ("history_controller", "ticket_rr_map"),
     ("history_controller", "ticket_source_map"),
     ("history_controller", "ticket_strategy_map"),
-    ("notifications_controller", "ORB_CHART_CID"),
-    ("schedule_controller", "parse_hm"),
     ("settings_controller", "get_app_config_async"),
     ("settings_controller", "switch_environment_db"),
     ("sync_controller", "is_centralized_remote_mode"),
     ("sync_controller", "is_remote_active"),
-    ("sync_controller", "link_state"),
     ("sync_controller", "note_remote_setting"),
-    ("sync_controller", "server_stop"),
     ("system_controller", "local_today"),
 }
 
 # Known dead. Each is a controller operation nothing calls and nothing wants.
 KNOWN_DEAD = {
     ("sync_controller", "make_stats_facades"),
-    ("sync_controller", "server_is_running"),
 }
 
 

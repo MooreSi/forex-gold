@@ -9,32 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.src.services.breakout_signal import breakout_signal_service as _bo_svc
 from backend.src.services.breakout_signal import panel_data as breakout
+from backend.src.services.engines import registry as _engines
 from backend.src.services.reversal_engine import panel_data as reversal
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
 from backend.src.services.risk import settings as _risk
 
 __all__ = ["breakout", "reversal",
            "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
-           "get_engine", "engines_running", "sub_engines",
-           "start_stopped_engines", "stop_running_engines"]
-
-
-# The signal engines by name, in the fixed (breakout, bounce, reversal) order
-# the mode toggle and the sync server have always bound them. Bounce's code was
-# deleted on 2026-09-14; its NAME stays because dropping the slot would shift
-# Reversal into its position on a paired node still running the old build.
-_ENGINE_SERVICES = {
-    "breakout": _bo_svc,
-    "bounce": None,
-    "reversal": _re_svc,
-}
-
-
-def _instance(svc) -> Any:
-    """An engine, or None -- for an empty slot as much as an unbuilt one."""
-    return svc.get_instance() if svc is not None else None
+           "get_engine", "engines_running", "sub_engines", "ENGINE_NAMES"]
 
 
 def get_risk_settings() -> dict:
@@ -51,48 +34,40 @@ def update_risk_settings(fields: dict) -> None:
 
 # ── Engine lifecycle (restructure phase1/010) ────────────────────────────────
 # Named operations instead of re-exported singletons, so no page loops over
-# engines choosing lifecycle again. The only-if-not-running guard below is
-# the documented mode-toggle semantics moved verbatim from frontend/app.py.
+# engines choosing lifecycle again.
+#
+# The table itself and the two bulk loops moved to services/engines/registry.py
+# on 2026-09-18: the Local/Remote handover needs them, a service may not import
+# a controller, and the copy it grew instead was a second answer to "which
+# engines exist and which may be bulk-started".
+
+
+# Which engines exist, in the fixed binding order. Re-exported so a router can
+# render the tab from it rather than restating the list and drifting.
+ENGINE_NAMES = _engines.ENGINE_NAMES
 
 
 def get_engine(name: str) -> Any:
     """The named engine's live instance (its panel needs status attributes
     and its refresh-callback hook)."""
-    return _instance(_ENGINE_SERVICES[name])
+    return _engines.instance(name)
 
 
 def engines_running() -> dict:
-    return {
-        name: bool(getattr(_instance(svc), "is_running", False))
-        for name, svc in _ENGINE_SERVICES.items()
-    }
+    return _engines.running()
 
 
 def sub_engines() -> tuple:
     """(breakout, bounce, reversal) instances in the fixed binding order the
     sync server's server_start has always received them."""
-    return tuple(_instance(svc) for svc in _ENGINE_SERVICES.values())
+    return _engines.all_instances()
 
 
-# Belt and braces: the slot is empty, so the loop would skip it anyway. The
-# exclusion keeps the safety property asserted rather than incidental.
-_NOT_BULK_STARTED = ("bounce",)
-
-
-def start_stopped_engines() -> None:
-    for name, svc in _ENGINE_SERVICES.items():
-        if name in _NOT_BULK_STARTED:
-            continue
-        eng = _instance(svc)
-        if eng is not None and not getattr(eng, "is_running", False):
-            eng.start()
-
-
-def stop_running_engines() -> None:
-    for svc in _ENGINE_SERVICES.values():
-        eng = _instance(svc)
-        if eng is not None and getattr(eng, "is_running", False):
-            eng.stop()
+# The bulk start/stop pair is NOT re-exported here. Their only caller was the
+# header's Local/Remote toggle, which now runs the full handover sequence in
+# services/cluster/handover.py and reaches the registry directly -- a service
+# may not import a controller. A forwarder no router calls is a route to
+# nowhere, so they went with the toggle rather than lingering as one.
 
 
 async def reversal_realised_pnl() -> dict:

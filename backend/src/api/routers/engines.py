@@ -27,11 +27,14 @@ router = APIRouter(prefix="/api/engines", tags=["engines"])
 # Named for what the operator calls them. `test_panel.py` was the Bounce engine
 # — the standing example in this repo of what naming a surface after its
 # service costs.
-ENGINE_LABELS = {
-    "breakout": "Breakout",
-    "bounce": "Bounce",
-    "reversal": "Reversal",
-}
+#
+# The KEYS come from the engine registry rather than being restated, so this
+# tab cannot disagree with the rest of the app about which engines exist. A
+# name with no label here falls back to its id, which reads as an oversight
+# rather than hiding the engine.
+_LABELS = {"breakout": "Breakout", "bounce": "Bounce", "reversal": "Reversal"}
+ENGINE_LABELS = {name: _LABELS.get(name, name)
+                 for name in engines_ctl.ENGINE_NAMES}
 
 
 class EngineAction(BaseModel):
@@ -86,9 +89,10 @@ async def reversal_report() -> dict:
 async def set_running(body: EngineAction) -> dict:
     """Start or stop ONE engine, by name.
 
-    Named rather than bulk. `start_stopped_engines()` exists for the app's own
-    startup and deliberately skips Bounce; a UI button that called it would
-    start engines the operator did not ask for.
+    Named rather than bulk. The bulk start (`services/engines/registry.py`)
+    exists for the app's own startup and the Local/Remote handover, and
+    deliberately skips Bounce; a UI button wired to it would start engines the
+    operator did not ask for.
     """
     engine = _engine_or_refuse(body.engine)
     if engine is None:

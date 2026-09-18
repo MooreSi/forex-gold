@@ -5,6 +5,7 @@ import { ConnectionsTab } from "./tabs/ConnectionsTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { Mt5Tab } from "./tabs/Mt5Tab";
 import { NodeTab } from "./tabs/NodeTab";
+import { RemoteTab } from "./tabs/RemoteTab";
 import { RiskTab } from "./tabs/RiskTab";
 import { TunablesTab } from "./tabs/TunablesTab";
 
@@ -20,6 +21,7 @@ const TABS = [
   { id: "mt5", label: "MT5", Panel: Mt5Tab },
   { id: "connections", label: "Connections", Panel: ConnectionsTab },
   { id: "node", label: "Node & updates", Panel: NodeTab },
+  { id: "remote", label: "Remote node", Panel: RemoteTab },
   { id: "tunables", label: "Expert tunables", Panel: TunablesTab },
   { id: "diagnostics", label: "Diagnostics", Panel: DiagnosticsTab },
 ];

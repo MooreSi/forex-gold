@@ -14,7 +14,7 @@ __all__ = ["get_risk_settings", "update_risk_settings",
            "get_channel_parser_config", "save_channel_parser_config",
            "save_channel_learned_rule", "update_unrecognised_message",
            "get_reader_status", "get_pending_unrecognised",
-           "fetch_stored_messages"]
+           "fetch_stored_messages", "send_message"]
 
 
 def get_risk_settings() -> dict:

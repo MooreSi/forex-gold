@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from backend.src.services.cluster import handover as _handover
 from backend.src.services.cluster.sync import client as _client
 from backend.src.services.cluster.sync import remote_stats_facade as _facade
 from backend.src.services.cluster.sync import server as _server
@@ -28,6 +29,7 @@ __all__ = [
     "load_config", "configure", "start", "stop",
     "send_engine_control", "send_market_order", "request_model_snapshot",
     "request_stand_down", "request_resume", "push_ai_config",
+    "take_over_locally", "hand_back_to_remote", "HandoverRefused",
     "get_remote_open_position",
     "is_remote_active", "is_centralized_remote_mode", "make_stats_facades",
     "cert_fingerprint", "server_start", "server_stop", "server_is_running",
@@ -111,6 +113,22 @@ async def request_stand_down(timeout: float = 15.0) -> dict:
 
 async def request_resume(timeout: float = 15.0) -> None:
     return await _client.get_instance().request_resume(timeout=timeout)
+
+
+# ── Handing trading control over ─────────────────────────────────────────────
+# The ORDER inside these is the safety property -- exactly one node may execute
+# new trades against the shared account. It lives in services/cluster/handover.py,
+# which is where the sequence and its failure behaviour are documented.
+
+HandoverRefused = _handover.HandoverRefused
+
+
+async def take_over_locally(*args, **kwargs) -> dict:
+    return await _handover.take_over_locally(*args, **kwargs)
+
+
+async def hand_back_to_remote(*args, **kwargs) -> dict:
+    return await _handover.hand_back_to_remote(*args, **kwargs)
 
 
 async def push_ai_config(updates: dict) -> None:

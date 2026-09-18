@@ -137,3 +137,50 @@ default, and what is implemented, is yes with an honest placeholder); whether
 the dashboard needs a phone layout; whether light mode is wanted now that CSS
 tokens make it cheap; and how a release guarantees the committed bundle is not
 stale.
+
+## A recorder will not catch a shape mismatch (2026-09-18)
+
+Every router test in `tests/api/routers/` replaces its controller with a
+recorder, which is right for what those tests are about and blind to the one
+thing that breaks a form in practice: **the router and the store disagreeing
+about the shape of a write.** A recorder takes `(*args, **kwargs)`, so it
+accepts any signature, any key and any order — and so does every controller,
+because a controller is a forwarder by design.
+
+Three defects shipped through a green suite because of this, all found on
+2026-09-18 by a second pass rather than by a test:
+
+* the Connections tab wrote `recipient` to a table whose column is `to_addr`;
+* it wrote the Telethon reader's three credentials to the alert bot's table,
+  which has none of them;
+* `PUT /api/settings/telegram` passed the whole request body to a
+  three-parameter `save_telegram_config(bot_token, chat_id, enabled)`.
+
+**When a test needs to prove a call is correctly shaped, bind it against the
+real signature** — `inspect.signature(real_fn).bind(...)`, the way
+`tests/controllers/test_controller_forwarding.py` does and the way
+`tests/api/test_settings_writes_reach_the_store.py` now does for the settings
+forms. That file also reads the React tab's own field list and checks each name
+against `backend/migrations/schema_sql.py`, so a field added to a form and not
+to the schema fails in CI rather than at the operator's keyboard.
+
+## The header's LOCAL/REMOTE control is a money path (2026-09-18)
+
+`PUT /api/node/active-trader` decides which of two paired nodes may open
+positions against the shared MT5 account. It is **not** a flag write, and it
+was one between the port and 2026-09-18 — setting `local` without the peer
+standing down leaves two nodes each believing they own the account.
+
+The sequence lives in `backend/src/services/cluster/handover.py` and the
+ordering is the safety property: a peer that does not acknowledge leaves the
+account with **no** active trader rather than two. Anything that touches that
+file needs the owner's sign-off and a demo session, the same as the close path.
+
+## One table of which engines exist (2026-09-18)
+
+`backend/src/services/engines/registry.py`. `engines_controller` held it and
+`services/cluster/handover.py` grew a second copy, which is how the empty
+`bounce` slot gets re-introduced in one of them and not the other. The slot's
+NAME stays although its code went on 2026-09-14, because `server_start` binds
+(breakout, bounce, reversal) positionally and a paired node on an older build
+would otherwise see Reversal shift into Bounce's place.

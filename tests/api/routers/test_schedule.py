@@ -147,3 +147,34 @@ def test_the_clock_offset_is_forwarded_and_the_new_label_returned(make_client, c
 def test_resuming_is_not_reachable_by_GET(make_client, clock):
     assert make_client().get("/api/schedule/resume-today").status_code == 405
     assert clock["writes"] == []
+
+
+class TestATimeThatIsNotATimeIsRefused:
+    """The mapping only. The rule itself belongs to the service and is tested
+    in `tests/risk/test_schedule_window_validation.py`, over the real
+    function — every caller needs it, including a paired node forwarding its
+    own grid, so putting it in this router would protect one of them."""
+
+    def test_the_services_reason_reaches_the_operator_unchanged(
+        self, make_client, clock, monkeypatch,
+    ):
+        """"mon window 2: end '25:00' is not a time of day" is something the
+        operator can fix. "Invalid schedule" is not."""
+        def _boom(_s):
+            raise ValueError("mon window 2: end '25:00' is not a time of day.")
+
+        monkeypatch.setattr(schedule_router.schedule_ctl,
+                            "set_trading_schedule", _boom)
+
+        res = make_client().put("/api/schedule/schedule", json={"schedule": {}})
+
+        assert res.status_code == 400
+        assert res.json()["error"]["message"] == (
+            "mon window 2: end '25:00' is not a time of day.")
+
+    def test_a_good_schedule_still_saves(self, make_client, clock):
+        res = make_client().put("/api/schedule/schedule", json={
+            "schedule": {"mon": [{"start": "08:00", "end": "12:00", "enabled": True}]}})
+
+        assert res.status_code == 200
+        assert len(clock["writes"]) == 1

@@ -1,8 +1,14 @@
 """Node and updates — pairing, autostart, restart, and applying a release.
 
-None of it trades. All of it can stop the app trading, which is why every
-action here is a POST that says what it did rather than a setting that changes
-quietly underneath.
+Most of it does not trade. **`/active-trader` does**: it decides which of two
+paired nodes may open new positions against the shared MT5 account, and it runs
+the stand-down/resume handshake so that the answer is never "both". The
+sequence and its failure behaviour live in `services/cluster/handover.py`; this
+handler forwards to it and decides nothing itself.
+
+Everything else here can stop the app trading, which is why every action is a
+POST that says what it did rather than a setting that changes quietly
+underneath.
 
 **The sync token is a secret**, and `GET /token` does not return it: it says
 whether one exists. Generating a new one returns the plaintext exactly once, so
@@ -22,6 +28,7 @@ from backend.src.api.errors import Refusal
 from backend.src.controllers import remote_controller as remote_ctl
 from backend.src.controllers import remote_node_controller as node_ctl
 from backend.src.controllers import settings_controller as settings_ctl
+from backend.src.controllers import sync_controller as sync_ctl
 from backend.src.controllers import system_controller as system_ctl
 
 log = logging.getLogger(__name__)
@@ -77,10 +84,32 @@ async def new_sync_token() -> dict:
 
 
 @router.put("/active-trader")
-async def set_active_trader(body: ActiveTraderWrite) -> dict:
-    """Which node is actually placing trades."""
-    settings_ctl.set_active_trader(body.trader)
-    return {"active_trader": settings_ctl.get_active_trader()}
+async def set_active_trader(
+    body: ActiveTraderWrite, eng: Any = Depends(engine_dep),
+) -> dict:
+    """Move trading control between this node and the paired one.
+
+    **Not a flag write.** Between 2026-09-18 and this change it was one, which
+    was the most dangerous line in the React port: setting `local` without the
+    peer standing down leaves two nodes each believing they own the same MT5
+    account, and setting `remote_vps` without stopping the local engines leaves
+    them running. Neither is visible on screen; both show up as trades nobody
+    placed.
+
+    The handshake, the ordering and the failure behaviour belong to
+    `services/cluster/handover.py`. A refusal from it is the operator's answer
+    and goes back verbatim.
+    """
+    try:
+        if body.trader == "local":
+            return await sync_ctl.take_over_locally()
+        return await sync_ctl.hand_back_to_remote(
+            # Purely so the answer can say how many keep running to their own
+            # SL/TP. Handing back closes nothing.
+            open_trades=eng.get_open_trades(),
+        )
+    except sync_ctl.HandoverRefused as exc:
+        raise Refusal(str(exc)) from exc
 
 
 @router.post("/register")

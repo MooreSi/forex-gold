@@ -111,14 +111,17 @@ def bot_infra_os():
     return os
 
 
-def test_the_backend_imports_nicegui_in_no_more_places_than_the_licence_screens():
+def test_the_backend_imports_nicegui_nowhere_at_all():
     """The contract itself, asserted directly rather than inferred from a total.
 
-    Both remaining sites are the pre-boot licence screens
-    (config/licence/guard.py), which still render with NiceGUI and run before
-    the app starts. The UI-shutdown site, which used to be the third, went on
-    2026-09-18. When the licence screens are ported (react-port task 090) this
-    goes to zero and the contract can be enforced there.
+    This read `<= 2` while the pre-boot licence screens were the last two
+    sites. Task 090 ported those on 2026-09-18 and the contract went to
+    `enforced_at_zero`, at which point `<= 2` became a test that cannot fail:
+    it would have stayed green through two NiceGUI imports creeping back in.
+
+    Zero is the claim now, and it is asserted here as well as in the contract
+    gate because this is the file that explains WHY — a backend that needs a UI
+    framework present cannot be run headless, tested on CI or scheduled.
     """
     import sys as _sys
     sys_path = _sys.path
@@ -127,7 +130,8 @@ def test_the_backend_imports_nicegui_in_no_more_places_than_the_licence_screens(
     from tools.refactor_audit import import_contracts as ic
 
     count = ic.check().counts["no-nicegui-in-the-backend"]
-    assert count <= 2, (
-        f"{count} backend source units import nicegui; the baseline is 2 and "
-        "bot_infra should be going through os_utils.shutdown_ui()"
+    assert count == 0, (
+        f"{count} backend source units import nicegui. The dashboard is React "
+        "and the licence screens are server-rendered HTML; nothing in "
+        "backend/ needs a UI framework."
     )

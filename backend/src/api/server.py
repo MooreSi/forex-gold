@@ -37,8 +37,10 @@ from backend.src.api.routers import chart as chart_router
 from backend.src.api.routers import engines as engines_router
 from backend.src.api.routers import history as history_router
 from backend.src.api.routers import news as news_router
+from backend.src.api.routers import notifications as notifications_router
 from backend.src.api.routers import node as node_router
 from backend.src.api.routers import parsing as parsing_router
+from backend.src.api.routers import remote as remote_router
 from backend.src.api.routers import orders as orders_router
 from backend.src.api.routers import schedule as schedule_router
 from backend.src.api.routers import settings as settings_router
@@ -69,8 +71,10 @@ ROUTERS = (
     engines_router.router,
     history_router.router,
     news_router.router,
+    notifications_router.router,
     node_router.router,
     parsing_router.router,
+    remote_router.router,
     schedule_router.router,
     settings_router.router,
     templates_router.router,

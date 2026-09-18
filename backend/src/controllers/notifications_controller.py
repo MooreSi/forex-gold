@@ -11,6 +11,7 @@ nothing on this module is inert.
 """
 from __future__ import annotations
 
+from backend.src.services.notifications import email_errors as _email_errors
 from backend.src.services.notifications import email_service as _email
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "build_orb_chart_image",
     "build_orb_report",
     "ORB_CHART_CID",
+    "friendly_email_error",
 ]
 
 
@@ -68,3 +70,8 @@ def build_orb_html(*args, **kwargs):
 
 def build_orb_chart_image(*args, **kwargs):
     return _email.build_orb_chart_image(*args, **kwargs)
+
+
+def friendly_email_error(*args, **kwargs):
+    """Turn an SMTP failure string into something the operator can act on."""
+    return _email_errors.friendly(*args, **kwargs)

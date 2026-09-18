@@ -16,7 +16,7 @@ from backend.src.services.risk import schedule as _schedule
 __all__ = [
     "DAY_NAMES", "get_trading_schedule", "set_trading_schedule",
     "is_trading_schedule_enabled", "set_trading_schedule_enabled",
-    "get_daily_profit_target", "set_daily_profit_target", "parse_hm",
+    "get_daily_profit_target", "set_daily_profit_target",
     "daily_profit_target_state", "daily_profit_target_state_async",
     "resume_past_daily_profit_target",
     "describe_trading_clock", "set_trading_clock_offset",
@@ -68,14 +68,11 @@ def resume_past_daily_profit_target(*args, **kwargs):
     return _schedule.resume_past_daily_profit_target(*args, **kwargs)
 
 
-def parse_hm(value: str):
-    """Parse "HH:MM", raising on anything else.
-
-    Public here because the schedule page needs to validate what was typed
-    before saving it, and was reaching for the service's private _parse_hm to
-    do it. Same function, named so a page may legitimately call it.
-    """
-    return _schedule._parse_hm(value)
+# `parse_hm` was here from the stage-1 restructure, exported so the schedule
+# page could check what was typed before saving it. The React port lost that
+# caller, and the check moved to where it protects every caller rather than one:
+# `set_trading_schedule` validates the whole grid itself (services/risk/
+# schedule.py, 2026-09-18), including a schedule forwarded by a paired node.
 
 
 def describe_trading_clock(*args, **kwargs):

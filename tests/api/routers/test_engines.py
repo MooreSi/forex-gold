@@ -4,7 +4,7 @@ Starting an engine does not place an order, but it is the switch that lets one
 be placed with nobody watching — so the two assertions that matter are about
 what the tab is allowed to start, and what it is never allowed to call.
 
-* **Named, not bulk.** `start_stopped_engines()` exists for the app's own
+* **Named, not bulk.** The registry's bulk start exists for the app's own
   startup and deliberately skips Bounce. A UI button wired to it would start
   engines the operator did not ask for.
 * **Never the blocking fit.** A five-second RandomForest train started from a
@@ -73,9 +73,13 @@ def engines(monkeypatch):
                         lambda force=False: state["fits"].append(("background", force)))
     monkeypatch.setattr(engines_router.engines_ctl, "pro_model_fit",
                         lambda *a, **k: state["fits"].append(("blocking", a, k)))
-    monkeypatch.setattr(engines_router.engines_ctl, "start_stopped_engines",
+    # The bulk pair lives in the engine registry, not on the controller: its
+    # only caller is the Local/Remote handover, and a service may not import a
+    # controller. Recorded here so the tab can still be shown never to use it.
+    from backend.src.services.engines import registry as _registry
+    monkeypatch.setattr(_registry, "start_stopped",
                         lambda: state["bulk"].append("start_all"))
-    monkeypatch.setattr(engines_router.engines_ctl, "stop_running_engines",
+    monkeypatch.setattr(_registry, "stop_running",
                         lambda: state["bulk"].append("stop_all"))
     monkeypatch.setattr(engines_router.engines_ctl, "reversal_realised_pnl", _realised)
     monkeypatch.setattr(engines_router.engines_ctl, "reversal_shadow_report",
@@ -146,8 +150,9 @@ def test_stopping_one_engine_stops_only_that_one(make_client, engines):
 
 
 def test_the_tab_never_uses_the_bulk_start(make_client, engines):
-    """`start_stopped_engines()` skips Bounce and is for the app's own startup.
-    A button wired to it would start engines nobody asked for."""
+    """The registry's bulk start skips Bounce and is for the app's own startup
+    and the Local/Remote handover. A button wired to it would start engines
+    nobody asked for."""
     client = make_client()
     client.post("/api/engines/running", json={"engine": "breakout", "running": True})
     client.post("/api/engines/running", json={"engine": "reversal", "running": False})

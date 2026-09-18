@@ -5,14 +5,8 @@
     "(orphan_modules --check) fails on any orphan NOT listed, and on any listed",
     "module that is no longer an orphan (delete its entry when you delete/wire it).",
     "",
-    "The 3 superseded-dead database.py clones were DELETED 2026-08-10. The 4 below",
-    "are built-but-UNWIRED (not dead): deleting them would destroy real",
-    "functionality and hide a wiring bug. Each needs an OWNER (Simon) wire-vs-remove",
-    "decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then.",
-    "2026-09-18: 32 entries added with class 'awaiting-react-port'. They are the controllers and services that only a NiceGUI tab imported. Big-bang replace deleted those tabs before their React equivalents existed, so these modules have no caller for as long as task 080 is open. This is the single largest recorded debt in this file and it is meant to shrink to nothing.",
-    "2026-09-18 (later the same day): the eight remaining tabs were ported, so 26 of the 32 'awaiting-react-port' entries now have callers and are gone from this file. 30 remain \u2014 they belong to surfaces the port reached differently (a deal-level trade table the boundary does not expose, and engine panel_data reads whose React equivalents ask the controller instead). Each is a question for whoever next touches that surface: wire it or delete it.",
-    "2026-09-18 (later the same day): the eight remaining tabs were ported, so 26 of the 32 'awaiting-react-port' entries now have callers and are gone from this file. 4 remain \u2014 surfaces the port reached differently, each a wire-it-or-delete-it question for whoever next touches them.",
-    "2026-09-18 (final): the Trading tab's remaining sections, the node/update panel and the licence screens all landed, so every 'awaiting-react-port' entry but 1 is gone. What is left: backend.src.controllers.notifications_controller."
+    "The 3 superseded-dead database.py clones were DELETED 2026-08-10. The 3 below are built-but-UNWIRED (not dead): deleting them would destroy real functionality and hide a wiring bug. Each needs an OWNER (Simon) wire-vs-remove decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then.",
+    "2026-09-18 (final): the eight remaining tabs, the rest of the Trading tab, the node/update panel and the licence screens all landed. Every 'awaiting-react-port' entry is gone. notifications_controller was the last of them and outlived the port because the Settings tab shipped without the test-send buttons that used it; wiring those (routers/notifications.py) cleared it. The three entries left are the pre-React debts this file was opened for."
   ],
   "allowed": [
     {
@@ -35,13 +29,6 @@
       "loc": 226,
       "class": "unwired-tool",
       "reason": "Walk-forward harness to validate breakout recalibrations BEFORE they touch live trading; its docstring documents manual invocation (run_walkforward/report). Likely a dev tool, not dead. The frontend backtest page uses a different system (services.backtest)."
-    },
-    {
-      "module": "backend.src.controllers.notifications_controller",
-      "file": "backend/src/controllers/notifications_controller.py",
-      "loc": 70,
-      "class": "awaiting-react-port",
-      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
     }
   ]
 }

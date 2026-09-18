@@ -31,6 +31,7 @@ class SentinelEngine:
         self.tick: Any = None
         self.account: dict = {"login": 123, "is_demo": True}
         self.health: dict = {"connected": True}
+        self.open_trades: list = []
         self.raises: Exception | None = None
 
     def _record(self, name: str, args: tuple, kwargs: dict):
@@ -80,6 +81,13 @@ class SentinelEngine:
 
     async def cancel_signal(self, *args, **kwargs):
         return self._record("cancel_signal", args, kwargs)
+
+    # ── reads that are not market data ───────────────────────────────────────
+    def get_open_trades(self):
+        """Synchronous, like the real runtime's. Used by the handover handler
+        only to report how many positions keep running to their own SL/TP."""
+        self.calls.append(("get_open_trades", (), {}))
+        return self.open_trades
 
 
 @pytest.fixture

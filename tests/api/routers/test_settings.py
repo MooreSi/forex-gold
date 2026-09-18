@@ -12,6 +12,10 @@ settings that saved four keys nothing read.
 
 Nothing here places an order. Changing a risk setting changes what the engines
 are allowed to do next time; it touches no open position.
+
+The two outbound connections moved to `test_notifications.py` on 2026-09-18,
+with their handlers. The redaction they are subject to is the same one, from
+the same `api/redaction.py`, and it is asserted on both sides.
 """
 from __future__ import annotations
 
@@ -25,8 +29,6 @@ def config(monkeypatch):
     state = {
         "risk": {"risk_pct": 1.0, "max_open_trades": 3},
         "app": {"port": 8888, "claude_api_key": "sk-secret", "ai_provider": "anthropic"},
-        "email": {"smtp_host": "smtp.example.com", "smtp_password": "hunter2"},
-        "telegram": {"api_id": "12345", "api_hash": "deadbeef"},
         "mt5": {"login": "5203117", "server": "Vantage-Demo", "password": "hunter2"},
         "retention": 90,
         "catalogue": {"re_min_adx": {"value": 22, "default": 20}},
@@ -51,11 +53,6 @@ def config(monkeypatch):
     monkeypatch.setattr(settings_router.settings_ctl, "update_risk_settings", _record("risk"))
     monkeypatch.setattr(settings_router.settings_ctl, "load_config", lambda: state["app"])
     monkeypatch.setattr(settings_router.settings_ctl, "save_config", _record("app"))
-    monkeypatch.setattr(settings_router.settings_ctl, "get_email_config", lambda: state["email"])
-    monkeypatch.setattr(settings_router.settings_ctl, "save_email_config", _record("email"))
-    monkeypatch.setattr(settings_router.settings_ctl, "get_telegram_config",
-                        lambda: state["telegram"])
-    monkeypatch.setattr(settings_router.settings_ctl, "save_telegram_config", _record("telegram"))
     monkeypatch.setattr(settings_router.settings_ctl, "get_mt5_credentials", lambda: state["mt5"])
     monkeypatch.setattr(settings_router.settings_ctl, "save_mt5_credentials", _record("mt5"))
     monkeypatch.setattr(settings_router.settings_ctl, "sync_bridge_credentials_file",
@@ -83,8 +80,6 @@ def config(monkeypatch):
 
 @pytest.mark.parametrize("path,secret", [
     ("/api/settings/app", "sk-secret"),
-    ("/api/settings/email", "hunter2"),
-    ("/api/settings/telegram", "deadbeef"),
     ("/api/settings/mt5", "hunter2"),
 ])
 def test_no_secret_reaches_the_browser(path, secret, make_client, config):

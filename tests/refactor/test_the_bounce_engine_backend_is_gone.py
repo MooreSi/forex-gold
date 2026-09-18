@@ -177,8 +177,9 @@ class TestTheBounceSlotIsEmptyRatherThanRemoved:
         from backend.src.controllers import engines_controller as ec
         subs = ec.sub_engines()
         assert len(subs) == 3, (
-            "remote_node.py unpacks this as `bo, bc, gd` and hands the three "
-            "to server_start by keyword -- the arity is the contract")
+            "api/routers/remote.py unpacks this as `breakout, bounce, reversal` "
+            "and hands the three to server_start by keyword -- the arity is "
+            "the contract")
 
     def test_the_bounce_slot_is_none(self):
         from backend.src.controllers import engines_controller as ec
@@ -191,10 +192,16 @@ class TestTheBounceSlotIsEmptyRatherThanRemoved:
     def test_the_bulk_start_and_stop_survive_the_empty_slot(self):
         """Both iterate every slot. An AttributeError on the dead one would
         take the mode toggle down with it -- and the mode toggle is what hands
-        trading between this node and the VPS."""
-        from backend.src.controllers import engines_controller as ec
-        ec.start_stopped_engines()
-        ec.stop_running_engines()
+        trading between this node and the VPS.
+
+        Read from the registry rather than the controller since 2026-09-18: the
+        table and its two loops moved to services/engines/registry.py, where
+        the handover can reach them without a service importing a controller.
+        """
+        from backend.src.services.engines import registry
+
+        registry.start_stopped()
+        registry.stop_running()
 
 
 class TestAppStartupNoLongerStartsIt:

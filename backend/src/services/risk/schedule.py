@@ -229,7 +229,56 @@ def _migrate_telegram_field(b: dict) -> tuple[dict, bool]:
     return {}, bool(b.get("telegram", True))
 
 
+def validate_trading_schedule(schedule: dict) -> None:
+    """Raise ValueError naming the first window that is not a time.
+
+    A schedule is stored as text and parsed when the engines ask whether they
+    may trade. A window that cannot be parsed does not fail loudly there --
+    `_find_active_block` swallows it and moves on -- so the window simply never
+    matches: the engines stop trading, or keep trading past a stop, and nothing
+    on any screen says why.
+
+    Range is checked as well as shape, because `_parse_hm` does not: it is
+    `int(h) * 60 + int(m)`, so "25:00" parses happily to 1500 minutes and then
+    matches no clock time that exists. That is the same silent never-matches
+    outcome, arrived at without an exception anywhere.
+
+    A window whose start AND end are both blank is how the grid says "no window
+    here", and most of four-a-day are. That is allowed. A half-blank pair is
+    not: it is a window with one end missing, which is a typo, not a gap.
+    """
+    for day, blocks in (schedule or {}).items():
+        for index, block in enumerate(blocks or []):
+            start = str((block or {}).get("start") or "").strip()
+            end = str((block or {}).get("end") or "").strip()
+            if not start and not end:
+                continue
+            for label, value in (("start", start), ("end", end)):
+                try:
+                    _parse_hm(value)
+                    hours, minutes = (int(part) for part in value.split(":"))
+                except (ValueError, AttributeError) as exc:
+                    raise ValueError(
+                        f"{day} window {index + 1}: {label} {value!r} is not a "
+                        "time. Use 24-hour HH:MM."
+                    ) from exc
+                # Each field on its own, not the total. "8:60" totals 540
+                # minutes -- exactly 09:00 -- so a range check on the sum
+                # accepts it and the window silently starts an hour late.
+                if not (0 <= hours < 24 and 0 <= minutes < 60):
+                    raise ValueError(
+                        f"{day} window {index + 1}: {label} {value!r} is not a "
+                        "time of day. Use 24-hour HH:MM."
+                    )
+
+
 def set_trading_schedule(schedule: dict, _from_sync: bool = False) -> None:
+    """Store the grid. **Validated first, including when it came from a peer.**
+
+    A paired node forwarding a schedule this node cannot parse would otherwise
+    disable trading here with no error on either side.
+    """
+    validate_trading_schedule(schedule)
     db_module.set_app_config("trading_schedule", json.dumps(schedule))
     _maybe_forward_trading_schedule(_from_sync)
 

@@ -1,5 +1,6 @@
 import { CircleDot, LogOut, Server, TriangleAlert } from "lucide-react";
 import { AccountBadge } from "./AccountBadge";
+import { ActiveTraderControl } from "./ActiveTraderControl";
 import { Button } from "@/components/shared/Button";
 import { formatPrice } from "@/components/shared/format";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,7 +27,7 @@ const EA_COLOURS: Record<string, string> = {
  * anything itself.
  */
 export function AppHeader() {
-  const { data, error, updatedAt } = useHeaderState();
+  const { data, error, updatedAt, refresh } = useHeaderState();
   const { logout } = useAuth();
 
   const stale = updatedAt !== null && Date.now() - updatedAt > 20_000;
@@ -85,7 +86,13 @@ export function AppHeader() {
             {data.ea_badge.text}
           </span>
         )}
-        {data?.active_trader && <span className="num text-ink-3">{data.active_trader}</span>}
+        {data?.active_trader && (
+          <ActiveTraderControl
+            activeTrader={data.active_trader}
+            remoteConnected={data.remote_connected === true}
+            onChanged={() => void refresh()}
+          />
+        )}
         <Button variant="ghost" onClick={() => void logout()} title="Sign out">
           <LogOut size={13} /> Sign out
         </Button>

@@ -1,7 +1,11 @@
 """Node pairing, autostart, restart and applying a release.
 
-None of it trades; all of it can stop the app trading. The two assertions that
-matter are about a secret and about a one-way action:
+Most of it does not trade; all of it can stop the app trading. `/active-trader`
+is the exception and has its own section at the bottom: it decides which of two
+paired nodes may open positions against the shared account.
+
+The two assertions that matter elsewhere are about a secret and a one-way
+action:
 
 * **The sync token is never read back.** `GET /state` reports whether one
   exists; only the endpoint that CREATES one returns the plaintext, once,
@@ -29,6 +33,8 @@ def node(monkeypatch, sentinel_engine):
         "autostart": {"supported": True, "installed": False, "armed": False},
         "update": {"version": "1.5.0"},
         "writes": [],
+        "handover": [],
+        "refuse": "",
     }
 
     async def _check():
@@ -70,6 +76,25 @@ def node(monkeypatch, sentinel_engine):
     monkeypatch.setattr(node_router.remote_ctl, "get_stored_email", lambda: state["email"])
     monkeypatch.setattr(node_router.remote_ctl, "request_registration",
                         lambda email, nickname: state["writes"].append(("register", email, nickname)))
+
+    # The handover, recorded rather than run. Its own sequence is tested in
+    # tests/services/cluster/test_handover.py; here the claim is only that the
+    # handler goes through it instead of writing the flag itself.
+    async def _take_over(*a, **k):
+        state["handover"].append("take_over")
+        if state["refuse"]:
+            raise node_router.sync_ctl.HandoverRefused(state["refuse"])
+        return {"active_trader": "local", "remote_open_positions": 0, "note": "ok"}
+
+    async def _hand_back(*a, open_trades=None, **k):
+        state["handover"].append("hand_back")
+        if state["refuse"]:
+            raise node_router.sync_ctl.HandoverRefused(state["refuse"])
+        return {"active_trader": "remote_vps",
+                "local_open_positions": len(open_trades or []), "note": "ok"}
+
+    monkeypatch.setattr(node_router.sync_ctl, "take_over_locally", _take_over)
+    monkeypatch.setattr(node_router.sync_ctl, "hand_back_to_remote", _hand_back)
     return state
 
 
@@ -109,12 +134,57 @@ def test_reading_the_state_never_generates_a_token(make_client, node):
 
 # ── Which node trades ────────────────────────────────────────────────────────
 
-def test_the_active_trader_is_read_and_written(make_client, node):
+def test_the_active_trader_is_reported(make_client, node):
     assert make_client().get("/api/node/state").json()["active_trader"] == "local"
 
-    make_client().put("/api/node/active-trader", json={"trader": "remote_vps"})
 
-    assert ("active_trader", "remote_vps") in node["writes"]
+class TestChangingItRunsTheHandshake:
+    """**Not a flag write**, which is what it was between 2026-09-18 and this
+    change — the most dangerous line in the React port. Setting `local` without
+    the peer standing down leaves two nodes believing they own the same MT5
+    account; setting `remote_vps` without stopping the local engines leaves
+    them running. The sequence itself is tested in
+    `tests/services/cluster/test_handover.py`; these are about the handler
+    reaching it and reporting what it said."""
+
+    def test_taking_over_goes_through_the_handover(self, make_client, node):
+        body = make_client().put(
+            "/api/node/active-trader", json={"trader": "local"}).json()
+
+        assert node["handover"] == ["take_over"]
+        assert body["active_trader"] == "local"
+        # And NOT a bare set_active_trader behind its back.
+        assert ("active_trader", "local") not in node["writes"]
+
+    def test_handing_back_goes_through_the_handover(self, make_client, node):
+        body = make_client().put(
+            "/api/node/active-trader", json={"trader": "remote_vps"}).json()
+
+        assert node["handover"] == ["hand_back"]
+        assert body["active_trader"] == "remote_vps"
+
+    def test_handing_back_reports_the_positions_that_keep_running(
+        self, make_client, node, sentinel_engine,
+    ):
+        """Handing back closes nothing. "View-only" does not mean "flat"."""
+        sentinel_engine.open_trades = [{"ticket": 1}, {"ticket": 2}]
+
+        body = make_client().put(
+            "/api/node/active-trader", json={"trader": "remote_vps"}).json()
+
+        assert body["local_open_positions"] == 2
+
+    def test_a_refusal_reaches_the_operator_in_its_own_words(
+        self, make_client, node,
+    ):
+        """"The VPS did not acknowledge" is the difference between "try again"
+        and "your account is being traded twice". A generic 500 loses it."""
+        node["refuse"] = "The remote node did not acknowledge the stand-down."
+
+        res = make_client().put("/api/node/active-trader", json={"trader": "local"})
+
+        assert res.status_code == 409
+        assert "did not acknowledge" in res.json()["error"]["message"]
 
 
 # ── Registration ─────────────────────────────────────────────────────────────

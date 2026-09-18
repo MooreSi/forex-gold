@@ -63,8 +63,17 @@ async def set_schedule(body: ScheduleWrite) -> dict:
     The echo matters: the service pads a schedule saved before the fourth
     window existed rather than discarding it, so what is stored and what was
     sent can legitimately differ.
+
+    A window that is not a time is refused with the window named. The service
+    does the checking — every caller needs it, including a paired node
+    forwarding its own grid — and the reason reaches the operator unchanged,
+    because "mon window 2: end '25:00' is not a time of day" is something they
+    can fix and "invalid schedule" is not.
     """
-    schedule_ctl.set_trading_schedule(body.schedule)
+    try:
+        schedule_ctl.set_trading_schedule(body.schedule)
+    except ValueError as exc:
+        raise Refusal(str(exc), status_code=400) from exc
     return {"schedule": schedule_ctl.get_trading_schedule()}
 
 

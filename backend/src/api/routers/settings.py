@@ -1,4 +1,8 @@
-"""Settings tab — twelve domains behind one tab, and the money ones are named.
+"""Settings tab — the domains behind one tab, and the money ones are named.
+
+The two outbound connections (email, Telegram) live in `notifications.py`,
+which also owns the test sends that prove them. They kept their
+`/api/settings/...` paths; only the module moved.
 
 Split into domain endpoints rather than one `PUT /settings`, for the reason the
 frontend conventions give: `settings.py` reached 3,112 lines because everything
@@ -21,18 +25,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.src.api.errors import Refusal
+from backend.src.api.redaction import redacted as _redacted
 from backend.src.controllers import settings_controller as settings_ctl
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-
-# Fields that must never leave the machine in a response, whatever shape the
-# service hands back. A denylist rather than an allowlist because the services
-# grow fields and a new secret must be excluded by default — the failure this
-# guards is a password reaching a browser, which cannot be taken back.
-SECRET_FIELDS = ("password", "api_key", "api_hash", "token", "secret", "passphrase")
-
 
 class ConfigWrite(BaseModel):
     model_config = {"extra": "allow"}
@@ -50,21 +48,6 @@ class Mt5Credentials(BaseModel):
     login: str
     password: str
     server: str
-
-
-def _redacted(values: dict) -> dict:
-    """Everything except the secrets, with a flag saying one is set.
-
-    `"password": ""` and `"password": null` both read as "no password
-    configured", which is why the flag is separate from the value.
-    """
-    out = {}
-    for key, value in (values or {}).items():
-        if any(s in key.lower() for s in SECRET_FIELDS):
-            out[f"{key}_set"] = bool(value)
-        else:
-            out[key] = value
-    return out
 
 
 @router.get("/risk")
@@ -93,28 +76,6 @@ async def app_config() -> dict:
 async def update_app_config(body: ConfigWrite) -> dict:
     settings_ctl.save_config(dict(body.model_dump()))
     return _redacted(settings_ctl.load_config())
-
-
-@router.get("/email")
-async def email() -> dict:
-    return _redacted(settings_ctl.get_email_config())
-
-
-@router.put("/email")
-async def save_email(body: ConfigWrite) -> dict:
-    settings_ctl.save_email_config(dict(body.model_dump()))
-    return _redacted(settings_ctl.get_email_config())
-
-
-@router.get("/telegram")
-async def telegram() -> dict:
-    return _redacted(settings_ctl.get_telegram_config())
-
-
-@router.put("/telegram")
-async def save_telegram(body: ConfigWrite) -> dict:
-    settings_ctl.save_telegram_config(dict(body.model_dump()))
-    return _redacted(settings_ctl.get_telegram_config())
 
 
 @router.get("/mt5")

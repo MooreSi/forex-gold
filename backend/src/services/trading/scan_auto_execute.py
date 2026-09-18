@@ -139,6 +139,92 @@ async def execute_auto_signal(
     get_trading_balance_fn: Callable[[], Awaitable[float]],
     open_trade_fn: Optional[Callable[..., Awaitable[dict]]] = None,
 ) -> dict:
+    """Execute (or decline) one parsed Telegram signal, and record what was
+    decided for the research log (docs/todo/signal-validation/010).
+
+    A wrapper rather than recording inside the body, for one reason: the
+    body has three separate exits, and `reversal_engine_live_execute.py`'s
+    rule is that every variant must see the SAME fact set whichever exit was
+    taken. Gathering the facts here before the body runs, and writing the
+    row here after it returns, makes that rule structural instead of a
+    comment somebody has to remember on the fourth exit.
+
+    Control flow, arguments and return value are unchanged;
+    `_execute_auto_signal` below is the original body, untouched. When the
+    log is off nothing here runs beyond one dict lookup.
+
+    THE SPREAD COSTS NOTHING HERE, AND THAT IS NOT AN ASSUMPTION.
+    `mt5_client.get_tick()` caches for TICK_CACHE_TTL = 1.0s, and this read
+    happens BEFORE the body's own. On an executing decision the body's read
+    becomes the cache hit, so the number of round trips is unchanged; on a
+    decision blocked before the body ever asks, it is one localhost call on
+    a path that is not latency-critical by definition. The whole decision
+    takes 13 ms against a 269 ms budget whose other 256 ms is the broker.
+
+    It is read only when the log is on, so an install that has not asked for
+    this pays nothing at all.
+    """
+    facts = None
+    try:
+        from backend.src.services.signals import decision_log as _dlog
+        if _dlog.enabled(rs or {}):
+            _dl_tick = None
+            try:
+                _dl_tick = await bridge.get_tick()
+            except Exception:
+                log.debug("[DecisionLog] no tick for the spread fact", exc_info=True)
+            facts = _dlog.inline_facts(rs or {}, time.time(), tick=_dl_tick)
+    except Exception:
+        log.debug("[DecisionLog] fact gathering failed", exc_info=True)
+
+    result = await _execute_auto_signal(
+        parsed, tg_id, channel_name, source_label, strategy, rs,
+        sess_ok, per_signal_skip, per_signal_skip_reason, skip_reason, bridge,
+        get_open_trades_fn=get_open_trades_fn,
+        find_and_apply_instant_followup_fn=find_and_apply_instant_followup_fn,
+        check_pre_trade_filters_fn=check_pre_trade_filters_fn,
+        suggest_lot_size_fn=suggest_lot_size_fn,
+        get_trading_balance_fn=get_trading_balance_fn,
+        open_trade_fn=open_trade_fn,
+    )
+
+    if facts is not None:
+        try:
+            from backend.src.services.signals import decision_log as _dlog
+            trade = result.get("trade_result") or {}
+            _dlog.record(
+                rs=rs, tg_id=tg_id, path="auto", channel_name=channel_name,
+                direction=str(parsed.get("direction") or ""),
+                executed=bool(result.get("executed")),
+                skip_reason=str(result.get("skip_reason") or ""),
+                strategy=strategy, parsed=parsed, tick=None,
+                trade_id=trade.get("trade_id"), facts=facts,
+            )
+        except Exception:
+            log.debug("[DecisionLog] auto-path record failed", exc_info=True)
+
+    return result
+
+
+async def _execute_auto_signal(
+    parsed: dict,
+    tg_id: str,
+    channel_name: str,
+    source_label: str,
+    strategy: str,
+    rs: dict,
+    sess_ok: bool,
+    per_signal_skip: bool,
+    per_signal_skip_reason: str,
+    skip_reason: str,
+    bridge: Any,
+    get_open_trades_fn: Callable[[], list],
+    find_and_apply_instant_followup_fn: Callable[[str, str, dict, str], Awaitable[bool]],
+    check_pre_trade_filters_fn: Callable[..., Optional[str]],
+    suggest_lot_size_fn: Callable[[float, float, float, float], float],
+    get_trading_balance_fn: Callable[[], Awaitable[float]],
+    open_trade_fn: Optional[Callable[..., Awaitable[dict]]] = None,
+) -> dict:
     """Returns {'executed', 'exec_lot', 'exec_price', 'trade_result',
     'skip_reason', 'gap_note'}."""
     if open_trade_fn is None:

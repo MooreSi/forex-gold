@@ -405,6 +405,16 @@ async def startup() -> None:
         _pro_corpus.init()
     except Exception as _e:
         log.error("[startup] Pro corpus init failed: %s", _e)
+    # The Telegram decision log's two tables (2026-09-18). Same database and
+    # the same reason as the corpus above: one file across demo and live, so
+    # a study does not split when the account does. Creating the schema costs
+    # nothing when the toggle is off -- and NOT creating it would turn every
+    # write into a silent debug-level failure the day it is switched on.
+    try:
+        from backend.src.services.signals import decision_log_repo as _dec_log
+        _dec_log.create_schema()
+    except Exception as _e:
+        log.error("[startup] Decision log schema failed: %s", _e)
     from backend.src.services.reversal_engine import ml_engine as _re_ml
     _re_ml.init(str(_DATA_DIR))
     _re_engine_module.init(_engine._bridge)

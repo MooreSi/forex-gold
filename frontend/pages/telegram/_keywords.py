@@ -60,6 +60,16 @@ _PARSING_CATEGORIES: list[tuple[str, str, list[tuple[str, str, str, int]]]] = [
         ("lk_ignore_forwarded_messages", "Ignore Forwarded Messages",
          "Do not execute trades from messages forwarded from other channels.", 0),
     ]),
+    ("RESEARCH", "text-sky-300 bg-sky-500/15", [
+        ("tg_decision_log_enabled", "Signal Decision Log",
+         "Records what the app decided about every Telegram signal — executed "
+         "or blocked, on both the normal and the Immediate Market Buy/Sell "
+         "path — what the trade then did, and what four gates that are "
+         "currently switched OFF would have decided. It changes no trading "
+         "decision and blocks nothing: it only writes down what happened, so "
+         "a gate can be judged on this account's own trades before being "
+         "switched on. Costs nothing on the order path; nothing is fetched.", 0),
+    ]),
     ("MARKET GUARD", "text-amber-300 bg-amber-500/15", [
         ("lk_queue_closed_market_limits", "Queue Closed Market Limits",
          "Hold BUY/SELL LIMIT signals that arrive while the market is shut for "

@@ -54,6 +54,10 @@ _SYNCED_SETTINGS_KEYS = (
     "cooldown_after_loss_min", "trade_strategy",
     "session_asia_enabled", "session_london_enabled", "session_ny_enabled",
     "accept_tg_signals", "auto_execute_signals", "exclude_high_risk",
+    # The Signal Decision Log (2026-09-18). Synced for the same reason its
+    # Parsing-page neighbours above are: left per-node, the Mac and the VPS
+    # would record different halves of one study and nothing would say so.
+    "tg_decision_log_enabled",
     "bo_live_execution", "bo_claude_eval_enabled", "kelly_sizing_enabled",
     "max_open_trades",
     # sg_claude_eval_enabled (Bounce Generator's own Claude-eval toggle) was

@@ -17,6 +17,7 @@ from ._auth import (
     _render_verify_code_step,
 )
 from ._feed import _render_channels_active_section
+from ._decision_log import render_decision_log_section
 from ._keywords import _render_parsing_settings_section
 from frontend.components.timer_probe import timer as _timer
 
@@ -27,6 +28,7 @@ def render(get_tg_reader: Callable):
 
     render_signals_card()
     _render_parsing_settings_section()
+    render_decision_log_section()
     _render_channels_active_section(reader)
 
     # ── Status banner ──────────────────────────────────────────────────────────

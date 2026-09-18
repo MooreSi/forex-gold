@@ -290,19 +290,26 @@ class SnapshotState:
     level between runs."""
     last_background: float = 0.0
     last_pro_resolve: float = 0.0
+    last_decision_sweep: float = 0.0
 
 
 BACKGROUND_INTERVAL_S = 900.0
 PRO_RESOLVE_INTERVAL_S = 60.0
+# The Telegram decision log's own sweep -- fill in closed outcomes, then
+# score the shadow variants. Slower than the capture because it reads the
+# trade ledger and may ask the bridge for the H1 bias, and neither is worth
+# doing every five seconds. Still well inside decision_shadow.MAX_BIAS_LAG_S,
+# which is what decides whether a bias read is still the same moment.
+DECISION_SWEEP_INTERVAL_S = 60.0
 
 
 async def run_snapshot_cycle(
     state: "SnapshotState", bridge: Any, now: Optional[float] = None, *,
-    capture=None, background=None, resolve=None,
+    capture=None, background=None, resolve=None, decisions=None,
 ) -> None:
     """One tick of the signal-snapshot research log.
 
-    Three cadences share it. The per-signal capture runs every tick, which the
+    Four cadences share it. The per-signal capture runs every tick, which the
     caller paces at 5s so the candle-derived indicators stay effectively
     contemporaneous with the signal. Background negatives run every 15 minutes
     (see capture_background_snapshot for why the study is unusable without
@@ -315,7 +322,14 @@ async def run_snapshot_cycle(
     break signal processing -- so it must not be able to break itself into a
     tight retry either.
 
-    The three actions are injectable. runtime.py passes its own module-level
+    The fourth is the Telegram decision log's sweep (2026-09-18,
+    docs/todo/signal-validation/010): outcomes filled from the closed-trade
+    ledger, then the shadow variants scored. It rides here rather than in a
+    loop of its own for two reasons -- runtime.py is at its LOC baseline and
+    is shrink-only, and a research sweep that already has a supervised,
+    failure-isolated 5s tick to sit on does not need a second one.
+
+    The actions are injectable. runtime.py passes its own module-level
     aliases, which is the seam tests/runtime/test_background_loops.py patches
     to drive the loop -- calling the module functions directly here would take
     a reference that patch never reaches.
@@ -346,3 +360,30 @@ async def run_snapshot_cycle(
                 await _pro_out.resolve_pending(bridge)
         except Exception:
             log.debug("Pro outcome resolve failed", exc_info=True)
+
+    if now - state.last_decision_sweep > DECISION_SWEEP_INTERVAL_S:
+        state.last_decision_sweep = now
+        try:
+            if decisions is not None:
+                await decisions(bridge)
+            else:
+                await _sweep_decision_log(bridge)
+        except Exception:
+            log.debug("Decision log sweep failed", exc_info=True)
+
+
+async def _sweep_decision_log(bridge: Any) -> None:
+    """Outcomes first, then the shadow scoring.
+
+    In that order on purpose: the shadow report joins on a resolved
+    outcome, so resolving first means a decision that closed in this
+    window is scoreable in the same pass rather than the next one.
+
+    Both halves are no-ops when the log is off -- there is nothing in the
+    queue, because nothing wrote to it.
+    """
+    from backend.src.services.signals import decision_outcomes as _outcomes
+    from backend.src.services.signals import decision_shadow as _shadow
+    from backend.src.db import database as _db
+    await _db.to_db_thread(_outcomes.resolve_pending)
+    await _shadow.evaluate_pending(bridge)

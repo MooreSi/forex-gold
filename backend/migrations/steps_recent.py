@@ -139,4 +139,17 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN re_cme_context_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
 
+    # The Telegram decision log (2026-09-18), Parsing page. Records what the
+    # app decided about each Telegram signal and what the trade then did,
+    # plus what four gates that are currently OFF would have decided --
+    # champion and challenger, recorded, never acted on. See
+    # docs/todo/signal-validation/010.
+    #
+    # Off by default and inert when off: it sits on the order path, and the
+    # measured IME budget is 269 ms end to end with 256 ms of that the
+    # broker POST. The rows go to reversal_engine.db, which is one file
+    # across demo and live -- this column only says whether to write them.
+    (47, "Telegram decision log, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN tg_decision_log_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

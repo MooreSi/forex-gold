@@ -171,7 +171,7 @@ here rather than there:
   engine-start + n*900s is how the 2026-09-14 session confirmed two live
   passes that had written nothing and said nothing. Worth keeping: the same
   trick identifies any loop that calls an AI provider.
-- **Neither `reversal_ai_apply` nor the Save Capabilities button logs
+- **Neither `reversal_ai_apply` nor the Save Tuning button logs
   anything**, so a switch that changed cannot be attributed to the AI or to
   the owner after the fact. Only the absence of an `[RE-AI]` line rules the
   tuner out. Not fixed -- recorded because it cost a session's worth of
@@ -338,3 +338,44 @@ champion once**. Only `ML floor 0.50` differs, refusing six of the twelve. So
 the comparison is not yet discriminating between four of its five arms, and a
 reader glancing at it should know the sample is one afternoon rather than a
 week.
+
+## The card is "Reversal Engine Tuning", and one switch on it is inert (2026-09-17)
+
+Renamed from "Reversal Engine Capabilities" at the owner's request. The
+label lives in `frontend/pages/reversal_panel/_capabilities.py` (file name
+unchanged) and is pinned as a render landmark in
+`tests/frontend/test_remaining_pages_render.py`. Two docs that named the old
+path were corrected in the same change; `docs/todo/reversal-engine/210`
+keeps the old name as history with a note, because it is a record of what
+was built rather than a description of what is there now.
+
+**`re_cme_context_enabled` (migration 46) is wired to nothing, deliberately.**
+`capability_gates.cme_context_enabled` is its only reader and nothing
+consumes that reader. The reason it stops there is not effort:
+
+- Spot XAUUSD on this broker publishes bid/ask and no Last, so there is no
+  trade side, and every "volume" in this system is tick volume — a count of
+  quote changes, not size. `services/market/order_flow.py` already carries
+  this, and labels each result with the method that produced it.
+- CME GC futures are the lit venue where gold prints real size, and the only
+  route from proxy to measurement. Dark pools are an equities construct
+  (off-exchange prints reported to a regulator's tape) and do not exist for
+  spot gold at all — worth knowing, because it is asked.
+- **Cost is not the blocker.** Daily GC volume and open interest are
+  published free by CME; only real-time streaming is a paid entitlement and
+  this engine has no use for it. The blocker is that nothing here has
+  measured whether futures flow predicts anything about these trades, so
+  the ingest would be built on a guess. Recorded in
+  `docs/simon-handover/039-cme-futures-context-is-free-is-it-worth-building.md`.
+
+Same shape as `vol_target_sizing_enabled`, which has been on this card
+un-connected since 2026-09-11. The risk with an inert switch is that
+somebody later believes it did something, so the tooltip says "no CME feed"
+and "changes nothing" in the app, and
+`tests/risk/test_cme_context_switch.py::TestTheCardDoesNotOverclaim` fails
+if either phrase is removed.
+
+**It is not in `ai_tuner.TUNABLE`**, and should not be. The tuner argues
+from this account's own measured trade history; there is no CME evidence for
+it to argue from, so the switch would be a coin flip with a rationale
+attached.

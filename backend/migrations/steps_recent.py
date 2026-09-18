@@ -122,4 +122,21 @@ _RECENT: list[tuple[int, str, object]] = [
     (45, "Asian-session exemption for the trend gate, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN htf_bias_asian_exempt INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # CME futures context (owner request 2026-09-17). Spot XAUUSD on this
+    # broker publishes bid/ask and no Last, so there is no trade side and
+    # "volume" everywhere in this system is tick volume -- a count of quote
+    # changes, not size (see services/market/order_flow.py). GC futures are
+    # the lit venue where gold prints real size, and the only route to
+    # measured flow rather than a tick-rule proxy.
+    #
+    # NOTHING CONSUMES THIS YET. There is no CME feed in the repo; the
+    # column records the intent and capability_gates.cme_context_enabled is
+    # its only reader. Daily GC volume and open interest are free from CME;
+    # the open question is whether futures flow predicts anything about
+    # these trades, which nobody has measured -- docs/simon-handover/039.
+    (46, "CME futures context switch, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_cme_context_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
 ]

@@ -1,4 +1,4 @@
-"""The Reversal Engine's capability switches.
+"""The Reversal Engine's tuning switches.
 
 Lives with the engine it configures (Signal Generator > Reversal Engine,
 owner request 2026-09-11), not on the Trading page. It was next to the
@@ -35,7 +35,7 @@ def render_capabilities_subcard(rs: dict) -> None:
     with ui.card().classes(_SUBCARD):
         with ui.row().classes("items-center gap-2 mb-2"):
             ui.icon("science").classes("text-purple-400")
-            ui.label("Reversal Engine Capabilities").classes(
+            ui.label("Reversal Engine Tuning").classes(
                 "text-sm font-bold text-purple-300")
 
         ui.label(
@@ -222,6 +222,32 @@ def render_capabilities_subcard(rs: dict) -> None:
 
         ui.separator().classes("my-3")
 
+        # ── Market context ───────────────────────────────────────────
+        ui.label("Market context").classes(
+            "text-xs font-semibold text-gray-400 uppercase tracking-wider")
+
+        cme_on = ui.checkbox(
+            "Read CME futures context (not connected yet)",
+            value=bool(rs.get("re_cme_context_enabled", 0)),
+        ).classes("text-sm text-gray-300")
+        cme_on.tooltip(
+            "This broker quotes spot gold bid/ask with no Last, so there is "
+            "no trade side and every 'volume' in this app is tick volume -- "
+            "a count of quote changes, not size. GC futures are the lit "
+            "venue where gold prints real size, and the only route to "
+            "measured flow instead of a proxy. There is NO CME FEED in this "
+            "build: no entitlement, no client, no ingest. Turning this on "
+            "records the intent and CHANGES NOTHING the engine decides. The "
+            "data this would use -- daily GC volume and open interest -- is "
+            "published free by CME; only real-time streaming is a paid "
+            "entitlement, and this engine does not need it. What is still "
+            "Simon's call is whether it is worth building at all, since "
+            "nothing has yet measured that futures flow predicts anything "
+            "about these trades -- see docs/simon-handover/039."
+        )
+
+        ui.separator().classes("my-3")
+
         # ── Level types ──────────────────────────────────────────────
         ui.label("Level types to refuse").classes(
             "text-xs font-semibold text-gray-400 uppercase tracking-wider")
@@ -263,13 +289,14 @@ def render_capabilities_subcard(rs: dict) -> None:
                     "vol_target_sizing_enabled":     int(bool(vol_sizing.value)),
                     "correlated_exposure_cap_lots":  float(corr_cap.value or 0.0),
                     "liquidity_map_levels_enabled":  int(bool(levels_on.value)),
+                    "re_cme_context_enabled":        int(bool(cme_on.value)),
                     "re_blocked_level_types":        ",".join(blocked.value or []),
                 })
-                ui.notify("Capability switches saved", type="positive")
+                ui.notify("Tuning switches saved", type="positive")
             except (TypeError, ValueError) as err:
                 ui.notify(f"Invalid value — {err}", type="negative")
 
-        ui.button("Save Capabilities", on_click=_save).classes(
+        ui.button("Save Tuning", on_click=_save).classes(
             "bg-purple-700 text-white mt-3 px-4 py-2")
 
         ui.separator().classes("my-3")

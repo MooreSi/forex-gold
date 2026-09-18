@@ -58,8 +58,12 @@ PAGE_LANDMARKS = {
     "breakout_panel":    ("Engine Parameters", "M5 candle gate + 3s velocity monitor"),
     "chart":             ("RSI 14", "FVG:"),
     # Learn From Pro Signals was removed 2026-09-11 (no longer used); the
-    # capability switches moved onto this page in the same change.
-    "reversal_panel":    ("Active Candidate Levels", "Reversal Engine Capabilities"),
+    # tuning switches moved onto this page in the same change. The card was
+    # called "Reversal Engine Capabilities" until 2026-09-17 (owner request).
+    # The CME line is here because that switch is inert by design -- if it
+    # ever stops rendering, nothing else in the suite would notice.
+    "reversal_panel":    ("Active Candidate Levels", "Reversal Engine Tuning",
+                          "Read CME futures context"),
     "telegram":          ("Telegram Authentication", "Step 1: Send login code"),
 }
 

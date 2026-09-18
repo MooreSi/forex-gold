@@ -21,6 +21,12 @@ one would eventually win an argument nobody was having.
 **Every scalar is exactly 1.0 when its input is absent**, so `apply` with a
 default `SizingInputs` returns the lot size it was given, unchanged and to
 the last decimal place. Nothing sizes differently until a dial moves.
+
+**The volatility scalar has an upside**, so this module can return MORE lots
+than it was handed. `SizingInputs.max_lots` carries the account's own
+`Global Parameters > Max lot size` through for that reason -- see
+`test_sizing_policy_respects_the_lot_ceiling.py`, which records the 0.15
+lots this returned against a 0.10 cap before the ceiling existed.
 """
 from __future__ import annotations
 
@@ -56,6 +62,12 @@ class SizingInputs:
     # A cap of 0.0 means OFF, matching every other setting in this codebase.
     open_correlated_lots: float = 0.0
     correlated_cap_lots: float = 0.0
+    # Global Parameters > Max lot size, the account's own last ceiling.
+    # `fees_sizing.suggest_lot_size` applies it to the base lot; this module
+    # can scale that base UP (MAX_VOL_SCALAR is 1.5), so without it here a
+    # quiet market returns 0.15 lots against a 0.10 cap. 0.0 means OFF, as
+    # it does for `correlated_cap_lots`.
+    max_lots: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -138,6 +150,13 @@ def apply(base_lots: float, inputs: SizingInputs) -> SizingResult:
         lots = room
         notes.append(f"correlated exposure cap: {room:.2f} lots left of "
                      f"{inputs.correlated_cap_lots:.2f}")
+
+    # Last, and after the correlated cap, because it is the account's
+    # ceiling rather than one of this policy's adjustments: whatever the
+    # scalars above decided, the user's Max lot size still wins.
+    if inputs.max_lots > 0 and lots > inputs.max_lots:
+        lots = float(inputs.max_lots)
+        notes.append(f"max lot size {inputs.max_lots:.2f}")
 
     if lots <= 0:
         return SizingResult(0.0, notes)

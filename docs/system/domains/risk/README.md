@@ -151,3 +151,46 @@ population the engine simulates, not a realised curve.
 `test_signal/test_signal_generate.py` blocks counter-bias signals in the
 Asian session specifically. Open question for the owner, recorded in
 `docs/simon-handover/033`.
+
+## Volatility targeting points the wrong way on this book (2026-09-17)
+
+Measured before wiring `sizing_policy` to the order path, which is why it was
+not wired. 5,116 closed `re_signals` rows carrying the H1 ATR at signal time:
+
+| ATR decile | avg P&L |
+|---|---|
+| 1 (3.13–5.34) | -$4.89 |
+| 2 (5.34–6.10) | -$6.53 |
+| 5 (7.12–7.74) | **-$8.26** |
+| 9 (10.21–12.80) | -$3.37 |
+| 10 (12.80–29.98) | **-$2.25** |
+
+The policy's premise is that violent markets are where the damage is. Here the
+violent decile is the least bad and the quiet-to-middle deciles are the worst,
+so the scalar sizes down into the best cohort and up into the worst. Replaying
+every trade: -$22,318 actual, **-$23,431** with targeting, against a flat
+control at the same total exposure of -$22,428. **-$1,002 worse than a flat
+size change**, which rules out "it just traded more".
+
+The drawdown arm is not a dial here at all. Peak equity on `re_balance_log` is
+$511.53, reached early; the curve is now -$22,299 and **99.2% of entries sit
+more than 20% below that peak**. `dd_full_pct` is 0.20, so the scalar is
+pinned at its `MIN_DD_SCALAR` floor of 0.25 permanently. That is a standing
+75% size cut, not a response to conditions — and `max_lot_size` is the honest
+place to express that if it is ever wanted.
+
+Recorded in
+`docs/simon-handover/040-volatility-sizing-would-have-lost-more-not-less.md`.
+The switch stays on the Reversal Engine Tuning card, off, connected to
+nothing.
+
+**A real bug found in the inert code and fixed in the same pass.**
+`sizing_policy.apply` had no upper lot ceiling while `MAX_VOL_SCALAR` is 1.5,
+and 98% of this account's trades are sized at exactly the 0.10 `max_lot_size`
+cap — so a quiet market would have returned **0.15 lots, over a cap the user
+set**. `SizingInputs.max_lots` now carries it, `capability_gates.sizing_inputs`
+supplies it OUTSIDE the `scale_on` branch (it is the account's ceiling, not the
+capability's), and `tests/risk/test_sizing_policy_respects_the_lot_ceiling.py`
+holds the negative control that shows the 0.15. Nothing caught this because
+`apply` still has no callers: an unwired module gets no test pressure from its
+call sites, so its own tests are all it has.

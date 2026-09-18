@@ -45,6 +45,60 @@ from backend.src.utils.models import (
 from backend.src.services.risk import expert_params
 
 
+async def _report_instant_entry(trade_id: Optional[str], tick, sl_note: str,
+                                fallback: str) -> None:
+    """Announce an IME fill as a full execution message.
+
+    Sent straight away when the row can already answer for itself, which is
+    every Python-managed trade. An EA Template row is INSERTed as a
+    placeholder (mt5_ticket=0, entry_price=0.0) and gains its real ticket
+    and fill price only when the first leg fills -- that one case waits in
+    the background rather than announcing "$0.00 | ticket pending".
+
+    A forwarded trade has no row on this node at all (it lives in the VPS's
+    DB), so it keeps the summary IME has always sent.
+    """
+    row = (await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+           if trade_id else None)
+    if row and not row.get("mt5_ticket"):
+        asyncio.create_task(
+            _send_instant_entry_alert(trade_id, tick, sl_note, fallback))
+        return
+    asyncio.create_task(telegram_alerts.send_message(
+        telegram_alerts.fmt_instant_entry(row, tick, sl_note) if row else fallback,
+        trade_id, "instant_entry",
+    ))
+
+
+async def _send_instant_entry_alert(trade_id: Optional[str], tick, sl_note: str,
+                                    fallback: str, timeout: float = 15.0,
+                                    poll: float = 1.0) -> None:
+    """Report an IME fill once the row can answer for itself.
+
+    An EA Template row is INSERTed as a placeholder (mt5_ticket=0,
+    entry_price=0.0); the real ticket and fill price arrive when the first
+    leg fills, normally within seconds. Every other opening path waits that
+    out (runtime._await_trade_promotion) -- IME did not, which is why a
+    template fill announced itself as "$0.00 | ticket pending". Bounded,
+    because a grid whose legs all sit unfilled is a legitimate state and
+    fmt_trade_open() reports it as such.
+
+    Re-reading the row also picks up levels a strategy sets just after the
+    fill (Conservative / Scalp Runner / Conservative Trial), so the TP
+    ladder in the message is the one actually working at the broker.
+    """
+    deadline = time.monotonic() + timeout
+    row = (await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+           if trade_id else None)
+    while row and not row.get("mt5_ticket") and time.monotonic() < deadline:
+        await asyncio.sleep(poll)
+        row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+    await telegram_alerts.send_message(
+        telegram_alerts.fmt_instant_entry(row, tick, sl_note) if row else fallback,
+        trade_id, "instant_entry",
+    )
+
+
 def ime_sl_bounds() -> tuple[float, float, float]:
     """(min pts, max pts, ATR multiplier) for the provisional stop an
     instant entry opens with. Were the constants 8.0 / 25.0 / 1.2; now
@@ -458,12 +512,14 @@ async def process_instant_entry(
             _sl_note = "_(levels set by strategy immediately)_"
         else:
             _sl_note = f"_(provisional {_IME_SL_DIST:.1f} pts / -${_ime_max_loss:.0f} max — awaiting follow-up)_"
-        asyncio.create_task(telegram_alerts.send_message(
+        _ime_summary = (
             f"*Immediate Signal Entry*  ({telegram_alerts._md_esc(channel_name)})\n"
             f"*{direction}* at ${exec_price:.2f}  |  lot {lot:.2f}  |  ticket `{_ime_ticket}`\n"
-            f"SL: ${provisional_sl:.2f} {_sl_note}",
-            event_type="instant_entry",
-        ))
+            f"SL: ${provisional_sl:.2f} {_sl_note}"
+        )
+        await _report_instant_entry(
+            trade_result.get("trade_id"), tick, _sl_note, _ime_summary,
+        )
 
         # ── Conservative / Scalp Runner: post-fill SL/TP override (IME path) ─
         # open_trade_from_signal() is not called for IME trades, so we apply

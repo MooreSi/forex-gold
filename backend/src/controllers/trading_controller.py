@@ -24,7 +24,7 @@ from backend.src.services.trading import engine_reads as _reads
 
 __all__ = [
     "get_risk_settings", "get_risk_settings_async", "update_risk_settings",
-    "trading_pause_status", "get_app_config", "set_app_config",
+    "trading_pause_status", "pause_trading", "resume_trading", "get_app_config", "set_app_config",
     "get_circuit_breaker_state", "get_effective_strategy",
     "get_custom_strategies", "delete_custom_strategy",
     "get_all_channel_strategy_settings", "get_channel_strategy_rec",
@@ -161,6 +161,19 @@ def validate_signal(*args, **kwargs):
     Returns a list of complaints; empty means valid."""
     from backend.src.services.signals.parser import validate_signal as _vs
     return _vs(*args, **kwargs)
+
+
+def pause_trading(*args, **kwargs) -> float:
+    """Halt new orders. Hours from now, or until a given moment."""
+    from backend.src.services.risk import manual_pause as _pause
+    return _pause.pause(*args, **kwargs)
+
+
+def resume_trading() -> None:
+    """Lift a manual pause AND re-arm the post-close guards. See
+    services/risk/manual_pause.py for why the second half is not optional."""
+    from backend.src.services.risk import manual_pause as _pause
+    _pause.resume()
 
 
 def trading_pause_status() -> dict:

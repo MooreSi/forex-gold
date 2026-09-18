@@ -1,6 +1,8 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { cn } from "@/lib/cn";
+import { AccessTab } from "./tabs/AccessTab";
+import { AiTab } from "./tabs/AiTab";
 import { ConnectionsTab } from "./tabs/ConnectionsTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { Mt5Tab } from "./tabs/Mt5Tab";
@@ -20,10 +22,12 @@ const TABS = [
   { id: "risk", label: "Risk", Panel: RiskTab },
   { id: "mt5", label: "MT5", Panel: Mt5Tab },
   { id: "connections", label: "Connections", Panel: ConnectionsTab },
+  { id: "ai", label: "AI", Panel: AiTab },
   { id: "node", label: "Node & updates", Panel: NodeTab },
   { id: "remote", label: "Remote node", Panel: RemoteTab },
   { id: "tunables", label: "Expert tunables", Panel: TunablesTab },
   { id: "diagnostics", label: "Diagnostics", Panel: DiagnosticsTab },
+  { id: "access", label: "Access & licence", Panel: AccessTab },
 ];
 
 export function SettingsPanel() {

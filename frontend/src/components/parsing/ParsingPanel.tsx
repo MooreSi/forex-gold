@@ -9,6 +9,7 @@ import { DecisionLogSection } from "./internal/DecisionLogSection";
 import { LexiconSection } from "./internal/LexiconSection";
 import { MessageFeedSection } from "./internal/MessageFeedSection";
 import { ParsingSettingsSection } from "./internal/ParsingSettingsSection";
+import { SignalsSourcesSection } from "./internal/SignalsSourcesSection";
 import { UnrecognisedSection } from "./internal/UnrecognisedSection";
 
 const SUB_TABS = [
@@ -62,7 +63,17 @@ export function ParsingPanel() {
           </Tabs.List>
 
           <Tabs.Content value="settings" className="min-h-0 flex-1 overflow-auto">
-            <ParsingSettingsSection settings={asObject(data.settings)} onSave={c.saveSetting} />
+            <div className="space-y-4">
+              {/* At the top, where it has been since 2026-07-22: these three
+                  decide whether a source opens real positions, and everything
+                  below only decides how a message is READ. */}
+              <SignalsSourcesSection
+                settings={asObject(data.settings)}
+                onSave={c.saveSetting}
+                controlTarget={String(data.control_target ?? "local")}
+              />
+              <ParsingSettingsSection settings={asObject(data.settings)} onSave={c.saveSetting} />
+            </div>
           </Tabs.Content>
           <Tabs.Content value="channels" className="min-h-0 flex-1 overflow-auto">
             <ChannelsSection channels={data.channels} onToggle={c.setChannelEnabled} />

@@ -276,9 +276,9 @@ async def cmd_pause(args: list) -> str:
         except ValueError:
             return f"Invalid duration '{args[0]}'. Examples: /pause 30m  /pause 2h  /pause 1d"
 
-    until_ts  = time.time() + duration_secs
+    from backend.src.services.risk import manual_pause as _pause
+    until_ts  = _pause.pause_until(time.time() + duration_secs)
     until_str = datetime.fromtimestamp(until_ts).strftime("%H:%M")
-    db_module.set_app_config("trade_pause_until", str(until_ts))
     return (
         f"Trading paused for {label} (until {until_str})\n"
         f"Use /resume to lift the pause early."
@@ -286,15 +286,13 @@ async def cmd_pause(args: list) -> str:
 
 
 async def cmd_resume(args: list) -> str:
-    db_module.set_app_config("trade_pause_until", "0")
-    # Re-arm the give-back guard from now. Without this, resuming after a
-    # give-back halt is a no-op: the day's peak is already spent, so the guard
-    # re-trips on the very next close.
-    try:
-        from backend.src.services.risk.governor import rearm_risk_guards
-        rearm_risk_guards()
-    except Exception:
-        pass
+    # Clearing the flag AND re-arming the post-close guards is one operation,
+    # in services/risk/manual_pause.py. It was written out by hand here and
+    # not at all in the dashboard's Resume button, which is exactly the drift
+    # a second copy produces: without the re-arm, resuming after a give-back
+    # halt is undone by the very next close.
+    from backend.src.services.risk import manual_pause as _pause
+    _pause.resume()
     rs        = db_module.get_risk_settings()
     auto_exec = bool(rs.get("auto_execute_signals", 0))
     return (

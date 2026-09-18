@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query
 from backend.src.api.deps import engine as engine_dep
 from backend.src.api.errors import Refusal
 from backend.src.api.schemas.trading import (
-    ChannelStrategyOverride, HaltState, RiskSettingsUpdate,
+    ChannelStrategyOverride, HaltState, PauseWrite, RiskSettingsUpdate,
 )
 from backend.src.controllers import trading_controller as trading_ctl
 
@@ -45,6 +45,39 @@ async def halt_state() -> dict:
         "market_closed": bool(trading_ctl.is_weekly_market_closed()),
         "circuit_breaker": trading_ctl.get_circuit_breaker_state(),
     }
+
+
+@router.post("/pause")
+async def pause(body: PauseWrite) -> dict:
+    """Halt new orders by hand.
+
+    **The safe direction**, and it changes nothing else: the signal generators
+    and the Telegram reader keep running, and active trade management (SL/TP
+    monitoring) continues exactly as before. Only new orders stop.
+
+    A moment in the past is refused rather than stored — it would write a pause
+    that has already expired, so trading would not stop and this screen would
+    say it had.
+    """
+    try:
+        until = trading_ctl.pause_trading(hours=body.hours, until=body.until)
+    except ValueError as exc:
+        raise Refusal(str(exc), status_code=400) from exc
+    return {"paused": True, "until": until}
+
+
+@router.post("/resume")
+async def resume() -> dict:
+    """Lift a manual pause.
+
+    Does more than clear the flag, and has to. Both post-close guards halt for
+    the rest of the broker day, so resuming after a give-back halt without
+    re-arming them lasts exactly until the next trade closes — the operator
+    presses Resume, sees trading resume, and it stops again with the button
+    looking broken.
+    """
+    trading_ctl.resume_trading()
+    return {"paused": False, "until": None}
 
 
 @router.get("/trades")

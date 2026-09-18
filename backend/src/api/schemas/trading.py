@@ -83,3 +83,16 @@ class ChannelStrategyOverride(BaseModel):
     source: str
     strategy: Optional[str] = None
     auto: bool = True
+
+
+class PauseWrite(BaseModel):
+    """Halt new orders for a number of hours, or until a given moment.
+
+    Both optional and `until` wins: a dialog that offers "pause for N hours"
+    and "pause until HH:MM" has to send whichever the operator filled in, and
+    an empty hours field must not silently become 0 -- which would be a pause
+    already in the past.
+    """
+
+    hours: float | None = None
+    until: float | None = None

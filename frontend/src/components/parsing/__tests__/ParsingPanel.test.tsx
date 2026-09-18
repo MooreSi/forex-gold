@@ -350,3 +350,95 @@ describe("the decision log", () => {
     expect(button).toHaveAttribute("title", expect.stringContaining("Safe to press twice"));
   });
 });
+
+describe("the live-execution gates", () => {
+  /**
+   * These decide whether a source opens real MT5 positions. They lived at the
+   * top of this page from 2026-07-22 and the React port dropped them, so
+   * between then and 2026-09-18 there was no way to stop an engine executing
+   * except by editing the database — the worst possible moment to be doing
+   * that is the moment you want an engine to stop.
+   */
+  it("puts all three sources on the screen", async () => {
+    render(<ParsingPanel />);
+
+    expect(await screen.findByTestId("source-accept_tg_signals")).toBeInTheDocument();
+    expect(screen.getByTestId("source-bo_live_execution")).toBeInTheDocument();
+    expect(screen.getByTestId("source-re_live_execution")).toBeInTheDocument();
+  });
+
+  it("defaults Telegram signals ON and live execution OFF, as the backend does", async () => {
+    // `accept_tg_signals` defaults to 1 and the two live-execution gates to 0.
+    // Getting this backwards would show an install as executing when it is not,
+    // or — far worse — as not executing when it is.
+    state.settings = {};
+    render(<ParsingPanel />);
+    await screen.findByTestId("source-accept_tg_signals");
+
+    expect(within(screen.getByTestId("source-accept_tg_signals"))
+      .getByRole("button")).toHaveTextContent("TG SIGNALS ON");
+    expect(within(screen.getByTestId("source-bo_live_execution"))
+      .getByRole("button")).toHaveTextContent("BO LIVE OFF");
+    expect(within(screen.getByTestId("source-re_live_execution"))
+      .getByRole("button")).toHaveTextContent("RE LIVE OFF");
+  });
+
+  it("shows a stored ON as ON", async () => {
+    state.settings = { bo_live_execution: 1 };
+    render(<ParsingPanel />);
+    await screen.findByTestId("source-bo_live_execution");
+
+    expect(within(screen.getByTestId("source-bo_live_execution"))
+      .getByRole("button")).toHaveTextContent("BO LIVE ON");
+  });
+
+  it("turns live execution off with one press", async () => {
+    // The direction that matters. An operator stopping an engine should not
+    // have to confirm anything.
+    state.settings = { bo_live_execution: 1 };
+    render(<ParsingPanel />);
+    await screen.findByTestId("source-bo_live_execution");
+
+    await userEvent.click(within(screen.getByTestId("source-bo_live_execution"))
+      .getByRole("button"));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ bo_live_execution: 0 });
+  });
+
+  it("turns it on again", async () => {
+    state.settings = { bo_live_execution: 0 };
+    render(<ParsingPanel />);
+    await screen.findByTestId("source-bo_live_execution");
+
+    await userEvent.click(within(screen.getByTestId("source-bo_live_execution"))
+      .getByRole("button"));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ bo_live_execution: 1 });
+  });
+
+  it("says what each one does, in the backend's own words", async () => {
+    render(<ParsingPanel />);
+    await screen.findByTestId("source-bo_live_execution");
+
+    expect(within(screen.getByTestId("source-bo_live_execution")).getByRole("button"))
+      .toHaveAttribute("title", expect.stringContaining("virtual/learning-only mode"));
+  });
+
+  it("warns that these do not travel to the trading node", async () => {
+    // They write this node's own row. In Remote mode an operator setting them
+    // here is setting the machine that is NOT placing the trades.
+    state.control_target = "remote";
+    render(<ParsingPanel />);
+
+    expect(await screen.findByText(/do not travel between/)).toBeInTheDocument();
+  });
+
+  it("says nothing about nodes when this machine is the trader", async () => {
+    render(<ParsingPanel />);
+    await screen.findByTestId("source-accept_tg_signals");
+
+    expect(screen.queryByText(/do not travel between/)).not.toBeInTheDocument();
+  });
+});

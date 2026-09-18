@@ -21,6 +21,22 @@ const BODIES: Record<string, unknown> = {
   "/api/notifications/test-email": { sent: true, to: "me@example.com" },
   "/api/notifications/test-telegram": { sent: true },
   "/api/settings/expert-params": { re_min_adx: { value: 22, default: 20 } },
+  "/api/ai/settings": {
+    provider: "claude", providers: ["claude", "deepseek"],
+    claude_model: "claude-sonnet-4-6", deepseek_model: "",
+    anthropic_api_key_set: true, deepseek_api_key_set: false,
+    claude_models: ["claude-sonnet-4-6", "claude-opus-4-8"],
+    deepseek_models: ["deepseek-chat"], configured: true,
+  },
+  "/api/ai/settings/test": { provider: "claude", ok: true, billable: true,
+                             note: "claude answered." },
+  "/api/ai/settings/models": { provider: "claude", models: ["a", "b", "c"] },
+  "/api/settings/access": { auto_login: false, warning: "" },
+  "/api/node/licence": {
+    email: "simon@example.com", licence_type: "perpetual",
+    expiry_date: "2030-01-01", machine_id: "abc123",
+    key_masked: "ABCD1234 - **** - ****",
+  },
   "/api/node/state": {
     version: "1.4.2",
     active_trader: "local",
@@ -544,5 +560,146 @@ describe("remote node", () => {
 
     expect(await screen.findByRole("alert"))
       .toHaveTextContent("Generate a pairing token first");
+  });
+});
+
+describe("AI", () => {
+  /**
+   * Restored 2026-09-18. Without this tab there was no way to enter an API key
+   * from the dashboard, so on a fresh install every AI feature in the app was
+   * unreachable unless somebody edited config.yaml by hand.
+   */
+  const open = async () => {
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "AI" }));
+  };
+
+  it("shows the provider and its model", async () => {
+    await open();
+
+    expect(await screen.findByLabelText("AI provider")).toHaveValue("claude");
+    expect(screen.getByLabelText("Model")).toHaveValue("claude-sonnet-4-6");
+  });
+
+  it("never puts a stored key back on screen", async () => {
+    await open();
+
+    expect(await screen.findByLabelText("API key")).toHaveValue("");
+    expect(screen.getByText("stored; leave blank to keep it")).toBeInTheDocument();
+  });
+
+  it("says when no key is stored", async () => {
+    overrides["/api/ai/settings"] = {
+      ...BODIES["/api/ai/settings"] as object,
+      provider: "deepseek", deepseek_api_key_set: false,
+    };
+    await open();
+
+    expect(await screen.findByText("not set")).toBeInTheDocument();
+  });
+
+  it("warns when nothing is configured at all", async () => {
+    // Otherwise the Analysis tab just returns nothing and the reason is three
+    // screens away.
+    overrides["/api/ai/settings"] = {
+      ...BODIES["/api/ai/settings"] as object, configured: false,
+    };
+    await open();
+
+    expect(await screen.findByText(/No AI provider is configured/)).toBeInTheDocument();
+  });
+
+  it("tests the key that was TYPED, so it can be checked before it is saved", async () => {
+    // Saving first and finding out hours later that an analysis failed is the
+    // version this replaces.
+    await open();
+
+    await userEvent.type(await screen.findByLabelText("API key"), "sk-new");
+    await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0][0]).toBe("/api/ai/settings/test");
+    expect(JSON.parse(writes()[0][1].body)).toEqual({
+      provider: "claude", api_key: "sk-new",
+    });
+  });
+
+  it("says testing costs something", async () => {
+    await open();
+
+    expect(await screen.findByText(/costs five tokens/)).toBeInTheDocument();
+  });
+
+  it("will not save an empty key, and says why", async () => {
+    await open();
+
+    const save = await screen.findByRole("button", { name: "Save key" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", expect.stringContaining("Type a key"));
+  });
+
+  it("keeps showing a stored model the fetched list no longer has", async () => {
+    // A model this key can no longer use is a real state. A dropdown that
+    // quietly showed something else would have the operator believe they are
+    // on a model they are not.
+    overrides["/api/ai/settings"] = {
+      ...BODIES["/api/ai/settings"] as object,
+      claude_model: "claude-retired", claude_models: ["claude-sonnet-4-6"],
+    };
+    await open();
+
+    expect(await screen.findByLabelText("Model")).toHaveValue("claude-retired");
+  });
+});
+
+describe("access and licence", () => {
+  const open = async () => {
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Access & licence" }));
+  };
+
+  it("shows which way the password prompt is set", async () => {
+    await open();
+
+    expect(await screen.findByLabelText("Ask for the dashboard password")).toBeChecked();
+    expect(screen.getByLabelText("Log in automatically")).not.toBeChecked();
+  });
+
+  it("shows the backend's warning when automatic login is on", async () => {
+    // The one thing the operator has to weigh. Composing it in the browser
+    // would mean a UI that forgot it offers the choice without the consequence.
+    overrides["/api/settings/access"] = {
+      auto_login: true,
+      warning: "Anyone who can open this machine can place and close live trades without a password.",
+    };
+    await open();
+
+    expect(await screen.findByRole("alert"))
+      .toHaveTextContent("place and close live trades without a password");
+  });
+
+  it("says nothing alarming when the password is required", async () => {
+    await open();
+    await screen.findByLabelText("Ask for the dashboard password");
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("saves the choice", async () => {
+    await open();
+
+    await userEvent.click(await screen.findByLabelText("Log in automatically"));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0][0]).toBe("/api/settings/access");
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ auto_login: true });
+  });
+
+  it("shows the licence, with the key already masked", async () => {
+    await open();
+
+    expect(await screen.findByText("simon@example.com")).toBeInTheDocument();
+    expect(screen.getByText("abc123")).toBeInTheDocument();
+    expect(screen.getByText("ABCD1234 - **** - ****")).toBeInTheDocument();
   });
 });

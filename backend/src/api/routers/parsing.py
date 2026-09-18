@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from backend.src.api.deps import reader as reader_dep
+from backend.src.controllers import engines_controller as engines_ctl
 from backend.src.controllers import telegram_controller as tg_ctl
 
 log = logging.getLogger(__name__)
@@ -74,6 +75,10 @@ async def state(rdr: Any = Depends(reader_dep)) -> dict:
         "reader": status,
         "configured": tg_ctl.reader_is_configured(status),
         "settings": tg_ctl.get_risk_settings(),
+        # The live-execution gates at the top of this tab write THIS node's row
+        # and do not travel between nodes, so the tab has to say which node it
+        # is setting when the other one is the trader.
+        "control_target": engines_ctl.control_target(),
         "lexicons": tg_ctl.get_all_lexicons(),
         "lexicon_labels": tg_ctl.LEXICON_LABELS,
         "lexicon_help": tg_ctl.LEXICON_HELP,

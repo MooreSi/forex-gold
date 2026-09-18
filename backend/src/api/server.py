@@ -31,6 +31,7 @@ from starlette.staticfiles import StaticFiles
 from backend.src.api import auth as gate
 from backend.src.api import deps, errors
 from backend.src.api.routers import ai as ai_router
+from backend.src.api.routers import ai_settings as ai_settings_router
 from backend.src.api.routers import auth as auth_router
 from backend.src.api.routers import backtest as backtest_router
 from backend.src.api.routers import chart as chart_router
@@ -67,6 +68,7 @@ ROUTERS = (
     system_router.router,
     auth_router.router,
     ai_router.router,
+    ai_settings_router.router,
     backtest_router.router,
     chart_router.router,
     decision_log_router.router,

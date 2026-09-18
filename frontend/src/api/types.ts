@@ -178,6 +178,12 @@ export interface ParsingState {
   lexicon_labels: Record<string, string>;
   lexicon_help: Record<string, string>;
   channels: ParsingChannel[];
+  /**
+   * Which node a control reaches. The live-execution gates on this tab write
+   * this node's own row and do NOT travel between nodes, so the tab says so
+   * when the other machine is the one trading.
+   */
+  control_target?: string;
 }
 
 export interface HourlyCell {

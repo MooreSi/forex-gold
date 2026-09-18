@@ -14,12 +14,15 @@ takes over position sizing and adds its own pre-trade gates, and this account
 runs with it off -- which is exactly why its configured 3% daily-loss limit sat
 inert through both losing days.
 """
+import pathlib
 import time
 
 import pytest
 
 from backend.src.services.risk import governor as rg
 from backend.src.db import database as db
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _reset_thread_local_connection():
@@ -249,14 +252,37 @@ def test_a_quiet_period_after_resuming_does_not_arm_anything(fresh_db):
     assert rg.check_giveback_guard(ON) is None
 
 
-def test_both_resume_paths_re_arm():
-    """/resume and the panel's Resume button must behave the same -- a fix on
-    one path only is how the two drift apart."""
+def test_every_resume_path_re_arms():
+    """A fix on one path only is how they drift apart -- and they HAD.
+
+    There were three: `/resume`, the Telegram panel's Resume button, and the
+    dashboard's. The first two re-armed by hand and the third did not, so
+    resuming from the dashboard after a give-back halt lasted until the next
+    close and the button looked broken.
+
+    All three now call `manual_pause.resume()`, which is asserted to re-arm in
+    `tests/risk/test_manual_pause.py`. Checking the delegation here is the
+    stronger claim: the old version could only see the two paths that happened
+    to contain the right substring, and said nothing about the one that was
+    wrong.
+    """
     import inspect
-    from backend.src.services.telegram import bot_readonly as ro
+
     from backend.src.services.positions import core_bot_panel as panel
-    assert "rearm_risk_guards" in inspect.getsource(ro.cmd_resume)
-    assert "rearm_risk_guards" in inspect.getsource(panel._resume_trading)
+    from backend.src.services.risk import manual_pause
+    from backend.src.services.telegram import bot_readonly as ro
+
+    for fn in (ro.cmd_resume, panel._resume_trading):
+        assert "manual_pause" in inspect.getsource(fn), fn.__qualname__
+        assert "rearm_risk_guards" not in inspect.getsource(fn), (
+            f"{fn.__qualname__} re-arms by hand again -- that is the copy that "
+            "drifted last time"
+        )
+
+    assert "rearm_risk_guards" in inspect.getsource(manual_pause.resume)
+
+    api = (REPO / "backend/src/api/routers/trading.py").read_text(encoding="utf-8")
+    assert "resume_trading" in api, "the dashboard has no resume path at all"
 
 
 # ── daily loss ceiling (governor-independent) ────────────────────────────────

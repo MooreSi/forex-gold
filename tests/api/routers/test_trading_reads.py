@@ -1,4 +1,17 @@
+"""The Trading tab's reads, and the two controls that stop and start it.
 
+**Nothing here places or closes a position.** The order paths live in
+`test_orders.py` behind their own router, deliberately, so that a GET can never
+open one. What is here is everything else the tab does: editing a pending
+signal, reading channel-strategy recommendations, and pausing trading.
+
+Pausing is the safe direction and is not gated. Resuming lets automated entries
+happen again, which is why it goes through a service that does more than clear
+a flag — see `tests/risk/test_manual_pause.py`.
+"""
+from __future__ import annotations
+
+import pytest
 
 # ── Editing a pending signal ─────────────────────────────────────────────────
 
@@ -154,3 +167,105 @@ class TestChannelStrategyRecommendations:
 
         assert r.status_code == 400
         assert asked == []
+
+
+# ── Pausing by hand ──────────────────────────────────────────────────────────
+
+class TestPausingTrading:
+    """Restored 2026-09-18. The React port shipped with no way to halt trading
+    from the dashboard at all, so an operator who wanted to stop had to turn
+    sources off one at a time or edit the database.
+
+    Pausing is the safe direction. Resuming is the one that lets money move
+    again, and it does MORE than clear a flag — the service re-arms the
+    post-close guards, because otherwise a resume after a give-back halt lasts
+    until the next trade closes."""
+
+    def test_pausing_for_hours_forwards_the_number(self, make_client, monkeypatch):
+        from backend.src.api.routers import trading as trading_router
+
+        seen = []
+        monkeypatch.setattr(trading_router.trading_ctl, "pause_trading",
+                            lambda *a, **k: seen.append((a, k)) or 1_800_000_000.0)
+
+        body = make_client().post("/api/trading/pause", json={"hours": 2}).json()
+
+        assert seen == [((), {"hours": 2.0, "until": None})]
+        assert body["paused"] is True
+        assert body["until"] == 1_800_000_000.0
+
+    def test_an_explicit_moment_wins_over_the_hours(self, make_client, monkeypatch):
+        """A dialog offers both; whichever was filled in is the one meant."""
+        from backend.src.api.routers import trading as trading_router
+
+        seen = []
+        monkeypatch.setattr(trading_router.trading_ctl, "pause_trading",
+                            lambda *a, **k: seen.append((a, k)) or 1_800_000_000.0)
+
+        make_client().post("/api/trading/pause",
+                           json={"hours": 2, "until": 1_800_000_000.0})
+
+        # Both are forwarded; the SERVICE decides which wins, because the rule
+        # ("a moment beats a duration, and an empty box is not zero") has to
+        # hold for the Telegram command too.
+        assert seen == [((), {"hours": 2.0, "until": 1_800_000_000.0})]
+
+    def test_an_empty_body_is_forwarded_as_empty_not_as_zero(
+        self, make_client, monkeypatch,
+    ):
+        """Zero would be a pause already in the past: trading would not stop
+        and the screen would say it had. The router must not invent a number
+        either -- `tests/risk/test_manual_pause.py` owns the 4-hour default."""
+        from backend.src.api.routers import trading as trading_router
+
+        seen = []
+        monkeypatch.setattr(trading_router.trading_ctl, "pause_trading",
+                            lambda *a, **k: seen.append(k) or 1.0)
+
+        make_client().post("/api/trading/pause", json={})
+
+        assert seen == [{"hours": None, "until": None}]
+
+    def test_a_moment_in_the_past_is_refused_with_its_reason(
+        self, make_client, monkeypatch,
+    ):
+        from backend.src.api.routers import trading as trading_router
+
+        def _boom(*a, **k):
+            raise ValueError("The pause has to end in the future.")
+
+        monkeypatch.setattr(trading_router.trading_ctl, "pause_trading", _boom)
+
+        res = make_client().post("/api/trading/pause", json={"until": 1.0})
+
+        assert res.status_code == 400
+        assert "future" in res.json()["error"]["message"]
+
+    def test_resuming_goes_through_the_service_that_also_rearms(
+        self, make_client, monkeypatch,
+    ):
+        from backend.src.api.routers import trading as trading_router
+
+        called = []
+        monkeypatch.setattr(trading_router.trading_ctl, "resume_trading",
+                            lambda: called.append(True))
+
+        body = make_client().post("/api/trading/resume").json()
+
+        assert called == [True]
+        assert body["paused"] is False
+
+    @pytest.mark.parametrize("path", ["/api/trading/pause", "/api/trading/resume"])
+    def test_neither_is_reachable_by_a_get(self, path, make_client, monkeypatch):
+        """Both change whether orders can be sent. A GET that does is one a
+        prefetch or a refresh can fire."""
+        from backend.src.api.routers import trading as trading_router
+
+        called = []
+        monkeypatch.setattr(trading_router.trading_ctl, "pause_trading",
+                            lambda *a, **k: called.append("pause"))
+        monkeypatch.setattr(trading_router.trading_ctl, "resume_trading",
+                            lambda: called.append("resume"))
+
+        assert make_client().get(path).status_code == 405
+        assert called == []

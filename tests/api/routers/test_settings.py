@@ -239,3 +239,59 @@ def test_reading_diagnostics_never_resets_the_breaker(make_client, config):
     make_client().get("/api/settings/diagnostics")
 
     assert config["writes"] == []
+
+
+# ── Who can open this app ────────────────────────────────────────────────────
+
+class TestAppAccess:
+    """Its own endpoint rather than a field on `/app`, for the reason the
+    NiceGUI tab was its own tab: "does this machine ask for a password" is the
+    first thing somebody looks for when they want to change it, and an access
+    control buried in a page of unrelated settings is one that stays forgotten.
+
+    Nothing here weakens the gate. `auto_login_enabled` still defaults to False
+    and an unreadable config still keeps the door shut — this only writes the
+    setting the gate reads."""
+
+    def test_it_reports_the_current_setting(self, make_client, config, monkeypatch):
+        monkeypatch.setattr(settings_router.settings_ctl, "get_config",
+                            lambda k, d=None: False)
+
+        assert make_client().get("/api/settings/access").json()["auto_login"] is False
+
+    def test_automatic_login_comes_with_the_backend_s_own_warning(
+        self, make_client, config, monkeypatch,
+    ):
+        """The one thing the operator has to weigh. Composing it in the browser
+        means a UI that forgot it offers the choice without the consequence."""
+        monkeypatch.setattr(settings_router.settings_ctl, "get_config",
+                            lambda k, d=None: True)
+
+        body = make_client().get("/api/settings/access").json()
+
+        assert body["auto_login"] is True
+        assert "without a password" in body["warning"]
+
+    def test_requiring_the_password_carries_no_warning(
+        self, make_client, config, monkeypatch,
+    ):
+        """Negative control: a warning shown always is a warning nobody reads."""
+        monkeypatch.setattr(settings_router.settings_ctl, "get_config",
+                            lambda k, d=None: False)
+
+        assert make_client().get("/api/settings/access").json()["warning"] == ""
+
+    def test_it_writes_the_key_the_gate_actually_reads(
+        self, make_client, config, monkeypatch,
+    ):
+        """A setting written under a different name is a switch that does
+        nothing — and this one's nothing is "the password is still required",
+        which at least fails safe, but silently."""
+        from backend.src.api import auth as auth_gate
+
+        monkeypatch.setattr(settings_router.settings_ctl, "get_config",
+                            lambda k, d=None: True)
+
+        make_client().put("/api/settings/access", json={"auto_login": True})
+
+        assert ("app", ({auth_gate.SETTING_KEY: True},), {}) in config["writes"]

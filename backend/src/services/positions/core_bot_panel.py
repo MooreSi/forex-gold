@@ -390,14 +390,11 @@ def _pause_until_session(key: str) -> Screen:
 
 
 def _resume_trading() -> Screen:
-    db_module.set_app_config("trade_pause_until", "0")
-    # See cmd_resume: without re-arming, a resume after a give-back halt is
-    # undone by the next close.
-    try:
-        from backend.src.services.risk.governor import rearm_risk_guards
-        rearm_risk_guards()
-    except Exception:
-        pass
+    # Clearing the flag AND re-arming the post-close guards is one operation,
+    # in services/risk/manual_pause.py -- written out by hand in three places
+    # until 2026-09-18 and correct in only two of them.
+    from backend.src.services.risk import manual_pause as _pause
+    _pause.resume()
     log.info("[Panel] trading resumed from the pause panel")
     return Screen("▶️ Trading resumed.", mode="send")
 

@@ -24,6 +24,7 @@ import logging
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from backend.src.api import auth as auth_gate
 from backend.src.api.errors import Refusal
 from backend.src.api.redaction import redacted as _redacted
 from backend.src.controllers import settings_controller as settings_ctl
@@ -42,6 +43,10 @@ class RetentionWrite(BaseModel):
 
 class ExpertParamsWrite(BaseModel):
     values: dict
+
+
+class AccessWrite(BaseModel):
+    auto_login: bool
 
 
 class Mt5Credentials(BaseModel):
@@ -133,6 +138,40 @@ async def reset_expert_params(body: ConfigWrite) -> dict:
     if key:
         return settings_ctl.reset_expert_param(str(key))
     return settings_ctl.reset_all_expert_params()
+
+
+@router.get("/access")
+async def access() -> dict:
+    """Whether this machine asks for the dashboard password on restart.
+
+    Its own endpoint rather than a field on `/app`, for the reason the NiceGUI
+    tab was its own tab: "does this machine ask for a password" is the first
+    thing somebody looks for when they want to change it, and an access control
+    buried in a page of unrelated settings is one that stays forgotten.
+    """
+    auto = bool(settings_ctl.get_config(auth_gate.SETTING_KEY, False))
+    return {
+        "auto_login": auto,
+        # Said by the backend, not composed in the browser: it is the one thing
+        # the operator needs to weigh, and a UI that forgot to render it would
+        # be offering the choice without the consequence.
+        "warning": (
+            "Anyone who can open this machine can place and close live trades "
+            "without a password." if auto else ""
+        ),
+    }
+
+
+@router.put("/access")
+async def set_access(body: AccessWrite) -> dict:
+    """Turn the password prompt on or off.
+
+    Nothing here weakens the gate itself: `auto_login_enabled` defaults to
+    False and an unreadable config still keeps the door shut. This only writes
+    the setting that gate reads.
+    """
+    settings_ctl.save_config({auth_gate.SETTING_KEY: bool(body.auto_login)})
+    return await access()
 
 
 @router.get("/diagnostics")

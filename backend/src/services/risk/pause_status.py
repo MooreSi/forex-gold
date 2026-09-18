@@ -32,6 +32,7 @@ from typing import Optional
 from backend.src.db import database as db_module
 from backend.src.services.risk import circuit_breaker_repo as _breaker
 from backend.src.services.risk import governor as _governor
+from backend.src.services.risk.manual_pause import PAUSE_KEY
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def _pause_until() -> float:
     time and keeps the halt.
     """
     try:
-        return float(db_module.get_app_config("trade_pause_until") or 0)
+        return float(db_module.get_app_config(PAUSE_KEY) or 0)
     except Exception:
         return 0.0
 

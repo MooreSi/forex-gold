@@ -1,6 +1,7 @@
 import { CircleDot, LogOut, Server, TriangleAlert } from "lucide-react";
 import { AccountBadge } from "./AccountBadge";
 import { ActiveTraderControl } from "./ActiveTraderControl";
+import { PauseControl } from "./PauseControl";
 import { Button } from "@/components/shared/Button";
 import { formatClock, formatPrice } from "@/components/shared/format";
 import { useAuth } from "@/contexts/AuthContext";
@@ -98,6 +99,10 @@ export function AppHeader() {
             {data.ea_badge.text}
           </span>
         )}
+        <PauseControl
+          paused={data?.pause?.paused === true}
+          onChanged={() => void refresh()}
+        />
         {data?.active_trader && (
           <ActiveTraderControl
             activeTrader={data.active_trader}

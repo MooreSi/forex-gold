@@ -5,7 +5,8 @@ import type { BlackoutSettings } from "@/api/types";
 interface BlackoutSectionProps {
   settings: BlackoutSettings;
   onSave: (next: {
-    enabled: boolean; minutes_before: number; minutes_after: number;
+    enabled: boolean; impact: string;
+    minutes_before: number; minutes_after: number;
   }) => Promise<void>;
 }
 
@@ -20,6 +21,10 @@ export function BlackoutSection({ settings, onSave }: BlackoutSectionProps) {
   const [enabled, setEnabled] = useState(settings.enabled);
   const [before, setBefore] = useState(String(settings.minutes_before));
   const [after, setAfter] = useState(String(settings.minutes_after));
+  // Which releases the window applies to. It was in the response and in the
+  // types from the start and was never on screen or written, so the setting
+  // could not be changed at all.
+  const [impact, setImpact] = useState(settings.impact ?? "high");
   const [saving, setSaving] = useState(false);
 
   // The server is the source of truth; a poll that lands after a save must be
@@ -28,13 +33,16 @@ export function BlackoutSection({ settings, onSave }: BlackoutSectionProps) {
     setEnabled(settings.enabled);
     setBefore(String(settings.minutes_before));
     setAfter(String(settings.minutes_after));
-  }, [settings.enabled, settings.minutes_before, settings.minutes_after]);
+    setImpact(settings.impact ?? "high");
+  }, [settings.enabled, settings.impact, settings.minutes_before,
+      settings.minutes_after]);
 
   const save = async () => {
     setSaving(true);
     try {
       await onSave({
         enabled,
+        impact,
         minutes_before: Number(before) || 0,
         minutes_after: Number(after) || 0,
       });
@@ -54,6 +62,18 @@ export function BlackoutSection({ settings, onSave }: BlackoutSectionProps) {
           className="accent-accent"
         />
         Hold automated entries around high-impact news
+      </label>
+      <label className="text-xs text-ink-2">
+        Blackout on
+        <select
+          aria-label="Blackout on"
+          value={impact}
+          onChange={(e) => setImpact(e.target.value)}
+          className="mt-0.5 block w-44 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+        >
+          <option value="high">High impact only</option>
+          <option value="high_medium">High + Medium impact</option>
+        </select>
       </label>
       <label className="text-xs text-ink-2">
         Minutes before

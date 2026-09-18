@@ -86,15 +86,39 @@ def test_saving_the_blackout_writes_the_keys_the_calendar_reads(make_client, cal
     """The 2026-09-04 bug, pinned by name. A key the reader does not look at is
     a setting that silently does nothing."""
     make_client().put("/api/news/blackout", json={
-        "enabled": False, "minutes_before": 30, "minutes_after": 45,
+        "enabled": False, "impact": "high_medium",
+        "minutes_before": 30, "minutes_after": 45,
     })
 
     assert calendar["saved"] == [{
         "news_blackout_enabled": False,
+        "news_blackout_impact": "high_medium",
         "news_blackout_minutes_before": 30,
         "news_blackout_minutes_after": 45,
     }]
     assert set(calendar["saved"][0]) == set(news_router.BLACKOUT_KEYS)
+
+
+def test_the_impact_level_is_written_too(make_client, calendar):
+    """It was in the response schema and in the browser's types from the start
+    and was never written, so the picker could not have worked -- the same
+    shape as the bug above, one key along."""
+    make_client().put("/api/news/blackout", json={
+        "enabled": True, "impact": "high_medium",
+        "minutes_before": 15, "minutes_after": 15,
+    })
+
+    assert calendar["saved"][0]["news_blackout_impact"] == "high_medium"
+
+
+def test_an_omitted_impact_defaults_to_high_rather_than_blank(make_client, calendar):
+    """A blank would be clamped back by the calendar anyway, but writing one
+    means the stored value is briefly a string the reader rejects."""
+    make_client().put("/api/news/blackout", json={
+        "enabled": True, "minutes_before": 15, "minutes_after": 15,
+    })
+
+    assert calendar["saved"][0]["news_blackout_impact"] == "high"
 
 
 def test_the_response_is_what_the_calendar_reports_not_what_was_sent(

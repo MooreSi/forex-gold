@@ -69,6 +69,12 @@ def _columns_of(table: str) -> set[str]:
     return cols
 
 
+def _mt5_columns() -> set[str]:
+    """`mt5_credentials` lives in the master (demo) database and holds BOTH
+    accounts: they have to be readable while pointed at either environment."""
+    return _columns_of("mt5_credentials")
+
+
 def _tab_source() -> str:
     return (_REPO / "frontend" / "src" / "components" / "settings" / "tabs"
             / "ConnectionsTab.tsx").read_text(encoding="utf-8")
@@ -254,3 +260,52 @@ def test_each_screen_actually_declares_some_keys(path, what):
     """The other half of the negative control: a spec file whose shape changed
     would silently offer nothing to check."""
     assert _keys_in(path), f"no `key:` entries parsed out of {what}"
+
+
+# ── The MT5 credentials, which are a dict and were passed as three args ──────
+
+class TestTheMt5CredentialsWrite:
+    """`save_mt5_credentials(updates: dict)` takes ONE dict and the router
+    passed it three positional arguments, so every save raised a TypeError —
+    the same defect as the Telegram one, in the one place that decides which
+    broker account the bridge logs into.
+
+    Invisible for the same reason: `tests/api/routers/test_settings.py`
+    replaces the controller with a recorder, and a recorder accepts any shape.
+    """
+
+    def test_it_takes_one_dict(self):
+        from backend.src.services.broker import credentials_repo as _creds
+
+        sig = inspect.signature(_creds.save_mt5_credentials)
+
+        with pytest.raises(TypeError):
+            sig.bind("5203117", "hunter2", "Vantage-Demo")
+
+        sig.bind({"login": "5203117"})
+
+    def test_the_router_does_not_pass_three_positional_arguments(self):
+        src = (_REPO / "backend" / "src" / "api" / "routers"
+               / "settings.py").read_text(encoding="utf-8")
+        call = re.search(r"save_mt5_credentials\((.*?)\)\n", src, re.S)
+
+        assert call, "no save_mt5_credentials call in the settings router"
+        assert "," not in call.group(1).split("{")[0], (
+            "the router still passes separate arguments to a one-dict save")
+
+    @pytest.mark.parametrize("field", ["login", "password_enc", "server",
+                                       "live_login", "live_password_enc",
+                                       "live_server"])
+    def test_every_credential_field_it_writes_is_a_column(self, field):
+        """`password` is not a column; `password_enc` is. A write under the
+        wrong name raises, which is the same outcome as the wrong shape."""
+        assert field in _mt5_columns()
+
+    def test_the_router_writes_the_encrypted_column_name(self):
+        """The repo encrypts `password_enc` and `live_password_enc` on the way
+        in. A value written as `password` would miss both the column and the
+        encryption."""
+        src = (_REPO / "backend" / "src" / "api" / "routers"
+               / "settings.py").read_text(encoding="utf-8")
+
+        assert "password_enc" in src

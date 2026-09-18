@@ -50,6 +50,16 @@ export const CAPABILITIES: Capability[] = [
       "Scale the position with measured volatility instead of using a flat risk percentage.",
   },
   {
+    key: "re_ai_tuning_enabled",
+    label: "Let the AI re-tune these settings",
+    description:
+      "Re-reads the market every 15 minutes and CHANGES the switches above on " +
+      "its own. It tunes against measured evidence from this account's own " +
+      "trade history — which is why the switches with no such evidence, like " +
+      "the CME one below, are not in its allowlist and it cannot touch them. " +
+      "Off means these settings only ever change when you change them.",
+  },
+  {
     key: "re_cme_context_enabled",
     label: "Read CME futures context (not connected yet)",
     // The wording is the point, not decoration. The failure it guards against

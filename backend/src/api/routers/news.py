@@ -22,8 +22,8 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 # reader does not look at is exactly the bug this feature already had: the page
 # saved four keys, `load()` named none of them, and switching the blackout off
 # did nothing at all (found 2026-09-04, on by default the whole time).
-BLACKOUT_KEYS = ("news_blackout_enabled", "news_blackout_minutes_before",
-                 "news_blackout_minutes_after")
+BLACKOUT_KEYS = ("news_blackout_enabled", "news_blackout_impact",
+                 "news_blackout_minutes_before", "news_blackout_minutes_after")
 
 
 @router.get("/state", response_model=NewsState)
@@ -46,6 +46,11 @@ async def set_blackout(body: BlackoutUpdate) -> dict:
     """
     settings_ctl.save_config({
         "news_blackout_enabled": bool(body.enabled),
+        # The impact level was in the schema and in the browser's types from
+        # the start and was never actually written, so the picker could not
+        # have worked -- the same shape as the 2026-09-04 bug this endpoint's
+        # docstring is about, one key along.
+        "news_blackout_impact": str(body.impact),
         "news_blackout_minutes_before": int(body.minutes_before),
         "news_blackout_minutes_after": int(body.minutes_after),
     })

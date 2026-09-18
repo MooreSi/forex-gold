@@ -1,6 +1,7 @@
 import { CircleDot, LogOut, Server, TriangleAlert } from "lucide-react";
 import { AccountBadge } from "./AccountBadge";
 import { ActiveTraderControl } from "./ActiveTraderControl";
+import { EnvironmentControl } from "./EnvironmentControl";
 import { PauseControl } from "./PauseControl";
 import { Button } from "@/components/shared/Button";
 import { formatClock, formatPrice } from "@/components/shared/format";
@@ -38,6 +39,7 @@ export function AppHeader() {
     <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface-1 px-4 py-2">
       <span className="text-sm font-bold tracking-tight text-accent">FOREX Trader</span>
       <AccountBadge account={data?.account ?? null} />
+      <EnvironmentControl />
 
       {data?.tick && (
         <span className="num flex items-center gap-2 text-xs text-ink-2">

@@ -14,7 +14,10 @@ const BODIES: Record<string, unknown> = {
     internal_net_exposure_max_lots: 0.5, dpm_enabled: 0, profit_close_usd: 0,
     risk_governor_enabled: 0,
   },
-  "/api/settings/mt5": { login: "5203117", server: "Vantage-Demo", password_set: true },
+  "/api/settings/mt5": {
+    login: "5203117", server: "Vantage-Demo", password_enc_set: true,
+    live_login: "900123", live_server: "Vantage-Live", live_password_enc_set: false,
+  },
   // The shapes the stores actually return. `telegram_config` has three
   // columns and none of them is an api_id; the reader's Telethon credentials
   // are a different store entirely, which is what the first port got wrong.
@@ -186,38 +189,91 @@ describe("risk", () => {
 });
 
 describe("MT5", () => {
-  it("shows which account is configured without showing a password", async () => {
+  const open = async () => {
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "MT5" }));
+  };
+
+  it("shows which account is configured without showing a password", async () => {
+    await open();
 
     expect(await screen.findByText(/5203117/)).toBeInTheDocument();
     expect(screen.getByText(/never sent to this screen/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Password")).toHaveValue("");
+    expect(screen.getByLabelText("Demo account password")).toHaveValue("");
+  });
+
+  it("offers the LIVE account too, which could not be configured at all before", async () => {
+    // Without it the demo/live switch can never be used: it refuses to switch
+    // to an account it has no credentials for.
+    await open();
+
+    expect(await screen.findByTestId("mt5-live")).toBeInTheDocument();
+    expect(screen.getByLabelText("Live account login")).toBeInTheDocument();
   });
 
   it("says when no password is stored, because the bridge cannot log in", async () => {
-    overrides["/api/settings/mt5"] = { login: "5203117", server: "X", password_set: false };
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "MT5" }));
+    await open();
 
-    expect(await screen.findByText(/cannot log in/)).toBeInTheDocument();
+    const live = within(await screen.findByTestId("mt5-live"));
+    expect(live.getByText(/cannot log in/)).toBeInTheDocument();
+  });
+
+  it("saves the live account under the live environment", async () => {
+    await open();
+
+    await userEvent.type(await screen.findByLabelText("Live account login"), "900123");
+    await userEvent.type(screen.getByLabelText("Live account password"), "pw");
+    await userEvent.type(screen.getByLabelText("Live account server"), "Vantage-Live");
+    await userEvent.click(screen.getByRole("button", { name: /Save live credentials/ }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({
+      login: "900123", password: "pw", server: "Vantage-Live", environment: "live",
+    });
+  });
+
+  it("saves the demo account as demo", async () => {
+    // Negative control: a form that always sent one environment would pass the
+    // test above and quietly overwrite the wrong account.
+    await open();
+
+    await userEvent.type(await screen.findByLabelText("Demo account login"), "5203117");
+    await userEvent.type(screen.getByLabelText("Demo account password"), "pw");
+    await userEvent.type(screen.getByLabelText("Demo account server"), "Vantage-Demo");
+    await userEvent.click(screen.getByRole("button", { name: /Save demo credentials/ }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body).environment).toBe("demo");
   });
 
   it("will not save a half-filled form, and says what is missing", async () => {
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "MT5" }));
+    await open();
 
-    const save = await screen.findByRole("button", { name: /Save and sync/ });
+    const save = await screen.findByRole("button", { name: /Save demo credentials/ });
     expect(save).toBeDisabled();
     expect(save).toHaveAttribute("title", expect.stringContaining("login, password and server"));
   });
 
-  it("says saving also pushes to the bridge", async () => {
-    // Saved and not synced leaves the bridge logged in as the previous account.
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "MT5" }));
+  it("offers the EA bridge switch", async () => {
+    await open();
 
-    expect(await screen.findByText(/pushes them to the bridge/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Use the EA bridge")).toBeInTheDocument();
+  });
+
+  it("offers the macOS bridge backend, which had no screen at all", async () => {
+    await open();
+
+    expect(await screen.findByLabelText("Backend")).toHaveValue("crossover");
+  });
+
+  it("saves a changed backend", async () => {
+    await open();
+
+    await userEvent.selectOptions(await screen.findByLabelText("Backend"), "wine");
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0][0]).toBe("/api/settings/app");
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ bridge_backend: "wine" });
   });
 });
 

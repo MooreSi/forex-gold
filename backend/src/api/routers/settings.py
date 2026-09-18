@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from backend.src.api import auth as auth_gate
 from backend.src.api.errors import Refusal
 from backend.src.api.redaction import redacted as _redacted
+from backend.src.controllers import environment_controller as env_ctl
 from backend.src.controllers import settings_controller as settings_ctl
 
 log = logging.getLogger(__name__)
@@ -53,6 +54,9 @@ class Mt5Credentials(BaseModel):
     login: str
     password: str
     server: str
+    # Which account these belong to. Both are stored in one row, so the field
+    # names differ rather than the table.
+    environment: str = "demo"
 
 
 @router.get("/risk")
@@ -91,14 +95,40 @@ async def mt5() -> dict:
 
 @router.put("/mt5")
 async def save_mt5(body: Mt5Credentials) -> dict:
-    """Store MT5 credentials and push them to the bridge's own file.
+    """Store one account's MT5 credentials and push them to the bridge's file.
 
-    Both, always: credentials saved here and not synced leave the bridge
-    authenticating as the previous account, which is the same shape of bug as
-    backing up the wrong database — it looks like it worked.
+    **One dict, under the column names the store uses.** It was three
+    positional arguments to a one-dict function until 2026-09-18, so every save
+    raised and MT5 credentials could not be set from the dashboard at all. The
+    password column is `password_enc`, which is also what the repo encrypts on
+    the way in — a value written as `password` would miss both.
+
+    `environment` says which account. Both live in the same row of the master
+    database, deliberately: they have to be readable while the app is pointed
+    at either one, and a per-environment copy goes stale on whichever side was
+    not edited.
+
+    The bridge file is rewritten too, always: credentials saved and not synced
+    leave the bridge authenticating as the previous account, which is the same
+    shape of bug as backing up the wrong database — it looks like it worked.
     """
-    settings_ctl.save_mt5_credentials(body.login, body.password, body.server)
-    settings_ctl.sync_bridge_credentials_file()
+    environment = (body.environment or "demo").strip().lower()
+    if environment not in ("demo", "live"):
+        raise Refusal(f"Unknown environment {body.environment!r}.", status_code=400)
+
+    prefix = "live_" if environment == "live" else ""
+    updates = {
+        f"{prefix}login": body.login,
+        f"{prefix}password_enc": body.password,
+        f"{prefix}server": body.server,
+    }
+    settings_ctl.save_mt5_credentials(updates)
+
+    # Only when this IS the account the app is pointed at. Rewriting the file
+    # after editing the OTHER account's credentials would hand the bridge an
+    # account nobody asked it to use.
+    if environment == env_ctl.describe_environments()["current"]:
+        settings_ctl.sync_bridge_credentials_file(environment)
     return _redacted(settings_ctl.get_mt5_credentials() or {})
 
 

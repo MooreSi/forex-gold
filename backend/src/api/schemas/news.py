@@ -39,6 +39,10 @@ class BlackoutUpdate(BaseModel):
     enabled: bool
     minutes_before: int
     minutes_after: int
+    # Which releases the window applies to. `get_blackout_settings` falls back
+    # to its default on an unknown value, which is why the response is read
+    # back rather than echoed.
+    impact: str = "high"
 
 
 class CurrentEvent(NewsEvent):

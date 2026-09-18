@@ -56,7 +56,9 @@ def config(monkeypatch):
     monkeypatch.setattr(settings_router.settings_ctl, "get_mt5_credentials", lambda: state["mt5"])
     monkeypatch.setattr(settings_router.settings_ctl, "save_mt5_credentials", _record("mt5"))
     monkeypatch.setattr(settings_router.settings_ctl, "sync_bridge_credentials_file",
-                        lambda: state.__setitem__("synced", state["synced"] + 1))
+                        lambda *a: state.__setitem__("synced", state["synced"] + 1))
+    monkeypatch.setattr(settings_router.env_ctl, "describe_environments",
+                        lambda: {"current": "demo", "environments": {}})
     monkeypatch.setattr(settings_router.settings_ctl, "get_data_retention_days",
                         lambda: state["retention"])
     monkeypatch.setattr(settings_router.settings_ctl, "set_data_retention_days",
@@ -154,11 +156,61 @@ def test_saving_mt5_credentials_also_syncs_the_bridge_file(make_client, config):
     previous account — the same shape as backing up the wrong database: it
     looks like it worked."""
     make_client().put("/api/settings/mt5", json={
-        "login": "9001", "password": "new-one", "server": "Vantage-Live",
+        "login": "9001", "password": "new-one", "server": "Vantage-Demo",
     })
 
-    assert ("mt5", ("9001", "new-one", "Vantage-Live"), {}) in config["writes"]
+    assert ("mt5", ({"login": "9001", "password_enc": "new-one",
+                     "server": "Vantage-Demo"},), {}) in config["writes"]
     assert config["synced"] == 1
+
+
+def test_it_writes_one_dict_under_the_column_names_the_store_uses(
+    make_client, config,
+):
+    """Three positional arguments to a one-dict save raised on every attempt,
+    so MT5 credentials could not be set from the dashboard at all. And the
+    password column is `password_enc` — which is also what the repo encrypts on
+    the way in, so a value written as `password` would miss both."""
+    make_client().put("/api/settings/mt5", json={
+        "login": "9001", "password": "new-one", "server": "Vantage-Demo",
+    })
+
+    written = next(a[0] for name, a, _k in config["writes"] if name == "mt5")
+    assert set(written) == {"login", "password_enc", "server"}
+
+
+def test_the_live_account_is_stored_under_its_own_fields(make_client, config):
+    """Both accounts share one row — they have to be readable while the app is
+    pointed at either — so the field names differ rather than the table."""
+    make_client().put("/api/settings/mt5", json={
+        "login": "900123", "password": "live-pw", "server": "Vantage-Live",
+        "environment": "live",
+    })
+
+    written = next(a[0] for name, a, _k in config["writes"] if name == "mt5")
+    assert set(written) == {"live_login", "live_password_enc", "live_server"}
+
+
+def test_editing_the_OTHER_account_does_not_rewrite_the_bridge_file(
+    make_client, config,
+):
+    """The app is pointed at demo. Rewriting the bridge's credentials after
+    editing the live account would hand it an account nobody asked it to use."""
+    make_client().put("/api/settings/mt5", json={
+        "login": "900123", "password": "live-pw", "server": "Vantage-Live",
+        "environment": "live",
+    })
+
+    assert config["synced"] == 0
+
+
+def test_an_unknown_environment_is_refused(make_client, config):
+    res = make_client().put("/api/settings/mt5", json={
+        "login": "1", "password": "p", "server": "s", "environment": "staging",
+    })
+
+    assert res.status_code == 400
+    assert not [w for w in config["writes"] if w[0] == "mt5"]
 
 
 def test_the_mt5_response_still_carries_no_password(make_client, config):

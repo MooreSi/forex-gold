@@ -138,7 +138,7 @@ describe("the blackout window", () => {
     ).not.toBeChecked();
   });
 
-  it("saves the three keys the calendar reads", async () => {
+  it("saves the four keys the calendar reads", async () => {
     render(<NewsPanel />);
     const before = await screen.findByLabelText("Minutes before");
 
@@ -151,8 +151,29 @@ describe("the blackout window", () => {
       expect(put).toBeTruthy();
       expect(put![0]).toBe("/api/news/blackout");
       expect(JSON.parse(put![1].body)).toEqual({
-        enabled: true, minutes_before: 25, minutes_after: 15,
+        enabled: true, impact: "high", minutes_before: 25, minutes_after: 15,
       });
+    });
+  });
+
+  it("offers the impact level, which could not be changed at all before", async () => {
+    // It was in the response and in the browser's types from the start and was
+    // never on screen or written.
+    render(<NewsPanel />);
+
+    expect(await screen.findByLabelText("Blackout on")).toHaveValue("high");
+  });
+
+  it("saves a changed impact level", async () => {
+    render(<NewsPanel />);
+
+    await userEvent.selectOptions(
+      await screen.findByLabelText("Blackout on"), "high_medium");
+    await userEvent.click(screen.getByRole("button", { name: /Save/ }));
+
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find((c) => c[1]?.method === "PUT");
+      expect(JSON.parse(put![1].body).impact).toBe("high_medium");
     });
   });
 

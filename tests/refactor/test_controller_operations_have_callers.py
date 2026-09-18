@@ -50,8 +50,6 @@ AWAITING_REACT_PORT = {
     ("history_controller", "ticket_rr_map"),
     ("history_controller", "ticket_source_map"),
     ("history_controller", "ticket_strategy_map"),
-    ("settings_controller", "get_app_config_async"),
-    ("settings_controller", "switch_environment_db"),
     ("system_controller", "local_today"),
 }
 
@@ -106,18 +104,19 @@ class TestEveryControllerOperationIsCalled:
         were deleted ahead of their React replacements. Porting those tabs took
         it to 31; finishing the Trading tab, the node/update panel and the
         licence screens took it to 18; the Connections/Remote Node pass took it
-        to 12, and routing the Signal Generator's controls at the node that is
-        actually trading took it to 9.
+        to 12, routing the Signal Generator's controls at the node that is
+        actually trading took it to 9, and the discrepancy audit — which built
+        the demo/live switch and deleted the two operations it replaced — took
+        it to 7.
 
-        Of those 9, seven (the six `ticket_*_map` builders and `local_today`)
-        belong to the Analysis deal-level trade table and its calendar, which
-        are blocked on an owner decision about the facade allowlist — see
-        docs/todo/frontend/react-port/PROGRESS.md. The other two are the
-        environment switcher that lived in the app shell.
+        All seven that remain are ONE feature: the six `ticket_*_map` builders
+        and `local_today` belong to the Analysis deal-level trade table and its
+        calendar, which are blocked on an owner decision about the facade
+        allowlist. See docs/todo/frontend/react-port/PROGRESS.md.
 
         That is the number to watch: it may fall; it may not rise.
         """
-        assert len(AWAITING_REACT_PORT) <= 9, (
+        assert len(AWAITING_REACT_PORT) <= 7, (
             "the React port debt grew — a new tab deletion, or a controller "
             "operation added with no router to call it"
         )

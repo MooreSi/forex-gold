@@ -59,8 +59,36 @@ jobs:
           # pytest" before testing anything (2026-08-11 review C3).
           pip install pytest pytest-cov pytest-asyncio
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dashboard dependencies
+        run: npm ci
+        working-directory: frontend
+
       - name: Run all checks
         run: python -m tools.checks all
+
+      - name: Type-check and test the dashboard
+        run: |
+          npm run lint
+          npm test
+        working-directory: frontend
+
+      - name: The committed bundle must match the source
+        # frontend/dist is committed and is what the app serves, so a source
+        # change that was not rebuilt ships the previous dashboard. This is the
+        # check that makes that impossible to forget -- discipline alone is
+        # what CLAUDE.md's stale-guardrail incident is about.
+        # Asset filenames are content-hashed, so any real change moves them.
+        run: |
+          npm run build
+          git diff --exit-code --stat -- dist \
+            || { echo "::error::frontend/dist is stale — run 'npm run build' in frontend/ and commit the result"; exit 1; }
+        working-directory: frontend
 
       - name: Upload coverage report
         if: always()

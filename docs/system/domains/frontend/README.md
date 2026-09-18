@@ -107,17 +107,27 @@ An operation that grows a branch leaves the sweep, and
 lists it and gives it a behavioural test. That is the intended friction: a
 controller acquiring logic should cost a conversation.
 
-## Still NiceGUI, and why
+## No NiceGUI anywhere
 
-`backend/src/config/licence/guard.py` renders the **licence error screen and the
-activation screen** with NiceGUI, and it runs *before* the main app starts, in
-its own `ui.run()`. It is the reason `nicegui` is still in `requirements.txt`
-and the reason `no-nicegui-in-the-backend` still carries 2 baselined
-violations. Porting it is task 090 in `docs/todo/frontend/react-port/`. It was
-left alone deliberately rather than rushed: it is a licence surface, it is
-~280 lines of interactive flow (remote agents, delivery polling, manual
-activation), and a half-ported activation screen locks people out of an app
-they have paid for.
+`nicegui` is not a dependency of this project. The last two screens that used
+it — the pre-boot licence error and activation pages — became plain
+server-rendered HTML on 2026-09-18
+(`config/licence/activation_server.py`), and `no-nicegui-in-the-backend` is
+enforced at zero.
+
+**Plain HTML, not React, and deliberately so.** Those screens run before the app
+starts and are the only way back into a stranded install: one that needed
+`frontend/dist` to have been compiled could not rescue a broken one.
+`test_the_form_renders_with_no_bundle_and_no_database` is the first test in that
+file.
+
+**One consequence, on the admin machine only.** The KeyGen licence console
+(`~/Documents/KeyGen/forex_admin.py`) is a separate NiceGUI tool that lives
+outside this repository, and `backend/src/app.py` imports it to offer the Admin
+button. That import now fails on a machine with no nicegui installed — cleanly,
+by design, because the admin console is optional and the trading app must start
+without it. The button simply does not appear. `pip install nicegui` on that
+machine brings it back.
 
 ## Open questions
 

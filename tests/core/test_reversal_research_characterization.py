@@ -24,16 +24,48 @@ def _reset_thread_local_connection():
         del db._thread_local.depth
 
 
+# Every module whose clock the research loop reads. It calls THREE sweeps, and
+# each one computes its own `datetime.now(...)` in its own namespace.
+#
+# Only the first was pinned until 2026-09-18, so the other two were reading the
+# real wall clock: both return early while the London hour is under 22 and run
+# past their `is_remote_node()` check once it is 22 or later. That made
+# `test_is_remote_node_checked_unconditionally_outside_window` pass all day and
+# fail every night between 22:00 and midnight London time, on any machine --
+# which is exactly what it did on CI at 22:22 BST. A test that means something
+# different depending on when it runs is not pinning anything.
+_CLOCK_MODULES = (
+    "backend.src.services.reversal_engine.research",
+    "backend.src.services.reversal_engine.study_schedule",
+    "backend.src.services.breakout_signal.excursion_sweep",
+)
+
+
+class _Patchers:
+    """The handful of clock patches, stopped together."""
+
+    def __init__(self, patchers):
+        self._patchers = patchers
+
+    def stop(self):
+        for patcher in self._patchers:
+            patcher.stop()
+
+
 def _patched_now(fixed_dt):
-    """Context manager patching core_reversal_research.datetime.now() (where
-    engine.py's now-wired _reversal_engine_research_loop actually computes the
-    current time, having delegated to reversal_engine_research_sweep) while leaving
-    direct datetime(...) construction working via the real class."""
-    patcher = mock.patch("backend.src.services.reversal_engine.research.datetime")
-    mock_dt = patcher.start()
-    mock_dt.now.return_value = fixed_dt
-    mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-    return patcher
+    """Pin the clock every sweep in the loop reads, at `fixed_dt`.
+
+    Direct `datetime(...)` construction keeps working via the real class, which
+    is why each mock gets a side_effect rather than being a bare MagicMock.
+    """
+    started = []
+    for module in _CLOCK_MODULES:
+        patcher = mock.patch(f"{module}.datetime")
+        mock_dt = patcher.start()
+        mock_dt.now.return_value = fixed_dt
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        started.append(patcher)
+    return _Patchers(started)
 
 
 def _make_engine():
@@ -169,6 +201,13 @@ def test_pipeline_exception_swallowed_no_dedup_write(fresh_db):
 
 
 def test_is_remote_node_checked_unconditionally_outside_window(fresh_db):
+    """The research sweep checks the node role before anything else, even at
+    12:30 when it has no work to do.
+
+    The count is 1 because the loop's other two sweeps return on their own
+    hour check first. That is only true if their clocks are pinned too — see
+    `_CLOCK_MODULES`.
+    """
     e = _make_engine()
     p = _patched_now(datetime(2026, 7, 20, 12, 30, 0))
     check_calls = []

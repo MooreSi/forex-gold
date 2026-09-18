@@ -1,0 +1,31 @@
+# Line endings, pinned where they change what gets built.
+#
+# `frontend/dist` is committed and is what the app serves, and CI rebuilds it
+# and fails on any diff. That check is only meaningful if the build is
+# byte-identical on every platform — and it was not.
+#
+# Vite builds `dist/index.html` from `frontend/index.html`, passing the lines
+# it does not touch straight through. On a Windows runner git checks the source
+# out with CRLF (core.autocrlf defaults to true in Git for Windows), so the
+# output came out with CRLF on 13 of its 15 lines while the committed copy had
+# LF. The step then reported "frontend/dist is stale" on 2026-09-18 with the
+# bundle's own content-hashed asset names matching exactly — the build was
+# identical, the line endings were not.
+#
+# Reproduced by converting the source to CRLF locally and rebuilding: 13
+# insertions, 13 deletions, the same stat CI printed.
+#
+# So the HTML template is checked out with LF everywhere, and the committed
+# bundle is never converted on the way in or out.
+frontend/index.html text eol=lf
+
+# The build output is stored and checked out byte for byte, never converted.
+# `-text` rather than `text eol=lf`: dist holds a PNG as well as HTML/JS/CSS,
+# and marking that as text silently rewrote it (3770 -> 3769 bytes) the first
+# time this file was written. A build artefact has no line-ending policy; it
+# has bytes.
+frontend/dist/** -text
+
+# Everything else keeps git's own detection. A repo-wide `* text=auto eol=lf`
+# would rewrite every working tree on the next checkout, which is a much bigger
+# change than the problem needs and not one to make while a port is in review.

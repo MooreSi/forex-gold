@@ -107,36 +107,48 @@ CONTRACTS: list[Contract] = [
         enforced_at_zero=True,
     ),
     Contract(
-        name="frontend-never-imports-the-database",
+        name="the-api-layer-never-imports-the-database",
         rationale=(
-            "Won in M3, and the reason the ui_db counter exists. A page that "
-            "opens its own connection runs SQL on the UI event loop, which is "
-            "what produced the 400-600ms stalls, and it bypasses every cache "
-            "invalidation the services perform on write."
+            "Won in M3 as frontend-never-imports-the-database, and inherited "
+            "by backend/src/api when the NiceGUI frontend was replaced by "
+            "React (2026-09-18). A page that opened its own connection ran SQL "
+            "on the UI event loop, which is what produced the 400-600ms "
+            "stalls, and it bypassed every cache invalidation the services "
+            "perform on write. An HTTP handler that does it runs the same SQL "
+            "on the server's event loop for every browser that asks. "
+            "RETARGETED, not renamed for tidiness: frontend/ now holds "
+            "TypeScript, so a contract still pointing there would scan zero "
+            "files and report zero violations for ever -- the "
+            "delegation_checker.py failure this repo was rebuilt after."
         ),
-        source_packages=("frontend",),
+        source_packages=("backend/src/api",),
         forbidden=("backend.src.db",),
         enforced_at_zero=True,
     ),
     Contract(
-        name="frontend-reaches-the-backend-through-controllers",
+        name="the-api-layer-reaches-the-backend-through-controllers",
         rationale=(
-            "The database boundary is closed; the service boundary is now closed too. "
-            "Every page that imports a service directly is a page that can "
-            "call a service function on the UI thread, and is one more caller "
-            "to rewire whenever a service's signature changes. Shrinks as "
-            "pages are drained; see FINISH_LINE.md."
+            "Reached zero as frontend-reaches-the-backend-through-controllers "
+            "on 2026-09-02, after dropping 99 -> 59 -> 0. The React port "
+            "(2026-09-18) moved the top layer from frontend/ to "
+            "backend/src/api/, and the contract moved with it rather than "
+            "being retired: a router that imports a service directly can call "
+            "a service function on the server's event loop, and is one more "
+            "caller to rewire whenever a service's signature changes. There is "
+            "no legacy here to absorb, so it starts and stays at zero."
         ),
-        source_packages=("frontend",),
+        source_packages=("backend/src/api",),
         forbidden=("backend.src",),
-        allowed=("backend.src.controllers",),
-        # The composition root. frontend/app/__init__.py wires the app's own
-        # startup and shutdown, and needs the lifecycle handles to do it --
-        # CLAUDE.md already names it a sanctioned site. Every OTHER page now
-        # reaches the backend through a controller, so the rule is enforced at
-        # zero rather than parked on a baseline of 1 that could not tell this
-        # file apart from the next one added.
-        exempt_files=("frontend/app/__init__.py",),
+        allowed=("backend.src.controllers", "backend.src.api"),
+        # The composition root, and the only file that may hold the engine
+        # handle. backend/src/api/server.py wires the app's own startup and
+        # shutdown and injects the runtime into the routers -- exactly the role
+        # frontend/app/__init__.py had, carrying exactly the same single
+        # exemption. Every OTHER module reaches the backend through a
+        # controller, so the rule is enforced at zero rather than parked on a
+        # baseline of 1 that could not tell this file apart from the next one
+        # added.
+        exempt_files=("backend/src/api/server.py",),
         enforced_at_zero=True,
     ),
     Contract(
@@ -227,22 +239,14 @@ def _matches(module: str, prefixes: tuple[str, ...]) -> bool:
 def _source_unit(path: str) -> str:
     """The unit a violation is attributed to.
 
-    A page split into a package is ONE source unit, not one per section.
-    Counting raw import statements made the metric move when a file was
-    split into a directory -- the same frontend package importing the same
-    backend modules scored worse purely because the statements were spread
-    over more files. Coupling did not change, so the number should not.
+    One file, one unit. The grouping rules that used to live here existed for
+    the NiceGUI frontend: a page split into a package is ONE source unit, not
+    one per section, or the metric moved when a file became a directory
+    without the coupling changing at all. `backend/src/api/` is flat by rule --
+    a router is a module, never a package, same as a controller -- so there is
+    nothing left to group and the branches were deleted with the frontend they
+    described (2026-09-18) rather than left as code that can never run.
     """
-    parts = path.split("/")
-    if len(parts) > 3 and parts[0] == "frontend" and parts[1] == "pages":
-        return "/".join(parts[:3])
-    # frontend/app.py became frontend/app/ for the same reason, and needs the
-    # same grouping. Named explicitly rather than derived from "is a package":
-    # frontend/components/ is a package of seven independent modules, and
-    # collapsing those into one unit would loosen the gate rather than fix a
-    # miscount.
-    if len(parts) > 2 and parts[0] == "frontend" and parts[1] == "app":
-        return "frontend/app"
     return path
 
 

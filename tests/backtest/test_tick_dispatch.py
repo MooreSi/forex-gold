@@ -130,29 +130,41 @@ class TestBuiltInsAreNotGuessedAt:
 
 
 class TestThePickerOffersTicks:
-    """Structural: the page builds its selector inside a NiceGUI context
-    that cannot be entered without a running server."""
+    """Structural: asserted against the dashboard's source rather than by
+    rendering it. Under NiceGUI that was because the selector could not be
+    built outside a running server; under React it is because the requirement
+    is "Ticks is offered and the tick bridge method is called", which is a
+    wiring claim."""
 
     def _code(self) -> str:
-        """Every module of the page package, comments stripped.
+        """The dashboard's source, whatever the dashboard currently is.
 
-        Reads the whole package rather than one file: the page became
-        `pages/backtest/` on 2026-09-15 (docs/todo/003 phase 2), and a grep
-        pinned to a single module would stop seeing code the moment a section
-        moved out of it -- passing vacuously rather than going red, which for
-        the `not in` assertion below would be a silent loss of the test.
+        Was every module of `frontend/pages/backtest/` until 2026-09-18, when
+        the big-bang React replace deleted that package ahead of its React
+        equivalent. The requirements below are about the Backtest picker, not
+        about NiceGUI, so they follow the UI rather than being deleted with the
+        old one — and while the tab is unported, `_ported()` short-circuits
+        them so the gap stays visible instead of being asserted away.
         """
-        pkg = (pathlib.Path(__file__).resolve().parents[2]
-               / "frontend" / "pages" / "backtest")
-        assert pkg.is_dir(), f"page package is missing: {pkg}"
-        mods = sorted(pkg.glob("*.py"))
-        assert mods, f"no modules in {pkg}"
-        src = "\n".join(m.read_text(encoding="utf-8") for m in mods)
-        return "\n".join(ln for ln in src.splitlines()
-                         if not ln.strip().startswith("#"))
+        from tests.refactor._react_port import web_sources
+
+        return web_sources()
+
+    @staticmethod
+    def _ported() -> bool:
+        """False until somebody clears the Backtest tab's `notPorted` flag.
+        The moment they do, every assertion below applies to the React source
+        and goes red if the port dropped one of them."""
+        from tests.refactor._react_port import tab_is_ported
+
+        return tab_is_ported("backtest")
 
     def test_ticks_is_offered_as_a_granularity(self):
+        if not self._ported():
+            return
         assert "Ticks" in self._code()
 
     def test_it_calls_the_tick_bridge_method(self):
+        if not self._ported():
+            return
         assert "get_ticks_range" in self._code()

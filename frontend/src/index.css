@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/*
+ * Semantic colours are frozen. green = profit, red = loss, yellow/amber =
+ * warning and the app's own accent, blue = the remote/VPS node, gray =
+ * neutral or absent data. They are tokens now instead of hand-written
+ * utility classes, which is the point of the port — but they are the SAME
+ * colours, deliberately. Remapping profit-green would be actively harmful.
+ *
+ * Only the neutral scale is meant to be re-skinned by a theme. That is the
+ * arrangement theme.py had across its four presets, and the reason it left
+ * every accent alone.
+ *
+ * There is no light mode yet (docs/todo/frontend/react-port/QUESTIONS.md Q3).
+ * Everything goes through a token so adding one stays a decision rather than
+ * a rewrite.
+ */
+@theme {
+  --color-profit: #00cc88;
+  --color-profit-dim: #00cc8833;
+  --color-loss: #ff4444;
+  --color-loss-dim: #ff444433;
+  --color-warning: #ffb020;
+  --color-accent: #ffd700;
+  --color-remote: #64b4ff;
+
+  --color-surface-0: #030712;
+  --color-surface-1: #0b111e;
+  --color-surface-2: #131a28;
+  --color-surface-3: #1b2333;
+  --color-line: #263044;
+
+  --color-ink-1: #e5e7eb;
+  --color-ink-2: #9ca3af;
+  --color-ink-3: #6b7280;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface-0);
+  color: var(--color-ink-1);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Any number a user might compare against another number is monospaced, so
+   the digits line up. Same rule the NiceGUI conventions carried. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

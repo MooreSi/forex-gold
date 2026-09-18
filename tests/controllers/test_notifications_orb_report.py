@@ -63,16 +63,32 @@ class TestItForwardsToTheRuntime:
 
 
 class TestThePageGoesThroughIt:
-    def test_the_email_page_no_longer_imports_the_composition_root(self):
+    def test_the_top_layer_no_longer_imports_the_composition_root(self):
+        """Retargeted 2026-09-18 from the NiceGUI email settings module to
+        `backend/src/api/`. The rule is the same and is now a contract enforced
+        at zero, with `server.py` as the single named exemption — it IS the
+        composition root, so it is the one file allowed to name one."""
         import pathlib
 
-        src = pathlib.Path("frontend/pages/settings/_email.py").read_text(
-            encoding="utf-8")
-        code = "\n".join(ln for ln in src.splitlines()
-                         if not ln.strip().startswith("#"))
+        api = pathlib.Path(__file__).resolve().parents[2] / "backend" / "src" / "api"
+        sources = [p for p in api.rglob("*.py") if p.name != "server.py"]
+        assert sources, "the API layer has no Python in it — this scan is inert"
 
-        assert "from backend.src.app import" not in code
-        assert "backend.src.app" not in code
+        # Parsed, not grepped. The NiceGUI version stripped `#` comments and
+        # searched the text, which would now fail on a module DOCSTRING that
+        # merely explains why only server.py may import the composition root.
+        # A string that mentions a rule is not a breach of it; an import is.
+        import ast
+
+        for path in sources:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    assert not node.module.startswith("backend.src.app"), (
+                        f"{path.name}:{node.lineno}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        assert not alias.name.startswith("backend.src.app"), (
+                            f"{path.name}:{node.lineno}")
 
     def test_it_is_exported(self):
         assert "build_orb_report" in nc.__all__

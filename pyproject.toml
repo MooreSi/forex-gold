@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "forex-trader"
 version = "1.0.0"
-description = "FOREX Trader — XAUUSD Gold Simulation App with NiceGUI"
+description = "FOREX Trader — XAUUSD Gold trading app with a React dashboard"
 requires-python = ">=3.11"
 # Kept in lockstep with requirements.txt (tests/refactor/test_pyproject_metadata.py
 # fails if requirements.txt declares a package this list omits). requirements.txt
@@ -13,6 +13,9 @@ requires-python = ">=3.11"
 # builds pull the same runtime set instead of a broken subset.
 dependencies = [
     "nicegui>=1.4.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "itsdangerous>=2.2.0",
     "httpx>=0.27.0",
     "pydantic>=2.0.0",
     "anthropic>=0.36.0",
@@ -38,7 +41,10 @@ forex-trader = "run:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["backend*", "frontend*"]
+# frontend/ is TypeScript now, not a Python package — including it made the
+# wheel carry an empty directory and, worse, made `include` look like it still
+# described where the UI lives.
+include = ["backend*"]
 
 [tool.pytest.ini_options]
 # The suite reads the real clock: dpm_engine.detect_session() branches on the
@@ -51,5 +57,4 @@ include = ["backend*", "frontend*"]
 # the same thing whenever it happens. Override the instant with
 # --market-clock=..., or drop the flag to reproduce real-clock behaviour.
 addopts = "-p tools.testing.fixed_clock"
-# frontend/ has its own suite since Phase 1; both must run by default.
 testpaths = ["tests"]

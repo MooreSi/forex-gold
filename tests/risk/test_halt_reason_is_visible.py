@@ -25,6 +25,7 @@ Nothing here places an order: the refusal happens before any broker call.
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import time
 
 import pytest
@@ -165,27 +166,72 @@ class TestTheGovernorExposesIt:
 
 
 class TestTheUiShowsIt:
-    def test_the_header_badge_reads_the_reason(self):
-        from tests.frontend._source import module_source
+    """Retargeted 2026-09-18 from the NiceGUI shell to the React dashboard.
 
-        src = module_source("frontend/app.py")
+    The bug this class exists for is unchanged and is not a NiceGUI bug: the
+    halt reason was written in three places, read in one, and shown to the
+    owner nowhere. The question "does a human ever see it?" has to be asked of
+    whatever the UI is at the time.
+
+    So the assertions moved rather than being deleted. Two halves:
+
+    * the reason must leave the backend — an HTTP field the dashboard can read;
+    * the dashboard must render that field rather than fetch it and drop it.
+
+    The second half reads the TypeScript source, which is exactly what the
+    NiceGUI version did with Python source and carries the same limitation:
+    it proves the field is referenced, not that it is visible. The component
+    test `TradingPanel`/`AppHeader` covers the rendering; this covers the wiring
+    end to end.
+    """
+
+    API_ROOT = pathlib.Path(__file__).resolve().parents[2] / "backend" / "src" / "api"
+    WEB_ROOT = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src"
+
+    def test_the_backend_offers_the_reason_over_http(self):
+        """Both surfaces that show it, because they are read in different
+        places: the header is on every tab, and the Trading tab disables its
+        controls with it."""
+        from backend.src.api.routers import system as system_router
+        from backend.src.api.routers import trading as trading_router
+
+        header = (self.API_ROOT / "routers" / "system.py").read_text(encoding="utf-8")
+        halt = (self.API_ROOT / "routers" / "trading.py").read_text(encoding="utf-8")
+
+        assert "halt_reason" in header, "the header payload no longer carries the reason"
+        assert "trading_halt_reason" in halt, "the halt endpoint no longer asks for it"
+        assert system_router.router.prefix == "/api/system"
+        assert trading_router.router.prefix == "/api/trading"
+
+    def test_the_header_renders_the_reason(self):
+        src = (self.WEB_ROOT / "components" / "shell" / "AppHeader.tsx").read_text(
+            encoding="utf-8")
 
         assert "halt_reason" in src, (
-            "the paused badge still says only when trading resumes"
+            "the header badge no longer shows why trading stopped"
         )
 
-    def test_the_pause_dialog_reads_the_reason(self):
-        from tests.frontend._source import module_source
+    def test_the_trading_controls_say_why_they_are_disabled(self):
+        src = (self.WEB_ROOT / "components" / "trading" / "hooks"
+               / "useTradingController.ts").read_text(encoding="utf-8")
 
-        src = module_source("frontend/app.py")
-        dialog = src[src.index("_on_pause_dialog_change"):]
-
-        assert "halt_reason" in dialog
+        assert "h.reason" in src, (
+            "the Trading tab greys its controls without reading the halt reason "
+            "-- a disabled Execute button with no explanation is "
+            "indistinguishable from a broken one"
+        )
 
     def test_the_ui_goes_through_a_controller(self):
-        """The frontend does not reach into services.risk for this."""
-        from tests.frontend._source import module_source
+        """The API layer does not reach into services.risk for this."""
+        for name in ("system.py", "trading.py"):
+            src = (self.API_ROOT / "routers" / name).read_text(encoding="utf-8")
+            assert "services.risk" not in src, name
 
-        src = module_source("frontend/app.py")
-
-        assert "services.risk" not in src
+    def test_these_checks_can_fail(self):
+        """Negative control. Every assertion above is a substring search over a
+        file, which is the kind of check that quietly passes against the wrong
+        file or an empty one."""
+        assert (self.API_ROOT / "routers" / "system.py").stat().st_size > 0
+        assert (self.WEB_ROOT / "components" / "shell" / "AppHeader.tsx").stat().st_size > 0
+        assert "halt_reason" not in (self.WEB_ROOT / "lib" / "cn.ts").read_text(
+            encoding="utf-8")

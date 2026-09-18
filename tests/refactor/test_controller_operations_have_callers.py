@@ -31,7 +31,73 @@ _CONTROLLERS = sorted(
     p.as_posix() for p in (REPO / "backend/src/controllers").glob("*_controller.py")
 )
 
-# Known dead. Each is a controller operation no page calls.
+# Waiting for a caller that the React port has not written yet.
+#
+# **This is not KNOWN_DEAD and must not be merged into it.** Dead means nobody
+# wants it; these were each called by a NiceGUI tab that the big-bang replace
+# on 2026-09-18 deleted before its React equivalent existed. The operation is
+# unchanged and still tested; the tab that asks for it is task 080 in
+# docs/todo/frontend/react-port/.
+#
+# The set is **shrink-only** and it is meant to reach zero. Every entry is one
+# question a router will have to ask. If task 080 finishes and an entry is
+# still here, that is the evidence it was genuinely dead all along — and then
+# it becomes a delete, not a move into KNOWN_DEAD.
+#
+# It mirrors the `awaiting-react-port` class in
+# tools/refactor_audit/orphan_module_allowlist.json: same cause, same debt,
+# same removal condition.
+AWAITING_REACT_PORT = {
+    ("ai_analysis_controller", "gather_channel_data"),
+    ("ai_analysis_controller", "gather_signal_generator_data"),
+    ("ai_analysis_controller", "gather_strategy_dpm_data"),
+    ("backtest_controller", "BROKER_TZ_OFFSET"),
+    ("backtest_controller", "summarise_templates"),
+    ("broker_controller", "BUILTIN_PRESET_NAME"),
+    ("broker_controller", "ea_is_healthy"),
+    ("broker_controller", "ea_seconds_since_last_seen"),
+    ("dpm_controller", "get_calibration_rows"),
+    ("dpm_controller", "get_calibration_runs"),
+    ("dpm_controller", "get_perf_rows"),
+    ("engines_controller", "start_stopped_engines"),
+    ("engines_controller", "stop_running_engines"),
+    ("engines_controller", "sub_engines"),
+    ("history_controller", "ticket_group_map"),
+    ("history_controller", "ticket_max_tp_map"),
+    ("history_controller", "ticket_order_type_map"),
+    ("history_controller", "ticket_rr_map"),
+    ("history_controller", "ticket_source_map"),
+    ("history_controller", "ticket_strategy_map"),
+    ("notifications_controller", "ORB_CHART_CID"),
+    ("schedule_controller", "describe_trading_clock"),
+    ("schedule_controller", "parse_hm"),
+    ("schedule_controller", "set_trading_clock_offset"),
+    ("settings_controller", "get_app_config_async"),
+    ("settings_controller", "get_expert_param_catalogue"),
+    ("settings_controller", "live_log_lines"),
+    ("settings_controller", "reset_all_expert_params"),
+    ("settings_controller", "reset_expert_param"),
+    ("settings_controller", "save_expert_params"),
+    ("settings_controller", "switch_environment_db"),
+    ("sync_controller", "is_centralized_remote_mode"),
+    ("sync_controller", "is_remote_active"),
+    ("sync_controller", "link_state"),
+    ("sync_controller", "note_remote_setting"),
+    ("sync_controller", "server_stop"),
+    ("system_controller", "AUTOSTART_CHECK_INTERVAL_SECS"),
+    ("system_controller", "autostart_disable"),
+    ("system_controller", "autostart_enable"),
+    ("system_controller", "autostart_is_armed"),
+    ("system_controller", "autostart_is_installed"),
+    ("system_controller", "autostart_is_supported"),
+    ("system_controller", "local_today"),
+    ("telegram_controller", "get_pending_unrecognised"),
+    ("telegram_controller", "get_reader_status"),
+    ("trading_controller", "get_channel_strategy_rec_map"),
+    ("trading_controller", "get_channel_strategy_recs"),
+}
+
+# Known dead. Each is a controller operation nothing calls and nothing wants.
 KNOWN_DEAD = {
     # Exported and tested, called by nothing. See the docstring.
     ("engines_controller", "engines_running"),
@@ -61,21 +127,42 @@ def _dead() -> set[tuple[str, str]]:
 
 class TestEveryControllerOperationIsCalled:
     def test_no_new_routes_to_nowhere(self):
-        unexpected = _dead() - KNOWN_DEAD
+        unexpected = _dead() - KNOWN_DEAD - AWAITING_REACT_PORT
 
         assert not unexpected, (
             f"controller operations nothing calls: {sorted(unexpected)} — a "
-            "controller names an operation for a page to use. Wire it up or "
-            "delete it; do not add it to KNOWN_DEAD."
+            "controller names an operation for a router to use. Wire it up or "
+            "delete it; do not add it to KNOWN_DEAD or AWAITING_REACT_PORT."
         )
 
-    def test_the_known_dead_set_has_no_slack(self):
-        assert _dead() == KNOWN_DEAD
+    def test_neither_set_has_slack(self):
+        """Both are exact. An entry that is no longer dead must be removed in
+        the change that revives it, or the set stops describing anything."""
+        assert _dead() == KNOWN_DEAD | AWAITING_REACT_PORT
 
-    def test_the_layer_is_overwhelmingly_alive(self):
+    def test_the_two_sets_do_not_overlap(self):
+        """'Nobody wants it' and 'its caller is not written yet' are different
+        claims with different endings. A name in both is a name whose status
+        nobody has decided."""
+        assert not (KNOWN_DEAD & AWAITING_REACT_PORT)
+
+    def test_the_port_debt_is_bounded_and_named(self):
+        """The honest number, recorded so it can be watched shrinking.
+
+        47 operations lost their caller on 2026-09-18 when eight NiceGUI tabs
+        were deleted ahead of their React replacements. That is the cost of
+        big-bang replace, stated rather than smoothed over. It may fall; it
+        may not rise.
+        """
+        assert len(AWAITING_REACT_PORT) <= 47, (
+            "the React port debt grew — a new tab deletion, or a controller "
+            "operation added with no router to call it"
+        )
+
+    def test_the_layer_is_still_mostly_alive(self):
         """The number that makes this a gate rather than a wish. If exports
-        ever drift far above callers, this file is measuring the wrong thing
-        and should be re-argued rather than baselined."""
+        ever drift far above callers for a reason that is NOT the port, this
+        file is measuring the wrong thing and should be re-argued."""
         exported = 0
         for path in _CONTROLLERS:
             mod = importlib.import_module(_rel(path)[:-3].replace("/", "."))
@@ -83,7 +170,8 @@ class TestEveryControllerOperationIsCalled:
                             if not n.startswith("_"))
 
         assert exported > 200
-        assert len(_dead()) <= 5
+        # Excluding the port debt, the layer is as tight as it ever was.
+        assert len(_dead() - AWAITING_REACT_PORT) <= 5
 
 
 class TestTheScannerCanSee:

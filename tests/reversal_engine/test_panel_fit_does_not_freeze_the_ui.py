@@ -25,6 +25,8 @@ is really gone rather than checking how it behaves.
 """
 from __future__ import annotations
 
+import pathlib
+
 import inspect
 
 from backend.src.controllers import engines_controller
@@ -61,9 +63,17 @@ class TestThePanelNoLongerOffersTheToggle:
 
     @staticmethod
     def _panel_source() -> str:
-        from frontend.pages import reversal_panel
+        """The dashboard's source, whatever the dashboard currently is.
 
-        return inspect.getsource(reversal_panel)
+        Was `inspect.getsource(frontend.pages.reversal_panel)` until
+        2026-09-18, when the big-bang React replace deleted that panel ahead of
+        its React equivalent. The claims below are not about NiceGUI — they are
+        about what the engine panel is allowed to offer and allowed to call —
+        so they follow the UI rather than being deleted with the old one.
+        """
+        from tests.refactor._react_port import web_sources
+
+        return web_sources()
 
     def test_the_toggle_is_gone(self):
         src = self._panel_source()
@@ -71,10 +81,19 @@ class TestThePanelNoLongerOffersTheToggle:
         assert "Learn From Pro Signals" not in src
 
     def test_the_panel_never_calls_the_blocking_fit(self):
-        """The rule that survives the removal. A five-second RandomForest
-        train on a NiceGUI handler freezes the UI, the EA socket reader and
-        the monitor loop together; the EA reconnects after ten seconds of
-        Python silence."""
-        body = "\n".join(l for l in self._panel_source().splitlines()
-                          if not l.strip().startswith("#"))
-        assert "pro_model_fit(" not in body
+        """The rule that survives both the removal and the port. A five-second
+        RandomForest train started from a UI handler freezes the event loop,
+        the EA socket reader and the monitor loop together; the EA reconnects
+        after ten seconds of Python silence.
+
+        In React the UI cannot call it directly at all — it would have to go
+        through a router. So the assertion moved to where the risk now lives:
+        no endpoint in the API layer may call the blocking fit.
+        """
+        api = pathlib.Path(__file__).resolve().parents[2] / "backend" / "src" / "api"
+        sources = list(api.rglob("*.py"))
+        assert sources, "the API layer has no Python in it — this scan is inert"
+        for path in sources:
+            body = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines()
+                              if not l.strip().startswith("#"))
+            assert "pro_model_fit(" not in body, path

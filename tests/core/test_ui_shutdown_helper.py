@@ -1,4 +1,4 @@
-"""One place knows how to stop the NiceGUI server.
+"""One place knows how to stop the web server.
 
 `no-nicegui-in-the-backend` is a counted contract: the backend must be
 runnable, testable and schedulable without a UI framework present. Three
@@ -8,16 +8,20 @@ after spawning the relaunch, and `bot_infra._delayed_app_shutdown` doing it
 again by hand for /restartapp.
 
 `os_utils.shutdown_ui()` is that one place. `bot_infra` calls it instead of
-importing nicegui itself, which takes the contract back to its baseline and
-means a future change to how the UI is stopped has one site, not two.
+importing the framework itself, which takes the contract back to its baseline
+and means a future change to how the UI is stopped has one site, not two.
 
-Nothing here starts or stops a real server: nicegui is faked in sys.modules.
+**That change happened on 2026-09-18**, and the rule is why these tests still
+exist. The server is uvicorn now, not NiceGUI, so `shutdown_ui` no longer
+imports anything: `run.py` registers a stopper (`server.should_exit = True`)
+and this helper calls it. One site, exactly as designed — and `utils/` still
+imports nothing above itself, which a `import uvicorn` here would have broken.
+
+Nothing here starts or stops a real server: the stopper is a recording lambda.
 """
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
 
 import pytest
 
@@ -25,47 +29,49 @@ from backend.src.utils import os_utils
 
 
 @pytest.fixture
-def fake_nicegui(monkeypatch):
-    """A stand-in nicegui whose app records shutdown() calls."""
+def registered_server(monkeypatch):
+    """A stopper that records being called, as run.py's does for real."""
     calls = []
-    app = types.SimpleNamespace(shutdown=lambda: calls.append(True))
-    mod = types.ModuleType("nicegui")
-    mod.app = app
-    monkeypatch.setitem(sys.modules, "nicegui", mod)
-    return calls
+    os_utils.register_ui_stopper(lambda: calls.append(True))
+    yield calls
+    # A stopper that leaks into the next test is a server the next test does
+    # not know it has.
+    os_utils.register_ui_stopper(None)
 
 
 @pytest.fixture
-def broken_nicegui(monkeypatch):
-    """nicegui present but its shutdown raises -- what a headless or
-    already-stopped server looks like from here."""
+def broken_server():
+    """A registered server whose stop raises -- what an already-stopped or
+    wedged uvicorn looks like from here."""
     def _boom():
         raise RuntimeError("no server running")
-    mod = types.ModuleType("nicegui")
-    mod.app = types.SimpleNamespace(shutdown=_boom)
-    monkeypatch.setitem(sys.modules, "nicegui", mod)
+    os_utils.register_ui_stopper(_boom)
+    yield
+    os_utils.register_ui_stopper(None)
 
 
-def test_shutting_down_asks_the_server_to_stop(fake_nicegui):
+def test_shutting_down_asks_the_server_to_stop(registered_server):
     assert os_utils.shutdown_ui() is True
-    assert fake_nicegui == [True]
+    assert registered_server == [True]
 
 
-def test_a_server_that_will_not_stop_is_reported_not_raised(broken_nicegui):
+def test_a_server_that_will_not_stop_is_reported_not_raised(broken_server):
     """Callers are mid-restart or mid-update. An exception here would abort a
     relaunch that has already been spawned, leaving nothing running."""
     assert os_utils.shutdown_ui() is False
 
 
-def test_no_nicegui_at_all_is_reported_not_raised(monkeypatch):
-    """The backend is meant to be runnable without a UI framework present --
-    that is the whole point of the contract this helper exists to satisfy."""
-    monkeypatch.setitem(sys.modules, "nicegui", None)
+def test_no_server_at_all_is_reported_not_raised(monkeypatch):
+    """Headless mode never starts one. The backend is meant to be runnable
+    without a UI present -- that is the whole point of the contract this
+    helper exists to satisfy."""
+    os_utils.register_ui_stopper(None)
     assert os_utils.shutdown_ui() is False
 
 
-def test_the_telegram_restart_path_goes_through_the_same_helper(fake_nicegui, monkeypatch):
-    """/restartapp used to import nicegui itself. It must not any more."""
+def test_the_telegram_restart_path_goes_through_the_same_helper(registered_server, monkeypatch):
+    """/restartapp used to import the UI framework itself. It must not any
+    more -- and after the port there is no framework to import."""
     from backend.src.services.telegram import bot_infra
     from backend.src.db import database as db_module
 
@@ -74,15 +80,15 @@ def test_the_telegram_restart_path_goes_through_the_same_helper(fake_nicegui, mo
 
     asyncio.run(bot_infra._delayed_app_shutdown(0))
 
-    assert fake_nicegui == [True]
+    assert registered_server == [True]
 
 
 async def _noop_sleep(_s, *a, **k):
     return None
 
 
-def test_headless_mode_never_touches_the_ui(monkeypatch, fake_nicegui):
-    """There is no NiceGUI server to stop in headless mode; the relaunch
+def test_headless_mode_never_touches_the_ui(monkeypatch, registered_server):
+    """There is no server to stop in headless mode; the relaunch
     subprocess was already spawned, so ending the process is all that is
     needed. Calling shutdown() there would be a no-op at best."""
     from backend.src.services.telegram import bot_infra
@@ -97,7 +103,7 @@ def test_headless_mode_never_touches_the_ui(monkeypatch, fake_nicegui):
     asyncio.run(bot_infra._delayed_app_shutdown(0))
 
     assert exited == [0]
-    assert fake_nicegui == [], "headless must not call into the UI"
+    assert registered_server == [], "headless must not call into the UI"
 
 
 def bot_infra_os():
@@ -105,12 +111,14 @@ def bot_infra_os():
     return os
 
 
-def test_the_backend_no_longer_imports_nicegui_in_three_places():
+def test_the_backend_imports_nicegui_in_no_more_places_than_the_licence_screens():
     """The contract itself, asserted directly rather than inferred from a total.
 
-    Two of the remaining sites are function-local imports for genuinely
-    cross-cutting actions -- the licence dialog and the UI shutdown -- which is
-    why they are baselined rather than banned.
+    Both remaining sites are the pre-boot licence screens
+    (config/licence/guard.py), which still render with NiceGUI and run before
+    the app starts. The UI-shutdown site, which used to be the third, went on
+    2026-09-18. When the licence screens are ported (react-port task 090) this
+    goes to zero and the contract can be enforced there.
     """
     import sys as _sys
     sys_path = _sys.path

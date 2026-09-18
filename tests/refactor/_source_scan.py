@@ -30,8 +30,22 @@ CATALOGUE_FILES = (
 @lru_cache(maxsize=1)
 def _sources() -> tuple[tuple[str, str], ...]:
     out = []
-    for root in ("backend", "frontend"):
-        for p in (REPO / root).rglob("*.py"):
+    # `frontend` was a search root until 2026-09-18. It holds TypeScript now,
+    # and a React component never names a Python function -- it asks for a URL.
+    # Leaving it in the list would have looked thorough while contributing
+    # nothing, which is the shape of a scanner that reassures without checking.
+    # The API layer under `backend/src/api/` is where the references moved to,
+    # and it is already inside this root.
+    for root in ("backend",):
+        base = REPO / root
+        files = list(base.rglob("*.py"))
+        if not files:
+            raise AssertionError(
+                f"source scan root {root!r} contains no Python — the scan would "
+                "report everything as unreferenced (or nothing as referenced) "
+                "and mean neither"
+            )
+        for p in files:
             out.append((p.relative_to(REPO).as_posix(), p.read_text(encoding="utf-8")))
     return tuple(out)
 

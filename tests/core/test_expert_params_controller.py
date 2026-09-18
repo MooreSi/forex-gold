@@ -73,13 +73,23 @@ def test_resetting_everything_restores_every_default():
     assert ep.get("min_tp1_rr") == 0.75
 
 
-def test_the_page_never_imports_the_service_directly():
-    """Guards the boundary this controller exists to provide."""
-    from tests.frontend._source import module_source
-    # The boundary has to hold across every module in the settings package,
-    # not just the one that used to be the whole page.
-    source = module_source("frontend/pages/settings.py")
-    assert "risk.expert_params" not in source and "import expert_params" not in source, (
-        "settings.py must reach Expert Tunables through the settings "
-        "controller, not by importing the service"
-    )
+def test_the_top_layer_never_imports_the_service_directly():
+    """Guards the boundary this controller exists to provide.
+
+    Retargeted 2026-09-18 from the NiceGUI settings package to
+    `backend/src/api/`, which is where the top layer lives now. The rule did
+    not change: Expert Tunables is reached through the settings controller, not
+    by importing the service.
+    """
+    import pathlib
+
+    api = pathlib.Path(__file__).resolve().parents[2] / "backend" / "src" / "api"
+    sources = list(api.rglob("*.py"))
+    assert sources, "the API layer has no Python in it — this scan is inert"
+
+    for path in sources:
+        source = path.read_text(encoding="utf-8")
+        assert "risk.expert_params" not in source and "import expert_params" not in source, (
+            f"{path.name} must reach Expert Tunables through the settings "
+            "controller, not by importing the service"
+        )

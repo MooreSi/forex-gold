@@ -8,7 +8,8 @@
     "The 3 superseded-dead database.py clones were DELETED 2026-08-10. The 4 below",
     "are built-but-UNWIRED (not dead): deleting them would destroy real",
     "functionality and hide a wiring bug. Each needs an OWNER (Simon) wire-vs-remove",
-    "decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then."
+    "decision -- see docs/questions/002-unwired-modules.md. Do NOT delete until then.",
+    "2026-09-18: 32 entries added with class 'awaiting-react-port'. They are the controllers and services that only a NiceGUI tab imported. Big-bang replace deleted those tabs before their React equivalents existed, so these modules have no caller for as long as task 080 is open. This is the single largest recorded debt in this file and it is meant to shrink to nothing."
   ],
   "allowed": [
     {
@@ -31,6 +32,216 @@
       "loc": 226,
       "class": "unwired-tool",
       "reason": "Walk-forward harness to validate breakout recalibrations BEFORE they touch live trading; its docstring documents manual invocation (run_walkforward/report). Likely a dev tool, not dead. The frontend backtest page uses a different system (services.backtest)."
+    },
+    {
+      "module": "backend.src.controllers.ai_analysis_controller",
+      "file": "backend/src/controllers/ai_analysis_controller.py",
+      "loc": 35,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.ai_controller",
+      "file": "backend/src/controllers/ai_controller.py",
+      "loc": 57,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.backtest_controller",
+      "file": "backend/src/controllers/backtest_controller.py",
+      "loc": 51,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.dpm_controller",
+      "file": "backend/src/controllers/dpm_controller.py",
+      "loc": 18,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.engines_controller",
+      "file": "backend/src/controllers/engines_controller.py",
+      "loc": 200,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.history_controller",
+      "file": "backend/src/controllers/history_controller.py",
+      "loc": 197,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.news_controller",
+      "file": "backend/src/controllers/news_controller.py",
+      "loc": 47,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.notifications_controller",
+      "file": "backend/src/controllers/notifications_controller.py",
+      "loc": 70,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.remote_controller",
+      "file": "backend/src/controllers/remote_controller.py",
+      "loc": 44,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.remote_node_controller",
+      "file": "backend/src/controllers/remote_node_controller.py",
+      "loc": 46,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.schedule_controller",
+      "file": "backend/src/controllers/schedule_controller.py",
+      "loc": 89,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.controllers.telegram_controller",
+      "file": "backend/src/controllers/telegram_controller.py",
+      "loc": 120,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.analytics.ai_analysis",
+      "file": "backend/src/services/analytics/ai_analysis.py",
+      "loc": 40,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.analytics.ai_analysis_repo",
+      "file": "backend/src/services/analytics/ai_analysis_repo.py",
+      "loc": 527,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.analytics.formatting",
+      "file": "backend/src/services/analytics/formatting.py",
+      "loc": 106,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.analytics.labels",
+      "file": "backend/src/services/analytics/labels.py",
+      "loc": 98,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.analytics.ticket_maps",
+      "file": "backend/src/services/analytics/ticket_maps.py",
+      "loc": 227,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.analytics.trade_history_repo",
+      "file": "backend/src/services/analytics/trade_history_repo.py",
+      "loc": 340,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.backtest.engine",
+      "file": "backend/src/services/backtest/engine.py",
+      "loc": 770,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.backtest.repo",
+      "file": "backend/src/services/backtest/repo.py",
+      "loc": 23,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.backtest.simulators",
+      "file": "backend/src/services/backtest/simulators.py",
+      "loc": 665,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.backtest.split",
+      "file": "backend/src/services/backtest/split.py",
+      "loc": 131,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.backtest.template_simulator",
+      "file": "backend/src/services/backtest/template_simulator.py",
+      "loc": 494,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.backtest.template_support",
+      "file": "backend/src/services/backtest/template_support.py",
+      "loc": 147,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.breakout_signal.panel_data",
+      "file": "backend/src/services/breakout_signal/panel_data.py",
+      "loc": 88,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.broker.fees",
+      "file": "backend/src/services/broker/fees.py",
+      "loc": 20,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.dpm.performance",
+      "file": "backend/src/services/dpm/performance.py",
+      "loc": 34,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.positions.spread_cache",
+      "file": "backend/src/services/positions/spread_cache.py",
+      "loc": 19,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.reversal_engine.panel_data",
+      "file": "backend/src/services/reversal_engine/panel_data.py",
+      "loc": 105,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
+    },
+    {
+      "module": "backend.src.services.telegram.messages",
+      "file": "backend/src/services/telegram/messages.py",
+      "loc": 21,
+      "class": "awaiting-react-port",
+      "reason": "Orphaned by the React port (2026-09-18), not dead. The NiceGUI tab that imported it was deleted in the big-bang replace, and its React replacement is task 080 in docs/todo/frontend/react-port/. The code is unchanged and still tested; only its caller is missing. Delete this entry when the tab that uses it is ported -- if task 080 finishes and this module is still here, that is the signal it was genuinely dead all along and the question becomes a delete, not a re-entry."
     }
   ]
 }

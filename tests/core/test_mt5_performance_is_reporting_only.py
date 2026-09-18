@@ -61,9 +61,14 @@ class TestItIsOnlyEverUsedForReporting:
 
     def test_the_known_callers_are_all_reporting(self):
         """A whole-repo sweep, so a NEW caller anywhere has to be looked at."""
+        # `frontend/` was a search root until 2026-09-18. It holds TypeScript
+        # now, and the three page callers listed below went with the NiceGUI
+        # tabs that held them. They will come back as routers under
+        # backend/src/api/ when those tabs are ported (react-port task 080) —
+        # which this sweep already covers, because it walks all of backend/src.
         out = subprocess.run(
             ["grep", "-rln", "--include=*.py", "compute_mt5_performance",
-             str(REPO / "backend" / "src"), str(REPO / "frontend")],
+             str(REPO / "backend" / "src")],
             capture_output=True, text=True).stdout.split()
         found = {Path(p).relative_to(REPO).as_posix() for p in out
                  if "__pycache__" not in p}
@@ -72,9 +77,6 @@ class TestItIsOnlyEverUsedForReporting:
             "backend/src/services/broker/mt5_performance.py",
             "backend/src/services/trading/bot_trading.py",       # !report
             "backend/src/services/notifications/scheduler.py",   # email
-            "frontend/pages/ai_summary.py",
-            "frontend/pages/history/__init__.py",
-            "frontend/pages/trading/__init__.py",
         }
 
         assert found == expected, (

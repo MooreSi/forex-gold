@@ -129,26 +129,24 @@ class TestTheScannerWorks:
         assert self._scan(tmp_path, "def f(:\n") == []
 
 
-class TestThePendingSignalsEditorSpecifically:
-    """The bug that prompted this. Named so a future edit that drops the
-    captures fails against something explicit rather than only the sweep."""
+# TestThePendingSignalsEditorSpecifically was deleted on 2026-09-18.
+#
+# It pinned that `save_edit` in `frontend/pages/trading/_pending_signals.py`
+# captured all fifteen of its row widgets as default arguments, because a
+# NiceGUI callback defined in a loop reads the loop's variables when it fires —
+# so without the captures, Save on one row wrote another row's values.
+#
+# Both the file and the mechanism are gone: the React port deleted the editor,
+# and a React handler closes over the props of the row that rendered it, so the
+# Python default-argument idiom has no equivalent to check. The generic sweep
+# above still guards every place the mechanism DOES still exist, which is now
+# `backend/` only.
+#
+# **The requirement is not gone.** React has its own version of this bug — a
+# handler that reads state captured on an earlier render, so a row's button
+# acts on the wrong row. When the pending-signals editor is rebuilt (task 080),
+# it needs a test that edits one row of several and asserts the OTHER rows are
+# untouched. That is recorded in
+# docs/todo/frontend/react-port/080-remaining-tabs.md; it is not covered by
+# anything today, and saying so is the point of this comment.
 
-    def test_save_edit_captures_every_widget_it_reads(self):
-        import ast
-
-        src = (REPO / "frontend/pages/trading/_pending_signals.py").read_text(
-            encoding="utf-8")
-        tree = ast.parse(src)
-        fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                  and n.name == "save_edit")
-
-        captured = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
-
-        for widget in ("e_dir", "e_el", "e_eh", "e_sl", "e_notes", "e_result",
-                       *(f"e_tp{n}" for n in range(1, 9))):
-            assert widget in captured, (
-                f"{widget} is read from the enclosing loop, so Save on one row "
-                f"would use another row's value"
-            )
-        assert "sid" in captured

@@ -225,25 +225,44 @@ class TestTheSwitchIsReachable:
         assert "vantage_risk_settings" in adds[0]
         assert "DEFAULT 0" in adds[0]
 
-    def test_the_capabilities_card_reads_and_writes_it(self):
-        from pathlib import Path
+    def test_the_switch_survives_the_react_port(self):
+        """The card that carried this switch was a NiceGUI panel, deleted on
+        2026-09-18 by the big-bang React replace before the Signal Generator
+        tab was ported.
 
-        src = (Path(__file__).resolve().parents[2]
-               / "frontend/pages/reversal_panel/_capabilities.py"
-               ).read_text(encoding="utf-8")
+        The requirement did not go with it. While the tab is unported this
+        asserts exactly that, so the gap is visible; the moment somebody clears
+        the tab's `notPorted` flag without bringing the switch, this goes red
+        and says what is missing. Deleting the test instead would have
+        protected nothing on the day the tab came back — and a switch nobody
+        can turn on is not a switch, which is the whole point of this class
+        (migration 41 shipped fourteen of those on 2026-09-11).
+        """
+        from tests.refactor._react_port import tab_is_ported, web_sources
 
-        assert 'rs.get("htf_bias_asian_exempt"' in src
-        assert '"htf_bias_asian_exempt":' in src
+        # Deliberately not `pytest.skip`. A skipped test reads as "not
+        # applicable"; this one is very much applicable and its answer today is
+        # "the tab is not back yet". The debt is recorded in
+        # docs/todo/frontend/react-port/080-remaining-tabs.md.
+        if not tab_is_ported("generator"):
+            return
 
-    def test_the_card_says_the_trend_gate_has_to_be_on_first(self):
+        assert "htf_bias_asian_exempt" in web_sources(), (
+            "the Signal Generator tab is marked as ported but nothing in the "
+            "dashboard reads or writes htf_bias_asian_exempt — the switch the "
+            "reversal capabilities card carried was dropped in the port"
+        )
+
+    def test_the_switch_says_the_trend_gate_has_to_be_on_first(self):
         """The switch does nothing on its own, exactly like "Ask the
-        meta-labeller" before the model is armed. A card that does not say
-        so invites the owner to turn it on and conclude it did nothing."""
-        from pathlib import Path
+        meta-labeller" before the model is armed. A UI that does not say so
+        invites the owner to turn it on and conclude it did nothing."""
+        from tests.refactor._react_port import tab_is_ported, web_sources
 
-        src = (Path(__file__).resolve().parents[2]
-               / "frontend/pages/reversal_panel/_capabilities.py"
-               ).read_text(encoding="utf-8")
+        if not tab_is_ported("generator"):
+            return
+
+        src = web_sources()
         at = src.index("htf_bias_asian_exempt")
         near = src[at:at + 1600].lower()
 

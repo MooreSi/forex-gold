@@ -7,6 +7,7 @@
     "backend/migrations/registry.py": 96.4,
     "backend/migrations/schema_sql.py": 100.0,
     "backend/src/__init__.py": 100.0,
+    "backend/src/api": 88.4,
     "backend/src/app.py": 26.5,
     "backend/src/config": 42.7,
     "backend/src/controllers": 79.3,
@@ -33,7 +34,6 @@
     "backend/src/services/signals": 89.9,
     "backend/src/services/telegram": 53.7,
     "backend/src/services/trading": 89.7,
-    "backend/src/utils": 65.4,
-    "frontend": 43.0
+    "backend/src/utils": 65.4
   }
 }

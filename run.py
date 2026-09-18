@@ -341,6 +341,34 @@ def _dashboard_storage_secret() -> str:
         return secrets.token_urlsafe(48)
 
 
+def _open_browser_when_up(port: int, timeout: float = 20.0) -> None:
+    """Open the dashboard once the server is actually listening.
+
+    `ui.run(show=True)` used to do this. Opening the browser before uvicorn has
+    bound produces a connection-refused page that the operator then has to
+    reload by hand, so this waits for the port in a background thread and only
+    then opens it. Failing to open a browser must never stop the app.
+    """
+    import threading
+    import webbrowser
+
+    def _wait_and_open() -> None:
+        from backend.src.utils.os_utils import is_port_listening
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if is_port_listening(port):
+                try:
+                    webbrowser.open(f"http://localhost:{port}")
+                except Exception as exc:
+                    log.warning("Could not open a browser (non-fatal): %s", exc)
+                return
+            time.sleep(0.25)
+        log.warning("Server did not start listening on %s within %.0fs — "
+                    "not opening a browser.", port, timeout)
+
+    threading.Thread(target=_wait_and_open, daemon=True).start()
+
+
 def main():
     # First thing, before anything else here can log: everything below this
     # point expects the console and file handlers to already be attached.
@@ -472,17 +500,23 @@ def main():
         except Exception as exc:
             log.warning("Could not check Remote-node role for browser auto-launch: %s", exc)
 
-        from nicegui import ui
-        import frontend.app  # registers startup hooks and page routes  # noqa: F401
-        # Gate every dashboard route behind a login (both modes). Registered here,
-        # after the pages import and before ui.run, so the middleware is in place
-        # when the server starts.
-        from frontend import auth_gate as _auth_gate
-        _auth_gate.install()
+        # Serve the compiled React dashboard and the JSON API from one
+        # uvicorn process. There is no second process and no Node runtime at
+        # run time — the bundle in frontend/dist is built by a developer and
+        # committed, which is what keeps this a Python-only install. See
+        # docs/system/domains/frontend/010-the-react-decision.md.
+        import uvicorn
+        from backend.src.api.server import build_app
+        from backend.src.utils.os_utils import register_ui_stopper
+
+        app = build_app(
+            session_secret=_dashboard_storage_secret(),
+            with_lifecycle=True,
+        )
 
         # Last thing before binding — see _claim_port. Everything above this
-        # line (database open, ui.app import) takes seconds, and the port was
-        # only freed before all of it.
+        # line (database open, app build) takes seconds, and the port was only
+        # freed before all of it.
         if not _claim_port(port):
             from backend.src.utils.os_utils import pids_listening_on
             holders = pids_listening_on(port)
@@ -496,44 +530,29 @@ def main():
             )
             return
 
-        ui.run(
+        if show_browser:
+            _open_browser_when_up(port)
+
+        # The ws_ping_interval / reconnect_timeout tuning that used to sit here
+        # existed for NiceGUI's socket.io transport, which a backgrounded tab
+        # kept losing and rebuilding (bugs/030 cause 3). There is no persistent
+        # socket now: the dashboard polls on one shared interval that pauses
+        # while the tab is hidden (frontend/src/hooks/usePoll.ts), so a
+        # throttled background tab costs nothing to keep alive.
+        server = uvicorn.Server(uvicorn.Config(
+            app,
             host=_resolve_bind_host(cfg),
             port=port,
-            title="FOREX Trader",
-            favicon="frontend/static/favicon.png",
-            dark=True,
-            reload=False,
-            show=show_browser,
-            # Signs the session cookie that backs app.storage.user — required for
-            # the dashboard login gate (frontend/auth_gate.py). Per-install secret
-            # stored in the user data dir; NOT a licence/auth secret.
-            storage_secret=_dashboard_storage_secret(),
-            # Keep the WebSocket alive when the browser tab is backgrounded or
-            # the screen is locked.  Browsers throttle background tabs, so the
-            # default 3 s reconnect window and 20 s uvicorn ping timeout cause
-            # spurious "Connection lost" overlays on Windows clients.
-            #
-            # TWO LAYERS, and the tighter one decides. ws_ping_timeout is
-            # uvicorn's; NiceGUI's transport is socket.io, and nicegui.nicegui
-            # derives engine.io's own deadline from reconnect_timeout:
-            #
-            #     sio.eio.ping_interval = max(reconnect_timeout * 0.8, 4)
-            #     sio.eio.ping_timeout  = max(reconnect_timeout * 0.4, 2)
-            #
-            # At the previous reconnect_timeout=30 that was a 12 s pong window
-            # against uvicorn's 60 s, so the 60 s never applied and a
-            # backgrounded tab -- throttled to a timer a minute or worse --
-            # was dropped and rebuilt. That rebuild re-renders every panel in
-            # one tick and stalls the event loop for ~2 s (bugs/030 cause 3).
-            # Reported by the owner as "come back to the page and it reloads".
-            #
-            # 150 makes engine.io's window 60 s, matching the ws_ping_timeout
-            # deliberately chosen beside it. The cost is that a genuinely
-            # closed tab's server-side state lingers ~2.5 min.
-            reconnect_timeout=150,         # -> engine.io pings 120 s, pong window 60 s
-            ws_ping_interval=30,           # server→browser ping every 30 s
-            ws_ping_timeout=60,            # allow 60 s for a pong before closing
-        )
+            log_level="info",
+            access_log=False,
+        ))
+        # A Server instance rather than uvicorn.run(), because /restartapp and
+        # the updater need a handle to stop it with. `should_exit` is uvicorn's
+        # own graceful stop: it finishes in-flight requests and runs the
+        # lifespan shutdown, which is what closes the bridge and the Telegram
+        # reader. Killing the process instead would skip all of that.
+        register_ui_stopper(lambda: setattr(server, "should_exit", True))
+        server.run()
     finally:
         if bridge_proc:
             bridge_proc.terminate()

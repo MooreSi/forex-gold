@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable, Optional
 
 log = logging.getLogger(__name__)
 
@@ -416,24 +417,45 @@ def restart_app(root) -> None:
     shutdown_ui()
 
 
-def shutdown_ui() -> bool:
-    """Ask the running NiceGUI server to stop. Returns False if it could not.
+_ui_stopper: Optional[Callable[[], None]] = None
 
-    The one place in the backend that knows how the UI is stopped.
-    `no-nicegui-in-the-backend` is a counted contract -- the backend must be
-    runnable, testable and schedulable without a UI framework present -- and
-    this used to be done here AND again by hand in
-    services/telegram/bot_infra for /restartapp, which put the count over its
-    baseline for a call that is identical in both places.
+
+def register_ui_stopper(fn) -> None:
+    """Tell this module how to stop the web server that is currently running.
+
+    `run.py` registers a callback that sets uvicorn's `should_exit`. Before the
+    React port this module imported `nicegui` and called `app.shutdown()`,
+    which put `no-nicegui-in-the-backend` over its baseline for a call that is
+    identical everywhere it appears. Injecting the stopper keeps the knowledge
+    of which server is running in the composition root, where it belongs, and
+    leaves `utils/` importing nothing above itself.
+
+    Idempotent by overwrite, so a relaunch that rebuilds the server replaces
+    the stale callback rather than stacking a second one.
+    """
+    global _ui_stopper
+    _ui_stopper = fn
+
+
+def shutdown_ui() -> bool:
+    """Ask the running web server to stop. Returns False if it could not.
+
+    The one place in the backend that knows how the UI is stopped. It used to
+    be done here AND again by hand in services/telegram/bot_infra for
+    /restartapp, which is why it is centralised.
 
     Never raises. Callers are mid-restart or mid-update with the relaunch
     subprocess already spawned; an exception here would abort that and leave
     nothing running at all. A headless instance, or one whose server has
     already stopped, is a False rather than a failure.
     """
+    if _ui_stopper is None:
+        # Headless mode never starts a server, so there is nothing to stop and
+        # this is the normal path there, not an error.
+        log.debug("No UI server registered — nothing to shut down.")
+        return False
     try:
-        from nicegui import app
-        app.shutdown()
+        _ui_stopper()
         return True
     except Exception as exc:
         log.warning("UI shutdown failed (relaunch, if any, is unaffected): %s", exc)

@@ -43,7 +43,7 @@ def test_the_contracts_the_refactor_already_won_are_enforced_at_zero():
     given back."""
     enforced = {c.name: c for c in ic.CONTRACTS if c.enforced_at_zero}
     assert "controllers-never-import-repos" in enforced
-    assert "frontend-never-imports-the-database" in enforced
+    assert "the-api-layer-never-imports-the-database" in enforced
 
     for name, contract in enforced.items():
         violations = ic.violations_for(contract)
@@ -160,51 +160,33 @@ def test_running_the_checker_as_a_script_reports_cleanly():
         assert contract.name in text, f"{contract.name} missing from the report"
 
 
-def test_contracts_are_counted_by_coupling_not_by_import_statements():
-    """A file split must not move a contract's number.
+def test_one_file_is_one_source_unit():
+    """Deleted with its subject, and replaced by the weaker claim that is now
+    true.
 
-    Splitting frontend/pages/trading.py into a package spread the same
-    backend imports over nine section modules. Counting raw import
-    statements scored that as a regression from 99 to 103 -- the same
-    frontend package importing the same backend modules, penalised purely
-    for having more files. Coupling did not change, so the number must not.
+    `_source_unit` used to group a split NiceGUI page package back into one
+    unit, so that splitting `frontend/pages/trading.py` into nine section
+    modules did not score as a regression from 99 to 103 — the same package
+    importing the same backend modules, penalised purely for having more
+    files. Two tests pinned that grouping; both were deleted on 2026-09-18
+    along with the frontend they described, because a rule that can never
+    match again is dead code (golden rule 9) and a test of dead code is worse
+    than none.
 
-    The unit is therefore a distinct (source unit -> imported module) edge,
-    where a split page package counts as ONE source unit.
+    The layer that replaced it is flat by rule: `backend/src/api/` holds
+    modules, never packages, exactly as `backend/src/controllers/` does. If
+    that ever stops being true, the grouping has to come back and so do those
+    tests.
     """
-    assert ic._source_unit("frontend/pages/trading/_strategy.py") == "frontend/pages/trading"
-    assert ic._source_unit("frontend/pages/trading/__init__.py") == "frontend/pages/trading"
-    # An unsplit page is its own unit, and non-page paths are untouched.
-    assert ic._source_unit("frontend/pages/chart.py") == "frontend/pages/chart.py"
-    assert ic._source_unit("frontend/app.py") == "frontend/app.py"
+    assert ic._source_unit("backend/src/api/routers/orders.py") == "backend/src/api/routers/orders.py"
     assert ic._source_unit("backend/src/utils/theme.py") == "backend/src/utils/theme.py"
-
-
-def test_the_app_package_is_one_source_unit_but_components_are_not():
-    """frontend/app.py splits into frontend/app/ for the same reason
-    frontend/pages/trading.py did, and must be grouped the same way -- or the
-    split scores as a regression while coupling is unchanged.
-
-    The grouping is named explicitly rather than derived from "is a package",
-    because frontend/components/ is a package of seven genuinely independent
-    modules. Collapsing those into one unit would not fix a miscount, it
-    would loosen the gate.
-    """
-    assert ic._source_unit("frontend/app/__init__.py") == "frontend/app"
-    assert ic._source_unit("frontend/app/_about.py") == "frontend/app"
-    # The unsplit module keeps its own identity.
-    assert ic._source_unit("frontend/app.py") == "frontend/app.py"
-    # And nothing else under frontend/ gets swept up.
-    assert (ic._source_unit("frontend/components/getting_started.py")
-            == "frontend/components/getting_started.py")
-    assert ic._source_unit("frontend/auth_gate.py") == "frontend/auth_gate.py"
 
 
 def test_the_same_module_imported_twice_in_one_package_counts_once():
     """The property the split exposed, asserted directly rather than
     inferred from the totals."""
     contract = next(c for c in ic.CONTRACTS
-                    if c.name == "frontend-reaches-the-backend-through-controllers")
+                    if c.name == "the-api-layer-reaches-the-backend-through-controllers")
     statements = ic.violations_for(contract)
     edges = ic.coupling_edges(contract)
     assert len(edges) <= len(statements)
@@ -221,23 +203,25 @@ class TestFileExemptions:
     """`exempt_files` lets a contract be enforced at zero with one named
     exception, instead of sitting on a baseline for ever because of it.
 
-    The frontend contract's last site is `frontend/app/__init__.py` — the
-    composition root, which wires the app's own startup and is already treated
-    as a sanctioned site in CLAUDE.md. A baseline of 1 cannot tell that site
-    apart from the next one somebody adds; a named exemption can.
+    The top layer's one site is `backend/src/api/server.py` — the composition
+    root, which wires the app's own startup and holds the engine handle every
+    router receives injected. It inherited the role, and the exemption, from
+    `frontend/app/__init__.py` when the React port replaced NiceGUI on
+    2026-09-18. A baseline of 1 cannot tell that site apart from the next one
+    somebody adds; a named exemption can.
 
     The danger is obvious and is what these tests are for: an exemption that
     silently grows, or goes stale, turns "enforced at zero" into a slogan.
     """
 
-    def test_the_frontend_contract_is_enforced_at_zero(self):
-        c = _contract("frontend-reaches-the-backend-through-controllers")
+    def test_the_top_layer_contract_is_enforced_at_zero(self):
+        c = _contract("the-api-layer-reaches-the-backend-through-controllers")
 
         assert c.enforced_at_zero
 
     def test_it_exempts_exactly_one_file(self):
         """Every addition here is a decision someone must make deliberately."""
-        c = _contract("frontend-reaches-the-backend-through-controllers")
+        c = _contract("the-api-layer-reaches-the-backend-through-controllers")
 
         assert len(c.exempt_files) == 1
 
@@ -267,7 +251,7 @@ class TestFileExemptions:
     def test_the_contract_still_fails_on_a_new_violation(self):
         """Proof the exemption path did not disable the rule. A file that is
         not exempt must still be reported."""
-        c = _contract("frontend-reaches-the-backend-through-controllers")
+        c = _contract("the-api-layer-reaches-the-backend-through-controllers")
         others = [v for v in ic.violations_for(c)]
 
         assert others == [], (

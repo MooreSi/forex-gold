@@ -73,9 +73,17 @@ def test_no_frontend_page_imports_the_models_module_directly():
 
 
 def test_the_contract_total_reflects_the_change():
-    """Five source units' worth of edges, gone."""
-    count = ic.check().counts["frontend-reaches-the-backend-through-controllers"]
-    assert count <= 56, (
-        f"{count} edges; removing the utils.models coupling should have taken "
-        "this from 61 to 56"
-    )
+    """The contract this counted reached zero, then moved.
+
+    It was `frontend-reaches-the-backend-through-controllers`, and the point of
+    the assertion was that removing five units' worth of `utils.models`
+    coupling took the count from 61 to 56. It carried on down to 0 on
+    2026-09-02, and on 2026-09-18 the top layer moved from `frontend/` to
+    `backend/src/api/` and the contract moved with it, renamed.
+
+    The claim worth keeping is the stronger one the count was heading towards:
+    the top layer gets its strategy vocabulary through a controller, and there
+    is no allowance for anything else.
+    """
+    count = ic.check().counts["the-api-layer-reaches-the-backend-through-controllers"]
+    assert count == 0, f"{count} edge(s) reaching past the controllers"

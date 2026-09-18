@@ -38,6 +38,18 @@ _MODULES = (
 
 # Empty since 2026-09-14, and the point is to keep it that way. Remove an entry
 # when it is wired up or deleted; never add one.
+# Waiting for a caller the React port has not written yet — NOT dead.
+#
+# `reset_adaptive_params` was called by the Breakout engine panel, which the
+# big-bang replace deleted on 2026-09-18 along with the other seven unported
+# tabs. Same debt, same removal condition and the same refusal to call it dead
+# as `AWAITING_REACT_PORT` in test_controller_operations_have_callers.py:
+# shrink-only, and if task 080 lands with this entry still here, that is the
+# evidence it was dead and the answer is a delete.
+AWAITING_REACT_PORT: set[tuple[str, str]] = {
+    ("breakout_signal", "reset_adaptive_params"),
+}
+
 KNOWN_DEAD: set[tuple[str, str]] = set()
 
 
@@ -57,7 +69,7 @@ def _dead() -> set[tuple[str, str]]:
 
 class TestEveryPanelReadHasACaller:
     def test_no_new_orphaned_panel_reads(self):
-        unexpected = _dead() - KNOWN_DEAD
+        unexpected = _dead() - KNOWN_DEAD - AWAITING_REACT_PORT
 
         assert not unexpected, (
             f"panel_data exports nothing references: {sorted(unexpected)} — "
@@ -68,7 +80,7 @@ class TestEveryPanelReadHasACaller:
     def test_the_known_dead_set_has_no_slack(self):
         """A shrinking baseline with room in it is room to regress invisibly,
         and would leave this file describing a clean-up that had happened."""
-        assert _dead() == KNOWN_DEAD
+        assert _dead() == KNOWN_DEAD | AWAITING_REACT_PORT
 
 
 class TestTheScannerCanSee:

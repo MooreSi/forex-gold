@@ -113,17 +113,35 @@ class TestItReachesTheScreenThroughTheController:
 
         assert hasattr(broker_controller, "ea_build_status")
 
-    def test_the_header_asks_for_it(self):
-        import inspect
-        from frontend.app import _header
+    def test_the_header_endpoint_asks_for_it(self):
+        """Retargeted 2026-09-18 from the NiceGUI header to the header
+        endpoint. The claim is unchanged: the badge the operator looks at is
+        fed by the staleness check, not by the connection state alone."""
+        import pathlib
 
-        assert "ea_build_status" in inspect.getsource(_header)
+        src = (pathlib.Path(__file__).resolve().parents[2]
+               / "backend/src/api/routers/system.py").read_text(encoding="utf-8")
+
+        assert "ea_build_status" in src
 
     def test_the_header_asks_for_the_badge_state_rather_than_deciding_itself(self):
-        import inspect
-        from frontend.app import _header
+        """The sharper half, and the reason `ea_badge_state` exists as a pure
+        function: the colour and the words are DECIDED once, in the service.
+        Re-deriving "stale outranks connected" in TypeScript would recreate the
+        2026-09-09 bug in a second language, where this test cannot see it."""
+        import pathlib
 
-        assert "ea_badge_state" in inspect.getsource(_header)
+        root = pathlib.Path(__file__).resolve().parents[2]
+        api = (root / "backend/src/api/routers/system.py").read_text(encoding="utf-8")
+        assert "ea_badge_state" in api
+
+        web = (root / "frontend/src/components/shell/AppHeader.tsx").read_text(
+            encoding="utf-8")
+        assert "ea_badge" in web, "the dashboard fetches the badge and drops it"
+        for decided_in_python in ("stale", "ea_version_ok"):
+            assert f"{decided_in_python} ?" not in web, (
+                "the dashboard is deciding the badge itself"
+            )
 
 
 class TestTheBadgeDecision:

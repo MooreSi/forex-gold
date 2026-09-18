@@ -82,24 +82,37 @@ Claude Code.
 | `/split-file` | a file is over 800 lines |
 | `/new-spec` | starting anything bigger than a one-line fix |
 | `/spec` | work needing several tasks and more than one session — scaffolds a plan pack under `docs/todo/` |
-| `/frontend-conventions` | writing, moving or splitting anything under `frontend/` |
+| `/frontend-conventions` | writing, moving or splitting anything under `frontend/src/` or `backend/src/api/` |
 | `/coverage-gap` | find and fill untested code |
 
 ## Layers point downward, never up
 
 ```
-frontend/ → controllers/ → services/ → db/
-                utils/, config/ → nothing
+frontend/ (React, in the browser)
+    │ HTTP/JSON
+backend/src/api/ → controllers/ → services/ → db/
+                       utils/, config/ → nothing
 ```
 
-Controllers route; services decide; repos hold the SQL. A controller is a flat
-`<name>_controller.py` that names an operation and forwards it to one service —
-no loops, no merges, no formatting, no fallbacks.
+Routers forward; controllers route; services decide; repos hold the SQL. A
+controller is a flat `<name>_controller.py` that names an operation and
+forwards it to one service — no loops, no merges, no formatting, no fallbacks.
+A router is one controller call plus a response model, held to the same rule
+and the same 200-line ceiling.
 
-The frontend never imports `backend.src.db`. Controllers never import
-`backend.src.db` or a service's `repo`. Services never import a controller.
-All four enforced at zero — see
+`backend/src/api/` never imports `backend.src.db` or `backend.src.services`.
+Controllers never import `backend.src.db` or a service's `repo`. Services never
+import a controller. All enforced at zero — see
 [docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md).
+`backend/src/api/server.py` is the single named exemption: it is the
+composition root and holds the engine handle.
+
+**The dashboard is React** (`frontend/src`, compiled to `frontend/dist`, which
+is committed). It replaced NiceGUI on 2026-09-18 — the decision and the
+2026-08-06 one it reverses are in
+[docs/system/domains/frontend/010-the-react-decision.md](docs/system/domains/frontend/010-the-react-decision.md),
+and what is and is not ported is in
+[docs/todo/frontend/react-port/](docs/todo/frontend/react-port/README.md).
 
 ## Session mechanics (Windows) — hard-won, do not relearn
 
@@ -115,16 +128,19 @@ Each of these cost real time in a past session:
   break under PowerShell 5.1.
 - **Start every shell command from an absolute path** — Bash cwd persists
   across calls and has drifted mid-session before.
+- **A `frontend/src` change that is not rebuilt is not shipped.** `dist/` is
+  committed; run `npm run build` in the same change or the dashboard the user
+  sees is the previous one.
 - **Before adding lines to a file in `structure_baseline.json`**, check the
   LOC ratchet — baselined files are shrink-only; plan the offsetting shrink
   first or put the code in a new module.
 - **A new module nothing imports yet** must ship with its
   `orphan_module_allowlist.json` entry (with reason) in the same change, or
   the orphan gate fails the next full run.
-- **`backend.src.config` imports from frontend COUNT against the
-  controller-boundary contract** — existing sites are baselined, new ones
-  regress it. Inject config values from `frontend/app.py` (already a
-  baselined site) instead.
+- **`backend.src.config` imports from `backend/src/api/` COUNT against the
+  controller-boundary contract**, which is now enforced at zero with no
+  baseline at all. Get config values through `settings_controller`, or inject
+  them from `backend/src/api/server.py` — the one exempt site.
 - **A test fixture that opens a database must close it before `os.remove`.**
   POSIX lets you unlink a file that still has an open handle; Windows does
   not, and raises `PermissionError: [WinError 32] The process cannot access
@@ -195,9 +211,17 @@ part needs a demo session, do the rest, and leave that piece.
 
 ```bash
 python run.py                 # starts the app on :8888
-pytest tests/ -q              # full suite, ~5 min
+pytest tests/ -q              # full suite, ~6 min
 python -m tools.checks all    # everything, before committing
+
+cd frontend && npm install    # once, per checkout
+cd frontend && npm test       # the dashboard's own suite (vitest)
+cd frontend && npm run build  # rebuild dist/ — commit it with your src change
 ```
+
+**`frontend/dist` is committed and is what the app serves.** A change under
+`frontend/src` that does not rebuild it ships the previous dashboard. Node is a
+developer dependency only; nothing about the install changes for a user.
 
 ## Why this file is strict
 

@@ -53,3 +53,12 @@ ca_key.pem
 
 # Local MT5 EA parameter presets -- machine-specific, not source
 mql5/*.set
+
+# ── React dashboard ───────────────────────────────────────────────────────────
+# node_modules is a build-time dependency of the dashboard and is never shipped;
+# frontend/dist IS shipped and is deliberately NOT ignored — the compiled bundle
+# is committed so the installer stays Python-only. See
+# docs/system/domains/frontend/010-the-react-decision.md.
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo
+frontend/*.tsbuildinfo

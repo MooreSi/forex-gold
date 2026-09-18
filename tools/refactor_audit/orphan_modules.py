@@ -62,7 +62,7 @@ ENTRYPOINTS = (
     "run",                    # the launcher
     "mt5_bridge",             # the Wine-side bridge process
     "backend.src.app",        # the composition root
-    "frontend.app",           # the UI, registers every page
+    "backend.src.api.server",  # the HTTP layer, mounts every router
     "signal_generator_report",  # shipped standalone report CLI (has __main__)
 )
 

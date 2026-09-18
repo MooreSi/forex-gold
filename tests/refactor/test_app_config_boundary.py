@@ -1,4 +1,4 @@
-"""The frontend reads and writes app config through a controller.
+"""The top layer reads and writes app config through a controller.
 
 `backend.src.config` was the single largest remaining coupling in
 `frontend-reaches-the-backend-through-controllers`: eight of the fifteen
@@ -79,7 +79,14 @@ def test_no_frontend_module_imports_the_app_config_directly():
     been done.
     """
     offenders = []
-    for path in (REPO / "frontend").rglob("*.py"):
+    # `frontend/` until 2026-09-18; `backend/src/api/` since. The top layer
+    # moved, so the scan moved with it rather than staying pointed at a
+    # directory that now holds TypeScript and would report zero offenders for
+    # ever.
+    scanned = [p for p in (REPO / "backend" / "src" / "api").rglob("*.py")
+               if "__pycache__" not in p.parts]
+    assert scanned, "the API layer has no Python in it — this scan is inert"
+    for path in scanned:
         if "__pycache__" in path.parts:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -97,11 +104,12 @@ def test_no_frontend_module_imports_the_app_config_directly():
     )
 
 
-def test_the_contract_drops_below_its_baseline():
+def test_the_contract_is_at_zero():
+    """This measured a baseline of 50 on the way down from 99. It reached 0 on
+    2026-09-02 and the contract was renamed on 2026-09-18 when the top layer
+    moved to `backend/src/api/`. The claim worth keeping is the end state, not
+    the waypoint."""
     from tools.refactor_audit import import_contracts as ic
 
-    count = ic.check().counts["frontend-reaches-the-backend-through-controllers"]
-    assert count <= 50, (
-        f"{count} edges against a baseline of 50 -- removing the eight "
-        "backend.src.config units should take 56 to 48"
-    )
+    count = ic.check().counts["the-api-layer-reaches-the-backend-through-controllers"]
+    assert count == 0, f"{count} edge(s) reaching past the controller layer"

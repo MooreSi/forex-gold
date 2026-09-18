@@ -13,101 +13,94 @@
   ],
   "_raised": {
     "2026-08-27": {
-    "_why": [
-      "The upstream merge (1e383fe) added nine supervised subsystems plus a",
-      "set of upstream features. Four baselined files grew. The alternative",
-      "to raising these four was moving close-path code (close_trade and its",
-      "callers in runtime.py), which is frozen and needs a demo session.",
-      "The owner chose the raise.",
-      "Every other file in this ratchet still holds its original floor, and",
-      "ea_bridge.py was SPLIT rather than baselined (1947 -> 715) instead of",
-      "being added here. The sql section went 56 statements -> 0 in the same",
-      "series. This is four recorded exceptions, not a general reset."
-    ],
-    "backend/src/runtime.py": {
-      "now": 1509,
-      "was": 1310,
-      "why": [
-        "The merge added nine methods to TradingRuntime: six supervisor loops",
-        "(_auto_template, _closed_market_queue, _ea_link_watchdog,",
-        "_ref_backfill, _signal_snapshot, _revalidate_pending_orders) plus",
-        "close_cmd, schedule_profit_sync and _await_trade_promotion.",
-        "The class is 88 methods averaging 12 lines, so returning to 1310",
-        "means deleting ~16 whole methods. The largest remaining are",
-        "_close_full_after_tps (53) and _cmd_close (45), both close-path.",
-        "Two loop bodies WERE relocated into their services first",
-        "(auto-template and signal snapshot, 1569 -> 1509) with 20 new tests",
-        "on logic that had none. The rest is not reachable without touching",
-        "frozen code.",
-        "facade_baseline.json rose from 79 to 88 for the same nine methods --",
-        "the two numbers are one fact stated twice and must move together."
-      ]
-    },
-    "backend/src/services/cluster/remote/server.py": {
-      "now": 1256,
-      "was": 1196,
-      "why": [
-        "THE LEAST COMFORTABLE OF THE FOUR, recorded as such deliberately.",
-        "This is licence-key issuance (Ed25519 signing through a",
-        "KeyGen-registered callback), the Telegram approve-registration",
-        "buttons, and per-client build tracking.",
-        "It has ZERO tests. That is also why it sits on the blocked-on-tests",
-        "list in docs/system/rules/70-file-organisation.md rather than in the",
-        "split queue.",
-        "Raising this baseline buys nothing but a green gate. It does not",
-        "make the file safer, and it removes the one signal that would have",
-        "flagged the next unreviewed growth in the code that issues licences",
-        "and grants admin authority.",
-        "The tests are deferred, not cancelled -- docs/todo/testing/012.",
-        "When they land, this entry should come back down.",
-        "",
-        "CORRECTION 2026-09-11: 'It has ZERO tests' is no longer true, and had",
-        "been false for nine days. remote/server.py is at 83% coverage",
-        "(docs/todo/testing/012), and the enforced baseline has already",
-        "followed the file down from 1256 to 1204 -- tight, no slack to remove.",
-        "What blocks the split is not tests any more: it is the TWELVE module",
-        "globals the file rebinds across 28 of its 41 functions. Measured",
-        "2026-09-11 -- only 143 lines are state-free, scattered over 10",
-        "unrelated functions, so moving every one of them leaves 1061 lines and",
-        "no coherent section. The state must become a module both halves",
-        "import before a seam exists at all."
-      ]
-    },
-    "backend/src/services/cluster/sync/server.py": {
-      "now": 1085,
-      "was": 1073,
-      "why": [
-        "Three execution-affecting settings joined the cross-node sync list:",
-        "internal_hedge_mode, internal_net_exposure_max_lots and",
-        "re_learn_from_ref_signals. Whichever node is the active trader reads",
-        "these before executing, so a flag set on one side that never reaches",
-        "the other is a live divergence between what the operator set and",
-        "what actually trades. Each entry carries its own comment."
-      ]
-    },
-    "mt5_bridge.py": {
-      "now": 1344,
-      "was": 1335,
-      "why": [
-        "A PII fix, not growth. The MT5 connect log carried the account",
-        "number, the broker server and the balance, and the diagnostics",
-        "feature uploads ~3,000 raw log lines to the admin server -- so every",
-        "one of them carried it (Q005 #1 in",
-        "docs/simon-handover/005-fact-finding.md, confirmed from real",
-        "captured logs). Seven of the nine lines are the comment recording",
-        "that. Deleting them to satisfy a line count would be the wrong",
-        "trade. The file is exempt from splitting anyway: it runs under a",
-        "different interpreter."
-      ]
-    }
+      "_why": [
+        "The upstream merge (1e383fe) added nine supervised subsystems plus a",
+        "set of upstream features. Four baselined files grew. The alternative",
+        "to raising these four was moving close-path code (close_trade and its",
+        "callers in runtime.py), which is frozen and needs a demo session.",
+        "The owner chose the raise.",
+        "Every other file in this ratchet still holds its original floor, and",
+        "ea_bridge.py was SPLIT rather than baselined (1947 -> 715) instead of",
+        "being added here. The sql section went 56 statements -> 0 in the same",
+        "series. This is four recorded exceptions, not a general reset."
+      ],
+      "backend/src/runtime.py": {
+        "now": 1509,
+        "was": 1310,
+        "why": [
+          "The merge added nine methods to TradingRuntime: six supervisor loops",
+          "(_auto_template, _closed_market_queue, _ea_link_watchdog,",
+          "_ref_backfill, _signal_snapshot, _revalidate_pending_orders) plus",
+          "close_cmd, schedule_profit_sync and _await_trade_promotion.",
+          "The class is 88 methods averaging 12 lines, so returning to 1310",
+          "means deleting ~16 whole methods. The largest remaining are",
+          "_close_full_after_tps (53) and _cmd_close (45), both close-path.",
+          "Two loop bodies WERE relocated into their services first",
+          "(auto-template and signal snapshot, 1569 -> 1509) with 20 new tests",
+          "on logic that had none. The rest is not reachable without touching",
+          "frozen code.",
+          "facade_baseline.json rose from 79 to 88 for the same nine methods --",
+          "the two numbers are one fact stated twice and must move together."
+        ]
+      },
+      "backend/src/services/cluster/remote/server.py": {
+        "now": 1256,
+        "was": 1196,
+        "why": [
+          "THE LEAST COMFORTABLE OF THE FOUR, recorded as such deliberately.",
+          "This is licence-key issuance (Ed25519 signing through a",
+          "KeyGen-registered callback), the Telegram approve-registration",
+          "buttons, and per-client build tracking.",
+          "It has ZERO tests. That is also why it sits on the blocked-on-tests",
+          "split queue.",
+          "Raising this baseline buys nothing but a green gate. It does not",
+          "make the file safer, and it removes the one signal that would have",
+          "flagged the next unreviewed growth in the code that issues licences",
+          "and grants admin authority.",
+          "When they land, this entry should come back down.",
+          "",
+          "CORRECTION 2026-09-11: 'It has ZERO tests' is no longer true, and had",
+          "followed the file down from 1256 to 1204 -- tight, no slack to remove.",
+          "What blocks the split is not tests any more: it is the TWELVE module",
+          "globals the file rebinds across 28 of its 41 functions. Measured",
+          "2026-09-11 -- only 143 lines are state-free, scattered over 10",
+          "unrelated functions, so moving every one of them leaves 1061 lines and",
+          "no coherent section. The state must become a module both halves",
+          "import before a seam exists at all."
+        ]
+      },
+      "backend/src/services/cluster/sync/server.py": {
+        "now": 1085,
+        "was": 1073,
+        "why": [
+          "Three execution-affecting settings joined the cross-node sync list:",
+          "internal_hedge_mode, internal_net_exposure_max_lots and",
+          "re_learn_from_ref_signals. Whichever node is the active trader reads",
+          "these before executing, so a flag set on one side that never reaches",
+          "the other is a live divergence between what the operator set and",
+          "what actually trades. Each entry carries its own comment."
+        ]
+      },
+      "mt5_bridge.py": {
+        "now": 1344,
+        "was": 1335,
+        "why": [
+          "A PII fix, not growth. The MT5 connect log carried the account",
+          "number, the broker server and the balance, and the diagnostics",
+          "feature uploads ~3,000 raw log lines to the admin server -- so every",
+          "one of them carried it (Q005 #1 in",
+          "captured logs). Seven of the nine lines are the comment recording",
+          "that. Deleting them to satisfy a line count would be the wrong",
+          "trade. The file is exempt from splitting anyway: it runs under a",
+          "different interpreter."
+        ]
+      }
     },
     "2026-09-03": {
       "_why": [
-        "docs/todo/backtest/010 phase 1: the backtest's tick-walking",
         "simulator needs tick history, fetched through TradingRuntime (the",
         "same facade get_candles_for_symbol already uses -- the live bridge",
         "connection is only reachable through it, no side door) and served",
-        "by a new bounded /ticks endpoint on the Wine bridge process.",
         "Both rises are small, mechanical additions in the same one-line-",
         "per-method shape every other market-data method here already has,",
         "not new growth of an existing responsibility."
@@ -127,10 +120,7 @@
         "now": 1401,
         "was": 1344,
         "why": [
-          "_get_ticks_range() and its /ticks HTTP route, bounded to one",
-          "calendar day per request -- docs/todo/backtest/010's 2026-09-03",
           "probe measured one closed hour of XAUUSD ticks at 29,580-34,584",
-          "ticks / 1.7-2.0MB, so an unbounded range would be tens of MB per",
           "request. Still exempt from splitting: runs under a different",
           "interpreter, same as the 2026-08-27 entry above."
         ]
@@ -147,9 +137,6 @@
         "regrowth up to it. Lowering is always permitted by the rule at the top",
         "of this file, so these needed no sign-off.",
         "",
-        "  backend/src/db/database.py            1251 -> removed (now 457)",
-        "  backend/src/services/cluster/remote/client.py  920 -> 894",
-        "  frontend/pages/test_panel.py         1246 -> 1245",
         "",
         "database.py is DELETED from the section rather than lowered: at 457 it",
         "is under the 800 ceiling entirely, so it is no longer a violation, and",
@@ -168,18 +155,11 @@
         "always permitted by the rule at the top of this file, so none of",
         "this needed sign-off.",
         "",
-        "  backend/src/services/cluster/remote/client.py   894 -> removed (732)",
-        "  backend/src/services/cluster/sync/client.py     867 -> removed (744)",
-        "  backend/src/services/cluster/sync/server.py    1085 -> removed (721)",
-        "  frontend/pages/ai_trade_analysis.py           1250 -> removed (package)",
-        "  frontend/pages/test_panel.py                  1245 -> removed (package)",
-        "  backend/src/runtime.py                        1509 -> 1507",
         "",
         "The three cluster files are now UNDER the 800 ceiling, so they are",
         "no longer violations at all and are held to the same ceiling as",
         "every other file -- stricter than any number, since a file absent",
         "from a section may never reappear in it. Note that removes the",
-        "sync/server.py entry from _raised's scope in practice: its 2026-08-27",
         "rise is history now, and the record above stays as the account of",
         "what was decided at the time.",
         "",
@@ -188,8 +168,6 @@
         "the gate can never check.",
         "",
         "The transaction section also dropped from three entries to one:",
-        "reversal_engine/database.py (3) and test_signal/database.py (1) are",
-        "resolved. backend/src/db/database.py (1) remains, and is the schema",
         "builder.",
         "",
         "Found while reconciling the refactor trackers against the code. The",

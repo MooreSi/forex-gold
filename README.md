@@ -98,10 +98,13 @@ backend/src/
     db/                 schema, connections, transactions
     services/           all the behaviour, one package per domain
     controllers/        translates between the UI and the services
+    api/                the HTTP layer the dashboard talks to — routers only
     utils/              bottom of the stack
 backend/migrations/     numbered, tested schema upgrade steps
 
-frontend/               NiceGUI dashboard — pages only, no database access
+frontend/               React dashboard (TypeScript, Vite)
+    src/                components, hooks, the one HTTP client
+    dist/               the compiled bundle — committed, and what the app serves
 mql5/                   MetaTrader 5 EA and indicator source
 installer/              Inno Setup installer source (see installer/BUILD_INSTALLER.md)
 notebooks/              research notebooks
@@ -111,10 +114,15 @@ docs/                   rules, specs, architecture, history
 ```
 
 Layers point downward only:
-`frontend → controllers → services → db`. The frontend never touches the
-database directly; every DB call is dispatched off the UI event loop by a
-controller. This is enforced, not conventional — see
+`frontend (browser) → backend/src/api → controllers → services → db`. The
+dashboard runs in the browser and reaches the app over HTTP/JSON; the API layer
+never touches the database or a service directly. This is enforced, not
+conventional — see
 [docs/system/rules/30-architecture.md](docs/system/rules/30-architecture.md).
+
+**Node is a developer dependency only.** The dashboard is compiled ahead of
+time and `frontend/dist` is committed, so installing and running the app needs
+nothing but Python.
 
 ## Developing
 
@@ -122,6 +130,16 @@ controller. This is enforced, not conventional — see
 pytest tests/ -q                # full suite
 python -m tools.checks all      # suite + every gate + boot smoke — run before committing
 python -m tools.checks gates    # structural gates only, ~12 seconds
+```
+
+The dashboard has its own toolchain:
+
+```bash
+cd frontend
+npm install                     # once per checkout
+npm test                        # vitest
+npm run dev                     # Vite on :5173, proxying /api to the app on :8888
+npm run build                   # rebuild dist/ — commit it with your src change
 ```
 
 `tools.checks gates` runs nine checks, and they only ever tighten:

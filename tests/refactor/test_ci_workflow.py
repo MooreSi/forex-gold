@@ -136,3 +136,65 @@ def test_the_coverage_artifact_can_actually_be_uploaded():
     assert "include-hidden-files: true" in step, (
         "the coverage artifact is a dotfile; without include-hidden-files the "
         "upload silently uploads nothing")
+
+
+# ── The shell each step actually gets ────────────────────────────────────────
+
+def _steps() -> list[dict]:
+    """Every step of every job, as dicts. Parsed rather than regexed: the
+    question here is which keys a step has, not what its text looks like."""
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    out = []
+    for job in (workflow.get("jobs") or {}).values():
+        out.extend(job.get("steps") or [])
+    return out
+
+
+# Syntax PowerShell does not understand. The job runs on windows-latest, where
+# pwsh is the default shell for `run:`.
+_BASH_ONLY = ("\\\n", "|| {", "&& {", "$(", "if [", "[ -")
+
+
+def test_every_step_that_writes_bash_asks_for_bash():
+    """A bash-only construct in a PowerShell step fails for a reason that has
+    nothing to do with what the step checks.
+
+    Found on 2026-09-18: the stale-bundle step used a line-continuation
+    backslash and `|| { ...; }`. PowerShell passed the `\\` to git as a
+    pathspec, git said "Could not access '\\'", and the step reported
+    **frontend/dist is stale** — while dist was byte-identical to what CI had
+    just built. A guardrail that cries wolf is one people learn to ignore,
+    which is the failure mode CLAUDE.md's stale-guardrail incident is about.
+    """
+    offenders = []
+    for step in _steps():
+        script = step.get("run") or ""
+        if not script or step.get("shell") == "bash":
+            continue
+        for token in _BASH_ONLY:
+            if token in script:
+                offenders.append(f"{step.get('name', '<unnamed>')}: {token!r}")
+                break
+
+    assert offenders == [], (
+        "these steps use bash syntax without `shell: bash`, on a Windows "
+        "runner:\n  " + "\n  ".join(offenders))
+
+
+def test_the_check_can_see_a_step_that_would_fail_it():
+    """Negative control. Every assertion above is `== []`, which a parser that
+    found no steps would satisfy."""
+    assert len(_steps()) > 3
+
+    offending = {"name": "made up", "run": "git diff \\\n  || { exit 1; }"}
+    assert any(token in offending["run"] for token in _BASH_ONLY)
+
+
+def test_the_bundle_step_is_the_one_that_needed_it():
+    """Named so the fix cannot be quietly undone by dropping the key."""
+    step = next(s for s in _steps()
+                if "committed bundle" in (s.get("name") or ""))
+
+    assert step.get("shell") == "bash"

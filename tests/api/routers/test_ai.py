@@ -48,8 +48,11 @@ def lab(monkeypatch):
                         lambda path, days: state["strategies"])
     monkeypatch.setattr(ai_router.ai_analysis_ctl, "gather_signal_generator_data",
                         lambda path, days: state["generator"])
-    monkeypatch.setattr(ai_router.ai_analysis_ctl, "signal_generator_system_prompt",
-                        lambda: "You are a trading analyst.")
+    # One stand-in per subject, so a handler that sends the WRONG subject's
+    # prompt is visible here rather than passing on a single shared string.
+    # That is what it did until 2026-09-19.
+    monkeypatch.setattr(ai_router.ai_analysis_ctl, "system_prompt_for",
+                        lambda subject: f"You are a trading analyst for {subject}.")
     return state
 
 
@@ -140,8 +143,27 @@ def test_the_model_is_given_the_evidence_and_the_system_prompt(make_client, lab)
     make_client().post("/api/ai/analyse", json={"subject": "channels", "days": 30})
 
     _cfg, system, prompt, _max = lab["completions"][0]
-    assert system == "You are a trading analyst."
+    assert system == "You are a trading analyst for channels."
     assert "GoldSignals" in prompt
+
+
+def test_each_subject_gets_its_own_prompt_not_a_shared_one(make_client, lab):
+    """The bug this file missed for months.
+
+    Every subject gathered its own evidence and was then sent the SIGNAL
+    GENERATOR prompt -- which opens "You are given performance data for
+    internal signal generator engines" and demands a schema keyed on
+    `engines`. Asking about Telegram channels handed a paid model channel
+    rows and told it they were engines.
+    """
+    for subject in ("channels", "strategies", "generator"):
+        make_client().post("/api/ai/analyse", json={"subject": subject, "days": 30})
+
+    systems = [c[1] for c in lab["completions"]]
+
+    assert systems == ["You are a trading analyst for channels.",
+                       "You are a trading analyst for strategies.",
+                       "You are a trading analyst for generator."]
 
 
 def test_an_unconfigured_provider_refuses_instead_of_answering_nothing(make_client, lab):

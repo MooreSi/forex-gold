@@ -10,7 +10,7 @@ from __future__ import annotations
 from backend.src.services.analytics import ai_analysis_repo as _repo
 
 __all__ = ["channel_data", "strategy_dpm_data", "signal_generator_data",
-           "signal_generator_system_prompt"]
+           "system_prompt_for"]
 
 
 def channel_data(db_path: str, days: int) -> list[dict]:
@@ -23,6 +23,18 @@ def strategy_dpm_data(db_path: str, days: int) -> dict:
 
 def signal_generator_data(db_path: str, days: int) -> dict:
     return _repo._gather_signal_generator_data(db_path, days)
+
+
+def system_prompt_for(subject: str) -> str:
+    """The system prompt for one analysis subject.
+
+    Raises KeyError for an unknown subject rather than falling back. A
+    fallback would send a paid model the wrong question with no trace, which
+    is exactly what happened between the port and 2026-09-19: all three
+    subjects were sent the signal-generator prompt, so asking about Telegram
+    channels handed the model channel rows and told it they were engines.
+    """
+    return _repo.SYSTEM_PROMPTS[subject]
 
 
 def signal_generator_system_prompt() -> str:

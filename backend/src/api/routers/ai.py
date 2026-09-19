@@ -105,7 +105,10 @@ async def analyse(body: AnalysisRequest) -> dict:
     gather = getattr(ai_analysis_ctl, SUBJECTS[body.subject][1])
     path = settings_ctl.get_config("db_path") or ""
     evidence_rows = gather(path, body.days)
-    prompt = ai_analysis_ctl.signal_generator_system_prompt()
+    # The prompt for THIS subject. Until 2026-09-19 every subject was sent the
+    # signal-generator one, so asking about Telegram channels handed the model
+    # channel rows and told it they were engines.
+    prompt = ai_analysis_ctl.system_prompt_for(body.subject)
     answer = await ai_ctl.complete(cfg, prompt, str(evidence_rows), 4000)
     return {"subject": body.subject, "days": body.days,
             "billable": True, "answer": answer}

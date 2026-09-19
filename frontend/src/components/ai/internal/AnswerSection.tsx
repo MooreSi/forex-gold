@@ -1,6 +1,7 @@
 import { CheckCircle2, MinusCircle, TrendingDown, TrendingUp, XCircle } from "lucide-react";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
+import { StructuredAnswer } from "./StructuredAnswer";
 
 interface AnswerSectionProps {
   answer: string;
@@ -131,6 +132,19 @@ export function AnswerSection({ answer }: AnswerSectionProps) {
   }
 
   const engines = asArray<EngineVerdict>(parsed["engines"]);
+
+  // Only the signal-generator schema has engine cards. The other two subjects
+  // -- the channel report and DPM-versus-fixed -- go through the generic
+  // renderer, which draws the SHAPE rather than a known schema. Without that,
+  // a subject with no bespoke renderer lands on screen as raw JSON, which is
+  // the state this whole area was in.
+  if (engines.length === 0) {
+    return (
+      <div data-testid="ai-answer">
+        <StructuredAnswer answer={parsed} />
+      </div>
+    );
+  }
 
   return (
     <div data-testid="ai-answer" className="space-y-3">

@@ -528,3 +528,108 @@ _SIGNAL_GEN_SYSTEM = (
 )
 
 
+# ── The other two subjects' prompts ──────────────────────────────────────────
+#
+# Carried over from the NiceGUI page on 2026-09-19. Only the signal-generator
+# pair survived the port, and `/api/ai/analyse` sent it for ALL THREE subjects
+# -- so asking about Telegram channels handed a paid model a pile of channel
+# rows, told it they were engines, and asked it to report on engines.
+#
+# The wording is the owner's, verbatim. Every numbered rule in the channel
+# prompt exists because the model got that judgement wrong without it, and
+# rephrasing them would be re-running an experiment somebody already paid for.
+
+_ANALYSIS_SCHEMA = (
+    '{"reliability_score":0,'
+    '"reliability_label":"string",'
+    '"executive_summary":"string",'
+    '"phantom_tps":[{"date":"string","direction":"string","claimed":"string",'
+    '"actual":"string","pnl":0.0}],'
+    '"phantom_tp_pattern":"string",'
+    '"sl_management":{"channel_instructs_be":false,"current_weakness":"string",'
+    '"recommended_rule":"string","implementation_note":"string"},'
+    '"partial_close_model":{"actual_period_pnl":0.0,"simulated_50pct_tp1_pnl":0.0,'
+    '"improvement":0.0,"verdict":"string"},'
+    '"rr_analysis":{"signals_below_1_to_1":0,"comment":"string","flags":["string"]},'
+    '"entry_drift":{"avg_pips":0.0,"worst_case_pips":0.0,"comment":"string"},'
+    '"session_analysis":"string",'
+    '"consecutive_losses":"string",'
+    '"lot_sizing":{"actual_win_rate_pct":0.0,"kelly_fraction_pct":0.0,'
+    '"recommended_risk_pct":0.0,"reasoning":"string"},'
+    '"overall_recommendation":"string"}'
+)
+
+_ANALYSIS_SYSTEM = (
+    "You are a professional XAUUSD (Gold) trading signal analyst. "
+    "You are given real trade data for a Telegram signal channel: what signals were sent, "
+    "what the channel claimed in follow-up messages, and what actually happened in execution.\n\n"
+    "CRITICAL CONTEXT — read carefully before analysing:\n"
+    "1. TP1 = WIN. A signal is considered to have won if it achieves TP1. Whether the trader "
+    "takes all profit at TP1, holds for TP2+, or uses partial closes is purely a risk management "
+    "decision that has no bearing on signal quality. Evaluate signal quality on whether TP1 was "
+    "reachable — not on how much profit was ultimately captured.\n"
+    "2. WIDER SL ANALYSIS. When a trade stops out at SL before reaching TP1, explicitly assess "
+    "whether a slightly wider SL (relative to recent ATR or nearby structure) would have kept the "
+    "trade alive long enough to reach TP1. Flag specific instances where a wider SL appears "
+    "structurally justified. This is important because the current fixed SL placement may be "
+    "cutting trades short that the signal correctly called.\n"
+    "3. ENTRY DRIFT = LATENCY, NOT SIGNAL FAULT. Any difference between the signal's entry zone "
+    "midpoint and the actual execution price is caused by infrastructure latency: Telegram → app "
+    "→ MT5 bridge (Wine/CrossOver on Mac) → Vantage broker. This is NOT a signal quality issue. "
+    "Report entry drift as infrastructure context only — do not penalise the signal for it.\n"
+    "4. The trader manages their own SL strategy independently. SL hits reflect risk management "
+    "decisions, not solely channel failure.\n"
+    "5. Signals provide an entry zone (price range), not a single price. Strong entry-zone "
+    "positioning relative to structure is evidence of signal quality.\n"
+    "6. A channel with net positive P&L is providing real value even if some trades SL out.\n\n"
+    "Analyse across these dimensions:\n"
+    "1. Signal quality — entry zone accuracy; R:R at signal; whether TP1 was achievable\n"
+    "2. SL placement — were stops too tight? Would wider SLs have captured more TP1s?\n"
+    "3. Phantom TPs — channel claims TP hit but trade actually ended at SL or in a loss\n"
+    "4. Partial close model — what would 50%-at-TP1 + SL-to-BE have produced vs actual\n"
+    "5. Session bias — which time-of-day sessions produce the best and worst results\n"
+    "6. Consecutive loss patterns — clusters that suggest adverse regime conditions\n"
+    "7. Lot sizing — based on actual (not claimed) win rate, what risk % is appropriate\n"
+    "8. Overall profitability assessment — honest verdict on whether this channel adds value\n\n"
+    "Be balanced: acknowledge strengths as clearly as you flag weaknesses. "
+    "Give concrete rules with numbers where improvements are warranted. "
+    "Respond ONLY with a single minified JSON object matching this exact schema — no other text:\n"
+    + _ANALYSIS_SCHEMA
+)
+
+_STRATEGY_DPM_SCHEMA = (
+    '{"overall_verdict":"string",'
+    '"best_approach":"dpm|scale_out|be_runner|trail_stop|protected_scale|insufficient_data",'
+    '"dpm_assessment":{"verdict":"string","strength":"string","weakness":"string",'
+    '"best_regime":"string","best_session":"string",'
+    '"recommendation":"keep_dpm|disable_dpm|use_dpm_selectively"},'
+    '"strategy_notes":[{"strategy":"string","verdict":"string"}],'
+    '"when_to_use_fixed":"string",'
+    '"actionable_advice":"string"}'
+)
+
+_STRATEGY_DPM_SYSTEM = (
+    "You are a professional trading systems analyst evaluating whether an adaptive Dynamic Position "
+    "Management (DPM) system outperforms fixed exit strategies on XAUUSD (Gold).\n\n"
+    "DPM uses ATR-based trailing stops, adaptive breakeven triggers, and partial close sizing that "
+    "self-calibrate over time based on market regime (trending/ranging/spike), session, and momentum.\n\n"
+    "Fixed strategies:\n"
+    "  scale_out: scale out 20% at each TP, move SL to BE after TP1\n"
+    "  be_runner: move SL to BE/TP levels, hold full position to final TP\n"
+    "  trail_stop: trailing stop activates after TP1 is hit\n"
+    "  protected_scale: hold through TP1+TP2 for BE protection, scale from TP3\n\n"
+    "Be direct. Give a clear verdict. If data is thin (< 10 trades), say so and note "
+    "what additional data is needed for a firm conclusion.\n"
+    "Respond ONLY with a single minified JSON object matching this exact schema — no other text:\n"
+    + _STRATEGY_DPM_SCHEMA
+)
+
+# Keyed by the subject id `/api/ai/analyse` takes. A KeyError here is the
+# second line of defence behind the router's own refusal: a subject with no
+# prompt must never fall back to another subject's, because that sends a paid
+# model the wrong question with no trace.
+SYSTEM_PROMPTS = {
+    "channels": _ANALYSIS_SYSTEM,
+    "strategies": _STRATEGY_DPM_SYSTEM,
+    "generator": _SIGNAL_GEN_SYSTEM,
+}

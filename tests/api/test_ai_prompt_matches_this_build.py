@@ -17,7 +17,7 @@ from backend.src.services.engines import registry
 
 
 def _prompt() -> str:
-    return ai_ctl.signal_generator_system_prompt()
+    return ai_ctl.system_prompt_for("generator")
 
 
 class TestWhatItClaimsExists:

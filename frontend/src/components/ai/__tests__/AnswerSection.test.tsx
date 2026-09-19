@@ -150,10 +150,13 @@ describe("an answer that is not the schema", () => {
   });
 
   it("shows a partial object without inventing the missing parts", () => {
+    // No `engines` key, so this takes the generic path -- which is correct:
+    // the engine-card layout is for the signal-generator schema, and an
+    // object that is not that schema is still an answer.
     render(<AnswerSection answer={JSON.stringify({ overall_assessment: "Thin." })} />);
 
-    expect(screen.getByTestId("overall-assessment")).toHaveTextContent("Thin.");
-    expect(screen.queryByTestId("collective-verdict")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ai-answer")).toHaveTextContent("Thin.");
+    expect(screen.queryByTestId("answer-collective_verdict")).not.toBeInTheDocument();
   });
 
   it("survives an engines field that is not a list", () => {

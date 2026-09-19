@@ -1,13 +1,39 @@
-import { Sparkles, TriangleAlert } from "lucide-react";
-import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { cn } from "@/lib/cn";
 import { useAiController } from "./hooks/useAiController";
-import { AnswerSection } from "./internal/AnswerSection";
 import { EvidenceSection } from "./internal/EvidenceSection";
+import { GeneratorEvidence } from "./internal/GeneratorEvidence";
+import { StrategyEvidence } from "./internal/StrategyEvidence";
+import { SubjectSection } from "./internal/SubjectSection";
 
 const WINDOWS = [7, 30, 90];
+
+/**
+ * One page, three subjects — the shape the NiceGUI page had.
+ *
+ * The React port put the subjects behind a three-way selector, so reading the
+ * channel report meant losing the generator's and the DPM comparison. The
+ * owner asked for the original back on 2026-09-19.
+ *
+ * All three sets of numbers load together because reading them is free. No
+ * model is called until a specific section's Ask button is pressed, so one
+ * page does not mean three bills.
+ */
+const SUBJECTS: Record<string, { blurb: string; icon: string }> = {
+  channels: {
+    icon: "channels",
+    blurb: "What each Telegram channel sent, claimed, and actually produced.",
+  },
+  strategies: {
+    icon: "percent",
+    blurb: "Adaptive position management against the fixed exit strategies.",
+  },
+  generator: {
+    icon: "flask",
+    blurb: "Whether this app's own engines are getting better over time.",
+  },
+};
 
 export function AiPanel() {
   const c = useAiController();
@@ -42,55 +68,33 @@ export function AiPanel() {
       ))}
     >
       {!c.meta ? (
-        <EmptyState title={c.refusal ? "Could not load this tab" : "Loading"} hint={c.refusal ?? undefined} />
+        <EmptyState title={c.refusal ? "Could not load this tab" : "Loading"}
+          hint={c.refusal ?? undefined} />
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {c.meta.subjects.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => c.setSubject(s.id)}
-                aria-pressed={s.id === c.subject}
-                className={cn(
-                  "rounded border px-2 py-1 text-[11px] transition-colors",
-                  s.id === c.subject
-                    ? "border-accent bg-accent/15 text-ink-1"
-                    : "border-line bg-surface-1 text-ink-3 hover:text-ink-2",
-                )}
+          {c.meta.subjects.map(({ id, label }) => {
+            const spec = SUBJECTS[id] ?? { blurb: "", icon: "bot" };
+            const state = c.stateFor(id);
+            return (
+              <SubjectSection
+                key={id}
+                id={id}
+                label={label}
+                blurb={spec.blurb}
+                icon={spec.icon}
+                state={state}
+                provider={c.meta!.provider}
+                cannotAsk={cannotAsk}
+                onAsk={() => void c.analyse(id)}
               >
-                {s.label}
-              </button>
-            ))}
-          </div>
-
-          <EvidenceSection subject={c.subject} evidence={c.evidence} />
-
-          <div className="flex items-center gap-3 border-t border-line pt-3">
-            <Button
-              variant="primary"
-              onClick={() => void c.analyse()}
-              disabled={c.asking}
-              disabledReason={cannotAsk}
-            >
-              <Sparkles size={13} />
-              {c.asking ? "Asking the model…" : "Ask the model"}
-            </Button>
-            <span className="flex items-center gap-1 text-[11px] text-warning">
-              <TriangleAlert size={12} />
-              This call is billed by {c.meta.provider || "your provider"}. The numbers above are free.
-            </span>
-          </div>
-
-          {c.refusal && (
-            <p role="alert" className="rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-              {c.refusal}
-            </p>
-          )}
-          {/* The prompt asks for JSON, so the answer arrives as a minified
-              object -- which is what this panel used to render on screen, as
-              text. AnswerSection breaks it into the sections it was asked for,
-              and falls back to the raw text for anything else. */}
-          {c.answer && <AnswerSection answer={c.answer} />}
+                {/* Each subject's evidence has its own shape and its own
+                    table. A shared renderer here would be raw JSON again. */}
+                {id === "strategies" ? <StrategyEvidence evidence={state.evidence} />
+                  : id === "generator" ? <GeneratorEvidence evidence={state.evidence} />
+                    : <EvidenceSection subject={id} evidence={state.evidence} />}
+              </SubjectSection>
+            );
+          })}
         </div>
       )}
     </PanelShell>

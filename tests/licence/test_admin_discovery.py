@@ -213,3 +213,70 @@ class TestTheTrackedCheckoutTakesPrecedence:
         source = (_P(__file__).resolve().parents[2]
                   / "backend/src/config/licence/guard.py").read_text(encoding="utf-8")
         assert '"forex-admin"' in source, "guard.py does not know about the tracked checkout"
+
+
+# ── Hosting the fleet vs drawing the console (2026-09-19) ────────────────────
+
+class TestHostingIsNotTheSameAsDrawing:
+    """`_is_admin_host()` answers "should this machine run the admin SERVER".
+
+    It used to be `_find_admin_open_fn() is not None`, which imports
+    `forex_admin` -- and that imports NiceGUI. The React app removed NiceGUI
+    from its dependencies on 2026-09-18, so on a clean install of that app
+    the licence-issuer Mac would have quietly started the remote CLIENT
+    instead of the server: dialling a fleet server that was not running,
+    showing no fleet at all. It only worked because a stale nicegui was left
+    in that app's virtualenv.
+    """
+
+    @pytest.fixture
+    def issuer_with_console(self, tmp_path, monkeypatch):
+        from backend.src.config.licence import issuer as issuer_mod
+        monkeypatch.delenv("FOREX_ADMIN_MACHINE_FINGERPRINT", raising=False)
+        monkeypatch.setattr(issuer_mod, "_read_fingerprint",
+                            lambda: issuer_mod.ADMIN_MACHINE_FINGERPRINT)
+
+        home = tmp_path / "home"
+        checkout = home / "forex-admin"
+        checkout.mkdir(parents=True)
+        (checkout / "forex_admin.py").write_text("x = 1\n", encoding="utf-8")
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(app_mod, "_admin_checkout_candidates",
+                            lambda _root: [checkout, home / "KeyGen",
+                                           home / "Documents" / "KeyGen"])
+        monkeypatch.setattr(app_mod, "_is_somebody_elses_client", lambda: False)
+        return checkout
+
+    def test_it_hosts_even_when_the_nicegui_console_cannot_be_drawn(
+        self, issuer_with_console, monkeypatch,
+    ):
+        """The React app's case: no NiceGUI, so no button — but it is still
+        the machine that must run the server."""
+        monkeypatch.setattr(app_mod, "_find_admin_open_fn", lambda: None)
+        assert app_mod._is_admin_host() is True
+
+    def test_a_non_issuer_machine_never_hosts(self, issuer_with_console, monkeypatch):
+        from backend.src.config.licence import issuer as issuer_mod
+        monkeypatch.setattr(issuer_mod, "_read_fingerprint", lambda: "SOMEONE-ELSE")
+        assert app_mod._is_admin_host() is False
+
+    def test_somebody_elses_client_never_hosts(self, issuer_with_console, monkeypatch):
+        """A machine the fleet has already welcomed keeps reporting in rather
+        than becoming a second server."""
+        monkeypatch.setattr(app_mod, "_is_somebody_elses_client", lambda: True)
+        assert app_mod._is_admin_host() is False
+
+    def test_no_console_checkout_means_no_hosting(self, issuer_with_console, monkeypatch):
+        (issuer_with_console / "forex_admin.py").unlink()
+        assert app_mod._is_admin_host() is False
+
+    def test_hosting_still_needs_a_password_to_start_the_server(
+        self, issuer_with_console, monkeypatch,
+    ):
+        """Hosting is necessary, not sufficient — an unconfigured console must
+        not expose a server."""
+        monkeypatch.setattr(app_mod, "LOCAL_ADMIN_AVAILABLE", True)
+        monkeypatch.setattr(app_mod, "password_is_set", lambda: False)
+        assert app_mod._should_start_remote_server() is False
+        monkeypatch.setattr(app_mod, "password_is_set", lambda: True)
+        assert app_mod._should_start_remote_server() is True

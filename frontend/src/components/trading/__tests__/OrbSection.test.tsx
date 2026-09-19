@@ -25,6 +25,12 @@ const REPORT = {
   position_note: "above both ranges",
 };
 
+// The ORB report draws the same TradingView chart the Chart tab does, and
+// lightweight-charts wants a canvas and `window.matchMedia` that jsdom does
+// not have. Async factory with a dynamic import because `vi.mock` is hoisted
+// above every import in the file.
+vi.mock("lightweight-charts", async () => (await import("@/test/chartStub")).chartStub());
+
 let state: Record<string, unknown>;
 let response: { status: number; body: unknown };
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -79,20 +85,53 @@ describe("the report", () => {
       .toBeInTheDocument();
   });
 
-  it("renders the backend's chart rather than drawing its own", async () => {
+  it("draws the live chart rather than the backend's PNG", async () => {
+    // CHANGED 2026-09-19 at the owner's request. It was a matplotlib image
+    // base64'd into the payload: it could not be zoomed, panned or read
+    // against a moving price, and it looked nothing like the Chart tab three
+    // clicks away. The endpoint still returns the PNG, which the emailed
+    // report uses -- the one place a picture is the right answer.
     render(<OrbSection />);
 
-    const img = await screen.findByAltText("ORB chart");
-    expect(img).toHaveAttribute("src", "data:image/png;base64,UE5H");
+    expect(await screen.findByTestId("orb-chart")).toBeInTheDocument();
+    expect(screen.queryByAltText("ORB chart")).not.toBeInTheDocument();
   });
 
-  it("survives a chart the backend could not render", async () => {
-    // The numbers are the point; the picture is not.
-    state.chart_png_base64 = null;
+  it("draws the Asian range and the opening range as bands", async () => {
+    // The two ranges ARE the report: the Asian session is the confirmation
+    // filter and the first fifteen minutes of London is the traded range.
+    render(<OrbSection />);
+    await screen.findByTestId("orb-chart");
+
+    expect(await screen.findByTestId("orb-band-asia")).toBeInTheDocument();
+    expect(screen.getByTestId("orb-band-or")).toBeInTheDocument();
+  });
+
+  it("asks for its own candles, at a resolution that can show a 15-minute range", async () => {
+    // The opening range is three bars at 5m. Anything coarser cannot show it.
+    render(<OrbSection />);
+    await screen.findByTestId("orb-chart");
+
+    await waitFor(() => expect(fetchMock.mock.calls.some((c) =>
+      String(c[0]).includes("/api/chart/candles?timeframe=5m"))).toBe(true));
+  });
+
+  it("still reports when there are no candles to draw", async () => {
+    // REPLACES "survives a chart the backend could not render". There is no
+    // server-rendered chart to fail any more, but the same property matters:
+    // the numbers are the point and the picture is not.
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method && init.method !== "GET") {
+        return { ok: true, status: 200, json: async () => response.body };
+      }
+      if (String(url).startsWith("/api/chart/candles")) {
+        return { ok: false, status: 500, statusText: "", json: async () => ({}) };
+      }
+      return { ok: true, status: 200, json: async () => state };
+    });
     render(<OrbSection />);
 
     expect(await screen.findByText(/BREAKOUT — BULLISH/)).toBeInTheDocument();
-    expect(screen.queryByAltText("ORB chart")).not.toBeInTheDocument();
   });
 
   it("says there is no report yet rather than showing an empty card", async () => {

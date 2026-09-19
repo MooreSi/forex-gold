@@ -94,10 +94,24 @@ def describe() -> dict:
     out = {}
     for environment in ENVIRONMENTS:
         login, password, server = _account(environment)
+        # Three states, not two. A password that is SAVED but cannot be
+        # decrypted reaches `_account` as "" and looks identical to one that
+        # was never entered -- and the advice for the two is opposite. On
+        # 2026-09-19 the header's switch was disabled with "Add it under
+        # Settings > MT5" on an install where both accounts were fully
+        # configured: the app was running under an interpreter with no
+        # `keyring`, so secrets fell back to a key file, the key did not match
+        # and every password decrypted to "". Re-typing them would not have
+        # helped.
+        #
+        # An account with a login and a server but no readable password is the
+        # signature: nothing was stored, nothing would decrypt to "".
+        unreadable = bool(login and server and not password)
         out[environment] = {
             "login": login,
             "server": server,
             "configured": bool(login and password and server),
+            "unreadable": unreadable,
         }
     return {"current": current(), "environments": out}
 

@@ -4,7 +4,14 @@ import { DialogShell } from "@/components/shared/DialogShell";
 import { Button } from "@/components/shared/Button";
 import { AccountBadge } from "./AccountBadge";
 
-interface Account { login: string; server: string; configured: boolean }
+interface Account {
+  login: string;
+  server: string;
+  configured: boolean;
+  /** Saved, but the key cannot decrypt it. A different problem from absent,
+   *  and the advice for the two is opposite. */
+  unreadable?: boolean;
+}
 interface EnvState {
   current: string;
   environments: Record<string, Account>;
@@ -86,11 +93,19 @@ export function EnvironmentControl({ account = null }: EnvironmentControlProps) 
         onClick={() => { setOutcome(null); setAsking(target); }}
         disabled={!targetAccount?.configured}
         title={
-          !targetAccount?.configured
-            ? `No ${target} account is configured. Add it under Settings > MT5.`
-            : live
-              ? "This app is pointed at the LIVE account. Click to switch back to demo."
-              : "This app is pointed at the demo account. Click to switch to live."
+          targetAccount?.unreadable
+            // NOT "add it under Settings > MT5". The credentials ARE saved;
+            // they cannot be decrypted, and re-typing them will not fix that.
+            // Seen live on 2026-09-19 when the app ran under an interpreter
+            // with no `keyring` and every password decrypted to "".
+            ? `The ${target} account (${targetAccount.login}) is saved but its `
+              + "password cannot be decrypted on this machine. Start the app "
+              + "with the project's own .venv, which has the keychain library."
+            : !targetAccount?.configured
+              ? `No ${target} account is configured. Add it under Settings > MT5.`
+              : live
+                ? "This app is pointed at the LIVE account. Click to switch back to demo."
+                : "This app is pointed at the demo account. Click to switch to live."
         }
         className="rounded transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
       >

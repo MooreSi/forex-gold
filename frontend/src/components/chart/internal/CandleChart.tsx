@@ -4,6 +4,7 @@ import {
   type IChartApi, type ISeriesApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, Overlays, Tick, Trade } from "@/api/types";
+import { chartColours, rgba, token, watchTheme } from "./chartTheme";
 import { rectsFor, type FvgRect } from "./fvgGeometry";
 
 interface CandleChartProps {
@@ -18,41 +19,11 @@ interface CandleChartProps {
 // semantics the rest of the UI uses, which is why they are not chosen freely.
 const BULL = "#00cc88";
 const BEAR = "#ff4444";
-/** A theme token's current value, or a fallback.
- *
- *  lightweight-charts paints to a canvas and cannot use CSS variables, so the
- *  chart has to be TOLD the colours. Until 2026-09-19 it was told #030712
- *  unconditionally, which in light mode is a black rectangle inside a white
- *  panel. */
-function token(name: string, fallback: string): string {
-  if (typeof getComputedStyle !== "function") return fallback;
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue(name).trim();
-  return value || fallback;
-}
-
-function chartColours() {
-  return {
-    background: token("--color-surface-1", "#030712"),
-    text: token("--color-ink-2", "#9ca3af"),
-    grid: token("--color-surface-3", "#1b2333"),
-    border: token("--color-line", "#263044"),
-  };
-}
-
 // A fair-value gap is an imbalance price left behind. Bullish gaps sit below
 // price and bearish above, so they take the same profit/loss meaning the rest
 // of the app uses -- through the THEME tokens, not fixed hex. #00cc88 at 13%
 // over a white panel is invisible, which is what the first version of this
 // overlay was in light mode: six correctly positioned zones nobody could see.
-function rgba(colour: string, alpha: number): string {
-  const hex = colour.trim().replace("#", "");
-  if (hex.length !== 6) return colour;
-  const n = parseInt(hex, 16);
-  if (!Number.isFinite(n)) return colour;
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
-
 function fvgColours() {
   const profit = token("--color-profit", "#00cc88");
   const loss = token("--color-loss", "#ff4444");
@@ -85,14 +56,7 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
   // mountable anywhere -- a chart that throws because a context is missing is
   // a blank dashboard over a colour, and the theme is the least important
   // thing on it.
-  useEffect(() => {
-    if (typeof MutationObserver !== "function") return;
-    const observer = new MutationObserver(() => setThemeTick((n) => n + 1));
-    observer.observe(document.documentElement, {
-      attributes: true, attributeFilter: ["data-theme"],
-    });
-    return () => observer.disconnect();
-  }, []);
+  useEffect(() => watchTheme(() => setThemeTick((n) => n + 1)), []);
 
   useEffect(() => {
     if (!holder.current) return;

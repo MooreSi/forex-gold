@@ -7,6 +7,7 @@ import { StatCard } from "@/components/shared/StatCard";
 import { formatPrice } from "@/components/shared/format";
 import { asObject } from "@/lib/asArray";
 import { usePoll } from "@/hooks/usePoll";
+import { OrbChart } from "./OrbChart";
 
 interface OrbReport {
   direction: string;
@@ -20,6 +21,8 @@ interface OrbReport {
 
 interface OrbState {
   report: OrbReport | null;
+  /** Still served, and still used by the emailed report. The tab draws the
+   *  live chart instead -- see OrbChart. */
   chart_png_base64: string | null;
   lot_size: number;
   auto_execute: boolean;
@@ -147,13 +150,15 @@ export function OrbSection() {
             )}
           </div>
 
-          {data.chart_png_base64 && (
-            <img
-              alt="ORB chart"
-              className="mt-3 w-full rounded border border-line"
-              src={`data:image/png;base64,${data.chart_png_base64}`}
-            />
-          )}
+          {/* The live chart, not the server-rendered PNG.
+              It was a matplotlib image base64'd into this payload: it could
+              not be zoomed, panned or read against a moving price, and it
+              looked nothing like the Chart tab three clicks away. The
+              endpoint still returns the PNG for the emailed report, which is
+              the one place a picture is the right answer. */}
+          <div className="mt-3">
+            <OrbChart bands={report} />
+          </div>
 
           {confirmed && (
             <>

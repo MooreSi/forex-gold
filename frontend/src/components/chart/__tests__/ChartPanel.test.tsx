@@ -14,6 +14,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChartPanel } from "../ChartPanel";
 import { resetPolls } from "@/hooks/usePoll";
 
+// lightweight-charts wants a real canvas and `window.matchMedia`; jsdom has
+// neither. The stand-in is shared with the ORB chart's tests -- see
+// src/test/chartStub.ts for why it answers coordinates the way it does.
+//
+// The factory is async with a dynamic import because `vi.mock` is hoisted
+// above every import in the file, so a factory that closes over one cannot
+// see it yet.
+vi.mock("lightweight-charts", async () => (await import("@/test/chartStub")).chartStub());
+
 const CANDLES = [
   { ts: 1_750_000_000, open: 2430, high: 2432, low: 2429, close: 2431 },
 ];
@@ -46,38 +55,6 @@ beforeEach(() => {
     return { ok: true, status: 200, json: async () => [] };
   });
   vi.stubGlobal("fetch", fetchMock);
-  // lightweight-charts wants a real canvas; jsdom has none.
-  //
-  // `timeScale` and `priceToCoordinate` were added on 2026-09-19 with the
-  // fair-value-gap overlay: the zones are an SVG layer positioned through the
-  // chart's own coordinate conversions, so a stand-in that cannot answer
-  // "where is this price" is not a stand-in for this component any more.
-  // Their geometry is tested for real in fvgGeometry.test.ts.
-  vi.mock("lightweight-charts", () => ({
-    ColorType: { Solid: "solid" },
-    CrosshairMode: { Normal: 0 },
-    createChart: () => ({
-      addCandlestickSeries: () => ({
-        setData: () => {}, setMarkers: () => {},
-        createPriceLine: () => ({}), removePriceLine: () => {},
-        priceToCoordinate: (p: number) => p,
-      }),
-      addLineSeries: () => ({ setData: () => {} }),
-      // The chart repaints itself when the theme changes; lightweight-charts
-      // paints to a canvas and cannot read a CSS variable.
-      applyOptions: () => {},
-      timeScale: () => ({
-        getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
-        // A pixel inside the canvas, as the real one returns. Echoing the
-        // timestamp back would put every zone 1.7 billion pixels to the
-        // right, which is not a thing the real chart does.
-        timeToCoordinate: () => 120,
-        subscribeVisibleTimeRangeChange: () => {},
-        unsubscribeVisibleTimeRangeChange: () => {},
-      }),
-      remove: () => {},
-    }),
-  }));
 });
 afterEach(() => {
   resetPolls();

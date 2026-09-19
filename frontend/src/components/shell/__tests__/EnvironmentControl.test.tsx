@@ -199,3 +199,51 @@ describe("what it reports", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Settings > MT5");
   });
 });
+
+describe("when the credentials are saved but cannot be read", () => {
+  it("does not tell the operator to enter credentials that are already there", async () => {
+    // Seen live on 2026-09-19: both accounts fully configured, the app
+    // trading on demo, and the switch disabled with "Add it under
+    // Settings > MT5". The app was running under an interpreter with no
+    // `keyring`, so every password decrypted to "". Re-typing them would not
+    // have fixed anything.
+    state.environments = {
+      demo: { login: "26004592", server: "VantageMarkets-Demo",
+              configured: false, unreadable: true },
+      live: { login: "29377272", server: "VantageMarkets-Live 6",
+              configured: false, unreadable: true },
+    };
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+
+    const button = await screen.findByTestId("environment-control");
+    expect(button).toBeDisabled();
+    expect(button.getAttribute("title")).not.toMatch(/Add it under Settings/);
+  });
+
+  it("names the account and says what is actually wrong", async () => {
+    state.environments = {
+      demo: { login: "26004592", server: "VantageMarkets-Demo",
+              configured: true, unreadable: false },
+      live: { login: "29377272", server: "VantageMarkets-Live 6",
+              configured: false, unreadable: true },
+    };
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+
+    const title = (await screen.findByTestId("environment-control")).getAttribute("title");
+    expect(title).toContain("29377272");
+    expect(title).toMatch(/cannot be decrypted/);
+  });
+
+  it("still says to add them when nothing is saved at all", async () => {
+    // The case where typing them IS the fix.
+    state.environments = {
+      demo: { login: "26004592", server: "VantageMarkets-Demo",
+              configured: true, unreadable: false },
+      live: { login: "", server: "", configured: false, unreadable: false },
+    };
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+
+    expect((await screen.findByTestId("environment-control")).getAttribute("title"))
+      .toMatch(/Add it under Settings > MT5/);
+  });
+});

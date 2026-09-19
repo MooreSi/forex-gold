@@ -2,11 +2,18 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { formatPercent, formatSignedMoney, pnlColour } from "@/components/shared/format";
 
 /**
- * The measured numbers, shown before anybody pays for an opinion about them.
+ * The channel table: the measured numbers, before anybody pays for an opinion
+ * about them.
  *
- * Channel evidence gets a real table because it is the subject people actually
- * read; the other two are shown as their raw shape, which is honest about the
- * fact that they were built to be fed to a model rather than rendered.
+ * Every column here answers a question the prompt asks the model. Phantom TPs
+ * are channel claims that a TP was hit on a trade that stopped out. The
+ * 50%-at-TP1 column is what the same signals would have produced under a
+ * partial-close rule, which is the single most actionable line in the report
+ * — a channel whose simulated figure is far better than its actual one is not
+ * a bad channel, it is a badly managed one.
+ *
+ * The other two subjects have their own tables; this file is no longer a
+ * dumping ground for raw JSON.
  */
 export function EvidenceSection({ subject, evidence }: { subject: string; evidence: unknown }) {
   if (evidence == null) {
@@ -28,6 +35,13 @@ export function EvidenceSection({ subject, evidence }: { subject: string; eviden
             <th className="py-1 font-medium" title="Claimed a TP on a trade that stopped out">
               Phantom TPs
             </th>
+            <th className="py-1 font-medium"
+              title="What the same signals would have produced closing 50% at TP1 and moving the stop to breakeven">
+              At 50% / TP1
+            </th>
+            <th className="py-1 font-medium" title="Longest run of losing trades">
+              Worst run
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -35,6 +49,8 @@ export function EvidenceSection({ subject, evidence }: { subject: string; eviden
             const stats = (row["stats"] ?? {}) as Record<string, unknown>;
             const pnl = typeof stats["total_pnl"] === "number" ? stats["total_pnl"] : null;
             const phantoms = Number(stats["phantom_tp_count"] ?? 0);
+            const simulated = typeof stats["simulated_50pct_pnl_sum"] === "number"
+              ? stats["simulated_50pct_pnl_sum"] : null;
             return (
               <tr key={String(row["channel_name"] ?? i)} className="border-t border-line">
                 <td className="py-1.5 text-ink-1">{String(row["channel_name"] ?? "—")}</td>
@@ -49,6 +65,12 @@ export function EvidenceSection({ subject, evidence }: { subject: string; eviden
                 <td className={`num py-1.5 ${phantoms > 0 ? "text-warning" : "text-ink-3"}`}>
                   {phantoms}
                 </td>
+                <td className={`num py-1.5 ${pnlColour(simulated)}`}>
+                  {simulated == null ? "—" : formatSignedMoney(simulated)}
+                </td>
+                <td className="num py-1.5 text-ink-3">
+                  {String(stats["max_consecutive_losses"] ?? "—")}
+                </td>
               </tr>
             );
           })}
@@ -56,9 +78,7 @@ export function EvidenceSection({ subject, evidence }: { subject: string; eviden
       </table>
     );
   }
-  return (
-    <pre className="num max-h-96 overflow-auto rounded border border-line bg-surface-1 p-3 text-[11px] text-ink-2">
-      {JSON.stringify(evidence, null, 2)}
-    </pre>
-  );
+  // No raw-JSON fallback any more: every subject has its own table, and a
+  // subject reaching here would be a wiring mistake worth seeing as one.
+  return <EmptyState title="No evidence for this subject" />;
 }

@@ -229,20 +229,50 @@ def _find_remote_admin_open_fn():
     return None
 
 
+def _is_admin_host() -> bool:
+    """Does this machine HOST the console -- i.e. should it run the admin
+    SERVER -- regardless of whether the console's UI can render here?
+
+    Until 2026-09-19 this was `_find_admin_open_fn() is not None`, which made
+    the answer depend on a successful `import forex_admin` -- and that module
+    imports NiceGUI. The React app (MooreSi/forex-react) removed NiceGUI from
+    its dependencies entirely on 2026-09-18, so on a clean install of that app
+    the import fails, this reads False, and **the licence-issuer Mac quietly
+    starts the remote CLIENT instead of the server** -- dialling a fleet
+    server that is not running, with no fleet and no console.
+
+    It only worked at all because a stale `nicegui` happened to be left in
+    that app's virtualenv. Hosting the fleet is a property of the machine
+    (issuer hardware + a console checkout + not already somebody's client),
+    not of which UI toolkit is installed, so it is decided from those.
+
+    `admin_open_fn` is still the NiceGUI import, because that genuinely is
+    "can this app draw the console" -- the two questions are now separate.
+    """
+    if _is_somebody_elses_client():
+        return False
+    if not _is_licence_issuer_machine():
+        return False
+    forex_root = Path(__file__).parent.parent.parent
+    return any((candidate / "forex_admin.py").exists()
+               for candidate in _admin_checkout_candidates(forex_root))
+
+
 admin_open_fn = _find_admin_open_fn()
-# Only the machine holding KeyGen runs the admin SERVER. A granted remote admin
-# gets a console (admin_panel.py, driven over the WS connection) and therefore
-# ADMIN_AVAILABLE too, but it must keep dialling the server rather than
-# becoming one -- so the two facts are kept apart.
-LOCAL_ADMIN_AVAILABLE = admin_open_fn is not None
+# Only the machine hosting the console runs the admin SERVER. A granted remote
+# admin gets a console (admin_panel.py, driven over the WS connection) and
+# therefore ADMIN_AVAILABLE too, but it must keep dialling the server rather
+# than becoming one -- so the two facts are kept apart.
+LOCAL_ADMIN_AVAILABLE = _is_admin_host()
 if admin_open_fn is None:
     admin_open_fn = _find_remote_admin_open_fn()
 ADMIN_AVAILABLE = admin_open_fn is not None
 
 
 def _should_start_remote_server() -> bool:
-    """True on the machine that issues licences: KeyGen present AND an admin
-    password set. Everything else runs the client (see startup())."""
+    """True on the machine that issues licences: a console checkout present,
+    the issuer hardware, AND an admin password set. Everything else runs the
+    client (see startup())."""
     return LOCAL_ADMIN_AVAILABLE and password_is_set()
 
 # ── App-wide singletons ──────────────────────────────────────────────────────

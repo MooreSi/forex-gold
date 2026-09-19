@@ -129,6 +129,49 @@ by design, because the admin console is optional and the trading app must start
 without it. The button simply does not appear. `pip install nicegui` on that
 machine brings it back.
 
+## The committed bundle is not byte-identical across operating systems (2026-09-19)
+
+`frontend/dist` is committed and is what the app serves, so CI rebuilds it and
+fails on any diff. That check lived as a step in the Windows `checks` job and
+failed on a tree whose `dist` was current.
+
+It was not stale. Windows genuinely builds a different bundle from the same
+source: **773.45 kB against macOS's 773.42 kB**, roughly 30 bytes and a
+different content hash. The CSS hash matched exactly; only the JS moved.
+
+Everything cheaper was ruled out first, in this order:
+
+- **Dependency drift** — `npm ci` from the committed `package-lock.json`
+  reproduced the committed hash exactly.
+- **Node version** — CI pins 22, the dev machine had 26. Building with Node
+  22.17.1 produced the same bytes. It changes only the *reported* gzip figure
+  (229.19 against 229.69), because vite computes that with Node's own zlib.
+  The file is identical; the number printed next to it is not. Worth knowing
+  before chasing a gzip delta.
+- **Line endings** — the whole source tree converted to CRLF locally rebuilt to
+  the same hash. (The 2026-09-18 `.gitattributes` fix was a real but different
+  problem: there the asset names matched and only `dist/index.html` differed.)
+- **Absolute paths leaking in** — a build from a much longer, unrelated
+  directory produced the same hash, so nothing about the build location is
+  embedded.
+
+What is left is that **esbuild and rollup ship a native binary per platform** —
+`@esbuild/win32-x64` and `@rollup/rollup-win32-x64-msvc` against the
+`darwin-arm64` pair. Same versions, different compiled minifiers, not
+bit-identical output.
+
+So cross-OS byte equality is not a property this toolchain has, and a check
+asserting it was testing the runner rather than the commit. The check is
+unchanged and not weakened — it still rebuilds from source and still fails on
+any diff. It now runs as its own `bundle` job on `macos-latest`, the platform
+`dist` is committed from, which is the only way the comparison means anything.
+**If `dist` ever starts being committed from another OS, that job's runner has
+to move with it.** The Windows `checks` job keeps the Python suite, which needs
+Windows because MetaTrader5 is a win32 dependency.
+
+Side benefit: bundle staleness is now reported in about two minutes instead of
+behind a forty-minute Windows suite.
+
 ## Open questions
 
 `docs/todo/frontend/react-port/QUESTIONS.md` — four, with provisional defaults

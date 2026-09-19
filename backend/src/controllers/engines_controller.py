@@ -13,13 +13,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.src.services.breakout_signal import panel_data as breakout
 from backend.src.services.cluster import remote_control as _remote
 from backend.src.services.engines import registry as _engines
 from backend.src.services.risk import settings as _risk
 
 __all__ = [
-    "breakout", "get_risk_settings", "get_risk_settings_async",
+    "get_risk_settings", "get_risk_settings_async",
     "update_risk_settings", "get_engine", "engines_running", "sub_engines",
     "ENGINE_NAMES", "IMPLEMENTED_NAMES", "control_target", "effective_settings",
     "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",

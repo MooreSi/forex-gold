@@ -288,7 +288,10 @@ describe("the checklist and the sizing", () => {
     await userEvent.click(screen.getByRole("button", { name: "0.50" }));
 
     await waitFor(() => expect(screen.getByText("$650.00")).toBeInTheDocument());
-    expect(screen.getByText("$2750.00")).toBeInTheDocument();
+    // Grouped since 2026-09-19: formatMoney was producing "$1210.40" while
+    // the header showed "$4,378.31" two inches away, which is the exact
+    // failure format.ts's own docstring warns about.
+    expect(screen.getByText("$2,750.00")).toBeInTheDocument();
   });
 
   it("stores the lot size it was given", async () => {

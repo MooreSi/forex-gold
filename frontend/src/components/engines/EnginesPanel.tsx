@@ -7,6 +7,7 @@ import { useEnginesController } from "./hooks/useEnginesController";
 import { CapabilitiesSection } from "./internal/CapabilitiesSection";
 import { ControlTargetBanner } from "./internal/ControlTargetBanner";
 import { EngineCard } from "./internal/EngineCard";
+import { BreakoutSection } from "./internal/BreakoutSection";
 import { ModelSection } from "./internal/ModelSection";
 import { ShadowSection } from "./internal/ShadowSection";
 
@@ -41,6 +42,17 @@ export function EnginesPanel() {
               {c.refusal}
             </p>
           )}
+
+          <section className="border-t border-line pt-3">
+            {/* The Breakout engine's own panel. Its reads have existed since
+                the restructure and nothing called them: this tab showed the
+                Reversal engine in detail and said nothing about Breakout
+                beyond its Start/Stop card. */}
+            <h3 className="mb-2 text-xs font-semibold text-ink-1">
+              Breakout engine
+            </h3>
+            <BreakoutSection />
+          </section>
 
           <section className="border-t border-line pt-3">
             <h3 className="mb-2 text-xs font-semibold text-ink-1">

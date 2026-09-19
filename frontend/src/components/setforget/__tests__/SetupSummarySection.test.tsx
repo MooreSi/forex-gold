@@ -129,7 +129,7 @@ describe("the cash beside each level", () => {
     summary();
 
     expect(screen.getByText(/13\.00 pts · \$260\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/55\.00 pts · \$1100\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/55\.00 pts · \$1,100\.00/)).toBeInTheDocument();
   });
 
   it("omits the cash until a size has been chosen", () => {

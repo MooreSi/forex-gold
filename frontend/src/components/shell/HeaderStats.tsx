@@ -1,5 +1,6 @@
 import { ArrowDownRight, ArrowUpRight, WifiOff } from "lucide-react";
 import type { Tick } from "@/api/types";
+import { formatMoney } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 
 /**
@@ -32,9 +33,19 @@ interface HeaderStatsProps {
 
 const DASH = "—";
 
+/**
+ * A header figure, through the shared formatter.
+ *
+ * This file used to carry its own money formatter, which is how the app ended
+ * up showing "$4,378.31" here and "$1210.40" three clicks away. `formatMoney`
+ * groups now and this is a thin wrapper over it: the only thing left here is
+ * the free-margin case, which wants no pennies because it is a headroom
+ * figure rather than an accounting one.
+ */
 function money(value: unknown, dp = 2): string {
   const n = typeof value === "number" ? value : Number(value);
   if (value == null || !Number.isFinite(n)) return DASH;
+  if (dp === 2) return formatMoney(n);
   return `$${n.toLocaleString("en-GB", {
     minimumFractionDigits: dp, maximumFractionDigits: dp,
   })}`;

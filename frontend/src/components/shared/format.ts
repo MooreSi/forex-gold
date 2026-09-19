@@ -11,17 +11,30 @@
 /** MT5 encodes its server time (UTC+3) as if it were a UTC epoch. */
 const MT5_UTC_OFFSET_SECONDS = 3 * 60 * 60;
 
+/** Two decimals and thousands separators.
+ *
+ *  The grouping is not decoration. `HeaderStats` grew its own money formatter
+ *  because this one produced "$1210.40" while the header showed "$4,378.31"
+ *  two inches away -- which is the exact failure the docstring above warns
+ *  about, committed inside the module that warns about it. There is one
+ *  implementation again. */
+function grouped(value: number): string {
+  return Math.abs(value).toLocaleString("en-GB", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+}
+
 export function formatMoney(value: number | null | undefined, currency = "$"): string {
   if (value == null || !Number.isFinite(value)) return "—";
   const sign = value < 0 ? "-" : "";
-  return `${sign}${currency}${Math.abs(value).toFixed(2)}`;
+  return `${sign}${currency}${grouped(value)}`;
 }
 
 /** A P&L number carries its own sign, always, so +12.00 cannot read as 12.00. */
 export function formatSignedMoney(value: number | null | undefined, currency = "$"): string {
   if (value == null || !Number.isFinite(value)) return "—";
   const sign = value < 0 ? "-" : "+";
-  return `${sign}${currency}${Math.abs(value).toFixed(2)}`;
+  return `${sign}${currency}${grouped(value)}`;
 }
 
 export function formatPrice(value: number | null | undefined, dp = 2): string {

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from backend.src.api.errors import Refusal
 from backend.src.controllers import engines_controller as engines_ctl
+from backend.src.controllers import breakout_controller as breakout_ctl
 from backend.src.controllers import reversal_controller as reversal_ctl
 
 log = logging.getLogger(__name__)
@@ -120,6 +121,52 @@ async def state() -> dict:
         # the header says REMOTE and these engines are still the live ones.
         "control_target": engines_ctl.control_target(),
         "ai_eval_keys": engines_ctl.AI_EVAL_KEYS,
+    }
+
+
+async def _guarded(read, fallback):
+    """One panel read, or the fallback.
+
+    The Breakout engine keeps its own database and a fresh install has none,
+    so a missing table must not take the whole panel down with it -- the same
+    convention `services/dpm/performance.py` uses. A missing NUMBER falls back
+    to None rather than 0: a 0.0 drawdown reads as an engine that never lost,
+    and a fresh install is not that.
+    """
+    try:
+        return await read()
+    except Exception as exc:
+        log.debug("[engines] breakout panel read unavailable: %s", exc)
+        return fallback
+
+
+@router.get("/breakout/report")
+async def breakout_report() -> dict:
+    """Everything the Breakout panel shows, in one read. Places nothing.
+
+    One endpoint rather than nine: the panel reads them together on every
+    refresh, and nine round-trips can disagree about which moment they
+    describe.
+    """
+    def thresholds() -> dict:
+        try:
+            return breakout_ctl.breakout_ml_thresholds()
+        except Exception:
+            return {}
+
+    return {
+        "stats": await _guarded(breakout_ctl.breakout_stats, {}),
+        "virtual_balance": await _guarded(breakout_ctl.breakout_virtual_balance, None),
+        "max_drawdown": await _guarded(breakout_ctl.breakout_max_drawdown, None),
+        "ml": {
+            "summary": await _guarded(breakout_ctl.breakout_ml_summary, {}),
+            "metrics": await _guarded(breakout_ctl.breakout_ml_metrics, {}),
+            "thresholds": thresholds(),
+        },
+        "by_session": await _guarded(breakout_ctl.breakout_perf_by_session, []),
+        "by_adx": await _guarded(breakout_ctl.breakout_perf_by_adx_band, []),
+        "by_type": await _guarded(breakout_ctl.breakout_perf_by_type, []),
+        "by_bias": await _guarded(breakout_ctl.breakout_perf_by_bias, []),
     }
 
 

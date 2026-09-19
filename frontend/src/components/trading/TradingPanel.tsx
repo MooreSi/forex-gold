@@ -12,6 +12,7 @@ import { ScheduleSection } from "./internal/ScheduleSection";
 import { OrbSection } from "./internal/OrbSection";
 import { SetForgetPanel } from "@/components/setforget/SetForgetPanel";
 import { RiskSection } from "./internal/RiskSection";
+import { StrategySection } from "./internal/StrategySection";
 import { TemplatesSection } from "./internal/TemplatesSection";
 import { cn } from "@/lib/cn";
 import { asArray } from "@/lib/asArray";
@@ -23,6 +24,7 @@ const SUB_TABS = [
   { id: "signals", label: "Signals" },
   { id: "schedule", label: "Schedule" },
   { id: "risk", label: "Risk" },
+  { id: "strategy", label: "Strategy" },
   { id: "templates", label: "EA templates" },
   { id: "orb", label: "ORB report" },
 ];
@@ -106,6 +108,11 @@ export function TradingPanel() {
             onSetTarget={(v) => void c.setDailyTarget(v)}
             onResumeToday={() => void c.resumeToday()}
           />
+        </Tabs.Content>
+        <Tabs.Content value="strategy" className="min-h-0 flex-1 overflow-auto">
+          {/* Which strategy each channel trades under. Never ported until
+              2026-09-19; its endpoints were all there. */}
+          <StrategySection />
         </Tabs.Content>
         <Tabs.Content value="risk" className="min-h-0 flex-1 overflow-auto">
           {/* Moved here from Settings on 2026-09-19: these are the sizing and

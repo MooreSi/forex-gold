@@ -19,9 +19,11 @@ const CANDLES = [
 ];
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let overlaysBody: Record<string, unknown>;
 
 beforeEach(() => {
   resetPolls();
+  overlaysBody = { timeframe: "5m", count: 1, emas: {}, rsi: [], fvgs: [] };
   fetchMock = vi.fn(async (url: string) => {
     if (url.startsWith("/api/chart/candles")) {
       return { ok: true, status: 200, json: async () => CANDLES };
@@ -29,7 +31,7 @@ beforeEach(() => {
     if (url.startsWith("/api/chart/overlays")) {
       return {
         ok: true, status: 200,
-        json: async () => ({ timeframe: "5m", count: 1, emas: {}, rsi: [], fvgs: [] }),
+        json: async () => overlaysBody,
       };
     }
     if (url.startsWith("/api/chart/tick")) {
@@ -45,6 +47,12 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetchMock);
   // lightweight-charts wants a real canvas; jsdom has none.
+  //
+  // `timeScale` and `priceToCoordinate` were added on 2026-09-19 with the
+  // fair-value-gap overlay: the zones are an SVG layer positioned through the
+  // chart's own coordinate conversions, so a stand-in that cannot answer
+  // "where is this price" is not a stand-in for this component any more.
+  // Their geometry is tested for real in fvgGeometry.test.ts.
   vi.mock("lightweight-charts", () => ({
     ColorType: { Solid: "solid" },
     CrosshairMode: { Normal: 0 },
@@ -52,8 +60,18 @@ beforeEach(() => {
       addCandlestickSeries: () => ({
         setData: () => {}, setMarkers: () => {},
         createPriceLine: () => ({}), removePriceLine: () => {},
+        priceToCoordinate: (p: number) => p,
       }),
       addLineSeries: () => ({ setData: () => {} }),
+      timeScale: () => ({
+        getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
+        // A pixel inside the canvas, as the real one returns. Echoing the
+        // timestamp back would put every zone 1.7 billion pixels to the
+        // right, which is not a thing the real chart does.
+        timeToCoordinate: () => 120,
+        subscribeVisibleTimeRangeChange: () => {},
+        unsubscribeVisibleTimeRangeChange: () => {},
+      }),
       remove: () => {},
     }),
   }));
@@ -131,5 +149,64 @@ describe("when there is nothing to draw", () => {
     render(<ChartPanel />);
 
     expect(await screen.findByText("Could not load candles")).toBeInTheDocument();
+  });
+});
+
+describe("fair-value gaps", () => {
+  // jsdom reports every element as 0x0, and a zero-width chart has nowhere to
+  // draw. The geometry itself refuses to draw before the chart has a size,
+  // which is correct and makes the element size a precondition of this test
+  // rather than an implementation detail of it.
+  function withSize(width: number, height: number) {
+    const w = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    const h = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true, get: () => width,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true, get: () => height,
+    });
+    return () => {
+      if (w) Object.defineProperty(HTMLElement.prototype, "clientWidth", w);
+      if (h) Object.defineProperty(HTMLElement.prototype, "clientHeight", h);
+    };
+  }
+
+  it("draws a zone the backend reported", async () => {
+    // The zones have been in the /overlays payload since it was written and
+    // nothing drew them. The owner asked for them on 2026-09-19.
+    const restore = withSize(600, 400);
+    overlaysBody = {
+      timeframe: "5m", count: 1, emas: {}, rsi: [],
+      fvgs: [{ ts: 1_750_000_000, top: 300, bottom: 250, direction: "bullish" }],
+    };
+    render(<ChartPanel />);
+
+    expect(await screen.findByTestId("fvg-overlay")).toBeInTheDocument();
+    restore();
+  });
+
+  it("colours a bearish zone differently from a bullish one", async () => {
+    const restore = withSize(600, 400);
+    overlaysBody = {
+      timeframe: "5m", count: 1, emas: {}, rsi: [],
+      fvgs: [{ ts: 1_750_000_000, top: 300, bottom: 250, direction: "bearish" }],
+    };
+    render(<ChartPanel />);
+
+    const rect = await screen.findByTestId("fvg-bearish-1750000000");
+    expect(rect.getAttribute("fill")).toContain("255,68,68");
+    restore();
+  });
+
+  it("draws no overlay at all when there are no zones", async () => {
+    // An empty SVG over the canvas is an invisible element that still
+    // intercepts nothing but exists to be wondered about.
+    const restore = withSize(600, 400);
+    render(<ChartPanel />);
+    await screen.findByTestId("candle-chart");
+
+    expect(screen.queryByTestId("fvg-overlay")).not.toBeInTheDocument();
+    restore();
   });
 });

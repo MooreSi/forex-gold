@@ -116,7 +116,15 @@ async def strategies() -> dict:
 
 @router.get("/channel-strategies")
 async def channel_strategies() -> dict:
-    return trading_ctl.get_all_channel_strategy_settings()
+    """Every channel's strategy, its auto flag and its lot multiplier.
+
+    Wrapped in an object rather than returned bare. This handler was annotated
+    `-> dict` and returned the controller's LIST, and FastAPI validates a
+    response against its return annotation -- so every call answered 500 from
+    the port until 2026-09-19. Nothing in the React app called it, which is why
+    it went unnoticed; the Strategy screen is the first caller.
+    """
+    return {"channels": trading_ctl.get_all_channel_strategy_settings()}
 
 
 @router.post("/channel-strategies")

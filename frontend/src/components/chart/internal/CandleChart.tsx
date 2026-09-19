@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ColorType, createChart, CrosshairMode,
   type IChartApi, type ISeriesApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, Overlays, Tick, Trade } from "@/api/types";
+import { rectsFor, type FvgRect } from "./fvgGeometry";
 
 interface CandleChartProps {
   candles: Candle[];
@@ -17,6 +18,18 @@ interface CandleChartProps {
 // semantics the rest of the UI uses, which is why they are not chosen freely.
 const BULL = "#00cc88";
 const BEAR = "#ff4444";
+// A fair-value gap is an imbalance price left behind. Bullish gaps sit below
+// price and bearish above, so they take the same profit/loss colours the rest
+// of the app uses — at a low alpha, because a zone is context, not a signal.
+const FVG_FILL: Record<string, string> = {
+  bullish: "rgba(0,204,136,0.13)",
+  bearish: "rgba(255,68,68,0.13)",
+};
+const FVG_EDGE: Record<string, string> = {
+  bullish: "rgba(0,204,136,0.45)",
+  bearish: "rgba(255,68,68,0.45)",
+};
+
 const EMA_COLOURS: Record<string, string> = {
   "9": "#ffd700",   // gold — fastest
   "21": "#ff9900",  // orange
@@ -33,6 +46,7 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
   const chart = useRef<IChartApi | null>(null);
   const candleSeries = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const emaSeries = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const [fvgRects, setFvgRects] = useState<FvgRect[]>([]);
 
   useEffect(() => {
     if (!holder.current) return;
@@ -134,5 +148,61 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
     };
   }, [tick]);
 
-  return <div ref={holder} data-testid="candle-chart" className="h-full w-full" />;
+  // ── Fair-value gaps ────────────────────────────────────────────────────────
+  // lightweight-charts has no rectangle primitive, so the zones are an SVG
+  // layer over its canvas, positioned through the chart's own coordinate
+  // conversions. Recomputed whenever the chart is panned, zoomed or resized —
+  // a band left at stale pixels is a price level that is not there.
+  const redrawFvgs = useCallback(() => {
+    const c = chart.current;
+    const series = candleSeries.current;
+    const box = holder.current;
+    if (!c || !series || !box) return setFvgRects([]);
+
+    const zones = overlays?.fvgs ?? [];
+    if (zones.length === 0) return setFvgRects([]);
+
+    const range = c.timeScale().getVisibleRange();
+    if (!range) return setFvgRects([]);
+
+    setFvgRects(rectsFor(zones, {
+      timeToX: (ts) => c.timeScale().timeToCoordinate(ts as UTCTimestamp),
+      priceToY: (price) => series.priceToCoordinate(price),
+      visibleTo: Number(range.to),
+      width: box.clientWidth,
+      height: box.clientHeight,
+    }));
+  }, [overlays]);
+
+  useEffect(() => {
+    const c = chart.current;
+    if (!c) return;
+    redrawFvgs();
+    const scale = c.timeScale();
+    scale.subscribeVisibleTimeRangeChange(redrawFvgs);
+    return () => scale.unsubscribeVisibleTimeRangeChange(redrawFvgs);
+  }, [redrawFvgs, candles]);
+
+  return (
+    <div ref={holder} data-testid="candle-chart" className="relative h-full w-full">
+      {fvgRects.length > 0 && (
+        <svg
+          data-testid="fvg-overlay"
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          aria-hidden
+        >
+          {fvgRects.map((r) => (
+            <rect
+              key={`${r.ts}-${r.y}`}
+              data-testid={`fvg-${r.direction}-${r.ts}`}
+              x={r.x} y={r.y} width={r.width} height={r.height}
+              fill={FVG_FILL[r.direction] ?? "rgba(156,163,175,0.10)"}
+              stroke={FVG_EDGE[r.direction] ?? "rgba(156,163,175,0.35)"}
+              strokeWidth="0.5"
+            />
+          ))}
+        </svg>
+      )}
+    </div>
+  );
 }

@@ -269,3 +269,49 @@ class TestPausingTrading:
 
         assert make_client().get(path).status_code == 405
         assert called == []
+
+
+class TestTheChannelStrategyList:
+    """`GET /api/trading/channel-strategies` answered 500 on a live install.
+
+    Found 2026-09-19 while building the Strategy screen. The controller
+    returns a LIST of channels; the handler was annotated `-> dict`, and
+    FastAPI validates the response against the return annotation, so every
+    call raised a ResponseValidationError. Nothing in the React app had ever
+    called it, which is why it went unnoticed since the port.
+
+    The shape is now an object with a `channels` key -- the same shape every
+    other read on this router uses, and one a later field can be added to
+    without breaking a caller.
+    """
+
+    def test_it_answers_at_all(self, make_client, monkeypatch):
+        from backend.src.api.routers import trading as trading_router
+        monkeypatch.setattr(
+            trading_router.trading_ctl, "get_all_channel_strategy_settings",
+            lambda: [{"source": "GoldSignals", "strategy_override": None,
+                      "auto_strategy": False, "lot_mult": 1.0}])
+
+        assert make_client().get("/api/trading/channel-strategies").status_code == 200
+
+    def test_it_returns_the_channels_the_controller_gave_it(self, make_client,
+                                                            monkeypatch):
+        from backend.src.api.routers import trading as trading_router
+        monkeypatch.setattr(
+            trading_router.trading_ctl, "get_all_channel_strategy_settings",
+            lambda: [{"source": "GoldSignals", "strategy_override": "scale_out",
+                      "auto_strategy": True, "lot_mult": 1.5}])
+
+        body = make_client().get("/api/trading/channel-strategies").json()
+
+        assert body["channels"][0]["source"] == "GoldSignals"
+        assert body["channels"][0]["strategy_override"] == "scale_out"
+
+    def test_no_channels_is_an_empty_list_not_an_error(self, make_client, monkeypatch):
+        from backend.src.api.routers import trading as trading_router
+        monkeypatch.setattr(
+            trading_router.trading_ctl, "get_all_channel_strategy_settings",
+            lambda: [])
+
+        assert make_client().get("/api/trading/channel-strategies").json() == {
+            "channels": []}

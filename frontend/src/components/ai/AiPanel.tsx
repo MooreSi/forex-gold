@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { cn } from "@/lib/cn";
 import { useAiController } from "./hooks/useAiController";
+import { AnswerSection } from "./internal/AnswerSection";
 import { EvidenceSection } from "./internal/EvidenceSection";
 
 const WINDOWS = [7, 30, 90];
@@ -85,14 +86,11 @@ export function AiPanel() {
               {c.refusal}
             </p>
           )}
-          {c.answer && (
-            <article
-              data-testid="ai-answer"
-              className="whitespace-pre-wrap rounded border border-line bg-surface-2 px-4 py-3 text-xs leading-relaxed text-ink-1"
-            >
-              {c.answer}
-            </article>
-          )}
+          {/* The prompt asks for JSON, so the answer arrives as a minified
+              object -- which is what this panel used to render on screen, as
+              text. AnswerSection breaks it into the sections it was asked for,
+              and falls back to the raw text for anything else. */}
+          {c.answer && <AnswerSection answer={c.answer} />}
         </div>
       )}
     </PanelShell>

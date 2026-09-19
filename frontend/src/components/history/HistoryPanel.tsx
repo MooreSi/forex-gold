@@ -10,11 +10,13 @@ import { ChannelsScorecard } from "./internal/ChannelsScorecard";
 import { HeatmapSection } from "./internal/HeatmapSection";
 import { LadderSection } from "./internal/LadderSection";
 import { PerformanceSection } from "./internal/PerformanceSection";
+import { CalendarSection } from "./internal/CalendarSection";
 import { EquityCurveSection } from "./internal/EquityCurveSection";
 import { TradeTableSection } from "./internal/TradeTableSection";
 
 const SUB_TABS = [
   { id: "equity", label: "Equity curve" },
+  { id: "calendar", label: "Calendar" },
   { id: "hours", label: "When it trades" },
   { id: "channels", label: "Channels" },
   { id: "ladder", label: "Ladder reach" },
@@ -88,6 +90,11 @@ export function HistoryPanel() {
               {/* Shares the trades poll with the table below, so opening both
                   costs one request rather than two. */}
               <EquityCurveSection days={c.days} />
+            </Tabs.Content>
+            <Tabs.Content value="calendar">
+              {/* Shares the trades poll with the curve and the table, so the
+                  three cannot disagree about what a day earned. */}
+              <CalendarSection days={c.days} />
             </Tabs.Content>
             <Tabs.Content value="hours">
               <HeatmapSection cells={c.hourly} />

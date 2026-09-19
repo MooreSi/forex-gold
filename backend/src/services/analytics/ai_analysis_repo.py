@@ -505,8 +505,11 @@ _SIGNAL_GEN_SYSTEM = (
     "Each engine uses a combination of rule-based logic and machine learning. "
     "Some also use an AI model (Claude or DeepSeek, depending on configuration) for decision support.\n\n"
     "CONTEXT ABOUT EACH ENGINE:\n"
-    "- Bounce Engine: detects price bounces off key support/resistance levels. Uses ML to "
-    "improve level detection and entry timing over time.\n"
+    # The Bounce Engine was described here until 2026-09-19. Its code was
+    # deleted on 2026-09-14, so every billable analysis was asking a paid model
+    # to judge an engine that does not exist -- and a model asked to assess
+    # something absent will say something about it, because that is what it was
+    # asked for. Pinned by tests/api/test_ai_prompt_matches_this_build.py.
     "- Breakout Engine: detects breakouts from consolidation ranges. Uses ML to classify "
     "genuine breakouts vs fakeouts, improving with each labelled outcome.\n"
     "- Reversal Engine: reverse-engineers the Gold Diggers VIP telegram signal methodology. "

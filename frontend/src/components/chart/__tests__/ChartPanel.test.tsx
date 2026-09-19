@@ -63,6 +63,9 @@ beforeEach(() => {
         priceToCoordinate: (p: number) => p,
       }),
       addLineSeries: () => ({ setData: () => {} }),
+      // The chart repaints itself when the theme changes; lightweight-charts
+      // paints to a canvas and cannot read a CSS variable.
+      applyOptions: () => {},
       timeScale: () => ({
         getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
         // A pixel inside the canvas, as the real one returns. Echoing the

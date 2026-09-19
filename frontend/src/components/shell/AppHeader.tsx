@@ -42,10 +42,14 @@ export function AppHeader() {
   const bridgeUp = data?.bridge?.["connected"] === true;
 
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface-1 px-4 py-2">
+    // `overflow-hidden` is the backstop. Every group inside shrinks or hides
+    // before it matters, but a header that CAN exceed the viewport scrolls the
+    // whole application sideways and clips the panel below it, which is a much
+    // worse failure than a figure dropping off the end.
+    <header className="flex shrink-0 items-center gap-2 overflow-hidden border-b border-line bg-surface-1 px-3 py-2 lg:gap-3 lg:px-4">
       <div className="flex shrink-0 flex-col justify-center leading-none">
         <span className="text-sm font-bold tracking-tight text-accent">FOREX Trader</span>
-        <span className="text-[9px] text-remote">by Simon Moore</span>
+        <span className="hidden text-[9px] text-remote lg:inline">by Simon Moore</span>
       </div>
 
       <EnvironmentControl account={data?.account ?? null} />
@@ -76,10 +80,10 @@ export function AppHeader() {
         </span>
       )}
 
-      <div className="ml-auto flex items-center gap-3 text-xs text-ink-2">
+      <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-2 lg:gap-3">
         {data?.remote_connected && (
           <span className="flex items-center gap-1 text-remote" title="Linked to the remote node">
-            <Server size={13} /> remote
+            <Server size={13} /> <span className="hidden xl:inline">remote</span>
           </span>
         )}
         <span
@@ -87,7 +91,7 @@ export function AppHeader() {
           title={bridgeUp ? "MT5 bridge connected" : "MT5 bridge not connected"}
         >
           <CircleDot size={13} className={bridgeUp ? "text-profit" : "text-loss"} />
-          bridge
+          <span className="hidden xl:inline">bridge</span>
         </span>
         {data?.ea_badge && (
           // Colour and words come from the backend. A stale EA build shown as

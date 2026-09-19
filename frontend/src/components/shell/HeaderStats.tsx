@@ -55,8 +55,8 @@ function Stat({ label, children, testId }: {
   );
 }
 
-function Divider() {
-  return <span aria-hidden className="h-6 w-px shrink-0 bg-line" />;
+function Divider({ className }: { className?: string } = {}) {
+  return <span aria-hidden className={cn("h-6 w-px shrink-0 bg-line", className)} />;
 }
 
 export function HeaderStats({ tick, account, lifetimePnl, stale }: HeaderStatsProps) {
@@ -64,7 +64,12 @@ export function HeaderStats({ tick, account, lifetimePnl, stale }: HeaderStatsPr
   const up = lifetimePnl != null && lifetimePnl >= 0;
 
   return (
-    <div className="flex shrink-0 items-center gap-3">
+    // `min-w-0` and the responsive hiding below are not decoration. Six
+    // figures plus the brand, the badge and the right-hand controls forced the
+    // document to 1153px at a 1024px viewport on 2026-09-19, which scrolled
+    // the WHOLE APP sideways and clipped the panel beneath it. The least
+    // important figures drop out first; bid and ask never do.
+    <div className="flex min-w-0 items-center gap-2 lg:gap-3">
       <Divider />
 
       <Stat label="BID" testId="stat-bid">
@@ -73,7 +78,7 @@ export function HeaderStats({ tick, account, lifetimePnl, stale }: HeaderStatsPr
       <Stat label="ASK" testId="stat-ask">
         <span className="text-loss">{money(tick?.ask)}</span>
       </Stat>
-      <span data-testid="stat-spread" className="num text-[10px] text-ink-3">
+      <span data-testid="stat-spread" className="num hidden text-[10px] text-ink-3 lg:inline">
         {spread == null || !Number.isFinite(spread)
           ? `spr:${DASH}`
           : `spr:${Math.round(spread)}pt`}
@@ -88,14 +93,16 @@ export function HeaderStats({ tick, account, lifetimePnl, stale }: HeaderStatsPr
         </span>
       )}
 
-      <Divider />
+      <Divider className="hidden xl:block" />
 
-      <Stat label="MT5 BAL" testId="stat-balance">{money(account?.["balance"])}</Stat>
-      <span data-testid="stat-free" className="num text-[10px] text-ink-3">
+      <div className="hidden items-center gap-2 xl:flex">
+        <Stat label="MT5 BAL" testId="stat-balance">{money(account?.["balance"])}</Stat>
+        <span data-testid="stat-free" className="num text-[10px] text-ink-3">
         {/* Headroom, not an accounting figure. Pennies on it are noise next to
             the balance it sits under. */}
-        free:{money(account?.["margin_free"], 0)}
-      </span>
+          free:{money(account?.["margin_free"], 0)}
+        </span>
+      </div>
 
       <Divider />
 

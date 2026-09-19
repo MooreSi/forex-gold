@@ -30,6 +30,28 @@ const FVG_EDGE: Record<string, string> = {
   bearish: "rgba(255,68,68,0.45)",
 };
 
+/** A theme token's current value, or a fallback.
+ *
+ *  lightweight-charts paints to a canvas and cannot use CSS variables, so the
+ *  chart has to be TOLD the colours. Until 2026-09-19 it was told #030712
+ *  unconditionally, which in light mode is a black rectangle inside a white
+ *  panel. */
+function token(name: string, fallback: string): string {
+  if (typeof getComputedStyle !== "function") return fallback;
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function chartColours() {
+  return {
+    background: token("--color-surface-1", "#030712"),
+    text: token("--color-ink-2", "#9ca3af"),
+    grid: token("--color-surface-3", "#1b2333"),
+    border: token("--color-line", "#263044"),
+  };
+}
+
 const EMA_COLOURS: Record<string, string> = {
   "9": "#ffd700",   // gold — fastest
   "21": "#ff9900",  // orange
@@ -47,21 +69,36 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
   const candleSeries = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const emaSeries = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const [fvgRects, setFvgRects] = useState<FvgRect[]>([]);
+  const [themeTick, setThemeTick] = useState(0);
+
+  // The document attribute rather than `useTheme()`. This component must be
+  // mountable anywhere -- a chart that throws because a context is missing is
+  // a blank dashboard over a colour, and the theme is the least important
+  // thing on it.
+  useEffect(() => {
+    if (typeof MutationObserver !== "function") return;
+    const observer = new MutationObserver(() => setThemeTick((n) => n + 1));
+    observer.observe(document.documentElement, {
+      attributes: true, attributeFilter: ["data-theme"],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!holder.current) return;
+    const colours = chartColours();
     const c = createChart(holder.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#030712" },
-        textColor: "#9ca3af",
+        background: { type: ColorType.Solid, color: colours.background },
+        textColor: colours.text,
         fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
       },
       grid: {
-        vertLines: { color: "#1b2333" },
-        horzLines: { color: "#1b2333" },
+        vertLines: { color: colours.grid },
+        horzLines: { color: colours.grid },
       },
-      rightPriceScale: { borderColor: "#263044" },
-      timeScale: { borderColor: "#263044", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: colours.border },
+      timeScale: { borderColor: colours.border, timeVisible: true, secondsVisible: false },
       crosshair: { mode: CrosshairMode.Normal },
       autoSize: true,
     });
@@ -77,6 +114,27 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
       emaSeries.current.clear();
     };
   }, []);
+
+  // Repaint on a theme change. The chart is created once and would otherwise
+  // keep whichever theme was in force at that moment.
+  useEffect(() => {
+    const c = chart.current;
+    if (!c) return;
+    const colours = chartColours();
+    if (typeof c.applyOptions !== "function") return;
+    c.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: colours.background },
+        textColor: colours.text,
+      },
+      grid: {
+        vertLines: { color: colours.grid },
+        horzLines: { color: colours.grid },
+      },
+      rightPriceScale: { borderColor: colours.border },
+      timeScale: { borderColor: colours.border },
+    });
+  }, [themeTick]);
 
   useEffect(() => {
     if (!candleSeries.current) return;

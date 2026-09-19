@@ -11,6 +11,7 @@ import { HeatmapSection } from "./internal/HeatmapSection";
 import { LadderSection } from "./internal/LadderSection";
 import { PerformanceSection } from "./internal/PerformanceSection";
 import { CalendarSection } from "./internal/CalendarSection";
+import { DpmSection } from "./internal/DpmSection";
 import { EquityCurveSection } from "./internal/EquityCurveSection";
 import { TradeTableSection } from "./internal/TradeTableSection";
 
@@ -24,6 +25,7 @@ const SUB_TABS = [
   // HistoryPanel.test.tsx pins. This one is a row per trade and costs a
   // request of its own, so it loads when it is asked for.
   { id: "trades", label: "Trades" },
+  { id: "dpm", label: "DPM" },
 ];
 
 export function HistoryPanel() {
@@ -104,6 +106,11 @@ export function HistoryPanel() {
             </Tabs.Content>
             <Tabs.Content value="ladder">
               <LadderSection ladder={asObject(c.state.data.ladder)} />
+            </Tabs.Content>
+            <Tabs.Content value="dpm">
+              {/* The sixth NiceGUI sub-tab. /api/ai/dpm has served these three
+                  tables since the port and nothing rendered them. */}
+              <DpmSection />
             </Tabs.Content>
             <Tabs.Content value="trades">
               {/* Its own endpoint, not a field on /state: this is a row per

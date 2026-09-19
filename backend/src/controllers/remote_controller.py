@@ -11,13 +11,14 @@ a UI break.
 """
 from __future__ import annotations
 
+from backend.src.config.licence import issuer as _issuer
 from backend.src.services.cluster.remote import client as _client
 from backend.src.services.cluster.remote import tls as _tls
 
 __all__ = [
     "SERVER_HOST", "SERVER_PORT",
     "get_or_create_token", "get_status", "get_stored_email",
-    "request_registration", "app_version",
+    "request_registration", "app_version", "is_licence_issuer_machine",
 ]
 
 SERVER_HOST = _tls.SERVER_HOST
@@ -42,3 +43,13 @@ def request_registration(email: str, nickname: str = "") -> None:
 
 def app_version() -> str:
     return _client._app_version()
+
+
+def is_licence_issuer_machine() -> bool:
+    """Is this the Mac that issues licences?
+
+    Exists so `api/admin_console.py` can ask without importing
+    `config.licence.issuer` directly -- the API layer reaches the backend
+    through controllers, and that contract is enforced at zero.
+    """
+    return _issuer.is_licence_issuer_machine()

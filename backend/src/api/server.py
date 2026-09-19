@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
+from backend.src.api import admin_console
 from backend.src.api import auth as gate
 from backend.src.api import deps, errors
 from backend.src.api.routers import ai as ai_router
@@ -47,6 +48,7 @@ from backend.src.api.routers import remote as remote_router
 from backend.src.api.routers import orb as orb_router
 from backend.src.api.routers import orders as orders_router
 from backend.src.api.routers import schedule as schedule_router
+from backend.src.api.routers import setforget as setforget_router
 from backend.src.api.routers import settings as settings_router
 from backend.src.api.routers import system as system_router
 from backend.src.api.routers import templates as templates_router
@@ -88,6 +90,7 @@ ROUTERS = (
     trading_router.router,
     orb_router.router,
     orders_router.router,
+    setforget_router.router,
 )
 
 
@@ -172,6 +175,17 @@ def build_app(
 
     for router in ROUTERS:
         app.include_router(router)
+
+    # The licence admin console, when this machine is the issuer and a
+    # forex-admin checkout is present. Optional by design: install() returns
+    # False and logs rather than raising, because a missing admin console must
+    # never stop the trading app from starting.
+    #
+    # Mounted here -- after the app's own routers, before the SPA fallback --
+    # so /api/admin sits under the auth gate like every other /api path, and
+    # /admin resolves to the console's bundle rather than being swallowed by
+    # the dashboard's index.html.
+    admin_console.install(app)
 
     @app.get("/healthz")
     async def healthz() -> dict:                      # noqa: ANN202

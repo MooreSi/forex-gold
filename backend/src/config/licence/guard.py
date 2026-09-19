@@ -101,8 +101,15 @@ def _this_is_the_admin_machine() -> bool:
         if not is_licence_issuer_machine():
             return False
         forex_root = _P(__file__).parent.parent.parent.parent
+        # Same order as app.py's _admin_checkout_candidates: the tracked
+        # ~/forex-admin checkout first, the two legacy untracked copies after.
+        # This only asks "is a console present", so order does not change the
+        # answer -- it is kept identical so the two lists cannot drift into
+        # disagreeing about what counts as a console.
         keygen = any((c / "forex_admin.py").exists() for c in (
-            forex_root.parent / "KeyGen", _P.home() / "Documents" / "KeyGen"))
+            _P.home() / "forex-admin",
+            forex_root.parent / "KeyGen",
+            _P.home() / "Documents" / "KeyGen"))
         if not keygen:
             return False
         pw = _P(_udd) / "remote" / "admin_password.hash"

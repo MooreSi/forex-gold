@@ -42,6 +42,17 @@ def fake_keygen(tmp_path, monkeypatch):
     (kg / "forex_admin.py").write_text(
         "def open_admin_dialog():\n    return 'opened'\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    # Patching $HOME is not enough. One candidate is `forex_root.parent /
+    # "KeyGen"` -- derived from __file__, so on the owner's Mac it resolves to
+    # the real ~/KeyGen no matter what $HOME says, and the lookup finds THAT
+    # instead of this fixture's. Which one won then depended on whether an
+    # earlier test had already put it on sys.path, so this file's results were
+    # order-dependent and machine-dependent -- the exact thing its docstring
+    # says it exists to stop. Pin the whole candidate list to tmp_path.
+    monkeypatch.setattr(app_mod, "_admin_checkout_candidates",
+                        lambda _root: [home / "forex-admin",
+                                       home / "KeyGen",
+                                       home / "Documents" / "KeyGen"])
     monkeypatch.setitem(sys.modules, "forex_admin", None)
     sys.modules.pop("forex_admin", None)
     monkeypatch.syspath_prepend(str(kg))
@@ -55,6 +66,13 @@ def no_keygen(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "Documents").mkdir(parents=True)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    # See fake_keygen: $HOME alone leaves the real ~/KeyGen reachable through
+    # the forex_root.parent candidate, and this assertion ("nothing is found")
+    # then failed on the owner's machine while passing on CI.
+    monkeypatch.setattr(app_mod, "_admin_checkout_candidates",
+                        lambda _root: [home / "forex-admin",
+                                       home / "KeyGen",
+                                       home / "Documents" / "KeyGen"])
     return home
 
 
@@ -92,6 +110,10 @@ class TestWhenTheModuleIsBroken:
             "raise RuntimeError('licences.db is on a dead network mount')\n",
             encoding="utf-8")
         monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(app_mod, "_admin_checkout_candidates",
+                            lambda _root: [home / "forex-admin",
+                                           home / "KeyGen",
+                                           home / "Documents" / "KeyGen"])
         sys.modules.pop("forex_admin", None)
         monkeypatch.syspath_prepend(str(kg))
 
@@ -116,3 +138,78 @@ class TestTheImportTimeout:
         monkeypatch.setattr(importlib, "import_module", _hang)
 
         assert app_mod._import_with_timeout("whatever", timeout=0.2) is None
+
+
+# ── Which checkout wins (2026-09-19) ─────────────────────────────────────────
+
+class TestTheTrackedCheckoutTakesPrecedence:
+    """`~/forex-admin` is the git checkout (MooreSi/forex-admin). The two
+    `KeyGen` folders are untracked copies that predate it, kept only so a
+    machine that has not moved over still works.
+
+    The order is the whole guarantee that the tracked copy is the one that
+    runs -- and it decides more than which dialog opens, because the winner
+    goes onto sys.path at position 0. A legacy folder winning also changes
+    which `database.py` and `licence_signing.py` everything else resolves to,
+    which is how the React console once read a different registry from the
+    NiceGUI one on the same machine.
+    """
+
+    @pytest.fixture
+    def three_checkouts(self, tmp_path, monkeypatch):
+        from backend.src.config.licence import issuer as issuer_mod
+        monkeypatch.delenv("FOREX_ADMIN_MACHINE_FINGERPRINT", raising=False)
+        monkeypatch.setattr(issuer_mod, "_read_fingerprint",
+                            lambda: issuer_mod.ADMIN_MACHINE_FINGERPRINT)
+
+        home = tmp_path / "home"
+        made = {}
+        for label, relative in (("tracked", "forex-admin"),
+                                ("sibling", "KeyGen"),
+                                ("icloud",  "Documents/KeyGen")):
+            path = home / relative
+            path.mkdir(parents=True)
+            (path / "forex_admin.py").write_text(
+                f"def open_admin_dialog():\n    return {label!r}\n",
+                encoding="utf-8")
+            made[label] = path
+
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(app_mod, "_admin_checkout_candidates",
+                            lambda _root: [made["tracked"], made["sibling"],
+                                           made["icloud"]])
+        sys.modules.pop("forex_admin", None)
+        return made
+
+    def test_forex_admin_wins_over_both_legacy_copies(self, three_checkouts,
+                                                      monkeypatch):
+        monkeypatch.syspath_prepend(str(three_checkouts["tracked"]))
+        assert app_mod._find_admin_open_fn()() == "tracked"
+
+    def test_the_legacy_copies_are_still_a_fallback(self, three_checkouts,
+                                                    monkeypatch):
+        """Removing them is a decision, not a refactor -- forex-admin's
+        docs/simon-handover/002. Until then, a machine with only the old
+        folder must keep working."""
+        import shutil
+        shutil.rmtree(three_checkouts["tracked"])
+        monkeypatch.syspath_prepend(str(three_checkouts["sibling"]))
+        assert app_mod._find_admin_open_fn()() == "sibling"
+
+    def test_the_candidate_order_is_the_documented_one(self):
+        """Against the real function, not the patched one -- the fixtures
+        above replace it, so without this nothing checks what it returns."""
+        candidates = app_mod._admin_checkout_candidates(Path("/srv/FOREX"))
+        assert candidates == [
+            Path.home() / "forex-admin",
+            Path("/srv") / "KeyGen",
+            Path.home() / "Documents" / "KeyGen",
+        ]
+
+    def test_guard_agrees_with_app(self):
+        """guard.py keeps its own copy of the list. They only decide the same
+        thing while they hold the same paths."""
+        from pathlib import Path as _P
+        source = (_P(__file__).resolve().parents[2]
+                  / "backend/src/config/licence/guard.py").read_text(encoding="utf-8")
+        assert '"forex-admin"' in source, "guard.py does not know about the tracked checkout"

@@ -54,6 +54,15 @@ def machine(tmp_path, monkeypatch):
     (kg / "admin_panel.py").write_text(
         "def open_dialog():\n    return 'remote-opened'\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    # $HOME alone does not pin the lookup: one candidate is
+    # `forex_root.parent / "KeyGen"`, derived from __file__, so on the owner's
+    # Mac the real ~/KeyGen (or ~/forex-admin) is reachable whatever $HOME
+    # says -- and which one won depended on test order. Pin the whole list
+    # into tmp_path, the same way test_admin_discovery.py does.
+    monkeypatch.setattr(app_mod, "_admin_checkout_candidates",
+                        lambda _root: [home / "forex-admin",
+                                       home / "KeyGen",
+                                       home / "Documents" / "KeyGen"])
     for mod in ("forex_admin", "admin_panel"):
         sys.modules.pop(mod, None)
     monkeypatch.syspath_prepend(str(kg))

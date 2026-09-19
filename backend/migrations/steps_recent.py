@@ -152,4 +152,18 @@ _RECENT: list[tuple[int, str, object]] = [
     (47, "Telegram decision log, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN tg_decision_log_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Set & Forget (2026-09-19), Trading > Set & Forget. The lot size that
+    # section's Execute button sends, and nothing else. 0 means "size it from
+    # Risk per trade % and the stop distance", exactly as orb_lot_size does --
+    # same meaning, same default, so this changes nobody's behaviour.
+    #
+    # Deliberately NOT in sync/server.py's synced key list, unlike
+    # orb_lot_size. ORB has an unattended scheduler that reads the value on
+    # whichever node is trading, so the value has to reach that node. Set &
+    # Forget has no unattended path at all: every order starts with a person
+    # pressing Execute, and the lot travels WITH that order.
+    (48, "Set & Forget lot size, 0 = size from risk %", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN setforget_lot_size REAL NOT NULL DEFAULT 0",
+    ]),
 ]

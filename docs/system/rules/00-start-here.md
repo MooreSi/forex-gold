@@ -17,6 +17,7 @@ That single fact drives everything else on this page.
 | 5 | [50-workflow.md](50-workflow.md) | how a change gets made, end to end |
 | 6 | [60-adding-a-tunable.md](60-adding-a-tunable.md) | when a constant should be user-editable |
 | 7 | [70-file-organisation.md](70-file-organisation.md) | when a file is too big |
+| 8 | [80-two-checkouts-one-data-dir.md](80-two-checkouts-one-data-dir.md) | when touching startup, shared state or the version number |
 
 These are plain Markdown on purpose. Any agent — Claude, Cursor, Copilot, a
 human with an editor — reads the same rules. Nothing here depends on a

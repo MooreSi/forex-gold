@@ -91,6 +91,50 @@ def _ensure_data_dirs():
     (USER_DATA_DIR / "data" / "sessions").mkdir(parents=True, exist_ok=True)
 
 
+# How long to wait for a handover before refusing. A restart is two instances
+# overlapping on purpose -- the Windows path spawns the replacement and only
+# then exits -- so the replacement must be allowed to outwait its own parent.
+_SINGLE_INSTANCE_WAIT = 15.0
+
+
+def _claim_single_instance() -> bool:
+    """Take the one-app-per-data-directory lock. False means do not start.
+
+    Two checkouts of this app resolve to the same USER_DATA_DIR: the same
+    config.yaml, the same forex_trader_<env>.db, the same MT5 bridge port.
+    Sharing them is the point -- it is what lets the owner switch between the
+    two apps and keep one history. Running both at once is not.
+
+    This must be called before `_free_port()`, which KILLS whatever is
+    listening: without the lock, launching the second app terminated the first
+    mid-trade and said nothing about it.
+
+    **Fails open.** If the lock cannot be taken at all -- a read-only or
+    missing data directory -- the app still starts, because refusing to boot
+    is a worse failure than the overlap, and it is what every build before the
+    lock did anyway. Logged as a warning, loudly, because a guard that has
+    quietly stopped guarding is the thing this codebase keeps being bitten by.
+    """
+    from backend.src.utils import single_instance
+    try:
+        single_instance.acquire(timeout=_SINGLE_INSTANCE_WAIT)
+        return True
+    except single_instance.AlreadyRunning as exc:
+        log.error(
+            "%s Close the running app first (FOREX Stop.command / Stop "
+            "FOREX.bat), or set FOREX_TRADER_DATA_DIR to give this checkout "
+            "its own data directory.", exc,
+        )
+        return False
+    except Exception as exc:
+        log.warning(
+            "Could not take the single-instance lock (%s) - starting anyway. "
+            "Nothing is stopping a second app from opening the same database.",
+            exc,
+        )
+        return True
+
+
 def _free_port(port: int) -> None:
     """Kill any process already listening on the given port."""
     try:
@@ -381,6 +425,12 @@ def main():
     _args, _ = _ap.parse_known_args()
 
     _ensure_data_dirs()
+
+    # Before the config is read and long before _free_port() kills anything:
+    # see _claim_single_instance.
+    if not _claim_single_instance():
+        return
+
     _migrate_config_yaml()
 
     # ── Database first, so the licence screen behind it can function ─────────
@@ -557,6 +607,13 @@ def main():
         if bridge_proc:
             bridge_proc.terminate()
             log.info("MT5 bridge terminated")
+        # The kernel would drop the lock at exit anyway, and does drop it
+        # across the POSIX restart's os.execv (the fd is close-on-exec). This
+        # is for the paths that return rather than exit -- headless, and the
+        # port-claim refusal below -- so a re-entered main() is not waiting on
+        # a lock this process never let go of.
+        from backend.src.utils import single_instance
+        single_instance.release()
 
 
 if __name__ == "__main__":

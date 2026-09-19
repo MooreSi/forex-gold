@@ -34,6 +34,45 @@ TIMEFRAMES: dict[str, str] = {
 # across two files is how they drift.
 EMA_PERIODS: list[int] = [9, 21, 50]
 
+# The widest an EMA may be. Not a style limit: the period is a loop bound over
+# the candle window, and an unbounded one from a query string is a request the
+# browser can make arbitrarily expensive.
+MAX_EMA_PERIOD = 1000
+
+
+def _ema_periods(raw: str | None) -> list[int]:
+    """The periods a caller asked for, or the Chart tab's three.
+
+    Set & Forget reads EMA 50 against EMA 200; the Chart tab reads 9/21/50.
+    Asking here rather than computing a second EMA in the browser keeps one
+    implementation of the maths -- `chart_controller.ema_series` is shared with
+    the engine's signal snapshot, and a TypeScript copy would be a second
+    answer to what an EMA 200 is.
+
+    A period that is not a usable number is REFUSED rather than dropped.
+    Falling back silently would draw an EMA 50 under a legend saying something
+    else, which is a line on a chart that is not the line it claims to be.
+    """
+    from backend.src.api.errors import Refusal
+    if not raw:
+        return list(EMA_PERIODS)
+    out: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            period = int(part)
+        except ValueError:
+            raise Refusal(f"{part!r} is not an EMA period.", status_code=400) from None
+        if not 1 <= period <= MAX_EMA_PERIOD:
+            raise Refusal(
+                f"EMA period {period} is outside 1-{MAX_EMA_PERIOD}.",
+                status_code=400,
+            )
+        out.append(period)
+    return out or list(EMA_PERIODS)
+
 
 def _mt5_timeframe(timeframe: str) -> str:
     from backend.src.api.errors import Refusal
@@ -94,8 +133,11 @@ async def tick(eng: Any = Depends(engine_dep)) -> dict | None:
 async def overlays(
     timeframe: str = Query("5m"),
     count: int = Query(200, ge=10, le=1000),
+    emas: str | None = Query(None, description="Comma-separated EMA periods; "
+                                               "defaults to the Chart tab's 9,21,50"),
     eng: Any = Depends(engine_dep),
 ) -> dict:
+    periods = _ema_periods(emas)
     mt5_tf = _mt5_timeframe(timeframe)
     rows = await eng.get_candles(mt5_tf, count)
     closes = [float(c.get("close") or 0) for c in rows]
@@ -103,7 +145,7 @@ async def overlays(
     return {
         "timeframe": timeframe,
         "count": len(rows),
-        "emas": {str(p): chart_ctl.ema_series(closes, p) for p in EMA_PERIODS},
+        "emas": {str(p): chart_ctl.ema_series(closes, p) for p in periods},
         "rsi": chart_ctl.rsi_series(closes, 14),
         "fvgs": fvgs,
     }

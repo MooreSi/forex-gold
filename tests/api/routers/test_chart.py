@@ -178,3 +178,66 @@ def test_the_release_list_is_served_with_the_running_version(make_client, monkey
 
     assert body["version"] == "1.4.2"
     assert body["releases"][0]["notes"] == ["Ported the News tab"]
+
+
+class TestChoosingTheEmaPeriods:
+    """Set & Forget reads EMA 50 against EMA 200; the Chart tab reads 9/21/50.
+
+    Rather than a second EMA implementation in the browser -- the exact drift
+    `chart_controller.ema_series` exists to prevent, since the engine's signal
+    snapshot shares it -- the caller says which periods it wants. The default is
+    untouched, so the Chart tab is byte-identical.
+    """
+
+    def test_the_default_is_still_the_chart_tabs_three(
+        self, make_client, sentinel_engine, monkeypatch,
+    ):
+        seen = []
+        monkeypatch.setattr(chart_router.chart_ctl, "ema_series",
+                            lambda closes, p: seen.append(p) or [float(p)] * len(closes))
+        monkeypatch.setattr(chart_router.chart_ctl, "rsi_series",
+                            lambda closes, p: [50.0] * len(closes))
+        monkeypatch.setattr(chart_router.chart_ctl, "detect_fvgs", lambda rows: [])
+        monkeypatch.setattr(chart_router.chart_ctl, "select_display_fvgs",
+                            lambda rows, f: [])
+        sentinel_engine.candles = _candles(4)
+
+        body = make_client().get("/api/chart/overlays?timeframe=5m").json()
+
+        assert seen == chart_router.EMA_PERIODS == [9, 21, 50]
+        assert set(body["emas"]) == {"9", "21", "50"}
+
+    def test_a_caller_can_ask_for_its_own_periods(
+        self, make_client, sentinel_engine, monkeypatch,
+    ):
+        seen = []
+        monkeypatch.setattr(chart_router.chart_ctl, "ema_series",
+                            lambda closes, p: seen.append(p) or [float(p)] * len(closes))
+        monkeypatch.setattr(chart_router.chart_ctl, "rsi_series",
+                            lambda closes, p: [50.0] * len(closes))
+        monkeypatch.setattr(chart_router.chart_ctl, "detect_fvgs", lambda rows: [])
+        monkeypatch.setattr(chart_router.chart_ctl, "select_display_fvgs",
+                            lambda rows, f: [])
+        sentinel_engine.candles = _candles(4)
+
+        body = make_client().get(
+            "/api/chart/overlays?timeframe=4H&emas=50,200").json()
+
+        assert seen == [50, 200]
+        assert set(body["emas"]) == {"50", "200"}
+
+    def test_a_period_that_is_not_a_number_is_refused_rather_than_ignored(
+        self, make_client, sentinel_engine,
+    ):
+        """Silently falling back to the default would draw an EMA 50 labelled
+        as whatever was asked for -- a line on a chart that is not the line its
+        legend says it is."""
+        res = make_client().get("/api/chart/overlays?timeframe=4H&emas=50,fifty")
+
+        assert res.status_code == 400
+        assert "fifty" in res.json()["error"]["message"]
+
+    def test_a_nonsense_period_is_refused(self, make_client, sentinel_engine):
+        for bad in ("0", "-5", "5000"):
+            res = make_client().get(f"/api/chart/overlays?timeframe=4H&emas={bad}")
+            assert res.status_code == 400, bad

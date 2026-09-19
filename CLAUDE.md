@@ -67,6 +67,7 @@ so.
 | How to make a change | [docs/system/rules/50-workflow.md](docs/system/rules/50-workflow.md) |
 | Making a constant configurable | [docs/system/rules/60-adding-a-tunable.md](docs/system/rules/60-adding-a-tunable.md) |
 | Splitting a big file | [docs/system/rules/70-file-organisation.md](docs/system/rules/70-file-organisation.md) |
+| **Two checkouts, one data dir** | [docs/system/rules/80-two-checkouts-one-data-dir.md](docs/system/rules/80-two-checkouts-one-data-dir.md) |
 
 These live in `docs/` as plain Markdown so any tool reads them — not just
 Claude Code.
@@ -169,6 +170,16 @@ Each of these cost real time in a past session:
 - **PS 5.1 `;` chains continue past failures** (no `&&`) — verify state
   after multi-step git chains.
 - Check doc links after moving files: `python tools/check_doc_links.py`.
+- **`~/Forex-Update` and `~/Forex-React` share one `USER_DATA_DIR`** — one
+  `config.yaml`, one `forex_trader_<env>.db`, one bridge port. That is
+  deliberate: it is what lets the owner switch between the two apps. Only one
+  may RUN at a time (`utils/single_instance.py`, claimed in `run.main()`
+  before anything opens the database). **The version number is the exception:
+  it is per-checkout and must never be stored in the shared data directory or
+  a database.** Both rules, and why, in
+  [docs/system/rules/80-two-checkouts-one-data-dir.md](docs/system/rules/80-two-checkouts-one-data-dir.md).
+  The lock module and its call site are identical in both checkouts; change
+  them together.
 - **After restoring a mutated source file, delete `__pycache__`.** Python
   invalidates bytecode on mtime + size. A mutation that swaps two things of
   the same length (`(sl, tp, id)` -> `(tp, sl, id)`) restored with `cp` in the

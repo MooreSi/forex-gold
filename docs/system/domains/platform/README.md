@@ -17,6 +17,7 @@ allowed to call.
 ## Where the code lives
 
 - `run.py` — launcher: rotating file logging into `USER_DATA_DIR/data`, `_free_port`, `_start_mt5_bridge`, `_migrate_config_yaml`, server startup
+- `backend/src/utils/single_instance.py` — one-app-per-data-directory OS advisory lock, claimed by `run.main()` before the config is read
 - `backend/src/config/__init__.py` — YAML config + env overrides, `USER_DATA_DIR`/`DATA_DIR`/`SESSIONS_DIR`/`DB_PATH`, port defaults, Wine paths, Claude model alias resolution; all access via `config.get()`
 - `backend/src/config/secrets.py` — Fernet at-rest encryption (`enc:v1:` prefix), key in the OS keychain
 - `backend/src/config/licence/` — `guard.py` (offline HMAC enforcement at startup), `keygen.py`, `fingerprint.py`, `client.py` (cert-pinned HTTP to the auth server), `store.py`
@@ -30,7 +31,8 @@ allowed to call.
 ## Constraints / must not change
 
 - All user data (config, DBs, sessions, logs) lives **outside** the project tree; every downstream path derives from `USER_DATA_DIR`.
-- This checkout must never default to the live app's `ForexTrader` folder — the default is `ForexTrader-Refactor2`. `run.py`'s log dir must match `backend.src.config.USER_DATA_DIR` exactly.
+- **This checkout DOES use the `ForexTrader` folder, and that is now correct.** The fork-era isolation (`ForexTrader-Refactor2`) was reverted upstream in 212fd87 and taken in the 2026-08-25 merge, because every launcher and the installer's `[Dirs]` section still said `ForexTrader` while the code wrote to `ForexTrader-Refactor2`, stranding a `config.yaml` on the Windows client. This line said the opposite until 2026-09-19; the code is the fact. `run.py`'s log dir must still match `backend.src.config.USER_DATA_DIR` exactly.
+- **`~/Forex-Update` (the original NiceGUI app) and `~/Forex-React` therefore share one `USER_DATA_DIR`** — one `config.yaml`, one `forex_trader_<env>.db`, one `reversal_engine.db`, one bridge port. Deliberate: it is what lets the owner switch between the two apps and keep one history. Only one may run at a time, and the version number is per-checkout. Both rules in [../../rules/80-two-checkouts-one-data-dir.md](../../rules/80-two-checkouts-one-data-dir.md).
 - The licence auth server URL is hardcoded and cert-pinned; `guard.enforce()` runs at startup before the server starts; `keygen.py`'s `_SERVER_SECRET` must match the admin tools.
 - `node_roles.py`'s two mutual-exclusion checks **fail open** — an unpaired install has no counterpart, and an error must not silently kill trading or bot control. That choice is load-bearing.
 - `cluster/sync` and `cluster/remote` are deliberately separate protocols with separate certs so the two channels can never interfere.
@@ -43,7 +45,8 @@ allowed to call.
 - **`os_utils.shutdown_ui()` is the only place the backend stops the NiceGUI server.** `no-nicegui-in-the-backend` counts source units, not calls, and `restart_app` plus `services/telegram/bot_infra._delayed_app_shutdown` were doing the identical `nicegui.app.shutdown()` in two of them -- one unit over baseline for no behavioural reason. It never raises: callers are mid-restart with the relaunch subprocess already spawned, so an exception there would abort the relaunch and leave nothing running. Headless mode does not call it at all -- there is no server to stop, and the relaunch was spawned separately.
 
 
-- Default ports here are offset from the live app: UI 8890 (live 8888), EA bridge 9111 (live 9000). `_free_port()` kills whatever is listening before starting.
+- **Only the EA bridge port is offset from the live app: 9111 against 9000. The UI port is 8888 in both** (`config/__init__.py:174`) — this line claimed 8890 until 2026-09-19 and was wrong. So the two checkouts collide on the dashboard port as well as on the database.
+- **`_free_port()` kills whatever is listening before starting, and `single_instance` now runs first so that it cannot.** The kill was written for a wedged instance of the SAME app; with two checkouts on one machine it meant launching the second app terminated the first mid-trade, silently. `run.main()` takes the lock before the config is read, so a live rival is refused rather than shot; by the time `_free_port()` runs, this process holds the lock and anything on the port is an orphan.
 - On native Windows the app imports `MetaTrader5` in-process and skips the bridge subprocess; on macOS the bridge runs under Wine Python.
 - `run.py` must set `BRIDGE_CREDS_PATH` for the bridge subprocess — without it every cold boot connects with no credentials, masked as a normal startup delay because the watchdog's restart path sets it correctly.
 - `_migrate_config_yaml()` rewrites stale Claude model IDs before any module reads config, so old files on remote machines can't crash the app.
@@ -145,4 +148,4 @@ allowed to call.
 
 - `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).
 - The by-layer split of the websocket transports in `controllers/{remote,sync}` is "still to come".
-- The installer's firewall rules use the live app's ports (8888/9000) while this checkout defaults to 8890/9111 — not reconciled.
+- The installer's firewall rules use the live app's ports (8888/9000) while this checkout defaults the EA bridge to 9111 — not reconciled. (The UI port matches at 8888; the 8890 previously recorded here was never the default.)

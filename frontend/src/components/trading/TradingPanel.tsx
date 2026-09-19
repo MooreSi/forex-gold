@@ -10,6 +10,7 @@ import { PlaceLimitOrderDialog } from "./PlaceLimitOrderDialog";
 import { PlaceOrderDialog } from "./PlaceOrderDialog";
 import { ScheduleSection } from "./internal/ScheduleSection";
 import { OrbSection } from "./internal/OrbSection";
+import { SetForgetPanel } from "@/components/setforget/SetForgetPanel";
 import { TemplatesSection } from "./internal/TemplatesSection";
 import { cn } from "@/lib/cn";
 import { asArray } from "@/lib/asArray";
@@ -17,6 +18,7 @@ import type { Trade } from "@/api/types";
 
 const SUB_TABS = [
   { id: "positions", label: "Positions" },
+  { id: "setforget", label: "Set & Forget" },
   { id: "signals", label: "Signals" },
   { id: "schedule", label: "Schedule" },
   { id: "templates", label: "EA templates" },
@@ -84,6 +86,9 @@ export function TradingPanel() {
             disabledReason={c.disabledReason}
             onChanged={() => void c.refreshAll()}
           />
+        </Tabs.Content>
+        <Tabs.Content value="setforget" className="min-h-0 flex-1 overflow-auto">
+          <SetForgetPanel />
         </Tabs.Content>
         <Tabs.Content value="signals" className="min-h-0 flex-1 overflow-auto">
           <SignalsSection

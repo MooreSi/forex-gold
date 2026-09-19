@@ -20,6 +20,12 @@ import { cn } from "@/lib/cn";
  *
  * Every number carries the count it was measured over, because a 100% win rate
  * over two trades is not a measurement.
+ *
+ * **The keys are the ones the endpoint really returns**, checked against it on
+ * 2026-09-19: `stats` has `avg_pnl_dollars` and no total, and each split names
+ * its own label column (`session`, `adx_band`, `breakout_type`, `htf_bias`)
+ * and reports `wins`/`losses` rather than a count. Guessing them is how three
+ * separate panels in this app ended up silently rendering em dashes.
  */
 interface BreakoutReport {
   stats: Record<string, unknown>;
@@ -75,8 +81,13 @@ function Split({ title, rows, keyField, testId }: {
       <table data-testid={testId} className="w-full text-left text-[11px]">
         <tbody className="num">
           {rows.map((r, i) => {
-            const pnl = num(r["net_pnl"] ?? r["pnl"]);
-            const n = num(r["n"] ?? r["count"]);
+            const pnl = num(r["total_pnl"] ?? r["net_pnl"] ?? r["pnl"]);
+            // The rows report wins and losses, not a count. Adding them is
+            // the count, and showing neither would leave every figure here
+            // without the sample it was measured over.
+            const wins = num(r["wins"]) ?? 0;
+            const losses = num(r["losses"]) ?? 0;
+            const n = num(r["n"] ?? r["count"]) ?? (wins + losses || null);
             return (
               <tr key={String(r[keyField] ?? i)} className="border-t border-line">
                 <td className="py-1 text-ink-1">{String(r[keyField] ?? "—")}</td>
@@ -127,14 +138,25 @@ export function BreakoutSection() {
         <Figure label="Win rate" testId="bo-win-rate"
           value={num(stats["win_rate"]) == null ? "—" : formatPercent(num(stats["win_rate"]))}
           hint={total ? `of ${total}` : undefined} />
-        <Figure label="Net P&L" testId="bo-pnl"
-          value={num(stats["net_pnl"]) == null ? "—" : formatMoney(num(stats["net_pnl"]))}
-          tone={pnlColour(num(stats["net_pnl"]) ?? 0)} />
+        {/* Average, not total: `stats` reports `avg_pnl_dollars` and carries
+            no total at all. Labelling an average "Net P&L" would be a figure
+            wrong by a factor of the trade count. */}
+        <Figure label="Avg per trade" testId="bo-pnl"
+          value={num(stats["avg_pnl_dollars"]) == null
+            ? "—" : formatMoney(num(stats["avg_pnl_dollars"]))}
+          hint={num(stats["avg_pnl_pts"]) == null
+            ? undefined : `${(num(stats["avg_pnl_pts"]) ?? 0).toFixed(1)} pts`}
+          tone={pnlColour(num(stats["avg_pnl_dollars"]) ?? 0)} />
         <Figure label="Paper balance" testId="bo-balance"
           value={balance == null ? "—" : formatMoney(balance)}
           hint="the engine's own, not the account" />
+        {/* DOLLARS, not a percentage. `get_max_drawdown` walks the balance
+            log and returns `peak - balance`, so rendering it with a % sign
+            turned $1,895.27 into "1895.3%" -- a unit error, checked against
+            the repo on 2026-09-19. */}
         <Figure label="Worst drawdown" testId="bo-drawdown"
-          value={drawdown == null ? "—" : `${drawdown.toFixed(1)}%`}
+          value={drawdown == null ? "—" : formatMoney(drawdown)}
+          hint="peak to trough, on the paper balance"
           tone={drawdown ? "text-loss" : undefined} />
       </div>
 
@@ -150,6 +172,11 @@ export function BreakoutSection() {
           <span className="num text-ink-3">
             {labelled} labelled{needed != null && ` of ${needed} needed`}
           </span>
+          {num(metrics["accuracy"]) != null && (
+            <span className="num text-ink-3" title="Accuracy over the labelled set">
+              {((num(metrics["accuracy"]) ?? 0) * 100).toFixed(0)}% accurate
+            </span>
+          )}
           {num(metrics["brier_now"]) != null && (
             <span className="num text-ink-3"
               title="Brier score: lower is better calibrated">
@@ -171,11 +198,11 @@ export function BreakoutSection() {
         <Split title="By session" rows={asArray(poll.data.by_session)}
           keyField="session" testId="bo-by-session" />
         <Split title="By ADX band" rows={asArray(poll.data.by_adx)}
-          keyField="band" testId="bo-by-adx" />
+          keyField="adx_band" testId="bo-by-adx" />
         <Split title="By breakout type" rows={asArray(poll.data.by_type)}
-          keyField="type" testId="bo-by-type" />
+          keyField="breakout_type" testId="bo-by-type" />
         <Split title="By HTF bias" rows={asArray(poll.data.by_bias)}
-          keyField="bias" testId="bo-by-bias" />
+          keyField="htf_bias" testId="bo-by-bias" />
       </div>
     </div>
   );

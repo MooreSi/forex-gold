@@ -23,7 +23,7 @@ from backend.src.services.breakout_signal import ml_engine as _real_ml
 
 _db, _ml, _params = make_facades("breakout", _real_db, _real_ml, _real_params)
 
-__all__ = ["virtual_balance", "max_drawdown", "stats", "open_signals", "all_signals", "perf_by_breakout_type", "perf_by_adx_band", "perf_by_session", "perf_by_bias", "analysis_log", "adaptive_params", "ml_summary", "ml_metrics", "get_config", "set_config", "reset_adaptive_params", "ml_thresholds"]
+__all__ = ["edge_stats", "virtual_balance", "max_drawdown", "stats", "open_signals", "all_signals", "perf_by_breakout_type", "perf_by_adx_band", "perf_by_session", "perf_by_bias", "analysis_log", "adaptive_params", "ml_summary", "ml_metrics", "get_config", "set_config", "reset_adaptive_params", "ml_thresholds"]
 
 async def virtual_balance():
     return await to_db_thread(_db.get_virtual_balance)
@@ -86,3 +86,18 @@ def ml_thresholds() -> dict:
     """MIN_TRAIN_SAMPLES / RETRAIN_EVERY, which the panel renders as prose."""
     return {"min_train_samples": _ml.MIN_TRAIN_SAMPLES,
             "retrain_every": _ml.RETRAIN_EVERY}
+
+
+async def edge_stats():
+    """Profit factor and expectancy -- the NiceGUI Edge tab's numbers.
+
+    Through the same facade as everything else here, so in Remote mode it
+    reads the mirrored VPS figures rather than this node's idle ones.
+    """
+    from backend.src.services.breakout_signal import breakout_edge_repo as _edge
+
+    # Not through the local/remote facade: the mirrored VPS snapshot has no
+    # edge block in it, so asking the facade would answer with whatever the
+    # local engine has while the panel around it showed the VPS's numbers.
+    # One honest source beats two that disagree.
+    return await to_db_thread(_edge.get_edge_stats)

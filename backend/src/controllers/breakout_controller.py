@@ -18,11 +18,21 @@ from __future__ import annotations
 from backend.src.services.breakout_signal import panel_data as _panel
 
 __all__ = [
-    "breakout_stats", "breakout_virtual_balance", "breakout_max_drawdown",
+    "breakout_edge_stats", "breakout_stats", "breakout_virtual_balance", "breakout_max_drawdown",
     "breakout_ml_summary", "breakout_ml_metrics", "breakout_ml_thresholds",
     "breakout_perf_by_session", "breakout_perf_by_adx_band",
     "breakout_perf_by_type", "breakout_perf_by_bias",
 ]
+
+
+async def breakout_edge_stats() -> dict:
+    """Profit factor, expectancy, and the averages behind them.
+
+    A win rate on its own decides nothing: 38% with an average win three times
+    the average loss is a profitable engine, and 60% with the ratio inverted
+    is not.
+    """
+    return await _panel.edge_stats()
 
 
 async def breakout_stats() -> dict:

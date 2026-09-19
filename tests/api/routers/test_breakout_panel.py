@@ -125,3 +125,30 @@ class TestItPlacesNothing:
 
     def test_the_report_is_not_reachable_by_POST(self, make_client, panel):
         assert make_client().post("/api/engines/breakout/report").status_code == 405
+
+
+def test_the_report_carries_the_edge_figures(make_client, panel, monkeypatch):
+    """Profit factor and expectancy -- the NiceGUI Edge tab's numbers, which
+    the React port had no counterpart for anywhere."""
+    async def _edge():
+        return {"profit_factor": 1.4, "expectancy": 3.2, "avg_win": 40.0,
+                "avg_loss": 25.0, "closed": 127}
+
+    monkeypatch.setattr(engines_router.breakout_ctl, "breakout_edge_stats", _edge)
+
+    body = make_client().get("/api/engines/breakout/report").json()
+
+    assert body["edge"]["profit_factor"] == 1.4
+    assert body["edge"]["expectancy"] == 3.2
+
+
+def test_a_missing_edge_read_does_not_take_the_panel_down(make_client, panel, monkeypatch):
+    async def _boom():
+        raise RuntimeError("no bo_signals table on this install")
+
+    monkeypatch.setattr(engines_router.breakout_ctl, "breakout_edge_stats", _boom)
+
+    body = make_client().get("/api/engines/breakout/report").json()
+
+    assert body["edge"] == {}
+    assert body["stats"]["win_rate"] == 58.3

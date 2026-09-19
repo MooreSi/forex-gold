@@ -36,6 +36,7 @@ interface BreakoutReport {
     metrics: Record<string, unknown>;
     thresholds: Record<string, unknown>;
   };
+  edge: Record<string, unknown>;
   by_session: Record<string, unknown>[];
   by_adx: Record<string, unknown>[];
   by_type: Record<string, unknown>[];
@@ -119,12 +120,20 @@ export function BreakoutSection() {
   }
 
   const stats = asObject(poll.data.stats);
+  const edge = asObject(poll.data.edge);
   const ml = asObject(poll.data.ml);
   const summary = asObject(ml["summary"]);
   const metrics = asObject(ml["metrics"]);
   const thresholds = asObject(ml["thresholds"]);
 
+  // `total` is COUNT(*) over the whole table -- every signal, whatever its
+  // status. CLOSED is wins + losses + be, and it is the number the four
+  // splits below sum to. Labelling `total` "Closed" made the headline read
+  // 128 against splits summing to 127, which is exactly the confusion this
+  // pair exists to remove.
   const total = num(stats["total"]) ?? 0;
+  const closed = (num(stats["wins"]) ?? 0) + (num(stats["losses"]) ?? 0)
+    + (num(stats["be"]) ?? 0);
   const trained = summary["trained"] === true;
   const labelled = num(summary["labeled_count"]) ?? 0;
   const needed = num(thresholds["min_train_samples"]) ?? num(summary["min_needed"]);
@@ -133,11 +142,14 @@ export function BreakoutSection() {
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Figure label="Closed" testId="bo-total" value={total ? String(total) : "—"} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
+        <Figure label="Signals" testId="bo-total" value={total ? String(total) : "—"}
+          hint={num(stats["pending"]) ? `${num(stats["pending"])} still open` : undefined} />
+        <Figure label="Closed" testId="bo-closed" value={closed ? String(closed) : "—"}
+          hint="what the splits below sum to" />
         <Figure label="Win rate" testId="bo-win-rate"
           value={num(stats["win_rate"]) == null ? "—" : formatPercent(num(stats["win_rate"]))}
-          hint={total ? `of ${total}` : undefined} />
+          hint={closed ? `of ${closed}` : undefined} />
         {/* Average, not total: `stats` reports `avg_pnl_dollars` and carries
             no total at all. Labelling an average "Net P&L" would be a figure
             wrong by a factor of the trade count. */}
@@ -158,6 +170,42 @@ export function BreakoutSection() {
           value={drawdown == null ? "—" : formatMoney(drawdown)}
           hint="peak to trough, on the paper balance"
           tone={drawdown ? "text-loss" : undefined} />
+      </div>
+
+      {/* The NiceGUI Edge tab's numbers, which the React port had nowhere at
+          all. A win rate on its own decides nothing: 38% with an average win
+          three times the average loss is a profitable engine, and 60% with
+          the ratio inverted is not. */}
+      <div data-testid="bo-edge"
+        className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded border border-line bg-surface-2/40 p-2.5 text-[11px]">
+        <span className="font-semibold text-ink-1">Edge</span>
+        <span className="text-ink-3">
+          Profit factor{" "}
+          <span data-testid="bo-pf" className={cn("num font-semibold",
+            num(edge["profit_factor"]) == null ? "text-ink-3"
+              : (num(edge["profit_factor"]) ?? 0) >= 1 ? "text-profit" : "text-loss")}>
+            {/* Null, not 0 and not infinity: an engine that has never lost
+                has no ratio yet, and 0.00 reads as the worst possible one. */}
+            {num(edge["profit_factor"]) == null
+              ? "not yet" : (num(edge["profit_factor"]) ?? 0).toFixed(2)}
+          </span>
+        </span>
+        <span className="text-ink-3">
+          Expectancy{" "}
+          <span data-testid="bo-expectancy" className={cn("num font-semibold",
+            pnlColour(num(edge["expectancy"]) ?? 0))}>
+            {num(edge["expectancy"]) == null
+              ? "not yet" : formatMoney(num(edge["expectancy"]))}
+          </span>
+          <span className="text-ink-3"> per trade</span>
+        </span>
+        <span className="num text-ink-3">
+          {/* The two averages the expectancy is built from, so the figure can
+              be argued with rather than just believed. */}
+          avg win {num(edge["avg_win"]) == null ? "—" : formatMoney(num(edge["avg_win"]))}
+          {" vs loss "}
+          {num(edge["avg_loss"]) == null ? "—" : formatMoney(num(edge["avg_loss"]))}
+        </span>
       </div>
 
       <div className="rounded border border-line bg-surface-2/40 p-2.5">

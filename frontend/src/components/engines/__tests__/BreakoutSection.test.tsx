@@ -61,12 +61,24 @@ describe("the headline figures", () => {
     expect(screen.getByTestId("bo-pnl")).toHaveTextContent("-$7.77");
   });
 
-  it("says how many trades the win rate is over", async () => {
-    // 100% over two trades is not a measurement.
+  it("tells signals apart from closed trades", async () => {
+    // `stats.total` is COUNT(*) over the whole table -- every signal, at any
+    // status. Closed is wins + losses + be, and it is what the splits below
+    // sum to. Showing 128 under a heading of "Closed" is what made me read a
+    // discrepancy into consistent data.
+    render(<BreakoutSection />);
+
+    expect(await screen.findByTestId("bo-total")).toHaveTextContent("128");
+    expect(screen.getByTestId("bo-closed")).toHaveTextContent("127");
+  });
+
+  it("says how many CLOSED trades the win rate is over", async () => {
+    // 100% over two trades is not a measurement -- and the denominator is
+    // the closed count, not every signal ever raised.
     render(<BreakoutSection />);
     await screen.findByTestId("bo-win-rate");
 
-    expect(screen.getByText("of 128")).toBeInTheDocument();
+    expect(screen.getByText("of 127")).toBeInTheDocument();
   });
 
   it("separates the engine's paper balance from the account", async () => {
@@ -196,5 +208,50 @@ describe("a fresh install", () => {
     render(<BreakoutSection />);
 
     expect(await screen.findByTestId("bo-ml-state")).toBeInTheDocument();
+  });
+});
+
+describe("the edge figures", () => {
+  // The NiceGUI Edge tab's numbers, which the React port had nowhere at all.
+  beforeEach(() => {
+    body = { ...body, edge: { profit_factor: 1.4, expectancy: 3.2,
+                              avg_win: 40, avg_loss: 25, closed: 127 } };
+  });
+
+  it("shows the profit factor and the expectancy", async () => {
+    render(<BreakoutSection />);
+
+    expect(await screen.findByTestId("bo-pf")).toHaveTextContent("1.40");
+    expect(screen.getByTestId("bo-expectancy")).toHaveTextContent("$3.20");
+  });
+
+  it("colours a profit factor below one as a loss", async () => {
+    body = { ...body, edge: { ...(body.edge as object), profit_factor: 0.61 } };
+    render(<BreakoutSection />);
+
+    expect((await screen.findByTestId("bo-pf")).className).toContain("text-loss");
+  });
+
+  it("says an engine that has never lost has no ratio yet", async () => {
+    // Not 0.00, which reads as the worst possible engine, and not infinity.
+    body = { ...body, edge: { ...(body.edge as object), profit_factor: null } };
+    render(<BreakoutSection />);
+
+    expect(await screen.findByTestId("bo-pf")).toHaveTextContent("not yet");
+  });
+
+  it("shows the two averages the expectancy is built from", async () => {
+    // So the figure can be argued with rather than just believed.
+    render(<BreakoutSection />);
+    await screen.findByTestId("bo-edge");
+
+    expect(screen.getByTestId("bo-edge")).toHaveTextContent("avg win $40.00 vs loss $25.00");
+  });
+
+  it("renders when the engine has no edge figures at all", async () => {
+    body = { ...body, edge: {} };
+    render(<BreakoutSection />);
+
+    expect(await screen.findByTestId("bo-expectancy")).toHaveTextContent("not yet");
   });
 });

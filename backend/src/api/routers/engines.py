@@ -156,6 +156,7 @@ async def breakout_report() -> dict:
 
     return {
         "stats": await _guarded(breakout_ctl.breakout_stats, {}),
+        "edge": await _guarded(breakout_ctl.breakout_edge_stats, {}),
         "virtual_balance": await _guarded(breakout_ctl.breakout_virtual_balance, None),
         "max_drawdown": await _guarded(breakout_ctl.breakout_max_drawdown, None),
         "ml": {

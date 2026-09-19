@@ -44,6 +44,7 @@ from backend.src.api.routers import notifications as notifications_router
 from backend.src.api.routers import node as node_router
 from backend.src.api.routers import parsing as parsing_router
 from backend.src.api.routers import remote as remote_router
+from backend.src.api.routers import orb as orb_router
 from backend.src.api.routers import orders as orders_router
 from backend.src.api.routers import schedule as schedule_router
 from backend.src.api.routers import settings as settings_router
@@ -85,6 +86,7 @@ ROUTERS = (
     settings_router.router,
     templates_router.router,
     trading_router.router,
+    orb_router.router,
     orders_router.router,
 )
 

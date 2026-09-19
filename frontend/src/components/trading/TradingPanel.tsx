@@ -9,6 +9,7 @@ import { SignalsSection } from "./internal/SignalsSection";
 import { PlaceLimitOrderDialog } from "./PlaceLimitOrderDialog";
 import { PlaceOrderDialog } from "./PlaceOrderDialog";
 import { ScheduleSection } from "./internal/ScheduleSection";
+import { OrbSection } from "./internal/OrbSection";
 import { TemplatesSection } from "./internal/TemplatesSection";
 import { cn } from "@/lib/cn";
 import { asArray } from "@/lib/asArray";
@@ -19,6 +20,7 @@ const SUB_TABS = [
   { id: "signals", label: "Signals" },
   { id: "schedule", label: "Schedule" },
   { id: "templates", label: "EA templates" },
+  { id: "orb", label: "ORB report" },
 ];
 
 /** Thin wrapper: composition, one piece of local UI state (which dialog is
@@ -97,6 +99,9 @@ export function TradingPanel() {
             onSetTarget={(v) => void c.setDailyTarget(v)}
             onResumeToday={() => void c.resumeToday()}
           />
+        </Tabs.Content>
+        <Tabs.Content value="orb" className="min-h-0 flex-1 overflow-auto">
+          <OrbSection />
         </Tabs.Content>
         <Tabs.Content value="templates" className="min-h-0 flex-1 overflow-auto">
           <TemplatesSection

@@ -91,14 +91,23 @@ def test_a_partial_close_of_zero_lots_is_rejected_before_it_reaches_the_engine(
 def test_a_market_order_forwards_every_field_with_the_engines_keyword_names(
     make_client, sentinel_engine,
 ):
+    """Every field, under the name the engine declares.
+
+    `direction` travels as a keyword rather than positionally since
+    2026-09-18, when this call started going through the node routing in
+    `services/cluster/remote_control.py` — the signature accepts both, and one
+    dict of named arguments is what can be forwarded to a peer unchanged. The
+    claim that matters is unchanged: nothing is dropped and nothing is renamed.
+    """
     make_client().post("/api/trading/orders/market", json={
         "direction": "SELL", "stop_loss": 2450.0, "lot_size": 0.02,
         "strategy": "scalp", "take_profit": 2400.0, "source_name": "orb_report",
     })
     args, kwargs = sentinel_engine.call_named("open_manual_market_order")
-    assert args == ("SELL",)
-    assert kwargs == {"stop_loss": 2450.0, "lot_size": 0.02, "strategy": "scalp",
-                      "take_profit": 2400.0, "source_name": "orb_report"}
+    assert args == ()
+    assert kwargs == {"direction": "SELL", "stop_loss": 2450.0, "lot_size": 0.02,
+                      "strategy": "scalp", "take_profit": 2400.0,
+                      "source_name": "orb_report"}
 
 
 def test_an_omitted_stop_loss_stays_None_and_is_not_filled_in_here(

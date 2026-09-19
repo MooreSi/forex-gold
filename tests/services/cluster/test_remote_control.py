@@ -55,15 +55,36 @@ class _Svc:
         return self._engine
 
 
+class _Runtime:
+    """The engine, as this module is allowed to see it: one facade method."""
+
+    def __init__(self, raises=None):
+        self.orders: list[dict] = []
+        self._raises = raises
+
+    async def open_manual_market_order(self, direction, **kwargs):
+        if self._raises:
+            raise self._raises
+        self.orders.append({"direction": direction,
+                            **{k: v for k, v in kwargs.items() if v is not None}})
+        return {"mt5_ticket": 1, "entry_price": 2400.0}
+
+
 class _Peer:
     def __init__(self):
         self.remote_settings: dict = {}
         self.sent: list[tuple] = []
-        self.ack: dict = {"is_running": True}
+        self.ack: dict = {"is_running": True, "result": {}}
         self.raises: Exception | None = None
 
     async def send_engine_control(self, engine, action, **kwargs):
         self.sent.append((engine, action, kwargs))
+        if self.raises:
+            raise self.raises
+        return self.ack
+
+    async def send_market_order(self, direction, **kwargs):
+        self.sent.append(("market_order", {"direction": direction, **kwargs}))
         if self.raises:
             raise self.raises
         return self.ack
@@ -313,3 +334,95 @@ class TestTheSettingsThePanelShows:
 
         assert rc.effective_settings({"a": 1}) == {"a": 1}
 
+
+
+# ── Placing an order on the node that is trading ─────────────────────────────
+
+@pytest.mark.asyncio
+class TestPlacingAMarketOrder:
+    """The manual Market Order button, and the ORB report's Execute.
+
+    In Remote mode this node is stood down and `open_trade` refuses with
+    "Trading stood down — the VPS is the active trader". That is safe and it is
+    also a lost capability: the NiceGUI button forwarded the order over the sync
+    channel so it executed on the machine that IS trading. The React port kept
+    the refusal and lost the forwarding.
+
+    **Nothing here reaches a broker.** The engine is a recorder and the peer is
+    a recorder; what is asserted is which one was asked.
+    """
+
+    async def test_locally_it_goes_to_this_node_s_engine(self, node):
+        engine = _Runtime()
+
+        result = await rc.place_market_order(
+            engine, direction="BUY", stop_loss=2400.0, lot_size=0.1)
+
+        assert engine.orders == [{"direction": "BUY", "stop_loss": 2400.0,
+                                  "lot_size": 0.1}]
+        assert node["peer"].sent == []
+        assert result["where"] == "local"
+
+    async def test_in_remote_mode_it_is_forwarded_to_the_peer(self, node):
+        """The whole point. Placed here it is refused; forwarded it executes on
+        the machine holding the account."""
+        node["remote_active"] = True
+        engine = _Runtime()
+        node["peer"].ack = {"result": {"mt5_ticket": 42, "entry_price": 2401.5}}
+
+        result = await rc.place_market_order(
+            engine, direction="BUY", stop_loss=2400.0, lot_size=0.1)
+
+        assert engine.orders == [], "the stood-down node must not be asked"
+        assert node["peer"].sent[0][0] == "market_order"
+        assert result["mt5_ticket"] == 42
+        assert result["where"] == "remote"
+
+    async def test_every_argument_travels(self, node):
+        """The ORB setup carries its own stop, target, strategy and source tag.
+        A forwarded order that dropped the take profit would open a position
+        with no target at all."""
+        node["remote_active"] = True
+        engine = _Runtime()
+
+        await rc.place_market_order(
+            engine, direction="SELL", stop_loss=2410.0, take_profit=2380.0,
+            lot_size=0.2, strategy="orb_fixed", source_name="ORB/IVB Report")
+
+        sent = node["peer"].sent[0][1]
+        assert sent["stop_loss"] == 2410.0
+        assert sent["take_profit"] == 2380.0
+        assert sent["strategy"] == "orb_fixed"
+        assert sent["source_name"] == "ORB/IVB Report"
+
+    async def test_a_peer_that_refuses_the_order_is_reported_not_swallowed(self, node):
+        node["remote_active"] = True
+        engine = _Runtime()
+        node["peer"].ack = {"error": "circuit breaker active"}
+
+        with pytest.raises(rc.RemoteControlFailed) as exc:
+            await rc.place_market_order(engine, direction="BUY", stop_loss=1.0)
+
+        assert "circuit breaker active" in str(exc.value)
+
+    async def test_an_unreachable_peer_does_not_fall_back_to_local(self, node):
+        """Falling back would place the order on a node that is stood down, or
+        worse, on a node the operator believes is idle."""
+        node["remote_active"] = True
+        engine = _Runtime()
+        node["peer"].raises = TimeoutError("no route")
+
+        with pytest.raises(rc.RemoteControlFailed):
+            await rc.place_market_order(engine, direction="BUY", stop_loss=1.0)
+
+        assert engine.orders == []
+
+    async def test_the_engine_s_own_refusal_still_reaches_the_caller(self, node):
+        """Locally, `open_trade` raises ValueError with a reason the operator
+        needs to read. It must not be turned into a RemoteControlFailed."""
+        engine = _Runtime(raises=ValueError("DPM is disabled and no stop loss was given"))
+
+        with pytest.raises(ValueError) as exc:
+            await rc.place_market_order(engine, direction="BUY")
+
+        assert "no stop loss" in str(exc.value)

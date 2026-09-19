@@ -96,6 +96,11 @@ async def set_ai_eval(*args, **kwargs) -> dict:
     return await _remote.set_ai_eval(*args, **kwargs)
 
 
+async def place_market_order(*args, **kwargs) -> dict:
+    """Place a market order on whichever node is actually trading."""
+    return await _remote.place_market_order(*args, **kwargs)
+
+
 async def reversal_realised_pnl() -> dict:
     """The Reversal Engine's REAL closed P&L -- the trades it actually placed,
     read from the core trade ledger rather than the engine's own virtual one."""

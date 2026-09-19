@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends
 
 from backend.src.api.deps import engine as engine_dep
 from backend.src.api.errors import Refusal
+from backend.src.controllers import engines_controller as engines_ctl
 from backend.src.api.schemas.trading import (
     CloseRequest, LimitOrderRequest, MarketOrderRequest,
     OpenFromSignalRequest, PartialCloseRequest,
@@ -49,15 +50,27 @@ def _refuse(exc: Exception) -> Refusal:
 async def place_market_order(
     body: MarketOrderRequest, eng: Any = Depends(engine_dep),
 ) -> dict:
+    """**It may not be placed on this machine.**
+
+    When the remote node is the active trader this one is stood down, and
+    `open_trade` refuses with "Trading stood down". That is safe and it is also
+    a lost capability: the NiceGUI button forwarded the order over the sync
+    channel so it executed on the machine holding the account. The controller
+    decides where it lands and the response says which — see
+    `services/cluster/remote_control.py`.
+    """
     try:
-        return await eng.open_manual_market_order(
-            body.direction,
+        return await engines_ctl.place_market_order(
+            eng,
+            direction=body.direction,
             stop_loss=body.stop_loss,
             lot_size=body.lot_size,
             strategy=body.strategy,
             take_profit=body.take_profit,
             source_name=body.source_name,
         )
+    except engines_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc)) from exc
     except ValueError as exc:
         raise _refuse(exc) from exc
 

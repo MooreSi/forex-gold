@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     "is_remote_active", "is_centralized_remote_mode", "where",
     "effective_settings", "set_engine_running", "set_ai_eval",
-    "AI_EVAL_KEYS", "RemoteControlFailed",
+    "place_market_order", "AI_EVAL_KEYS", "RemoteControlFailed",
 ]
 
 # The only two settings the sync protocol can carry. `set_ai_eval` is the one
@@ -161,6 +161,39 @@ async def set_ai_eval(engine: str, enabled: Optional[bool] = None) -> dict:
     # Without this the toggle recomputes the same "current" for ever.
     _note(key, 1 if target else 0)
     return {"engine": engine, "key": key, "enabled": target, "where": "remote"}
+
+
+async def place_market_order(engine: Any, **order: Any) -> dict:
+    """Place a market order on whichever node is actually trading.
+
+    In Remote mode this node is stood down and `open_trade` refuses with
+    "Trading stood down -- the VPS is the active trader". That is safe, and it
+    is also a lost capability: the NiceGUI button forwarded the order over the
+    sync channel so it executed on the machine holding the account. This is
+    that forwarding.
+
+    **No fallback.** A peer that cannot be reached is a refusal, not a reason
+    to place the order here: here is either stood down, or a node the operator
+    believes is idle.
+
+    A local ValueError is the engine saying no with a reason the operator needs
+    to read -- "DPM is disabled and no stop loss was given" -- so it is left to
+    propagate rather than wrapped.
+    """
+    if not is_remote_active():
+        result = await engine.open_manual_market_order(**order)
+        return {**(result or {}), "where": "local"}
+
+    try:
+        ack = await _client.get_instance().send_market_order(**order)
+    except Exception as exc:
+        log.warning("[remote_control] market order did not reach the peer: %s", exc)
+        raise RemoteControlFailed(
+            f"The remote node could not be reached ({exc}). Nothing was placed."
+        ) from exc
+    if (ack or {}).get("error"):
+        raise RemoteControlFailed(f"The remote node refused: {ack['error']}")
+    return {**((ack or {}).get("result") or {}), "where": "remote"}
 
 
 async def _send(engine: str, action: str, **kwargs: Any) -> dict:

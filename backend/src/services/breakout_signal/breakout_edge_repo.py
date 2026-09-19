@@ -32,6 +32,10 @@ def get_edge_stats() -> dict:
     engine. Same rule for `expectancy` on an engine with no closed trades: a
     fresh install has no edge, not a bad one.
     """
+    # `get_db().get` returns a sqlite3.Row, which indexes but has no .get().
+    # The first version of this called row.get() and every read failed into
+    # the router's guard -- the panel showed "not yet" for a live engine with
+    # 127 closed trades, and the test passed because its fake returned a dict.
     row = get_db().get("""
         SELECT
           COUNT(*) as closed,
@@ -41,13 +45,19 @@ def get_edge_stats() -> dict:
           SUM(CASE WHEN pnl_dollars < 0 THEN -pnl_dollars ELSE 0 END) as gross_loss
         FROM bo_signals
         WHERE status='closed' AND outcome IN ('win','loss','be')
-    """) or {}
+    """)
 
-    closed = int(row.get("closed") or 0)
-    wins = int(row.get("wins") or 0)
-    losses = int(row.get("losses") or 0)
-    gross_profit = float(row.get("gross_profit") or 0.0)
-    gross_loss = float(row.get("gross_loss") or 0.0)
+    def _field(name):
+        try:
+            return row[name] if row is not None else None
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    closed = int(_field("closed") or 0)
+    wins = int(_field("wins") or 0)
+    losses = int(_field("losses") or 0)
+    gross_profit = float(_field("gross_profit") or 0.0)
+    gross_loss = float(_field("gross_loss") or 0.0)
 
     avg_win = (gross_profit / wins) if wins else None
     avg_loss = (gross_loss / losses) if losses else None

@@ -43,11 +43,15 @@ def engine_db(tmp_path, monkeypatch):
 
     class _Db:
         def get(self, sql, *params):
+            # A real sqlite3.Row, NOT a dict. The first version of this
+            # fixture returned a dict, so the implementation could call
+            # `row.get(...)` -- which a Row does not have -- and pass here
+            # while every live read failed into the router's guard. A stub
+            # that is easier to satisfy than the real thing proves nothing.
             c = sqlite3.connect(str(path))
             c.row_factory = sqlite3.Row
             try:
-                row = c.execute(sql, params).fetchone()
-                return dict(row) if row else {}
+                return c.execute(sql, params).fetchone()
             finally:
                 c.close()
 

@@ -375,6 +375,11 @@ class TradingRuntime:
     async def get_candles_for_symbol(self, symbol: str, timeframe: str, count: int) -> list[dict]:
         return await self._bridge.get_candles_for_symbol(symbol, timeframe, count)
 
+    async def get_deal_history(self, days: int = 7) -> Optional[list[dict]]:
+        """Closed deals from MT5's own record, for the Analysis trade table.
+        Why it is on the facade: facade_baseline.json, 2026-09-19."""
+        return await self._bridge.get_deal_history(days)
+
     async def get_ticks_range(self, from_ts: float, to_ts: float) -> list[dict]:
         """Tick history for the backtest's tick-walking simulator (docs/todo/
         backtest/010 phase 1). Bounded to one day per request by the bridge

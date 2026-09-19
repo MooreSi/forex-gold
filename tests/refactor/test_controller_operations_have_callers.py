@@ -43,15 +43,21 @@ _CONTROLLERS = sorted(
 # It mirrors the `awaiting-react-port` class in
 # tools/refactor_audit/orphan_module_allowlist.json: same cause, same debt,
 # same removal condition.
-AWAITING_REACT_PORT = {
-    ("history_controller", "ticket_group_map"),
-    ("history_controller", "ticket_max_tp_map"),
-    ("history_controller", "ticket_order_type_map"),
-    ("history_controller", "ticket_rr_map"),
-    ("history_controller", "ticket_source_map"),
-    ("history_controller", "ticket_strategy_map"),
-    ("system_controller", "local_today"),
-}
+# **Empty, as of 2026-09-19.** It held 47 operations the big-bang replace
+# orphaned when eight NiceGUI tabs were deleted ahead of their React
+# equivalents, and every one of them now has a caller, has been deleted as
+# genuinely dead, or moved into the service that actually uses it.
+#
+# The last seven went together because they were one feature: the six
+# `ticket_*_map` builders and `system_controller.local_today` belong to the
+# Analysis deal-level trade table and its calendar, which needed
+# `get_deal_history` on the runtime facade -- an allowlist entry, and therefore
+# the owner's word (facade_baseline.json records it, 89 -> 90).
+#
+# It stays here, empty, rather than being deleted: `test_neither_set_has_slack`
+# is what keeps it honest, and a future port has somewhere to record its debt
+# with the same shrink-only rule.
+AWAITING_REACT_PORT: set[tuple[str, str]] = set()
 
 # Known dead. Each is a controller operation nothing calls and nothing wants.
 KNOWN_DEAD = {
@@ -105,18 +111,15 @@ class TestEveryControllerOperationIsCalled:
         it to 31; finishing the Trading tab, the node/update panel and the
         licence screens took it to 18; the Connections/Remote Node pass took it
         to 12, routing the Signal Generator's controls at the node that is
-        actually trading took it to 9, and the discrepancy audit — which built
-        the demo/live switch and deleted the two operations it replaced — took
-        it to 7.
+        actually trading took it to 9, the discrepancy audit took it to 7, and
+        the Analysis trade table — the last seven, which were one feature —
+        took it to **zero** on 2026-09-19.
 
-        All seven that remain are ONE feature: the six `ticket_*_map` builders
-        and `local_today` belong to the Analysis deal-level trade table and its
-        calendar, which are blocked on an owner decision about the facade
-        allowlist. See docs/todo/frontend/react-port/PROGRESS.md.
-
-        That is the number to watch: it may fall; it may not rise.
+        Zero is the number now, and it may not rise. A new entry means a tab
+        was deleted ahead of its replacement again, or a controller operation
+        was added with no router to call it.
         """
-        assert len(AWAITING_REACT_PORT) <= 7, (
+        assert len(AWAITING_REACT_PORT) == 0, (
             "the React port debt grew — a new tab deletion, or a controller "
             "operation added with no router to call it"
         )

@@ -10,11 +10,16 @@ import { ChannelsScorecard } from "./internal/ChannelsScorecard";
 import { HeatmapSection } from "./internal/HeatmapSection";
 import { LadderSection } from "./internal/LadderSection";
 import { PerformanceSection } from "./internal/PerformanceSection";
+import { TradeTableSection } from "./internal/TradeTableSection";
 
 const SUB_TABS = [
   { id: "hours", label: "When it trades" },
   { id: "channels", label: "Channels" },
   { id: "ladder", label: "Ladder reach" },
+  // Last, and not the default: the tab opens on the heatmap, which
+  // HistoryPanel.test.tsx pins. This one is a row per trade and costs a
+  // request of its own, so it loads when it is asked for.
+  { id: "trades", label: "Trades" },
 ];
 
 export function HistoryPanel() {
@@ -84,6 +89,12 @@ export function HistoryPanel() {
             </Tabs.Content>
             <Tabs.Content value="ladder">
               <LadderSection ladder={asObject(c.state.data.ladder)} />
+            </Tabs.Content>
+            <Tabs.Content value="trades">
+              {/* Its own endpoint, not a field on /state: this is a row per
+                  trade and the rest of the tab is aggregates. A window nobody
+                  is looking at should not be paying for it. */}
+              <TradeTableSection days={c.days} />
             </Tabs.Content>
           </Tabs.Root>
         </div>

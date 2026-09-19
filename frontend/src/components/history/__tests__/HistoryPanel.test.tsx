@@ -202,3 +202,26 @@ describe("ladder reach", () => {
     expect(screen.getByText("18")).toBeInTheDocument();
   });
 });
+
+describe("the trades tab", () => {
+  it("costs nothing until it is opened", async () => {
+    // A row per trade over ten years is what forced the old WebSocket buffer
+    // from 1MB to 10MB. It is not on the default tab, so it is not fetched.
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+
+    expect(gets().some((c) => String(c[0]).includes("/api/history/trades"))).toBe(false);
+  });
+
+  it("asks for the trades of the window that is selected", async () => {
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+
+    await userEvent.click(screen.getByRole("button", { name: "365d" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Trades" }));
+
+    await waitFor(() => {
+      expect(gets().some((c) => c[0] === "/api/history/trades?days=365")).toBe(true);
+    });
+  });
+});

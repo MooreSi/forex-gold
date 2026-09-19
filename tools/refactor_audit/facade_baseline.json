@@ -26,7 +26,23 @@
     "docs/todo/backtest/010 phase 1: the backtest's tick-walking simulator",
     "needs tick history, and the live bridge connection only exists inside",
     "this class -- there is no side door that reaches it without going",
-    "through the facade."
+    "through the facade.",
+    "",
+    "Raised again, 2026-09-19, from 89 to 90, owner sign-off in-session.",
+    "get_deal_history() forwards to the bridge, the same one-line shape as",
+    "get_ticks_range above. The Analysis tab's deal-level trade table is the",
+    "last thing the React port could not build: the NiceGUI page read",
+    "engine._bridge.get_deal_history() directly, which the controller boundary",
+    "forbids, and there is no side door to the live bridge that does not go",
+    "through this class. The alternative considered was a service function",
+    "taking the engine, which fails test_no_production_code_reaches_into_a_",
+    "runtime_private because that test derives its leak set from the runtime's",
+    "own members.",
+    "",
+    "Deliberately ONE method, not two. The table's spread column also wanted",
+    "get_tick_at() to backfill uncached tickets; it renders from the existing",
+    "spread cache instead and shows an em dash where there is none. A second",
+    "name is a second decision."
   ],
-  "method_count": 89
+  "method_count": 90
 }

@@ -19,6 +19,7 @@ from backend.src.services.analytics import reporting as _reporting
 from backend.src.services.analytics import labels as _labels
 from backend.src.services.analytics import pnl as _pnl
 from backend.src.services.analytics import ticket_maps as _maps
+from backend.src.services.analytics import trade_table as _trade_table
 from backend.src.services.broker import fees as _fees
 from backend.src.services.channels import performance as _channels
 from backend.src.services.positions import spread_cache as _spread
@@ -31,9 +32,8 @@ from backend.src.utils.models import CONTRACT_SIZE  # noqa: F401
 __all__ = [
     "parse_reason", "format_broker_ts", "format_duration", "to_date",
     "broker_ts_to_local_date", "strategy_display_label",
-    "trade_source_label", "trade_channel_label", "ticket_source_map",
-    "ticket_strategy_map", "ticket_max_tp_map", "ticket_rr_map",
-    "ticket_order_type_map", "ticket_group_map", "ticket_info",
+    "trade_source_label", "trade_channel_label", "ticket_info",
+    "closed_trade_table",
     "get_cached_spreads", "cache_spread", "platform_fee_rate", "apply_fee",
     "get_hourly_pnl_grid", "session_for_hour", "get_app_config",
     "set_app_config", "recompute_channel_performance",
@@ -83,32 +83,20 @@ def broker_ts_to_local_date(ts, offset_minutes=None) -> Optional[date]:
 
 # -- Per-ticket lookup maps --------------------------------------------------
 
-async def ticket_source_map(days: int) -> dict[str, str]:
-    return await _maps.source_map(days)
-
-
-async def ticket_strategy_map(days: int) -> dict[str, str]:
-    return await _maps.strategy_map(days)
-
-
-async def ticket_max_tp_map() -> dict[str, str]:
-    return await _maps.max_tp_map()
-
-
-async def ticket_rr_map() -> dict[str, float]:
-    return await _maps.rr_map()
-
-
-async def ticket_order_type_map(days: int) -> dict[str, tuple[str, Optional[float]]]:
-    return await _maps.order_type_map(days)
-
-
-async def ticket_group_map() -> dict[str, tuple[str, int]]:
-    return await _maps.group_map()
+# The six per-ticket attribution maps used to be re-exported here for the
+# NiceGUI trade table. The React table is assembled in
+# services/analytics/trade_table.py, which reaches `ticket_maps` directly --
+# a service calling a service, with no reason to detour through this layer.
+# A forwarder no router calls is a route to nowhere.
 
 
 async def ticket_info() -> dict:
     return await _maps.ticket_info()
+
+
+async def closed_trade_table(engine, days: int) -> dict:
+    """`{rows, error}` for the Analysis tab's deal-level trade table."""
+    return await _trade_table.closed_trades(engine, days)
 
 
 # -- Spreads, P&L, config ----------------------------------------------------

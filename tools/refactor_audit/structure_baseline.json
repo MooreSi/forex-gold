@@ -125,6 +125,29 @@
           "interpreter, same as the 2026-08-27 entry above."
         ]
       }
+    },
+    "2026-09-19": {
+      "_why": [
+        "One file, five lines, for the last thing the React port could not",
+        "build: the Analysis tab's deal-level trade table. The NiceGUI page",
+        "read engine._bridge.get_deal_history() directly, which the controller",
+        "boundary forbids, and the live bridge connection is only reachable",
+        "through this facade -- there is no side door. Owner sign-off",
+        "in-session, the same sign-off facade_baseline.json's 89 -> 90 records.",
+        "Exactly the 2026-09-03 case above, one method later."
+      ],
+      "backend/src/runtime.py": {
+        "now": 1518,
+        "was": 1513,
+        "why": [
+          "get_deal_history() forwards to self._bridge.get_deal_history(),",
+          "the same one-line shape as get_ticks_range directly below it.",
+          "facade_baseline.json rose 89 -> 90 for the same method -- the two",
+          "numbers are one fact stated twice and move together.",
+          "The docstring was cut to two lines to keep the rise at five; the",
+          "full rationale lives in facade_baseline.json instead of here."
+        ]
+      }
     }
   },
   "_tightened": {
@@ -180,7 +203,7 @@
   },
   "baseline": {
     "loc": {
-      "backend/src/runtime.py": 1513,
+      "backend/src/runtime.py": 1518,
       "backend/src/services/cluster/remote/server.py": 1204,
       "mt5_bridge.py": 1401
     },

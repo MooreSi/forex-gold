@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from backend.src.api.deps import engine as engine_dep
 from backend.src.controllers import history_controller as history_ctl
+from backend.src.controllers import system_controller as system_ctl
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,33 @@ async def state(days: int = DAYS, eng: Any = Depends(engine_dep)) -> dict:
         "channels": history_ctl.get_channel_scorecard(days),
         "ladder": history_ctl.strategy_ladder_reach(days),
     }
+
+
+@router.get("/trades")
+async def closed_trades(days: int = DAYS, eng: Any = Depends(engine_dep)) -> dict:
+    """Every closed trade in the window, deal by deal.
+
+    Its own endpoint rather than a field on `/state`: `/state` returns
+    aggregates whose size is bounded by the channel count and a 7x24 grid,
+    while this is a row per trade and ten years of them is what forced the
+    old WebSocket buffer from 1MB to 10MB. A panel that is not on screen
+    should not be paying for it.
+
+    `error` is separate from an empty list because "no trades in this window"
+    and "the bridge is down" look identical in an empty table.
+    """
+    return await history_ctl.closed_trade_table(eng, days)
+
+
+@router.get("/today")
+async def today() -> dict:
+    """Today on the TRADING clock, not the machine's date.
+
+    They differ whenever a clock offset is configured, which is the whole point
+    on a VPS in another timezone — a calendar that highlighted the machine's
+    today would mark the wrong day's trades.
+    """
+    return {"date": system_ctl.local_today().isoformat()}
 
 
 @router.post("/recompute")

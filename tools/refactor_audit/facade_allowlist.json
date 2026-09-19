@@ -12,6 +12,7 @@
   "get_bridge_health",
   "get_candles",
   "get_candles_for_symbol",
+  "get_deal_history",
   "get_fresh_tick",
   "get_mt5_account",
   "get_open_trades",

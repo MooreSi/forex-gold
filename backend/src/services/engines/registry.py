@@ -23,8 +23,8 @@ from backend.src.services.breakout_signal import breakout_signal_service as _bo_
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
 
 __all__ = [
-    "ENGINE_NAMES", "instance", "all_instances", "running",
-    "start_stopped", "stop_running",
+    "ENGINE_NAMES", "IMPLEMENTED_NAMES", "instance", "all_instances",
+    "running", "start_stopped", "stop_running",
 ]
 
 _ENGINE_SERVICES: dict[str, Any] = {
@@ -34,6 +34,21 @@ _ENGINE_SERVICES: dict[str, Any] = {
 }
 
 ENGINE_NAMES = tuple(_ENGINE_SERVICES)
+
+# What this build can actually RUN, which is not the same list.
+#
+# `ENGINE_NAMES` is the wire order and must keep Bounce. This is the screen's
+# list and must not: its code was deleted on 2026-09-14, and a Start button for
+# an engine that does not exist is a control that cannot work. Asked for
+# explicitly by the owner, 2026-09-19 ("the bounce signal generator should have
+# been completely removed").
+#
+# Derived, never written out again -- a hand-maintained second list is exactly
+# how the empty slot gets re-introduced in one place and not the other, which
+# is what this module was created to stop.
+IMPLEMENTED_NAMES = tuple(
+    name for name, svc in _ENGINE_SERVICES.items() if svc is not None
+)
 
 # Belt and braces: the slot is empty, so the loop would skip it anyway. The
 # exclusion keeps the safety property asserted rather than incidental — the day

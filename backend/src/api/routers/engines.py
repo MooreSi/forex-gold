@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from backend.src.api.errors import Refusal
 from backend.src.controllers import engines_controller as engines_ctl
+from backend.src.controllers import reversal_controller as reversal_ctl
 
 log = logging.getLogger(__name__)
 
@@ -32,9 +33,19 @@ router = APIRouter(prefix="/api/engines", tags=["engines"])
 # tab cannot disagree with the rest of the app about which engines exist. A
 # name with no label here falls back to its id, which reads as an oversight
 # rather than hiding the engine.
-_LABELS = {"breakout": "Breakout", "bounce": "Bounce", "reversal": "Reversal"}
+_LABELS = {"breakout": "Breakout", "reversal": "Reversal"}
+# IMPLEMENTED_NAMES, not ENGINE_NAMES. The latter is the sync protocol's
+# positional order and still carries Bounce's empty slot, because dropping the
+# name would shift Reversal into its place on the wire. The SCREEN must not
+# show it: its code was deleted on 2026-09-14, so a card with a Start button
+# is a control that cannot work. Owner's request, 2026-09-19.
 ENGINE_LABELS = {name: _LABELS.get(name, name)
-                 for name in engines_ctl.ENGINE_NAMES}
+                 for name in engines_ctl.IMPLEMENTED_NAMES}
+
+
+# How much of the virtual ledger the panel gets. Bounded here rather than by
+# the browser: it is a row per variant per signal, and both numbers grow.
+HISTORY_LIMIT = 200
 
 
 class EngineAction(BaseModel):
@@ -56,6 +67,16 @@ class AiEval(BaseModel):
     enabled: bool | None = None
 
 
+def _label(name: str) -> str:
+    """What to call an engine in a message.
+
+    Falls back to the raw name, because a name can be addressable without
+    being on this build's screen -- Bounce is, for a peer that still runs it --
+    and a KeyError here would turn a plain refusal into a 500.
+    """
+    return ENGINE_LABELS.get(name, _LABELS.get(name, name))
+
+
 def _known_or_refuse(name: str) -> None:
     """Reject a name this build has no engine for, before anything is sent.
 
@@ -63,9 +84,15 @@ def _known_or_refuse(name: str) -> None:
     only applies when the command was going to be applied here at all — in
     Remote mode the engine that matters is the peer's.
     """
-    if name not in ENGINE_LABELS:
+    # ENGINE_NAMES, not ENGINE_LABELS. The labels are what this build SHOWS,
+    # and Bounce left that list on 2026-09-19; the names are what the sync
+    # protocol carries, and a paired node on an older build may still have
+    # Bounce. Validating against the screen would make an engine the peer
+    # genuinely runs unaddressable from here.
+    if name not in engines_ctl.ENGINE_NAMES:
         raise Refusal(f"Unknown engine {name!r}. "
-                      f"Known: {', '.join(ENGINE_LABELS)}.", status_code=400)
+                      f"Known: {', '.join(engines_ctl.ENGINE_NAMES)}.",
+                      status_code=400)
 
 
 @router.get("/state")
@@ -87,7 +114,7 @@ async def state() -> dict:
         # machine nobody is watching.
         "settings": engines_ctl.effective_settings(
             await engines_ctl.get_risk_settings_async()),
-        "pro_model": engines_ctl.pro_model_status(),
+        "pro_model": reversal_ctl.pro_model_status(),
         # Which node a control will reach. Three states, not two:
         # "centralized" is the VPS-trades-but-generation-moved-here case, where
         # the header says REMOTE and these engines are still the live ones.
@@ -98,10 +125,17 @@ async def state() -> dict:
 
 @router.get("/reversal/report")
 async def reversal_report() -> dict:
-    """The Reversal engine's own measurements. Reads history, places nothing."""
+    """The Reversal engine's own measurements. Reads history, places nothing.
+
+    `history` is the virtual trade ledger: one row per variant decision, with
+    what that decision would have earned. The owner asked for it on 2026-09-19
+    -- the aggregates above say which variant is ahead and cannot say what
+    either of them did last Tuesday.
+    """
     return {
-        "realised": await engines_ctl.reversal_realised_pnl(),
-        "shadow": engines_ctl.reversal_shadow_report(),
+        "realised": await reversal_ctl.reversal_realised_pnl(),
+        "shadow": reversal_ctl.reversal_shadow_report(),
+        "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
     }
 
 
@@ -127,7 +161,7 @@ async def set_running(body: EngineAction) -> dict:
     if (engines_ctl.control_target() != "remote"
             and engines_ctl.get_engine(body.engine) is None):
         raise Refusal(
-            f"The {ENGINE_LABELS[body.engine]} engine is not built on this "
+            f"The {_label(body.engine)} engine is not built on this "
             "install, so there is nothing to start.",
         )
     try:
@@ -181,15 +215,15 @@ async def fit_pro_model() -> dict:
     `tests/reversal_engine/test_panel_fit_does_not_freeze_the_ui.py` asserts
     that no module under `backend/src/api/` names the blocking one.
     """
-    engines_ctl.pro_model_fit_in_background(force=True)
-    return {"started": True, "status": engines_ctl.pro_model_status()}
+    reversal_ctl.pro_model_fit_in_background(force=True)
+    return {"started": True, "status": reversal_ctl.pro_model_status()}
 
 
 @router.post("/reversal/study")
 async def reversal_study() -> dict:
     """Run the phase-1 research study and render it. Reads history, writes two
     measurement columns, places nothing."""
-    return {"report": await engines_ctl.reversal_research_study()}
+    return {"report": await reversal_ctl.reversal_research_study()}
 
 
 @router.post("/reversal/reset-stats")
@@ -202,14 +236,14 @@ async def reversal_reset_stats() -> dict:
     point: "reset" next to a machine-learning engine reads as "forget what you
     learned", and an operator who believed that would avoid pressing it.
     """
-    return {"since": await engines_ctl.reversal_reset_stats()}
+    return {"since": await reversal_ctl.reversal_reset_stats()}
 
 
 @router.post("/reversal/ai/recommend")
 async def reversal_ai_recommend() -> dict:
     """Ask the configured model for capability settings. **Billable.** Writes
     nothing — the operator decides whether to apply it."""
-    return {"billable": True, "recommendation": await engines_ctl.reversal_ai_recommend()}
+    return {"billable": True, "recommendation": await reversal_ctl.reversal_ai_recommend()}
 
 
 @router.post("/reversal/ai/apply")
@@ -220,4 +254,4 @@ async def reversal_ai_apply(body: AiSettings) -> dict:
     been through a UI and back, and the allowlist is the only thing between a
     model's output and a live trading setting.
     """
-    return {"applied": engines_ctl.reversal_ai_apply(body.settings)}
+    return {"applied": reversal_ctl.reversal_ai_apply(body.settings)}

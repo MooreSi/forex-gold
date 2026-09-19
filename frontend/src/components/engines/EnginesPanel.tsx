@@ -1,4 +1,4 @@
-import { Brain, FlaskConical } from "lucide-react";
+import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
@@ -7,6 +7,8 @@ import { useEnginesController } from "./hooks/useEnginesController";
 import { CapabilitiesSection } from "./internal/CapabilitiesSection";
 import { ControlTargetBanner } from "./internal/ControlTargetBanner";
 import { EngineCard } from "./internal/EngineCard";
+import { ModelSection } from "./internal/ModelSection";
+import { ShadowSection } from "./internal/ShadowSection";
 
 export function EnginesPanel() {
   const c = useEnginesController();
@@ -51,14 +53,7 @@ export function EnginesPanel() {
           </section>
 
           <section className="border-t border-line pt-3">
-            <h3 className="flex items-center gap-1.5 text-xs font-semibold text-ink-1">
-              <Brain size={13} /> Pro-signal model
-            </h3>
-            <p className="mt-0.5 text-[11px] text-ink-3">
-              {model["trained"] === true
-                ? `trained on ${String(model["samples"] ?? "?")} samples`
-                : "not trained yet"}
-            </p>
+            <ModelSection model={model} />
             <div className="mt-2 flex flex-wrap gap-2">
               <Button onClick={() => void c.refit()} disabled={c.busy === "fit"}>
                 {c.busy === "fit" ? "Starting…" : "Retrain in the background"}
@@ -74,12 +69,20 @@ export function EnginesPanel() {
             </p>
           </section>
 
-          {c.report && (
+          <section className="border-t border-line pt-3">
+            <ShadowSection
+              shadow={c.report.data?.shadow}
+              history={c.report.data?.history}
+              realised={asObject(c.report.data?.realised)}
+            />
+          </section>
+
+          {c.study && (
             <pre
               data-testid="study-report"
               className="max-h-80 overflow-auto whitespace-pre-wrap rounded border border-line bg-surface-1 p-3 text-[11px] text-ink-2"
             >
-              {c.report}
+              {c.study}
             </pre>
           )}
         </div>

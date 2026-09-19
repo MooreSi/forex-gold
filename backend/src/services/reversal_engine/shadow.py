@@ -136,3 +136,18 @@ def report(variants=DEFAULT_VARIANTS) -> list[dict]:
         b["mean_r"] = (total_r / n_r) if n_r else None
         out.append(b)
     return out
+
+
+def history(limit: int = 100) -> list[dict]:
+    """The virtual trade ledger: every variant's call, newest first.
+
+    `report()` above aggregates the same rows to one per variant, which
+    answers "which variant is ahead" and cannot answer "what did it do last
+    Tuesday, and was it right" -- the question an operator watching a
+    challenger actually has.
+
+    A pass-through to the repo, deliberately: the shaping (skips kept, R left
+    null on an unsettled signal) is SQL, and a controller may not reach a
+    repo directly.
+    """
+    return shadow_repo.recent_decisions(limit)

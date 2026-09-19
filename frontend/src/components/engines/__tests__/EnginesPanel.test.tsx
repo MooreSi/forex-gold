@@ -9,11 +9,15 @@ function state(over: Partial<EnginesState> = {}): EnginesState {
   return {
     engines: [
       { id: "breakout", label: "Breakout", running: true, built: true },
-      { id: "bounce", label: "Bounce", running: false, built: false },
       { id: "reversal", label: "Reversal", running: false, built: true },
     ],
     settings: { re_min_adx: 22, htf_bias_asian_exempt: 0, htf_bias_gate_enabled: 0 },
-    pro_model: { trained: true, samples: 412 },
+    // The shape `pro_model.status()` actually returns.
+    pro_model: {
+      ready: false, auc: null, n: 0, reason: "not fitted", fitted_at: 0,
+      corpus: { pos: 1926, neg: 8190, wins: 745, losses: 92, pending: 831 },
+      min_auc: 0.55,
+    },
     ...over,
   };
 }
@@ -43,23 +47,34 @@ afterEach(() => {
 const posts = () => fetchMock.mock.calls.filter((c) => c[1]?.method === "POST");
 
 describe("what is running", () => {
-  it("shows all three engines by the names the operator uses", async () => {
+  it("shows the engines this build has, by the names the operator uses", async () => {
     render(<EnginesPanel />);
 
     expect(await screen.findByText("Breakout")).toBeInTheDocument();
-    expect(screen.getByText("Bounce")).toBeInTheDocument();
+    // Bounce left the screen on 2026-09-19: its code was deleted on
+    // 2026-09-14, so its card carried a Start button that could not work.
+    expect(screen.queryByText("Bounce")).not.toBeInTheDocument();
     expect(screen.getByText("Reversal")).toBeInTheDocument();
   });
 
   it("tells a stopped engine apart from one that is not built", async () => {
     // Both show "not running". Only one of them can be started, and the
     // difference is what the operator needs to know.
+    //
+    // Bounce was the example here until 2026-09-19, when it left the screen.
+    // The STATE it illustrated is still real -- an engine whose service
+    // exists but whose instance was never created -- so the example moved
+    // rather than the test going with it.
+    body = state({
+      engines: [
+        { id: "breakout", label: "Breakout", running: true, built: true },
+        { id: "reversal", label: "Reversal", running: false, built: false },
+      ],
+    });
     render(<EnginesPanel />);
     await screen.findByText("Breakout");
 
-    expect(screen.getByTestId("engine-reversal")).toHaveAttribute("data-built", "true");
-    expect(screen.getByText("Stopped")).toBeInTheDocument();
-    expect(screen.getByTestId("engine-bounce")).toHaveAttribute("data-built", "false");
+    expect(screen.getByTestId("engine-reversal")).toHaveAttribute("data-built", "false");
     expect(screen.getByText("Not built on this install")).toBeInTheDocument();
   });
 
@@ -72,10 +87,16 @@ describe("what is running", () => {
   });
 
   it("will not offer to start an engine that is not built, and says why", async () => {
+    body = state({
+      engines: [
+        { id: "breakout", label: "Breakout", running: true, built: true },
+        { id: "reversal", label: "Reversal", running: false, built: false },
+      ],
+    });
     render(<EnginesPanel />);
     await screen.findByText("Breakout");
 
-    const button = within("engine-bounce").querySelector("button")!;
+    const button = within("engine-reversal").querySelector("button")!;
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", expect.stringContaining("not built"));
   });
@@ -129,18 +150,13 @@ describe("starting and stopping", () => {
 });
 
 describe("the pro-signal model", () => {
-  it("says what it was trained on", async () => {
-    render(<EnginesPanel />);
-
-    expect(await screen.findByText("trained on 412 samples")).toBeInTheDocument();
-  });
-
-  it("says when it has never been trained", async () => {
-    body = state({ pro_model: { trained: false } });
-    render(<EnginesPanel />);
-
-    expect(await screen.findByText("not trained yet")).toBeInTheDocument();
-  });
+  // DELETED 2026-09-19: "says what it was trained on" and "says when it has
+  // never been trained". Both asserted on `{trained, samples}` -- a shape
+  // `pro_model.status()` has never returned. It returns `ready`, `auc`, `n`,
+  // `reason`, `fitted_at`, `corpus` and `min_auc`, so the panel rendered "not
+  // trained yet" on every install regardless of the model, and these two
+  // tests were what made that look covered. The real payload is tested in
+  // ModelSection.test.tsx.
 
   it("retrains in the background, and says so on the screen", async () => {
     // bugs/030: an inline fit freezes the dashboard, the EA socket reader and

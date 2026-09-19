@@ -39,3 +39,35 @@ def closed_decisions() -> list[dict]:
         "JOIN re_signals s ON s.signal_ref = d.signal_ref "
         "WHERE s.status='closed'")
     return [dict(r) for r in rows]
+
+
+def recent_decisions(limit: int = 100) -> list[dict]:
+    """The newest shadow decisions, with what each one would have earned.
+
+    `shadow.report()` aggregates this to one row per variant, which answers
+    "which variant is ahead" and cannot answer "what did it do last Tuesday,
+    and was it right". The Signal Generator's virtual trade history is the
+    second question.
+
+    **A SKIP is a row, not an absence.** A variant that skipped a losing trade
+    and one that never saw it both contribute nothing to the P&L, and only one
+    of them is evidence. The signal's outcome is carried on a skipped row too,
+    because a skip on a loser is the variant being right.
+
+    `r` is NULL for a signal that has not closed, never 0.0 -- zero R and "not
+    settled yet" are different statements, and a table rendering both as 0.00
+    invites the wrong one to be acted on. Same rule `report()` states about
+    `mean_r`.
+    """
+    rows = get_db().all(
+        "SELECT d.ts AS ts, d.signal_ref AS signal_ref, d.variant AS variant, "
+        "       d.would_take AS would_take, d.reason AS reason, "
+        "       s.direction AS direction, s.status AS status, "
+        "       s.outcome AS outcome, s.sl_dist AS sl_dist, "
+        "       s.pnl_pts AS pnl_pts, s.net_pnl_dollars AS net, "
+        "       CASE WHEN s.status='closed' AND s.sl_dist > 0 "
+        "            THEN s.pnl_pts / s.sl_dist END AS r "
+        "FROM re_shadow_decisions d "
+        "JOIN re_signals s ON s.signal_ref = d.signal_ref "
+        "ORDER BY d.ts DESC LIMIT ?", limit)
+    return [dict(r) for r in rows]

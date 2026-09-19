@@ -89,9 +89,9 @@ def engines(monkeypatch):
     monkeypatch.setattr(engines_router.engines_ctl, "get_risk_settings_async", _settings_async)
     monkeypatch.setattr(engines_router.engines_ctl, "update_risk_settings",
                         lambda f: state["written"].append(f))
-    monkeypatch.setattr(engines_router.engines_ctl, "pro_model_status",
+    monkeypatch.setattr(engines_router.reversal_ctl, "pro_model_status",
                         lambda: state["pro_model"])
-    monkeypatch.setattr(engines_router.engines_ctl, "pro_model_fit_in_background",
+    monkeypatch.setattr(engines_router.reversal_ctl, "pro_model_fit_in_background",
                         lambda force=False: state["fits"].append(("background", force)))
     # The BLOCKING fit is deliberately not on the controller any more: no
     # router may call it, so there is nothing here to stand in for. The test
@@ -104,12 +104,17 @@ def engines(monkeypatch):
                         lambda: state["bulk"].append("start_all"))
     monkeypatch.setattr(_registry, "stop_running",
                         lambda: state["bulk"].append("stop_all"))
-    monkeypatch.setattr(engines_router.engines_ctl, "reversal_realised_pnl", _realised)
-    monkeypatch.setattr(engines_router.engines_ctl, "reversal_shadow_report",
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_realised_pnl", _realised)
+    # The virtual ledger, recorded rather than read: its own SQL is tested in
+    # tests/reversal_engine/test_shadow_history.py, and no router test should
+    # need the engine's database to exist.
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_history",
+                        lambda limit=200: [])
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_report",
                         lambda: [{"signal_id": "s1"}])
-    monkeypatch.setattr(engines_router.engines_ctl, "reversal_research_study", _study)
-    monkeypatch.setattr(engines_router.engines_ctl, "reversal_ai_recommend", _recommend)
-    monkeypatch.setattr(engines_router.engines_ctl, "reversal_ai_apply",
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_research_study", _study)
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_ai_recommend", _recommend)
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_ai_apply",
                         lambda s: state["applied"].append(s) or {"re_min_adx": 25})
     return state
 
@@ -121,8 +126,12 @@ def test_the_tab_lists_all_three_engines_by_the_name_the_operator_uses(make_clie
     repo of what naming a surface after its service costs."""
     rows = make_client().get("/api/engines/state").json()["engines"]
 
-    assert [r["id"] for r in rows] == ["breakout", "bounce", "reversal"]
-    assert [r["label"] for r in rows] == ["Breakout", "Bounce", "Reversal"]
+    # CHANGED 2026-09-19: Bounce left the screen at the owner's request. Its
+    # code was deleted on 2026-09-14, so its card carried a Start button that
+    # could not work. It is still in ENGINE_NAMES and still addressable -- see
+    # test_bounce_is_still_addressable_even_though_it_is_not_shown.
+    assert [r["id"] for r in rows] == ["breakout", "reversal"]
+    assert [r["label"] for r in rows] == ["Breakout", "Reversal"]
 
 
 def test_an_engine_that_is_not_built_reads_differently_from_one_that_is_stopped(
@@ -131,8 +140,9 @@ def test_an_engine_that_is_not_built_reads_differently_from_one_that_is_stopped(
     """Both show "not running". Only one of them can be started."""
     rows = {r["id"]: r for r in make_client().get("/api/engines/state").json()["engines"]}
 
-    assert rows["bounce"]["built"] is False
-    assert rows["bounce"]["running"] is False
+    # Bounce was the example here until it left the screen. "Built" still
+    # means what it meant: a service exists AND an instance has been created.
+    assert "bounce" not in rows
     assert rows["breakout"]["built"] is True
     assert rows["breakout"]["running"] is False
 
@@ -395,3 +405,57 @@ class TestTheTabSaysWhichNodeItIsDriving:
 
         assert res.status_code == 409
         assert "not a setting" in res.json()["error"]["message"]
+
+
+# -- Bounce left the screen, not the wire ------------------------------------
+
+def test_the_panel_does_not_offer_an_engine_whose_code_was_deleted(make_client, engines):
+    # Bounce's code went on 2026-09-14. A card with a Start button for it is a
+    # control that cannot work, which is worse than its absence.
+    ids = {e["id"] for e in make_client().get("/api/engines/state").json()["engines"]}
+
+    assert "bounce" not in ids
+
+
+def test_the_engines_that_exist_are_still_offered(make_client, engines):
+    # The other half: a filter that hid everything would pass the test above.
+    ids = {e["id"] for e in make_client().get("/api/engines/state").json()["engines"]}
+
+    assert {"breakout", "reversal"} <= ids
+
+
+def test_bounce_is_still_addressable_even_though_it_is_not_shown(make_client, engines):
+    # Leaving the SCREEN is not leaving the protocol. A paired node on an
+    # older build may still run Bounce, and validating the name against the
+    # visible list would make an engine the peer genuinely has unreachable
+    # from here. Locally it is still "not built on this install" -- 409, not
+    # the 400 an unknown name gets.
+    res = make_client().post("/api/engines/running",
+                             json={"engine": "bounce", "running": True})
+
+    assert res.status_code == 409
+
+
+def test_the_reversal_report_carries_the_virtual_trade_history(make_client, engines,
+                                                              monkeypatch):
+    # The aggregates say which variant is ahead. The history says what either
+    # of them did, signal by signal, which is what watching a challenger means.
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_history",
+                        lambda limit: [{"ts": 1.0, "variant": "challenger",
+                                        "would_take": 0, "r": None}])
+
+    body = make_client().get("/api/engines/reversal/report").json()
+
+    assert body["history"][0]["variant"] == "challenger"
+
+
+def test_the_history_is_bounded_by_the_server(make_client, engines, monkeypatch):
+    # A row per variant per signal, and both grow. An unbounded read is the
+    # browser deciding how expensive a request is.
+    asked = []
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_history",
+                        lambda limit: asked.append(limit) or [])
+
+    make_client().get("/api/engines/reversal/report")
+
+    assert asked == [engines_router.HISTORY_LIMIT]

@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.src.controllers import engines_controller as ec
+from backend.src.controllers import reversal_controller as ec
 
 
 class TestTheResearchStudy:

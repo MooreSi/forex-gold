@@ -29,12 +29,12 @@ import pathlib
 
 import inspect
 
-from backend.src.controllers import engines_controller
+from backend.src.controllers import reversal_controller
 
 
 class TestTheControllerOffersANonBlockingFit:
     def test_it_exists(self):
-        assert hasattr(engines_controller, "pro_model_fit_in_background")
+        assert hasattr(reversal_controller, "pro_model_fit_in_background")
 
     def test_it_delegates_to_the_services_background_fit(self, monkeypatch):
         from backend.src.services.reversal_engine import pro_model as pm
@@ -42,7 +42,7 @@ class TestTheControllerOffersANonBlockingFit:
         monkeypatch.setattr(pm, "fit_in_background",
                             lambda force=False: seen.update(force=force))
 
-        engines_controller.pro_model_fit_in_background(force=True)
+        reversal_controller.pro_model_fit_in_background(force=True)
 
         assert seen == {"force": True}
 
@@ -59,7 +59,7 @@ class TestTheControllerOffersANonBlockingFit:
         from backend.src.services.reversal_engine import pro_model
 
         assert callable(pro_model.fit)
-        assert not hasattr(engines_controller, "pro_model_fit"), (
+        assert not hasattr(reversal_controller, "pro_model_fit"), (
             "the blocking fit is back on the controller, where a router can "
             "reach it -- five seconds of frozen event loop (bugs/030)"
         )

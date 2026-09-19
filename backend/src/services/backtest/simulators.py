@@ -663,3 +663,60 @@ def _simulate_adaptive_runner(
     )
 
 
+
+
+def _simulate_fixed_rr(
+    candles: list[dict], sig: BtSignal, fill_bar: int, fill_price: float,
+    is_buy: bool, sl_dist: float, balance: float, risk_pct: float,
+    fixed_lots: float = 0.0,
+) -> Optional[BtTrade]:
+    """Fixed R:R: one stop, one target, both set at the broker.
+
+    The strategy's own summary defines it completely -- "No partial closes, no
+    breakeven move, no trailing" -- so there is no judgement to exercise here
+    and nothing about the live EA's behaviour to re-derive. That is why this
+    one is walked while the five EA-managed strategies refuse.
+
+    It is also the picker's FIRST option and the baseline every other row in
+    the comparison table is read against. Between the React port and
+    2026-09-19 it had no dispatch branch at all, so it returned zero trades on
+    every run: the comparison's own control was blank.
+
+    **The stop wins a bar that touches both.** Within one candle there is no
+    way to know which came first, and assuming the favourable touch would make
+    every backtest flatter than the account it models. Every other simulator
+    in this file uses the same convention.
+
+    None -- not a trade -- when the signal has no target on the correct side.
+    With no target there is nothing to be fixed about, and inventing one would
+    be inventing the strategy.
+    """
+    target = _valid_tp(sig.tp1, is_buy, fill_price)
+    if target is None:
+        return None
+
+    lot = _lot_size(balance, sl_dist, risk_pct, fixed_lots)
+    sl_price = fill_price - (1.0 if is_buy else -1.0) * sl_dist
+
+    trade = BtTrade(
+        signal_id=sig.signal_id, strategy="fixed_rr", direction=sig.direction,
+        fill_price=fill_price, fill_bar_idx=fill_bar, lot_size=lot,
+    )
+
+    end_bar = min(fill_bar + _MAX_HOLD_BARS, len(candles))
+    for i in range(fill_bar, end_bar):
+        c = candles[i]
+        hit_sl = c["low"] <= sl_price if is_buy else c["high"] >= sl_price
+        if hit_sl:
+            return _close_trade(trade, sl_price, i, fill_bar, is_buy, lot, 0.0, "sl")
+        hit_tp = c["high"] >= target if is_buy else c["low"] <= target
+        if hit_tp:
+            return _close_trade(trade, target, i, fill_bar, is_buy, lot, 0.0,
+                                "tp1_only")
+
+    # Neither was reached inside the hold window. Marked to market at the last
+    # close, the same way every other simulator here ends -- a trade left open
+    # at the end of the data is not a free option.
+    last_close = candles[end_bar - 1]["close"]
+    return _close_trade(trade, last_close, end_bar - 1, fill_bar, is_buy, lot,
+                        0.0, "timeout")

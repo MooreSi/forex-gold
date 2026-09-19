@@ -45,6 +45,7 @@ export function AboutPanel() {
 
   return (
     <PanelShell
+      icon="info"
       title={section ? TITLES[section] : "About"}
       actions={
         section && (

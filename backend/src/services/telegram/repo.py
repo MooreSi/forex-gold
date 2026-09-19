@@ -218,14 +218,25 @@ def fetch_stored_messages(limit: int = 100) -> tuple[list[dict], int]:
     env = _cfg.get("account_env", "demo")
     db_path = str(DATA_DIR / f"forex_trader_{env}.db")
     conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    total = conn.execute("SELECT COUNT(*) FROM telegram_messages").fetchone()[0]
-    rows  = conn.execute(
-        "SELECT group_name, sender_name, timestamp, received_at, text, "
-        "       has_media, media_type "
-        "FROM telegram_messages "
-        "ORDER BY id DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    conn.close()
+    try:
+        conn.row_factory = sqlite3.Row
+        total = conn.execute("SELECT COUNT(*) FROM telegram_messages").fetchone()[0]
+        rows  = conn.execute(
+            # `id` is not decoration. The browser keys the feed on it, and
+            # without it every row falls back to its ARRAY POSITION -- so one
+            # new message at the top shifts every key and React rewrites the
+            # entire feed instead of inserting one row. That is what the owner
+            # saw as "the feed updates when no new messages arrive"
+            # (2026-09-19). Do not trim this column.
+            "SELECT id, group_name, sender_name, timestamp, received_at, text, "
+            "       has_media, media_type "
+            "FROM telegram_messages "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        # In a finally, not after the query: Windows will not unlink a file
+        # that still has an open handle, and a read that raised used to leak
+        # one. That is the 2026-08-27 class of teardown failure.
+        conn.close()
     return [dict(r) for r in rows], total

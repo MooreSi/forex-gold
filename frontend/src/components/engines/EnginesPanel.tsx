@@ -13,7 +13,7 @@ export function EnginesPanel() {
   const model = asObject(c.state.data?.pro_model);
 
   return (
-    <PanelShell title="Signal Generator" subtitle="the engines that produce signals">
+    <PanelShell title="Signal Generator" subtitle="the engines that produce signals" icon="flask">
       {!c.state.data ? (
         <EmptyState
           title={c.state.error ? "Could not load the engines" : "Loading"}

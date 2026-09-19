@@ -97,7 +97,12 @@ class TestWhatCountsAsATrade:
         """The open-positions panel owns those."""
         engine = _Engine([_deal()])
 
-        assert await trade_table.closed_trades(engine, 30) == {"rows": [], "error": None}
+        out = await trade_table.closed_trades(engine, 30)
+
+        # Not whole-dict equality: the payload gained a `curve` key on
+        # 2026-09-19 and this test is about rows, not about the shape.
+        assert out["rows"] == []
+        assert out["error"] is None
 
     async def test_balance_operations_are_not_trades(self, maps):
         """A deposit has no position_id. Counting one as a trade would put a
@@ -299,7 +304,10 @@ class TestWhenTheBrokerCannotAnswer:
     async def test_genuinely_no_trades_is_not_an_error(self, maps):
         engine = _Engine([])
 
-        assert await trade_table.closed_trades(engine, 30) == {"rows": [], "error": None}
+        out = await trade_table.closed_trades(engine, 30)
+
+        assert out["rows"] == []
+        assert out["error"] is None
 
 
 async def test_the_newest_close_is_first(maps):
@@ -312,3 +320,33 @@ async def test_the_newest_close_is_first(maps):
     rows = (await trade_table.closed_trades(engine, 30))["rows"]
 
     assert [r["ticket"] for r in rows] == [2, 1]
+
+
+class TestTheEquityCurveRidesAlong:
+    """The curve is built from the rows this read already produced.
+
+    Added 2026-09-19 with the Analysis tab's equity curve. Its own arithmetic
+    is tested in test_equity_curve.py; what matters here is that it comes from
+    THIS read -- a second fetch against a moving account is a second chance
+    for the curve and the table beneath it to disagree on screen.
+    """
+
+    async def test_a_successful_read_carries_a_curve(self, maps):
+        engine = _Engine([
+            _deal(position_id=771, entry=0, type=0, price=2400.0, time=100),
+            _deal(position_id=771, entry=1, type=1, price=2410.0, time=200),
+        ])
+
+        out = await trade_table.closed_trades(engine, 7)
+
+        assert out["curve"]["trades"] == len(out["rows"])
+
+    async def test_the_curve_is_present_and_empty_when_the_bridge_is_down(self, maps):
+        # Absent would be a crash in the browser, which reads curve.points
+        # before it reads error.
+        engine = _Engine(raises=RuntimeError("bridge is down"))
+
+        out = await trade_table.closed_trades(engine, 7)
+
+        assert out["curve"] == {"points": [], "net": 0.0, "peak": 0.0,
+                                "max_drawdown": 0.0, "trades": 0}

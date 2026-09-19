@@ -29,6 +29,7 @@ import logging
 import time
 from typing import Any, Optional
 
+from backend.src.services.analytics import equity_curve as _curve
 from backend.src.services.analytics import labels as _labels
 from backend.src.services.analytics import ticket_maps as _maps
 from backend.src.services.broker import fees as _fees
@@ -81,8 +82,14 @@ def _max_tp_cell(raw: Optional[str], close_ts: float, now: float) -> str:
     return ""
 
 
+def _empty(error: str) -> dict:
+    """The shape every caller gets, with nothing in it. The curve is present
+    and empty rather than absent: a missing key is a crash in the browser."""
+    return {"rows": [], "error": error, "curve": _curve.build([])}
+
+
 async def closed_trades(engine: Any, days: int) -> dict:
-    """`{rows, error}` — one row per closed position over `days`.
+    """`{rows, error, curve}` — one row per closed position over `days`.
 
     `error` is a string when the broker could not be reached, and the rows are
     empty. The two are separate because "no trades in this window" and "the
@@ -93,9 +100,9 @@ async def closed_trades(engine: Any, days: int) -> dict:
         deals = await engine.get_deal_history(days)
     except Exception as exc:
         log.warning("[trade_table] deal history unavailable: %s", exc)
-        return {"rows": [], "error": f"MT5 deal history is unavailable: {exc}"}
+        return _empty(f"MT5 deal history is unavailable: {exc}")
     if deals is None:
-        return {"rows": [], "error": "MT5 deal history is unavailable."}
+        return _empty("MT5 deal history is unavailable.")
 
     by_position: dict[int, list[dict]] = {}
     for deal in deals:
@@ -185,4 +192,7 @@ async def closed_trades(engine: Any, days: int) -> dict:
         })
 
     rows.sort(key=lambda r: r["close_ts"], reverse=True)
-    return {"rows": rows, "error": None}
+    # The curve is built from these same rows rather than from a second read.
+    # Two independent reads of a moving account are two chances for the curve
+    # and the table beneath it to disagree on screen.
+    return {"rows": rows, "error": None, "curve": _curve.build(rows)}

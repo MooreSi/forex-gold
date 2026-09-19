@@ -188,3 +188,14 @@ async def restart(eng: Any = Depends(engine_dep)) -> dict:
     it.
     """
     return {"result": await node_ctl.restart_app(eng)}
+
+
+@router.post("/stop")
+async def stop(eng: Any = Depends(engine_dep)) -> dict:
+    """Shut the app down. It does not come back on its own.
+
+    The other half of the NiceGUI header's power button. Nothing here closes a
+    position: open trades keep running to their own SL/TP on the broker's side,
+    which is what happens when the machine is turned off.
+    """
+    return {"result": await node_ctl.stop_app(eng)}

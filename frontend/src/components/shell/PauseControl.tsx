@@ -64,15 +64,18 @@ export function PauseControl({ paused, onChanged }: PauseControlProps) {
 
   return (
     <>
-      <Button
-        variant="ghost"
+      <button
+        type="button"
+        data-testid="pause-control"
+        aria-label={paused ? "Paused — resume trading" : "Pause trading"}
         onClick={() => { setError(null); setOpen(true); }}
         title={paused ? "Trading is paused. Resume it." : "Stop sending new orders."}
+        className={paused
+          ? "flex items-center gap-1 rounded bg-warning/15 px-2 py-1 text-[11px] font-semibold text-warning transition-colors hover:bg-warning/25"
+          : "rounded p-1.5 text-warning transition-colors hover:bg-surface-2"}
       >
-        {paused
-          ? <span className="flex items-center gap-1 text-warning"><Play size={13} /> Paused</span>
-          : <span className="flex items-center gap-1"><Pause size={13} /> Pause</span>}
-      </Button>
+        {paused ? <><Play size={13} /> Paused</> : <Pause size={15} />}
+      </button>
 
       <DialogShell
         open={open}

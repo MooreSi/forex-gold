@@ -17,6 +17,7 @@ export function AiPanel() {
 
   return (
     <PanelShell
+      icon="bot"
       title="AI Analysis"
       subtitle={
         c.meta?.configured

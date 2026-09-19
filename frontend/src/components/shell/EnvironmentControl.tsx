@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/api/client";
-import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Button } from "@/components/shared/Button";
+import { AccountBadge } from "./AccountBadge";
 
 interface Account { login: string; server: string; configured: boolean }
 interface EnvState {
@@ -9,8 +10,18 @@ interface EnvState {
   environments: Record<string, Account>;
 }
 
+interface EnvironmentControlProps {
+  /** The bridge's account, so the badge shows ground truth rather than config. */
+  account?: Record<string, unknown> | null;
+}
+
 /**
  * Demo or live: which account the whole app is pointed at.
+ *
+ * **The badge IS the switch.** Until 2026-09-19 the header carried a green
+ * "DEMO 5203117" box and, next to it, a separate ghost button also reading
+ * "DEMO" — the same fact twice, and neither of them obviously the control.
+ * Now the box is the button.
  *
  * **The biggest single control in this dashboard.** Every other setting decides
  * what happens on whichever account is selected; this decides whether that
@@ -26,7 +37,7 @@ interface EnvState {
  * cached handle — the runtime, the bridge, the engines — was built against the
  * old account.
  */
-export function EnvironmentControl() {
+export function EnvironmentControl({ account = null }: EnvironmentControlProps) {
   const [state, setState] = useState<EnvState | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +60,7 @@ export function EnvironmentControl() {
 
   const live = state.current === "live";
   const target = live ? "demo" : "live";
-  const account = state.environments?.[target];
+  const targetAccount = state.environments?.[target];
 
   async function apply() {
     setBusy(true);
@@ -69,25 +80,22 @@ export function EnvironmentControl() {
 
   return (
     <>
-      <Button
-        variant="ghost"
+      <button
+        type="button"
         data-testid="environment-control"
         onClick={() => { setOutcome(null); setAsking(target); }}
-        disabledReason={
-          account?.configured
-            ? undefined
-            : `No ${target} account is configured. Add it under Settings > MT5.`
-        }
+        disabled={!targetAccount?.configured}
         title={
-          live
-            ? "This app is pointed at the LIVE account. Switch back to demo."
-            : "This app is pointed at the demo account. Switch to live."
+          !targetAccount?.configured
+            ? `No ${target} account is configured. Add it under Settings > MT5.`
+            : live
+              ? "This app is pointed at the LIVE account. Click to switch back to demo."
+              : "This app is pointed at the demo account. Click to switch to live."
         }
+        className="rounded transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        <span className={live ? "font-bold text-loss" : "text-ink-3"}>
-          {live ? "LIVE" : "DEMO"}
-        </span>
-      </Button>
+        <AccountBadge account={account} configured={state.current} />
+      </button>
 
       <DialogShell
         open={asking !== null}
@@ -105,8 +113,8 @@ export function EnvironmentControl() {
           )}
 
           <p className="text-ink-3">
-            Account <span className="num text-ink-2">{account?.login}</span> on{" "}
-            <span className="num text-ink-2">{account?.server}</span>. Make sure
+            Account <span className="num text-ink-2">{targetAccount?.login}</span> on{" "}
+            <span className="num text-ink-2">{targetAccount?.server}</span>. Make sure
             MetaTrader 5 is logged into that account.
           </p>
           <p className="text-ink-3">

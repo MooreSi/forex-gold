@@ -48,6 +48,10 @@ def node(monkeypatch, sentinel_engine):
         state["writes"].append(("restart", engine))
         return "restarting"
 
+    async def _stop(engine):
+        state["writes"].append(("stop", engine))
+        return "stopping"
+
     monkeypatch.setattr(node_router.system_ctl, "app_version", lambda: "1.4.2")
     monkeypatch.setattr(node_router.system_ctl, "check_for_update", _check)
     monkeypatch.setattr(node_router.system_ctl, "apply_update", _apply)
@@ -72,6 +76,7 @@ def node(monkeypatch, sentinel_engine):
     monkeypatch.setattr(node_router.node_ctl, "generate_sync_token",
                         lambda: state["writes"].append(("token",)) or "brand-new-token")
     monkeypatch.setattr(node_router.node_ctl, "restart_app", _restart)
+    monkeypatch.setattr(node_router.node_ctl, "stop_app", _stop)
     monkeypatch.setattr(node_router.remote_ctl, "get_status", lambda: state["registration"])
     monkeypatch.setattr(node_router.remote_ctl, "get_stored_email", lambda: state["email"])
     monkeypatch.setattr(node_router.remote_ctl, "request_registration",
@@ -280,3 +285,26 @@ def test_restarting_goes_through_the_runtime(make_client, node, sentinel_engine)
 def test_restart_is_not_reachable_by_GET(make_client, node):
     assert make_client().get("/api/node/restart").status_code == 405
     assert node["writes"] == []
+
+
+# -- The power button's other half --------------------------------------------
+
+def test_stopping_goes_through_the_runtime(make_client, node, sentinel_engine):
+    # Not by killing the process: the service persists the Telegram bot's
+    # update offset first, so the next start does not replay the command that
+    # caused the shutdown.
+    body = make_client().post("/api/node/stop").json()
+
+    assert body["result"] == "stopping"
+    assert ("stop", sentinel_engine) in node["writes"]
+
+
+def test_stop_is_not_reachable_by_GET(make_client, node):
+    # A link a browser can prefetch must not shut the app down.
+    assert make_client().get("/api/node/stop").status_code == 405
+
+
+def test_stopping_is_not_restarting(make_client, node):
+    make_client().post("/api/node/stop")
+
+    assert not any(w[0] == "restart" for w in node["writes"])

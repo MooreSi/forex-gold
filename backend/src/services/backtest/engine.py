@@ -21,6 +21,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+# Why a strategy produced no numbers. Its own module: it is not simulation,
+# and this file sits at the 800-line ceiling. `refusals` imports back from
+# here lazily, inside its functions, so there is no cycle.
+from backend.src.services.backtest import refusals as _refusals
+
 _USD_PER_PT_PER_LOT  = 100.0
 _MAX_HOLD_BARS       = 96        # ~8h on M5, ~24h on M15
 _MIN_LOT             = 0.01
@@ -504,7 +509,7 @@ def _simulate(
     from backend.src.services.backtest.simulators import (
         _run_ladder_strategy,
         _simulate_adaptive_runner, _simulate_be_runner, _simulate_conservative,
-        _simulate_ct, _simulate_nss, _simulate_protected_scale,
+        _simulate_ct, _simulate_fixed_rr, _simulate_nss, _simulate_protected_scale,
         _simulate_reversal_runner, _simulate_scale_out, _simulate_signal_climber,
         _simulate_trail_stop,
     )
@@ -559,7 +564,12 @@ def _simulate(
         trade = _simulate_signal_climber(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)
     elif strategy == "adaptive_runner":
         trade = _simulate_adaptive_runner(candles, sig, fill_bar, fill_price, is_buy, balance, risk_pct, fixed_lots)
+    elif strategy == "fixed_rr":
+        trade = _simulate_fixed_rr(candles, sig, fill_bar, fill_price, is_buy, sl_dist, balance, risk_pct, fixed_lots)
     else:
+        # EA-managed and anything else unknown. `run_backtest` turns this
+        # into a stated refusal rather than letting it reach the comparison
+        # table as zeros -- see services/backtest/refusals.py.
         return None
 
     # Apply round-turn commission after strategy simulator sets pnl_usd
@@ -610,7 +620,7 @@ def run_backtest(
                 current_balance = max(current_balance + t.pnl_usd, 1.0)
 
         stats = _compute_stats(strategy, trades, starting_balance)
-        stats.unsupported_reason = _template_refusal(strategy, tick_mode=False)
+        stats.unsupported_reason = _refusals.why(strategy, tick_mode=False)
         if split_fraction > 0.0:
             # Lazy: split.py imports this module's dataclasses at load time.
             from backend.src.services.backtest.split import (
@@ -654,35 +664,10 @@ def run_backtest_ticks(
                 current_balance = max(current_balance + t.pnl_usd, 1.0)
 
         stats = _compute_stats(strategy, trades, starting_balance)
-        stats.unsupported_reason = _template_refusal(strategy, tick_mode=True)
+        stats.unsupported_reason = _refusals.why(strategy, tick_mode=True)
         out[strategy] = stats
 
     return out
-
-
-def _template_refusal(strategy: str, tick_mode: bool) -> str:
-    """Why this walk refused `strategy`'s template, or "" when it did not.
-
-    Deliberately narrow. A built-in strategy is not "unsupported" -- it is
-    simply not walked on ticks, a different silence. A template that no longer
-    exists is a different problem again, and labelling it unsupported sends
-    the user to edit a trail mode on a template that is not there. Only a
-    template the walk actively refuses gets a reason.
-    """
-    if not strategy.startswith(TEMPLATE_PREFIX):
-        return ""
-    template = _load_backtest_template(strategy[len(TEMPLATE_PREFIX):])
-    if not template:
-        return ""
-    try:
-        from backend.src.services.backtest.template_simulator import (
-            unsupported_reason as _why,
-        )
-        # The bar walk can always compute an ATR at the fill; the tick
-        # walk has no candle series to derive one from.
-        return _why(template, tick_mode, atr_available=not tick_mode)
-    except Exception:
-        return ""
 
 
 def _compute_stats(

@@ -30,9 +30,13 @@
  * arrangement theme.py had across its four presets, and the reason it left
  * every accent alone.
  *
- * There is no light mode yet (docs/todo/frontend/react-port/QUESTIONS.md Q3).
- * Everything goes through a token so adding one stays a decision rather than
- * a rewrite.
+ * Light mode landed 2026-09-19 (QUESTIONS.md Q3, answered by the owner: light,
+ * dark and auto). It re-skins the neutral scale as intended, and it does move
+ * the accents — but only their LIGHTNESS. #00cc88 on white is a pale mint that
+ * fails contrast at 11px, which on a P&L column is not a styling problem. Each
+ * accent keeps its hue and therefore its meaning: green is still profit, red
+ * still loss, amber still warning, gold still the app, blue still the remote
+ * node. Nothing is remapped.
  */
 @theme {
   --color-profit: #00cc88;
@@ -55,6 +59,70 @@
 
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 }
+
+/*
+ * The light scale.
+ *
+ * Written twice on purpose: once for an explicit choice (`data-theme="light"`)
+ * and once for "follow the machine" (`data-theme="auto"` under a light media
+ * query). A single rule cannot express both, because an explicit choice has to
+ * beat the machine's preference rather than be overridden by it.
+ *
+ * `ThemeContext` sets the attribute. Nothing else reads it.
+ */
+:root[data-theme="light"],
+:root[data-theme="auto"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="auto"] {
+    --color-profit: #059669;
+    --color-profit-dim: #05966922;
+    --color-loss: #dc2626;
+    --color-loss-dim: #dc262622;
+    --color-warning: #b45309;
+    --color-accent: #a16207;
+    --color-remote: #2563eb;
+
+    --color-surface-0: #eef2f7;
+    --color-surface-1: #ffffff;
+    --color-surface-2: #f4f7fb;
+    --color-surface-3: #e5eaf1;
+    --color-line: #cbd5e1;
+
+    --color-ink-1: #0f172a;
+    --color-ink-2: #475569;
+    --color-ink-3: #7c8aa0;
+  }
+}
+
+:root[data-theme="light"] {
+  --color-profit: #059669;
+  --color-profit-dim: #05966922;
+  --color-loss: #dc2626;
+  --color-loss-dim: #dc262622;
+  --color-warning: #b45309;
+  --color-accent: #a16207;
+  --color-remote: #2563eb;
+
+  --color-surface-0: #eef2f7;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f4f7fb;
+  --color-surface-3: #e5eaf1;
+  --color-line: #cbd5e1;
+
+  --color-ink-1: #0f172a;
+  --color-ink-2: #475569;
+  --color-ink-3: #7c8aa0;
+}
+
+/* `auto` under a dark machine, and the explicit dark choice, both fall through
+   to the @theme block above — those values ARE the dark scale. */
 
 html,
 body,

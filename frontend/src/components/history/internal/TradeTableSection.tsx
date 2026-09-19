@@ -1,37 +1,9 @@
-import { useCallback } from "react";
-import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import {
   formatBrokerTime, formatMoney, formatPrice, pnlColour,
 } from "@/components/shared/format";
 import { asArray } from "@/lib/asArray";
-import { usePoll } from "@/hooks/usePoll";
-
-interface TradeRow {
-  ticket: number;
-  direction: string;
-  entry_price: number;
-  exit_price: number;
-  open_ts: number;
-  close_ts: number;
-  lots: number;
-  close_lots: number[];
-  pnl: number;
-  fees: number;
-  pips: number | null;
-  duration_secs: number | null;
-  order_type: string;
-  pending_secs: number | null;
-  reason: string;
-  source: string;
-  strategy: string;
-  max_tp: string;
-  rr: number | null;
-  spread_points: number | null;
-  group: [string, number] | null;
-}
-
-interface TradesState { rows: TradeRow[]; error: string | null }
+import { useClosedTrades, type TradeRow } from "../hooks/useClosedTrades";
 
 /**
  * Every closed trade in the window, deal by deal.
@@ -76,11 +48,9 @@ const COLUMNS = [
 ];
 
 export function TradeTableSection({ days }: { days: number }) {
-  const poll = usePoll<TradesState>(
-    `history/trades/${days}`,
-    useCallback(() => api.get<TradesState>(`/api/history/trades?days=${days}`), [days]),
-    60_000,
-  );
+  // The same poll key the equity curve uses, so the two panels share one
+  // request rather than each fetching a row per trade every interval.
+  const poll = useClosedTrades(days);
 
   const data = poll.data;
   if (!data) {

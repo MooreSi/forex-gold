@@ -4,12 +4,13 @@ from __future__ import annotations
 from typing import Optional
 
 from backend.src.services.cluster import node as _node
+from backend.src.services.health import power as _power
 from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import settings as _risk
 
 __all__ = ["get_app_config", "set_app_config", "get_risk_settings",
            "update_risk_settings", "generate_sync_token", "get_sync_token",
-           "restart_app"]
+           "restart_app", "stop_app"]
 
 
 def get_app_config(key: str) -> Optional[str]:
@@ -44,3 +45,12 @@ async def restart_app(engine) -> str:
     sequence, and stops the page reaching into `engine._cmd_restart_app`.
     """
     return await engine.restart_app([])
+
+
+async def stop_app(engine) -> str:
+    """Shut the app down. The header's power button, alongside restart.
+
+    Not a restart with no relaunch: the service persists the bot offset and
+    schedules the stop so the reply reaches the browser first.
+    """
+    return await _power.stop_app(engine)

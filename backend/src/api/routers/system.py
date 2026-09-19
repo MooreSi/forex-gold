@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 
 from backend.src.api.deps import engine as engine_dep
 from backend.src.controllers import broker_controller as broker_ctl
+from backend.src.controllers import history_controller as history_ctl
 from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.controllers import system_controller as system_ctl
 from backend.src.controllers import sync_controller as sync_ctl
@@ -49,6 +50,13 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
     account = await eng.get_mt5_account()
     health = await eng.get_bridge_health()
     tick = await eng.get_tick()
+    # Equity minus net deposits: the only figure on screen that answers "am I
+    # up or down overall". Cached five minutes behind the controller, because
+    # this endpoint is polled every five seconds and the deposit total comes
+    # from ten years of deal history.
+    lifetime = await history_ctl.account_lifetime_pnl(
+        eng, float((account or {}).get("equity") or 0.0),
+    ) if account else None
     ea_ok, scope = broker_ctl.get_effective_ea_status()
     stale, stale_detail = broker_ctl.ea_build_status()
     colour, text, tooltip = broker_ctl.ea_badge_state(ea_ok, stale, scope, stale_detail)
@@ -56,6 +64,7 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
         "account": account,
         "bridge": health,
         "tick": tick.to_dict() if tick else None,
+        "lifetime_pnl": lifetime,
         "active_trader": settings_ctl.get_active_trader(),
         # BOTH halts, not just the governor's. The circuit breaker writes a
         # different key, so a tripped breaker used to be invisible everywhere

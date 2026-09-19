@@ -3,6 +3,7 @@ import { PanelShell } from "@/components/shared/PanelShell";
 import { cn } from "@/lib/cn";
 import { AccessTab } from "./tabs/AccessTab";
 import { AiTab } from "./tabs/AiTab";
+import { AppearanceTab } from "./tabs/AppearanceTab";
 import { ConnectionsTab } from "./tabs/ConnectionsTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { Mt5Tab } from "./tabs/Mt5Tab";
@@ -28,11 +29,12 @@ const TABS = [
   { id: "tunables", label: "Expert tunables", Panel: TunablesTab },
   { id: "diagnostics", label: "Diagnostics", Panel: DiagnosticsTab },
   { id: "access", label: "Access & licence", Panel: AccessTab },
+  { id: "appearance", label: "Appearance", Panel: AppearanceTab },
 ];
 
 export function SettingsPanel() {
   return (
-    <PanelShell title="Settings">
+    <PanelShell title="Settings" icon="settings">
       <Tabs.Root defaultValue="risk" className="flex h-full min-h-0 flex-col">
         <Tabs.List className="mb-3 flex gap-1 border-b border-line">
           {TABS.map((t) => (

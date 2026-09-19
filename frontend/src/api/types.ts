@@ -59,6 +59,13 @@ export interface HeaderState {
   account: Record<string, unknown> | null;
   bridge: Record<string, unknown> | null;
   tick: Tick | null;
+  /**
+   * Equity minus net deposits: the account's whole life, including open
+   * trades, swap and commission. Null when the deposit history cannot be
+   * read -- showing the whole equity as profit is the most flattering
+   * possible wrong answer, so the header shows nothing instead.
+   */
+  lifetime_pnl: number | null;
   active_trader: string | null;
   /**
    * Both halts at once, not just the risk governor's. The circuit breaker
@@ -201,4 +208,111 @@ export interface HistoryState {
   hourly: HourlyCell[];
   channels: Record<string, unknown>[];
   ladder: Record<string, Record<string, unknown>>;
+}
+
+/* ── Set & Forget ─────────────────────────────────────────────────────────── */
+
+/** A supply or demand band. `touches` is how many swing points merged into it. */
+export interface Aoi {
+  kind: "demand" | "supply";
+  low: number;
+  high: number;
+  ts: number;
+  touches: number;
+}
+
+export interface ConfluenceItem {
+  id: string;
+  label: string;
+  weight: number;
+  passed: boolean;
+  /** Why it passed or failed, in words. The number is not the product. */
+  detail: string;
+}
+
+export interface Confluence {
+  items: ConfluenceItem[];
+  score: number;
+  max: number;
+  pct: number;
+  grade: "high" | "moderate" | "low";
+}
+
+export interface SetForgetCandidate {
+  direction: "BUY" | "SELL";
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  /** "stop" is a refusal, not an order type this section will place. */
+  order_type: "market" | "limit" | "stop";
+  risk: number;
+  reward: number;
+  rr: number | null;
+  zone?: Aoi | null;
+  target_zone?: Aoi | null;
+}
+
+/** One drawn retracement level. Priced by the backend, never re-derived here. */
+export interface FibLevel {
+  ratio: number;
+  price: number;
+}
+
+export interface SetForgetEvidence {
+  price: number | null;
+  weekly_bias: string;
+  daily_bias: string;
+  entry_bias: string;
+  entry_timeframe: string;
+  zones: Aoi[];
+  atr: number;
+  ema_fast: number | null;
+  ema_slow: number | null;
+  rsi: number | null;
+  fib: number | null;
+  /** Empty when no leg has completed. Never a list of nulls. */
+  fib_levels: FibLevel[];
+  impulse: { start: number; end: number } | null;
+  confirmation: { kind: string; direction: string } | null;
+}
+
+export interface SetForgetReview {
+  verdict: "take" | "adjust" | "skip" | null;
+  reasoning?: string;
+  risks?: string;
+  /** Rules the model's own levels broke. Non-empty means they were discarded. */
+  levels_rejected?: string[];
+  model?: string;
+  error?: string | null;
+}
+
+export interface SetForgetState {
+  generated_at: number;
+  price: number | null;
+  evidence: SetForgetEvidence;
+  candidate: SetForgetCandidate | null;
+  /** Which rule refused, when there is no candidate. */
+  no_setup_reason: string;
+  confluence: Confluence;
+  invalidations: string[];
+  ai: SetForgetReview | null;
+  billed: boolean;
+  /**
+   * Cash for ONE lot. The browser multiplies; it does not re-derive P&L.
+   * The figure comes from the backend's single `fees_sizing.pnl`.
+   */
+  risk_per_lot: number | null;
+  reward_per_lot: number | null;
+  suggested_lot: number | null;
+  lot_size: number;
+  risk_per_trade_pct: number;
+  balance: number | null;
+  min_rr: number;
+  preferred_rr: number;
+  strategy: string;
+  source_name: string;
+  control_target: string;
+  ai_configured: boolean;
+  ai_provider: string;
+  ai_model: string;
 }

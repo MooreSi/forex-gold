@@ -19,7 +19,7 @@ interface NotPortedPanelProps {
  */
 export function NotPortedPanel({ tab, task, origin }: NotPortedPanelProps) {
   return (
-    <PanelShell title={tab} subtitle="Not ported yet">
+    <PanelShell title={tab} subtitle="Not ported yet" icon="warning">
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
         <Construction className="text-warning" size={28} />
         <p className="text-sm text-ink-1">

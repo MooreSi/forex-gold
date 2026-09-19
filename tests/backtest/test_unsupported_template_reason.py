@@ -140,12 +140,25 @@ def test_a_missing_template_is_not_reported_as_unsupported(templates):
     assert stats["template:No Such Template"].unsupported_reason == ""
 
 
-def test_a_non_template_strategy_carries_no_reason(templates):
-    """Built-in strategies are not walked on ticks at all. That is a
-    different silence, and mislabelling it 'unsupported template' would be
-    wrong."""
+def test_a_non_template_strategy_blames_the_tick_walk_not_the_template(templates):
+    """Built-in strategies are not walked on ticks at all.
+
+    CHANGED 2026-09-19. This used to assert the reason was EMPTY, on the
+    grounds that "unsupported template" would be the wrong label for a
+    built-in -- which is right, and is still asserted below. But empty meant
+    the comparison table showed a full row of zeros for Scale Out on Ticks
+    with nothing said, and zeros beside a real drawdown read as the safer
+    choice. The requirement changed: say something true instead of nothing.
+
+    The distinction the original test protected is kept: the reason names the
+    TICK WALK, never the strategy or a template, because Scale Out walks
+    perfectly well on candles.
+    """
     stats = bt.run_backtest_ticks(
         [_sig()], _ticks(4000.0, 4002.5), ["scale_out"],
         starting_balance=10_000.0, spread_pts=0.0)
+    reason = stats["scale_out"].unsupported_reason
 
-    assert stats["scale_out"].unsupported_reason == ""
+    assert "tick" in reason.lower()
+    assert "template" not in reason.lower().replace("ea templates only", "")
+    assert stats["scale_out"].trades == 0

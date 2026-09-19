@@ -18,6 +18,7 @@ export function ChartPanel() {
   return (
     <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <PanelShell
+        icon="candlestick"
         title="XAUUSD"
         subtitle={c.tick.data ? `spread ${formatPrice(c.tick.data.spread, 2)}` : "waiting for a price"}
         actions={
@@ -50,7 +51,7 @@ export function ChartPanel() {
         )}
       </PanelShell>
 
-      <PanelShell title="Open positions" subtitle="drawn on the chart">
+      <PanelShell title="Open positions" subtitle="drawn on the chart" icon="positions">
         <ChartTradesSection trades={trades} />
       </PanelShell>
     </div>

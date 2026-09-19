@@ -13,6 +13,7 @@ import { AiPanel } from "@/components/ai/AiPanel";
 import { EnginesPanel } from "@/components/engines/EnginesPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { NotPortedPanel } from "@/components/shared/NotPortedPanel";
+import { iconFor } from "@/components/shared/icons";
 import { cn } from "@/lib/cn";
 
 const PANELS: Record<string, ComponentType> = {
@@ -46,22 +47,29 @@ export function AppShell() {
           aria-label="Dashboard sections"
           className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-line bg-surface-1 px-2"
         >
-          {TABS.map((t) => (
-            <Tabs.Trigger
-              key={t.id}
-              value={t.id}
-              className={cn(
-                "-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors",
-                "border-transparent text-ink-3 hover:text-ink-2",
-                "data-[state=active]:border-accent data-[state=active]:text-ink-1",
-              )}
-            >
-              {t.label}
-              {t.notPorted && (
-                <span className="ml-1.5 text-[9px] uppercase text-warning">wip</span>
-              )}
-            </Tabs.Trigger>
-          ))}
+          {TABS.map((t) => {
+            // The `icon` field has been on TabSpec since the port began with
+            // nothing rendering it. A tab strip of ten identical words is
+            // harder to navigate than it needs to be.
+            const Icon = iconFor(t.icon);
+            return (
+              <Tabs.Trigger
+                key={t.id}
+                value={t.id}
+                className={cn(
+                  "-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors",
+                  "border-transparent text-ink-3 hover:bg-surface-2 hover:text-ink-2",
+                  "data-[state=active]:border-accent data-[state=active]:text-ink-1",
+                )}
+              >
+                {Icon && <Icon size={14} aria-hidden />}
+                {t.label}
+                {t.notPorted && (
+                  <span className="ml-1.5 text-[9px] uppercase text-warning">wip</span>
+                )}
+              </Tabs.Trigger>
+            );
+          })}
         </Tabs.List>
 
         {TABS.map((t) => {

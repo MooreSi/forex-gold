@@ -8,7 +8,7 @@ export function BacktestPanel() {
   const c = useBacktestController();
 
   return (
-    <PanelShell title="Backtest" subtitle="walks recorded signals; places nothing">
+    <PanelShell title="Backtest" subtitle="walks recorded signals; places nothing" icon="bar-chart">
       {!c.options ? (
         <EmptyState
           title={c.refusal ? "Could not load the backtest options" : "Loading"}

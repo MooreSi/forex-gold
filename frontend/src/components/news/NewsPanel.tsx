@@ -14,6 +14,7 @@ export function NewsPanel() {
 
   return (
     <PanelShell
+      icon="newspaper"
       title="Economic calendar"
       subtitle="times in UTC"
       actions={

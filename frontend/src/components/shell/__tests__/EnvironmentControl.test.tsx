@@ -12,7 +12,14 @@ import { EnvironmentControl } from "../EnvironmentControl";
  * account before it acts, and does it say what it is about to do to the app.
  *
  * Nothing here switches anything: `fetch` is a recorder.
+ *
+ * Changed 2026-09-19: the control used to be a ghost button beside the green
+ * account badge, both saying "DEMO". They are one control now -- the badge IS
+ * the switch -- so these tests pass the bridge's account in, because the badge
+ * shows ground truth rather than what the config file says.
  */
+const DEMO_ACCOUNT = { is_demo: true, login: 5203117 };
+const LIVE_ACCOUNT = { is_demo: false, login: 900123 };
 let state: Record<string, unknown>;
 let response: { status: number; body: unknown };
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -44,14 +51,14 @@ const writes = () => fetchMock.mock.calls.filter((c) => c[1]?.method === "PUT");
 
 describe("what it shows", () => {
   it("says DEMO on a demo install", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
 
     expect(await screen.findByTestId("environment-control")).toHaveTextContent("DEMO");
   });
 
   it("says LIVE, loudly, on a live one", async () => {
     state.current = "live";
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={LIVE_ACCOUNT} />);
 
     const button = await screen.findByTestId("environment-control");
     expect(button).toHaveTextContent("LIVE");
@@ -64,7 +71,7 @@ describe("what it shows", () => {
     fetchMock.mockImplementation(async () => ({
       ok: false, status: 500, json: async () => ({}),
     }));
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
 
     await waitFor(() =>
       expect(screen.queryByTestId("environment-control")).not.toBeInTheDocument());
@@ -75,7 +82,7 @@ describe("what it shows", () => {
       demo: { login: "5203117", server: "Vantage-Demo", configured: true },
       live: { login: "", server: "", configured: false },
     };
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
 
     const button = await screen.findByTestId("environment-control");
     expect(button).toBeDisabled();
@@ -85,7 +92,7 @@ describe("what it shows", () => {
 
 describe("switching to live", () => {
   it("does not switch on the first press", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
 
     await userEvent.click(await screen.findByTestId("environment-control"));
 
@@ -95,7 +102,7 @@ describe("switching to live", () => {
   it("names the account before it acts", async () => {
     // "Are you sure?" is a question people learn to click through.
     // "Switch to 900123 on Vantage-Live?" is one they read.
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     expect(screen.getByText("900123")).toBeInTheDocument();
@@ -103,21 +110,21 @@ describe("switching to live", () => {
   });
 
   it("says it is real money", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     expect(screen.getByText(/real money/)).toBeInTheDocument();
   });
 
   it("warns that the app restarts", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     expect(screen.getByText(/app restarts to apply it/)).toBeInTheDocument();
   });
 
   it("cancelling sends nothing", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -126,7 +133,7 @@ describe("switching to live", () => {
   });
 
   it("confirming sends the target and the confirmation together", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     await userEvent.click(screen.getByRole("button", { name: "Switch to LIVE" }));
@@ -143,7 +150,7 @@ describe("switching back to demo", () => {
     // The safe direction. Dressing it up the same way would train the operator
     // to click through the question that matters.
     state.current = "live";
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={LIVE_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     expect(screen.getByText(/back to the demo account/)).toBeInTheDocument();
@@ -152,7 +159,7 @@ describe("switching back to demo", () => {
 
   it("sends demo as the target", async () => {
     state.current = "live";
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={LIVE_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
 
     await userEvent.click(screen.getByRole("button", { name: "Switch to demo" }));
@@ -166,7 +173,7 @@ describe("switching back to demo", () => {
 
 describe("what it reports", () => {
   it("shows the backend's note and what happened to the restart", async () => {
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
     await userEvent.click(screen.getByRole("button", { name: "Switch to LIVE" }));
 
@@ -185,7 +192,7 @@ describe("what it reports", () => {
         },
       },
     };
-    render(<EnvironmentControl />);
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
     await userEvent.click(await screen.findByTestId("environment-control"));
     await userEvent.click(screen.getByRole("button", { name: "Switch to LIVE" }));
 

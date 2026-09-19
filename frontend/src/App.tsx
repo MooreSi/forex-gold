@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/shell/AppShell";
 import { LoginPage } from "@/pages/LoginPage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 
 function Gate() {
   const { ready, authenticated, auto_login } = useAuth();
@@ -18,8 +19,12 @@ function Gate() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Gate />
-    </AuthProvider>
+    // Theme outside auth: the login page is a screen too, and a sign-in form
+    // that ignores the chosen theme is the first thing anybody sees.
+    <ThemeProvider>
+      <AuthProvider>
+        <Gate />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

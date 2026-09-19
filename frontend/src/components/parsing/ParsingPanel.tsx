@@ -27,6 +27,7 @@ export function ParsingPanel() {
 
   return (
     <PanelShell
+      icon="send"
       title="Parsing"
       subtitle={
         data ? (data.configured ? "reader connected" : "reader not configured") : undefined

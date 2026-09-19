@@ -20,7 +20,7 @@
     "backend/src/services/analytics": 79.1,
     "backend/src/services/auth": 100.0,
     "backend/src/services/backtest": 58.4,
-    "backend/src/services/breakout_signal": 51.6,
+    "backend/src/services/breakout_signal": 54.3,
     "backend/src/services/broker": 68.7,
     "backend/src/services/broker/ea_bridge": 66.9,
     "backend/src/services/channels": 48.2,

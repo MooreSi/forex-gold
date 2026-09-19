@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Image as ImageIcon } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { formatBrokerTime } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 
 interface MessageFeedSectionProps {
@@ -41,9 +40,29 @@ function textOf(row: Record<string, unknown>): string {
   return typeof raw === "string" ? raw : "";
 }
 
-function stamp(row: Record<string, unknown>): number | null {
+/**
+ * When the message was sent, rendered in UK local time.
+ *
+ * `telegram_messages.timestamp` is a TEXT column holding an ISO 8601 string
+ * with an explicit UTC offset -- "2026-09-18T16:26:44+00:00" -- not an epoch.
+ * The previous helper accepted only a number, so every row in the feed showed
+ * an em dash where its time should be. Checked against the live payload,
+ * 2026-09-19.
+ *
+ * **Not `formatBrokerTime`.** These stamps are real UTC from Telegram, not
+ * MT5 broker time, so subtracting the three-hour broker offset would put every
+ * message three hours early. The broker shift belongs to deal history only.
+ */
+function stamp(row: Record<string, unknown>): string {
   const raw = row["timestamp"] ?? row["received_at"] ?? row["ts"];
-  return typeof raw === "number" ? raw : null;
+  const ms = typeof raw === "number" ? raw * 1000
+    : typeof raw === "string" ? Date.parse(raw)
+    : NaN;
+  if (!Number.isFinite(ms)) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    timeZone: "Europe/London",
+  }).format(new Date(ms));
 }
 
 function Row({ row }: { row: Record<string, unknown> }) {
@@ -56,7 +75,7 @@ function Row({ row }: { row: Record<string, unknown> }) {
       className="border-t border-line align-top"
     >
       <td className="num whitespace-nowrap px-2 py-1.5 text-[10px] text-ink-3">
-        {formatBrokerTime(stamp(row))}
+        {stamp(row)}
       </td>
       <td className="whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-2">
         {channelOf(row)}

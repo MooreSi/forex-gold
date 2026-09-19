@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ColorType, createChart, CrosshairMode,
   type IChartApi, type ISeriesApi, type SeriesMarker, type Time, type UTCTimestamp,
@@ -18,18 +18,6 @@ interface CandleChartProps {
 // semantics the rest of the UI uses, which is why they are not chosen freely.
 const BULL = "#00cc88";
 const BEAR = "#ff4444";
-// A fair-value gap is an imbalance price left behind. Bullish gaps sit below
-// price and bearish above, so they take the same profit/loss colours the rest
-// of the app uses — at a low alpha, because a zone is context, not a signal.
-const FVG_FILL: Record<string, string> = {
-  bullish: "rgba(0,204,136,0.13)",
-  bearish: "rgba(255,68,68,0.13)",
-};
-const FVG_EDGE: Record<string, string> = {
-  bullish: "rgba(0,204,136,0.45)",
-  bearish: "rgba(255,68,68,0.45)",
-};
-
 /** A theme token's current value, or a fallback.
  *
  *  lightweight-charts paints to a canvas and cannot use CSS variables, so the
@@ -49,6 +37,28 @@ function chartColours() {
     text: token("--color-ink-2", "#9ca3af"),
     grid: token("--color-surface-3", "#1b2333"),
     border: token("--color-line", "#263044"),
+  };
+}
+
+// A fair-value gap is an imbalance price left behind. Bullish gaps sit below
+// price and bearish above, so they take the same profit/loss meaning the rest
+// of the app uses -- through the THEME tokens, not fixed hex. #00cc88 at 13%
+// over a white panel is invisible, which is what the first version of this
+// overlay was in light mode: six correctly positioned zones nobody could see.
+function rgba(colour: string, alpha: number): string {
+  const hex = colour.trim().replace("#", "");
+  if (hex.length !== 6) return colour;
+  const n = parseInt(hex, 16);
+  if (!Number.isFinite(n)) return colour;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function fvgColours() {
+  const profit = token("--color-profit", "#00cc88");
+  const loss = token("--color-loss", "#ff4444");
+  return {
+    fill: { bullish: rgba(profit, 0.18), bearish: rgba(loss, 0.18) },
+    edge: { bullish: rgba(profit, 0.55), bearish: rgba(loss, 0.55) },
   };
 }
 
@@ -241,12 +251,20 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
     return () => scale.unsubscribeVisibleTimeRangeChange(redrawFvgs);
   }, [redrawFvgs, candles]);
 
+  // Recomputed with the theme, like the chart's own colours.
+  const fvgPaint = useMemo(() => fvgColours(), [themeTick]);
+
   return (
     <div ref={holder} data-testid="candle-chart" className="relative h-full w-full">
       {fvgRects.length > 0 && (
         <svg
           data-testid="fvg-overlay"
-          className="pointer-events-none absolute inset-0 h-full w-full"
+          // z-10, not just "after the canvas in the DOM". lightweight-charts
+          // gives its own canvases explicit z-index 1 and 2, so an overlay at
+          // `auto` is painted UNDER them: six correctly positioned zones,
+          // present in the DOM, invisible on screen. Found by inspecting the
+          // running app on 2026-09-19.
+          className="pointer-events-none absolute inset-0 z-10 h-full w-full"
           aria-hidden
         >
           {fvgRects.map((r) => (
@@ -254,8 +272,10 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
               key={`${r.ts}-${r.y}`}
               data-testid={`fvg-${r.direction}-${r.ts}`}
               x={r.x} y={r.y} width={r.width} height={r.height}
-              fill={FVG_FILL[r.direction] ?? "rgba(156,163,175,0.10)"}
-              stroke={FVG_EDGE[r.direction] ?? "rgba(156,163,175,0.35)"}
+              fill={fvgPaint.fill[r.direction as "bullish" | "bearish"]
+                ?? "rgba(156,163,175,0.14)"}
+              stroke={fvgPaint.edge[r.direction as "bullish" | "bearish"]
+                ?? "rgba(156,163,175,0.4)"}
               strokeWidth="0.5"
             />
           ))}

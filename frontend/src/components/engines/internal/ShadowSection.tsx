@@ -46,8 +46,14 @@ export function ShadowSection({ shadow, history, realised }: {
 }) {
   const rows = asArray<ShadowRow>(shadow);
   const decisions = asArray<HistoryRow>(history);
-  const net = typeof realised?.["net_pnl"] === "number"
-    ? (realised["net_pnl"] as number) : null;
+  // `{n, total, per_trade}` -- the shape `panel_data.get_realised_pnl` really
+  // returns. The first version of this read `net_pnl`, a key that does not
+  // exist, so the line was silently absent: the same mistake this panel's own
+  // pro-model section had been making, made again two hundred lines away.
+  // Checked against the live payload, 2026-09-19.
+  const net = typeof realised?.["total"] === "number"
+    ? (realised["total"] as number) : null;
+  const n = typeof realised?.["n"] === "number" ? (realised["n"] as number) : null;
 
   return (
     <div className="space-y-3">
@@ -59,6 +65,9 @@ export function ShadowSection({ shadow, history, realised }: {
             <span className={cn("num font-semibold", pnlColour(net))}>
               {formatMoney(net)}
             </span>
+            {/* -$206 over 58 trades and -$206 over 3 are different
+                statements, and only one of them is a verdict. */}
+            {n != null && <span className="num"> over {n}</span>}
           </span>
         )}
       </div>

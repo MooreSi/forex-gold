@@ -69,7 +69,7 @@ export function HeaderStats({ tick, account, lifetimePnl, stale }: HeaderStatsPr
     // document to 1153px at a 1024px viewport on 2026-09-19, which scrolled
     // the WHOLE APP sideways and clipped the panel beneath it. The least
     // important figures drop out first; bid and ask never do.
-    <div className="flex min-w-0 items-center gap-2 lg:gap-3">
+    <div className="flex min-w-0 items-center gap-2 overflow-hidden lg:gap-3">
       <Divider />
 
       <Stat label="BID" testId="stat-bid">
@@ -111,7 +111,12 @@ export function HeaderStats({ tick, account, lifetimePnl, stale }: HeaderStatsPr
         <span
           data-testid="stat-lifetime"
           className={cn(
-            "num flex items-center gap-0.5 text-[10px] font-semibold",
+            // Hidden below xl. It is the only figure here that is not live --
+            // an account's whole life does not change between glances -- so it
+            // is the one to lose when there is not room. Without this it ran
+            // underneath the bridge and EA badges at 1024px, which is worse
+            // than not showing it: two numbers on top of each other.
+            "num hidden items-center gap-0.5 text-[10px] font-semibold xl:flex",
             up ? "text-profit" : "text-loss",
           )}
           title="Equity minus everything paid in: the account's whole life, including open trades, swap and commission."

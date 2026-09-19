@@ -32,9 +32,15 @@ const HISTORY = [
     net: null, r: null },
 ];
 
+// The shape `panel_data.get_realised_pnl` really returns, checked against the
+// live payload on 2026-09-19. The first version of this test invented
+// `{net_pnl}` and passed against a component reading the same invented key --
+// which is precisely how the pro-model section went a year reporting nothing.
+const REALISED = { n: 58, total: -206.62, per_trade: -3.5624 };
+
 const render_ = (over: Record<string, unknown> = {}) =>
   render(<ShadowSection shadow={SHADOW} history={HISTORY}
-    realised={{ net_pnl: 88.4 }} {...over} />);
+    realised={REALISED} {...over} />);
 
 describe("the scoreboard", () => {
   it("marks which variant is the live one", async () => {
@@ -70,7 +76,20 @@ describe("the scoreboard", () => {
     // engine actually did.
     render_();
 
-    expect(screen.getByTestId("shadow-realised")).toHaveTextContent("$88.40");
+    expect(screen.getByTestId("shadow-realised")).toHaveTextContent("-$206.62");
+  });
+
+  it("says how many real trades that P&L is over", async () => {
+    // -$206 over 58 trades and -$206 over 3 are different statements.
+    render_();
+
+    expect(screen.getByTestId("shadow-realised")).toHaveTextContent("58");
+  });
+
+  it("says nothing rather than zero when the engine has no realised P&L", async () => {
+    render_({ realised: {} });
+
+    expect(screen.queryByTestId("shadow-realised")).not.toBeInTheDocument();
   });
 });
 

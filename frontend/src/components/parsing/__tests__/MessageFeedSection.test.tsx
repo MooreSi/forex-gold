@@ -96,6 +96,42 @@ describe("the rows", () => {
     expect(screen.getByTestId("feed-row-41")).toBe(before);
   });
 
+  it("renders the ISO timestamp the column actually holds", async () => {
+    // `telegram_messages.timestamp` is TEXT, not an epoch. The first version
+    // of this accepted only a number, so every row in the feed showed an em
+    // dash where its time should be. Checked against the live payload.
+    render(<MessageFeedSection total={1} messages={[
+      msg(1, { timestamp: "2026-09-18T16:26:44+00:00" }),
+    ]} />);
+
+    expect(screen.getByTestId("feed-row-1")).toHaveTextContent("18 Sept, 17:26");
+  });
+
+  it("does not apply the broker offset to a Telegram stamp", async () => {
+    // These are real UTC from Telegram, not MT5 broker time. Subtracting the
+    // three-hour broker offset would put every message three hours early --
+    // and 14:26 is exactly what that mistake looks like.
+    render(<MessageFeedSection total={1} messages={[
+      msg(1, { timestamp: "2026-09-18T16:26:44+00:00" }),
+    ]} />);
+
+    expect(screen.getByTestId("feed-row-1")).not.toHaveTextContent("14:26");
+  });
+
+  it("falls back to received_at when the sent time is missing", async () => {
+    render(<MessageFeedSection total={1} messages={[
+      msg(1, { timestamp: null, received_at: "2026-09-18T16:26:44+00:00" }),
+    ]} />);
+
+    expect(screen.getByTestId("feed-row-1")).toHaveTextContent("17:26");
+  });
+
+  it("shows a dash for a stamp it cannot read", async () => {
+    render(<MessageFeedSection total={1} messages={[msg(1, { timestamp: "not a date" })]} />);
+
+    expect(screen.getByTestId("feed-row-1")).toHaveTextContent("—");
+  });
+
   it("shows the message text", async () => {
     render(<MessageFeedSection total={1} messages={[msg(1, { text: "BUY XAUUSD 4000" })]} />);
 

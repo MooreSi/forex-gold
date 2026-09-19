@@ -141,3 +141,32 @@ describe("when there is nothing yet", () => {
     expect(screen.getByText(/No variant has seen a closed signal/)).toBeInTheDocument();
   });
 });
+
+describe("the edge figures", () => {
+  // The pair the NiceGUI Edge tab was built around, which this engine had
+  // nowhere at all until 2026-09-19.
+  const EDGE = { profit_factor: 1.2, expectancy: 4.5, closed: 58 };
+
+  it("shows the profit factor and the expectancy", async () => {
+    render(<ShadowSection shadow={SHADOW} history={HISTORY}
+      realised={REALISED} edge={EDGE} />);
+
+    expect(screen.getByTestId("shadow-edge")).toHaveTextContent("1.20");
+    expect(screen.getByTestId("shadow-edge")).toHaveTextContent("$4.50");
+  });
+
+  it("says an engine that has never lost has no ratio yet", async () => {
+    render(<ShadowSection shadow={SHADOW} history={HISTORY} realised={REALISED}
+      edge={{ ...EDGE, profit_factor: null }} />);
+
+    expect(screen.getByTestId("shadow-edge")).toHaveTextContent("not yet");
+  });
+
+  it("shows nothing at all rather than zeros when there is no edge to report", async () => {
+    // A fresh install has no edge, not a bad one.
+    render(<ShadowSection shadow={SHADOW} history={HISTORY}
+      realised={REALISED} edge={{}} />);
+
+    expect(screen.queryByTestId("shadow-edge")).not.toBeInTheDocument();
+  });
+})

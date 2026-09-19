@@ -86,6 +86,7 @@ export function EnginesPanel() {
               shadow={c.report.data?.shadow}
               history={c.report.data?.history}
               realised={asObject(c.report.data?.realised)}
+              edge={asObject<Record<string, unknown>>(c.report.data?.edge)}
             />
           </section>
 

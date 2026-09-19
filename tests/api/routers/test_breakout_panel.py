@@ -152,3 +152,72 @@ def test_a_missing_edge_read_does_not_take_the_panel_down(make_client, panel, mo
 
     assert body["edge"] == {}
     assert body["stats"]["win_rate"] == 58.3
+
+
+class TestTheEngineSaysWhatItIsDoing:
+    """The three reads that explain the numbers above them.
+
+    `all_signals`, `analysis_log` and `adaptive_params` were the last of the
+    seventeen `panel_data` operations with no caller. The log is the one that
+    matters most: every other panel says WHAT the engine did, and this is the
+    only thing in the app that says why it did not.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reads(self, monkeypatch, panel):
+        panel["signals"] = [{"id": 128, "signal_ref": "BO-324FEF14",
+                             "direction": "BUY", "outcome": "loss"}]
+        panel["log"] = [{"id": 82161, "ts": 1789848014.0, "result": "closed",
+                         "suppressed_reason": "Market closed (weekend)"}]
+        panel["params"] = {"min_adx_go": {"value": 30.0, "default": 28.0,
+                                          "min": 20.0, "max": 45.0, "desc": "..."}}
+        panel["asked"] = {}
+
+        async def _signals(limit):
+            panel["asked"]["signals"] = limit
+            if "signals" in panel["fail"]:
+                raise RuntimeError("no table")
+            return panel["signals"]
+
+        async def _log(limit):
+            panel["asked"]["log"] = limit
+            if "log" in panel["fail"]:
+                raise RuntimeError("no table")
+            return panel["log"]
+
+        async def _params():
+            if "params" in panel["fail"]:
+                raise RuntimeError("no table")
+            return panel["params"]
+
+        monkeypatch.setattr(engines_router.breakout_ctl, "breakout_recent_signals", _signals)
+        monkeypatch.setattr(engines_router.breakout_ctl, "breakout_analysis_log", _log)
+        monkeypatch.setattr(engines_router.breakout_ctl, "breakout_adaptive_params", _params)
+
+    def test_the_report_carries_them(self, make_client, panel):
+        body = make_client().get("/api/engines/breakout/report").json()
+
+        assert body["signals"][0]["signal_ref"] == "BO-324FEF14"
+        assert body["log"][0]["suppressed_reason"] == "Market closed (weekend)"
+        assert body["params"]["min_adx_go"]["value"] == 30.0
+
+    def test_the_lists_are_bounded_by_the_server(self, make_client, panel):
+        # Both grow without limit, and an unbounded read is the browser
+        # deciding how expensive a request is.
+        make_client().get("/api/engines/breakout/report")
+
+        assert panel["asked"]["signals"] == engines_router.BREAKOUT_LIST_LIMIT
+        assert panel["asked"]["log"] == engines_router.BREAKOUT_LIST_LIMIT
+
+    def test_a_missing_log_does_not_take_the_panel_down(self, make_client, panel):
+        panel["fail"] = {"log"}
+
+        body = make_client().get("/api/engines/breakout/report").json()
+
+        assert body["log"] == []
+        assert body["signals"][0]["signal_ref"] == "BO-324FEF14"
+
+    def test_missing_parameters_are_an_empty_object(self, make_client, panel):
+        panel["fail"] = {"params"}
+
+        assert make_client().get("/api/engines/breakout/report").json()["params"] == {}

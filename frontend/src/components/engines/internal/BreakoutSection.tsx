@@ -5,6 +5,7 @@ import { formatMoney, formatPercent, pnlColour } from "@/components/shared/forma
 import { usePoll } from "@/hooks/usePoll";
 import { asArray, asObject } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
+import { BreakoutActivity } from "./BreakoutActivity";
 
 /**
  * The Breakout engine's own panel.
@@ -37,6 +38,9 @@ interface BreakoutReport {
     thresholds: Record<string, unknown>;
   };
   edge: Record<string, unknown>;
+  signals: unknown;
+  log: unknown;
+  params: unknown;
   by_session: Record<string, unknown>[];
   by_adx: Record<string, unknown>[];
   by_type: Record<string, unknown>[];
@@ -252,6 +256,10 @@ export function BreakoutSection() {
         <Split title="By HTF bias" rows={asArray(poll.data.by_bias)}
           keyField="htf_bias" testId="bo-by-bias" />
       </div>
+
+      {/* Collapsed by default: detail for a question, not a dashboard. */}
+      <BreakoutActivity signals={poll.data.signals} log={poll.data.log}
+        params={poll.data.params} />
     </div>
   );
 }

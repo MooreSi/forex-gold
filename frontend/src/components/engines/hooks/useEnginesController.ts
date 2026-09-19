@@ -31,6 +31,7 @@ export interface EnginesState {
 
 export interface ReversalReport {
   realised: Record<string, unknown>;
+  edge: Record<string, unknown>;
   shadow: unknown;
   history: unknown;
 }

@@ -242,6 +242,63 @@ def fetch_realised_pnl_last_24h(cutoff: float) -> float:
     return float(row[0] or 0.0)
 
 
+def edge_for_source(source: str, since: float = 0.0) -> dict:
+    """Profit factor and expectancy for one signal source.
+
+    The pair the NiceGUI Edge tab was built around, over the trades that
+    really went to MT5. A win rate on its own decides nothing: 38% with an
+    average win three times the average loss is profitable, and 60% with the
+    ratio inverted is not.
+
+    Takes a source name rather than being welded to one engine, because the
+    same query answers "does this Telegram channel have an edge" -- the
+    question the Analysis scorecard raises and cannot answer.
+
+    `profit_factor` is None, not 0.0 and not infinity, for a source that has
+    never lost: a ratio with a zero denominator does not exist yet, and 0.0
+    reads as the worst possible source. `expectancy` is None for a source with
+    no closed trades at all, because nothing is not bad.
+
+    `since` is the same close-time floor `realised_pnl_for_source` takes, so a
+    panel reset to report from a fresh start does not have its edge figures
+    quietly computed over everything before it.
+    """
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) n, "
+            "  SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) wins, "
+            "  SUM(CASE WHEN net_pnl < 0 THEN 1 ELSE 0 END) losses, "
+            "  COALESCE(SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END), 0) gp, "
+            "  COALESCE(SUM(CASE WHEN net_pnl < 0 THEN -net_pnl ELSE 0 END), 0) gl "
+            "FROM vantage_simulated_trades "
+            "WHERE status='closed' AND tg_source=? "
+            "  AND COALESCE(close_time, 0) >= ?",
+            (source, float(since or 0.0)),
+        ).fetchone()
+
+    closed = int(row[0] or 0)
+    wins = int(row[1] or 0)
+    losses = int(row[2] or 0)
+    gross_profit = float(row[3] or 0.0)
+    gross_loss = float(row[4] or 0.0)
+
+    return {
+        "closed": closed,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / closed * 100, 1) if closed else None,
+        "gross_profit": round(gross_profit, 2),
+        "gross_loss": round(gross_loss, 2),
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else None,
+        # Over every closed trade, breakeven ones included: leaving them out
+        # inflates the win rate and this figure together.
+        "expectancy": (round((gross_profit - gross_loss) / closed, 2)
+                       if closed else None),
+        "avg_win": round(gross_profit / wins, 2) if wins else None,
+        "avg_loss": round(gross_loss / losses, 2) if losses else None,
+    }
+
+
 def realised_pnl_for_source(source: str, since: float = 0.0) -> dict:
     """Closed-trade count, total P&L and per-trade average for one channel.
 

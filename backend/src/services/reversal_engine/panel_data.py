@@ -89,6 +89,21 @@ async def get_realised_pnl() -> dict:
                               "Reversal Engine", since)
 
 
+async def get_edge_stats() -> dict:
+    """Profit factor and expectancy for this engine's REAL trades.
+
+    Same source as `get_realised_pnl` and the same reset epoch, deliberately:
+    two figures on one screen computed over different rows is worse than
+    either being absent. The engine's own database prices every signal it
+    produced at the virtual lot whether or not the order was placed, so it
+    cannot answer this.
+    """
+    from backend.src.services.analytics import read_repo as _reads
+    from backend.src.services.reversal_engine.stats_repo import stats_epoch
+    since = await to_db_thread(stats_epoch)
+    return await to_db_thread(_reads.edge_for_source, "Reversal Engine", since)
+
+
 async def reset_stats() -> float:
     """Start this panel's numbers again from now. Returns the new epoch.
 

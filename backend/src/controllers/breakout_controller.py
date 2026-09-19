@@ -18,6 +18,8 @@ from __future__ import annotations
 from backend.src.services.breakout_signal import panel_data as _panel
 
 __all__ = [
+    "breakout_adaptive_params", "breakout_analysis_log",
+    "breakout_recent_signals",
     "breakout_edge_stats", "breakout_stats", "breakout_virtual_balance", "breakout_max_drawdown",
     "breakout_ml_summary", "breakout_ml_metrics", "breakout_ml_thresholds",
     "breakout_perf_by_session", "breakout_perf_by_adx_band",
@@ -86,3 +88,29 @@ async def breakout_perf_by_type() -> list:
 async def breakout_perf_by_bias() -> list:
     """P&L split by whether the trade agreed with the higher-timeframe bias."""
     return await _panel.perf_by_bias()
+
+
+async def breakout_recent_signals(limit: int = 25) -> list:
+    """The engine's own signals, newest first."""
+    return await _panel.all_signals(limit)
+
+
+async def breakout_analysis_log(limit: int = 25) -> list:
+    """Why the engine acted, or did not.
+
+    The only read in this app that answers the second half. Every other panel
+    says what an engine DID; a suppressed candidate leaves no trade behind to
+    look at, so without this the operator cannot tell a quiet market from a
+    gate that is set too tight.
+    """
+    return await _panel.analysis_log(limit)
+
+
+async def breakout_adaptive_params() -> dict:
+    """The parameters the engine has tuned for itself, with their defaults.
+
+    Shown against the default rather than alone: a threshold that has drifted
+    is the engine telling you something, and a number with nothing to compare
+    it to is not.
+    """
+    return await _panel.adaptive_params()

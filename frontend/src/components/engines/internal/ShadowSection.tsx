@@ -41,8 +41,10 @@ export interface HistoryRow {
  * renders both as 0.000 invites the wrong one to be acted on — the rule
  * `shadow.report()` states in its own docstring.
  */
-export function ShadowSection({ shadow, history, realised }: {
-  shadow: unknown; history: unknown; realised: Record<string, unknown>;
+export function ShadowSection({ shadow, history, realised, edge }: {
+  shadow: unknown; history: unknown;
+  realised: Record<string, unknown>;
+  edge?: Record<string, unknown>;
 }) {
   const rows = asArray<ShadowRow>(shadow);
   const decisions = asArray<HistoryRow>(history);
@@ -68,6 +70,29 @@ export function ShadowSection({ shadow, history, realised }: {
             {/* -$206 over 58 trades and -$206 over 3 are different
                 statements, and only one of them is a verdict. */}
             {n != null && <span className="num"> over {n}</span>}
+          </span>
+        )}
+        {/* The pair the NiceGUI Edge tab was built around, which this engine
+            had nowhere. A win rate alone decides nothing: 38% with an average
+            win three times the average loss is profitable, and 60% with the
+            ratio inverted is not. */}
+        {edge && typeof edge["expectancy"] === "number" && (
+          <span data-testid="shadow-edge" className="text-[11px] text-ink-3">
+            {" · "}PF{" "}
+            <span className={cn("num font-semibold",
+              typeof edge["profit_factor"] !== "number" ? "text-ink-3"
+                : (edge["profit_factor"] as number) >= 1 ? "text-profit" : "text-loss")}>
+              {/* Null, not 0: an engine that has never lost has no ratio yet,
+                  and 0.00 reads as the worst possible one. */}
+              {typeof edge["profit_factor"] === "number"
+                ? (edge["profit_factor"] as number).toFixed(2) : "not yet"}
+            </span>
+            {", expectancy "}
+            <span className={cn("num font-semibold",
+              pnlColour(edge["expectancy"] as number))}>
+              {formatMoney(edge["expectancy"] as number)}
+            </span>
+            <span> per trade</span>
           </span>
         )}
       </div>

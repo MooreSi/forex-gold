@@ -108,6 +108,10 @@ def engines(monkeypatch):
     # The virtual ledger, recorded rather than read: its own SQL is tested in
     # tests/reversal_engine/test_shadow_history.py, and no router test should
     # need the engine's database to exist.
+    async def _edge_stats():
+        return {"profit_factor": 1.2, "expectancy": 4.5, "closed": 58}
+
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_edge_stats", _edge_stats)
     monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_history",
                         lambda limit=200: [])
     monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_report",
@@ -440,6 +444,10 @@ def test_the_reversal_report_carries_the_virtual_trade_history(make_client, engi
                                                               monkeypatch):
     # The aggregates say which variant is ahead. The history says what either
     # of them did, signal by signal, which is what watching a challenger means.
+    async def _edge_stats():
+        return {"profit_factor": 1.2, "expectancy": 4.5, "closed": 58}
+
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_edge_stats", _edge_stats)
     monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_history",
                         lambda limit: [{"ts": 1.0, "variant": "challenger",
                                         "would_take": 0, "r": None}])
@@ -453,9 +461,41 @@ def test_the_history_is_bounded_by_the_server(make_client, engines, monkeypatch)
     # A row per variant per signal, and both grow. An unbounded read is the
     # browser deciding how expensive a request is.
     asked = []
+    async def _edge_stats():
+        return {"profit_factor": 1.2, "expectancy": 4.5, "closed": 58}
+
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_edge_stats", _edge_stats)
     monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_history",
                         lambda limit: asked.append(limit) or [])
 
     make_client().get("/api/engines/reversal/report")
 
     assert asked == [engines_router.HISTORY_LIMIT]
+
+
+def test_the_reversal_report_carries_its_edge_figures(make_client, engines, monkeypatch):
+    """Profit factor and expectancy, the pair the NiceGUI Edge tab was built
+    around. The Breakout panel got them first; this engine had none."""
+    async def _edge():
+        return {"profit_factor": 1.2, "expectancy": 4.5, "closed": 58}
+
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_edge_stats", _edge)
+
+    body = make_client().get("/api/engines/reversal/report").json()
+
+    assert body["edge"]["profit_factor"] == 1.2
+    assert body["edge"]["expectancy"] == 4.5
+
+
+def test_a_missing_reversal_edge_read_does_not_take_the_report_down(
+    make_client, engines, monkeypatch,
+):
+    async def _boom():
+        raise RuntimeError("no trades table")
+
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_edge_stats", _boom)
+
+    body = make_client().get("/api/engines/reversal/report").json()
+
+    assert body["edge"] == {}
+    assert body["realised"] == {"net_pnl": 88.4}

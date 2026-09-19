@@ -48,6 +48,11 @@ ENGINE_LABELS = {name: _LABELS.get(name, name)
 # the browser: it is a row per variant per signal, and both numbers grow.
 HISTORY_LIMIT = 200
 
+# How many signal and analysis-log rows the Breakout panel gets. Both grow
+# without limit, and an unbounded read is the browser deciding how expensive a
+# request is.
+BREAKOUT_LIST_LIMIT = 25
+
 
 class EngineAction(BaseModel):
     engine: str
@@ -168,6 +173,12 @@ async def breakout_report() -> dict:
         "by_adx": await _guarded(breakout_ctl.breakout_perf_by_adx_band, []),
         "by_type": await _guarded(breakout_ctl.breakout_perf_by_type, []),
         "by_bias": await _guarded(breakout_ctl.breakout_perf_by_bias, []),
+        "signals": await _guarded(
+            lambda: breakout_ctl.breakout_recent_signals(BREAKOUT_LIST_LIMIT), []),
+        # Why it did NOT act, which nothing else in this app reports.
+        "log": await _guarded(
+            lambda: breakout_ctl.breakout_analysis_log(BREAKOUT_LIST_LIMIT), []),
+        "params": await _guarded(breakout_ctl.breakout_adaptive_params, {}),
     }
 
 
@@ -182,6 +193,10 @@ async def reversal_report() -> dict:
     """
     return {
         "realised": await reversal_ctl.reversal_realised_pnl(),
+        # Profit factor and expectancy over the same rows and the same reset
+        # epoch as `realised` above: two figures on one screen computed over
+        # different trades is worse than either being absent.
+        "edge": await _guarded(reversal_ctl.reversal_edge_stats, {}),
         "shadow": reversal_ctl.reversal_shadow_report(),
         "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
     }

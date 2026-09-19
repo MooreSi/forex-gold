@@ -18,7 +18,7 @@ from backend.src.services.reversal_engine import reversal_engine_service as _re_
 from backend.src.services.risk import settings as _risk
 
 __all__ = [
-    "reversal", "reversal_realised_pnl", "pro_model_status",
+    "reversal", "reversal_realised_pnl", "reversal_edge_stats", "pro_model_status",
     "pro_model_fit_in_background", "reversal_research_study",
     "reversal_shadow_report", "reversal_shadow_history",
     "reversal_ai_recommend", "reversal_ai_apply", "reversal_reset_stats",
@@ -31,6 +31,15 @@ def get_risk_settings() -> dict:
 
 def update_risk_settings(fields: dict) -> None:
     _risk.update(fields)
+
+
+async def reversal_edge_stats() -> dict:
+    """Profit factor and expectancy over the trades this engine really placed.
+
+    A win rate on its own decides nothing: 38% with an average win three times
+    the average loss is profitable, and 60% with the ratio inverted is not.
+    """
+    return await reversal.get_edge_stats()
 
 
 async def reversal_realised_pnl() -> dict:

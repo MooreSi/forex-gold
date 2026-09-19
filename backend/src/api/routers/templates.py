@@ -32,6 +32,17 @@ async def templates() -> dict:
     }
 
 
+@router.get("/schema")
+async def schema() -> dict:
+    """What the fields are: type, default and allowed values for each.
+
+    Declared BEFORE `/{name}`: FastAPI matches in definition order, so the
+    other way round a request for the schema is read as a template called
+    "schema" and answers 404.
+    """
+    return {"fields": broker_ctl.ea_template_schema()}
+
+
 @router.get("/{name}")
 async def template(name: str) -> dict:
     found = broker_ctl.get_ea_template(name)

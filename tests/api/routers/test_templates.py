@@ -131,3 +131,27 @@ def test_reading_a_template_never_pushes_it(make_client, ea):
     client.get("/api/trading/templates/Grid Runner")
 
     assert ea["writes"] == []
+
+
+# -- The field schema ---------------------------------------------------------
+
+def test_the_schema_describes_the_fields(make_client, ea):
+    body = make_client().get("/api/trading/templates/schema").json()
+    names = {f["name"] for f in body["fields"]}
+
+    assert "trail_mode" in names
+    assert "sl_pips" in names
+
+
+def test_the_schema_route_is_not_read_as_a_template_called_schema(make_client, ea):
+    # FastAPI matches in definition order. Declared after "/{name}", this
+    # request answers 404 for a template nobody asked for.
+    assert make_client().get("/api/trading/templates/schema").status_code == 200
+
+
+def test_a_choice_field_carries_its_values(make_client, ea):
+    body = make_client().get("/api/trading/templates/schema").json()
+    trail = next(f for f in body["fields"] if f["name"] == "trail_mode")
+
+    assert trail["type"] == "choice"
+    assert "step" in trail["choices"]

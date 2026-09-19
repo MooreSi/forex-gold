@@ -331,6 +331,48 @@ _CHOICES = {
 }
 
 
+def field_schema() -> list[dict]:
+    """Every editable field, with its type, default and allowed values.
+
+    The EA template has around a hundred fields. Until 2026-09-19 the only way
+    to change one was a textarea holding the whole thing as raw JSON, which is
+    why the owner reported being unable to edit a template at all -- an
+    unlabelled hundred-key blob is not an editor.
+
+    A real form needs to know what the fields ARE, and that is already stated
+    here: DEFAULTS, _BOOL_FIELDS, _INT_FIELDS, _FLOAT_FIELDS and _CHOICES
+    between them describe every one completely. This exposes that rather than
+    having the browser keep its own copy, because a hand-maintained list of a
+    hundred field types in another language drifts the first time a field is
+    added here and nowhere else.
+
+    DEFAULTS order, which is the order the form renders in -- deriving it from
+    a set would reshuffle the page on every reload.
+
+    Bookkeeping (`name`, `created_at`, `updated_at`) is absent because it is
+    absent from DEFAULTS: the set of editable fields and the set `_clean_fields`
+    accepts are the same set, by construction.
+    """
+    out: list[dict] = []
+    for name, default in DEFAULTS.items():
+        if name in _CHOICES:
+            kind, choices = "choice", list(_CHOICES[name])
+        elif name in _BOOL_FIELDS:
+            kind, choices = "boolean", []
+        elif name in _INT_FIELDS:
+            kind, choices = "integer", []
+        elif name in _FLOAT_FIELDS:
+            kind, choices = "number", []
+        else:
+            # Nothing reaches this today. It is here so a field added to
+            # DEFAULTS and forgotten in the type tuples still appears in the
+            # form as text rather than vanishing from it.
+            kind, choices = "text", []
+        out.append({"name": name, "type": kind, "default": default,
+                    "choices": choices})
+    return out
+
+
 def _strategy_override_for(channel_name: str):
     """This channel's explicitly assigned strategy, or None. Seam for tests."""
     from backend.src.db import database as _db

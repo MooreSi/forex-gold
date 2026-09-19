@@ -25,8 +25,16 @@ const SCHEDULE = {
   clock: { label: "Broker time (UTC+3)", offset_minutes: 180 },
 };
 
+// The EA template's fields, as the backend describes them. The form renders
+// from this rather than from a copy of the field list in TypeScript.
+const TEMPLATE_FIELDS = [
+  { name: "sl_pips", type: "number", default: 50, choices: [] },
+  { name: "trail_mode", type: "choice", default: "off",
+    choices: ["off", "step", "candle"] },
+];
+
 const TEMPLATES = {
-  templates: [{ name: "Grid Runner", anchor_pips: 12 }],
+  templates: [{ name: "Grid Runner", sl_pips: 12, trail_mode: "off" }],
   builtin: "Shipped Default",
   ea_connected: true,
   ea_last_seen_secs: 3.2,
@@ -51,6 +59,11 @@ beforeEach(() => {
     }
     if (url.startsWith("/api/schedule/state")) {
       return { ok: true, status: 200, json: async () => schedule };
+    }
+    if (url.startsWith("/api/trading/templates/schema")) {
+      // Declared before the list, as it is in the router: "/schema" would
+      // otherwise be read as a template called "schema".
+      return { ok: true, status: 200, json: async () => ({ fields: TEMPLATE_FIELDS }) };
     }
     if (url.startsWith("/api/trading/templates")) {
       return { ok: true, status: 200, json: async () => templates };
@@ -176,11 +189,14 @@ describe("EA templates", () => {
   });
 
   it("saves an edited template and reports that it was pushed", async () => {
+    // CHANGED 2026-09-19 with the editor. It used to click "Edit" and type
+    // into a textarea of raw JSON; picking the template from the list and
+    // pressing Save is the same act against a real form.
     render(<TradingPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "EA templates" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Grid Runner" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(writes().some((c) => String(c[0]).includes("Grid%20Runner"))).toBe(true);
@@ -192,34 +208,48 @@ describe("EA templates", () => {
     templates.ea_connected = false;
     render(<TradingPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "EA templates" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Grid Runner" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Saved. No EA is connected",
     );
   });
 
-  it("refuses to save unparseable values rather than sending them", async () => {
+  it("sends the template's saved values, not the schema's defaults", async () => {
+    // REPLACES "refuses to save unparseable values". There is no JSON to be
+    // unparseable any more -- which is the point of the change -- but the
+    // failure that test was guarding still exists in another form: a save
+    // that sends the wrong values silently resets a tuned template.
+    // "Grid Runner" has sl_pips 12 against a schema default of 50.
     render(<TradingPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "EA templates" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Grid Runner" }));
 
-    const box = screen.getByLabelText("Grid Runner values");
-    await userEvent.clear(box);
-    await userEvent.type(box, "not json");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("nothing was saved");
-    expect(writes()).toHaveLength(0);
+    await waitFor(() => expect(writes().length).toBeGreaterThan(0));
+    const sent = JSON.parse(writes()[0][1].body);
+    expect(sent.sl_pips).toBe(12);
+    expect(sent.trail_mode).toBe("off");
+  });
+
+  it("offers a fixed-value field as its own values, never as free text", async () => {
+    render(<TradingPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "EA templates" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Grid Runner" }));
+
+    const select = await screen.findByLabelText(/Trail type/i);
+    expect(select.tagName).toBe("SELECT");
   });
 
   it("deletes by name", async () => {
     render(<TradingPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "EA templates" }));
 
-    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Grid Runner" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Delete/ }));
 
     await waitFor(() => {
       const del = writes().find((c) => c[1]?.method === "DELETE");

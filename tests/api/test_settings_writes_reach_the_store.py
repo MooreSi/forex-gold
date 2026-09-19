@@ -198,7 +198,12 @@ class TestTheScannerCanSee:
 # ── The same check, for every screen that writes the risk row ────────────────
 
 RISK_SPEC_FILES = {
-    "frontend/src/components/settings/content/risk.ts": "the Risk tab",
+    # Moved out of Settings on 2026-09-19 -- these are the numbers the engines
+    # read before every order, so they now live on Trading. The endpoint and
+    # the columns are unchanged, and so is this gate's reason for existing:
+    # the first React version of this screen offered two keys that are not
+    # columns at all, and they raised on save with the value silently lost.
+    "frontend/src/components/trading/content/risk.ts": "the Risk screen",
     "frontend/src/components/engines/content/capabilities.ts":
         "the Signal Generator's capability switches",
     "frontend/src/components/parsing/content/settings.ts": "the parsing switches",

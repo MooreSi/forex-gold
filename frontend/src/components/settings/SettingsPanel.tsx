@@ -9,7 +9,6 @@ import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { Mt5Tab } from "./tabs/Mt5Tab";
 import { NodeTab } from "./tabs/NodeTab";
 import { RemoteTab } from "./tabs/RemoteTab";
-import { RiskTab } from "./tabs/RiskTab";
 import { TunablesTab } from "./tabs/TunablesTab";
 
 /**
@@ -18,9 +17,12 @@ import { TunablesTab } from "./tabs/TunablesTab";
  * The NiceGUI original reached 3,112 lines in a single module because every
  * feature that needed a setting was added to the same surface. Each tab here
  * owns one endpoint and knows nothing about the others.
+ *
+ * Risk left for Trading on 2026-09-19. Those numbers are read by the engines
+ * before every order; they are not preferences, and filing them beside the
+ * SMTP host was the wrong shelf.
  */
 const TABS = [
-  { id: "risk", label: "Risk", Panel: RiskTab },
   { id: "mt5", label: "MT5", Panel: Mt5Tab },
   { id: "connections", label: "Connections", Panel: ConnectionsTab },
   { id: "ai", label: "AI", Panel: AiTab },
@@ -35,7 +37,7 @@ const TABS = [
 export function SettingsPanel() {
   return (
     <PanelShell title="Settings" icon="settings">
-      <Tabs.Root defaultValue="risk" className="flex h-full min-h-0 flex-col">
+      <Tabs.Root defaultValue="mt5" className="flex h-full min-h-0 flex-col">
         <Tabs.List className="mb-3 flex gap-1 border-b border-line">
           {TABS.map((t) => (
             <Tabs.Trigger

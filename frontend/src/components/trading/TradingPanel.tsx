@@ -11,6 +11,7 @@ import { PlaceOrderDialog } from "./PlaceOrderDialog";
 import { ScheduleSection } from "./internal/ScheduleSection";
 import { OrbSection } from "./internal/OrbSection";
 import { SetForgetPanel } from "@/components/setforget/SetForgetPanel";
+import { RiskSection } from "./internal/RiskSection";
 import { TemplatesSection } from "./internal/TemplatesSection";
 import { cn } from "@/lib/cn";
 import { asArray } from "@/lib/asArray";
@@ -21,6 +22,7 @@ const SUB_TABS = [
   { id: "setforget", label: "Set & Forget" },
   { id: "signals", label: "Signals" },
   { id: "schedule", label: "Schedule" },
+  { id: "risk", label: "Risk" },
   { id: "templates", label: "EA templates" },
   { id: "orb", label: "ORB report" },
 ];
@@ -104,6 +106,11 @@ export function TradingPanel() {
             onSetTarget={(v) => void c.setDailyTarget(v)}
             onResumeToday={() => void c.resumeToday()}
           />
+        </Tabs.Content>
+        <Tabs.Content value="risk" className="min-h-0 flex-1 overflow-auto">
+          {/* Moved here from Settings on 2026-09-19: these are the sizing and
+              loss limits the engines read before every order, not preferences. */}
+          <RiskSection />
         </Tabs.Content>
         <Tabs.Content value="orb" className="min-h-0 flex-1 overflow-auto">
           <OrbSection />

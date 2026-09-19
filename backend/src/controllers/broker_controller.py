@@ -31,6 +31,7 @@ from backend.src.services.broker import ea_templates as _templates
 __all__ = [
     "get_effective_ea_status", "ea_build_status", "ea_badge_state",
     "ea_is_healthy", "ea_seconds_since_last_seen", "push_template",
+    "ea_template_schema",
     "push_global_config", "list_ea_templates", "get_ea_template",
     "save_ea_template", "delete_ea_template", "export_templates",
     "import_templates", "export_filename", "override_for_template",
@@ -103,6 +104,16 @@ async def push_global_config() -> bool:
 
 def list_ea_templates(*args, **kwargs):
     return _templates.list_ea_templates(*args, **kwargs)
+
+
+def ea_template_schema() -> list:
+    """Every editable template field, with its type, default and choices.
+
+    The form on Trading > EA templates renders from this rather than from a
+    copy of the field list in TypeScript -- a hundred field types maintained
+    in two languages drift the first time one is added to only one of them.
+    """
+    return _templates.field_schema()
 
 
 def get_ea_template(*args, **kwargs):

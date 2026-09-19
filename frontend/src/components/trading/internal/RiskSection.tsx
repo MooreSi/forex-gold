@@ -1,11 +1,17 @@
 import { EmptyState } from "@/components/shared/EmptyState";
+import { useSettingsResource } from "@/components/settings/hooks/useSettingsResource";
+import { SettingsField } from "@/components/settings/internal/SettingsField";
+import { SettingsToggle } from "@/components/settings/internal/SettingsToggle";
 import { RISK_GROUPS, type RiskField } from "../content/risk";
-import { useSettingsResource } from "../hooks/useSettingsResource";
-import { SettingsField } from "../internal/SettingsField";
-import { SettingsToggle } from "../internal/SettingsToggle";
 
 /**
  * The numbers that decide how much money a trade can lose.
+ *
+ * Moved out of Settings on 2026-09-19 at the owner's request. These are not
+ * preferences — they are the sizing and the loss limits the engines read
+ * before every order, and they belong beside the trading they govern rather
+ * than filed with the SMTP host and the theme. The endpoint is unchanged:
+ * `/api/settings/risk` is still where they live.
  *
  * Every field shows what was STORED after a save, not what was typed: the risk
  * service clamps, and a field that kept the operator's number would be telling
@@ -21,7 +27,7 @@ import { SettingsToggle } from "../internal/SettingsToggle";
  * nothing: "I turned it on and it made no difference" is how a setting gets
  * reported as broken.
  */
-export function RiskTab() {
+export function RiskSection() {
   const risk = useSettingsResource<Record<string, unknown>>("/api/settings/risk");
   const data = risk.data;
 

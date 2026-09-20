@@ -260,7 +260,7 @@ def _stop_for(direction: str, zone: dict, evidence: dict, tol: float) -> float:
 
 
 def _parse(raw: str) -> dict:
-    """The model's reply as an object, however it chose to wrap it.
+    r"""The model's reply as an object, however it chose to wrap it.
 
     `services/ai/json_reply` does the reading: same tolerance for a fence and
     for prose either side, but brace-matched rather than `re.search(r"\{.*\}")`,

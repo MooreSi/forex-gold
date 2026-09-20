@@ -111,3 +111,61 @@ describe("a breaker that is switched off", () => {
       .toHaveTextContent("Circuit breaker off");
   });
 });
+
+describe("exporting the logs", () => {
+  /**
+   * The NiceGUI app had an Export Logs button; the React port had nothing, so
+   * the only way to get logs off a machine was to find them on disk.
+   */
+  function serveWithBundle(ok: boolean) {
+    posts = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/log-bundle")) {
+        return {
+          ok, status: ok ? 200 : 500,
+          blob: async () => new Blob(["log text"]),
+          headers: new Headers({
+            "content-disposition": 'attachment; filename="forex_trader_logs_x.txt"',
+            "x-log-lines-kept": "42",
+            "x-log-lines-scanned": "12000",
+            "x-log-truncated": "0",
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ log: [], circuit_breaker: CLEAR }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", {
+      createObjectURL: () => "blob:x", revokeObjectURL: () => {},
+    });
+    return fetchMock;
+  }
+
+  it("offers the button", async () => {
+    serveWithBundle(true);
+    render(<DiagnosticsTab />);
+
+    expect(await screen.findByRole("button", { name: /Export logs/ }))
+      .toBeInTheDocument();
+  });
+
+  it("says how much was kept, so a quiet bundle does not read as a failure", async () => {
+    serveWithBundle(true);
+    render(<DiagnosticsTab />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Export logs/ }));
+
+    const note = await screen.findByTestId("log-export-note");
+    expect(note).toHaveTextContent("42 lines kept of 12000 scanned");
+  });
+
+  it("says so when the export fails, rather than appearing to do nothing", async () => {
+    serveWithBundle(false);
+    render(<DiagnosticsTab />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Export logs/ }));
+
+    expect(await screen.findByTestId("log-export-note"))
+      .toHaveTextContent(/Could not export the logs/);
+  });
+});

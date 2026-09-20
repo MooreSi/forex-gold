@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Download } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/shared/Button";
 import { asArray, asObject } from "@/lib/asArray";
@@ -11,6 +13,47 @@ interface Diagnostics {
 /** The log since this app started, and the circuit breaker. */
 export function DiagnosticsTab() {
   const diag = useSettingsResource<Diagnostics>("/api/settings/diagnostics");
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState("");
+
+  /**
+   * The filtered logs, saved to disk.
+   *
+   * The NiceGUI app mailed this to a hardcoded address; a browser can simply
+   * hand the operator the file. Fetched rather than linked so the failure is
+   * visible here instead of as a blank tab, and so the counts in the response
+   * headers can be reported -- a bundle of 40 lines out of 200,000 scanned is
+   * a normal, quiet machine, and saying so stops it reading as a failure.
+   */
+  async function downloadBundle() {
+    setExporting(true);
+    setExportNote("");
+    try {
+      const res = await fetch("/api/settings/log-bundle?days=5");
+      if (!res.ok) throw new Error(`the server answered ${res.status}`);
+      const blob = await res.blob();
+      const name = /filename="([^"]+)"/.exec(
+        res.headers.get("content-disposition") ?? "")?.[1]
+        ?? "forex_trader_logs.txt";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      const kept = res.headers.get("x-log-lines-kept") ?? "?";
+      const scanned = res.headers.get("x-log-lines-scanned") ?? "?";
+      setExportNote(
+        `Saved ${name} — ${kept} lines kept of ${scanned} scanned`
+        + (res.headers.get("x-log-truncated") === "1" ? ", oldest truncated" : ""),
+      );
+    } catch (e) {
+      setExportNote(`Could not export the logs: ${
+        e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  }
   const reset = useSettingsResource<Record<string, unknown>>(
     "/api/settings/circuit-breaker/reset",
   );
@@ -71,6 +114,21 @@ export function DiagnosticsTab() {
         >
           Reset
         </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="ghost" disabled={exporting} onClick={() => void downloadBundle()}>
+          <Download size={12} className="mr-1 inline" aria-hidden />
+          {exporting ? "Preparing…" : "Export logs"}
+        </Button>
+        <span className="text-[11px] text-ink-3">
+          The last 5 days, with the polling noise and DEBUG lines stripped out.
+        </span>
+        {exportNote && (
+          <span data-testid="log-export-note" className="text-[11px] text-ink-2">
+            {exportNote}
+          </span>
+        )}
       </div>
 
       <div>

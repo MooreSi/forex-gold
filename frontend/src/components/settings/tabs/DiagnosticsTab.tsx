@@ -21,7 +21,30 @@ export function DiagnosticsTab() {
 
   const breaker = asObject(diag.data.circuit_breaker);
   const log = asArray<string[]>(diag.data.log);
-  const tripped = breaker["tripped"] === true;
+
+  // `is_active`, not `tripped`. The endpoint has never returned a `tripped`
+  // key, so this card said "clear" whatever the breaker was doing -- on the
+  // one screen whose job is to say whether orders are being blocked -- and
+  // its Reset button was permanently disabled, in exactly the state it
+  // exists for. The test fixture invented `{tripped, reason}` to match.
+  const enabled = breaker["enabled"] === true;
+  const tripped = breaker["is_active"] === true;
+  const state = tripped ? "tripped" : enabled ? "clear" : "off";
+
+  // Built from the numbers the endpoint gives rather than expecting the
+  // backend to compose a sentence. `remaining_secs` matters: this breaker
+  // clears itself, and "tripped" with no horizon reads as permanent.
+  const losses = Number(breaker["consec_losses"] ?? 0);
+  const threshold = Number(breaker["losses_threshold"] ?? 0);
+  const remaining = Number(breaker["remaining_secs"] ?? 0);
+  const why = tripped
+    ? [
+      losses > 0 ? `${losses} consecutive losses` : `${threshold} consecutive losses`,
+      remaining > 0 ? `clears in ${Math.ceil(remaining / 60)}m` : "",
+    ].filter(Boolean).join(" — ")
+    : enabled
+      ? `after ${threshold} consecutive losses, for ${Number(breaker["cooldown_mins"] ?? 0)}m`
+      : "Switched off in Trading > Risk — nothing is guarding against a losing run.";
 
   return (
     <div className="space-y-3">
@@ -30,12 +53,12 @@ export function DiagnosticsTab() {
         data-tripped={tripped}
         className="flex items-center gap-3 rounded border border-line bg-surface-2 px-3 py-2"
       >
-        <span className={tripped ? "text-xs text-loss" : "text-xs text-profit"}>
-          Circuit breaker {tripped ? "tripped" : "clear"}
+        <span className={
+          tripped ? "text-xs text-loss" : enabled ? "text-xs text-profit" : "text-xs text-ink-3"
+        }>
+          Circuit breaker {state}
         </span>
-        {typeof breaker["reason"] === "string" && breaker["reason"] && (
-          <span className="text-[11px] text-ink-3">{breaker["reason"]}</span>
-        )}
+        {why && <span className="text-[11px] text-ink-3">{why}</span>}
         <Button
           className="ml-auto"
           variant="ghost"

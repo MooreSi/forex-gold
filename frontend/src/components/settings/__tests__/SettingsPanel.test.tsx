@@ -53,7 +53,15 @@ const BODIES: Record<string, unknown> = {
     version: "1.4.2",
     active_trader: "local",
     sync_token_set: true,
-    registration: { approved: true },
+    // The real shape. This said { approved: true }; there is no `approved`
+    // key, so the card told every install it had not been approved.
+    registration: {
+      connected: true, last_error: "", version: "1.4.2", latest_version: "",
+      update_available: false, changelog: [], connected_host: "",
+      subscription_type: "Annual", subscription_expiry: "2027-01-15",
+      email: "simon@example.com", nickname: "", is_remote_admin: false,
+      registration_sent_at: 0,
+    },
     registered_email: "simon@example.com",
     autostart: { supported: true, installed: false, armed: false, check_interval_secs: 300 },
   },
@@ -72,7 +80,15 @@ const BODIES: Record<string, unknown> = {
   "/api/node/sync-token": {},
   "/api/settings/diagnostics": {
     log: [["12:00:01", "Engine started"]],
-    circuit_breaker: { tripped: true, reason: "3 consecutive losses" },
+    // The real shape. This invented `{tripped, reason}`, which the endpoint
+    // has never returned -- so the card's `breaker["tripped"]` was always
+    // undefined and it reported "clear" whatever the breaker was doing.
+    // Corrected 2026-09-20.
+    circuit_breaker: {
+      enabled: true, losses_threshold: 3, cooldown_mins: 60,
+      active_until: 1_789_900_000, consec_losses: 3, is_active: true,
+      remaining_secs: 1_500,
+    },
   },
 };
 
@@ -381,7 +397,13 @@ describe("diagnostics", () => {
   });
 
   it("only offers a reset when there is something to reset", async () => {
-    overrides["/api/settings/diagnostics"] = { log: [], circuit_breaker: { tripped: false } };
+    overrides["/api/settings/diagnostics"] = {
+      log: [],
+      circuit_breaker: {
+        enabled: true, losses_threshold: 3, cooldown_mins: 60,
+        active_until: 0, consec_losses: 0, is_active: false, remaining_secs: 0,
+      },
+    };
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Diagnostics" }));
 

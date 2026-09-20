@@ -21,6 +21,22 @@ interface NodeState {
  * back, so this screen can only say whether one exists — which is the honest
  * thing it knows.
  */
+/**
+ * The expiry line: the date, how long is left, and how alarmed to be.
+ *
+ * A bare date is a number the operator has to do arithmetic on. The day count
+ * is what tells them whether this matters today.
+ */
+function describeExpiry(raw: string): { label: string; tone: string } {
+  if (!raw || raw === "perpetual") return { label: "Never", tone: "text-profit" };
+  const when = Date.parse(`${raw}T00:00:00Z`);
+  if (Number.isNaN(when)) return { label: raw, tone: "text-ink-2" };
+  const days = Math.round((when - Date.now()) / 86_400_000);
+  if (days < 0) return { label: `${raw} — expired`, tone: "text-loss" };
+  if (days <= 30) return { label: `${raw} — ${days} days`, tone: "text-warning" };
+  return { label: `${raw} — ${days} days`, tone: "text-profit" };
+}
+
 export function NodeTab() {
   const node = useSettingsResource<NodeState>("/api/node/state");
   const token = useSettingsResource<{ token: string; note: string }>("/api/node/sync-token");
@@ -33,6 +49,16 @@ export function NodeTab() {
   }
 
   const autostart = asObject(node.data.autostart);
+
+  // ── Licence ──────────────────────────────────────────────────────────────
+  const reg = asObject(node.data.registration);
+  const registered = reg["connected"] === true;
+  const lastError = String(reg["last_error"] ?? "");
+  const licenceEmail = String(reg["email"] ?? "") || node.data.registered_email || "";
+  // A blank subscription is a perpetual one, which is what the NiceGUI page
+  // called it. Showing an empty cell instead reads as "unknown".
+  const subscriptionType = String(reg["subscription_type"] ?? "") || "Perpetual";
+  const expiry = describeExpiry(String(reg["subscription_expiry"] ?? ""));
 
   // `update` is the CHECK result, which is always an object -- the flag is
   // inside it. Treating the object's presence as "an update exists" meant
@@ -89,11 +115,42 @@ export function NodeTab() {
 
       <section>
         <h3 className="text-xs font-semibold text-ink-1">Licence registration</h3>
-        <p className="mt-0.5 text-[11px] text-ink-3">
-          {node.data.registration["approved"] === true
-            ? `Approved${node.data.registered_email ? ` for ${node.data.registered_email}` : ""}.`
-            : "This machine has not been approved yet."}
-        </p>
+        {/* `connected`, not `approved`. The endpoint has never returned an
+            `approved` key, so every install -- registered or not -- was told
+            it had not been approved. The subscription, its expiry and the
+            registered email were on the NiceGUI page and were never ported. */}
+        {registered ? (
+          <>
+            <p className="mt-0.5 text-[11px] text-profit">Authorised and registered.</p>
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-[11px]">
+              <dt className="text-ink-3">Subscription</dt>
+              <dd data-testid="licence-subscription" className="text-ink-1">
+                {subscriptionType}
+              </dd>
+              <dt className="text-ink-3">Expires</dt>
+              <dd data-testid="licence-expiry" className={`num ${expiry.tone}`}>
+                {expiry.label}
+              </dd>
+              {licenceEmail && (
+                <>
+                  <dt className="text-ink-3">Email</dt>
+                  <dd data-testid="licence-email" className="num text-ink-2">
+                    {licenceEmail}
+                  </dd>
+                </>
+              )}
+            </dl>
+          </>
+        ) : (
+          <>
+            <p className="mt-0.5 text-[11px] text-ink-3">
+              This machine has not been approved yet.
+            </p>
+            {lastError && (
+              <p className="mt-0.5 text-[11px] text-warning">Last error: {lastError}</p>
+            )}
+          </>
+        )}
         <div className="mt-2 grid gap-3 sm:grid-cols-3">
           <SettingsField label="Email" value={email} onCommit={setEmail} />
           <SettingsField label="Nickname" value={nickname} onCommit={setNickname} />

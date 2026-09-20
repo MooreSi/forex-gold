@@ -1,5 +1,5 @@
 import { TriangleAlert, CalendarClock } from "lucide-react";
-import { formatBrokerTime } from "@/components/shared/format";
+import { formatUtcTime } from "@/components/shared/format";
 import type { CurrentEvent, NewsEvent } from "@/api/types";
 
 interface NewsBannerProps {
@@ -43,6 +43,9 @@ export function NewsBanner({ current, next }: NewsBannerProps) {
     );
   }
 
+  // No upcoming HIGH-impact release. Deliberately not "no events": low and
+  // medium ones hold nothing, so announcing one under this heading describes
+  // a pause that is never going to happen.
   if (!next) {
     return (
       <div
@@ -71,7 +74,7 @@ export function NewsBanner({ current, next }: NewsBannerProps) {
         </p>
       </div>
       <span className="num ml-auto text-xs text-ink-3">
-        {formatBrokerTime(next.ts + 3 * 60 * 60)}
+        {formatUtcTime(next.ts)}
       </span>
     </div>
   );

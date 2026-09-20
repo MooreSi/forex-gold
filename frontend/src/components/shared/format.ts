@@ -71,6 +71,29 @@ export function formatBrokerTime(epochSeconds: number | null | undefined): strin
   }).format(new Date(asRealInstant));
 }
 
+/**
+ * A real UTC instant, rendered in UTC.
+ *
+ * For timestamps that are genuinely UTC — the economic calendar, Telegram
+ * message stamps — as opposed to MT5's broker stamps, which are UTC+3 encoded
+ * as an epoch and need `formatBrokerTime`.
+ *
+ * The news banner used `formatBrokerTime(ts + 3h)`: the added three hours
+ * cancel that helper's shift, which leaves Europe/London local time. On a page
+ * headed "times in UTC" that is an hour out for eight months of the year, and
+ * plausible enough that nobody notices.
+ */
+export function formatUtcTime(epochSeconds: number | null | undefined): string {
+  if (epochSeconds == null || !Number.isFinite(epochSeconds)) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(epochSeconds * 1000));
+}
+
 /** Clock time for a chart axis or a "last updated" line. */
 export function formatClock(epochSeconds: number | null | undefined): string {
   if (epochSeconds == null || !Number.isFinite(epochSeconds)) return "—";

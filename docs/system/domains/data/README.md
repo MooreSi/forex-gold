@@ -76,6 +76,40 @@ CREATE TABLE pass.
 
 - **The migration steps live in `backend/migrations/steps.py`, not `registry.py` (2026-09-10).** A pure move: the list had reached 661 of registry.py's 800 lines, and the next migration would have crossed the LOC ceiling — a wall every future migration hits rather than a problem with any one of them. `registry.py` keeps the machinery that applies them (`apply_migration`, `run`, the stamp, the critical-schema check) and re-exports `MIGRATIONS`, so `backend.migrations.registry.MIGRATIONS` and every other import path are unchanged. `_rename_gdc_column` moved with the list because it *is* step 1, and leaving it behind would have made the two modules import each other. Adding a migration now means editing `steps.py`; `registry.py` is 120 lines and should stay that way.
 
+## Two clocks land in one `close_time` column (latent, found 2026-09-20)
+
+`vantage_simulated_trades.close_time` is written by two paths that do not
+agree about what a timestamp means:
+
+- `services/trading/close_trade.py` writes `time.time()` — a real UTC instant.
+- `services/broker/history_import.py` writes the MT5 deal's own `time`, which
+  is **broker time (UTC+3) encoded as a UTC epoch**, through
+  `broker_repo.insert_imported_trade`.
+
+Three hours apart, in the same column, with nothing on the row saying which
+kind it is. Anything that reads `close_time` as an instant — the Analysis
+heatmap, the calendar, "when it trades" — would place imported trades three
+hours late.
+
+**It is latent, not active.** Checked against the live demo database on
+2026-09-20: 421 closed trades across seven `exit_reason` values, none of them
+`MT5_import`, so every `close_time` currently in the table is real UTC and
+nothing on screen is wrong today. It becomes real the first time
+`import_mt5_history` runs.
+
+Not fixed here, deliberately. Either writer can be changed, but whichever is
+chosen silently changes the meaning of rows already stored, and the close path
+is frozen. The decision is the owner's: normalise the importer to UTC on the
+way in (and migrate nothing, since there is nothing to migrate yet), or carry
+the broker offset per row.
+
+The same distinction bit the dashboard and was fixed there: `close_ts` (MT5
+deals) uses `formatBrokerTime`, and everything this app stamps itself —
+`created_at`, the analysis log's `ts`, the shadow ledger's `ts`,
+`calibrated_at`, `close_time` — uses the new `formatUtcTime`. Four panels had
+been shifting their own timestamps three hours early.
+
+
 ## Open questions
 
 - None currently flagged. (Cross-engine database consolidation is tracked under the engines domain.)

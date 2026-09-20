@@ -47,7 +47,18 @@ const BODIES: Record<string, unknown> = {
     registered_email: "simon@example.com",
     autostart: { supported: true, installed: false, armed: false, check_interval_secs: 300 },
   },
-  "/api/node/update": { current: "1.4.2", update: null, changes: [] },
+  // The real shape of `GET /api/node/update`. This fixture said
+  // `update: null`, which the endpoint never returns -- it always returns the
+  // check object, with an `available` flag inside it. That mattered: the
+  // component treated the presence of the object as "an update exists", so
+  // against the real backend it always claimed one and always enabled the
+  // destructive Apply button. Corrected 2026-09-20.
+  "/api/node/update": {
+    current: "1.4.2",
+    update: { available: false, local_sha: "aaaaaaa", remote_sha: "aaaaaaa",
+              commits: [], error: null },
+    changes: [], changes_error: "",
+  },
   "/api/node/sync-token": {},
   "/api/settings/diagnostics": {
     log: [["12:00:01", "Engine started"]],
@@ -442,13 +453,57 @@ describe("node and updates", () => {
 
   it("offers to apply one when there is", async () => {
     overrides["/api/node/update"] = {
-      current: "1.4.2", update: { version: "1.5.0" }, changes: ["Ported the News tab"],
+      current: "1.4.2",
+      update: {
+        available: true, local_sha: "aaaaaaa", remote_sha: "bbbbbbbcccc",
+        commits: [{ sha: "bbbbbbbcccc", short_sha: "bbbbbbb",
+                    summary: "Ported the News tab" }],
+        error: null,
+      },
+      changes: ["Ported the News tab"], changes_error: "",
     };
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
 
-    expect(await screen.findByText(/1.5.0 is available/)).toBeInTheDocument();
+    expect(await screen.findByText(/1 newer commit/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Apply the update/ })).toBeEnabled();
+  });
+
+  it("shows what the update changes", async () => {
+    // The summary was fetched by the backend and never rendered.
+    overrides["/api/node/update"] = {
+      current: "1.4.2",
+      update: {
+        available: true, local_sha: "aaaaaaa", remote_sha: "bbbbbbb",
+        commits: [{ sha: "bbbbbbb", short_sha: "bbbbbbb", summary: "raw subject" }],
+        error: null,
+      },
+      changes: ["Faster startup", "Fixes a chart crash"], changes_error: "",
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText("Faster startup")).toBeInTheDocument();
+    expect(screen.getByText("Fixes a chart crash")).toBeInTheDocument();
+  });
+
+  it("falls back to the raw commit subjects when there is no summary", async () => {
+    // A summary is a nicety, never a precondition -- an operator with no AI
+    // provider still needs to see what they are about to install.
+    overrides["/api/node/update"] = {
+      current: "1.4.2",
+      update: {
+        available: true, local_sha: "aaaaaaa", remote_sha: "bbbbbbb",
+        commits: [{ sha: "bbbbbbb", short_sha: "bbbbbbb",
+                    summary: "Fix the chart crash" }],
+        error: null,
+      },
+      changes: [], changes_error: "no AI provider configured (Settings > AI)",
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
+
+    expect(await screen.findByText("Fix the chart crash")).toBeInTheDocument();
   });
 
   it("says when autostart is not supported rather than offering a dead switch", async () => {

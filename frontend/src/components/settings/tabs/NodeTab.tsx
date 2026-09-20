@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { asObject } from "@/lib/asArray";
+import { asArray, asObject } from "@/lib/asArray";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { SettingsField } from "../internal/SettingsField";
 
@@ -33,7 +33,25 @@ export function NodeTab() {
   }
 
   const autostart = asObject(node.data.autostart);
-  const available = asObject(update.data)["update"];
+
+  // `update` is the CHECK result, which is always an object -- the flag is
+  // inside it. Treating the object's presence as "an update exists" meant
+  // this screen claimed one on every install and left the Apply button
+  // enabled, and Apply force-checks-out origin and discards local changes.
+  // The test fixture said `update: null`, a shape the endpoint never
+  // returns, so both tests agreed with the bug. Fixed 2026-09-20.
+  const check = asObject(asObject(update.data)["update"]);
+  const available = check["available"] === true;
+  const commits = asArray<Record<string, unknown>>(check["commits"]);
+  // The AI summary when there is one, the raw commit subjects when there is
+  // not. A summary costs a paid model call and can fail for reasons that have
+  // nothing to do with the release -- and an operator still needs to see what
+  // they are about to install.
+  const summary = asArray<string>(asObject(update.data)["changes"]);
+  const lines = summary.length > 0
+    ? summary
+    : commits.map((c) => String(c["summary"] ?? "")).filter(Boolean);
+  const checkError = String(check["error"] ?? "");
 
   return (
     <div className="space-y-5">
@@ -118,11 +136,20 @@ export function NodeTab() {
         <p className="mt-0.5 text-[11px] text-ink-3">
           Running <span className="num">{node.data.version}</span>
           {available
-            ? ` — ${String(asObject(available)["version"] ?? "a newer release")} is available.`
+            ? ` — ${commits.length} newer commit${commits.length === 1 ? "" : "s"}`
+              + ` available (${String(check["remote_sha"] ?? "").slice(0, 7)}).`
             : update.data
               ? " — up to date."
               : ""}
         </p>
+        {checkError && (
+          <p className="mt-0.5 text-[11px] text-warning">{checkError}</p>
+        )}
+        {available && lines.length > 0 && (
+          <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] text-ink-2">
+            {lines.map((line, i) => <li key={i}>{line}</li>)}
+          </ul>
+        )}
         <div className="mt-2 flex items-center gap-2">
           <Button variant="ghost" onClick={() => void update.reload()}>
             Check for updates

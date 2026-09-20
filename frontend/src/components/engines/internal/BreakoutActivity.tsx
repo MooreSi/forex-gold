@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { formatBrokerTime, formatMoney, pnlColour } from "@/components/shared/format";
+import { formatMoney, formatUtcTime, pnlColour } from "@/components/shared/format";
 import { asArray, asObject } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 
@@ -69,7 +69,7 @@ export function BreakoutActivity({ signals, log, params }: {
                   data-testid={`bo-signal-${r["id"] ?? i}`}
                   className="border-t border-line">
                   <td className="py-1 text-ink-3">
-                    {formatBrokerTime(num(r["created_at"]))}
+                    {formatUtcTime(num(r["created_at"]))}
                   </td>
                   <td className={cn("py-1",
                     r["direction"] === "BUY" ? "text-profit" : "text-loss")}>
@@ -93,7 +93,7 @@ export function BreakoutActivity({ signals, log, params }: {
             <li key={String(e["id"] ?? i)} data-testid={`bo-log-${e["id"] ?? i}`}
               className="flex gap-2 border-t border-line pt-1 first:border-0 first:pt-0">
               <span className="num shrink-0 text-[10px] text-ink-3">
-                {formatBrokerTime(num(e["ts"]))}
+                {formatUtcTime(num(e["ts"]))}
               </span>
               <span className="text-[11px] text-ink-2">
                 {/* The reason, not the verdict. "suppressed" on its own is

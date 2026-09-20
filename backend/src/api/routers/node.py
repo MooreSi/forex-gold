@@ -164,12 +164,39 @@ async def set_autostart(body: AutostartWrite) -> dict:
 
 @router.get("/update")
 async def update_status() -> dict:
-    """Is there a newer release, and what changed in it."""
-    available = await system_ctl.check_for_update()
+    """Is there a newer release, and what changed in it.
+
+    This answered 500 on every call where an update was actually available --
+    the only time it is asked to do anything. `summarise_changes` was handed
+    the whole check dict as its first positional argument (it takes
+    `local_sha, remote_sha`), was never awaited, and returns `(bullets,
+    error)` where a list of lines was expected. Behind `if available`, so an
+    install that was up to date never reached it. Fixed 2026-09-20.
+
+    **The summary is a nicety, never a precondition for updating** -- the
+    service says so in its own docstring. It costs a paid model call and can
+    fail for reasons that have nothing to do with the release, so a failure
+    here reports the update anyway, hands back the reason, and leaves the raw
+    commit subjects in `update.commits` for the screen to fall back on.
+    """
+    check = await system_ctl.check_for_update()
+    changes: list[str] = []
+    changes_error = ""
+
+    if check.get("available"):
+        try:
+            changes, changes_error = await system_ctl.summarise_changes(
+                check.get("local_sha", ""), check.get("remote_sha", ""),
+            )
+        except Exception as exc:
+            log.debug("[Update] change summary failed: %s", exc)
+            changes, changes_error = [], f"{type(exc).__name__}: {exc}"[:200]
+
     return {
         "current": system_ctl.app_version(),
-        "update": available,
-        "changes": system_ctl.summarise_changes(available) if available else [],
+        "update": check,
+        "changes": list(changes),
+        "changes_error": changes_error,
     }
 
 

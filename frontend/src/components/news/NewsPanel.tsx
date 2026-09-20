@@ -3,10 +3,23 @@ import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { asObject } from "@/lib/asArray";
+import type { NewsEvent } from "@/api/types";
 import { useNewsController } from "./hooks/useNewsController";
 import { BlackoutSection } from "./internal/BlackoutSection";
 import { EventsSection } from "./internal/EventsSection";
 import { NewsBanner } from "./internal/NewsBanner";
+
+/**
+ * The next release the blackout would actually hold entries for.
+ *
+ * `events[0]` was used, which is simply the next row on the calendar whatever
+ * its impact. On the running app that put a bank holiday and a LOW-impact
+ * house-price index under the words "Next high impact" — neither of which
+ * holds an entry.
+ */
+function nextHighImpact(events: NewsEvent[]): NewsEvent | undefined {
+  return events.find((e) => String(e.impact ?? "").toLowerCase() === "high");
+}
 
 export function NewsPanel() {
   const c = useNewsController();
@@ -52,7 +65,7 @@ export function NewsPanel() {
         />
       ) : (
         <div className="space-y-4">
-          <NewsBanner current={data.current} next={c.events[0]} />
+          <NewsBanner current={data.current} next={nextHighImpact(c.events)} />
           <BlackoutSection settings={asObject(data.blackout)} onSave={c.saveBlackout} />
           <EventsSection events={c.events} />
         </div>

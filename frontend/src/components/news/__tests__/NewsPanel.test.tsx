@@ -74,6 +74,47 @@ describe("the banner", () => {
     const banner = await screen.findByTestId("news-banner");
     expect(banner).toHaveAttribute("data-state", "clear");
   });
+
+  it("names the next HIGH impact release, not simply the next row", async () => {
+    // The banner took events[0] whatever it was. On the running app that
+    // made it announce a bank holiday and a LOW-impact house-price index
+    // under the words "Next high impact" — and those hold no entries at
+    // all, so it described a pause that was never going to happen.
+    serve(state({
+      events: [
+        event({ title: "Bank Holiday", impact: "holiday", ts: NOW + HOUR }),
+        event({ title: "Rightmove HPI m/m", impact: "low", ts: NOW + 2 * HOUR }),
+        event({ title: "US Non-Farm Payrolls", impact: "high", ts: NOW + 3 * HOUR }),
+      ],
+    }));
+    render(<NewsPanel />);
+
+    const banner = await screen.findByTestId("news-banner");
+    expect(banner).toHaveTextContent("US Non-Farm Payrolls");
+    expect(banner).not.toHaveTextContent("Rightmove");
+  });
+
+  it("gives the time in UTC, which is what the page says it shows", async () => {
+    // It formatted with formatBrokerTime(ts + 3h) — the +3h cancels that
+    // helper's broker-time shift, leaving Europe/London local time on a
+    // page headed "times in UTC". In BST that is an hour out, and an hour
+    // is the difference between being at the desk for a release and not.
+    render(<NewsPanel />);
+
+    const banner = await screen.findByTestId("news-banner");
+    expect(banner).toHaveTextContent("15 Jun, 16:06");
+    expect(banner).not.toHaveTextContent("17:06");
+  });
+
+  it("says the week is clear when only low-impact events remain", async () => {
+    serve(state({
+      events: [event({ title: "Rightmove HPI m/m", impact: "low" })],
+    }));
+    render(<NewsPanel />);
+
+    const banner = await screen.findByTestId("news-banner");
+    expect(banner).toHaveAttribute("data-state", "clear");
+  });
 });
 
 describe("the event list", () => {

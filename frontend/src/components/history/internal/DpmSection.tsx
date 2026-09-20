@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { formatBrokerTime, formatMoney, pnlColour } from "@/components/shared/format";
+import { formatUtcTime, formatMoney, pnlColour } from "@/components/shared/format";
 import { usePoll } from "@/hooks/usePoll";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
@@ -93,7 +93,7 @@ export function DpmSection() {
             {runs.map((r, i) => (
               <tr key={String(r["calibrated_at"] ?? i)} className="border-t border-line">
                 <td className="px-2 py-1 text-ink-3">
-                  {formatBrokerTime(num(r["calibrated_at"]))}
+                  {formatUtcTime(num(r["calibrated_at"]))}
                 </td>
                 <td className="px-2 py-1 text-ink-2">{String(r["buckets"] ?? "—")}</td>
                 {/* Beside every average, because a mean over four trades is
@@ -153,7 +153,7 @@ export function DpmSection() {
                   data-testid={`dpm-trade-${t["trade_id"] ?? i}`}
                   className="border-t border-line">
                   <td className="px-2 py-1 text-ink-3">
-                    {formatBrokerTime(num(t["close_time"]))}
+                    {formatUtcTime(num(t["close_time"]))}
                   </td>
                   <td className={cn("px-2 py-1",
                     t["direction"] === "BUY" ? "text-profit" : "text-loss")}>

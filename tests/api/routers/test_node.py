@@ -31,8 +31,25 @@ def node(monkeypatch, sentinel_engine):
         "registration": {"approved": True, "machine_id": "abc123"},
         "email": "simon@example.com",
         "autostart": {"supported": True, "installed": False, "armed": False},
-        "update": {"version": "1.5.0"},
+        # The real shape of `check_for_update`. This said {"version": "1.5.0"},
+        # which that function never returns -- and the `summarise_changes`
+        # stub below was a SYNC one-argument lambda, which it never was
+        # either. Between them the handler could call an async two-argument
+        # function with one positional dict, never await it, and unpack its
+        # tuple as a list, and every test here stayed green. It 500'd on the
+        # running app for any install with an update pending. Corrected
+        # 2026-09-20.
+        "update": {
+            "available": True, "local_sha": "aaaaaaa", "remote_sha": "bbbbbbb",
+            "commits": [{"sha": "bbbbbbb", "short_sha": "bbbbbbb",
+                         "summary": "Ported the News tab"}],
+            "error": None,
+        },
         "writes": [],
+        # Kept out of `writes`: that list is what
+        # `test_checking_for_an_update_never_applies_one` asserts is empty,
+        # and a summary is a read, not a write.
+        "summaries": [],
         "handover": [],
         "refuse": "",
     }
@@ -55,8 +72,11 @@ def node(monkeypatch, sentinel_engine):
     monkeypatch.setattr(node_router.system_ctl, "app_version", lambda: "1.4.2")
     monkeypatch.setattr(node_router.system_ctl, "check_for_update", _check)
     monkeypatch.setattr(node_router.system_ctl, "apply_update", _apply)
-    monkeypatch.setattr(node_router.system_ctl, "summarise_changes",
-                        lambda u: ["Ported the News tab"])
+    async def _summarise(local_sha, remote_sha, *a, **kw):
+        state["summaries"].append((local_sha, remote_sha))
+        return ["Ported the News tab"], ""
+
+    monkeypatch.setattr(node_router.system_ctl, "summarise_changes", _summarise)
     monkeypatch.setattr(node_router.system_ctl, "autostart_is_supported",
                         lambda: state["autostart"]["supported"])
     monkeypatch.setattr(node_router.system_ctl, "autostart_is_installed",
@@ -242,19 +262,22 @@ def test_the_update_check_reports_the_running_version_beside_the_new_one(
     body = make_client().get("/api/node/update").json()
 
     assert body["current"] == "1.4.2"
-    assert body["update"]["version"] == "1.5.0"
+    assert body["update"]["available"] is True
+    assert body["update"]["remote_sha"] == "bbbbbbb"
     assert body["changes"] == ["Ported the News tab"]
 
 
 def test_no_update_available_lists_no_changes(make_client, node):
-    """Negative control: summarising `None` would render a changelog for a
-    release that does not exist."""
-    node["update"] = None
+    """Negative control: summarising costs a paid model call, and an install
+    that is up to date has nothing to summarise."""
+    node["update"] = {"available": False, "local_sha": "aaaaaaa",
+                      "remote_sha": "aaaaaaa", "commits": [], "error": None}
 
     body = make_client().get("/api/node/update").json()
 
-    assert body["update"] is None
+    assert body["update"]["available"] is False
     assert body["changes"] == []
+    assert node["summaries"] == []
 
 
 def test_checking_for_an_update_never_applies_one(make_client, node):

@@ -1,5 +1,5 @@
 import { EmptyState } from "@/components/shared/EmptyState";
-import { formatBrokerTime, formatMoney, pnlColour } from "@/components/shared/format";
+import { formatMoney, formatUtcTime, pnlColour } from "@/components/shared/format";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 
@@ -159,7 +159,7 @@ export function ShadowSection({ shadow, history, realised, edge }: {
                     <tr key={`${d.signal_ref}-${d.variant}-${i}`}
                       data-testid={`decision-${d.signal_ref}-${d.variant}`}
                       className="border-t border-line">
-                      <td className="px-2 py-1 text-ink-3">{formatBrokerTime(d.ts)}</td>
+                      <td className="px-2 py-1 text-ink-3">{formatUtcTime(d.ts)}</td>
                       <td className="px-2 py-1 text-ink-2">{d.variant}</td>
                       <td className={cn("px-2 py-1", took ? "text-profit" : "text-ink-3")}>
                         {took ? "took" : "skipped"}

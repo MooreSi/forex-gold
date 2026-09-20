@@ -209,6 +209,10 @@ def build(directory=None, days: int = DEFAULT_DAYS, *,
 
     raw_total = 0
     kept: list[str] = []
+    # Whether the record currently being read is one to keep. Continuation
+    # lines follow their header's decision. True to begin with, so a file that
+    # starts mid-record does not silently lose its first lines.
+    keeping = True
     for path in _log_files(directory):
         try:
             with path.open("r", encoding="utf-8", errors="replace") as fh:
@@ -218,12 +222,28 @@ def build(directory=None, days: int = DEFAULT_DAYS, *,
                         continue
                     raw_total += 1
                     ts = _line_ts(stripped)
-                    # A continuation line (a stack trace) has no timestamp of
-                    # its own. Dropping those keeps the word "Traceback" and
-                    # throws away the trace.
-                    if ts is not None and ts < cutoff:
+                    if ts is None:
+                        # A continuation line -- a stack trace, or the body of
+                        # a multi-line report. It has no timestamp and no level
+                        # of its own, so it belongs to whatever record last
+                        # decided. Judging these individually kept the BODY of
+                        # every dropped DEBUG record: the reconciliation pass
+                        # logs its full report at DEBUG once the throttle has
+                        # quietened it, and that alone put 13,918 lines into a
+                        # real 5-day export, reading as 13,918 unresolved
+                        # problems where there had been ten warnings.
+                        #
+                        # Before any header at all (a rotated file can begin
+                        # mid-record) the line is kept: it is one line, and it
+                        # might be the interesting one.
+                        if keeping:
+                            kept.append(stripped)
                         continue
-                    if _keep(stripped):
+                    if ts < cutoff:
+                        keeping = False
+                        continue
+                    keeping = _keep(stripped)
+                    if keeping:
                         kept.append(stripped)
         except OSError as exc:
             log.debug("[LogBundle] skipping %s: %s", path, exc)

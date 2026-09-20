@@ -344,3 +344,76 @@ class TestABurstOfNearlyIdenticalLines:
         out = log_bundle.build(tmp_path, now=_NOW)
 
         assert "the thing that actually broke" in out["text"]
+
+
+class TestAMultiLineRecordIsDroppedWhole:
+    """The filter's own blind spot, measured on a real export.
+
+    A log record can span many lines: only the first carries the timestamp and
+    the level. Deciding per LINE meant a DEBUG record lost its header and kept
+    its body -- and the reconciliation pass logs its full report at DEBUG every
+    few seconds once the throttle has quietened it. That put 13,918
+    continuation lines into a 5-day export, which read as 13,918 unresolved
+    reconciliation problems. There were ten warnings in that whole window.
+
+    A continuation line is one with no timestamp of its own, so it belongs to
+    whatever record last made a decision.
+    """
+
+    def test_the_body_of_a_debug_record_goes_with_its_header(self, tmp_path):
+        _write(tmp_path, "forex_trader.log", [
+            f"{_stamp(0.1)} DEBUG backend — [reconcile] unchanged: differences:",
+            "  db_only_no_evidence: 1",
+            "    trade=be1aea4e signal=- ticket=- — open in the database",
+        ])
+
+        out = log_bundle.build(tmp_path, now=_NOW)
+
+        assert "db_only_no_evidence" not in out["text"]
+        assert "be1aea4e" not in out["text"]
+
+    def test_the_body_of_a_kept_record_still_survives(self, tmp_path):
+        _write(tmp_path, "forex_trader.log", [
+            f"{_stamp(0.1)} WARNING backend — [reconcile] found differences:",
+            "  db_only_no_evidence: 1",
+            "    trade=be1aea4e signal=- ticket=- — open in the database",
+        ])
+
+        out = log_bundle.build(tmp_path, now=_NOW)
+
+        assert "db_only_no_evidence" in out["text"]
+        assert "be1aea4e" in out["text"]
+
+    def test_a_traceback_under_an_error_still_survives(self, tmp_path):
+        _write(tmp_path, "forex_trader.log", [
+            f"{_stamp(0.1)} ERROR backend — boom",
+            "Traceback (most recent call last):",
+            '  File "x.py", line 1, in <module>',
+        ])
+
+        out = log_bundle.build(tmp_path, now=_NOW)
+
+        assert "Traceback (most recent call last):" in out["text"]
+
+    def test_the_body_of_a_dropped_poll_line_goes_too(self, tmp_path):
+        _write(tmp_path, "forex_trader.log", [
+            f'{_stamp(0.1)} INFO httpx — HTTP Request: GET '
+            f'http://localhost:9010/health "HTTP/1.0 200 OK"',
+            "  some continuation nobody needs",
+        ])
+
+        out = log_bundle.build(tmp_path, now=_NOW)
+
+        assert "some continuation" not in out["text"]
+
+    def test_a_continuation_before_any_header_is_kept(self, tmp_path):
+        """A rotated file can begin mid-record. Keeping it is the safe
+        default -- it is one line, and it might be the interesting one."""
+        _write(tmp_path, "forex_trader.log", [
+            "  orphaned continuation at the top of a rotated file",
+            f"{_stamp(0.1)} ERROR backend — boom",
+        ])
+
+        out = log_bundle.build(tmp_path, now=_NOW)
+
+        assert "orphaned continuation" in out["text"]

@@ -144,6 +144,28 @@ allowed to call.
   is a reason, and the `nicegui` import moved below the `allow_register`
   branch (that branch never used it).
 
+## The log file is shared by both checkouts (2026-09-20)
+
+`~/Forex-Update` and `~/Forex-React` share one `USER_DATA_DIR` (rules/80), and
+that includes `forex_trader.log`. Both apps append to the same file, so a
+5-day export off this machine carries 1,494 lines naming `Forex-Update`
+paths and 2,297 naming `Forex-React`, including NiceGUI's own stack traces.
+
+Not filtered, deliberately: they are the same user, the same machine and the
+same database, and a support bundle that hid half the machine's behaviour
+would be worse. But it is why a line in an export can name a file that does
+not exist in this checkout, and why "this app logged X" cannot be concluded
+from the log alone -- check the module path.
+
+It also cost a wrong diagnosis on the day it was found: ~14,000 lines
+reporting two trades as "open in the database, and the broker has no record
+of it" looked like a live reconciliation failure in this app. It was not.
+The reconciliation throttle was working correctly -- ten WARNINGs in five
+days -- and the rest were the BODY of its throttled DEBUG reports, kept by a
+log filter that judged lines individually instead of records. See
+`services/diagnostics/log_bundle.py`.
+
+
 ## Open questions
 
 - `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).

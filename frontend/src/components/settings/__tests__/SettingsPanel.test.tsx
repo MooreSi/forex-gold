@@ -22,7 +22,17 @@ const BODIES: Record<string, unknown> = {
   },
   "/api/notifications/test-email": { sent: true, to: "me@example.com" },
   "/api/notifications/test-telegram": { sent: true },
-  "/api/settings/expert-params": { re_min_adx: { value: 22, default: 20 } },
+  // The real catalogue shape: group name -> list of parameter rows. This
+  // fixture was `{ re_min_adx: { value: 22, default: 20 } }`, which the
+  // endpoint has never returned, and the tab read it the same invented way --
+  // so on the running app it showed four empty boxes named after the GROUPS
+  // and hid every actual tunable. Corrected 2026-09-20.
+  "/api/settings/expert-params": {
+    "Risk filters": [
+      { key: "re_min_adx", label: "Minimum ADX", value: 22, default: 20,
+        min: 5, max: 60, unit: "", desc: "Below this the trend is too weak." },
+    ],
+  },
   "/api/ai/settings": {
     provider: "claude", providers: ["claude", "deepseek"],
     claude_model: "claude-sonnet-4-6", deepseek_model: "",
@@ -329,24 +339,34 @@ describe("connections", () => {
 
 describe("expert tunables", () => {
   it("renders whatever the catalogue lists, with no per-parameter code", async () => {
-    // `/add-tunable` exists so a new tunable appears here on its own.
+    // `/add-tunable` exists so a new tunable appears here on its own -- in
+    // whatever group the catalogue puts it, including a brand new group.
     overrides["/api/settings/expert-params"] = {
-      re_min_adx: { value: 22, default: 20 },
-      a_brand_new_tunable: { value: 7, default: 5 },
+      "Risk filters": [
+        { key: "re_min_adx", label: "Minimum ADX", value: 22, default: 20,
+          min: 5, max: 60, unit: "", desc: "" },
+      ],
+      "A brand new group": [
+        { key: "a_brand_new_tunable", label: "A brand new tunable", value: 7,
+          default: 5, min: 1, max: 9, unit: "", desc: "" },
+      ],
     };
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Expert tunables" }));
 
     expect(await screen.findByTestId("tunable-re_min_adx")).toBeInTheDocument();
     expect(screen.getByTestId("tunable-a_brand_new_tunable")).toBeInTheDocument();
-    expect(screen.getByLabelText("a_brand_new_tunable")).toHaveValue("7");
+    expect(screen.getByLabelText("A brand new tunable")).toHaveValue("7");
+    expect(screen.getByRole("heading", { name: "A brand new group" }))
+      .toBeInTheDocument();
   });
 
   it("shows each parameter's default", async () => {
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Expert tunables" }));
 
-    expect(await screen.findByText("default 20")).toBeInTheDocument();
+    expect(await screen.findByTestId("tunable-hint-re_min_adx"))
+      .toHaveTextContent("default 20");
   });
 });
 

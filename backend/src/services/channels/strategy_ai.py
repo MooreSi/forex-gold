@@ -133,6 +133,7 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
 
     Returns {source: {strategy, reasoning, confidence}}.
     """
+    from backend.src.services.ai import json_reply
     from backend.src.services.ai import provider as ai_provider
     from backend.src.db import database as _db
     from backend.src.utils.models import STRATEGY_NAMES
@@ -451,12 +452,7 @@ configuration with negative expectancy."""
 
     try:
         raw = await ai_provider.complete(cfg, "", prompt, max_tokens=1024, timeout=30)
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        data = json.loads(raw)
+        data = json_reply.parse_json_object(raw, "channel_strategy_ai")
         for src, rec in data.items():
             strategy   = rec.get("strategy", rule_regime)
             reasoning  = (rec.get("reasoning") or "")[:200]
@@ -539,6 +535,7 @@ async def evaluate_signal_strategy(
     Returns {strategy, reasoning, confidence, skip}.
     skip=True means the AI recommends not trading this specific signal.
     """
+    from backend.src.services.ai import json_reply
     from backend.src.services.ai import provider as ai_provider
     from backend.src.db import database as _db
     from backend.src.utils.models import STRATEGY_NAMES
@@ -603,12 +600,7 @@ Respond ONLY with JSON, no prose:
         # user's configured model — now uses whichever provider/model is
         # selected in Settings > AI, like every other AI call in the app.
         raw = await ai_provider.complete(cfg, "", prompt, max_tokens=256, timeout=20)
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        data       = json.loads(raw)
+        data       = json_reply.parse_json_object(raw, "evaluate_signal_strategy")
         strategy   = data.get("strategy") or current_rec.get("strategy") or "conservative"
         reasoning  = (data.get("reasoning") or "")[:200]
         confidence = float(data.get("confidence", 0.6))

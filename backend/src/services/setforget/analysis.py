@@ -260,21 +260,15 @@ def _stop_for(direction: str, zone: dict, evidence: dict, tol: float) -> float:
 
 
 def _parse(raw: str) -> dict:
-    """The model's reply as an object, however it chose to wrap it."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # A model that wrote a sentence before its JSON still answered. The
-        # object is what matters; the apology around it is not.
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            raise
-        return json.loads(match.group(0))
+    """The model's reply as an object, however it chose to wrap it.
 
+    `services/ai/json_reply` does the reading: same tolerance for a fence and
+    for prose either side, but brace-matched rather than `re.search(r"\{.*\}")`,
+    which is greedy and swallowed any trailing `}` in the apology after the
+    object.
+    """
+    from backend.src.services.ai import json_reply
+    return json_reply.parse_json_object(raw, "setforget_analysis")
 
 def _review_levels(reply: dict, candidate: dict, price: float,
                    tol: float) -> tuple[Optional[dict], list[str]]:

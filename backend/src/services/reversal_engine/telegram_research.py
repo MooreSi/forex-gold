@@ -128,16 +128,19 @@ def _build_prompt(messages: list[dict]) -> str:
 
 
 def _parse_ai_json(raw: str) -> Optional[dict]:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        if raw.startswith("json"):
-            raw = raw[4:]
+    """The model's reply as an object, or None.
+
+    Keeps the None contract its callers are written for; the reading itself
+    is `services/ai/json_reply`, which handles the wrappers this used to get
+    wrong (`raw.strip("`")` also ate backticks that were part of the content,
+    and a fence tagged anything but lowercase `json` left its tag behind).
+    """
+    from backend.src.services.ai import json_reply
     try:
-        data = json.loads(raw)
-    except Exception:
+        return json_reply.parse_json_object(raw, "telegram_research")
+    except ValueError as exc:
+        _log.debug("[Research] %s", exc)
         return None
-    return data if isinstance(data, dict) else None
 
 
 def _clamp01(v, default: float = 0.5) -> float:

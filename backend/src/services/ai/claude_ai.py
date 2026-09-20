@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from backend.src.config import is_debug as _is_debug
+from backend.src.services.ai import json_reply
 from backend.src.services.ai import provider as ai_provider
 from backend.src.services.ai import provider
 from backend.src.services.positions import core_strategy_catalogue as strategy_catalogue
@@ -94,12 +95,7 @@ async def request_commentary(
 
     try:
         raw = await ai_provider.complete(cfg, _SYSTEM, prompt, max_tokens=800, timeout=timeout)
-        if raw.startswith("```"):
-            lines = raw.splitlines()
-            raw = "\n".join(lines[1:])
-            if raw.endswith("```"):
-                raw = raw[:-3].strip()
-        data = json.loads(raw)
+        data = json_reply.parse_json_object(raw, "ai_commentary")
         data["commentary_type"] = event_type
         return data
     except ai_provider.TruncatedResponseError:
@@ -417,12 +413,7 @@ async def request_market_analysis(
 
     try:
         raw = await ai_provider.complete(cfg, _MARKET_SYSTEM, prompt, max_tokens=2000, timeout=timeout)
-        if raw.startswith("```"):
-            lines = raw.splitlines()
-            raw = "\n".join(lines[1:])
-            if raw.endswith("```"):
-                raw = raw[:-3].strip()
-        data = json.loads(raw)
+        data = json_reply.parse_json_object(raw, "market_analysis")
         # The model is free-typing a key, and templates arrive named rather
         # than keyed often enough to be worth normalising ("Sniper" ->
         # "template:Sniper"). A key that matches nothing at all is dropped to

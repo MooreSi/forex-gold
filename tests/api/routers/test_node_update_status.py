@@ -132,3 +132,37 @@ class TestASummaryIsNeverAPrecondition:
         body = make_client().get("/api/node/update").json()
 
         assert body["update"]["commits"][0]["summary"] == "Fix the thing"
+
+
+class TestTheSummaryCanBeSkipped:
+    """Summarising costs a paid model call, and two callers do not want one.
+
+    The header's popup asks for the summary once, when it is opened. The
+    Node & Updates screen's "Check for Updates" button, and anything polling
+    to keep a badge honest, only need to know whether there is an update --
+    paying a model call for each of those is money spent on text nobody
+    asked to see.
+    """
+
+    def test_the_check_still_answers_without_a_summary(self, make_client, lab):
+        body = make_client().get("/api/node/update?include_summary=false").json()
+
+        assert body["update"]["available"] is True
+
+    def test_no_model_call_is_made(self, make_client, lab):
+        make_client().get("/api/node/update?include_summary=false")
+
+        assert lab["calls"] == []
+
+    def test_the_commit_subjects_still_come_back(self, make_client, lab):
+        """They are what the screen lists when there is no summary, and they
+        cost nothing -- they were already in the check."""
+        body = make_client().get("/api/node/update?include_summary=false").json()
+
+        assert body["update"]["commits"][0]["summary"] == "Fix the thing"
+
+    def test_asking_for_it_is_still_the_default(self, make_client, lab):
+        """The popup does not pass the flag, and must still get its summary."""
+        body = make_client().get("/api/node/update").json()
+
+        assert body["changes"] == ["Faster startup", "Fixes a chart crash"]

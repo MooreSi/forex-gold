@@ -60,6 +60,7 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
     ea_ok, scope = broker_ctl.get_effective_ea_status()
     stale, stale_detail = broker_ctl.ea_build_status()
     colour, text, tooltip = broker_ctl.ea_badge_state(ea_ok, stale, scope, stale_detail)
+    update_check = system_ctl.cached_update_check()
     return {
         "account": account,
         "bridge": health,
@@ -79,4 +80,14 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
         # it in a second language.
         "ea_badge": {"colour": colour, "text": text, "tooltip": tooltip,
                      "stale": stale, "scope": scope},
+        # The header's UPDATE AVAILABLE badge. From the CACHED check, never a
+        # live one: `check_for_update` runs `git fetch`, and this endpoint is
+        # polled every five seconds. Only the two facts the badge renders --
+        # whether there is one and how many commits it is -- travel here; the
+        # detail is fetched once, when the operator opens the popup.
+        "update": {
+            "available": update_check.get("available") is True,
+            "commits": len(update_check.get("commits") or []),
+            "remote_sha": str(update_check.get("remote_sha") or ""),
+        },
     }

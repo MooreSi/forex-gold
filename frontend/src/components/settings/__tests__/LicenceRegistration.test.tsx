@@ -15,6 +15,7 @@
  * were never ported.
  */
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NodeTab } from "../tabs/NodeTab";
 
@@ -106,5 +107,54 @@ describe("a registered machine", () => {
 
     expect(await screen.findByTestId("licence-email"))
       .toHaveTextContent("simon@example.com");
+  });
+});
+
+describe("the sync token", () => {
+  /**
+   * `POST /api/node/sync-token` generates a token and returns it once.
+   * There is no GET: reading a stored token back is exactly what the
+   * endpoint refuses to do. The tab nevertheless fetched it on mount —
+   * `useSettingsResource` GETs its path as soon as it is used — so every
+   * visit to Node & updates fired a request that answered 405. Seen in the
+   * browser console against the running app, 2026-09-20.
+   */
+  it("does not fetch a token the endpoint will not return", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      const body = String(url).includes("/api/node/state")
+        ? { ...BASE, registration: BASE.registration }
+        : String(url).includes("/api/node/update")
+          ? { current: "0.5", update: { available: false, commits: [] }, changes: [] }
+          : {};
+      return { ok: true, status: 200, json: async () => body };
+    }));
+    render(<NodeTab />);
+    await screen.findByText(/not been approved yet/);
+
+    expect(calls).not.toContain("GET /api/node/sync-token");
+  });
+
+  it("still shows a token once one is generated", async () => {
+    // The one moment it is ever readable.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/api/node/sync-token")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ token: "brand-new-token", note: "Copy this now." }),
+        };
+      }
+      const body = String(url).includes("/api/node/state")
+        ? { ...BASE, registration: BASE.registration }
+        : { current: "0.5", update: { available: false, commits: [] }, changes: [] };
+      return { ok: true, status: 200, json: async () => body };
+    }));
+    render(<NodeTab />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Generate a new token/ }));
+
+    expect(await screen.findByTestId("new-sync-token"))
+      .toHaveTextContent("brand-new-token");
   });
 });

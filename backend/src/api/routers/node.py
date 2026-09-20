@@ -163,7 +163,7 @@ async def set_autostart(body: AutostartWrite) -> dict:
 
 
 @router.get("/update")
-async def update_status() -> dict:
+async def update_status(include_summary: bool = True) -> dict:
     """Is there a newer release, and what changed in it.
 
     This answered 500 on every call where an update was actually available --
@@ -178,12 +178,17 @@ async def update_status() -> dict:
     fail for reasons that have nothing to do with the release, so a failure
     here reports the update anyway, hands back the reason, and leaves the raw
     commit subjects in `update.commits` for the screen to fall back on.
+
+    `include_summary=false` asks for the check alone. The Node & Updates
+    screen's Check button and anything keeping a badge honest only need to
+    know whether there IS an update; only the popup that shows the operator
+    what they are about to install is worth a model call.
     """
     check = await system_ctl.check_for_update()
     changes: list[str] = []
     changes_error = ""
 
-    if check.get("available"):
+    if check.get("available") and include_summary:
         try:
             changes, changes_error = await system_ctl.summarise_changes(
                 check.get("local_sha", ""), check.get("remote_sha", ""),
@@ -194,6 +199,11 @@ async def update_status() -> dict:
 
     return {
         "current": system_ctl.app_version(),
+        # Which repository and branch this was compared against. Not
+        # decoration: this checkout's origin and its running branch are not
+        # the ones the constants name, so "up to date" can be true of a
+        # branch nobody is running.
+        "tracking": await system_ctl.update_tracking(),
         "update": check,
         "changes": list(changes),
         "changes_error": changes_error,

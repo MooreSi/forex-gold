@@ -130,6 +130,20 @@ async def check_for_update() -> dict:
     return await _update.check_for_update()
 
 
+def cached_update_check() -> dict:
+    """The last update check, without running one. Never blocks on git.
+
+    The header is polled every five seconds and cannot afford a `git fetch`
+    per poll -- see the service's own docstring.
+    """
+    return _update.cached_update_check()
+
+
+async def update_tracking() -> dict:
+    """Which repository and branch an update would come from. Read-only."""
+    return await _update.tracking()
+
+
 def summarise_changes(*args, **kwargs):
     """Human-readable summary of what an update would bring in."""
     return _update.summarise_changes(*args, **kwargs)

@@ -1,295 +1,212 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+/**
+ * The AI Analysis tab: one call, one readable answer.
+ *
+ * The NiceGUI tab had a single Research Now button. It asked the model ONCE
+ * about everything — sentiment, the day's price range, what could move gold,
+ * the risks, the levels, which strategy to run — and rendered the answer as
+ * cards. The React port put a different page here entirely (the three-subject
+ * trade analysis, which in the original lived under the Analysis tab) and
+ * printed the model's raw prose. The owner's words on 2026-09-20: "the output
+ * was a load of messages, it should be summarised and easy to read".
+ *
+ * So what these tests protect is: one call, a structured answer, and nothing
+ * billed for looking at the tab.
+ */
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AiPanel } from "../AiPanel";
 
-/**
- * One page, three subjects.
- *
- * REWRITTEN 2026-09-19. These tests described the React port's three-way
- * selector — "re-reads the evidence when the subject changes", "drops a stale
- * answer when the subject changes" — a design the owner asked to be replaced
- * with the NiceGUI page's single scrolling page. Every property they were
- * actually protecting is kept below, scoped to a section:
- *
- *   * the numbers are readable without paying for an opinion about them;
- *   * no model is called until a SPECIFIC section is asked — one page must
- *     not mean three bills;
- *   * a refusal reaches the screen in the backend's own words;
- *   * an unconfigured provider disables the button with a reason rather than
- *     answering nothing, which reads as a model with no opinion.
- */
-const SUBJECTS = {
-  subjects: [
-    { id: "channels", label: "Telegram channels" },
-    { id: "strategies", label: "Fixed strategies vs DPM" },
-    { id: "generator", label: "The internal signal generator" },
-  ],
-  configured: true,
-  provider: "anthropic",
-  model: "claude-opus-5",
+const ANALYSIS = {
+  sentiment: "bullish",
+  sentiment_confidence: 0.72,
+  today_bias: "Buying dips while 2,640 holds.",
+  price_low: 2638.5,
+  price_high: 2672.25,
+  summary: "Gold is bid into the US session on soft real yields.",
+  technical_summary: "Price is above the 21 EMA on H1 with a higher low at 2,641.",
+  key_drivers: ["Soft US real yields", "Central bank buying"],
+  risk_factors: ["A hot CPI print would reverse this"],
+  support_levels: [2640, 2628],
+  resistance_levels: [2672, 2690],
+  strategy_recommendation: "scale_out",
+  strategy_label: "Scale out",
+  strategy_reason: "Momentum is good but the range is narrow.",
+  signal_analysis: "Four of the last six channel signals aligned with this bias.",
+  disclaimer: "AI analysis for informational purposes only. Not financial advice.",
+  generated_at: "2026-09-20T09:30:00Z",
 };
 
-// One shape per subject, as the three gatherers really return them.
-const EVIDENCE: Record<string, unknown> = {
-  channels: [
-    {
-      channel_name: "GoldSignals",
-      stats: {
-        total_signals: 40, closed_trades: 30, win_rate_pct: 61.0,
-        total_pnl: 310.5, phantom_tp_count: 2,
-        simulated_50pct_pnl_sum: 520.25, max_consecutive_losses: 4,
-      },
-    },
-  ],
-  strategies: {
-    days: 30, total_closed: 421,
-    fixed_stats: { count: 421, wins: 201, win_rate: 47.7, total_pnl: -4735.72,
-                   avg_pnl: -11.25, profit_factor: 0.61, avg_hold_min: 23,
-                   sl_exits: 337, be_exits: 0 },
-    dpm_stats: { count: 0, wins: 0, win_rate: 0, total_pnl: 0, avg_pnl: 0,
-                 profit_factor: 0, avg_hold_min: 0, sl_exits: 0, be_exits: 0 },
-    strategy_breakdown: [
-      { strategy: "orb_fixed", count: 5, wins: 3, win_rate: 60.0,
-        total_pnl: -25.06, avg_pnl: -5.01, profit_factor: 0.23,
-        avg_hold_min: 12, sl_exits: 2 },
-    ],
-    dpm_detail: { count: 0 },
-  },
-  generator: {
-    days: 30, total_trades: 421,
-    engines: [
-      {
-        strategy: "breakout", label: "Breakout",
-        all: { count: 20, win_rate: 55, total_pnl: 120 },
-        early_half: { count: 8, win_rate: 40, total_pnl: -30 },
-        late_half: { count: 12, win_rate: 66, total_pnl: 150 },
-      },
-      {
-        strategy: "reversal", label: "Reversal",
-        all: { count: 4, win_rate: 25, total_pnl: -80 },
-        early_half: { count: 0, win_rate: 0, total_pnl: 0 },
-        late_half: { count: 4, win_rate: 25, total_pnl: -80 },
-      },
-    ],
-  },
-};
-
-let fetchMock: ReturnType<typeof vi.fn>;
-let configured: boolean;
-let analyseFails: boolean;
+let stored: Record<string, unknown>;
+let fresh: Record<string, unknown>;
+let posts: string[];
+let failPost: string | null;
+/** Held open so a test can look at the screen mid-call. */
+let holdPost: Promise<void> | null;
 
 beforeEach(() => {
-  configured = true;
-  analyseFails = false;
-  fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === "/api/ai/subjects") {
-      return { ok: true, status: 200, json: async () => ({ ...SUBJECTS, configured }) };
-    }
-    if (url.startsWith("/api/ai/evidence")) {
-      const subject = new URL(url, "http://x").searchParams.get("subject") ?? "";
-      return { ok: true, status: 200,
-               json: async () => ({ evidence: EVIDENCE[subject] ?? null }) };
-    }
-    if (url === "/api/ai/analyse" && init?.method === "POST") {
-      if (analyseFails) {
-        return { ok: false, status: 409, statusText: "", json: async () => ({
-          error: { kind: "refusal", message: "The provider rejected the API key.", ref: null },
-        }) };
+  posts = [];
+  failPost = null;
+  holdPost = null;
+  stored = { billable: false, analysis: null, saved_at: "" };
+  fresh = { billable: true, analysis: ANALYSIS, saved_at: "2026-09-20T09:30:00Z" };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    const u = String(url);
+    if (init?.method === "POST") {
+      posts.push(u);
+      if (holdPost) await holdPost;
+      if (failPost) {
+        return {
+          ok: false, status: 409,
+          json: async () => ({ error: { kind: "refusal", message: failPost } }),
+        };
       }
-      const subject = JSON.parse(String(init.body)).subject;
-      return { ok: true, status: 200, json: async () => ({
-        answer: JSON.stringify({ overall_assessment: `A verdict about ${subject}.` }),
-      }) };
+      return { ok: true, status: 200, json: async () => fresh };
     }
-    return { ok: false, status: 404, statusText: "", json: async () => ({}) };
-  });
-  vi.stubGlobal("fetch", fetchMock);
+    return { ok: true, status: 200, json: async () => stored };
+  }));
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const called = (prefix: string) =>
-  fetchMock.mock.calls.filter((c) => String(c[0]).startsWith(prefix));
-
-const section = (id: string) => screen.getByTestId(`subject-${id}`);
-
-describe("one page, not three", () => {
-  it("shows all three subjects at once", async () => {
+describe("opening the tab", () => {
+  it("costs nothing", async () => {
+    // The button is a decision the operator makes, not a toll for looking.
     render(<AiPanel />);
+    await screen.findByRole("button", { name: /research now/i });
 
-    expect(await screen.findByTestId("subject-channels")).toBeInTheDocument();
-    expect(screen.getByTestId("subject-strategies")).toBeInTheDocument();
-    expect(screen.getByTestId("subject-generator")).toBeInTheDocument();
+    expect(posts).toEqual([]);
   });
 
-  it("loads every subject's evidence without calling a model", async () => {
+  it("shows the analysis this install last ran", async () => {
+    stored = { billable: false, analysis: ANALYSIS, saved_at: "2026-09-20T09:30:00Z" };
     render(<AiPanel />);
-    await screen.findByText("GoldSignals");
 
-    await waitFor(() => expect(called("/api/ai/evidence")).toHaveLength(3));
-    expect(called("/api/ai/analyse")).toHaveLength(0);
+    expect(await screen.findByText(/soft real yields/i)).toBeInTheDocument();
   });
 
-  it("re-reads every subject when the window changes", async () => {
+  it("invites a first run when there has never been one", async () => {
     render(<AiPanel />);
-    await screen.findByText("GoldSignals");
 
-    await userEvent.click(screen.getByRole("button", { name: "90d" }));
-
-    await waitFor(() => {
-      const at90 = called("/api/ai/evidence").filter((c) => String(c[0]).includes("days=90"));
-      expect(at90).toHaveLength(3);
-    });
+    expect(
+      await screen.findByText(/Press Research Now for an AI analysis/i),
+    ).toBeInTheDocument();
   });
 });
 
-describe("the channel table", () => {
-  it("shows the measured numbers", async () => {
+describe("researching", () => {
+  it("asks the model once, for everything", async () => {
+    // The complaint: the tab broke one question into a call per subject.
     render(<AiPanel />);
+    await userEvent.click(await screen.findByRole("button", { name: /research now/i }));
 
-    expect(await screen.findByText("GoldSignals")).toBeInTheDocument();
-    expect(within(section("channels")).getByText("61.0%")).toBeInTheDocument();
-    expect(within(section("channels")).getByText("+$310.50")).toBeInTheDocument();
+    await waitFor(() => expect(posts).toEqual(["/api/ai/research"]));
   });
 
-  it("surfaces phantom TPs, which is the number the tab exists for", async () => {
+  it("says it is working while the call is out", async () => {
+    // The call takes as long as the model takes — up to half a minute. A
+    // button that looks idle for thirty seconds gets pressed again.
+    let release: (() => void) | null = null;
+    holdPost = new Promise<void>((r) => { release = r; });
     render(<AiPanel />);
-    await screen.findByText("GoldSignals");
+    await userEvent.click(await screen.findByRole("button", { name: /research now/i }));
 
-    expect(within(section("channels")).getByText("Phantom TPs")).toBeInTheDocument();
-    expect(within(section("channels")).getByText("2")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/Researching gold market conditions/i)).toBeInTheDocument());
+    release!();
   });
 
-  it("shows what a 50%-at-TP1 rule would have produced instead", async () => {
-    // The most actionable line in the report: a channel whose simulated
-    // figure is far better than its actual one is badly managed, not bad.
+  it("puts a refusal on screen in the backend's own words", async () => {
+    failPost = "No AI provider is configured. Add a provider and an API key "
+      + "under Settings → AI before asking for an analysis.";
     render(<AiPanel />);
-    await screen.findByText("GoldSignals");
+    await userEvent.click(await screen.findByRole("button", { name: /research now/i }));
 
-    expect(within(section("channels")).getByText("+$520.25")).toBeInTheDocument();
-  });
-});
-
-describe("the DPM comparison", () => {
-  it("puts DPM and the fixed strategies head to head", async () => {
-    render(<AiPanel />);
-    await screen.findByTestId("fixed-stats");
-
-    expect(within(section("strategies")).getByText("Fixed strategies")).toBeInTheDocument();
-    expect(within(section("strategies")).getByText("DPM-managed")).toBeInTheDocument();
-  });
-
-  it("says a side with no trades has none rather than showing zeros", async () => {
-    // A row of zeros beside a real drawdown reads as the safer choice.
-    render(<AiPanel />);
-
-    expect(await screen.findByTestId("dpm-stats"))
-      .toHaveTextContent("no trades in this window");
-  });
-
-  it("breaks the fixed strategies out by name", async () => {
-    render(<AiPanel />);
-
-    expect(await screen.findByTestId("strategy-breakdown")).toHaveTextContent("orb_fixed");
+    expect(await screen.findByText(/No AI provider is configured/)).toBeInTheDocument();
   });
 });
 
-describe("the engine comparison", () => {
-  it("shows each engine's early half against its late half", async () => {
-    // The question the subject exists for is "is it improving", and a single
-    // total cannot answer it.
-    render(<AiPanel />);
-    const row = await screen.findByTestId("engine-breakout");
-
-    expect(within(row).getByTestId("early-breakout")).toHaveTextContent("40%");
-    expect(within(row).getByTestId("late-breakout")).toHaveTextContent("66%");
+describe("the answer is summarised, not printed", () => {
+  beforeEach(() => {
+    stored = { billable: false, analysis: ANALYSIS, saved_at: "2026-09-20T09:30:00Z" };
   });
 
-  it("shows a dash for a half with no trades, not 0%", async () => {
-    // An engine that did not trade in the first half has not declined.
+  it("leads with the sentiment", async () => {
     render(<AiPanel />);
-    await screen.findByTestId("engine-reversal");
 
-    expect(screen.getByTestId("early-reversal")).toHaveTextContent("—");
+    expect(await screen.findByTestId("sentiment")).toHaveTextContent("BULLISH");
+  });
+
+  it("states how sure the model is, as a number", async () => {
+    // "Bullish" with no confidence is a claim with no weight behind it.
+    render(<AiPanel />);
+
+    expect(await screen.findByTestId("confidence")).toHaveTextContent("72%");
+  });
+
+  it("shows the day's price range", async () => {
+    render(<AiPanel />);
+
+    const target = await screen.findByTestId("price-target");
+    expect(target).toHaveTextContent("2,638.50");
+    expect(target).toHaveTextContent("2,672.25");
+  });
+
+  it("lists what could move gold", async () => {
+    render(<AiPanel />);
+
+    expect(await screen.findByText("Soft US real yields")).toBeInTheDocument();
+  });
+
+  it("lists the risks", async () => {
+    render(<AiPanel />);
+
+    expect(await screen.findByText(/hot CPI print/)).toBeInTheDocument();
+  });
+
+  it("shows the levels it is watching", async () => {
+    render(<AiPanel />);
+
+    const levels = await screen.findByTestId("levels");
+    expect(levels).toHaveTextContent("2,640.00");
+    expect(levels).toHaveTextContent("2,690.00");
+  });
+
+  it("names the strategy it recommends, and why", async () => {
+    render(<AiPanel />);
+
+    const rec = await screen.findByTestId("strategy-recommendation");
+    expect(rec).toHaveTextContent("Scale out");
+    expect(rec).toHaveTextContent(/range is narrow/);
+  });
+
+  it("carries the disclaimer the model returned", async () => {
+    // It is not decoration: this screen is one step from a Place Order button.
+    render(<AiPanel />);
+
+    expect(await screen.findByText(/Not financial advice/)).toBeInTheDocument();
   });
 });
 
-describe("what costs money", () => {
-  it("says so in every section, not once at the top", async () => {
-    // An operator scrolling to the third section should not have to remember
-    // a warning from the first.
+describe("an answer with holes in it", () => {
+  it("renders what there is rather than nothing", async () => {
+    // A provider that returns half a schema must not blank the tab.
+    stored = {
+      billable: false, saved_at: "",
+      analysis: { sentiment: "neutral", summary: "Nothing to say today." },
+    };
     render(<AiPanel />);
-    await screen.findByText("GoldSignals");
 
-    for (const id of ["channels", "strategies", "generator"]) {
-      expect(within(section(id)).getByText(/numbers above are free/)).toBeInTheDocument();
-    }
+    expect(await screen.findByText("Nothing to say today.")).toBeInTheDocument();
   });
 
-  it("names the model in the header so it is not a surprise", async () => {
+  it("does not invent a price range it was not given", async () => {
+    stored = {
+      billable: false, saved_at: "",
+      analysis: { sentiment: "neutral", summary: "Nothing to say today." },
+    };
     render(<AiPanel />);
+    await screen.findByText("Nothing to say today.");
 
-    expect(await screen.findByText("anthropic · claude-opus-5")).toBeInTheDocument();
-  });
-
-  it("asks for ONE subject when that section's button is pressed", async () => {
-    // One page must not mean three bills.
-    render(<AiPanel />);
-    await screen.findByText("GoldSignals");
-
-    await userEvent.click(
-      within(section("generator")).getByRole("button", { name: /Ask the model/ }));
-
-    await waitFor(() => expect(called("/api/ai/analyse")).toHaveLength(1));
-    expect(JSON.parse(called("/api/ai/analyse")[0][1].body)).toEqual({
-      subject: "generator", days: 30,
-    });
-  });
-
-  it("puts the answer under the section that was asked", async () => {
-    render(<AiPanel />);
-    await screen.findByText("GoldSignals");
-
-    await userEvent.click(
-      within(section("strategies")).getByRole("button", { name: /Ask the model/ }));
-
-    await waitFor(() => expect(
-      within(section("strategies")).getByTestId("ai-answer")).toBeInTheDocument());
-    expect(within(section("channels")).queryByTestId("ai-answer")).toBeNull();
-  });
-
-  it("disables every button with a reason when no provider is configured", async () => {
-    configured = false;
-    render(<AiPanel />);
-
-    const ask = (await screen.findAllByRole("button", { name: /Ask the model/ }))[0]!;
-    expect(ask).toBeDisabled();
-    expect(ask).toHaveAttribute("title", expect.stringContaining("Settings → AI"));
-  });
-
-  it("shows a refusal from the backend verbatim, in its own section", async () => {
-    analyseFails = true;
-    render(<AiPanel />);
-    await screen.findByText("GoldSignals");
-
-    await userEvent.click(
-      within(section("channels")).getByRole("button", { name: /Ask the model/ }));
-
-    expect(await within(section("channels")).findByRole("alert"))
-      .toHaveTextContent("The provider rejected the API key.");
-  });
-
-  it("drops the answers when the window changes", async () => {
-    // An answer about 30 days sitting under a 90-day table is the kind of
-    // thing somebody acts on.
-    render(<AiPanel />);
-    await screen.findByText("GoldSignals");
-    await userEvent.click(
-      within(section("channels")).getByRole("button", { name: /Ask the model/ }));
-    await within(section("channels")).findByTestId("ai-answer");
-
-    await userEvent.click(screen.getByRole("button", { name: "90d" }));
-
-    await waitFor(() => expect(screen.queryByTestId("ai-answer")).toBeNull());
+    expect(screen.queryByTestId("price-target")).toBeNull();
   });
 });

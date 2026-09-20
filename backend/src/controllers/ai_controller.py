@@ -16,6 +16,7 @@ ones are not. is_configured() and FALLBACK_DEEPSEEK_MODELS touch nothing.
 from __future__ import annotations
 
 from backend.src.services.ai import claude_ai as _claude
+from backend.src.services.ai import market_research as _research
 from backend.src.services.ai import provider as _provider
 
 __all__ = [
@@ -25,6 +26,8 @@ __all__ = [
     "FALLBACK_DEEPSEEK_MODELS",
     "request_commentary",
     "request_market_analysis",
+    "run_market_research",
+    "last_market_research",
 ]
 
 # Offered in Settings when the DeepSeek model list cannot be fetched live.
@@ -55,3 +58,17 @@ async def request_commentary(*args, **kwargs):
 async def request_market_analysis(*args, **kwargs):
     """Market analysis. Billable."""
     return await _claude.request_market_analysis(*args, **kwargs)
+
+
+async def run_market_research(engine, **kwargs):
+    """The AI Analysis tab's whole answer, in one model call. **Billable.**
+
+    The gathering -- tick, candles, signals, performance, the strategy
+    catalogue -- belongs to the service; this only routes to it.
+    """
+    return await _research.run_research(engine, **kwargs)
+
+
+def last_market_research() -> dict:
+    """The analysis this install last ran. Asks no model and costs nothing."""
+    return _research.last_research()

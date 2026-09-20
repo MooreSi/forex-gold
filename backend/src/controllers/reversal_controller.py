@@ -22,6 +22,7 @@ __all__ = [
     "pro_model_fit_in_background", "reversal_research_study",
     "reversal_shadow_report", "reversal_shadow_history",
     "reversal_ai_recommend", "reversal_ai_apply", "reversal_reset_stats",
+    "reversal_ml_metrics", "reversal_ml_summary",
 ]
 
 
@@ -49,6 +50,20 @@ async def reversal_realised_pnl() -> dict:
 
 
 # ── Reversal Engine: the pro-likeness sub-model ──────────────────────────────
+
+async def reversal_ml_metrics() -> dict:
+    """The learning curve: per-signal win flags and realised R, oldest first.
+
+    Raw outcomes rather than a running average, because the panel rolls them
+    over its own window and a cumulative mean cannot be un-averaged back.
+    """
+    return await reversal.ml_metrics()
+
+
+async def reversal_ml_summary() -> dict:
+    """Whether the ML gate is trained, and how far off it is if not."""
+    return await reversal.ml_summary()
+
 
 def pro_model_status() -> dict:
     """Whether the model is fitted and usable, and why not if it is not."""

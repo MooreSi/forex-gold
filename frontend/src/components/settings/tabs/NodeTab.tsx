@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { api } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { asArray, asObject } from "@/lib/asArray";
+import { asObject } from "@/lib/asArray";
 import { useSettingsResource } from "../hooks/useSettingsResource";
+import { GitHubUpdateSection } from "../internal/GitHubUpdateSection";
 import { SettingsField } from "../internal/SettingsField";
 
 interface NodeState {
@@ -39,8 +41,13 @@ function describeExpiry(raw: string): { label: string; tone: string } {
 
 export function NodeTab() {
   const node = useSettingsResource<NodeState>("/api/node/state");
-  const token = useSettingsResource<{ token: string; note: string }>("/api/node/sync-token");
-  const update = useSettingsResource<Record<string, unknown>>("/api/node/update");
+  // NOT `useSettingsResource`. That hook GETs its path on mount, and
+  // `/api/node/sync-token` is POST-only by design — reading a stored token
+  // back is precisely what it refuses to do — so every visit to this tab
+  // fired a request that answered 405. The token exists for exactly one
+  // moment, which is the response to the POST, so it is held here.
+  const [token, setToken] = useState<{ token: string; note: string } | null>(null);
+  const [generating, setGenerating] = useState(false);
   const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
 
@@ -60,25 +67,6 @@ export function NodeTab() {
   const subscriptionType = String(reg["subscription_type"] ?? "") || "Perpetual";
   const expiry = describeExpiry(String(reg["subscription_expiry"] ?? ""));
 
-  // `update` is the CHECK result, which is always an object -- the flag is
-  // inside it. Treating the object's presence as "an update exists" meant
-  // this screen claimed one on every install and left the Apply button
-  // enabled, and Apply force-checks-out origin and discards local changes.
-  // The test fixture said `update: null`, a shape the endpoint never
-  // returns, so both tests agreed with the bug. Fixed 2026-09-20.
-  const check = asObject(asObject(update.data)["update"]);
-  const available = check["available"] === true;
-  const commits = asArray<Record<string, unknown>>(check["commits"]);
-  // The AI summary when there is one, the raw commit subjects when there is
-  // not. A summary costs a paid model call and can fail for reasons that have
-  // nothing to do with the release -- and an operator still needs to see what
-  // they are about to install.
-  const summary = asArray<string>(asObject(update.data)["changes"]);
-  const lines = summary.length > 0
-    ? summary
-    : commits.map((c) => String(c["summary"] ?? "")).filter(Boolean);
-  const checkError = String(check["error"] ?? "");
-
   return (
     <div className="space-y-5">
       <section>
@@ -91,10 +79,17 @@ export function NodeTab() {
         <div className="mt-2 flex items-center gap-2">
           <Button
             onClick={async () => {
-              await token.save({}, "POST");
-              await node.reload();
+              setGenerating(true);
+              try {
+                setToken(await api.post<{ token: string; note: string }>(
+                  "/api/node/sync-token", {},
+                ));
+                await node.reload();
+              } finally {
+                setGenerating(false);
+              }
             }}
-            disabled={token.saving}
+            disabled={generating}
           >
             Generate a new token
           </Button>
@@ -102,13 +97,13 @@ export function NodeTab() {
             Active trader: <span className="num">{node.data.active_trader}</span>
           </span>
         </div>
-        {token.data?.token && (
+        {token?.token && (
           <div
             data-testid="new-sync-token"
             className="mt-2 rounded border border-warning/40 bg-warning/10 px-3 py-2"
           >
-            <p className="num text-sm text-ink-1">{token.data.token}</p>
-            <p className="mt-1 text-[11px] text-warning">{token.data.note}</p>
+            <p className="num text-sm text-ink-1">{token.token}</p>
+            <p className="mt-1 text-[11px] text-warning">{token.note}</p>
           </div>
         )}
       </section>
@@ -188,37 +183,7 @@ export function NodeTab() {
         )}
       </section>
 
-      <section>
-        <h3 className="text-xs font-semibold text-ink-1">Updates</h3>
-        <p className="mt-0.5 text-[11px] text-ink-3">
-          Running <span className="num">{node.data.version}</span>
-          {available
-            ? ` — ${commits.length} newer commit${commits.length === 1 ? "" : "s"}`
-              + ` available (${String(check["remote_sha"] ?? "").slice(0, 7)}).`
-            : update.data
-              ? " — up to date."
-              : ""}
-        </p>
-        {checkError && (
-          <p className="mt-0.5 text-[11px] text-warning">{checkError}</p>
-        )}
-        {available && lines.length > 0 && (
-          <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] text-ink-2">
-            {lines.map((line, i) => <li key={i}>{line}</li>)}
-          </ul>
-        )}
-        <div className="mt-2 flex items-center gap-2">
-          <Button variant="ghost" onClick={() => void update.reload()}>
-            Check for updates
-          </Button>
-          <Button
-            onClick={() => void update.save({}, "POST")}
-            disabledReason={available ? null : "There is no update to apply."}
-          >
-            Apply the update
-          </Button>
-        </div>
-      </section>
+      <GitHubUpdateSection version={node.data.version} />
     </div>
   );
 }

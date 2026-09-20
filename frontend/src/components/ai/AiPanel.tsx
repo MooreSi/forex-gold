@@ -1,102 +1,112 @@
+import { Search } from "lucide-react";
+import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
-import { cn } from "@/lib/cn";
-import { useAiController } from "./hooks/useAiController";
-import { EvidenceSection } from "./internal/EvidenceSection";
-import { GeneratorEvidence } from "./internal/GeneratorEvidence";
-import { StrategyEvidence } from "./internal/StrategyEvidence";
-import { SubjectSection } from "./internal/SubjectSection";
+import { useMarketResearch } from "./hooks/useMarketResearch";
+import { PriceTargetSection } from "./internal/PriceTargetSection";
+import { ResearchNarrativeSection } from "./internal/ResearchNarrativeSection";
+import { SentimentSection } from "./internal/SentimentSection";
 
-const WINDOWS = [7, 30, 90];
+/** When the stored analysis was produced, in the operator's own timezone. */
+function describeSavedAt(iso: string): string {
+  if (!iso) return "";
+  const when = Date.parse(iso);
+  if (Number.isNaN(when)) return "";
+  return `Last research: ${new Date(when).toLocaleString(undefined, {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+  })}`;
+}
 
 /**
- * One page, three subjects — the shape the NiceGUI page had.
+ * AI Analysis — one call, one readable answer.
  *
- * The React port put the subjects behind a three-way selector, so reading the
- * channel report meant losing the generator's and the DPM comparison. The
- * owner asked for the original back on 2026-09-19.
+ * The NiceGUI tab this restores had a single Research Now button: it asked
+ * the configured model ONCE about sentiment, the day's range, the drivers,
+ * the risks, the levels and which strategy to run, and rendered the structured
+ * answer as cards. The React port shipped a different page here entirely (the
+ * three-subject trade analysis, which in the original lives under the Analysis
+ * tab) and printed the model's raw prose. Both were reported on 2026-09-20.
  *
- * All three sets of numbers load together because reading them is free. No
- * model is called until a specific section's Ask button is pressed, so one
- * page does not mean three bills.
+ * **Opening this tab costs nothing.** The last analysis is read back from the
+ * database; only the button bills.
  */
-const SUBJECTS: Record<string, { blurb: string; icon: string }> = {
-  channels: {
-    icon: "channels",
-    blurb: "What each Telegram channel sent, claimed, and actually produced.",
-  },
-  strategies: {
-    icon: "percent",
-    blurb: "Adaptive position management against the fixed exit strategies.",
-  },
-  generator: {
-    icon: "flask",
-    blurb: "Whether this app's own engines are getting better over time.",
-  },
-};
-
 export function AiPanel() {
-  const c = useAiController();
-
-  const cannotAsk = !c.meta?.configured
-    ? "No AI provider is configured. Add one under Settings → AI."
-    : null;
+  const r = useMarketResearch();
 
   return (
     <PanelShell
       icon="bot"
-      title="AI Analysis"
-      subtitle={
-        c.meta?.configured
-          ? `${c.meta.provider} · ${c.meta.model}`
-          : "no provider configured"
-      }
-      actions={WINDOWS.map((d) => (
-        <button
-          key={d}
-          onClick={() => c.setDays(d)}
-          aria-pressed={d === c.days}
-          className={cn(
-            "num rounded px-2 py-1 text-[11px] transition-colors",
-            d === c.days
-              ? "bg-surface-3 text-ink-1"
-              : "text-ink-3 hover:bg-surface-2 hover:text-ink-2",
-          )}
+      title="AI Market Analysis"
+      subtitle={describeSavedAt(r.savedAt) || "XAUUSD Gold"}
+      actions={
+        <Button
+          variant="primary"
+          onClick={() => void r.research()}
+          disabled={r.researching}
+          className="gap-1.5"
         >
-          {d}d
-        </button>
-      ))}
+          <Search size={13} />
+          {r.researching ? "Researching..." : "Research Now"}
+        </Button>
+      }
     >
-      {!c.meta ? (
-        <EmptyState title={c.refusal ? "Could not load this tab" : "Loading"}
-          hint={c.refusal ?? undefined} />
+      {r.refusal && (
+        <p className="mb-3 rounded border border-loss/40 bg-loss/10 px-3 py-2 text-xs text-loss">
+          {r.refusal}
+        </p>
+      )}
+
+      {r.researching && !r.analysis && (
+        <EmptyState
+          title="Researching gold market conditions..."
+          hint="The model is reading price, candles, signals and the news. This can take up to 30 seconds."
+        />
+      )}
+
+      {!r.analysis ? (
+        !r.researching && (
+          <EmptyState
+            title="Press Research Now for an AI analysis of the gold market"
+            hint="Sentiment, today's range, what could move it, the risks, the levels and a strategy recommendation — one model call, not one per metric."
+          />
+        )
       ) : (
-        <div className="space-y-4">
-          {c.meta.subjects.map(({ id, label }) => {
-            const spec = SUBJECTS[id] ?? { blurb: "", icon: "bot" };
-            const state = c.stateFor(id);
-            return (
-              <SubjectSection
-                key={id}
-                id={id}
-                label={label}
-                blurb={spec.blurb}
-                icon={spec.icon}
-                state={state}
-                provider={c.meta!.provider}
-                cannotAsk={cannotAsk}
-                onAsk={() => void c.analyse(id)}
-              >
-                {/* Each subject's evidence has its own shape and its own
-                    table. A shared renderer here would be raw JSON again. */}
-                {id === "strategies" ? <StrategyEvidence evidence={state.evidence} />
-                  : id === "generator" ? <GeneratorEvidence evidence={state.evidence} />
-                    : <EvidenceSection subject={id} evidence={state.evidence} />}
-              </SubjectSection>
-            );
-          })}
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-stretch gap-3">
+            <div className="min-w-56 flex-1">
+              <SentimentSection analysis={r.analysis} />
+            </div>
+            <div className="min-w-56 flex-1">
+              <PriceTargetSection analysis={r.analysis} />
+            </div>
+          </div>
+
+          <ResearchNarrativeSection analysis={r.analysis} />
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <span className="text-[11px] text-ink-3">
+              {[
+                describeSavedAt(r.savedAt),
+                r.analysis.fetched_news
+                  ? `${r.analysis.news_count ?? 0} news headlines included`
+                  : "",
+                // The service sets `error` when it answered with a partial
+                // schema. Saying so is the difference between a short
+                // analysis and a broken one.
+                r.analysis.error ? "Analysis may be incomplete" : "",
+              ].filter(Boolean).join("  |  ")}
+            </span>
+            {analysisDisclaimer(r.analysis.disclaimer)}
+          </div>
         </div>
       )}
     </PanelShell>
   );
+}
+
+/** Never dropped when the model returns one: this tab is one step from an
+ *  order ticket, and the wording is the provider's, not ours. */
+function analysisDisclaimer(text: string | undefined) {
+  if (!text) return null;
+  return <span className="text-[11px] italic text-ink-3">{text}</span>;
 }

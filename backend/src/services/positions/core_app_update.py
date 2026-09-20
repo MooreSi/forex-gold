@@ -19,6 +19,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 from backend.src.services.ai import provider as ai_provider
@@ -286,6 +287,92 @@ async def check_for_update() -> dict:
         "available": available, "local_sha": local_sha, "remote_sha": remote_sha,
         "commits": commits, "error": None,
     }
+
+
+async def tracking() -> dict:
+    """Which repository and branch an update would come from.
+
+    Read from `origin` rather than from `_GITHUB_REPO_URL`: the constant is
+    what a bootstrap would CREATE, and says nothing about what this checkout
+    actually fetches from. The two differ here -- this repo's origin is
+    `MooreSi/forex-react` -- and a screen that shows the constant is telling
+    the operator about somewhere else.
+
+    `_BRANCH` is likewise not always the branch the app is RUNNING. Which
+    branch an install follows is the owner's decision; naming it on screen is
+    how they get to notice it is not the one they expected.
+    """
+    rc, out, _ = await _run_git("remote", "get-url", "origin")
+    url = out.strip() if rc == 0 else ""
+    # `.git` is how git writes it and not how anyone links to it.
+    if url.endswith(".git"):
+        url = url[:-4]
+    return {"branch": _BRANCH, "repo_url": url}
+
+
+# ── The header badge's cached view of the check ────────────────────────
+# `check_for_update` runs `git fetch`, which takes as long as the network takes.
+# The header that shows the badge is polled every five seconds, so it cannot
+# call it: that would be a fetch per poll, and a header that stalls with the
+# connection. It reads this instead -- the last answer, refreshed behind the
+# caller at most every ten minutes.
+
+UPDATE_CHECK_TTL_SECS = 600.0
+
+# A seam, so a test can move time without sleeping for ten minutes.
+_monotonic = time.monotonic
+
+_check_cache: dict = {"at": 0.0, "result": {"available": False}}
+_check_task: Optional["asyncio.Task"] = None
+
+
+def reset_update_cache() -> None:
+    """Forget the last check. For tests -- nothing in the app calls it."""
+    global _check_task
+    _check_cache["at"] = 0.0
+    _check_cache["result"] = {"available": False}
+    _check_task = None
+
+
+async def _refresh_update_cache() -> None:
+    """Run a real check and remember it, however it goes.
+
+    The timestamp is written in EVERY case, including the failure one. A
+    machine with no network would otherwise be permanently stale and start a
+    `git fetch` on every five-second poll, forever.
+    """
+    try:
+        result = await check_for_update()
+        if isinstance(result, dict):
+            _check_cache["result"] = result
+    except Exception as e:  # a badge is never worth an exception upwards
+        log.debug("[Update] background check failed: %s", e)
+    finally:
+        _check_cache["at"] = _monotonic()
+
+
+def cached_update_check() -> dict:
+    """The last known answer to "is there an update", without waiting for git.
+
+    Returns immediately, always. The first call -- and any call made once the
+    answer is older than `UPDATE_CHECK_TTL_SECS` -- also schedules a refresh,
+    whose result the NEXT caller sees. A refresh already in flight is never
+    duplicated.
+    """
+    global _check_task
+    stale = _check_cache["at"] == 0.0 or (
+        _monotonic() - _check_cache["at"] >= UPDATE_CHECK_TTL_SECS
+    )
+    if stale and (_check_task is None or _check_task.done()):
+        try:
+            _check_task = asyncio.get_running_loop().create_task(
+                _refresh_update_cache(),
+            )
+        except RuntimeError:
+            # No running loop: a synchronous caller. Answering what we have is
+            # right; raising at one would take the whole header response down.
+            _check_task = None
+    return dict(_check_cache["result"])
 
 
 # ── Plain-English summary of a pending update ────────────────────────────────

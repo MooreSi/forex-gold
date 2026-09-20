@@ -5,6 +5,7 @@ import { HeaderStats } from "./HeaderStats";
 import { PauseControl } from "./PauseControl";
 import { PowerControl } from "./PowerControl";
 import { TradingStatusBadge } from "./TradingStatusBadge";
+import { UpdateBadge } from "./UpdateBadge";
 import { formatClock } from "@/components/shared/format";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminConsole } from "@/hooks/useAdminConsole";
@@ -82,6 +83,7 @@ export function AppHeader() {
       )}
 
       <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-2 lg:gap-3">
+        <UpdateBadge update={data?.update ?? null} />
         {data?.remote_connected && (
           <span className="flex items-center gap-1 text-remote" title="Linked to the remote node">
             <Server size={13} /> <span className="hidden xl:inline">remote</span>
@@ -92,7 +94,7 @@ export function AppHeader() {
           title={bridgeUp ? "MT5 bridge connected" : "MT5 bridge not connected"}
         >
           <CircleDot size={13} className={bridgeUp ? "text-profit" : "text-loss"} />
-          <span className="hidden xl:inline">bridge</span>
+          <span className="hidden xl:inline">Bridge</span>
         </span>
         {data?.ea_badge && (
           // Colour and words come from the backend. A stale EA build shown as

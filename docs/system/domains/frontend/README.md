@@ -252,3 +252,42 @@ occurrence of a key in a file will happily match a COMMENT above the real
 thing. A comment that quotes the phrases the test looks for satisfies it on its
 own, and the code underneath can then say anything. Do not restate a test's
 expected strings in a comment next to the thing it checks.
+
+
+## Which NiceGUI page belongs on which React tab (2026-09-20)
+
+Two tabs were carrying the wrong page. Worth writing down, because the names
+are close enough that it was invisible for weeks:
+
+* **AI Analysis** is `frontend/pages/ai_summary.py` — one Research Now button,
+  **one** model call across every metric, a structured answer rendered as
+  cards (sentiment + confidence, the day's range, drivers, risks, levels, a
+  strategy recommendation). The port instead put the three-subject trade
+  analysis here and printed the model's raw prose.
+* **Analysis** is where `ai_trade_analysis` lives
+  (`frontend/pages/history/__init__.py` renders it), as a section of the
+  history tab. That is where the three-subject panel now sits, as a sub-tab.
+* **Signal Generator** has two sub-tabs and always did —
+  `frontend/pages/test_panel/__init__.py` builds Breakout and Reversal Engine.
+
+The general lesson: when a React tab "feels wrong" to the owner, check which
+NiceGUI module the tab of that name actually rendered before redesigning it.
+The original is in `~/Forex-Update`, not in this checkout.
+
+### One question, one call
+
+`ai_summary` asks the model once and gets a structured answer back; the
+three-subject page asks once per subject and gets prose. Both are still here
+and both are right for what they do — but the tab an operator opens daily is
+the first kind. A call per metric costs several calls and produces several
+views that can contradict each other.
+
+### The learning chart
+
+`frontend/components/learning_chart.py` upstream carries a finding that cost
+real time to get: both engine panels plotted a **cumulative** mean, which over
+the Reversal engine's ~4,880 labelled signals is a constant with extra steps
+and cannot answer "is it learning?". The React port
+(`components/engines/internal/learning_series.ts`) uses the rolling window and
+keeps the reasoning in its docstring. The two lines it draws are on different
+scales and are deliberately **not** comparable to each other.

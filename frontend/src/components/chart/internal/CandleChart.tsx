@@ -30,8 +30,15 @@ function fvgColours() {
   return {
     fill: { bullish: rgba(profit, 0.18), bearish: rgba(loss, 0.18) },
     edge: { bullish: rgba(profit, 0.55), bearish: rgba(loss, 0.55) },
+    // The label has to carry on its own over a 18%-opacity band, so it is far
+    // more opaque than the fill it sits on.
+    label: { bullish: rgba(profit, 0.95), bearish: rgba(loss, 0.95) },
   };
 }
+
+/** Pixels in from the zone's left edge, so the text clears its own border. */
+const FVG_LABEL_INSET = 6;
+const FVG_LABEL_SIZE = 10;
 
 const EMA_COLOURS: Record<string, string> = {
   "9": "#ffd700",   // gold — fastest
@@ -244,16 +251,34 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
           aria-hidden
         >
           {fvgRects.map((r) => (
-            <rect
-              key={`${r.ts}-${r.y}`}
-              data-testid={`fvg-${r.direction}-${r.ts}`}
-              x={r.x} y={r.y} width={r.width} height={r.height}
-              fill={fvgPaint.fill[r.direction as "bullish" | "bearish"]
-                ?? "rgba(156,163,175,0.14)"}
-              stroke={fvgPaint.edge[r.direction as "bullish" | "bearish"]
-                ?? "rgba(156,163,175,0.4)"}
-              strokeWidth="0.5"
-            />
+            <g key={`${r.ts}-${r.y}`}>
+              <rect
+                data-testid={`fvg-${r.direction}-${r.ts}`}
+                x={r.x} y={r.y} width={r.width} height={r.height}
+                fill={fvgPaint.fill[r.direction as "bullish" | "bearish"]
+                  ?? "rgba(156,163,175,0.14)"}
+                stroke={fvgPaint.edge[r.direction as "bullish" | "bearish"]
+                  ?? "rgba(156,163,175,0.4)"}
+                strokeWidth="0.5"
+              />
+              {/* The band's colour alone does not say what the band IS. The
+                  label is drawn at the zone's own left edge and vertical
+                  centre, so a thin gap still gets named rather than silently
+                  losing its label. */}
+              <text
+                data-testid={`fvg-label-${r.direction}-${r.ts}`}
+                x={r.x + FVG_LABEL_INSET}
+                y={r.y + r.height / 2}
+                dominantBaseline="middle"
+                fontSize={FVG_LABEL_SIZE}
+                fontWeight="600"
+                letterSpacing="0.5"
+                fill={fvgPaint.label[r.direction as "bullish" | "bearish"]
+                  ?? "rgba(156,163,175,0.9)"}
+              >
+                FVG
+              </text>
+            </g>
           ))}
         </svg>
       )}

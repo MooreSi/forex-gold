@@ -82,6 +82,47 @@ export interface HeaderState {
   };
   remote_connected: boolean;
   ea_badge: EaBadge | null;
+  /**
+   * Whether a newer build is waiting on GitHub, for the header's badge.
+   *
+   * Two facts only, and from the backend's CACHED check -- this payload is
+   * polled every five seconds and a live check runs `git fetch`. What the
+   * update actually contains is fetched once, when the popup opens.
+   */
+  update?: { available: boolean; commits: number; remote_sha: string } | null;
+}
+
+/** One commit in a pending update, as `/api/node/update` reports it. */
+export interface UpdateCommit {
+  sha: string;
+  short_sha: string;
+  summary: string;
+}
+
+/** The answer to "is there a newer build, and what is in it". */
+export interface UpdateCheck {
+  available: boolean;
+  local_sha?: string;
+  remote_sha?: string;
+  commits?: UpdateCommit[];
+  /**
+   * True when this install has no `.git` at all, or could not be matched to a
+   * commit. Not a failure: it is the normal state of an install that has
+   * never updated, and the button next to it is what fixes it -- but it
+   * force-checks-out, so it is never called "Update" without qualification.
+   */
+  bootstrap?: boolean;
+  error?: string | null;
+}
+
+export interface UpdateStatus {
+  current: string;
+  /** Which repository and branch the check compared against, read from git. */
+  tracking?: { repo_url: string; branch: string };
+  update: UpdateCheck;
+  /** Plain-English lines from the AI provider. Empty is normal and fine. */
+  changes: string[];
+  changes_error: string;
 }
 
 export interface HaltState {

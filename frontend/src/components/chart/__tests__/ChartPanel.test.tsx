@@ -179,6 +179,41 @@ describe("fair-value gaps", () => {
     restore();
   });
 
+  it("labels each zone FVG so it is not just a coloured band", async () => {
+    // The owner could not tell what the red and green bands were (2026-09-20).
+    // A zone that is only a colour is a zone you have to be told about.
+    const restore = withSize(600, 400);
+    overlaysBody = {
+      timeframe: "5m", count: 1, emas: {}, rsi: [],
+      fvgs: [{ ts: 1_750_000_000, top: 300, bottom: 250, direction: "bullish" }],
+    };
+    render(<ChartPanel />);
+
+    const label = await screen.findByTestId("fvg-label-bullish-1750000000");
+    expect(label.textContent).toBe("FVG");
+    restore();
+  });
+
+  it("puts the label inside its own zone, not at the chart origin", async () => {
+    // A label drawn at 0,0 is present in the DOM and useless on screen — the
+    // same failure mode the zones themselves had before the z-index fix.
+    const restore = withSize(600, 400);
+    overlaysBody = {
+      timeframe: "5m", count: 1, emas: {}, rsi: [],
+      fvgs: [{ ts: 1_750_000_000, top: 300, bottom: 250, direction: "bearish" }],
+    };
+    render(<ChartPanel />);
+
+    const rect = await screen.findByTestId("fvg-bearish-1750000000");
+    const label = await screen.findByTestId("fvg-label-bearish-1750000000");
+    const x = Number(rect.getAttribute("x"));
+    const y = Number(rect.getAttribute("y"));
+    const h = Number(rect.getAttribute("height"));
+    expect(Number(label.getAttribute("x"))).toBeGreaterThan(x);
+    expect(Number(label.getAttribute("y"))).toBeCloseTo(y + h / 2, 5);
+    restore();
+  });
+
   it("draws no overlay at all when there are no zones", async () => {
     // An empty SVG over the canvas is an invisible element that still
     // intercepts nothing but exists to be wondered about.

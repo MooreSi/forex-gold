@@ -199,6 +199,15 @@ async def reversal_report() -> dict:
         "edge": await _guarded(reversal_ctl.reversal_edge_stats, {}),
         "shadow": reversal_ctl.reversal_shadow_report(),
         "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
+        # The learning curve. `panel_data.ml_metrics()` has answered since the
+        # restructure and no endpoint called it, so the React panel had no
+        # data for the "is it learning?" chart the NiceGUI one drew. Guarded
+        # like the Breakout reads: a fresh install has no ML table, and a
+        # chart is never worth the rest of a panel that reports real money.
+        "ml": {
+            "metrics": await _guarded(reversal_ctl.reversal_ml_metrics, {}),
+            "summary": await _guarded(reversal_ctl.reversal_ml_summary, {}),
+        },
     }
 
 

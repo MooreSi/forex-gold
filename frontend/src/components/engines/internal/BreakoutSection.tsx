@@ -6,6 +6,7 @@ import { usePoll } from "@/hooks/usePoll";
 import { asArray, asObject } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { BreakoutActivity } from "./BreakoutActivity";
+import { LearningChartSection } from "./LearningChartSection";
 
 /**
  * The Breakout engine's own panel.
@@ -243,6 +244,10 @@ export function BreakoutSection() {
           )}
         </p>
       </div>
+
+      {/* Whether the classifier is getting better, which none of the figures
+          above can say: they are all measured over the whole labelled set. */}
+      <LearningChartSection metrics={metrics} summary={summary} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* The session split is the one that earned its place: this engine's

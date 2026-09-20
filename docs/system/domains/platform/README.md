@@ -171,3 +171,26 @@ log filter that judged lines individually instead of records. See
 - `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).
 - The by-layer split of the websocket transports in `controllers/{remote,sync}` is "still to come".
 - The installer's firewall rules use the live app's ports (8888/9000) while this checkout defaults the EA bridge to 9111 — not reconciled. (The UI port matches at 8888; the 8890 previously recorded here was never the default.)
+
+
+## Updating this install (2026-09-20)
+
+Three things about the update path, all found by using it:
+
+* **`POST /api/node/update` is not a route.** Applying an update is
+  `POST /api/node/update/apply`. The Settings button posted to the former and
+  told the operator nothing, so the update it claimed to start never ran.
+* **`GET /api/node/update` runs `git fetch`** and, when an update exists, a
+  paid model call for the plain-English summary. Nothing polls it. The
+  header's badge reads `system_ctl.cached_update_check()` instead — the last
+  answer, refreshed behind the caller at most every ten minutes — and only the
+  popup the operator opens asks for the summary (`include_summary`, default
+  true; the Settings card passes false and lists the commit subjects, which it
+  already has for free).
+* **A check must look like it is happening.** It takes as long as a fetch
+  takes, and a button with no visible state is indistinguishable from a dead
+  one. That is precisely how this was reported.
+
+The version string does not answer "am I on the current build?" — this app
+self-updates by commit, and the string only moves when someone bumps it. Show
+the installed commit against origin's.

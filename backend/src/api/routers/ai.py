@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query
+from typing import Any
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from backend.src.api.deps import engine as engine_dep
 from backend.src.api.errors import Refusal
 from backend.src.controllers import ai_analysis_controller as ai_analysis_ctl
 from backend.src.controllers import ai_controller as ai_ctl
@@ -82,6 +85,37 @@ async def dpm() -> dict:
         "calibration": await dpm_ctl.get_calibration_rows(),
         "runs": await dpm_ctl.get_calibration_runs(),
     }
+
+
+@router.get("/research")
+async def last_research() -> dict:
+    """The analysis this install last ran. **Nothing billed.**
+
+    Its own read so that opening the tab is free: the Research button is then
+    a decision the operator makes, not a toll for looking at the tab.
+    """
+    body = ai_ctl.last_market_research()
+    return {"billable": False, "analysis": body.get("analysis"),
+            "saved_at": body.get("saved_at", "")}
+
+
+@router.post("/research")
+async def research(eng: Any = Depends(engine_dep)) -> dict:
+    """Ask the model to read the market. **Billable, once.**
+
+    One call answers every metric the tab shows -- sentiment, price range,
+    drivers, risks, levels, the strategy recommendation -- because that is one
+    coherent view. A call per metric costs several and produces several views
+    that can contradict each other.
+    """
+    if not ai_ctl.is_configured(settings_ctl.load_config()):
+        raise Refusal(
+            "No AI provider is configured. Add a provider and an API key under "
+            "Settings → AI before asking for an analysis.",
+        )
+    body = await ai_ctl.run_market_research(eng)
+    return {"billable": True, "analysis": body.get("analysis"),
+            "saved_at": body.get("saved_at", "")}
 
 
 @router.post("/analyse")

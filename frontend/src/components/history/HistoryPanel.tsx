@@ -13,6 +13,7 @@ import { PerformanceSection } from "./internal/PerformanceSection";
 import { CalendarSection } from "./internal/CalendarSection";
 import { DpmSection } from "./internal/DpmSection";
 import { EquityCurveSection } from "./internal/EquityCurveSection";
+import { TradeAnalysisPanel } from "@/components/ai/TradeAnalysisPanel";
 import { TradeTableSection } from "./internal/TradeTableSection";
 
 const SUB_TABS = [
@@ -26,6 +27,11 @@ const SUB_TABS = [
   // request of its own, so it loads when it is asked for.
   { id: "trades", label: "Trades" },
   { id: "dpm", label: "DPM" },
+  // Where the NiceGUI app had it: `frontend/pages/history/__init__.py`
+  // renders `ai_trade_analysis` inside this tab. The React port mounted it on
+  // the AI Analysis tab instead, which left the tab named for the market
+  // research showing something else entirely.
+  { id: "ai", label: "AI trade analysis" },
 ];
 
 export function HistoryPanel() {
@@ -111,6 +117,11 @@ export function HistoryPanel() {
               {/* The sixth NiceGUI sub-tab. /api/ai/dpm has served these three
                   tables since the port and nothing rendered them. */}
               <DpmSection />
+            </Tabs.Content>
+            <Tabs.Content value="ai">
+              {/* Reads its evidence for free; each section has its own Ask
+                  button, so opening this sub-tab bills nothing. */}
+              <TradeAnalysisPanel />
             </Tabs.Content>
             <Tabs.Content value="trades">
               {/* Its own endpoint, not a field on /state: this is a row per

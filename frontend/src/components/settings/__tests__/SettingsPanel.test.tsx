@@ -477,75 +477,19 @@ describe("node and updates", () => {
     expect(request).toHaveAttribute("title", expect.stringContaining("email address"));
   });
 
-  it("says the app is up to date rather than leaving it blank", async () => {
+  // The Updates section this tab used to carry was replaced on 2026-09-20 by
+  // `GitHubUpdateSection`, which shows the installed commit against GitHub's
+  // and applies the update through the route that actually applies one. Its
+  // own tests moved with it, to `GitHubUpdateSection.test.tsx`; the AI summary
+  // they also pinned now belongs to the header's popup
+  // (`shell/__tests__/UpdateBadge.test.tsx`), which is the only caller that
+  // pays for one. What is left here is the tab-level fact: the card is on
+  // this tab and it reports the check.
+  it("carries the GitHub update card", async () => {
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
 
-    expect(await screen.findByText(/up to date/)).toBeInTheDocument();
-  });
-
-  it("will not offer to apply an update that does not exist", async () => {
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
-
-    const apply = await screen.findByRole("button", { name: /Apply the update/ });
-    expect(apply).toBeDisabled();
-    expect(apply).toHaveAttribute("title", "There is no update to apply.");
-  });
-
-  it("offers to apply one when there is", async () => {
-    overrides["/api/node/update"] = {
-      current: "1.4.2",
-      update: {
-        available: true, local_sha: "aaaaaaa", remote_sha: "bbbbbbbcccc",
-        commits: [{ sha: "bbbbbbbcccc", short_sha: "bbbbbbb",
-                    summary: "Ported the News tab" }],
-        error: null,
-      },
-      changes: ["Ported the News tab"], changes_error: "",
-    };
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
-
-    expect(await screen.findByText(/1 newer commit/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Apply the update/ })).toBeEnabled();
-  });
-
-  it("shows what the update changes", async () => {
-    // The summary was fetched by the backend and never rendered.
-    overrides["/api/node/update"] = {
-      current: "1.4.2",
-      update: {
-        available: true, local_sha: "aaaaaaa", remote_sha: "bbbbbbb",
-        commits: [{ sha: "bbbbbbb", short_sha: "bbbbbbb", summary: "raw subject" }],
-        error: null,
-      },
-      changes: ["Faster startup", "Fixes a chart crash"], changes_error: "",
-    };
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
-
-    expect(await screen.findByText("Faster startup")).toBeInTheDocument();
-    expect(screen.getByText("Fixes a chart crash")).toBeInTheDocument();
-  });
-
-  it("falls back to the raw commit subjects when there is no summary", async () => {
-    // A summary is a nicety, never a precondition -- an operator with no AI
-    // provider still needs to see what they are about to install.
-    overrides["/api/node/update"] = {
-      current: "1.4.2",
-      update: {
-        available: true, local_sha: "aaaaaaa", remote_sha: "bbbbbbb",
-        commits: [{ sha: "bbbbbbb", short_sha: "bbbbbbb",
-                    summary: "Fix the chart crash" }],
-        error: null,
-      },
-      changes: [], changes_error: "no AI provider configured (Settings > AI)",
-    };
-    render(<SettingsPanel />);
-    await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
-
-    expect(await screen.findByText("Fix the chart crash")).toBeInTheDocument();
+    expect(await screen.findByTestId("update-status")).toHaveTextContent(/up to date/i);
   });
 
   it("says when autostart is not supported rather than offering a dead switch", async () => {

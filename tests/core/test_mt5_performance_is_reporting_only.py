@@ -84,6 +84,12 @@ class TestItIsOnlyEverUsedForReporting:
             # render costs one round-trip rather than the 4.3-a-minute the
             # NiceGUI page cost (bugs/030).
             "backend/src/api/routers/history.py",
+            # The AI Analysis tab's market research (2026-09-20). Reporting,
+            # and the same caller the NiceGUI AI Summary page in this list's
+            # history was: the figures go into the prompt the model reads.
+            # It decides nothing, places nothing, and sizes nothing -- the
+            # answer is prose on a screen a human then acts on, or does not.
+            "backend/src/services/ai/market_research.py",
         }
 
         assert found == expected, (

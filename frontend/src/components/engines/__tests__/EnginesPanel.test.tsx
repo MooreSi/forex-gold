@@ -46,6 +46,12 @@ afterEach(() => {
 
 const posts = () => fetchMock.mock.calls.filter((c) => c[1]?.method === "POST");
 
+/** The Reversal engine's model, switches and ledger now live behind their own
+ *  tab, as they did in the NiceGUI panel this restores. */
+async function openReversalTab() {
+  await userEvent.click(await screen.findByRole("tab", { name: /Reversal engine/ }));
+}
+
 describe("what is running", () => {
   it("shows the engines this build has, by the names the operator uses", async () => {
     render(<EnginesPanel />);
@@ -162,7 +168,7 @@ describe("the pro-signal model", () => {
     // bugs/030: an inline fit freezes the dashboard, the EA socket reader and
     // the monitor loop together. The operator is told which one this is.
     render(<EnginesPanel />);
-    await screen.findByText("Breakout");
+    await openReversalTab();
 
     await userEvent.click(screen.getByRole("button", { name: /Retrain in the background/ }));
 
@@ -174,7 +180,7 @@ describe("the pro-signal model", () => {
 
   it("shows the research study's report", async () => {
     render(<EnginesPanel />);
-    await screen.findByText("Breakout");
+    await openReversalTab();
 
     await userEvent.click(screen.getByRole("button", { name: /Run the research study/ }));
 
@@ -189,6 +195,7 @@ describe("the reversal capabilities", () => {
     // tests/risk/test_htf_bias_gate_asian_exemption.py went red the moment
     // this tab was marked ported without it, which is what it is for.
     render(<EnginesPanel />);
+    await openReversalTab();
 
     expect(await screen.findByTestId("capability-htf_bias_asian_exempt")).toBeInTheDocument();
   });
@@ -197,6 +204,7 @@ describe("the reversal capabilities", () => {
     // "Does NOTHING unless X is also on" was a tooltip. A tooltip is not where
     // you put the reason a setting has no effect.
     render(<EnginesPanel />);
+    await openReversalTab();
 
     const card = await screen.findByTestId("capability-htf_bias_asian_exempt");
     expect(card).toHaveTextContent("Only trade with the trend");
@@ -209,6 +217,7 @@ describe("the reversal capabilities", () => {
       settings: { htf_bias_asian_exempt: 1, htf_bias_gate_enabled: 1 },
     });
     render(<EnginesPanel />);
+    await openReversalTab();
 
     const card = await screen.findByTestId("capability-htf_bias_asian_exempt");
     expect(card).not.toHaveTextContent("it is currently off");
@@ -217,6 +226,7 @@ describe("the reversal capabilities", () => {
 
   it("writes only the switch that changed", async () => {
     render(<EnginesPanel />);
+    await openReversalTab();
     await screen.findByTestId("capability-htf_bias_asian_exempt");
 
     await userEvent.click(screen.getByLabelText(/ignore the trend there/));
@@ -281,5 +291,47 @@ describe("which machine these controls drive", () => {
     await screen.findByText("Breakout");
 
     expect(screen.queryByTestId("control-target")).not.toBeInTheDocument();
+  });
+});
+
+describe("the two engines have a tab each", () => {
+  /**
+   * The NiceGUI Signal Generator tab had exactly this: a Breakout tab and a
+   * Reversal Engine tab (`frontend/pages/test_panel/__init__.py`). The React
+   * port put both engines' detail on one scrolling page, so reading the
+   * Breakout splits meant scrolling past the reversal model, its capability
+   * switches and its virtual trade ledger. Asked for on 2026-09-20.
+   */
+  it("opens on Breakout, as the original did", async () => {
+    render(<EnginesPanel />);
+
+    expect(await screen.findByRole("tab", { name: /Breakout engine/ }))
+      .toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps the reversal detail off the Breakout tab", async () => {
+    // The whole point of the split: one engine's numbers at a time.
+    render(<EnginesPanel />);
+    await screen.findByRole("tab", { name: /Breakout engine/ });
+
+    expect(screen.queryByTestId("capability-htf_bias_asian_exempt")).toBeNull();
+  });
+
+  it("shows the reversal detail once its tab is chosen", async () => {
+    render(<EnginesPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: /Reversal engine/ }));
+
+    expect(await screen.findByTestId("capability-htf_bias_asian_exempt"))
+      .toBeInTheDocument();
+  });
+
+  it("still starts and stops either engine from above the tabs", async () => {
+    // Start/Stop is not per-tab: an operator stopping an engine should not
+    // have to find the right tab first.
+    render(<EnginesPanel />);
+    await openReversalTab();
+
+    expect(screen.getAllByRole("button", { name: /^(Start|Stop)$/ }).length)
+      .toBeGreaterThan(1);
   });
 });

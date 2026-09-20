@@ -105,3 +105,71 @@ def test_unparseable_compile_stamp_does_not_break_the_check(caplog):
             "compiled": "not-a-timestamp",
         })
     assert bridge.ea_version_ok is True
+
+
+class TestTheDriftIsRECORDED_notJustLogged:
+    """A warning nobody reads is how this failed the first time.
+
+    The version comparison has a badge; the drift check never did. It only
+    ever logged, so an EA whose version matches but whose source was edited
+    after the last compile showed a GREEN badge while running rules the app
+    no longer ships. Seen on the owner's Mac, 2026-09-20: "EA v1.08 matches,
+    but the source was modified 5951 min after this build was compiled".
+
+    The two kinds of stale are kept apart deliberately. A version mismatch is
+    certain (the binary is a different build). Drift is weaker evidence: it
+    fires on any saved edit, including ones that never reach a terminal. Both
+    are worth showing; conflating them would let the weaker one speak with the
+    stronger one's authority.
+    """
+
+    def test_drift_is_stored_on_the_bridge(self):
+        bridge = _bridge()
+        bridge._check_ea_version({
+            "ea_version": ea_bridge._expected_ea_version(),
+            "compiled": _stamp(offset_minutes=-180),
+        })
+
+        assert bridge.ea_source_drift_s is not None
+        assert bridge.ea_source_drift_s > 3 * 3600 - 60
+
+    def test_a_freshly_compiled_build_records_no_drift(self):
+        bridge = _bridge()
+        bridge._check_ea_version({
+            "ea_version": ea_bridge._expected_ea_version(),
+            "compiled": _stamp(),
+        })
+
+        assert not bridge.ea_source_drift_s
+
+    def test_a_save_within_the_slack_records_no_drift(self):
+        """Same threshold the warning uses, so the badge and the log cannot
+        disagree about whether this build is stale."""
+        bridge = _bridge()
+        bridge._check_ea_version({
+            "ea_version": ea_bridge._expected_ea_version(),
+            "compiled": _stamp(offset_minutes=-0.5),
+        })
+
+        assert not bridge.ea_source_drift_s
+
+    def test_an_unreadable_stamp_records_no_drift_rather_than_guessing(self):
+        bridge = _bridge()
+        bridge._check_ea_version({
+            "ea_version": ea_bridge._expected_ea_version(),
+            "compiled": "not a timestamp",
+        })
+
+        assert not bridge.ea_source_drift_s
+
+    def test_a_version_mismatch_does_not_also_claim_drift(self):
+        """It returns before the drift check, and must not leave a stale
+        value from a previous connection behind either."""
+        bridge = _bridge()
+        bridge._check_ea_version({
+            "ea_version": ea_bridge._expected_ea_version(),
+            "compiled": _stamp(offset_minutes=-180),
+        })
+        bridge._check_ea_version({"ea_version": "0.01", "compiled": _stamp()})
+
+        assert not bridge.ea_source_drift_s

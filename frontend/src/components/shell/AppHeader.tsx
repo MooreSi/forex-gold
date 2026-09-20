@@ -1,5 +1,6 @@
 import { CircleDot, LogOut, Server, ShieldCheck, TriangleAlert } from "lucide-react";
 import { ActiveTraderControl } from "./ActiveTraderControl";
+import { EaBadge } from "./EaBadge";
 import { EnvironmentControl } from "./EnvironmentControl";
 import { HeaderStats } from "./HeaderStats";
 import { PauseControl } from "./PauseControl";
@@ -10,19 +11,6 @@ import { formatClock } from "@/components/shared/format";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminConsole } from "@/hooks/useAdminConsole";
 import { useHeaderState } from "@/hooks/useHeaderState";
-import { cn } from "@/lib/cn";
-
-// The service names a colour; this is the only place that decides what the
-// name looks like. Amber is "connected but stale", which is neither green nor
-// red on purpose.
-const EA_COLOURS: Record<string, string> = {
-  green: "text-profit",
-  red: "text-loss",
-  orange: "text-warning",
-  amber: "text-warning",
-  grey: "text-ink-3",
-  gray: "text-ink-3",
-};
 
 /**
  * The bar on every tab: who is trading, on what account, at what price, what
@@ -96,19 +84,11 @@ export function AppHeader() {
           <CircleDot size={13} className={bridgeUp ? "text-profit" : "text-loss"} />
           <span className="hidden xl:inline">Bridge</span>
         </span>
-        {data?.ea_badge && (
-          // Colour and words come from the backend. A stale EA build shown as
-          // a green badge is the screen contradicting the log — the bug
-          // `ea_badge_state` was extracted for. The UI renders the decision.
-          <span
-            data-testid="ea-badge"
-            className={cn("flex items-center gap-1", EA_COLOURS[data.ea_badge.colour] ?? "text-ink-3")}
-            title={data.ea_badge.tooltip}
-          >
-            <CircleDot size={13} />
-            {data.ea_badge.text}
-          </span>
-        )}
+        {/* Colour and words come from the backend. A stale EA build shown as
+            a green badge is the screen contradicting the log — the bug
+            `ea_badge_state` was extracted for. The UI renders the decision,
+            and when it says stale, opens the dialog that fixes it. */}
+        <EaBadge badge={data?.ea_badge} />
         {data?.active_trader && (
           <ActiveTraderControl
             activeTrader={data.active_trader}

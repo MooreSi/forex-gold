@@ -124,6 +124,12 @@ def cluster(monkeypatch):
         "reversal": _Svc(reversal, "reversal"),
     })
     monkeypatch.setattr(handover._client, "get_instance", lambda: peer)
+    # This file is about a node that HAS a peer -- "both nodes are pointed at
+    # the same MT5 account", as the module docstring puts it. That was implicit
+    # until 2026-09-20, when the standalone case below was added; stating it
+    # here keeps the two apart instead of letting the real pairing config
+    # decide which set of rules these tests run under.
+    monkeypatch.setattr(handover, "_paired_host", lambda: "vps.example.com")
 
     def _set(value, *a, **k):
         state["order"].append(f"trader:{value}")
@@ -275,3 +281,123 @@ def test_bounce_is_never_bulk_started():
     started by a mode switch.
     """
     assert "bounce" in engine_registry._NOT_BULK_STARTED
+
+
+@pytest.mark.asyncio
+class TestAnInstallWithNoPeerAtAll:
+    """A standalone install must not be trapped in `remote_vps`.
+
+    Found on the owner's Mac, 2026-09-20: `active_trader` was `remote_vps`
+    with nothing paired at all -- no sync host, no token, server disabled.
+    Two things were wrong with that state at once.
+
+    It was **inert**: `open_trade`'s stand-down gate reads
+    `if _host and get_active_trader() == TRADER_REMOTE_VPS`, and with no host
+    the gate never fires, so the node traded while its own header said REMOTE.
+    A screen that contradicts what the engines are doing is the failure this
+    whole area exists to prevent.
+
+    And it was **a trap**: the only way back is Take over locally, which
+    requires a connected peer. There is no peer to connect to, so the flag
+    could not be cleared from the UI at all.
+
+    The handshake still guards the case it was written for. When a host IS
+    configured, a disconnected peer refuses exactly as before -- a peer that
+    cannot be reached might still be trading, and that is the whole point.
+    What changes is only the case where no second node exists to stand down.
+    """
+
+    async def test_taking_over_works_when_nothing_is_paired(self, cluster,
+                                                            monkeypatch):
+        monkeypatch.setattr(handover, "_paired_host", lambda: "")
+        cluster["peer"].conn_state = "disconnected"
+
+        await handover.take_over_locally()
+
+        assert cluster["trader"] == "local"
+
+    async def test_no_stand_down_is_requested_of_a_peer_that_does_not_exist(
+        self, cluster, monkeypatch,
+    ):
+        monkeypatch.setattr(handover, "_paired_host", lambda: "")
+        cluster["peer"].conn_state = "disconnected"
+
+        await handover.take_over_locally()
+
+        assert cluster["peer"].calls == []
+
+    async def test_the_engines_still_start(self, cluster, monkeypatch):
+        monkeypatch.setattr(handover, "_paired_host", lambda: "")
+        cluster["peer"].conn_state = "disconnected"
+
+        await handover.take_over_locally()
+
+        assert cluster["breakout"].is_running is True
+        assert cluster["reversal"].is_running is True
+
+    async def test_it_says_there_was_no_peer_rather_than_inventing_one(
+        self, cluster, monkeypatch,
+    ):
+        monkeypatch.setattr(handover, "_paired_host", lambda: "")
+        cluster["peer"].conn_state = "disconnected"
+
+        body = await handover.take_over_locally()
+
+        assert body["remote_open_positions"] == 0
+        assert "no remote node" in body["note"].lower()
+
+    async def test_a_configured_peer_that_is_offline_still_refuses(
+        self, cluster, monkeypatch,
+    ):
+        """The guarantee this must not weaken. A paired peer that cannot be
+        reached may still be trading the same account."""
+        monkeypatch.setattr(handover, "_paired_host", lambda: "vps.example.com")
+        cluster["peer"].conn_state = "disconnected"
+
+        with pytest.raises(handover.HandoverRefused):
+            await handover.take_over_locally()
+
+        assert cluster["trader"] == "remote_vps"
+        assert cluster["breakout"].is_running is False
+
+
+class TestReadingWhetherAPeerExists:
+    """`_paired_host` is what decides which set of rules `take_over_locally`
+    runs under, so its own failure mode matters.
+
+    It answers the SAME question `open_trade` asks before applying its
+    stand-down gate. If the two ever disagree, the flag means one thing to the
+    order path and another to the screen -- which is the bug this whole change
+    came from.
+    """
+
+    def test_it_reports_the_configured_host(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.src.services.cluster.sync.client.SyncClient.load_config",
+            staticmethod(lambda: ("vps.example.com", 8765, "tok")),
+        )
+
+        assert handover._paired_host() == "vps.example.com"
+
+    def test_no_host_configured_reads_as_standalone(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.src.services.cluster.sync.client.SyncClient.load_config",
+            staticmethod(lambda: ("", 8765, "")),
+        )
+
+        assert handover._paired_host() == ""
+
+    def test_a_config_it_cannot_read_is_treated_as_PAIRED(self, monkeypatch):
+        """Fail towards the handshake. Assuming standalone on an unreadable
+        config would skip the stand-down on a node that may well have a peer,
+        and two nodes trading one account is the outcome this file exists to
+        prevent."""
+        def _boom():
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(
+            "backend.src.services.cluster.sync.client.SyncClient.load_config",
+            staticmethod(_boom),
+        )
+
+        assert handover._paired_host() != ""

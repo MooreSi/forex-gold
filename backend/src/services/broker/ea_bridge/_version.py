@@ -94,6 +94,9 @@ class VersionMixin:
         """
         self.ea_version = msg.get("ea_version") or None
         self.ea_compiled = msg.get("compiled") or None
+        # Cleared on every hello, so a reconnect after a recompile cannot be
+        # reported with the previous connection's drift.
+        self.ea_source_drift_s = 0.0
         expected = _expected_ea_version()
 
         if self.ea_version is None:
@@ -132,6 +135,11 @@ class VersionMixin:
         if compiled_at is not None and src_mtime is not None:
             drift = (src_mtime - compiled_at).total_seconds()
             if drift > _EA_COMPILE_SLACK_S:
+                # RECORDED, not only logged. The version comparison has had a
+                # badge since 2026-09-09; this check never did, so a build
+                # whose version matches but whose source moved on showed green
+                # while running rules the app no longer ships.
+                self.ea_source_drift_s = drift
                 log.warning(
                     "[EABridge] EA v%s matches, but the source was modified "
                     "%.0f min after this build was compiled (%s) -- there are "
@@ -199,10 +207,29 @@ def ea_build_status() -> tuple[bool, str]:
     try:
         from backend.src.services.broker import ea_bridge
         bridge = ea_bridge.get_instance()
-        if bridge is None or getattr(bridge, "ea_version_ok", None) is not False:
+        if bridge is None:
+            return False, ""
+        version_ok = getattr(bridge, "ea_version_ok", None) is not False
+        # Seconds the source was saved after the running build was compiled.
+        # Absent on a bridge from before this field existed, which is not
+        # staleness -- see the test of that name.
+        drift = float(getattr(bridge, "ea_source_drift_s", 0) or 0)
+        if version_ok and drift <= 0:
             return False, ""
         running = getattr(bridge, "ea_version", None) or "unknown"
         expected = _expected_ea_version() or "unknown"
+        if version_ok:
+            # The weaker kind: EA_VERSION was never bumped, but the .mq5 was
+            # saved after this binary was compiled, so the running EA is
+            # missing those edits. Only a recompile is needed -- the source in
+            # the terminal is already the current one.
+            hours = drift / 3600.0
+            return True, (
+                f"The EA on the chart is v{running}, but its source has been "
+                f"edited since it was compiled ({hours:.0f} hours of changes "
+                f"it does not have). Fix: recompile in MetaEditor (F7). The "
+                f"chart reloads the new build by itself."
+            )
         return True, (
             f"The EA on the chart is v{running}, but this app ships v{expected}. "
             f"The compiled .ex5 is stale, so EA fixes are NOT running. "

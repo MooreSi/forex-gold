@@ -43,9 +43,11 @@ OLDER = "1.05"
 
 
 class _Bridge:
-    def __init__(self, ok, running=None):
+    def __init__(self, ok, running=None, drift=0.0):
         self.ea_version_ok = ok
         self.ea_version = running
+        # Seconds the .mq5 was saved after the running build was compiled.
+        self.ea_source_drift_s = drift
 
 
 @pytest.fixture
@@ -179,3 +181,66 @@ class TestTheBadgeDecision:
         colour, _t, _ = ea_bridge.ea_badge_state(False, True, "local", "d")
 
         assert colour == "red"
+
+
+class TestTheOtherKindOfStale:
+    """A build whose VERSION matches but whose source has moved on.
+
+    The 2026-09-09 case above is a version mismatch: certain, because the
+    binary announces a different build. This is the weaker one -- EA_VERSION
+    was not bumped, but the .mq5 was saved after the last compile, so the
+    running EA is missing edits. It was logged from the start and never
+    reached the badge, so it showed GREEN. Reported on the owner's Mac,
+    2026-09-20: "EA v1.08 matches, but the source was modified 5951 min
+    after this build was compiled".
+
+    Both are stale for the badge's purpose, which is "the EA is not running
+    what this app ships". The DETAIL keeps them apart, because the action
+    differs: a mismatch needs the source deployed and compiled, drift needs
+    only a recompile.
+    """
+
+    def test_a_drifted_build_is_reported_stale(self, bridge):
+        bridge(_Bridge(ok=True, running=SHIPPED, drift=99 * 3600))
+
+        assert ea_bridge.ea_build_status()[0] is True
+
+    def test_the_detail_says_it_needs_recompiling(self, bridge):
+        bridge(_Bridge(ok=True, running=SHIPPED, drift=99 * 3600))
+
+        _stale, detail = ea_bridge.ea_build_status()
+
+        assert "recompil" in detail.lower()
+
+    def test_the_detail_says_how_far_behind_it_is(self, bridge):
+        """"Stale" with no number leaves the operator unable to judge whether
+        it is a save from a minute ago or a build from last week."""
+        bridge(_Bridge(ok=True, running=SHIPPED, drift=99 * 3600))
+
+        _stale, detail = ea_bridge.ea_build_status()
+
+        assert "99" in detail
+
+    def test_no_drift_is_not_stale(self, bridge):
+        bridge(_Bridge(ok=True, running=SHIPPED, drift=0.0))
+
+        assert ea_bridge.ea_build_status()[0] is False
+
+    def test_a_bridge_from_before_this_field_existed_is_not_stale(self, bridge):
+        """`ea_build_status` runs on the header tick against whatever object
+        the bridge module hands back. A missing attribute is not staleness."""
+        class _Old:
+            ea_version_ok = True
+            ea_version = SHIPPED
+
+        bridge(_Old())
+
+        assert ea_bridge.ea_build_status()[0] is False
+
+    def test_a_version_mismatch_still_wins_the_message(self, bridge):
+        """Both true at once: the certain one is the one to act on."""
+        bridge(_Bridge(ok=False, running=OLDER, drift=99 * 3600))
+
+        _stale, detail = ea_bridge.ea_build_status()
+
+        assert "deploy_ea" in detail

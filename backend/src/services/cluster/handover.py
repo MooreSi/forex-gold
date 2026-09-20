@@ -61,6 +61,25 @@ class HandoverRefused(Exception):
     """
 
 
+def _paired_host() -> str:
+    """The VPS this install is paired with, or "" when it is standalone.
+
+    The SAME question `open_trade` asks before it applies its stand-down gate
+    (`_host and get_active_trader() == TRADER_REMOTE_VPS`). Both sides must
+    agree on what "there is a second node" means, or the flag can mean one
+    thing to the order path and another to the screen.
+    """
+    try:
+        from backend.src.services.cluster.sync.client import SyncClient
+        host, _, _ = SyncClient.load_config()
+        return host or ""
+    except Exception as exc:
+        # Unreadable is treated as PAIRED: assuming standalone here would skip
+        # the stand-down handshake on a node that may well have a peer.
+        log.warning("[handover] could not read the pairing config: %s", exc)
+        return "unknown"
+
+
 def _require_link() -> None:
     if _client.get_instance().conn_state != "connected":
         raise HandoverRefused(
@@ -75,6 +94,25 @@ async def take_over_locally(timeout: float = 15.0) -> dict:
     The order is the whole point. Marking this node active before the peer has
     acknowledged means two nodes believing they own the same account.
     """
+    # A standalone install has no peer to stand down, and demanding one
+    # traps it: `active_trader` can be `remote_vps` with nothing paired, the
+    # order path ignores the flag entirely (so the node trades), and the only
+    # control that clears it needs a link that does not exist. Found on the
+    # owner's Mac, 2026-09-20.
+    #
+    # This does NOT weaken the mutual-exclusion guarantee. A CONFIGURED peer
+    # still has to acknowledge, reachable or not, because a peer that cannot
+    # be reached may still be trading the same account.
+    if not _paired_host():
+        _node.set_active_trader(TRADER_LOCAL)
+        _start_stopped_engines()
+        return {
+            "active_trader": TRADER_LOCAL,
+            "remote_open_positions": 0,
+            "note": ("Now trading on this machine. There is no remote node "
+                     "paired with this install, so nothing had to stand down."),
+        }
+
     _require_link()
     try:
         ack = await _client.get_instance().request_stand_down(timeout=timeout)

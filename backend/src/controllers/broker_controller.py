@@ -158,6 +158,33 @@ def ea_build_status(*args, **kwargs):
     return _ea.ea_build_status(*args, **kwargs)
 
 
+def ea_deploy_report(*args, **kwargs) -> dict:
+    """Copy the shipped EA into every MetaTrader on this machine.
+
+    Writes files and nothing else. It cannot place, close or size a trade;
+    what it can do is change which rules an ALREADY attached EA manages
+    existing positions with, once the terminal reloads the new build.
+    """
+    from backend.src.services.broker import ea_deploy as _dep
+    return _dep.deploy(*args, **kwargs)
+
+
+def ea_compile(experts_dir, platform=None) -> dict:
+    """Compile the EA in one Experts folder. Windows only; see the service."""
+    from backend.src.services.broker import ea_deploy as _dep
+    return _dep.compile_ea(experts_dir, platform=platform)
+
+
+def ea_binary_is_shipped() -> bool:
+    """Whether this build ships a pre-compiled .ex5 beside the source.
+
+    The difference between "one click" and "one click, then press F7": with a
+    binary there is nothing for MetaEditor to do.
+    """
+    from backend.src.services.broker import ea_deploy as _dep
+    return _dep.binary_is_shipped()
+
+
 def ea_badge_state(*args, **kwargs):
     """Colour/text/tooltip for the EA badge. See ea_bridge.ea_badge_state."""
     from backend.src.services.broker import ea_bridge as _ea

@@ -194,3 +194,26 @@ Three things about the update path, all found by using it:
 The version string does not answer "am I on the current build?" — this app
 self-updates by commit, and the string only moves when someone bumps it. Show
 the installed commit against origin's.
+
+
+## A standalone install could get stuck "stood down" (2026-09-20)
+
+`get_active_trader()` **defaults to `remote_vps`**, on the sound reasoning
+that a paired Mac must not assume it is in charge. On an install with no peer
+at all, that default was a trap in two directions at once:
+
+* it was **inert** for trading, because `open_trade`'s gate reads
+  `if _host and get_active_trader() == TRADER_REMOTE_VPS` and there is no
+  host, so the node traded normally while its own header said REMOTE; and
+* it was **unreachable**, because the only control that clears it is Take
+  over locally, which required a connected peer that does not exist.
+
+`take_over_locally` now takes the local-only path when `_paired_host()` is
+empty, which is the same question the order path asks. A **configured** peer
+still has to acknowledge whether it is reachable or not: an unreachable peer
+may still be trading the same account, and that guarantee is not weakened.
+`_paired_host` treats an unreadable config as PAIRED for the same reason.
+
+The default itself is unchanged. Changing it would mean revisiting
+`test_the_active_trader_DEFAULTS_TO_THE_VPS`, which is a deliberate safety
+pin, so an unpaired install still reads REMOTE until someone takes over once.

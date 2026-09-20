@@ -296,3 +296,47 @@ through. It always requested `COPY_TICKS_ALL`; it was dropping three of the
 fields in a dict comprehension, which made any order-flow measurement
 impossible. Whether this feed populates them is still unmeasured --
 `market/order_flow.probe_feed` answers it.
+
+
+## The two kinds of stale EA, and the one button (2026-09-20)
+
+A terminal can be running the wrong EA in two different ways, and until now
+only the first reached the screen:
+
+* **Version mismatch.** The EA announces a different `EA_VERSION` from the
+  one the repo ships. Certain: the binary is a different build. Badged amber
+  since 2026-09-09. Fix: deploy the source, compile.
+* **Source drift.** The version matches, but the `.mq5` was saved after the
+  running build was compiled, so edits that never moved `EA_VERSION` are
+  missing. This was logged from the start and **never badged**, so it showed
+  green. Found on the owner's Mac: "EA v1.08 matches, but the source was
+  modified 5951 min after this build was compiled". Fix: recompile only, since
+  the terminal's source is already current.
+
+Both are stale for the badge's purpose. `ea_build_status()` reports both and
+keeps the detail apart, because the action differs. Drift is the weaker
+signal (it fires on any saved edit, including ones that never reach a
+terminal), so it is recorded on the bridge as `ea_source_drift_s` and
+deliberately does **not** flip `ea_version_ok`.
+
+### What the Install button can honestly do
+
+`POST /api/settings/ea/install` copies the EA into every Experts folder it
+finds, and then:
+
+| | compile | who does it |
+|---|---|---|
+| `.ex5` committed in `mql5/` | not needed | nobody, the chart reloads it |
+| Windows, source only | `metaeditor64.exe /compile` | the app |
+| macOS/CrossOver, source only | impossible | the operator, F7 |
+
+**MetaEditor cannot be driven headlessly under CrossOver.** It exits 0,
+writes no log and rebuilds nothing, which is why `compile_ea` refuses on
+macOS outright and why `_needs_compile` re-checks the `.ex5` mtime on Windows
+rather than trusting the exit code. An endpoint that reported that compile as
+a success would recreate the exact silent staleness the badge exists to end.
+
+**Shipping a compiled `.ex5` beside the `.mq5` removes the manual step
+everywhere**, which is what the owner chose on 2026-09-20. It costs one
+compile per `EA_VERSION` bump, on a machine that can compile, committed with
+the source change.

@@ -19,6 +19,8 @@ credentials exist and for which login, never the password.
 """
 from __future__ import annotations
 
+import sys
+
 import logging
 
 from fastapi import APIRouter
@@ -26,6 +28,7 @@ from pydantic import BaseModel
 
 from backend.src.api import auth as auth_gate
 from backend.src.api.errors import Refusal
+from backend.src.controllers import broker_controller as broker_ctl
 from backend.src.api.redaction import redacted as _redacted
 from backend.src.controllers import environment_controller as env_ctl
 from backend.src.controllers import settings_controller as settings_ctl
@@ -33,6 +36,9 @@ from backend.src.controllers import settings_controller as settings_ctl
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+# Named once: the popup tells the operator which file to open in MetaEditor.
+EA_FILE_NAME = "ForexTraderBridge.mq5"
 
 class ConfigWrite(BaseModel):
     model_config = {"extra": "allow"}
@@ -212,6 +218,70 @@ async def diagnostics() -> dict:
         "log": [list(line) for line in await settings_ctl.live_log_lines()],
         "circuit_breaker": await settings_ctl.get_circuit_breaker_state_async(),
     }
+
+
+@router.get("/ea")
+async def ea_status() -> dict:
+    """What the EA badge's popup shows. Reads only; installs nothing.
+
+    `binary_shipped` is the difference between one click and one click plus
+    F7: with a pre-compiled `.ex5` beside the source there is nothing for
+    MetaEditor to do.
+    """
+    stale, detail = broker_ctl.ea_build_status()
+    return {
+        "stale": stale,
+        "detail": detail,
+        "binary_shipped": broker_ctl.ea_binary_is_shipped(),
+        "platform": sys.platform,
+    }
+
+
+@router.post("/ea/install")
+async def ea_install() -> dict:
+    """Put the EA this app ships into every MetaTrader on this machine.
+
+    Copies files. It opens, closes and sizes nothing -- but it does change
+    which rules an already-attached EA will manage open positions with, once
+    the terminal reloads the new build, so it is a POST that reports exactly
+    what it did.
+
+    **It never claims a compile it did not perform.** MetaEditor exits 0 on a
+    build it never ran, so `compile_ea` refuses outright on macOS and verifies
+    the `.ex5` is genuinely newer on Windows. When a compile is still needed
+    the answer says so and names the key to press, rather than reporting a
+    success that would leave the old build running silently -- which is the
+    failure this whole area exists to end.
+    """
+    report = broker_ctl.ea_deploy_report()
+    if not report.get("targets"):
+        raise Refusal(
+            "No MetaTrader terminal was found on this machine, so there is "
+            "nothing to install the EA into.")
+
+    needs_compile = int(report.get("needs_compile") or 0) > 0
+    compiled = False
+    next_step = ""
+
+    if needs_compile:
+        result = broker_ctl.ea_compile(report["targets"][0])
+        compiled = bool(result.get("ok"))
+        if compiled:
+            needs_compile = False
+            next_step = ("The EA was rebuilt. The chart reloads it by itself, "
+                         "so there is nothing left to do.")
+        else:
+            next_step = (
+                f"Open MetaEditor, open {EA_FILE_NAME} and press F7 to compile "
+                f"it. The chart reloads the new build by itself afterwards. "
+                f"({result.get('detail', '')})"
+            )
+    else:
+        next_step = ("The compiled EA was installed. The chart reloads it by "
+                     "itself, so there is nothing left to do.")
+
+    return {"report": report, "needs_compile": needs_compile,
+            "compiled": compiled, "next_step": next_step}
 
 
 @router.post("/circuit-breaker/reset")

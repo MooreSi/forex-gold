@@ -216,6 +216,29 @@ def compile_ea(experts_dir: Path, platform: Optional[str] = None) -> dict:
     return {"ok": True, "detail": f"compiled {ex5.name}"}
 
 
+def shipped_binary(repo_root: Optional[Path] = None) -> Optional[Path]:
+    """The pre-compiled `.ex5` this build ships, or None.
+
+    When one is committed beside the `.mq5`, a machine needs no MetaEditor at
+    all: the copy below drops the binary in and the attached EA reloads it.
+    That is the portable answer this module's docstring recommends, and the
+    only one that works on macOS, where MetaEditor cannot be driven headlessly.
+    """
+    root = Path(repo_root) if repo_root is not None else _repo_root()
+    candidate = root / "mql5" / f"{EA_NAME}.ex5"
+    return candidate if candidate.exists() else None
+
+
+def binary_is_shipped(repo_root: Optional[Path] = None) -> bool:
+    """Whether this build ships a pre-compiled EA beside the source.
+
+    The difference between "one click" and "one click, then press F7". The
+    question is answered here rather than in the controller, which forwards
+    and decides nothing.
+    """
+    return shipped_binary(repo_root=repo_root) is not None
+
+
 def deploy_after_update(repo_root: Optional[Path] = None,
                         home: Optional[Path] = None) -> dict:
     """The hook `apply_update` calls once the pull has landed.

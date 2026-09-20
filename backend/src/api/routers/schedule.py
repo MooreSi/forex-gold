@@ -12,6 +12,7 @@ describing something the backend does not do.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -37,7 +38,19 @@ class TargetWrite(BaseModel):
 
 
 class ClockOffsetWrite(BaseModel):
-    minutes: int
+    """`minutes: null` means "follow this machine's own clock".
+
+    It was `int`, which made the default state -- the one every
+    single-machine install wants -- the one state the screen could not set.
+    A user who picked a VPS offset once could never go back. The service has
+    always accepted None for exactly this (`clock.set_offset_minutes`).
+    """
+    minutes: Optional[int] = None
+
+
+class MarketsWrite(BaseModel):
+    """Any subset of the three markets. Names, not settings keys."""
+    markets: dict
 
 
 @router.get("/state")
@@ -53,6 +66,14 @@ async def state() -> dict:
         # screen that does not answer it is describing hours in an unknown
         # timezone.
         "clock": schedule_ctl.describe_trading_clock(),
+        # The Trading Markets card above the grid, what a window can force a
+        # source onto, and which sources exist. Sent with the state rather
+        # than fetched per dropdown: there are up to 28 windows on this
+        # screen and the list is the same for all of them.
+        #
+        # Guarded in the service, deliberately: the grid IS the screen, and
+        # one of these being unavailable must not take it down with it.
+        **schedule_ctl.screen_extras(),
     }
 
 
@@ -109,6 +130,30 @@ async def resume_today() -> dict:
 
 @router.put("/clock-offset")
 async def set_clock_offset(body: ClockOffsetWrite) -> dict:
-    """Shift the clock the schedule windows are measured against."""
-    schedule_ctl.set_trading_clock_offset(body.minutes)
+    """Shift the clock the schedule windows are measured against.
+
+    `null` restores the machine's own clock. The service refuses an offset
+    more than a day from UTC, and that reason reaches the operator: it is a
+    typo they can fix, and "invalid offset" is not.
+    """
+    try:
+        schedule_ctl.set_trading_clock_offset(body.minutes)
+    except ValueError as exc:
+        raise Refusal(str(exc), status_code=400) from exc
     return {"clock": schedule_ctl.describe_trading_clock()}
+
+
+@router.put("/markets")
+async def set_markets(body: MarketsWrite) -> dict:
+    """Switch Asia, London or New York on or off.
+
+    A session that is off blocks automated execution for its hours whatever
+    the windows say, so an unknown market name is refused rather than
+    ignored -- a toggle that silently does nothing is worse here than an
+    error.
+    """
+    try:
+        schedule_ctl.set_trading_markets(body.markets)
+    except ValueError as exc:
+        raise Refusal(str(exc), status_code=400) from exc
+    return {"markets": schedule_ctl.trading_markets()}

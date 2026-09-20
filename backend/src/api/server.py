@@ -53,6 +53,7 @@ from backend.src.api.routers import settings as settings_router
 from backend.src.api.routers import system as system_router
 from backend.src.api.routers import templates as templates_router
 from backend.src.api.routers import trading as trading_router
+from backend.src.api.routers import trading_status as trading_status_router
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ ROUTERS = (
     settings_router.router,
     templates_router.router,
     trading_router.router,
+    trading_status_router.router,
     orb_router.router,
     orders_router.router,
     setforget_router.router,

@@ -107,6 +107,8 @@ export function TradingPanel() {
             onSetSchedule={(v) => void c.setSchedule(v)}
             onSetTarget={(v) => void c.setDailyTarget(v)}
             onResumeToday={() => void c.resumeToday()}
+            onSetMarket={(m, v) => void c.setMarket(m, v)}
+            onSetClockOffset={(v) => void c.setClockOffset(v)}
           />
         </Tabs.Content>
         <Tabs.Content value="strategy" className="min-h-0 flex-1 overflow-auto">

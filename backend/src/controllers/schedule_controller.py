@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from backend.src.services.risk import clock as _clock
 from backend.src.services.risk import schedule as _schedule
+from backend.src.services.risk import schedule_options as _options
 
 __all__ = [
     "DAY_NAMES", "get_trading_schedule", "set_trading_schedule",
@@ -20,6 +21,8 @@ __all__ = [
     "daily_profit_target_state", "daily_profit_target_state_async",
     "resume_past_daily_profit_target",
     "describe_trading_clock", "set_trading_clock_offset",
+    "trading_markets", "set_trading_markets", "override_options", "channel_names",
+    "screen_extras",
 ]
 
 DAY_NAMES = _schedule.DAY_NAMES
@@ -84,3 +87,37 @@ def describe_trading_clock(*args, **kwargs):
 def set_trading_clock_offset(*args, **kwargs):
     """Set the trading clock, or None to follow this machine's own clock."""
     return _clock.set_offset_minutes(*args, **kwargs)
+
+
+# ── What the schedule SCREEN needs, beyond the grid ──────────────────────────
+# The Trading Markets card, the per-source Override dropdown and the channel
+# list. Assembled in services/risk/schedule_options.py rather than here: it
+# merges the strategy catalogue, the EA templates and the Telegram channels,
+# and merging is the one thing a controller may not do.
+
+
+def trading_markets() -> dict:
+    """The three Trading Markets toggles, and which session is live now."""
+    return _options.markets()
+
+
+def set_trading_markets(fields: dict) -> None:
+    """Switch one or more markets on or off. Gates automated execution."""
+    _options.set_markets(fields)
+
+
+def override_options() -> list[dict]:
+    """The choices a window offers for forcing a source onto a strategy."""
+    return _options.override_options()
+
+
+def channel_names() -> list[str]:
+    """The Telegram channels a window can allow or block individually."""
+    return _options.channel_names()
+
+
+def screen_extras() -> dict:
+    """The markets card, the override choices and the channel list, in one
+    guarded read -- so a piece that is unavailable costs itself and not the
+    whole schedule screen."""
+    return _options.screen_extras()

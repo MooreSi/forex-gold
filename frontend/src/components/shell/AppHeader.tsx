@@ -4,6 +4,7 @@ import { EnvironmentControl } from "./EnvironmentControl";
 import { HeaderStats } from "./HeaderStats";
 import { PauseControl } from "./PauseControl";
 import { PowerControl } from "./PowerControl";
+import { TradingStatusBadge } from "./TradingStatusBadge";
 import { formatClock } from "@/components/shared/format";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminConsole } from "@/hooks/useAdminConsole";
@@ -115,6 +116,11 @@ export function AppHeader() {
         )}
 
         <span aria-hidden className="h-5 w-px bg-line" />
+
+        {/* Whether anything is holding automated entries, and which of the
+            four mechanisms it is. Always visible, next to the controls that
+            change it. */}
+        <TradingStatusBadge />
 
         <PauseControl
           paused={data?.pause?.paused === true}

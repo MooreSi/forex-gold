@@ -12,17 +12,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TradingPanel } from "../TradingPanel";
 import { resetPolls } from "@/hooks/usePoll";
 
+// The payload as `/api/schedule/state` really returns it.
+//
+// This fixture used to key the days "mon", "tue", ... and the component read
+// the same names, so both agreed and both were wrong: the service's DAY_NAMES
+// are "monday" ... "sunday" (backend/src/services/risk/schedule.py), so
+// against the real backend the grid rendered nothing and an edit wrote a key
+// nothing reads. Corrected 2026-09-20, with the block fields the service
+// actually stores.
 const SCHEDULE = {
   schedule: {
-    mon: [
-      { start: "08:00", end: "12:00", enabled: true },
-      { start: "13:00", end: "17:00", enabled: false },
+    monday: [
+      {
+        start: "08:00", end: "12:00", enabled: true, target: 0,
+        reversal_engine: true, breakout_engine: true,
+        reversal_engine_override: "", breakout_engine_override: "",
+        telegram_channels: {}, telegram_default_enabled: true,
+      },
+      {
+        start: "13:00", end: "17:00", enabled: false, target: 0,
+        reversal_engine: true, breakout_engine: true,
+        reversal_engine_override: "", breakout_engine_override: "",
+        telegram_channels: {}, telegram_default_enabled: true,
+      },
     ],
   },
   enabled: true,
   daily_target: 250,
   daily_state: { reached: false, overridden: false, pnl: 40, target: 250 },
-  clock: { label: "Broker time (UTC+3)", offset_minutes: 180 },
+  clock: { label: "Broker time (UTC+3)", offset_minutes: 180,
+           configured: 180, following_machine: false },
+  markets: { asia: true, london: true, new_york: false,
+             session: "london", allowed_now: true },
+  override_options: [
+    { value: "", label: "— No Override —" },
+    { value: "auto", label: "Auto (AI-managed)" },
+  ],
+  channels: ["GoldSignals"],
 };
 
 // The EA template's fields, as the backend describes them. The form renders
@@ -99,9 +125,9 @@ describe("the schedule", () => {
     render(<TradingPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Schedule" }));
 
-    expect(await screen.findByLabelText("Mon window 1")).toBeChecked();
-    expect(screen.getByLabelText("Mon window 2")).not.toBeChecked();
-    expect(screen.getByLabelText("Mon window 1 start")).toHaveValue("08:00");
+    expect(await screen.findByLabelText("monday window 1")).toBeChecked();
+    expect(screen.getByLabelText("monday window 2")).not.toBeChecked();
+    expect(screen.getByLabelText("monday window 1 start")).toHaveValue("08:00");
   });
 
   it("sends the whole grid when one window changes, not just the window", async () => {
@@ -110,13 +136,13 @@ describe("the schedule", () => {
     render(<TradingPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Schedule" }));
 
-    await userEvent.click(await screen.findByLabelText("Mon window 2"));
+    await userEvent.click(await screen.findByLabelText("monday window 2"));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
     const body = JSON.parse(writes()[0][1].body);
-    expect(body.schedule.mon).toHaveLength(2);
-    expect(body.schedule.mon[1].enabled).toBe(true);
-    expect(body.schedule.mon[0].start).toBe("08:00");
+    expect(body.schedule.monday).toHaveLength(2);
+    expect(body.schedule.monday[1].enabled).toBe(true);
+    expect(body.schedule.monday[0].start).toBe("08:00");
   });
 
   it("turns the whole schedule off by sending false", async () => {

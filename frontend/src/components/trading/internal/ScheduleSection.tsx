@@ -1,9 +1,12 @@
 import { useCallback } from "react";
+import { Copy } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney } from "@/components/shared/format";
-import { asObject } from "@/lib/asArray";
-import { cn } from "@/lib/cn";
+import { asArray, asObject } from "@/lib/asArray";
+import { ScheduleWindowRow, type OverrideChoice } from "./ScheduleWindowRow";
+import { TradingClockCard } from "./TradingClockCard";
+import { TradingMarketsCard } from "./TradingMarketsCard";
 
 interface ScheduleState {
   schedule: Record<string, unknown>;
@@ -11,6 +14,9 @@ interface ScheduleState {
   daily_target: number;
   daily_state: Record<string, unknown>;
   clock: Record<string, unknown>;
+  markets?: Record<string, unknown>;
+  override_options?: OverrideChoice[];
+  channels?: string[];
 }
 
 interface ScheduleSectionProps {
@@ -19,47 +25,75 @@ interface ScheduleSectionProps {
   onSetSchedule: (schedule: Record<string, unknown>) => void;
   onSetTarget: (target: number) => void;
   onResumeToday: () => void;
+  onSetMarket: (market: string, enabled: boolean) => void;
+  onSetClockOffset: (minutes: number | null) => void;
 }
 
-const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const DAY_LABEL: Record<string, string> = {
-  mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun",
-};
+// The service's own day keys. The grid is stored under these names and a
+// mismatch here silently edits a day that is never read back.
+const DAYS = [
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+];
 
 function blocks(schedule: Record<string, unknown>, day: string): Record<string, unknown>[] {
-  const raw = schedule[day];
-  return Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
+  return asArray<Record<string, unknown>>(schedule[day]);
 }
 
 /**
- * Per-day trading windows, and the whole-day profit target.
+ * Trading Schedule: when automated orders may be placed, and by whom.
  *
- * The clock the windows are measured in is stated at the top. It was an open
- * question once (simon-handover/017) and a schedule screen that does not
- * answer it is describing hours in an unknown timezone.
+ * Three gates stack here, and they are independent. The **markets** decide
+ * which sessions accept a trade at all. The **windows** cap the hours and the
+ * profit within a day. The **daily target** stops everything once the day has
+ * earned enough, whatever the windows still allow.
+ *
+ * None of it touches signal generation or Telegram ingestion — this blocks and
+ * redirects the final order-placement step only, and only for automated
+ * orders. Manual orders are always exempt.
  */
 export function ScheduleSection({
   state, onSetEnabled, onSetSchedule, onSetTarget, onResumeToday,
+  onSetMarket, onSetClockOffset,
 }: ScheduleSectionProps) {
   const setBlock = useCallback(
     (day: string, index: number, patch: Record<string, unknown>) => {
       if (!state) return;
       const next = { ...state.schedule };
-      const rows = blocks(next, day).map((b, i) => (i === index ? { ...b, ...patch } : b));
-      next[day] = rows;
+      next[day] = blocks(next, day).map((b, i) => (i === index ? { ...b, ...patch } : b));
       onSetSchedule(next);
     },
     [state, onSetSchedule],
   );
+
+  // Monday's windows, copied over every other day. The grid is 7 days x 4
+  // windows with a channel list inside each; setting that up by hand is 28
+  // identical edits, which is how a schedule ends up subtly inconsistent.
+  const copyMondayToAll = useCallback(() => {
+    if (!state) return;
+    const monday = blocks(state.schedule, "monday");
+    if (monday.length === 0) return;
+    const next = { ...state.schedule };
+    for (const day of DAYS) {
+      if (day === "monday") continue;
+      next[day] = blocks(next, day).map((b, i) =>
+        (monday[i] ? { ...monday[i] } : b));
+    }
+    onSetSchedule(next);
+  }, [state, onSetSchedule]);
 
   if (!state) return <EmptyState title="Loading the schedule" />;
 
   const daily = asObject(state.daily_state);
   const reached = daily["reached"] === true;
   const overridden = daily["overridden"] === true;
+  const options = asArray<OverrideChoice>(state.override_options);
+  const channels = asArray<string>(state.channels);
 
   return (
     <div className="space-y-4">
+      <TradingClockCard clock={state.clock} onSetOffset={onSetClockOffset} />
+      <TradingMarketsCard markets={state.markets ?? {}} onSetMarket={onSetMarket} />
+
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-xs text-ink-2">
           <input
@@ -71,12 +105,6 @@ export function ScheduleSection({
           />
           Only trade inside these windows
         </label>
-        <span className="text-[11px] text-ink-3">
-          Times are {String(asObject(state.clock)["label"] ?? "in an unknown clock")}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
         <label className="text-xs text-ink-2">
           Whole-day profit target
           <input
@@ -88,59 +116,47 @@ export function ScheduleSection({
           />
           <span className="ml-1 text-[11px] text-ink-3">0 turns this gate off</span>
         </label>
-        {reached && (
-          <span
-            data-testid="daily-target-reached"
-            className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] text-warning"
-          >
-            Day's target reached ({formatMoney(Number(daily["pnl"] ?? 0))} of{" "}
-            {formatMoney(Number(daily["target"] ?? 0))}) — automated entries are held
-            <Button variant="ghost" onClick={onResumeToday}>Resume for today</Button>
-          </span>
-        )}
-        {overridden && (
-          <span className="text-[11px] text-ink-3">
-            Resumed for today only; this clears at the day boundary.
-          </span>
-        )}
+        <Button variant="ghost" onClick={copyMondayToAll}>
+          <Copy className="mr-1 inline h-3 w-3" aria-hidden />
+          Copy Monday to all days
+        </Button>
       </div>
 
-      <div className="space-y-1.5">
+      {reached && (
+        <div
+          data-testid="daily-target-reached"
+          className="flex flex-wrap items-center gap-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] text-warning"
+        >
+          Day&apos;s target reached ({formatMoney(Number(daily["pnl"] ?? 0))} of{" "}
+          {formatMoney(Number(daily["target"] ?? 0))}) — automated entries are held
+          <Button variant="ghost" onClick={onResumeToday}>Resume for today</Button>
+        </div>
+      )}
+      {overridden && (
+        <p className="text-[11px] text-ink-3">
+          Resumed for today only; this clears at the day boundary.
+        </p>
+      )}
+
+      <div className="space-y-2">
         {DAYS.map((day) => (
-          <div key={day} className="flex flex-wrap items-center gap-2">
-            <span className="num w-10 text-[11px] text-ink-3">{DAY_LABEL[day]}</span>
-            {blocks(state.schedule, day).map((block, i) => (
-              <span
-                key={i}
-                data-testid={`window-${day}-${i}`}
-                className={cn(
-                  "flex items-center gap-1 rounded border px-2 py-1",
-                  block["enabled"] ? "border-line bg-surface-2" : "border-line/50 bg-surface-1",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  aria-label={`${DAY_LABEL[day]} window ${i + 1}`}
-                  checked={Boolean(block["enabled"])}
-                  onChange={(e) => setBlock(day, i, { enabled: e.target.checked })}
-                  className="accent-accent"
+          <section key={day} className="rounded-lg border border-line bg-surface-1 p-2">
+            <h4 className="mb-1 text-xs font-semibold capitalize text-accent">{day}</h4>
+            <div className="space-y-1">
+              {blocks(state.schedule, day).map((block, i) => (
+                <ScheduleWindowRow
+                  key={i}
+                  day={day}
+                  dayLabel={day}
+                  index={i}
+                  block={block}
+                  channels={channels}
+                  options={options}
+                  onPatch={(patch) => setBlock(day, i, patch)}
                 />
-                <input
-                  aria-label={`${DAY_LABEL[day]} window ${i + 1} start`}
-                  defaultValue={String(block["start"] ?? "")}
-                  onBlur={(e) => setBlock(day, i, { start: e.target.value })}
-                  className="num w-12 bg-transparent text-[11px] text-ink-1"
-                />
-                <span className="text-ink-3">–</span>
-                <input
-                  aria-label={`${DAY_LABEL[day]} window ${i + 1} end`}
-                  defaultValue={String(block["end"] ?? "")}
-                  onBlur={(e) => setBlock(day, i, { end: e.target.value })}
-                  className="num w-12 bg-transparent text-[11px] text-ink-1"
-                />
-              </span>
-            ))}
-          </div>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
     </div>

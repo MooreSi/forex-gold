@@ -10,6 +10,9 @@ interface ScheduleState {
   daily_target: number;
   daily_state: Record<string, unknown>;
   clock: Record<string, unknown>;
+  markets: Record<string, unknown>;
+  override_options: { value: string; label: string }[];
+  channels: string[];
 }
 
 interface TemplatesState {
@@ -107,6 +110,19 @@ export function useTradingController() {
     await schedule.refresh();
   }, [schedule]);
 
+  const setMarket = useCallback(async (market: string, enabled: boolean) => {
+    await api.put("/api/schedule/markets", { markets: { [market]: enabled } });
+    await schedule.refresh();
+  }, [schedule]);
+
+  // `null` is the machine's own clock, and is sent as null rather than
+  // omitted: the endpoint treats a missing value the same way, but being
+  // explicit is what stops a future caller passing 0 and meaning "machine".
+  const setClockOffset = useCallback(async (minutes: number | null) => {
+    await api.put("/api/schedule/clock-offset", { minutes });
+    await schedule.refresh();
+  }, [schedule]);
+
   // ── EA templates ──────────────────────────────────────────────────────────
 
   const saveTemplate = useCallback(
@@ -134,6 +150,7 @@ export function useTradingController() {
       trades, halt, signals, disabledReason, refreshAll,
       schedule: schedule.data,
       setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
+      setMarket, setClockOffset,
       templates: asArray<Record<string, unknown>>(templates.data?.templates),
       eaConnected: asObject(templates.data)["ea_connected"] === true,
       eaLastSeen: typeof templates.data?.ea_last_seen_secs === "number"
@@ -143,6 +160,7 @@ export function useTradingController() {
     }),
     [trades, halt, signals, disabledReason, refreshAll, schedule.data,
      setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
+     setMarket, setClockOffset,
      templates.data, saveTemplate, deleteTemplate, installBuiltin],
   );
 }

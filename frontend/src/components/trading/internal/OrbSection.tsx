@@ -3,6 +3,7 @@ import { CandlestickChart } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { StatCard } from "@/components/shared/StatCard";
 import { formatPrice } from "@/components/shared/format";
 import { asObject } from "@/lib/asArray";
@@ -103,7 +104,17 @@ export function OrbSection() {
     }
   }
 
-  if (!data) return null;
+  // Not `return null`: that left the ORB tab completely blank until the first
+  // poll resolved, which reads as a broken tab rather than a busy one. Every
+  // other panel in the app says which it is.
+  if (!data) {
+    return (
+      <EmptyState
+        title={poll.error ? "Could not load the ORB report" : "Loading the ORB report"}
+        hint={poll.error?.message}
+      />
+    );
+  }
 
   const status = STATUS[report?.direction ?? "inside"] ?? STATUS.inside;
   const confirmed = report?.direction === "bullish" || report?.direction === "bearish";

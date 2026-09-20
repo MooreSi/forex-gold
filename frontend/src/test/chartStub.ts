@@ -10,12 +10,25 @@
  * echoing their inputs: a `timeToCoordinate` that returns the timestamp puts
  * every overlay 1.7 billion pixels to the right, which is not a thing the real
  * chart does and would make an overlay test pass for the wrong reason.
+ *
+ * **It also models DISPOSAL**, because the real library does. After `remove()`
+ * every method on the chart and on its time scale throws "Object is disposed",
+ * and a stub that stayed friendly hid a real uncaught error: React runs effect
+ * cleanups in definition order, so the effect that creates the chart disposed
+ * it before the effect that subscribes to its time scale unsubscribed, and
+ * every unmount threw. Seen in the browser console on 2026-09-20.
  */
 export function chartStub() {
   return {
     ColorType: { Solid: "solid" },
     CrosshairMode: { Normal: 0 },
-    createChart: () => ({
+    createChart: () => {
+      let disposed = false;
+      const alive = <T>(fn: () => T) => (): T => {
+        if (disposed) throw new Error("Object is disposed");
+        return fn();
+      };
+      return {
       addCandlestickSeries: () => ({
         setData: () => {},
         setMarkers: () => {},
@@ -25,13 +38,14 @@ export function chartStub() {
       }),
       addLineSeries: () => ({ setData: () => {} }),
       applyOptions: () => {},
-      timeScale: () => ({
+      timeScale: alive(() => ({
         getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
         timeToCoordinate: () => 120,
-        subscribeVisibleTimeRangeChange: () => {},
-        unsubscribeVisibleTimeRangeChange: () => {},
-      }),
-      remove: () => {},
-    }),
+        subscribeVisibleTimeRangeChange: alive(() => {}),
+        unsubscribeVisibleTimeRangeChange: alive(() => {}),
+      })),
+      remove: () => { disposed = true; },
+      };
+    },
   };
 }

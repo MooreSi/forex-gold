@@ -271,3 +271,30 @@ describe("the settings", () => {
     expect(await screen.findByText(/no double trade/)).toBeInTheDocument();
   });
 });
+
+describe("before the report arrives", () => {
+  it("says it is loading rather than rendering an empty tab", async () => {
+    // `if (!data) return null` put NOTHING on the page until the first poll
+    // resolved -- an ORB tab that looks broken rather than busy. Every other
+    // panel in the app shows an empty state here.
+    let resolve: (v: unknown) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((r) => { resolve = r; })));
+
+    render(<OrbSection />);
+
+    expect(await screen.findByText(/Loading the ORB report/)).toBeInTheDocument();
+    resolve({ ok: true, status: 200, json: async () => ({}) });
+  });
+
+  it("says so when the read fails, instead of staying blank", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false, status: 500,
+      json: async () => ({ error: { message: "the bridge is offline" } }),
+    })));
+
+    render(<OrbSection />);
+
+    expect(await screen.findByText(/Could not load the ORB report/))
+      .toBeInTheDocument();
+  });
+});

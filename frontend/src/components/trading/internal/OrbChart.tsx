@@ -50,6 +50,10 @@ export function OrbChart({ bands }: { bands: OrbBands | null }) {
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const priceLines = useRef<IPriceLine[]>([]);
+  // See CandleChart for the whole story: lightweight-charts disposes hard, and
+  // React runs effect cleanups in definition order, so the chart is already
+  // gone by the time the subscription below tries to unsubscribe from it.
+  const disposed = useRef(false);
   const [themeTick, setThemeTick] = useState(0);
   const [rects, setRects] = useState<(Band & { y: number; height: number })[]>([]);
 
@@ -82,7 +86,9 @@ export function OrbChart({ bands }: { bands: OrbBands | null }) {
       upColor: c.profit, downColor: c.loss, borderVisible: false,
       wickUpColor: c.profit, wickDownColor: c.loss,
     });
+    disposed.current = false;
     return () => {
+      disposed.current = true;
       instance.remove();
       chart.current = null;
       series.current = null;
@@ -145,7 +151,9 @@ export function OrbChart({ bands }: { bands: OrbBands | null }) {
     const box = holder.current;
     // An empty update is skipped rather than set: setting a fresh [] on every
     // pass is the same loop the memo above avoids.
-    if (!s || !box || !bands) return setRects((prev) => (prev.length ? [] : prev));
+    if (disposed.current || !s || !box || !bands) {
+      return setRects((prev) => (prev.length ? [] : prev));
+    }
     const c = chartColours();
 
     const zones: Band[] = [
@@ -185,7 +193,10 @@ export function OrbChart({ bands }: { bands: OrbBands | null }) {
     redraw();
     const scale = c.timeScale();
     scale.subscribeVisibleTimeRangeChange(redraw);
-    return () => scale.unsubscribeVisibleTimeRangeChange(redraw);
+    return () => {
+      if (disposed.current) return;
+      scale.unsubscribeVisibleTimeRangeChange(redraw);
+    };
   }, [redraw, rows, themeTick]);
 
   if (!candles.data && candles.error) {

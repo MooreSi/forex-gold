@@ -50,6 +50,13 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
   const candleSeries = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const emaSeries = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const [fvgRects, setFvgRects] = useState<FvgRect[]>([]);
+  // lightweight-charts disposes hard: every method on a removed chart, and on
+  // its time scale, throws "Object is disposed". React runs effect cleanups in
+  // DEFINITION order, so the effect below that creates the chart tears it down
+  // BEFORE the subscription effect further down gets to unsubscribe -- and
+  // that unsubscribe then threw on every unmount. This is how the later
+  // cleanup knows the object it holds is already gone.
+  const disposed = useRef(false);
   const [themeTick, setThemeTick] = useState(0);
 
   // The document attribute rather than `useTheme()`. This component must be
@@ -81,7 +88,9 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
       upColor: BULL, downColor: BEAR, borderVisible: false,
       wickUpColor: BULL, wickDownColor: BEAR,
     });
+    disposed.current = false;
     return () => {
+      disposed.current = true;
       c.remove();
       chart.current = null;
       candleSeries.current = null;
@@ -189,7 +198,7 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
     const c = chart.current;
     const series = candleSeries.current;
     const box = holder.current;
-    if (!c || !series || !box) return setFvgRects([]);
+    if (disposed.current || !c || !series || !box) return setFvgRects([]);
 
     const zones = overlays?.fvgs ?? [];
     if (zones.length === 0) return setFvgRects([]);
@@ -212,7 +221,10 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
     redrawFvgs();
     const scale = c.timeScale();
     scale.subscribeVisibleTimeRangeChange(redrawFvgs);
-    return () => scale.unsubscribeVisibleTimeRangeChange(redrawFvgs);
+    return () => {
+      if (disposed.current) return;
+      scale.unsubscribeVisibleTimeRangeChange(redrawFvgs);
+    };
   }, [redrawFvgs, candles]);
 
   // Recomputed with the theme, like the chart's own colours.

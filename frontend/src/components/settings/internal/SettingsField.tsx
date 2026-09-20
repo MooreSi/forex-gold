@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface SettingsFieldProps {
   label: string;
@@ -22,6 +22,9 @@ export function SettingsField({
   label, value, hint, type = "text", version = 0, onCommit,
 }: SettingsFieldProps) {
   const [draft, setDraft] = useState(value);
+  // Whether the operator is in this field right now. A ref, not state: it must
+  // not re-run the effect below, only decide whether that effect may write.
+  const editing = useRef(false);
 
   // The stored value wins after every save, not only when it CHANGES.
   //
@@ -30,7 +33,24 @@ export function SettingsField({
   // alone keeps the rejected input on screen. Typing 99 into a risk field the
   // service clamps back to 2 left "99" in the box, which reads as a 99% risk
   // setting the engine is not using.
-  useEffect(() => setDraft(value), [value, version]);
+  //
+  // **Except while the field is focused**, because this used to overwrite what
+  // was being typed. The settings read is asynchronous, so opening a tab and
+  // starting to edit before it resolves put the stored number back into the
+  // box mid-edit. It surfaced on CI as a flake rather than a report: the load
+  // landed between a `clear()` and a `type("2")`, the field still held "1",
+  // took the "2" on the end, and saved 12% risk per trade where 2 was asked
+  // for. The same race on a real machine writes the same number.
+  //
+  // Losing focus is deliberately NOT a dependency here. A blur commits, and
+  // re-syncing at that moment would snap the field back to the stale stored
+  // value for as long as the save takes. The bumped `version` that follows the
+  // save is what brings the field back into line, by which time `editing` is
+  // false.
+  useEffect(() => {
+    if (editing.current) return;
+    setDraft(value);
+  }, [value, version]);
 
   return (
     <label className="block text-xs text-ink-2">
@@ -41,7 +61,11 @@ export function SettingsField({
         inputMode={type === "number" ? "decimal" : undefined}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => draft !== value && onCommit(draft)}
+        onFocus={() => { editing.current = true; }}
+        onBlur={() => {
+          editing.current = false;
+          if (draft !== value) onCommit(draft);
+        }}
         className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
       />
       {hint && <span className="mt-0.5 block text-[10px] text-ink-3">{hint}</span>}

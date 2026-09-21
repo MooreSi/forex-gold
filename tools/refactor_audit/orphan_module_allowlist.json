@@ -29,6 +29,20 @@
       "loc": 226,
       "class": "unwired-tool",
       "reason": "Walk-forward harness to validate breakout recalibrations BEFORE they touch live trading; its docstring documents manual invocation (run_walkforward/report). Likely a dev tool, not dead. The frontend backtest page uses a different system (services.backtest)."
+    },
+    {
+      "module": "backend.src.services.backtest.resample",
+      "file": "backend/src/services/backtest/resample.py",
+      "loc": 239,
+      "class": "unwired-tool",
+      "reason": "Monte Carlo band around the backtest's single equity path -- docs/todo/backtest/020. Pure: takes a StrategyStats, returns percentiles, reaches nothing. Unwired because whether it surfaces on the Backtest page or stays a tool is the open decision in that file's section 3, and the owner has not answered it. Pinned by tests/backtest/test_resample.py. Delete this entry when the decision is made and it is wired (or removed)."
+    },
+    {
+      "module": "backend.src.services.analytics.regime_drift",
+      "file": "backend/src/services/analytics/regime_drift.py",
+      "loc": 194,
+      "class": "unwired-tool",
+      "reason": "Phase 1 of docs/todo/004: recomputes utils/regime.py's per-hour and per-level buckets over a live window and reports where the frozen constants and the data now disagree. Pure; the DB read is in tools/regime_drift_report.py, which is its caller and is not an app entrypoint. Unwired on purpose -- acting on what it reports is phase 2 and waits on the owner's answer to 004 section 4A, because a gate that widens can open trading hours that are shut today. Pinned by tests/analytics/test_regime_drift.py."
     }
   ]
 }

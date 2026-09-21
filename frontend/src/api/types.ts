@@ -298,6 +298,25 @@ export interface SetForgetCandidate {
   risk: number;
   reward: number;
   rr: number | null;
+  /**
+   * Which of the three stages this setup is in. Only "triggered" may be
+   * placed; the other two are shown so the plan is visible before it is live.
+   *
+   *   armed      the zone is chosen, price has not reached it
+   *   waiting    price is at the zone, the 30m has not reacted yet
+   *   triggered  price is at the zone AND the 30m has shifted or engulfed
+   */
+  stage: "armed" | "waiting" | "triggered";
+  /** What fired on the 30m, or null while armed or waiting. */
+  trigger: { kind: string; ts: number; level: number } | null;
+  /** How far the entry is from the current price, in points. */
+  distance: number;
+  /**
+   * That distance as a number of average days, or null when the daily range
+   * could not be read. Null, never 0: an unknown wait rendered as "0 days"
+   * reads as "fills immediately", the most encouraging possible wrong answer.
+   */
+  distance_days: number | null;
   zone?: Aoi | null;
   target_zone?: Aoi | null;
 }
@@ -316,6 +335,8 @@ export interface SetForgetEvidence {
   entry_timeframe: string;
   zones: Aoi[];
   atr: number;
+  /** The DAILY range. What turns a distance into a wait. */
+  daily_atr: number;
   ema_fast: number | null;
   ema_slow: number | null;
   rsi: number | null;

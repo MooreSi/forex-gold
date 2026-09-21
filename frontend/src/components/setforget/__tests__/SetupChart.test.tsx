@@ -17,23 +17,34 @@
  * layout — so what is asserted is the stacking class, and the comment is the
  * reason it is worth asserting at all.
  */
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SetupChart } from "../internal/SetupChart";
 import type { Aoi, FibLevel, SetForgetCandidate } from "@/api/types";
 
-/** Whatever the component last handed to `applyOptions`. */
+/** Whatever the component last handed to the SERIES' `applyOptions`. */
 let options: Record<string, unknown>;
+/** The chart's creation options, its later applyOptions calls, and the
+ *  candlestick series' own options -- all three carry theme colours. */
+type Options = Record<string, any>;
+let created: Options;
+let applied: Options[];
+let seriesOptions: Options;
 /** The prices the fake scale can place. Anything else answers null. */
 let inRange: (price: number) => boolean;
 
 vi.mock("lightweight-charts", () => ({
   ColorType: { Solid: "solid" },
   CrosshairMode: { Normal: 0 },
-  createChart: () => ({
-    addCandlestickSeries: () => ({
+  createChart: (_node: unknown, opts: Options) => ((created = opts), {
+    applyOptions: (next: Options) => { applied.push(next); },
+    addCandlestickSeries: (o: Options) => ((seriesOptions = o), {
       setData: () => {},
-      applyOptions: (o: Record<string, unknown>) => { options = o; },
+      // Merges, like the real one. A mock that REPLACED made the theme
+      // repaint look as though it had wiped the autoscale provider.
+      applyOptions: (next: Record<string, unknown>) => {
+        options = { ...options, ...next };
+      },
       // A linear scale: 2000 sits at y=200, and every point is 2px.
       priceToCoordinate: (price: number) =>
         (inRange(price) ? 200 - (price - 2000) * 2 : null),
@@ -58,6 +69,9 @@ const CANDLES = [
 const CANDIDATE: SetForgetCandidate = {
   direction: "BUY", entry: 1985, stop_loss: 1972, take_profit: 2040,
   order_type: "limit", risk: 13, reward: 55, rr: 4.23,
+  stage: "triggered",
+  trigger: { kind: "shift_of_structure", ts: 1, level: 1972 },
+  distance: 15, distance_days: 0.75,
 };
 
 const FIBS: FibLevel[] = [
@@ -87,7 +101,11 @@ function draw(over: Partial<Parameters<typeof SetupChart>[0]> = {}) {
 
 beforeEach(() => {
   options = {};
+  created = {};
+  applied = [];
+  seriesOptions = {};
   inRange = () => true;
+  document.documentElement.removeAttribute("data-theme");
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -237,5 +255,56 @@ describe("the retracement levels", () => {
 
     expect(screen.getByTestId("fibonacci-overlay")).toBeInTheDocument();
     expect(screen.queryByTestId("position-overlay")).not.toBeInTheDocument();
+  });
+});
+
+describe("the theme", () => {
+  /** The options the chart was created with, and any applied since. */
+  function chartOptions(): Options {
+    return applied.length > 0 ? applied[applied.length - 1] : created;
+  }
+
+  it("takes its colours from the theme rather than hard-coding them", () => {
+    /* Reported 2026-09-21: this chart was black inside a white panel, because
+       it named #030712 directly while the Chart tab read the tokens. A canvas
+       cannot use a CSS variable, so the colours have to be READ and handed
+       over -- and read from the one shared place, or the third chart in the
+       app drifts from the other two exactly as this one did. */
+    document.documentElement.style.setProperty("--color-surface-1", "#ffffff");
+    document.documentElement.style.setProperty("--color-ink-2", "#111111");
+
+    draw();
+
+    expect(created.layout.background.color).toBe("#ffffff");
+    expect(created.layout.textColor).toBe("#111111");
+  });
+
+  it("repaints when the theme changes rather than keeping the one it was born with",
+     async () => {
+    /* The chart is created once. Without this it holds whichever theme was in
+       force at mount, so switching to light leaves a black rectangle until the
+       tab is navigated away from and back. */
+    document.documentElement.style.setProperty("--color-surface-1", "#000000");
+    draw();
+    expect(chartOptions().layout.background.color).toBe("#000000");
+
+    document.documentElement.style.setProperty("--color-surface-1", "#ffffff");
+    // A MutationObserver delivers on a microtask, so this has to be awaited
+    // or the assertion runs before the repaint.
+    await act(async () => {
+      document.documentElement.setAttribute("data-theme", "light");
+    });
+
+    expect(chartOptions().layout.background.color).toBe("#ffffff");
+  });
+
+  it("draws the candles in the app's own profit and loss colours", () => {
+    document.documentElement.style.setProperty("--color-profit", "#00aa77");
+    document.documentElement.style.setProperty("--color-loss", "#dd2222");
+
+    draw();
+
+    expect(seriesOptions.upColor).toBe("#00aa77");
+    expect(seriesOptions.downColor).toBe("#dd2222");
   });
 });

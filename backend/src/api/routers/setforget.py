@@ -99,7 +99,7 @@ def _context(settings: dict, balance: Optional[float], cfg: dict) -> dict:
         "ai_configured": ai_ctl.is_configured(cfg),
         # Named so the page can say which model is about to be billed.
         "ai_provider": cfg.get("ai_provider", ""),
-        "ai_model": cfg.get("claude_model") or cfg.get("deepseek_model") or "",
+        "ai_model": ai_ctl.active_model(cfg),
     }
 
 

@@ -6,6 +6,7 @@ import {
 import type {
   Aoi, Candle, FibLevel, Overlays, SetForgetCandidate,
 } from "@/api/types";
+import { chartColours, watchTheme } from "@/components/shared/chartTheme";
 import { useChartGeometry } from "../hooks/useChartGeometry";
 import { FibonacciOverlay } from "./FibonacciOverlay";
 import { PositionOverlay } from "./PositionOverlay";
@@ -20,12 +21,19 @@ interface SetupChartProps {
   rewardMoney: number | null;
 }
 
-// The same green and red the rest of the app uses for rising and falling. Not
-// chosen freely: they carry the profit/loss meaning everywhere else on screen.
-const BULL = "#00cc88";
-const BEAR = "#ff4444";
-// EMA 50 gold, EMA 200 sky blue — the fast/slow pair Alex G's checklist reads.
-const EMA_COLOURS: Record<string, string> = { "50": "#ffd700", "200": "#64b4ff" };
+/**
+ * EMA 50 on the accent, EMA 200 on the remote blue — the fast/slow pair Alex
+ * G's checklist reads, named as TOKENS rather than hex.
+ *
+ * Every colour on this chart is read from the theme for the same reason: a
+ * canvas cannot use a CSS variable, so it has to be told, and this chart named
+ * its own hex until 2026-09-21 — a black rectangle inside a white panel, three
+ * clicks from a Chart tab that themed correctly.
+ */
+function colours() {
+  const c = chartColours();
+  return { ...c, emas: { "50": c.accent, "200": c.remote } as Record<string, string> };
+}
 
 /**
  * The section's chart: candles, the two EMAs, the areas of interest, the
@@ -61,6 +69,12 @@ export function SetupChart(props: SetupChartProps) {
   // Bumped when new data has been pushed in, so the geometry recomputes: the
   // price scale moves when the series changes, not only when a person pans.
   const [revision, setRevision] = useState(0);
+  const [themeTick, setThemeTick] = useState(0);
+
+  // The document attribute rather than `useTheme()`: a chart that throws
+  // because a context is missing is a blank panel over a colour, and the
+  // colour is the least important thing on it. Same call the Chart tab makes.
+  useEffect(() => watchTheme(() => setThemeTick((n) => n + 1)), []);
 
   const geometry = useChartGeometry({
     holder, chart, series, zones, fibLevels, candidate, revision,
@@ -68,26 +82,31 @@ export function SetupChart(props: SetupChartProps) {
 
   useEffect(() => {
     if (!holder.current) return;
+    const theme = colours();
     const c = createChart(holder.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#030712" },
-        textColor: "#9ca3af",
+        background: { type: ColorType.Solid, color: theme.background },
+        textColor: theme.text,
         fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
         fontSize: 10,
       },
       grid: {
-        vertLines: { color: "#131a28" },
-        horzLines: { color: "#131a28" },
+        vertLines: { color: theme.grid },
+        horzLines: { color: theme.grid },
       },
-      rightPriceScale: { borderColor: "#263044", scaleMargins: { top: 0.12, bottom: 0.12 } },
-      timeScale: { borderColor: "#263044", timeVisible: true, secondsVisible: false },
+      rightPriceScale: {
+        borderColor: theme.border, scaleMargins: { top: 0.12, bottom: 0.12 },
+      },
+      timeScale: {
+        borderColor: theme.border, timeVisible: true, secondsVisible: false,
+      },
       crosshair: { mode: CrosshairMode.Normal },
       autoSize: true,
     });
     chart.current = c;
     series.current = c.addCandlestickSeries({
-      upColor: BULL, downColor: BEAR, borderVisible: false,
-      wickUpColor: BULL, wickDownColor: BEAR,
+      upColor: theme.profit, downColor: theme.loss, borderVisible: false,
+      wickUpColor: theme.profit, wickDownColor: theme.loss,
       priceLineVisible: false,
     });
     // Without this the scale fits the CANDLES, and a resting entry a few
@@ -117,6 +136,34 @@ export function SetupChart(props: SetupChartProps) {
       emas.current.clear();
     };
   }, []);
+
+  // Repaint on a theme change. Without this the chart holds whichever theme
+  // was in force at mount, so switching to light leaves a black rectangle
+  // until the tab is navigated away from and back.
+  useEffect(() => {
+    const c = chart.current;
+    if (!c || typeof c.applyOptions !== "function") return;
+    const theme = colours();
+    c.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: theme.background },
+        textColor: theme.text,
+      },
+      grid: {
+        vertLines: { color: theme.grid },
+        horzLines: { color: theme.grid },
+      },
+      rightPriceScale: { borderColor: theme.border },
+      timeScale: { borderColor: theme.border },
+    });
+    series.current?.applyOptions({
+      upColor: theme.profit, downColor: theme.loss,
+      wickUpColor: theme.profit, wickDownColor: theme.loss,
+    });
+    for (const [period, line] of emas.current) {
+      line.applyOptions({ color: theme.emas[period] ?? theme.text });
+    }
+  }, [themeTick]);
 
   useEffect(() => {
     if (!series.current || candles.length === 0) return;
@@ -151,7 +198,7 @@ export function SetupChart(props: SetupChartProps) {
       let line = emas.current.get(period);
       if (!line) {
         line = chart.current.addLineSeries({
-          color: EMA_COLOURS[period] ?? "#9ca3af",
+          color: colours().emas[period] ?? colours().text,
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
@@ -170,7 +217,7 @@ export function SetupChart(props: SetupChartProps) {
 
   return (
     <div className="relative h-72 w-full overflow-hidden rounded border border-line
-                    bg-surface-0 sm:h-96">
+                    bg-surface-1 sm:h-96">
       <div ref={holder} data-testid="setforget-chart" className="h-full w-full" />
 
       {geometry && <FibonacciOverlay fibs={geometry.fibs} />}

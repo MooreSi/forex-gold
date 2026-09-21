@@ -272,3 +272,53 @@ class TestRetracementPrices:
 
     def test_the_levels_are_the_conventional_four_in_order(self):
         assert confluence.LEVELS == (0.382, 0.5, 0.618, 0.786)
+
+
+class TestTheDirectionlessPatterns:
+    """Inside bars and dojis carry no direction of their own.
+
+    The guide calls the inside bar "a quiet pullback within a trend" and the
+    doji a hint at a "stall/reversal" when it lands at an AOI. Neither picks a
+    side, so both are read as continuation in the direction already in force --
+    which is only safe in a method whose first filter is the higher-timeframe
+    bias, and this is that method.
+
+    Without this they fail the item outright, because the check compares a
+    direction against the trade's and None never matches. A perfectly good
+    inside bar at a demand zone would have scored zero.
+    """
+
+    def test_an_inside_bar_confirms_the_trend_already_in_force(self):
+        result = confluence.score(_clean(
+            confirmation={"kind": "inside_bar", "direction": None}))
+
+        assert _item(result, "confirmation")["passed"] is True
+
+    def test_it_confirms_a_short_just_the_same(self):
+        result = confluence.score(_clean(
+            direction="SELL", weekly_bias="bearish", daily_bias="bearish",
+            entry_bias="bearish", rsi=55.0,
+            at_zone={"kind": "supply", "low": 2010.0, "high": 2015.0, "touches": 2},
+            ema_fast=1980.0, ema_slow=2005.0,
+            confirmation={"kind": "doji", "direction": None}))
+
+        assert _item(result, "confirmation")["passed"] is True
+
+    def test_the_reason_says_it_was_read_as_continuation(self):
+        """A reader who sees "a confirmation candle has closed" ticked wants to
+        know it was a pause read with the trend, not a reversal signal."""
+        result = confluence.score(_clean(
+            confirmation={"kind": "inside_bar", "direction": None}))
+        detail = _item(result, "confirmation")["detail"]
+
+        assert "inside bar" in detail
+        assert "continuation" in detail.lower()
+
+    def test_a_directional_pattern_pointing_the_wrong_way_still_fails(self):
+        """The change must not turn the direction check off. A bearish
+        engulfing at a demand zone is the zone failing, and it still has to
+        score zero."""
+        result = confluence.score(_clean(
+            confirmation={"kind": "engulfing", "direction": "bearish"}))
+
+        assert _item(result, "confirmation")["passed"] is False

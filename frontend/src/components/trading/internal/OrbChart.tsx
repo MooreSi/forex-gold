@@ -5,7 +5,7 @@ import {
 } from "lightweight-charts";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { chartColours, rgba, watchTheme } from "@/components/chart/internal/chartTheme";
+import { chartColours, rgba, watchTheme } from "@/components/shared/chartTheme";
 import { usePoll } from "@/hooks/usePoll";
 import { asArray } from "@/lib/asArray";
 import type { Candle } from "@/api/types";

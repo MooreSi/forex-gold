@@ -31,6 +31,7 @@ from backend.src.services.positions import core_indicators as _ind
 from backend.src.services.reversal_engine import ict_patterns as _ict
 from backend.src.services.setforget import (
     aoi, confluence, patterns, prompt as _prompt, resample, setup, structure,
+    trigger as _trigger,
 )
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,14 @@ log = logging.getLogger(__name__)
 ENTRY_TIMEFRAME = "H4"
 ENTRY_LABEL = "4H"
 DAILY_TIMEFRAME = "D1"
+# The lowest of the three timeframes, and the one that says WHEN. Alex G's
+# guide: "a 4:1 or 8:1 ratio of timeframes (e.g. Daily, 4H, 30-min) so you see
+# the long-term trend and then zoom in for entries." The community's checklist
+# names the same group, "2H, 1H, 30m", and gives it a quarter of the score.
+TRIGGER_TIMEFRAME = "M30"
+# Two hundred 30m bars is about four trading days -- enough for the swing
+# points a shift of structure is measured against, and no more.
+TRIGGER_COUNT = 200
 
 # 400 4H bars is roughly ten weeks -- enough for an EMA 200 to mean something.
 ENTRY_COUNT = 400
@@ -57,10 +66,30 @@ ATR_PERIOD = 14
 # same wick that confirms it. Not large either -- the distance is the risk.
 STOP_BUFFER_ATR = 0.25
 
-# Two bands within this much ATR of each other are one area of interest. See
-# `aoi.merge` -- without it the detector's output is unusable at this window
-# size, and the failure looks like "the method never finds anything".
-ZONE_MERGE_ATR = 1.5
+# No ZONE_MERGE_ATR. Until 2026-09-21 two bands within 1.5 x ATR of each other
+# were folded into one area of interest, because every swing point was a zone
+# and the raw output was a wall of hairlines. The owner replaced the rule:
+# three touches validate a key horizontal zone, and bands are one level when
+# they OVERLAP -- never by an ATR proximity gap, which glues distinct levels
+# together and manufactures the touch counts the validation reads. The wall of
+# hairlines is now handled by refusing to call a one-touch band a level at
+# all, which is a filter rather than a smear.
+
+# How far from price an order may rest, in DAILY ATRs. Reported 2026-09-21: a
+# resting order went out at a zone price would take days to reach, on a method
+# whose entire premise is a week of planning ("2-3 hours weekly" is the pitch).
+# `propose` was taking the nearest qualifying zone with no ceiling at all, and
+# across several months of daily and weekly levels the nearest one below price
+# can be hundreds of dollars away -- a perfectly real level, and not one this
+# week's order belongs at.
+#
+# Measured in daily ATR, not points, because "how far away" only means anything
+# as "how long would it take": 300 points is a fortnight on a quiet gold and two
+# sessions on a violent one. Three days rather than five: price meanders, so a
+# level three average days off is roughly a week of real travel, and a week is
+# the horizon the method plans over. A reasoned number, not a measured one --
+# docs/system/domains/trading/020-set-and-forget.md records it as open.
+MAX_ENTRY_DAILY_ATR = 3.0
 
 # When ATR cannot be read -- a flat or empty series -- the zone tolerance falls
 # back to a tenth of a percent of price, about $2 on gold at $2,000.
@@ -77,6 +106,8 @@ async def gather(engine: Any) -> dict:
     """
     daily = await engine.get_candles(DAILY_TIMEFRAME, DAILY_COUNT) or []
     entry = await engine.get_candles(ENTRY_TIMEFRAME, ENTRY_COUNT) or []
+    trigger_candles = await engine.get_candles(
+        TRIGGER_TIMEFRAME, TRIGGER_COUNT) or []
     weekly = resample.to_weekly(daily)
 
     price = float(entry[-1]["close"]) if entry else None
@@ -84,20 +115,30 @@ async def gather(engine: Any) -> dict:
     entry_bias = structure.bias(entry)
 
     atr = _ict.atr(entry, ATR_PERIOD) if len(entry) > ATR_PERIOD else 0.0
-    # Bands closer together than this are one level. Without it a 400-bar
-    # window yields a dozen hairlines, the next opposing zone sits a point or
-    # two from every entry, and the section refuses every setup it ever finds
-    # for a reason that is about the detector rather than about the chart.
-    gap = atr * ZONE_MERGE_ATR
+    # The DAILY range, which is what decides whether a zone is worth resting an
+    # order at. The 4H ATR answers "how wide is a bar"; this answers "how far
+    # does gold go in a day", and only the second one converts a distance into
+    # a wait.
+    daily_atr = _ict.atr(daily, ATR_PERIOD) if len(daily) > ATR_PERIOD else 0.0
 
-    # Daily levels and 4H levels together, merged. A trader's chart carries
-    # both: the daily zone is why the trade exists and the 4H one is where the
-    # order goes. Kept separate they would double-count the same band.
-    zones = aoi.merge(
-        aoi.zones(daily, reference=price, gap=gap)
-        + aoi.zones(entry, reference=price, gap=gap),
-        gap=gap,
-    ) if entry or daily else []
+    # The major levels, marked on the HIGHER timeframes only and each found by
+    # scanning backward just far enough to validate it. The 4H does not mark
+    # levels: it is where execution happens, reacting to the ones the Daily
+    # and the Weekly have already established. A 4H that marked its own would
+    # put a level under every recent wick, which is the opposite of trading
+    # the majors.
+    #
+    # Weekly and Daily are scanned separately and then folded together on
+    # OVERLAP, because a weekly band and a daily band at the same price are
+    # one level a trader would draw once -- and a level both timeframes agree
+    # on is the strongest kind the method recognises.
+    daily_zones, daily_bars = aoi.mark(daily, price) if daily and price else ([], 0)
+    weekly_zones, weekly_bars = (aoi.mark(weekly, price)
+                                 if weekly and price else ([], 0))
+    zones = aoi.merge(daily_zones + weekly_zones)
+    if len(zones) > aoi.DEFAULT_LIMIT:
+        nearest = sorted(zones, key=lambda z: aoi.distance(z, price))
+        zones = sorted(nearest[:aoi.DEFAULT_LIMIT], key=lambda z: z["low"])
     impulse = structure.last_impulse(entry, entry_bias) if entry else None
 
     return {
@@ -106,7 +147,12 @@ async def gather(engine: Any) -> dict:
         "daily_bias": structure.bias(daily),
         "entry_bias": entry_bias,
         "entry_timeframe": ENTRY_LABEL,
+        "daily_atr": daily_atr,
         "zones": zones,
+        # How much history the levels above actually came from. On screen so
+        # that "does it really measure back to last September?" has an answer
+        # without reading the source.
+        "zone_scan": {"daily_bars": daily_bars, "weekly_bars": weekly_bars},
         "atr": atr,
         "ema_fast": _ind.ema_last(closes, EMA_FAST) if closes else None,
         "ema_slow": _ind.ema_last(closes, EMA_SLOW) if closes else None,
@@ -121,6 +167,10 @@ async def gather(engine: Any) -> dict:
         # would be drawn as a band at zero, across the bottom of the chart,
         # looking like a real level nobody can account for.
         "fib_levels": _fib_levels(impulse),
+        # The 30m series the trigger is read from. `propose` evaluates it,
+        # because the direction it needs is derived there and deriving it twice
+        # is how the two stages end up disagreeing about which way the trade is.
+        "trigger_candles": trigger_candles,
         "candles": entry,
         "weekly_candles": weekly,
         "daily_candles": daily,
@@ -193,7 +243,16 @@ def propose(evidence: dict) -> tuple[Optional[dict], str]:
 
     direction = "BUY" if weekly == "bullish" else "SELL"
     want_kind = "demand" if direction == "BUY" else "supply"
-    zones = evidence.get("zones") or []
+    # Only bands narrow enough to BE a level can carry an entry or a target.
+    # Alex G's guide: "keep the zone reasonably narrow". A band wide enough to
+    # swallow price makes "price is at an area of interest" trivially true, and
+    # a take-profit inside one is a target with a thousand points of slack.
+    #
+    # Applied here rather than in `gather`: a wide band is still real structure
+    # and worth drawing on the chart. It is not a precise enough level to place
+    # an order at, which is a different claim.
+    zones = aoi.within_width(evidence.get("zones") or [],
+                             float(price or 0.0))
     tol = tolerance(evidence)
 
     here = aoi.at_price(zones, price, want_kind, tolerance=tol)
@@ -217,6 +276,15 @@ def propose(evidence: dict) -> tuple[Optional[dict], str]:
         # order fills on the first tap rather than needing the zone eaten.
         entry = zone["high"] if direction == "BUY" else zone["low"]
 
+        # Near enough to be worth waiting for. An order resting where price
+        # will not arrive for a fortnight is not a set-and-forget trade, it is
+        # a bet left on the table -- and it looks identical on screen to one
+        # that fills tomorrow.
+        refusal = _out_of_reach(abs(price - entry), evidence, want_kind,
+                                direction)
+        if refusal:
+            return None, refusal
+
     stop = _stop_for(direction, zone, evidence, tol)
     target_zone = aoi.next_opposing(zones, entry, direction)
     if target_zone is None:
@@ -226,13 +294,82 @@ def propose(evidence: dict) -> tuple[Optional[dict], str]:
                       "profit at the next zone, not at a multiple of the risk.")
     target = target_zone["low"] if direction == "BUY" else target_zone["high"]
 
+    # ── The three stages ────────────────────────────────────────────────────
+    # Rebuilt 2026-09-21. The old model had two -- pick a zone, rest an order
+    # at it -- and with nothing to wait for it committed immediately and let
+    # the market come to it, which on a level a fortnight away is not a trade.
+    #
+    #   armed      the zone is chosen, price has not reached it
+    #   waiting    price is at the zone, the 30m has not reacted
+    #   triggered  price is at the zone AND the 30m has shifted or engulfed
+    #
+    # The first two are still returned, with their levels, so the plan is
+    # visible before it is live. `setup.invalidations` is what makes them
+    # unplaceable -- the same mechanism that refuses a thin ratio, so the
+    # button is disabled with a reason rather than mysteriously.
+    arrived = _trigger.has_arrived(zone, price, tol)
+    fired = _trigger.evaluate(evidence.get("trigger_candles") or [], direction) \
+        if arrived else None
+    stage = "triggered" if fired else ("waiting" if arrived else "armed")
+
+    if stage == "triggered":
+        # The guide: "enter immediately after a signal candle closes". The
+        # point of waiting for the 30m is that price is already AT the level
+        # when it fires, so there is nothing left to rest an order for.
+        entry = price
+
     candidate = setup.build(
         direction, entry, stop, target,
         order_type=setup.order_type_for(direction, entry, price, tol),
     )
+    candidate["stage"] = stage
+    candidate["trigger"] = fired
     candidate["zone"] = zone
     candidate["target_zone"] = target_zone
+    # On the candidate rather than derived in the browser, so the page can say
+    # "about two days away" beside the entry instead of leaving the operator to
+    # judge it off the chart -- which is what went wrong on 2026-09-21.
+    candidate["distance"] = abs(price - candidate["entry"])
+    candidate["distance_days"] = _days_away(candidate["distance"], evidence)
     return candidate, ""
+
+
+def _days_away(distance: float, evidence: dict) -> Optional[float]:
+    """A distance as a number of average days, or None when it cannot be told.
+
+    None, not zero: an unreadable daily range means the wait is UNKNOWN, and
+    rendering that as "0 days" would read as "fills immediately" -- the most
+    encouraging possible wrong answer.
+    """
+    daily_atr = float(evidence.get("daily_atr") or 0.0)
+    if daily_atr <= 0:
+        return None
+    return distance / daily_atr
+
+
+def _out_of_reach(distance: float, evidence: dict, kind: str,
+                  direction: str) -> str:
+    """Why this zone is too far to rest an order at, or "" if it is not.
+
+    The reason names the distance AND the wait. "No setup" tells the operator
+    nothing they can act on; "300 points below, about 15 days of movement"
+    tells them whether to come back tomorrow or next month.
+
+    An unreadable daily range applies no ceiling at all. Refusing everything
+    because the bridge served no daily candles would read as a market with no
+    setups in it rather than as missing data.
+    """
+    days = _days_away(distance, evidence)
+    if days is None or days <= MAX_ENTRY_DAILY_ATR:
+        return ""
+    side = "below" if direction == "BUY" else "above"
+    return (
+        f"The nearest {kind} zone is {distance:.0f} points {side} price — "
+        f"about {days:.0f} days of movement at gold's current daily range. "
+        f"Set & Forget plans a week at a time, so an order resting that far "
+        f"out is a bet left on the table rather than a trade. Nothing to place "
+        f"yet; the level is still worth watching."
+    )
 
 
 def _stop_for(direction: str, zone: dict, evidence: dict, tol: float) -> float:
@@ -352,7 +489,7 @@ async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:
         "reasoning": str(reply.get("reasoning") or ""),
         "risks": str(reply.get("risks") or ""),
         "levels_rejected": rejected,
-        "model": cfg.get("claude_model") or cfg.get("deepseek_model") or "",
+        "model": _ai.active_model(cfg),
         "error": None,
     }
     return result
@@ -366,4 +503,5 @@ def _public(evidence: dict) -> dict:
     one page that can disagree about what the last bar was.
     """
     return {k: v for k, v in evidence.items()
-            if k not in ("candles", "weekly_candles", "daily_candles")}
+            if k not in ("candles", "weekly_candles", "daily_candles",
+                         "trigger_candles")}

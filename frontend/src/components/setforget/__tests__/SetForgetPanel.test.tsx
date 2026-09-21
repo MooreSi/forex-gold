@@ -50,6 +50,9 @@ vi.mock("lightweight-charts", () => ({
 const CANDIDATE = {
   direction: "BUY", entry: 1985, stop_loss: 1972, take_profit: 2040,
   order_type: "limit", risk: 13, reward: 55, rr: 4.23,
+  stage: "triggered",
+  trigger: { kind: "shift_of_structure", ts: 1, level: 1972 },
+  distance: 15, distance_days: 0.75,
   zone: { kind: "demand", low: 1975, high: 1985, ts: 1, touches: 2 },
   target_zone: { kind: "supply", low: 2040, high: 2050, ts: 2, touches: 1 },
 };
@@ -57,7 +60,7 @@ const CANDIDATE = {
 const EVIDENCE = {
   price: 2000, weekly_bias: "bullish", daily_bias: "bullish",
   entry_bias: "bullish", entry_timeframe: "4H", zones: [CANDIDATE.zone],
-  atr: 6, ema_fast: 1995, ema_slow: 1960, rsi: 52, fib: 0.5,
+  atr: 6, daily_atr: 20, ema_fast: 1995, ema_slow: 1960, rsi: 52, fib: 0.5,
   fib_levels: [{ ratio: 0.382, price: 1990 }, { ratio: 0.786, price: 1978 }],
   impulse: null, confirmation: null,
 };

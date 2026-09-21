@@ -22,9 +22,9 @@ import json
 
 import pytest
 
-from backend.src.services.setforget import analysis
+from backend.src.services.setforget import analysis, aoi, setup
 
-from ._candles import zigzag
+from ._candles import series, zigzag
 
 
 class _Engine:
@@ -59,6 +59,9 @@ def _evidence(**over) -> dict:
         "confirmation": None,
         "impulse": {"start": 1950.0, "end": 2060.0, "start_ts": 1.0, "end_ts": 2.0},
         "fib": 0.545,
+        # Gold moves about this much in a day, and it is what decides whether a
+        # zone is worth resting an order at -- see TestTheEntryHasToBeReachable.
+        "daily_atr": 20.0,
     }
     ev.update(over)
     return ev
@@ -74,7 +77,8 @@ class TestGather:
 
         ev = await analysis.gather(engine)
 
-        assert [tf for tf, _ in engine.calls] == ["D1", analysis.ENTRY_TIMEFRAME]
+        assert [tf for tf, _ in engine.calls] == [
+            "D1", analysis.ENTRY_TIMEFRAME, analysis.TRIGGER_TIMEFRAME]
         assert ev["price"] == pytest.approx(
             engine.by_timeframe["H4"][-1]["close"])
 
@@ -260,6 +264,35 @@ class TestEvaluate:
         assert result["ai"]["reasoning"]
 
     @pytest.mark.asyncio
+    async def test_the_review_names_the_model_that_was_actually_called(
+            self, engine, monkeypatch):
+        """The label beside the verdict has to be the model that produced it.
+
+        `claude_model` carries a config default that is present whether or not
+        Claude is the selected provider, so reading the label as
+        `claude_model or deepseek_model` printed a Claude model above a
+        DeepSeek answer -- a review attributed to a model that was never
+        billed.
+        """
+        monkeypatch.setattr(analysis._ai, "is_configured", lambda cfg: True)
+
+        async def _complete(cfg, system, prompt, max_tokens, timeout=30):
+            return json.dumps({"verdict": "skip", "reasoning": "Too far."})
+        monkeypatch.setattr(analysis._ai, "complete", _complete)
+        monkeypatch.setattr(analysis, "propose", lambda ev: (
+            {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
+             "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
+             "reward": 55.0, "rr": 4.23}, ""))
+
+        result = await analysis.evaluate(engine, {
+            "ai_provider": "deepseek",
+            "deepseek_model": "deepseek-flash",
+            "claude_model": "claude-sonnet-4-6",
+        })
+
+        assert result["ai"]["model"] == "deepseek-flash"
+
+    @pytest.mark.asyncio
     async def test_a_model_answer_that_breaks_the_rules_is_discarded(
             self, engine, monkeypatch):
         """The property this whole file exists for. A model asked for a stop
@@ -346,70 +379,91 @@ class TestEvaluate:
         assert "529" in result["ai"]["error"]
 
 
-class TestTheZoneMergeGapIsWired:
-    """The fix for the failure that made the whole section useless.
+class TestTheAreasOfInterestAreMarkedNotMerged:
+    """Replaces `TestTheZoneMergeGapIsWired`, deleted 2026-09-21.
 
-    Over a 400-bar window the detector produces a dozen bands stacked within a
-    few points of each other. The next opposing zone is then always a point or
-    two from the entry, every candidate comes out under 1:2, and the section
-    refuses everything it ever finds -- for a reason that is about the detector
-    rather than about the chart.
+    Those tests pinned the OLD rule: every swing point was a zone, and an
+    ATR-derived proximity gap folded the resulting wall of hairlines into
+    something usable. The owner replaced that rule -- scan backward on the
+    higher timeframes until a band with three touches validates an AOI, then
+    stop, and let execution work against those levels alone. So the ATR gap is
+    gone, and the tests that asserted it was wired went with it. They were not
+    edited to pass; the specification they encoded no longer exists.
 
-    `aoi.merge` grew a proximity gap for it. These pin that `gather` actually
-    HANDS IT OVER: the merge could be perfect and the orchestrator could still
-    call it with the default of zero, which is exactly the shape of bug that
-    passes every unit test underneath it.
+    What replaces them is the same KIND of test, which is why the class stays:
+    `aoi.mark` could be perfect and `gather` could still call it with the 4H
+    series or top it up with unvalidated bands, and every unit test underneath
+    would still be green.
     """
 
     @pytest.mark.asyncio
-    async def test_the_gap_handed_to_the_zone_builder_is_atr_derived(
-            self, monkeypatch):
-        seen = []
-        monkeypatch.setattr(analysis.aoi, "zones",
-                            lambda candles, **kw: seen.append(kw.get("gap")) or [])
-        monkeypatch.setattr(analysis.aoi, "merge",
-                            lambda raw, **kw: seen.append(kw.get("gap")) or [])
-        monkeypatch.setattr(analysis._ict, "atr", lambda candles, period: 8.0)
-
+    async def test_the_levels_come_from_the_higher_timeframes_not_the_4h(self):
+        """The 4H is execution. It reacts to the marked levels; it does not
+        get to mark its own, or "focuses solely on current price action as it
+        interacts with those zones" is not what the page is doing."""
         engine = _Engine({
-            "D1": zigzag([(1900.0, 0), (2000.0, 40), (1960.0, 20)]),
-            "H4": zigzag([(1980.0, 0), (2050.0, 30), (2000.0, 30)]),
-        })
-        await analysis.gather(engine)
-
-        assert seen, "neither zones() nor merge() was called"
-        assert all(g == pytest.approx(8.0 * analysis.ZONE_MERGE_ATR) for g in seen), seen
-
-    @pytest.mark.asyncio
-    async def test_a_choppy_series_comes_back_with_fewer_zones_than_raw(self):
-        """The behaviour, not the wiring. A window that yields a wall of
-        hairlines must come back as a handful of levels a person would draw."""
-        choppy = zigzag([(2000.0, 0), (2012.0, 3), (2002.0, 3), (2014.0, 3),
-                         (2004.0, 3), (2016.0, 3), (2006.0, 3), (2018.0, 3),
-                         (2008.0, 3), (2020.0, 3), (2010.0, 3)])
-        engine = _Engine({"D1": choppy, "H4": choppy})
-
-        merged = (await analysis.gather(engine))["zones"]
-        unmerged = analysis.aoi.zones(choppy, limit=99)
-
-        assert len(merged) < len(unmerged), (len(merged), len(unmerged))
-
-    @pytest.mark.asyncio
-    async def test_an_unreadable_atr_does_not_merge_everything_into_one_band(
-            self):
-        """A gap of zero is the safe failure: separate levels stay separate.
-        The dangerous one would be a gap so large that every zone on the chart
-        folds into a single band spanning the whole range, which price is
-        always "at" -- the checklist would then score every read."""
-        engine = _Engine({
-            "D1": zigzag([(1900.0, 0), (2000.0, 40), (1960.0, 20), (2060.0, 40)]),
-            "H4": [],                                  # no ATR to measure
+            # Validated daily levels at 400 and 600, straddling the price.
+            "D1": zigzag([(500.0, 0), (600.0, 8), (400.0, 8), (600.0, 8),
+                          (400.0, 8), (600.0, 8), (400.0, 8), (520.0, 6)]),
+            # The 4H has turned at 520 three times, so it carries a validated
+            # band of its own. Price closes at 510, right under it.
+            "H4": zigzag([(500.0, 0), (520.0, 8), (500.0, 8), (520.0, 8),
+                          (500.0, 8), (520.0, 8), (510.0, 5)]),
         })
 
         ev = await analysis.gather(engine)
 
-        assert ev["atr"] == 0
-        assert len(ev["zones"]) > 1
+        # Bodies, not wicks, since 2026-09-21 -- so the demand band starts at
+        # the swing candle's body low rather than a point below it at the tail.
+        assert [z["kind"] for z in ev["zones"]] == ["demand", "supply"], ev["zones"]
+        assert round(ev["zones"][0]["low"]) == 400, ev["zones"]
+        assert round(ev["zones"][1]["high"]) == 600, ev["zones"]
+        assert not any(515.0 <= z["low"] <= 525.0 for z in ev["zones"]), \
+            "the 4H marked a level of its own"
+
+    @pytest.mark.asyncio
+    async def test_every_marked_zone_carries_three_touches(self):
+        engine = _Engine({
+            "D1": zigzag([(100.0, 0), (120.0, 8), (100.0, 8), (120.0, 8),
+                          (100.0, 8), (120.0, 8), (110.0, 5)]),
+            "H4": zigzag([(112.0, 0), (108.0, 10), (110.0, 10)]),
+        })
+
+        ev = await analysis.gather(engine)
+
+        assert ev["zones"]
+        assert all(z["touches"] >= aoi.MIN_TOUCHES for z in ev["zones"])
+
+    @pytest.mark.asyncio
+    async def test_the_page_is_told_how_far_back_the_levels_were_marked(self):
+        """The question that started this ("does it really measure back to the
+        14th of September?") had no answer on screen. Now it does."""
+        daily = zigzag([(100.0, 0), (120.0, 8), (100.0, 8), (120.0, 8),
+                        (100.0, 8), (120.0, 8), (110.0, 5)])
+        engine = _Engine({
+            "D1": daily,
+            "H4": zigzag([(112.0, 0), (108.0, 10), (110.0, 10)]),
+        })
+
+        ev = await analysis.gather(engine)
+
+        assert ev["zone_scan"]["daily_bars"] > 0
+        assert ev["zone_scan"]["daily_bars"] <= len(daily)
+
+    @pytest.mark.asyncio
+    async def test_a_chart_with_no_validated_level_marks_none(self):
+        """A one-way trend has turned at nothing three times. The honest answer
+        is no levels -- and `propose` then refuses for a reason that names the
+        chart rather than the detector. Topping the list up with unvalidated
+        bands is exactly what the three-touch rule exists to refuse."""
+        engine = _Engine({
+            "D1": zigzag([(1000.0, 0), (2000.0, 80), (1990.0, 6)]),
+            "H4": zigzag([(1995.0, 0), (1990.0, 10), (1992.0, 10)]),
+        })
+
+        ev = await analysis.gather(engine)
+
+        assert ev["zones"] == []
 
 
 class TestProposeWithoutAPrice:
@@ -631,3 +685,263 @@ class TestTheDrawableFibonacciLevels:
         engine = _Engine({"D1": [], "H4": []})
 
         assert (await analysis.gather(engine))["fib_levels"] == []
+
+
+class TestTheEntryHasToBeReachable:
+    """Reported 2026-09-21: a resting order was placed at a zone price would
+    take days to reach, on a method whose whole premise is a week of planning.
+
+    The cause was that `propose` took the NEAREST qualifying zone with no
+    ceiling on how far away that was. On a window of several months of daily
+    and weekly levels, the nearest one below price can be hundreds of dollars
+    off -- a perfectly real level, and not one this week's order belongs at.
+
+    Distance is measured in DAILY ATR because "how far away is it" only means
+    anything as "how long would it take": 400 points is a fortnight on a quiet
+    gold and two sessions on a violent one.
+    """
+
+    def _far(self, **over):
+        # The demand zone sits 300 below price: fifteen average days away.
+        ev = _evidence(
+            price=2000.0, daily_atr=20.0,
+            zones=[_zone("demand", 1690.0, 1700.0), _zone("supply", 2040.0, 2050.0)],
+        )
+        ev.update(over)
+        return ev
+
+    def test_a_zone_days_away_is_refused_rather_than_rested_at(self):
+        candidate, why = analysis.propose(self._far())
+
+        assert candidate is None
+        assert why
+
+    def test_the_refusal_says_how_far_and_how_long(self):
+        """"No setup" is useless here. The operator needs to know whether to
+        come back tomorrow or next month, and the distance alone does not say
+        -- 300 points is a fortnight on a quiet gold and two sessions on a
+        violent one."""
+        _, why = analysis.propose(self._far())
+
+        assert "300" in why
+        assert "15" in why and "day" in why.lower()
+
+    def test_a_zone_within_reach_is_still_rested_at(self):
+        """The negative control: the ceiling must not refuse everything."""
+        near = self._far(zones=[_zone("demand", 1950.0, 1960.0),
+                                _zone("supply", 2040.0, 2050.0)])
+
+        candidate, why = analysis.propose(near)
+
+        assert candidate is not None, why
+        assert candidate["entry"] == 1960.0
+
+    def test_the_ceiling_scales_with_how_far_gold_actually_moves(self):
+        """Same 40-point gap, two different markets. On a quiet gold that is
+        four days out and worth waiting for; on a violent one it is half a
+        session. A fixed point ceiling would be wrong on both."""
+        zones = [_zone("demand", 1950.0, 1960.0), _zone("supply", 2040.0, 2050.0)]
+        quiet, _ = analysis.propose(_evidence(price=2000.0, zones=zones,
+                                              daily_atr=2.0))
+        busy, _ = analysis.propose(_evidence(price=2000.0, zones=zones,
+                                             daily_atr=40.0))
+
+        assert quiet is None, "40 points is 20 days at an ATR of 2"
+        assert busy is not None
+
+    def test_the_candidate_carries_the_distance_so_the_page_can_say_it(self):
+        candidate, _ = analysis.propose(_evidence())
+
+        assert candidate is not None
+        assert candidate["distance"] == pytest.approx(15.0)      # 2000 - 1985
+        assert candidate["distance_days"] == pytest.approx(0.75)  # at ATR 20
+
+    def test_a_market_entry_is_zero_days_away_not_unmeasured(self):
+        """Price is already at the zone. Zero is the honest answer and None
+        would render as an em dash next to a trade that fills now."""
+        candidate, _ = analysis.propose(_evidence(price=1980.0))
+
+        assert candidate is not None
+        assert candidate["order_type"] == "market"
+        assert candidate["distance_days"] == pytest.approx(0.0)
+
+    def test_an_unreadable_daily_atr_does_not_refuse_everything(self):
+        """A bridge that could not serve daily candles must not turn the whole
+        section into "nothing is reachable" -- that reads as a market with no
+        setups rather than as missing data. With no ATR the ceiling cannot be
+        computed, so it is not applied, and the distance is reported unscaled."""
+        candidate, why = analysis.propose(self._far(daily_atr=0.0))
+
+        assert candidate is not None, why
+        assert candidate["distance_days"] is None
+
+
+class TestAWideBandCannotCarryAnEntry:
+    """`aoi.within_width` is the rail; this is the wiring that arms it.
+
+    The rail could be perfect and `propose` could never call it -- the same
+    shape of bug as a merge gap that is computed and then not handed over. So
+    this checks the decision, not the helper.
+
+    The band is still REPORTED by `gather` and still drawn on the chart. It is
+    real structure; it is just not a precise enough level to place an order at.
+    Those are different claims and the code makes them separately.
+    """
+
+    def test_a_band_wide_enough_to_swallow_price_cannot_be_the_entry(self):
+        """Measured live on 2026-09-21: a 1035-point band on gold at ~$4,350.
+        Price is inside one that wide essentially always, so it made "price is
+        at an area of interest" trivially true."""
+        candidate, why = analysis.propose(_evidence(
+            price=4350.0, daily_atr=30.0,
+            zones=[_zone("demand", 3315.0, 4349.0, touches=80),
+                   _zone("supply", 4400.0, 4410.0, touches=3)]))
+
+        assert candidate is None
+        assert why
+
+    def test_a_band_wide_enough_to_swallow_price_cannot_be_the_target(self):
+        """A take-profit inside a thousand-point band is a target with a
+        thousand points of slack, and the ratio computed from it is fiction."""
+        candidate, why = analysis.propose(_evidence(
+            price=4350.0, daily_atr=30.0,
+            zones=[_zone("demand", 4330.0, 4345.0, touches=3),
+                   _zone("supply", 4400.0, 5435.0, touches=80)]))
+
+        assert candidate is None
+        assert "take profit" in why.lower()
+
+    def test_ordinary_bands_are_left_alone(self):
+        """The negative control. A cap that refuses everything reads as a
+        market with no structure in it, which is worse than no cap at all."""
+        candidate, why = analysis.propose(_evidence(
+            price=4350.0, daily_atr=30.0,
+            zones=[_zone("demand", 4330.0, 4345.0, touches=3),
+                   _zone("supply", 4400.0, 4415.0, touches=3)]))
+
+        assert candidate is not None, why
+        # Price is within ATR of the band, so this is a market entry off it.
+        assert candidate["zone"]["low"] == 4330.0
+        assert candidate["take_profit"] == 4400.0
+
+
+class TestTheThreeStages:
+    """The entry model, rebuilt on 2026-09-21 after the owner confirmed the
+    trigger belongs on the 30-minute chart.
+
+    The old model had two stages: pick a zone, rest an order at it. That is
+    what put an order days of travel from price -- there was nothing to wait
+    for, so the app committed immediately and let the market come to it.
+
+    The new model has three, and only the third may be placed:
+
+      armed      -- the zone is chosen, price has not reached it
+      waiting    -- price is at the zone, the 30m has not reacted yet
+      triggered  -- price is at the zone AND the 30m has shifted or engulfed
+
+    The first two are still SHOWN, with their levels, so the plan is visible
+    before it is live. They are just not placeable, and `setup.invalidations`
+    is what refuses them -- the same mechanism that refuses a thin ratio, so
+    the Execute button is disabled with a reason rather than mysteriously.
+    """
+
+    # Falls, bounces to a swing high, falls again, then closes back through it.
+    TURNED_UP = [118, 112, 106, 120, 108, 102, 98, 104, 112, 126]
+
+    def _ev(self, **over):
+        ev = _evidence(
+            price=1980.0,
+            zones=[_zone("demand", 1975.0, 1985.0, touches=3),
+                   _zone("supply", 2040.0, 2050.0, touches=3)],
+        )
+        ev.update(over)
+        return ev
+
+    def test_price_not_yet_at_the_zone_is_armed_and_not_placeable(self):
+        """The state the old model placed an order in."""
+        candidate, why = analysis.propose(self._ev(price=2000.0))
+
+        assert candidate is not None, why
+        assert candidate["stage"] == "armed"
+        assert setup.invalidations(candidate), "armed must not be placeable"
+
+    def test_at_the_zone_with_a_quiet_30m_is_waiting(self):
+        candidate, why = analysis.propose(self._ev(
+            trigger_candles=series([118, 112, 106, 120, 108, 102, 98, 96, 94])))
+
+        assert candidate is not None, why
+        assert candidate["stage"] == "waiting"
+        assert setup.invalidations(candidate), "waiting must not be placeable"
+
+    def test_at_the_zone_with_a_shift_is_triggered_and_placeable(self):
+        candidate, why = analysis.propose(self._ev(
+            trigger_candles=series(self.TURNED_UP)))
+
+        assert candidate is not None, why
+        assert candidate["stage"] == "triggered"
+        assert setup.invalidations(candidate) == []
+
+    def test_a_triggered_setup_enters_at_the_market(self):
+        """The guide: "enter immediately after a signal candle closes". The
+        whole point of waiting for the 30m is that price is already at the
+        level when it fires -- so there is nothing left to rest an order for."""
+        candidate, _ = analysis.propose(self._ev(
+            trigger_candles=series(self.TURNED_UP)))
+
+        assert candidate is not None
+        assert candidate["order_type"] == "market"
+
+    def test_the_refusal_names_the_stage_rather_than_saying_no(self):
+        """"Not placeable" is useless. "Waiting for a 30m shift of structure"
+        tells the operator what they are waiting FOR, which is the difference
+        between a plan and a broken page."""
+        armed, _ = analysis.propose(self._ev(price=2000.0))
+        waiting, _ = analysis.propose(self._ev(
+            trigger_candles=series([118, 112, 106, 120, 108, 102, 98, 96, 94])))
+
+        assert any("reach" in r.lower() or "arriv" in r.lower()
+                   for r in setup.invalidations(armed)), setup.invalidations(armed)
+        assert any("30" in r for r in setup.invalidations(waiting)), \
+            setup.invalidations(waiting)
+
+    def test_the_trigger_travels_with_the_candidate(self):
+        """So the card can name what fired, and the operator can disagree."""
+        candidate, _ = analysis.propose(self._ev(
+            trigger_candles=series(self.TURNED_UP)))
+
+        assert candidate is not None
+        assert candidate["trigger"]["kind"] == "shift_of_structure"
+
+    def test_no_30m_data_at_all_leaves_it_waiting_rather_than_triggered(self):
+        """A bridge that served no 30m candles must not read as "nothing has
+        happened, therefore go". Missing data is not a quiet market."""
+        candidate, _ = analysis.propose(self._ev(trigger_candles=[]))
+
+        assert candidate is not None
+        assert candidate["stage"] == "waiting"
+        assert setup.invalidations(candidate)
+
+
+class TestGatherReadsTheTriggerTimeframe:
+    @pytest.mark.asyncio
+    async def test_it_asks_the_bridge_for_the_30m(self):
+        engine = _Engine({
+            "D1": zigzag([(1900.0, 0), (2000.0, 40), (1960.0, 20), (2060.0, 40)]),
+            "H4": zigzag([(1980.0, 0), (2050.0, 30), (2000.0, 30)]),
+            "M30": zigzag([(1990.0, 0), (2010.0, 20), (2000.0, 20)]),
+        })
+
+        await analysis.gather(engine)
+
+        assert analysis.TRIGGER_TIMEFRAME in [tf for tf, _ in engine.calls]
+
+    @pytest.mark.asyncio
+    async def test_the_30m_candles_do_not_ship_to_the_browser(self):
+        """Same rule as the other three series: the page draws from
+        /api/chart at its own window, and a second copy here is a second
+        answer to what the last bar was."""
+        engine = _Engine({"D1": [], "H4": [], "M30": []})
+
+        ev = await analysis.gather(engine)
+
+        assert "trigger_candles" not in analysis._public(ev)

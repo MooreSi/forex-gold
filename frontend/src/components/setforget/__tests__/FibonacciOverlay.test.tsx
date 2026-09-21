@@ -75,7 +75,7 @@ describe("the retracement band", () => {
 const EVIDENCE: SetForgetEvidence = {
   price: 2000, weekly_bias: "bullish", daily_bias: "bullish",
   entry_bias: "bullish", entry_timeframe: "4H", zones: [],
-  atr: 6.4, ema_fast: 1995, ema_slow: 1960, rsi: 52, fib: 0.618,
+  atr: 6.4, daily_atr: 20, ema_fast: 1995, ema_slow: 1960, rsi: 52, fib: 0.618,
   fib_levels: [], impulse: null, confirmation: null,
 };
 

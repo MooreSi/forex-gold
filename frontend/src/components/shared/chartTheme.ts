@@ -3,9 +3,15 @@
  *
  * lightweight-charts paints to a canvas and cannot use a CSS variable, so
  * every chart in this app has to be TOLD its colours and re-told them when
- * the theme changes. Shared because there are two charts now — the Chart tab
- * and the ORB report — and a second copy is how one of them ends up dark
- * inside a white panel, which is exactly what the first one did.
+ * the theme changes. Shared because there are three charts now — the Chart
+ * tab, the ORB report and Set & Forget — and a second copy is how one of them
+ * ends up dark inside a white panel, which is exactly what the first one did
+ * and what Set & Forget did again on 2026-09-21.
+ *
+ * In `shared/` rather than `chart/internal/`, which is where it started: a
+ * domain's `internal/` is not for other domains to import, and the third
+ * caller is what made that rule bite. Nothing about the module changed in the
+ * move.
  */
 export function token(name: string, fallback: string): string {
   if (typeof getComputedStyle !== "function") return fallback;

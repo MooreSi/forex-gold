@@ -21,13 +21,16 @@ import type { SetForgetCandidate, SetForgetEvidence } from "@/api/types";
 const EVIDENCE: SetForgetEvidence = {
   price: 2000, weekly_bias: "bullish", daily_bias: "bullish",
   entry_bias: "bullish", entry_timeframe: "4H", zones: [],
-  atr: 6, ema_fast: 1995, ema_slow: 1960, rsi: 52, fib: 0.5,
+  atr: 6, daily_atr: 20, ema_fast: 1995, ema_slow: 1960, rsi: 52, fib: 0.5,
   fib_levels: [], impulse: null, confirmation: null,
 };
 
 const LONG: SetForgetCandidate = {
   direction: "BUY", entry: 1985, stop_loss: 1972, take_profit: 2040,
   order_type: "limit", risk: 13, reward: 55, rr: 4.23,
+  stage: "triggered",
+  trigger: { kind: "shift_of_structure", ts: 1, level: 1972 },
+  distance: 15, distance_days: 0.75,
   zone: { kind: "demand", low: 1975, high: 1985, ts: 1, touches: 3 },
 };
 
@@ -206,5 +209,131 @@ describe("the lot selector", () => {
 
     expect(screen.getByText(/No size chosen yet/)).toBeInTheDocument();
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+  });
+});
+
+describe("how long a resting order will wait", () => {
+  /**
+   * Reported 2026-09-21: an order went out at a zone days away and nothing on
+   * the page said so. A resting order that fills tomorrow and one that fills
+   * in a fortnight render identically — same card, same numbers, same green
+   * Execute button — so the wait has to be stated, not left to be judged off
+   * the chart.
+   */
+  it("states the distance and the wait", () => {
+    summary({ candidate: { ...LONG, distance: 15, distance_days: 0.75 } });
+
+    expect(screen.getByText(/15\.00 points from price/)).toBeInTheDocument();
+    // Three quarters of a day is eighteen hours, which is nearer a day than
+    // it is to now.
+    expect(screen.getByText("about a day away")).toBeInTheDocument();
+  });
+
+  it("says price is already there when it is", () => {
+    summary({ candidate: { ...LONG, distance: 2, distance_days: 0.1 } });
+
+    expect(screen.getByText("price is there now")).toBeInTheDocument();
+  });
+
+  it("says a day for a day", () => {
+    summary({ candidate: { ...LONG, distance: 22, distance_days: 1.1 } });
+
+    expect(screen.getByText("about a day away")).toBeInTheDocument();
+  });
+
+  it("warns when the wait runs to days", () => {
+    const { container } = summary({
+      candidate: { ...LONG, distance: 160, distance_days: 8 },
+    });
+
+    expect(screen.getByText("about 8 days away")).toBeInTheDocument();
+    expect(container.querySelector(".text-warning")).not.toBeNull();
+  });
+
+  it("does not warn about a wait of hours", () => {
+    const { container } = summary({
+      candidate: { ...LONG, distance: 8, distance_days: 0.4 },
+    });
+
+    expect(container.querySelector(".text-warning")).toBeNull();
+  });
+
+  it("says the wait is unknown rather than implying it fills now", () => {
+    /* Null is "the daily range could not be read". Rendered as "0 days" that
+       would read as "fills immediately" — the most encouraging possible wrong
+       answer about a trade. */
+    summary({ candidate: { ...LONG, distance: 15, distance_days: null } });
+
+    expect(screen.getByText(/wait unknown/)).toBeInTheDocument();
+  });
+
+  it("says nothing about waiting for a market order", () => {
+    summary({ candidate: { ...LONG, order_type: "market", distance: 0,
+                           distance_days: 0 } });
+
+    expect(screen.queryByText(/points from price/)).not.toBeInTheDocument();
+    expect(screen.getByText(/fills now at the market/)).toBeInTheDocument();
+  });
+});
+
+describe("the three stages", () => {
+  /**
+   * Added 2026-09-21 with the 30-minute trigger. Before it a chosen zone and a
+   * live order were the same thing, which is what put one days from price.
+   *
+   * The tone is the point here. Waiting for the 30m is the method WORKING --
+   * most of the time there is no trade -- and dressing that in the same red as
+   * an inverted stop teaches the operator to ignore both.
+   */
+  const WAITING = { ...LONG, stage: "waiting" as const, trigger: null };
+  const ARMED = { ...LONG, stage: "armed" as const, trigger: null };
+
+  it("says what it is waiting for, not that something is wrong", () => {
+    summary({
+      candidate: WAITING,
+      invalidations: ["Price is at the zone but the 30m has not reacted yet."],
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /Not ready to place — waiting for the 30m/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says price has not arrived when it has not", () => {
+    summary({
+      candidate: ARMED,
+      invalidations: ["Price has not reached the zone yet."],
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /waiting for price to reach the zone/i);
+  });
+
+  it("still lists the reason underneath", () => {
+    summary({
+      candidate: WAITING,
+      invalidations: ["Price is at the zone but the 30m has not reacted yet."],
+    });
+
+    expect(screen.getByText(/the 30m has not reacted yet/)).toBeInTheDocument();
+  });
+
+  it("keeps the red alert for a genuine rule breach on a triggered setup", () => {
+    /* The tone softening must not swallow a real refusal. A 1:0.6 ratio on a
+       triggered setup is still wrong, and still red. */
+    summary({
+      candidate: { ...LONG, stage: "triggered" },
+      invalidations: ["Reward-to-risk is 1:0.60."],
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /does not meet the method's rules/);
+  });
+
+  it("shows nothing at all when a triggered setup is sound", () => {
+    summary({ candidate: { ...LONG, stage: "triggered" }, invalidations: [] });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

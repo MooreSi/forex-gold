@@ -117,6 +117,20 @@ def invalidations(s: Optional[dict], min_rr: float = MIN_RR) -> list[str]:
             out.append(f"A SELL's target must be below its entry. "
                        f"Target {target:.2f} is at or above entry {entry:.2f}.")
 
+    # The 30m stage. Only a triggered setup may be placed; the other two are
+    # shown so the plan is visible, and refused here so the button is disabled
+    # with a reason. Added 2026-09-21 with the trigger stage -- before it, a
+    # zone being chosen was the same thing as an order going out.
+    stage = s.get("stage")
+    if stage == "armed":
+        out.append("Price has not reached the zone yet. Set & Forget enters "
+                   "when price arrives and the 30m reacts — there is nothing "
+                   "to place until it gets there.")
+    elif stage == "waiting":
+        out.append("Price is at the zone but the 30m has not reacted yet. "
+                   "The trigger is a shift of structure or an engulfing close "
+                   "on the 30-minute chart.")
+
     rr = s.get("rr")
     if rr is None:
         out.append("The entry and the stop are the same price, so there is no "

@@ -57,6 +57,22 @@ def is_configured(cfg: dict) -> bool:
     return _ANTHROPIC_AVAILABLE and bool(cfg.get("anthropic_api_key"))
 
 
+def active_model(cfg: dict) -> str:
+    """The model id the selected provider would actually send. Asks nothing.
+
+    Branches on ai_provider exactly as complete() does, including the fall-
+    through to Claude when ai_provider is absent -- a label that fell a
+    different way would describe a different call than the one that was made.
+    It reads only the selected provider's model key: `claude_model` carries a
+    config default that is present whether or not Claude is selected, so
+    `claude_model or deepseek_model` named Claude above every DeepSeek answer.
+    """
+    provider = cfg.get("ai_provider", "claude")
+    if provider == "deepseek":
+        return str(cfg.get("deepseek_model") or "")
+    return str(cfg.get("claude_model") or "")
+
+
 async def complete(cfg: dict, system: str, prompt: str, max_tokens: int, timeout: int = 30) -> str:
     """Return the raw text reply from the configured provider. system may be
     "" for callers with no separate system prompt. Raises on any failure

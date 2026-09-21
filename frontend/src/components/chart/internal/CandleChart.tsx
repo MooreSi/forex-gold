@@ -4,7 +4,7 @@ import {
   type IChartApi, type ISeriesApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, Overlays, Tick, Trade } from "@/api/types";
-import { chartColours, rgba, token, watchTheme } from "./chartTheme";
+import { chartColours, rgba, token, watchTheme } from "@/components/shared/chartTheme";
 import { rectsFor, type FvgRect } from "./fvgGeometry";
 
 interface CandleChartProps {

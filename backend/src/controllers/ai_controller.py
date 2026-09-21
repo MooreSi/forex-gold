@@ -21,6 +21,7 @@ from backend.src.services.ai import provider as _provider
 
 __all__ = [
     "is_configured",
+    "active_model",
     "complete",
     "fetch_available_models",
     "FALLBACK_DEEPSEEK_MODELS",
@@ -37,6 +38,11 @@ FALLBACK_DEEPSEEK_MODELS = _provider.FALLBACK_DEEPSEEK_MODELS
 def is_configured(cfg: dict) -> bool:
     """Whether a provider and key are set. Makes no request."""
     return _provider.is_configured(cfg)
+
+
+def active_model(cfg: dict) -> str:
+    """Which model the selected provider would send. Makes no request."""
+    return _provider.active_model(cfg)
 
 
 async def complete(cfg: dict, system: str, prompt: str,

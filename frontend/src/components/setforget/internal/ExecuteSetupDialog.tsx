@@ -3,6 +3,7 @@ import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
 import { formatMoney, formatPrice } from "@/components/shared/format";
 import type { SetForgetCandidate } from "@/api/types";
+import { waitFor } from "./waitFor";
 
 interface ExecuteSetupDialogProps {
   open: boolean;
@@ -58,7 +59,12 @@ export function ExecuteSetupDialog(props: ExecuteSetupDialogProps) {
                        bg-surface-2/50 px-3 py-2">
           <Row label="Direction" value={candidate.direction} />
           <Row label="Order" value={resting ? "Limit (rests at the zone)" : "Market"} />
-          <Row label="Entry" value={formatPrice(candidate.entry)} />
+          <Row
+            label="Entry"
+            value={resting
+              ? `${formatPrice(candidate.entry)}  (${waitFor(candidate.distance_days)})`
+              : formatPrice(candidate.entry)}
+          />
           <Row label="Lots" value={lots ? lots.toFixed(2) : "sized from risk %"} />
           <Row
             label="Stop loss"

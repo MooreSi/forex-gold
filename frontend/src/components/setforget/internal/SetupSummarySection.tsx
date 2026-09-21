@@ -1,6 +1,9 @@
-import { ArrowDownRight, ArrowUpRight, Clock, Zap } from "lucide-react";
+import {
+  ArrowDownRight, ArrowUpRight, Clock, Crosshair, Eye, Zap,
+} from "lucide-react";
 import type { SetForgetCandidate, SetForgetEvidence } from "@/api/types";
 import { formatMoney, formatPrice } from "@/components/shared/format";
+import { isALongWait, waitFor } from "./waitFor";
 import { cn } from "@/lib/cn";
 
 interface SetupSummarySectionProps {
@@ -11,6 +14,19 @@ interface SetupSummarySectionProps {
   rewardMoney: number | null;
   invalidations: string[];
 }
+
+/**
+ * The three stages, as the card names them.
+ *
+ * Added 2026-09-21 with the 30-minute trigger. Before it there were two
+ * states -- a setup or no setup -- and "a zone was chosen" was the same thing
+ * as "an order is going out", which is what put one days of travel from price.
+ */
+const STAGES = {
+  armed: { label: "Waiting for price to reach the zone", icon: Eye },
+  waiting: { label: "Waiting for the 30m to react", icon: Clock },
+  triggered: { label: "Triggered", icon: Crosshair },
+} as const;
 
 const BIAS_TONE: Record<string, string> = {
   bullish: "text-profit",
@@ -34,6 +50,8 @@ export function SetupSummarySection(props: SetupSummarySectionProps) {
   const Arrow = long ? ArrowUpRight : ArrowDownRight;
   const resting = candidate.order_type === "limit";
   const thin = candidate.rr !== null && candidate.rr < minRr;
+  const stage = STAGES[candidate.stage] ?? STAGES.armed;
+  const ready = candidate.stage === "triggered";
 
   return (
     <section className="rounded-lg border border-line bg-surface-1 p-4">
@@ -72,6 +90,27 @@ export function SetupSummarySection(props: SetupSummarySectionProps) {
           : "Price is already at the zone, so this fills now at the market."}
       </p>
 
+      {resting && (
+        /* How long the wait is, stated rather than left to be judged off the
+           chart. An order resting days away looks identical on screen to one
+           that fills tomorrow, which is exactly how one went out unnoticed. */
+        <p
+          className={cn(
+            "mt-2 flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px]",
+            isALongWait(candidate.distance_days)
+              ? "border-warning/40 bg-warning/10 text-warning"
+              : "border-line bg-surface-2/50 text-ink-2",
+          )}
+        >
+          <Clock size={12} className="shrink-0" />
+          <span className="num">
+            {candidate.distance.toFixed(2)} points from price
+          </span>
+          <span className="text-ink-3">·</span>
+          <span>{waitFor(candidate.distance_days)}</span>
+        </p>
+      )}
+
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         <Level label="Entry" price={candidate.entry} />
         <Level
@@ -103,14 +142,27 @@ export function SetupSummarySection(props: SetupSummarySectionProps) {
       </dl>
 
       {invalidations.length > 0 && (
+        /* Two different messages behind one mechanism. Waiting for the 30m is
+           the method working -- most of the time there IS no trade -- and
+           dressing it in the same red as an inverted stop would teach the
+           operator to ignore both. The gate is the same either way: Execute is
+           disabled while there is anything in this list. */
         <div
-          role="alert"
-          className="mt-3 rounded-md border border-loss/40 bg-loss/10 px-3 py-2"
+          role={ready ? "alert" : "status"}
+          className={cn(
+            "mt-3 rounded-md border px-3 py-2",
+            ready ? "border-loss/40 bg-loss/10" : "border-warning/40 bg-warning/10",
+          )}
         >
-          <p className="text-[11px] font-semibold text-loss">
-            This setup does not meet the method&apos;s rules
+          <p className={cn("flex items-center gap-1.5 text-[11px] font-semibold",
+                           ready ? "text-loss" : "text-warning")}>
+            {!ready && <stage.icon size={12} />}
+            {ready
+              ? "This setup does not meet the method's rules"
+              : `Not ready to place — ${stage.label.toLowerCase()}`}
           </p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-loss/90">
+          <ul className={cn("mt-1 list-disc space-y-0.5 pl-4 text-[11px]",
+                            ready ? "text-loss/90" : "text-warning/90")}>
             {invalidations.map((reason) => <li key={reason}>{reason}</li>)}
           </ul>
         </div>

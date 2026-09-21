@@ -130,11 +130,22 @@ def _confirmation(ev: dict, want: str) -> tuple[bool, str]:
     found = ev.get("confirmation")
     if not found:
         return False, "No confirmation candle on the last closed bar."
+
+    shape = str(found.get("kind", "")).replace("_", " ")
+    if found.get("direction") is None:
+        # An inside bar or a doji. Neither picks a side -- the guide calls the
+        # first "a quiet pullback within a trend" and the second a hint at a
+        # stall at a level -- so both are read as continuation in the direction
+        # already in force. That is only safe because the higher-timeframe bias
+        # is this method's first filter, and it is why the check below still
+        # refuses a DIRECTIONAL pattern pointing the wrong way.
+        return True, (f"The last closed bar is a {shape} — no side of its own, "
+                      f"read as continuation of the {want} bias.")
+
     if found.get("direction") != want:
         return False, (f"The last closed bar is a {found.get('direction')} "
-                       f"{str(found.get('kind', '')).replace('_', ' ')} — the wrong way.")
-    return True, (f"The last closed bar is a {want} "
-                  f"{str(found.get('kind', '')).replace('_', ' ')}.")
+                       f"{shape} — the wrong way.")
+    return True, f"The last closed bar is a {want} {shape}."
 
 
 # id, label, weight, check. Data rather than a chain of ifs: adding an item is

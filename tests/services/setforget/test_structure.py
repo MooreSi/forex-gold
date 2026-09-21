@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from backend.src.services.setforget import structure
 
-from ._candles import series, zigzag
+from ._candles import candle, series, zigzag
 
 
 def _prices(points, kind):
@@ -142,3 +142,92 @@ class TestAnImpulseWithNothingBeforeIt:
 
         assert structure.last_impulse(candles, "bearish") is None
         assert structure.last_impulse(candles, "bullish") is None
+
+
+class TestShiftOfStructure:
+    """The 30-minute trigger, and the reason this module exists on a third
+    timeframe at all.
+
+    Alex G's guide puts the entry on the lowest of three timeframes -- "a 4:1
+    or 8:1 ratio (e.g. Daily, 4H, 30-min)" -- and the community's Perfect
+    Checklist has a whole group labelled "2H, 1H, 30m" whose heaviest item is
+    Shift of Structure. The higher timeframes say WHERE and WHICH WAY; this
+    says WHEN.
+
+    A shift is price closing through the last confirmed swing point against the
+    move that just happened: for a long, a close above the most recent swing
+    high after a run of lower highs into the zone. It is the first evidence
+    that the sellers who drove price into the zone have stopped.
+
+    **The close, never the wick.** A wick through a level is a test of it. Only
+    a close says the level changed hands, and the guide is explicit about using
+    body closes to read structure.
+    """
+
+    # Falls, bounces to a swing high at 121, falls to a swing low, then closes
+    # back above that 121. The bounce is what creates a level to break -- a
+    # series that only falls has no confirmed swing high at all.
+    TURNED_UP = [118, 112, 106, 120, 108, 102, 98, 104, 112, 126]
+    TURNED_DOWN = [108, 114, 120, 106, 118, 124, 128, 122, 114, 100]
+
+    def test_a_close_above_the_last_swing_high_shifts_a_downmove_up(self):
+        candles = series(self.TURNED_UP)
+
+        shift = structure.shift_of_structure(candles, "BUY")
+
+        assert shift is not None
+        assert shift["direction"] == "BUY"
+
+    def test_a_close_below_the_last_swing_low_shifts_an_upmove_down(self):
+        candles = series(self.TURNED_DOWN)
+
+        shift = structure.shift_of_structure(candles, "SELL")
+
+        assert shift is not None
+        assert shift["direction"] == "SELL"
+
+    def test_a_wick_through_the_level_is_not_a_shift(self):
+        """A wick through is a test of the level. Only a close says it changed
+        hands -- and the guide reads structure from body closes for exactly
+        this reason. Without it every spike into a level is an entry."""
+        candles = series(self.TURNED_UP[:-1])
+        broken = [dict(c) for c in candles]
+        # A final bar whose HIGH clears everything but whose close does not.
+        broken.append(candle(len(broken) * 3600.0, 107.0, 999.0, 106.0, 108.0))
+
+        assert structure.shift_of_structure(broken, "BUY") is None
+
+    def test_a_move_that_has_not_turned_yet_is_no_shift(self):
+        """Still making lower lows into the zone. This is the common case and
+        it must answer None, or the trigger fires on arrival at the zone rather
+        than on the reaction to it."""
+        falling = series([118, 112, 106, 120, 108, 102, 98, 96, 94])
+
+        assert structure.shift_of_structure(falling, "BUY") is None
+
+    def test_it_reports_the_level_that_was_broken(self):
+        """The level is what a pending entry would be placed against, so a
+        detector that only returned True leaves the price to be guessed."""
+        candles = series(self.TURNED_UP)
+
+        shift = structure.shift_of_structure(candles, "BUY")
+
+        assert shift is not None
+        assert isinstance(shift["level"], float)
+        assert shift["level"] < candles[-1]["close"], "closed through it"
+
+    def test_an_old_shift_does_not_count_as_a_trigger_today(self):
+        """A shift twenty bars ago is history. Reading it as a live trigger is
+        how an entry fires on a move that already happened and is over."""
+        candles = series(self.TURNED_UP + [126 + i for i in range(20)])
+
+        assert structure.shift_of_structure(candles, "BUY", within=3) is None
+
+    def test_the_recency_window_is_the_callers(self):
+        candles = series(self.TURNED_UP)
+
+        assert structure.shift_of_structure(candles, "BUY", within=1) is not None
+
+    def test_too_short_a_series_is_none_rather_than_an_error(self):
+        assert structure.shift_of_structure([], "BUY") is None
+        assert structure.shift_of_structure(series([100, 101]), "BUY") is None

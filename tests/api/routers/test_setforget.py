@@ -28,6 +28,9 @@ def _candidate(**over) -> dict:
         "direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
         "take_profit": 2040.0, "order_type": "limit",
         "risk": 13.0, "reward": 55.0, "rr": 4.23,
+        "distance": 15.0, "distance_days": 0.75,
+        "stage": "triggered",
+        "trigger": {"kind": "shift_of_structure", "ts": 1.0, "level": 1972.0},
         "zone": {"kind": "demand", "low": 1975.0, "high": 1985.0, "touches": 2},
         "target_zone": {"kind": "supply", "low": 2040.0, "high": 2050.0,
                         "touches": 1},
@@ -42,7 +45,8 @@ def sf(monkeypatch):
         "evidence": {
             "price": 2000.0, "weekly_bias": "bullish", "daily_bias": "bullish",
             "entry_bias": "bullish", "entry_timeframe": "4H", "zones": [],
-            "atr": 6.0, "ema_fast": 1995.0, "ema_slow": 1960.0, "rsi": 52.0,
+            "atr": 6.0, "daily_atr": 20.0,
+            "ema_fast": 1995.0, "ema_slow": 1960.0, "rsi": 52.0,
             "confirmation": None, "impulse": None, "fib": 0.5,
             # Present so the test can prove the router strips them: the
             # browser draws the chart from /api/chart at the window it is
@@ -181,6 +185,20 @@ class TestTheFreeRead:
         assert body["control_target"] == "remote"
         assert body["ai_model"] == "a-model"
         assert body["ai_configured"] is True
+
+    def test_the_named_model_follows_the_selected_provider(self, make_client, sf):
+        """`claude_model` has a config default that is set even when DeepSeek
+        is the selected provider, so a naive `claude_model or deepseek_model`
+        told the page a Claude model was about to be billed when it was not.
+        """
+        sf["cfg"] = {"ai_provider": "deepseek",
+                     "deepseek_model": "deepseek-flash",
+                     "claude_model": "claude-sonnet-4-6"}
+
+        body = make_client().get("/api/trading/setforget").json()
+
+        assert body["ai_provider"] == "deepseek"
+        assert body["ai_model"] == "deepseek-flash"
 
     def test_a_chart_that_cannot_be_read_says_why(self, make_client, sf):
         sf["read_raises"] = RuntimeError("the bridge is not connected")

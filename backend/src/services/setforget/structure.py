@@ -107,3 +107,62 @@ def last_impulse(candles: list[dict], direction: str,
         return None
     return {"start": start["price"], "end": end["price"],
             "start_ts": start["ts"], "end_ts": end["ts"]}
+
+
+# How many bars back a shift may have happened and still count as a trigger.
+# A shift twenty bars ago is history: reading it as live is how an entry fires
+# on a move that already happened and is over.
+DEFAULT_SHIFT_WINDOW = 3
+
+
+def shift_of_structure(candles: list[dict], direction: str,
+                       within: int = DEFAULT_SHIFT_WINDOW,
+                       lookback: int = DEFAULT_LOOKBACK) -> Optional[dict]:
+    """The 30-minute trigger: price CLOSING through the last swing against it.
+
+    The higher timeframes say where a trade belongs and which way. This says
+    when. Alex G's guide puts the entry on the lowest of three timeframes --
+    "a 4:1 or 8:1 ratio (e.g. Daily, 4H, 30-min)" -- and the community's
+    checklist gives Shift of Structure the heaviest weight in its 2H/1H/30m
+    group. For a long that is a close above the most recent confirmed swing
+    high, after the run of lower highs that carried price into the zone: the
+    first evidence the sellers who drove it there have stopped.
+
+    **The close, never the wick.** A wick through a level is a test of it; only
+    a close says it changed hands. Without that distinction every spike into a
+    level is an entry, and spikes into levels are exactly what a good level
+    produces.
+
+    Returns `{"idx", "ts", "level", "direction"}` -- `level` is the swing that
+    was broken, which is what a pending entry would be placed against. A
+    detector that only answered True would leave that price to be guessed.
+    """
+    direction = str(direction or "").strip().upper()
+    if len(candles) < lookback * 2 + 2:
+        return None
+
+    want = "high" if direction == "BUY" else "low"
+    points = [p for p in swing_points(candles, lookback) if p["kind"] == want]
+    if not points:
+        return None
+
+    first = max(len(candles) - within, 0)
+    for idx in range(len(candles) - 1, first - 1, -1):
+        close = float(candles[idx].get("close") or 0.0)
+        # The swing must PREDATE the bar that broke it, or a bar is being
+        # compared against a level it defined itself.
+        prior = [p for p in points if p["idx"] < idx]
+        if not prior:
+            continue
+        level = prior[-1]["price"]
+        previous = float(candles[idx - 1].get("close") or 0.0) if idx else close
+        # The bar that CROSSED, not every bar after it. Price sitting above a
+        # level it broke twenty bars ago is not a fresh trigger -- without this
+        # the recency window means nothing, because the most recent bar always
+        # satisfies "close is above the level" for as long as the move lasts.
+        broke = (close > level >= previous) if direction == "BUY" \
+            else (close < level <= previous)
+        if broke:
+            return {"idx": idx, "ts": float(candles[idx].get("ts") or 0.0),
+                    "level": float(level), "direction": direction}
+    return None

@@ -25,6 +25,11 @@ MIN_TAIL_FRACTION = 0.50
 # ends, which means it rejected neither and is a doji.
 MAX_OPPOSITE_TAIL_FRACTION = 0.20
 
+# A doji's body, at most, as a fraction of its range. Alex G's guide calls it
+# "open and close are nearly equal"; measured against the bar's OWN range
+# because a $2 body is indecision on a $40 gold bar and a trend bar on a $3 one.
+MAX_DOJI_BODY_FRACTION = 0.08
+
 
 def _body(c: dict) -> tuple[float, float]:
     o, cl = float(c.get("open") or 0.0), float(c.get("close") or 0.0)
@@ -79,6 +84,46 @@ def pin_bar(c: dict) -> Optional[str]:
     return None
 
 
+def inside_bar(previous: dict, current: dict) -> bool:
+    """Whether `current`'s whole RANGE sits inside `previous`'s.
+
+    The guide: "a SMALLER candle whose range is completely within the previous
+    candle's high-low". Both halves are load-bearing.
+
+    Range, not body -- a bar whose body is contained but whose wick pokes past
+    the prior high has broken that high, which is the opposite signal to a
+    quiet pause.
+
+    Smaller, not equal -- a bar with the same high and low as the one before it
+    has not contracted, and a run of identical bars is a dead feed rather than
+    a series of inside bars. That distinction is the difference between this
+    returning None on a flat chart and it reporting a pattern on every bar.
+
+    It carries no direction of its own. An inside bar is a pause, and which way
+    it resolves is the trend's business, so callers read it as continuation in
+    the direction already in force.
+    """
+    p_high, p_low = float(previous.get("high") or 0.0), float(previous.get("low") or 0.0)
+    c_high, c_low = float(current.get("high") or 0.0), float(current.get("low") or 0.0)
+    contained = c_high <= p_high and c_low >= p_low
+    return contained and (c_high - c_low) < (p_high - p_low)
+
+
+def doji(c: dict) -> bool:
+    """Open and close near enough to equal that the bar decided nothing.
+
+    A zero-range bar is not a doji -- it is a gap in the feed. Saying otherwise
+    would turn every missing candle into a reversal hint at whatever level it
+    happened to sit on.
+    """
+    high, low = float(c.get("high") or 0.0), float(c.get("low") or 0.0)
+    rng = high - low
+    if rng <= 0:
+        return False
+    body_low, body_high = _body(c)
+    return (body_high - body_low) / rng <= MAX_DOJI_BODY_FRACTION
+
+
 def confirmation(candles: list[dict]) -> Optional[dict]:
     """The pattern on the last CLOSED bar, or None.
 
@@ -89,6 +134,15 @@ def confirmation(candles: list[dict]) -> Optional[dict]:
 
     Returns `{"idx", "ts", "kind", "direction", "high", "low"}`. The extremes
     travel with the pattern because the stop is placed from them.
+
+    The two DIRECTIONAL patterns are checked first and win. An engulfing says
+    which way; a doji only says that something stalled, and an inside bar only
+    that nothing happened. Letting the weak two displace the strong two would
+    quietly downgrade every confirmation the method actually trades on.
+
+    `direction` is None for the two that pick no side. The caller reads those
+    as continuation in the direction already in force -- which is why they are
+    usable at all in a method whose first filter is the higher-timeframe bias.
     """
     if len(candles) < 2:
         return None
@@ -102,7 +156,11 @@ def confirmation(candles: list[dict]) -> Optional[dict]:
     if direction is None:
         direction = pin_bar(bar)
         kind = "pin_bar" if direction else None
-    if direction is None:
+    if direction is None and idx >= 1 and inside_bar(candles[idx - 1], bar):
+        kind = "inside_bar"
+    if kind is None and doji(bar):
+        kind = "doji"
+    if kind is None:
         return None
 
     return {

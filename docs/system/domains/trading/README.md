@@ -97,3 +97,41 @@ closed-trade outcomes.
 
 - The pre-fill entry-mid fallback values recomputed in `signals/resolution.py` are described as "dead in practice" — retained but unverified as removable.
 - The TP-ladder close-% tables in `open_trade.py` are out of scope for live tuning — "retuning those is a materially bigger, separate task."
+
+
+## Open positions: the short names, and who reads them (2026-09-21)
+
+`analytics/reporting.get_open_trades()` returns `vantage_simulated_trades`
+rows **verbatim** -- `trade_id`, `entry_price`, `lot_size`, `stop_loss`,
+`tp1`, `mt5_profit`. Two screens read short names instead (`id`, `entry`,
+`lots`, `sl`, `tp`, `pnl`), and until this change nothing filled them, so:
+
+* the chart's positions table and the Trading tab's Positions table rendered
+  an em dash in every column but Side;
+* `CandleChart` drew no entry marker, because it filters on
+  `typeof t.entry === "number"`;
+* **the Close button posted to `/api/trading/trades/undefined/close`**, since
+  `trade.id` was never set. That one touches money: closing from that table
+  could not work at all.
+
+Both routes now answer through `ChartTrade`, whose `model_validator` COPIES
+the real columns into the short names. Copies, never renames: several screens
+read the long names, and a validation alias would consume the original and
+break them.
+
+The display LABELS (`source_label`, `strategy_label`) are added in the service
+instead, because they are decisions, not renames: `strategy` is stored as
+`template:<name>` and `tg_source` holds an engine name, a channel name or a
+marker like `manual_market`. Deriving that in TypeScript would be a second
+answer to what a trade's source is.
+
+## Resume must clear the hold that is actually on (2026-09-21)
+
+Three separate mechanisms stop new orders: the governor's manual pause, the
+circuit breaker, and the daily profit/loss halt. `POST /api/trading/resume`
+lifts the **first only**. The header's Resume button used it, so with a
+tripped breaker or a daily halt in force it did nothing visible -- which is
+what `trading_status.resume_all`'s docstring had already predicted in as many
+words. Both Resume controls now use `/api/trading/resume-all`, which re-arms
+the post-close guards exactly as `resume` did and clears the other two as
+well.

@@ -7,6 +7,11 @@ import type { Trade } from "@/api/types";
  *
  * SL and TP live here rather than as lines on the candles — they were taken
  * off the chart on 2026-08-04 because they buried the price action.
+ *
+ * Every column but Side rendered an em dash until 2026-09-21: the rows are
+ * `vantage_simulated_trades` columns (`lot_size`, `entry_price`, `stop_loss`,
+ * `tp1`) and this reads the short names `ChartTrade` promises. The schema now
+ * fills them — see `backend/src/api/schemas/chart.py`.
  */
 export function ChartTradesSection({ trades }: { trades: Trade[] }) {
   if (trades.length === 0) {
@@ -26,6 +31,8 @@ export function ChartTradesSection({ trades }: { trades: Trade[] }) {
           <th className="py-1 font-medium">Entry</th>
           <th className="py-1 font-medium">SL</th>
           <th className="py-1 font-medium">TP</th>
+          <th className="py-1 font-medium">Source</th>
+          <th className="py-1 font-medium">Ticket</th>
         </tr>
       </thead>
       <tbody>
@@ -38,6 +45,12 @@ export function ChartTradesSection({ trades }: { trades: Trade[] }) {
             <td className="num py-1 text-ink-1">{formatPrice(t.entry)}</td>
             <td className="num py-1 text-ink-3">{formatPrice(t.sl)}</td>
             <td className="num py-1 text-ink-3">{formatPrice(t.tp)}</td>
+            {/* Which engine or channel opened it, and the broker ticket to
+                match it against MT5. Both were already in the payload. */}
+            <td className="py-1 text-ink-2">{t.tg_source ? String(t.tg_source) : "—"}</td>
+            <td className="num py-1 text-ink-3">
+              {t.mt5_ticket ? String(t.mt5_ticket) : "—"}
+            </td>
           </tr>
         ))}
       </tbody>

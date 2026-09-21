@@ -44,6 +44,15 @@ export interface Trade {
   lots?: number;
   sl?: number;
   tp?: number;
+  /** The broker's own ticket, so a position can be matched in MT5. */
+  mt5_ticket?: number;
+  /** Where it came from: an engine of this app's, or a Telegram channel. */
+  tg_source?: string;
+  /** The broker's running P&L while the position is open. */
+  pnl?: number;
+  /** Decided by the backend — see services/analytics/labels.py. */
+  source_label?: string;
+  strategy_label?: string;
   [key: string]: unknown;
 }
 

@@ -18,6 +18,12 @@ interface ActiveTradesSectionProps {
  * Closing is money-touching, so it goes through the same confirmation bar as
  * opening: the dialog names the position it is about to close, and nothing is
  * a single click.
+ *
+ * Every column but Side rendered an em dash until 2026-09-21 -- the rows are
+ * raw `vantage_simulated_trades` columns and this reads the short names. The
+ * same gap made `trade.id` undefined, so the Close button's URL was
+ * `/api/trading/trades/undefined/close`. Both fixed by giving the route the
+ * `ChartTrade` model the chart's own trades already used.
  */
 export function ActiveTradesSection({
   trades, disabledReason, onChanged,
@@ -60,6 +66,8 @@ export function ActiveTradesSection({
             <th className="py-1 font-medium">Entry</th>
             <th className="py-1 font-medium">SL</th>
             <th className="py-1 font-medium">P&amp;L</th>
+            <th className="py-1 font-medium">Strategy</th>
+            <th className="py-1 font-medium">Source</th>
             <th className="py-1" />
           </tr>
         </thead>
@@ -75,6 +83,16 @@ export function ActiveTradesSection({
                 <td className="num py-1.5 text-ink-1">{formatPrice(t.entry)}</td>
                 <td className="num py-1.5 text-ink-3">{formatPrice(t.sl)}</td>
                 <td className={`num py-1.5 ${pnlColour(pnl)}`}>{formatSignedMoney(pnl)}</td>
+                {/* Both decided by the backend: `strategy` is stored as
+                    `template:<name>` and `tg_source` holds an engine name, a
+                    channel name or a marker. Re-deriving that here would be a
+                    second answer to what a trade's source is. */}
+                <td className="py-1.5 text-ink-2">
+                  {t.strategy_label ? String(t.strategy_label) : "—"}
+                </td>
+                <td className="py-1.5 text-ink-2">
+                  {t.source_label ? String(t.source_label) : "—"}
+                </td>
                 <td className="py-1.5 text-right">
                   <Button
                     variant="danger"

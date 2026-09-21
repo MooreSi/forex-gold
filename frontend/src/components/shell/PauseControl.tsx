@@ -128,7 +128,12 @@ export function PauseControl({ paused, onChanged }: PauseControlProps) {
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
             {paused ? (
               <Button disabled={busy}
-                onClick={() => void send("/api/trading/resume", {})}>
+                // `resume-all`, not `resume`. Three separate mechanisms stop
+                // new orders -- the manual pause, the circuit breaker and the
+                // daily profit/loss halt -- and `resume` lifts only the first.
+                // With either of the others in force this button did nothing
+                // visible, which is how it was reported on 2026-09-21.
+                onClick={() => void send("/api/trading/resume-all", {})}>
                 {busy ? "Resuming…" : "Resume trading"}
               </Button>
             ) : (

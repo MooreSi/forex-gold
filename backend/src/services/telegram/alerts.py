@@ -11,6 +11,7 @@ import httpx
 
 from backend.src.config import is_debug as _is_debug
 from backend.src.db import database as db_module
+from backend.src.services.analytics import labels as _labels
 from backend.src.services.broker.ea_templates import TEMPLATE_OVERRIDE_PREFIX as _TEMPLATE_OVERRIDE_PREFIX
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 
@@ -301,8 +302,14 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
     if spread_line:
         lines.append(spread_line)
     lines.append(f"Strategy: {_md_esc(strategy_name)}")
-    if tg_source:
-        lines.append(f"Channel: {_md_esc(tg_source)}")
+    # An engine of this app's own is not a channel. Calling it one made an
+    # execution by the Reversal Engine -- the biggest single source of trades
+    # on this account -- read exactly like a copied Telegram signal, which is
+    # why one was reported as never arriving at all (2026-09-21).
+    if _labels.is_internal_engine(tg_source):
+        lines.append(f"Engine: {_md_esc(tg_source)}")
+    elif _labels.trade_channel_label(tg_source):
+        lines.append(f"Channel: {_md_esc(_labels.trade_channel_label(tg_source))}")
     # Executed by the companion MQL5 EA (native OnTick management inside the
     # MT5 terminal, no polling) vs this app's own Python-side polling — worth
     # surfacing per-trade since only portable strategies with a healthy,

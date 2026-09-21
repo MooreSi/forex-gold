@@ -45,6 +45,7 @@ def is_stuck_placeholder(trade: dict) -> bool:
 
 
 def get_open_trades() -> list[dict]:
+    from backend.src.services.analytics import labels as _labels
     with db_module.db() as conn:
         rows = conn.execute(
             "SELECT t.*, s.source_name AS _sig_source "
@@ -57,6 +58,13 @@ def get_open_trades() -> list[dict]:
         if not t.get("tg_source") and t.get("_sig_source"):
             t["tg_source"] = t["_sig_source"]
         t.pop("_sig_source", None)
+        # The labels are decided HERE, not in the browser. `strategy` is
+        # stored as `template:<name>` and `tg_source` holds an engine name, a
+        # channel name or a marker like `manual_market`; re-deriving those
+        # rules in TypeScript would be a second answer to what a trade's
+        # source is. Added, never replacing the raw columns.
+        t["strategy_label"] = _labels.strategy_display_label(t.get("strategy") or "")
+        t["source_label"] = _labels.trade_source_label(t.get("tg_source") or "")
         for key in ("claude_open", "claude_close"):
             if t.get(key):
                 try:

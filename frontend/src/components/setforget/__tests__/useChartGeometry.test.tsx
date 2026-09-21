@@ -29,6 +29,8 @@ vi.mock("lightweight-charts", () => ({
     addLineSeries: () => ({ setData: () => {} }),
     priceScale: () => ({ width: () => 60 }),
     timeScale: () => ({
+      // The real chart has this; the panel opens on the recent bars with it.
+      setVisibleLogicalRange: () => {},
       subscribeVisibleTimeRangeChange: () => {},
       unsubscribeVisibleTimeRangeChange: () => {},
     }),

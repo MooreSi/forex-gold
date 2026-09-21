@@ -38,11 +38,19 @@ const EMA_COLOURS: Record<string, string> = { "50": "#ffd700", "200": "#64b4ff" 
  * the geometry, and geometry that lives inside a component that also owns a
  * canvas cannot be tested without one.
  */
+/**
+ * How many bars the chart opens on: ten days at 4H, enough to read the swing
+ * the setup is built on without burying today in fifty days of history.
+ */
+export const VISIBLE_BARS = 60;
+
 export function SetupChart(props: SetupChartProps) {
   const {
     candles, overlays, zones, fibLevels, candidate, riskMoney, rewardMoney,
   } = props;
   const holder = useRef<HTMLDivElement>(null);
+  // The opening range is applied once, on the first candles to arrive.
+  const rangeSet = useRef(false);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const emas = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
@@ -118,6 +126,22 @@ export function SetupChart(props: SetupChartProps) {
         open: c.open, high: c.high, low: c.low, close: c.close,
       })),
     );
+    // Open on the current market. The panel asks for 300 4H bars because EMA
+    // 200 needs them -- fifty days, which drawn all at once leaves today a few
+    // pixels wide and makes a live chart look frozen (reported 2026-09-21).
+    //
+    // ONCE. This panel re-polls every 60 seconds, and re-applying the range on
+    // each tick would drag the chart back from wherever the operator had
+    // panned it, which is the same class of bug as a poll overwriting a field
+    // being typed into.
+    if (!rangeSet.current && chart.current) {
+      rangeSet.current = true;
+      const last = candles.length - 1;
+      chart.current.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, last - VISIBLE_BARS),
+        to: last,
+      });
+    }
     setRevision((n) => n + 1);
   }, [candles]);
 

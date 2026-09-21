@@ -208,6 +208,10 @@ describe("pausing trading by hand", () => {
     await userEvent.click(screen.getByRole("button", { name: "Resume trading" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect(writes()[0][0]).toBe("/api/trading/resume");
+    // `resume-all` since 2026-09-21: it re-arms the post-close guards exactly
+    // as `resume` did (same `manual_pause.resume()`), and also clears a
+    // tripped breaker or a daily halt. With either of those in force the old
+    // route left the button doing nothing visible.
+    expect(writes()[0][0]).toBe("/api/trading/resume-all");
   });
 });

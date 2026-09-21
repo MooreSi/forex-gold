@@ -212,10 +212,46 @@ def get_consolidated_trades(days: int = 0) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _is_standalone_install() -> bool:
+    """True when this machine is not part of a pair, in EITHER role.
+
+    Both keys, not just one. The Mac points at a VPS with `sync_remote_host`;
+    the VPS never sets that -- it is the server, and its half of the pairing
+    is `sync_server_enabled`. Checking only the client key made every VPS look
+    standalone, which through `get_active_trader` defaulting to local would
+    have had `SyncServer.is_standing_down()` answer True and stop the VPS
+    trading altogether. Caught by
+    tests/core/test_sync_server_auth.py::TestStandDown::test_the_TRADE_GATE_FOLLOWS
+    on 2026-09-21, which is exactly what that test is for.
+    """
+    if get_app_config("sync_remote_host") or "":
+        return False
+    return (get_app_config("sync_server_enabled") or "") != "1"
+
+
 def get_active_trader() -> str:
-    """'local' or 'remote_vps'. Defaults to remote_vps — the VPS is the
-    always-on trader unless this Mac has explicitly taken over."""
-    return get_app_config("active_trader") or "remote_vps"
+    """'local' or 'remote_vps'.
+
+    With a VPS paired, the default is remote_vps: it is the always-on trader
+    unless this Mac has explicitly taken over, and a fresh Mac assuming it is
+    in charge while the VPS also trades is the outcome the whole cluster
+    module exists to prevent.
+
+    **With nothing paired at all -- neither role -- there is no VPS to defer
+    to, and the default is local.** An unpaired install answering remote_vps was wrong in both
+    directions at once (2026-09-21): `open_trade`'s stand-down gate reads
+    `_host and get_active_trader() == TRADER_REMOTE_VPS`, so with no host it
+    never fired and the node traded normally -- while every screen read
+    REMOTE. A header describing a machine that does not exist is worse than
+    no header.
+
+    The host is the same key `SyncClient.load_config` reads, so this and the
+    order path cannot disagree about whether a second node exists.
+    """
+    stored = get_app_config("active_trader")
+    if stored:
+        return stored
+    return "local" if _is_standalone_install() else "remote_vps"
 
 
 def set_active_trader(value: str) -> None:

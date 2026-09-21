@@ -63,7 +63,17 @@ class _Ws:
 
 
 @pytest.fixture
-def server():
+def server(fresh_db):
+    """A VPS: a node running the sync SERVER half of the pair.
+
+    `sync_server_enabled` is set because that is what makes this machine a
+    server -- `app.py` only builds a SyncServer when the flag is "1" -- and
+    because `get_active_trader()` reads it to tell a paired node from a
+    standalone one. Without it the fixture described a machine that cannot
+    exist: a running sync server on an install that is not paired at all.
+    """
+    from backend.src.db import database as db_module
+    db_module.set_app_config("sync_server_enabled", "1")
     s = SyncServer()
     s._token = "a-high-entropy-shared-secret"
     return s

@@ -217,3 +217,28 @@ may still be trading the same account, and that guarantee is not weakened.
 The default itself is unchanged. Changing it would mean revisiting
 `test_the_active_trader_DEFAULTS_TO_THE_VPS`, which is a deliberate safety
 pin, so an unpaired install still reads REMOTE until someone takes over once.
+
+
+## An unreachable backend is not a signed-out operator (2026-09-21)
+
+`AuthContext.refresh` caught every failure the same way and fell back to "no
+session". A `fetch` that cannot connect throws a TypeError; the client throws
+`ApiError` only when the server actually ANSWERED. Conflating them meant that
+every restart put the login form in front of an install with auto-login on.
+
+The two are now told apart, and the difference does double duty: while the
+backend is unreachable the shell says it is reconnecting and keeps retrying,
+and when it answers again the page reloads itself -- so restarting the app no
+longer needs a manual refresh.
+
+## The active-trader default, again: BOTH roles count (2026-09-21)
+
+`get_active_trader()` now defaults to local on a standalone install. The first
+attempt tested only `sync_remote_host`, which is the CLIENT half of a pairing.
+A VPS never sets it -- it is the server, and its half is `sync_server_enabled`
+-- so every VPS looked standalone, defaulted to local, and
+`SyncServer.is_standing_down()` would have answered True and **stopped the VPS
+trading altogether**. Caught by
+`tests/core/test_sync_server_auth.py::TestStandDown::test_the_TRADE_GATE_FOLLOWS`,
+which exists for exactly that. A standalone install is one that is in neither
+role.

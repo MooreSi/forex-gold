@@ -12,6 +12,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 
 from backend.src.api.deps import engine as engine_dep
+from backend.src.api.schemas.chart import ChartTrade
 from backend.src.api.errors import Refusal
 from backend.src.api.schemas.trading import (
     ChannelStrategyOverride, HaltState, PauseWrite, RiskSettingsUpdate,
@@ -80,8 +81,16 @@ async def resume() -> dict:
     return {"paused": False, "until": None}
 
 
-@router.get("/trades")
+@router.get("/trades", response_model=list[ChartTrade])
 async def open_trades(eng: Any = Depends(engine_dep)) -> list[dict]:
+    """Open positions for the Positions table.
+
+    Same shape as the chart's, through the same model: the rows are raw
+    `vantage_simulated_trades` columns and both screens read the short names.
+    Until 2026-09-21 this route had no model at all, so the table rendered an
+    em dash in every column but Side -- and `trade.id`, which the Close button
+    puts in its URL, was undefined on every row.
+    """
     return await trading_ctl.get_open_trades(eng)
 
 

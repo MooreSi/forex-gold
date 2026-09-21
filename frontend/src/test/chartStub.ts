@@ -18,6 +18,9 @@
  * it before the effect that subscribes to its time scale unsubscribed, and
  * every unmount threw. Seen in the browser console on 2026-09-20.
  */
+/** Every logical range any stubbed chart was asked to show. */
+export const visibleRanges: unknown[] = [];
+
 export function chartStub() {
   return {
     ColorType: { Solid: "solid" },
@@ -31,6 +34,7 @@ export function chartStub() {
       return {
       addCandlestickSeries: () => ({
         setData: () => {},
+        applyOptions: () => {},
         setMarkers: () => {},
         createPriceLine: () => ({}),
         removePriceLine: () => {},
@@ -38,11 +42,14 @@ export function chartStub() {
       }),
       addLineSeries: () => ({ setData: () => {} }),
       applyOptions: () => {},
+      priceScale: () => ({ applyOptions: () => {}, width: () => 60 }),
       timeScale: alive(() => ({
         getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
         timeToCoordinate: () => 120,
         subscribeVisibleTimeRangeChange: alive(() => {}),
         unsubscribeVisibleTimeRangeChange: alive(() => {}),
+        // Recorded so a test can assert which bars a chart opens on.
+        setVisibleLogicalRange: (r: unknown) => { visibleRanges.push(r); },
       })),
       remove: () => { disposed = true; },
       };

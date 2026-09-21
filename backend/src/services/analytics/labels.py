@@ -89,9 +89,34 @@ def trade_source_label(tg_source: str) -> str:
     return tg_source
 
 
+# Sources that are this app's own, not a Telegram channel. The engines write
+# their name into `tg_source` because that column is "where the trade came
+# from", and a reader that assumes every value is a channel calls the app's
+# own biggest source of trades a channel -- which is how an engine execution
+# became indistinguishable from a copied signal (2026-09-21).
+#
+# Exact names. A substring test would silence a real channel that happens to
+# contain one of these words.
+INTERNAL_ENGINE_SOURCES = frozenset({
+    "Reversal Engine", "Breakout Engine", "Signal Generator", "Bounce Generator",
+})
+# The ORB/IVB report names its own run, so it is matched by prefix.
+_INTERNAL_PREFIXES = ("ORB/IVB Report",)
+# Neither an engine nor a channel: the operator, or a sync from the broker.
+_NOT_A_SOURCE = ("manual_market", "MT5_imported")
+
+
+def is_internal_engine(tg_source: str) -> bool:
+    """Whether this trade came from one of the app's own engines."""
+    if not tg_source:
+        return False
+    return (tg_source in INTERNAL_ENGINE_SOURCES
+            or tg_source.startswith(_INTERNAL_PREFIXES))
+
+
 def trade_channel_label(tg_source: str) -> str:
     """Return the Telegram channel name, or empty string if not a Telegram signal."""
-    if not tg_source or tg_source in ("manual_market", "MT5_imported", "Signal Generator", "Bounce Generator"):
+    if not tg_source or tg_source in _NOT_A_SOURCE or is_internal_engine(tg_source):
         return ""
     if tg_source.startswith("instant:"):
         return tg_source[len("instant:"):]

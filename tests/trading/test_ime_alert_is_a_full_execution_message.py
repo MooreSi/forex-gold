@@ -66,7 +66,11 @@ class TestTheFormatter:
         assert "TP1: 4380.76" in msg
         assert "TP3: 4383.76" in msg
         assert "Spread: 22 pts" in msg
-        assert "Channel: Reversal Engine" in msg
+        # "Engine:", not "Channel:", since 2026-09-21 -- the Reversal Engine
+        # is this app's own, and calling it a channel made its executions
+        # indistinguishable from copied Telegram signals. What this test is
+        # about is that the line is CARRIED, not what it is called.
+        assert "Engine: Reversal Engine" in msg
         assert "Executed via: EA" in msg
         assert "$0.00" not in msg
 

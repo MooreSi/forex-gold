@@ -45,11 +45,37 @@ class TestNodeIdentity:
         A changing id makes one node look like many."""
         assert repo.get_or_create_node_id() == repo.get_or_create_node_id()
 
-    def test_the_active_trader_DEFAULTS_TO_THE_VPS(self):
+    def test_the_active_trader_DEFAULTS_TO_THE_VPS_WHEN_ONE_IS_PAIRED(self):
         """The VPS is the always-on trader unless this Mac has explicitly
         taken over. Defaulting to local would have a fresh Mac believe it is
-        in charge while the VPS is also trading."""
+        in charge while the VPS is also trading.
+
+        Narrowed on 2026-09-21 from an unconditional default. The reasoning
+        above is about a PAIRED Mac and was being applied to every install:
+        with no `sync_remote_host` there is no VPS to be in charge instead,
+        `open_trade`'s stand-down gate is inert (it reads `_host and ...`), and
+        the machine traded normally while its own header said REMOTE. The
+        guarantee this test exists for is unchanged and pinned right here --
+        the moment a host is configured, the VPS is assumed to own the
+        account."""
+        from backend.src.db import database as db_module
+        db_module.set_app_config("sync_remote_host", "vps.example.com")
+
         assert repo.get_active_trader() == "remote_vps"
+
+    def test_a_standalone_install_defaults_to_LOCAL(self):
+        """No host paired means no second node to defer to. Saying REMOTE
+        there is the screen describing a machine that does not exist."""
+        assert repo.get_active_trader() == "local"
+
+    def test_an_explicit_choice_still_wins_either_way(self):
+        """The default only decides what an install that has never chosen
+        does; it must never override a stored answer."""
+        from backend.src.db import database as db_module
+        db_module.set_app_config("sync_remote_host", "vps.example.com")
+        repo.set_active_trader("local")
+
+        assert repo.get_active_trader() == "local"
 
     def test_it_round_trips(self):
         repo.set_active_trader("local")

@@ -33,11 +33,13 @@ provisional default, proceed, and record the open decision.
 ## Before you commit — all of it
 
 ```bash
-python -m tools.checks all
+.venv/bin/python -m tools.checks all
 ```
 
 Runs the suite, all four gates, the coverage ratchet and the boot smoke test.
 Everything must pass. **A failing gate is not noise.**
+
+**Use `.venv/bin/python`, never bare `python`** — see Session mechanics.
 
 ## The knowledge base — docs/system/
 
@@ -119,6 +121,28 @@ and what is and is not ported is in
 
 Each of these cost real time in a past session:
 
+- **Run everything through `.venv/bin/python`, never bare `python`.** The
+  project's environment is `.venv` (3.13 — the `__pycache__` files say
+  `cpython-313`). Bare `python` on the owner's Mac is a pyenv 3.11 with a
+  different, incomplete package set, and on Windows it is whatever is on
+  PATH. Getting this wrong does not fail loudly: on 2026-09-21 a full
+  session ran under 3.11 and reported **20 fabricated "pre-existing"
+  failures** to the owner as fact — the 15 reversal-engine ML tests, 4
+  news-calendar tests, and the whole of `tests/api` as uncollectable
+  (`ModuleNotFoundError: itsdangerous`, a dependency `requirements.txt`
+  declares and that venv simply lacked). All 20 pass. They were reported
+  twice, the second time "confirmed" by reproducing them in a throwaway
+  worktree — which shared the same wrong interpreter, so the confirmation
+  confirmed nothing.
+  **A missing third-party module is almost never a real finding here. It is
+  this.** Check `head -1 $(which python)` against `.venv/bin/python` before
+  concluding anything about a failure you did not cause.
+- **`git archive` is not a checkout.** Verifying a commit in isolation needs
+  `git worktree add --detach <dir> <rev>`, outside the repo. An archive has
+  no `.git`, so every test that shells out to git — `.gitattributes` line
+  endings, whether `.gitignore` covers a path, `test_bundle_is_reproducible`,
+  `test_bundled_ca` — fails for a reason that has nothing to do with the
+  change. Same session, 7 more false failures.
 - **Never edit tracked files while `tools.checks all` (or the suite) is
   running.** Mid-run edits produce phantom gate failures and wasted 8-minute
   runs. Docs-only edits are the one exception.
@@ -220,10 +244,14 @@ part needs a demo session, do the rest, and leave that piece.
 
 ## Running it
 
+Every Python command goes through `.venv/bin/python`. Bare `python` is a
+different interpreter with a different package set — see Session mechanics
+for what that cost.
+
 ```bash
-python run.py                 # starts the app on :8888
-pytest tests/ -q              # full suite, ~6 min
-python -m tools.checks all    # everything, before committing
+.venv/bin/python run.py                 # starts the app on :8888
+.venv/bin/python -m pytest tests/ -q    # full suite, ~7.5 min on this Mac
+.venv/bin/python -m tools.checks all    # everything, before committing
 
 cd frontend && npm install    # once, per checkout
 cd frontend && npm test       # the dashboard's own suite (vitest)

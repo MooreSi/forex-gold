@@ -123,6 +123,10 @@ def test_no_test_in_this_file_can_spawn_a_process():
 
 ## Running
 
+**`python` here means `.venv/bin/python`.** Bare `python` is a different
+interpreter with a different package set, and it fails in a way that reads
+as a finding about your change — see CLAUDE.md, Session mechanics.
+
 ```bash
 pytest tests/ -q                 # full suite, ~4-5 minutes
 pytest tests/core/ -q            # the trading logic

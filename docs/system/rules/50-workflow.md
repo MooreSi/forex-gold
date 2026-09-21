@@ -48,6 +48,10 @@ reviewed, and if it breaks you cannot tell which half did it.
 
 ## 5. Verify — all of it
 
+**`python` here means `.venv/bin/python`.** Bare `python` is a different
+interpreter with a different package set, and it fails in a way that reads
+as a finding about your change — see CLAUDE.md, Session mechanics.
+
 ```bash
 pytest tests/ -q
 python -m tools.refactor_audit.structure_gates   --check

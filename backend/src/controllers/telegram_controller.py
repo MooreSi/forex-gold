@@ -16,7 +16,8 @@ __all__ = [
     "save_channel_learned_rule", "update_unrecognised_message",
     "get_reader_status", "get_pending_unrecognised",
     "fetch_stored_messages", "send_message", "decision_log_summary",
-    "decision_log_report", "decision_log_backfill", "reader_is_configured",
+    "decision_log_report", "decision_log_backfill", "contradiction_report",
+    "reader_is_configured",
     "get_all_lexicons", "set_lexicon", "get_telegram_channel_names",
 ]
 
@@ -140,6 +141,12 @@ def decision_log_report() -> list:
     """Champion vs challenger, over the decisions whose trade has closed."""
     from backend.src.services.signals import decision_shadow as _shadow
     return _shadow.report()
+
+
+def contradiction_report() -> list:
+    """Per contradiction policy: how often each verdict came up."""
+    from backend.src.services.signals import contradiction_log as _contra
+    return _contra.report()
 
 
 def decision_log_backfill() -> int:

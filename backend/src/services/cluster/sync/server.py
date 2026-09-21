@@ -58,6 +58,11 @@ _SYNCED_SETTINGS_KEYS = (
     # Parsing-page neighbours above are: left per-node, the Mac and the VPS
     # would record different halves of one study and nothing would say so.
     "tg_decision_log_enabled",
+    # The contradiction study (2026-09-21). Same reason, and one more: with
+    # it on, each node writes its own Telegram signals to its own signal
+    # bus, so a node where it is off would be judging contradictions
+    # against half the evidence.
+    "tg_contradiction_log_enabled",
     "bo_live_execution", "bo_claude_eval_enabled", "kelly_sizing_enabled",
     "max_open_trades",
     # sg_claude_eval_enabled (Bounce Generator's own Claude-eval toggle) was

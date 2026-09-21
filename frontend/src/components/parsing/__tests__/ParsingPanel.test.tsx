@@ -100,12 +100,15 @@ describe("the settings section", () => {
     }
     expect(PARSING_KEYS).toContain("immediate_market_entry");
     // 12 until the 2026-09-18 upstream merge added `tg_decision_log_enabled`
-    // under a new RESEARCH badge. The number is exact on purpose — the failure
-    // above was switches SILENTLY disappearing, so a `>=` here would not have
-    // caught it. Change it only alongside a switch that genuinely arrived or
-    // went, and say which in the commit.
+    // under a new RESEARCH badge; 14 since 2026-09-21, when
+    // `tg_contradiction_log_enabled` joined it under the same badge. The
+    // number is exact on purpose — the failure above was switches SILENTLY
+    // disappearing, so a `>=` here would not have caught it. Change it only
+    // alongside a switch that genuinely arrived or went, and say which in
+    // the commit.
     expect(PARSING_KEYS).toContain("tg_decision_log_enabled");
-    expect(PARSING_KEYS.length).toBe(13);
+    expect(PARSING_KEYS).toContain("tg_contradiction_log_enabled");
+    expect(PARSING_KEYS.length).toBe(14);
   });
 
   it("puts every category badge on the screen too", async () => {

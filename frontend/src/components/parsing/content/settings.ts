@@ -126,6 +126,13 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
           "Records what the app decided about every Telegram signal — executed or blocked, on both the normal and the Immediate Market Buy/Sell path — what the trade then did, and what four gates that are currently switched OFF would have decided. It changes no trading decision and blocks nothing: it only writes down what happened, so a gate can be judged on this account's own trades before being switched on. Costs nothing on the order path; nothing is fetched.",
         defaultOn: false,
       },
+      {
+        key: "tg_contradiction_log_enabled",
+        label: "Signal Contradiction Study",
+        description:
+          "Records what would happen when two sources disagree about direction — a Telegram channel against an internal engine, or one channel against another. Each policy (first wins, freshest wins, half size) has its verdict written down; none of them is applied, and no trade is blocked, resized or cancelled. Switching it on also puts Telegram signals on the shared signal bus, which is what makes the disagreement visible at all; with it off, the bus is exactly as it was.",
+        defaultOn: false,
+      },
     ],
   },
   {

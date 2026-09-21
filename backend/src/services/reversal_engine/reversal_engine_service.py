@@ -486,6 +486,13 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 except Exception:
                     pass
 
+                # The contradiction study (2026-09-21): recording only, off
+                # unless switched on. The bus write above is untouched live
+                # behaviour; this only asks what each policy would have said.
+                from backend.src.services.signals import contradiction_log as _contra_log
+                _contra_log.observe_engine_signal(
+                    "reversal_engine", direction, sig_id, _rs)
+
                 if feats:
                     re_db.store_ml_features(sig_id, feats)
                     if prob is not None:

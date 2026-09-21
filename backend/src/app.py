@@ -466,6 +466,15 @@ async def startup() -> None:
         _dec_log.create_schema()
     except Exception as _e:
         log.error("[startup] Decision log schema failed: %s", _e)
+    # The contradiction study's two tables (2026-09-21). Same database, same
+    # reason, and the same argument for creating them while the toggle is
+    # off: a missing table turns every write into a silent debug-level
+    # failure on the day somebody switches it on.
+    try:
+        from backend.src.services.signals import contradiction_log_repo as _contra
+        _contra.create_schema()
+    except Exception as _e:
+        log.error("[startup] Contradiction study schema failed: %s", _e)
     from backend.src.services.reversal_engine import ml_engine as _re_ml
     _re_ml.init(str(_DATA_DIR))
     _re_engine_module.init(_engine._bridge)

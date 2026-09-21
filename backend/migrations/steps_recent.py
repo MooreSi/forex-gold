@@ -166,4 +166,19 @@ _RECENT: list[tuple[int, str, object]] = [
     (48, "Set & Forget lot size, 0 = size from risk %", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN setforget_lot_size REAL NOT NULL DEFAULT 0",
     ]),
+
+    # Buy/sell contradictions between sources (2026-09-21), Parsing page.
+    # Stage 1: Telegram signals reach the cross-engine signal bus, and every
+    # contradiction policy's verdict is RECORDED. Nothing is acted on -- see
+    # services/signals/contradiction.py.
+    #
+    # Off by default, and inert when off in a stronger sense than the
+    # decision log above: with this 0, a Telegram signal is not written to
+    # signal_bus at all. That table is read by a live suppression gate
+    # (has_conflict_on_bus, six hours wide on the breakout engine), so
+    # "off" has to mean the bus looks exactly as it did before the feature
+    # existed, not merely that the study is not reading it.
+    (49, "Signal contradiction study, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN tg_contradiction_log_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

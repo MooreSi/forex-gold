@@ -370,7 +370,7 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             # a worse price → straight to SL). 4 min covers Telegram delivery
             # latency plus one scan cycle, nothing more.
             _is_fresh = await _record_staleness_or_new_impl(
-                tg_id, group_id, channel_name, msg, parsed, source_label,
+                tg_id, group_id, channel_name, msg, parsed, source_label, rs,
             )
             if not _is_fresh:
                 continue

@@ -30,6 +30,21 @@ from backend.src.db.database import db, row_to_dict, to_db_thread, _schedule_cor
 # concurrent_agreement and conflict-suppression features.  Rows are auto-expired
 # by the prune helper; the table never grows large.
 
+# What produced a bus row. Until 2026-09-21 the bus carried engine rows and
+# nothing else, so the column did not exist and every historical row is an
+# engine row -- which is why every read below coalesces NULL to KIND_ENGINE
+# rather than treating it as unknown.
+KIND_ENGINE   = "engine"
+KIND_TELEGRAM = "telegram"
+
+# The default every existing reader gets. Widening it is not a refactor: the
+# breakout engine reads has_conflict_on_bus over a SIX HOUR window and
+# suppresses on a hit, so the day a Telegram row becomes visible there is the
+# day an opposing channel message starts silently cancelling engine signals.
+# A caller that wants the whole bus passes `kinds=` and owns that decision.
+DEFAULT_READ_KINDS: tuple[str, ...] = (KIND_ENGINE,)
+
+
 def _ensure_signal_bus() -> None:
     """Idempotent: create the table if it was added after initial schema run."""
     with db() as conn:
@@ -46,10 +61,16 @@ def _ensure_signal_bus() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_signal_bus_exp ON signal_bus(expires_at)")
-        # Migration: add new columns to existing tables
+        # Migration: add new columns to existing tables.
+        # source_kind/source_name/symbol are deliberately NULLable with no
+        # DEFAULT: a backfill would claim to know what an old row was, and
+        # the readers already answer that question one way, in one place.
         for col, defn in [
             ("is_still_open", "INTEGER NOT NULL DEFAULT 1"),
             ("signal_id",     "INTEGER"),
+            ("symbol",        "TEXT"),
+            ("source_kind",   "TEXT"),
+            ("source_name",   "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE signal_bus ADD COLUMN {col} {defn}")
@@ -63,12 +84,21 @@ def write_signal_bus(
     confidence: float = 0.0,
     ttl_seconds: float = 300.0,
     signal_id: Optional[int] = None,
+    symbol: Optional[str] = None,
+    source_kind: str = KIND_ENGINE,
+    source_name: Optional[str] = None,
 ) -> int:
     """
     Record a signal on the shared bus. Returns the bus row id.
     TTL default reduced to 5 min (matches max scalp trade lifetime).
     Call close_bus_entry() when the originating signal closes so other engines
     see it as resolved immediately rather than waiting for TTL expiry.
+
+    `source_kind` defaults to KIND_ENGINE because every call site that
+    predates the column is an engine, and `source_name` defaults to `engine`
+    for the same reason -- for an engine the two are the same string, and a
+    Telegram row needs somewhere to put the channel name that is not the
+    `engine` column the readers key their exclusion on.
     """
     try:
         _ensure_signal_bus()
@@ -76,9 +106,12 @@ def write_signal_bus(
         with db() as conn:
             cur = conn.execute(
                 "INSERT INTO signal_bus"
-                "(engine,direction,confidence,created_at,expires_at,is_still_open,signal_id)"
-                " VALUES(?,?,?,?,?,1,?)",
-                (engine, direction.upper(), float(confidence), now, now + ttl_seconds, signal_id),
+                "(engine,direction,confidence,created_at,expires_at,is_still_open,"
+                "signal_id,symbol,source_kind,source_name)"
+                " VALUES(?,?,?,?,?,1,?,?,?,?)",
+                (engine, direction.upper(), float(confidence), now, now + ttl_seconds,
+                 signal_id, symbol, source_kind or KIND_ENGINE,
+                 source_name if source_name is not None else engine),
             )
             return cur.lastrowid or 0
     except Exception as _e:
@@ -106,20 +139,45 @@ def close_bus_entry(engine: str, signal_id: int) -> None:
 def get_concurrent_signals(
     exclude_engine: str,
     window_seconds: float = 900.0,
+    kinds: tuple[str, ...] = DEFAULT_READ_KINDS,
+    symbol: Optional[str] = None,
 ) -> list[dict]:
     """
     Return active, still-open signals from all engines except the caller.
     is_still_open=0 entries (signal already closed) are excluded even if TTL has not expired.
+
+    `kinds` restricts the read to those source kinds and defaults to engine
+    rows only -- see DEFAULT_READ_KINDS for why that default is load-bearing
+    rather than tidy. A NULL source_kind counts as KIND_ENGINE; every row
+    written before the column existed was one.
+
+    `symbol` is opt-in and defaults to no filter, because the bus had no
+    symbol until 2026-09-21 and every existing caller compares directions
+    across whatever is on it. A row whose symbol is unknown (NULL) matches
+    any symbol: it cannot be ruled out, and treating it as a non-match would
+    quietly narrow the live suppression gate.
     """
     try:
         _ensure_signal_bus()
         cutoff = time.time() - window_seconds
+        kind_list = tuple(kinds) or DEFAULT_READ_KINDS
+        placeholders = ",".join("?" for _ in kind_list)
+        sql = (
+            "SELECT engine, direction, confidence, created_at, symbol,"
+            " COALESCE(source_kind, ?) AS source_kind,"
+            " COALESCE(source_name, engine) AS source_name, signal_id"
+            " FROM signal_bus"
+            " WHERE engine != ? AND expires_at > ? AND created_at > ?"
+            " AND is_still_open = 1"
+            f" AND COALESCE(source_kind, ?) IN ({placeholders})"
+        )
+        params: list = [KIND_ENGINE, exclude_engine, time.time(), cutoff, KIND_ENGINE]
+        params.extend(kind_list)
+        if symbol:
+            sql += " AND (symbol IS NULL OR UPPER(symbol) = UPPER(?))"
+            params.append(symbol)
         with db() as conn:
-            rows = conn.execute(
-                "SELECT engine, direction, confidence, created_at FROM signal_bus"
-                " WHERE engine != ? AND expires_at > ? AND created_at > ? AND is_still_open = 1",
-                (exclude_engine, time.time(), cutoff),
-            ).fetchall()
+            rows = conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
     except Exception:
         return []

@@ -622,6 +622,13 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         except Exception:
             pass
 
+        # The contradiction study (2026-09-21): recording only, off unless
+        # switched on. The bus write above is untouched live behaviour;
+        # this only asks what each policy would have said.
+        from backend.src.services.signals import contradiction_log as _contra_log
+        _contra_log.observe_engine_signal(
+            "breakout", candidate["direction"], sig_id)
+
         ml_features = bo_ml.extract_features(sig_data, market_ctx=_market_ctx)
         if ml_features and sig_id:
             bdb.store_ml_features(sig_id, ml_features)

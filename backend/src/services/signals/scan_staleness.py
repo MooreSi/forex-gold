@@ -26,7 +26,9 @@ from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.channels import strategy_ai as channel_strategy_ai
 from backend.src.services.ai import provider as ai_provider
-from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES
+from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, STRATEGY_NAMES, SYMBOL
+from backend.src.services.signals import contradiction as _contradiction
+from backend.src.services.signals import contradiction_log as _contradiction_log
 from backend.src.services.risk import expert_params
 from backend.src.services.telegram import alerts
 from backend.src.services.ai import provider
@@ -49,11 +51,19 @@ _SESS_HUMAN = {
 
 
 async def record_staleness_or_new(
-    tg_id: str, group_id: str, channel_name: str, msg: dict, parsed: dict, source_label: str,
+    tg_id: str, group_id: str, channel_name: str, msg: dict, parsed: dict,
+    source_label: str, rs: Optional[dict] = None,
 ) -> bool:
     """Returns True if the message is fresh enough to proceed (recorded as
     'new'); False if stale (recorded as 'historical', alerted once if
-    newly recorded) -- caller should skip to the next message."""
+    newly recorded) -- caller should skip to the next message.
+
+    `rs` is optional and defaults to None, which means "do not run the
+    contradiction study". The caller already holds the settings; a default
+    that re-read them would put a settings read on the scan path for a
+    feature that is off, which is the one thing that feature promises not
+    to do.
+    """
     msg_ts_str = msg.get("timestamp") or ""
     msg_age_secs = None
     if msg_ts_str:
@@ -89,13 +99,33 @@ async def record_staleness_or_new(
             )
         return False
 
-    tg_repo.insert_tg_signal_if_new(
+    _was_new = tg_repo.insert_tg_signal_if_new(
         tg_id, group_id, channel_name, msg.get("sender_name", ""),
         msg_ts_str, msg.get("text") or "", parsed, "new",
     )
     log.info("[%s] New signal tg_id=%s %s entry %s-%s SL %s",
              source_label, tg_id, parsed["direction"],
              parsed["entry_low"], parsed["entry_high"], parsed["stop_loss"])
+
+    # The contradiction study (2026-09-21), off unless switched on. This is
+    # where a Telegram signal joins the cross-engine signal bus -- until
+    # now it never did, so a channel disagreeing with an engine, or with
+    # another channel, was invisible everywhere in the system. Recording
+    # only: see services/signals/contradiction_log.py.
+    #
+    # Gated on _was_new rather than called every pass. The scan loop
+    # re-sees a message about once a second for as long as it stays in the
+    # reader's fetch window, and while the study's UNIQUE constraint makes
+    # a repeat harmless, a bus write per second would not be.
+    if _was_new and rs is not None:
+        _contradiction_log.note_signal(
+            rs,
+            source_kind=_contradiction.KIND_TELEGRAM,
+            source_name=channel_name,
+            direction=str(parsed.get("direction") or ""),
+            symbol=SYMBOL,
+            candidate_ref=str(tg_id),
+        )
     return True
 
 

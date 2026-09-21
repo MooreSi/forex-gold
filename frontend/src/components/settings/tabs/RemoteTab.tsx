@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney } from "@/components/shared/format";
 import { asObject } from "@/lib/asArray";
@@ -108,14 +109,16 @@ export function RemoteTab() {
           />
           <label className="text-xs text-ink-2">
             Listen port
-            <input
-              aria-label="Listen port"
-              className="num mt-0.5 w-28 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-              defaultValue={String(server.port ?? "")}
-              onBlur={(e) => void act(() =>
-                api.put("/api/remote/server",
-                  { enabled: Boolean(server.enabled), port: Number(e.target.value) }))}
-            />
+            <Tooltip label="The TCP port this machine listens on for the other node. It must match the port the other node dials, and be open in this machine's firewall. Saved when you leave the box.">
+              <input
+                aria-label="Listen port"
+                className="num mt-0.5 w-28 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                defaultValue={String(server.port ?? "")}
+                onBlur={(e) => void act(() =>
+                  api.put("/api/remote/server",
+                    { enabled: Boolean(server.enabled), port: Number(e.target.value) }))}
+              />
+            </Tooltip>
           </label>
           <span className="text-[11px] text-ink-3">
             {server.running ? "listening" : "stopped"}
@@ -137,31 +140,37 @@ export function RemoteTab() {
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="block text-xs text-ink-2">
             VPS address
-            <input
-              aria-label="VPS address"
-              className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-              value={host ?? client.host ?? ""}
-              onChange={(e) => setHost(e.target.value)}
-            />
+            <Tooltip label="The other node's hostname or IP address. Nothing is dialled until you press Save and connect — a stored address that was never tried looks exactly like a working pair.">
+              <input
+                aria-label="VPS address"
+                className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                value={host ?? client.host ?? ""}
+                onChange={(e) => setHost(e.target.value)}
+              />
+            </Tooltip>
           </label>
           <label className="block text-xs text-ink-2">
             Port
-            <input
-              aria-label="VPS port"
-              className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-              value={port ?? String(client.port ?? "")}
-              onChange={(e) => setPort(e.target.value)}
-            />
+            <Tooltip label="The port the other node is listening on. It has to match that machine's Listen port above.">
+              <input
+                aria-label="VPS port"
+                className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                value={port ?? String(client.port ?? "")}
+                onChange={(e) => setPort(e.target.value)}
+              />
+            </Tooltip>
           </label>
           <label className="block text-xs text-ink-2">
             Shared token
-            <input
-              aria-label="Shared token"
-              type="password"
-              className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-            />
+            <Tooltip label="The pairing token, generated on the OTHER node under Node & updates and shown there exactly once. It is stored but never shown again here, so reconnecting means pasting it in fresh.">
+              <input
+                aria-label="Shared token"
+                type="password"
+                className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+              />
+            </Tooltip>
             <span className="mt-0.5 block text-[10px] text-ink-3">
               {client.token_set
                 ? "one is stored; re-enter it to reconnect"

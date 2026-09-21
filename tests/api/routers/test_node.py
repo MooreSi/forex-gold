@@ -331,3 +331,44 @@ def test_stopping_is_not_restarting(make_client, node):
     make_client().post("/api/node/stop")
 
     assert not any(w[0] == "restart" for w in node["writes"])
+
+
+# -- The keep-alive watchdog --------------------------------------------------
+#
+# Owner, 2026-09-21: "in settings it is missing the toggle to ensure the app,
+# bridge and mt5 is kept alive". It was not missing -- it was reported by half.
+# `/state` said whether the OS scheduler ENTRY exists (`installed`) and never
+# said whether the operator had turned the feature ON (`auto_restart_enabled`,
+# which `app.py` reconciles the OS to on every boot). Those disagree in the one
+# case worth showing: the setting is on and the entry has been lost to an OS
+# upgrade or a machine migration, which the NiceGUI app reported as "On, but
+# the scheduler entry is missing — toggle off and on to repair" and the React
+# port rendered as a plain unticked box.
+
+def test_the_state_reports_the_stored_toggle_as_well_as_the_os_entry(
+        make_client, node, monkeypatch):
+    monkeypatch.setattr(node_router.settings_ctl, "get_app_config",
+                        lambda key: "1" if key == "auto_restart_enabled" else None)
+    node["autostart"]["installed"] = False
+
+    body = make_client().get("/api/node/state").json()["autostart"]
+
+    assert body["enabled"] is True      # what the operator asked for
+    assert body["installed"] is False   # what the OS actually has
+    assert body["armed"] is False
+
+
+def test_an_unset_toggle_reads_as_off_not_as_missing(make_client, node, monkeypatch):
+    monkeypatch.setattr(node_router.settings_ctl, "get_app_config", lambda key: None)
+
+    body = make_client().get("/api/node/state").json()["autostart"]
+
+    assert body["enabled"] is False
+
+
+def test_the_state_says_how_often_the_watchdog_checks(make_client, node):
+    """The interval is the whole answer to "is it still running?" and the
+    screen cannot state it without being told."""
+    body = make_client().get("/api/node/state").json()["autostart"]
+
+    assert body["check_interval_secs"] == 300

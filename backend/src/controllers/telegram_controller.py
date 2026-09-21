@@ -13,6 +13,7 @@ from backend.src.services.telegram import reader as _reader
 __all__ = [
     "get_risk_settings", "update_risk_settings",
     "get_channel_parser_config", "save_channel_parser_config",
+    "set_channel_parser_enabled",
     "save_channel_learned_rule", "update_unrecognised_message",
     "get_reader_status", "get_pending_unrecognised",
     "fetch_stored_messages", "send_message", "decision_log_summary",
@@ -36,6 +37,10 @@ def get_channel_parser_config(channel_name: str) -> Optional[dict]:
 
 def save_channel_parser_config(*args, **kwargs):
     return _channels.save_parser_config(*args, **kwargs)
+
+
+def set_channel_parser_enabled(channel_name: str, enabled: bool) -> dict:
+    return _channels.set_parser_enabled(channel_name, enabled)
 
 
 def save_channel_learned_rule(*args, **kwargs):

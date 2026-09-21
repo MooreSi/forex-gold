@@ -155,3 +155,126 @@ def test_a_choice_field_carries_its_values(make_client, ea):
 
     assert trail["type"] == "choice"
     assert "step" in trail["choices"]
+
+
+# -- Export and import --------------------------------------------------------
+#
+# Owner, 2026-09-21: "trading > ea template - needs buttons to import, export
+# and delete ea templates". Delete was already here. The service half
+# (`ea_templates.export_templates` / `import_templates`, with the envelope,
+# the validate-everything-before-writing rule and the overwrite guard) has
+# been in the tree since the NiceGUI app; only the HTTP surface and the
+# buttons were never ported. These endpoints are that surface and nothing
+# more -- no validation of their own, so there is exactly one implementation
+# of what a valid export file is.
+
+@pytest.fixture
+def transfer(monkeypatch, ea):
+    ea["exported"] = '{"format": "forex-ea-templates", "templates": []}'
+    ea["imported"] = {"added": ["Grid Runner"], "replaced": [], "skipped": []}
+
+    def _export(names=None):
+        ea["writes"].append(("export", names))
+        return ea["exported"]
+
+    def _import(payload, *, overwrite=False):
+        ea["writes"].append(("import", payload, overwrite))
+        if isinstance(ea["imported"], Exception):
+            raise ea["imported"]
+        return ea["imported"]
+
+    monkeypatch.setattr(templates_router.broker_ctl, "export_templates", _export)
+    monkeypatch.setattr(templates_router.broker_ctl, "import_templates", _import)
+    monkeypatch.setattr(templates_router.broker_ctl, "export_filename",
+                        lambda prefix="ea_templates": "ea_templates_20260921_101500.eatpl.json")
+    return ea
+
+
+def test_export_returns_the_file_and_the_name_to_save_it_as(make_client, transfer):
+    r = make_client().get("/api/trading/templates/export")
+
+    assert r.status_code == 200
+    assert r.json()["content"] == transfer["exported"]
+    assert r.json()["filename"] == "ea_templates_20260921_101500.eatpl.json"
+
+
+def test_export_with_no_names_exports_every_template(make_client, transfer):
+    """The panel's button is "export all" -- names=None is what the service
+    reads as that, and an empty list would export nothing at all."""
+    make_client().get("/api/trading/templates/export")
+
+    assert ("export", None) in transfer["writes"]
+
+
+def test_export_can_be_narrowed_to_named_templates(make_client, transfer):
+    make_client().get("/api/trading/templates/export?names=Grid Runner&names=Trail Runner")
+
+    assert ("export", ["Grid Runner", "Trail Runner"]) in transfer["writes"]
+
+
+def test_the_export_route_is_not_read_as_a_template_called_export(make_client, transfer):
+    # Same trap as /schema: declared after "/{name}" this answers 404.
+    assert make_client().get("/api/trading/templates/export").status_code == 200
+
+
+def test_export_never_writes_anything(make_client, transfer):
+    """Negative control -- an export that saved would be a way to corrupt a
+    template by reading it."""
+    make_client().get("/api/trading/templates/export")
+
+    assert [w[0] for w in transfer["writes"]] == ["export"]
+
+
+def test_import_adds_the_file_and_says_what_it_did(make_client, transfer):
+    body = make_client().post("/api/trading/templates/import",
+                              json={"content": "{...}"}).json()
+
+    assert ("import", "{...}", False) in transfer["writes"]
+    assert body["added"] == ["Grid Runner"]
+    assert body["skipped"] == []
+
+
+def test_import_does_not_overwrite_unless_asked(make_client, transfer):
+    """A shared file must never silently clobber a locally tuned template.
+    The default is the safe one, and this is what keeps it that way."""
+    make_client().post("/api/trading/templates/import", json={"content": "{...}"})
+
+    assert transfer["writes"][-1] == ("import", "{...}", False)
+
+
+def test_import_overwrites_when_asked(make_client, transfer):
+    make_client().post("/api/trading/templates/import",
+                       json={"content": "{...}", "overwrite": True})
+
+    assert transfer["writes"][-1] == ("import", "{...}", True)
+
+
+def test_import_returns_the_new_list_so_the_page_need_not_ask_again(make_client, transfer):
+    body = make_client().post("/api/trading/templates/import",
+                              json={"content": "{...}"}).json()
+
+    assert [t["name"] for t in body["templates"]] == ["Grid Runner", "Trail Runner"]
+
+
+def test_a_file_that_is_not_an_export_is_a_refusal_naming_the_problem(
+        make_client, transfer):
+    """`import_templates` validates every template before writing any of
+    them, so a bad file imports nothing. What it must not do is answer 500 --
+    the operator picked the wrong file, and the page has to be able to say
+    which file and why."""
+    transfer["imported"] = ValueError("not an EA template export")
+
+    r = make_client().post("/api/trading/templates/import", json={"content": "nope"})
+
+    # 409 is this app's Refusal code -- "the backend said no and the reason is
+    # meant for the user" -- not a 500 and not a validation error.
+    assert r.status_code == 409
+    assert "not an EA template export" in r.json()["error"]["message"]
+
+
+def test_an_import_with_no_content_is_refused_before_the_service_sees_it(
+        make_client, transfer):
+    r = make_client().post("/api/trading/templates/import", json={"content": ""})
+
+    assert r.status_code == 409
+    assert [w for w in transfer["writes"] if w[0] == "import"] == []

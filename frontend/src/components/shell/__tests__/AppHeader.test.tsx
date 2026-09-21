@@ -32,12 +32,21 @@ function header(over: Partial<HeaderState> = {}): HeaderState {
 }
 
 let body: HeaderState;
+/** What `/api/trading/status-badge` answers. The header's single halt
+ *  indicator reads this endpoint, not `/api/system/header`. */
+let badge: Record<string, unknown>;
 
 beforeEach(() => {
   resetPolls();
   body = header();
-  vi.stubGlobal("fetch", vi.fn(async () => ({
-    ok: true, status: 200, json: async () => body,
+  badge = {
+    state: "ok", label: "Trading Active",
+    detail: "Nothing is holding automated entries.",
+    until: null, resume_ts: null, can_resume: false,
+  };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+    ok: true, status: 200,
+    json: async () => (String(url).includes("status-badge") ? badge : body),
   })));
 });
 afterEach(() => {
@@ -47,68 +56,120 @@ afterEach(() => {
 
 const renderHeader = () => render(<AuthProvider><AppHeader /></AuthProvider>);
 
-describe("the halt badge", () => {
-  it("stays out of the way when nothing is stopped", async () => {
+describe("the halt, stated once", () => {
+  /**
+   * It used to be stated three times: a badge of its own in the middle of the
+   * bar, the trading-status badge on the right, and the Pause button growing
+   * into a "Paused" pill. All three on a header that already runs out of room
+   * at 1024px, and the owner reported the congestion on 2026-09-21.
+   *
+   * There is one now, and it is the one that knows most: `TradingStatusBadge`
+   * reads the backend's own decision across all FOUR mechanisms that can hold
+   * an entry, where the removed badge knew about two. Clicking it offers the
+   * Resume.
+   */
+  it("says so when nothing is stopped", async () => {
     renderHeader();
-    await screen.findByTestId("account-badge");
+
+    expect(await screen.findByTestId("trading-status-badge"))
+      .toHaveTextContent("Trading Active");
+  });
+
+  it("states the halt exactly once", async () => {
+    // The whole point of the change. Two elements saying "paused" on one bar
+    // is what made the third unreadable.
+    badge = {
+      state: "halted", label: "Trading Paused until 21 Sep 18:00",
+      detail: "daily loss limit reached", until: 1_800_000_000,
+      resume_ts: null, can_resume: true,
+    };
+    body = header({
+      pause: { paused: true, reason: "daily loss limit reached",
+               until: 1_800_000_000, source: "governor" },
+    });
+    renderHeader();
+    await screen.findByTestId("trading-status-badge");
 
     expect(screen.queryByTestId("pause-badge")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/paused/i).length).toBe(1);
   });
 
   it("shows a governor halt with its reason", async () => {
-    body = header({
-      pause: { paused: true, reason: "daily loss limit reached",
-               until: null, source: "governor" },
-    });
+    badge = {
+      state: "halted", label: "Trading Paused until 21 Sep 18:00",
+      detail: "daily loss limit reached", until: 1_800_000_000,
+      resume_ts: null, can_resume: true,
+    };
     renderHeader();
 
-    expect(await screen.findByTestId("pause-badge"))
-      .toHaveTextContent("daily loss limit reached");
+    expect(await screen.findByTestId("trading-status-badge"))
+      .toHaveAttribute("title", "daily loss limit reached");
   });
 
   it("shows a tripped circuit breaker, which used to be invisible here", async () => {
-    body = header({
-      pause: { paused: true, reason: "circuit breaker: 3 consecutive losing trades",
-               until: null, source: "circuit-breaker" },
-    });
+    badge = {
+      state: "halted", label: "Trading Paused until 21 Sep 18:00",
+      detail: "Circuit breaker active (3 consecutive losses)",
+      until: 1_800_000_000, resume_ts: null, can_resume: true,
+    };
     renderHeader();
 
-    expect(await screen.findByTestId("pause-badge"))
-      .toHaveTextContent("3 consecutive losing trades");
+    expect(await screen.findByTestId("trading-status-badge"))
+      .toHaveAttribute("title", expect.stringContaining("3 consecutive losses"));
   });
 
   it("says when trading resumes", async () => {
     // "Halted" with no resume time leaves the operator watching the screen to
     // find out when it lifts.
-    body = header({
-      pause: { paused: true, reason: "drawdown",
-               until: 1_800_000_000, source: "governor" },
-    });
+    badge = {
+      state: "halted", label: "Trading Paused until 21 Sep 18:00",
+      detail: "drawdown", until: 1_800_000_000, resume_ts: null, can_resume: true,
+    };
     renderHeader();
 
-    expect(await screen.findByTestId("pause-badge")).toHaveTextContent(/until \d\d:\d\d/);
+    expect(await screen.findByTestId("trading-status-badge"))
+      .toHaveTextContent(/until \d\d \w\w\w \d\d:\d\d/);
   });
 
-  it("does not invent a resume time when there is none", async () => {
-    // A halt with no stored expiry is real — a manual /pause with no end. A
-    // fabricated "until —" reads as a value.
-    body = header({
-      pause: { paused: true, reason: "manually paused", until: null, source: "governor" },
-    });
+  it("reports the two mechanisms the removed badge could not see", async () => {
+    // A profit target reached and a news blackout both hold every automated
+    // entry, and neither writes the key `pause` read. A header that said
+    // nothing about them was a false all-clear.
+    badge = {
+      state: "profit_target", label: "Profit Target Reached",
+      detail: "Daily profit target reached ($120.00 of $100.00)",
+      until: null, resume_ts: null, can_resume: true,
+    };
     renderHeader();
 
-    expect(await screen.findByTestId("pause-badge")).not.toHaveTextContent("until");
+    expect(await screen.findByTestId("trading-status-badge"))
+      .toHaveTextContent("Profit Target Reached");
   });
 
   it("renders whatever the backend decided, without re-deciding it", async () => {
     // Negative control for the whole file: a header that applied its own rule
     // for "is this really a halt" would disagree with the engines.
-    body = header({
-      pause: { paused: true, reason: "", until: null, source: "" },
-    });
+    badge = {
+      state: "halted", label: "Trading Paused until 21 Sep 18:00",
+      detail: "", until: null, resume_ts: null, can_resume: true,
+    };
     renderHeader();
 
-    expect(await screen.findByTestId("pause-badge")).toBeInTheDocument();
+    expect(await screen.findByTestId("trading-status-badge"))
+      .toHaveTextContent("Trading Paused");
+  });
+
+  it("is the control that lifts it, not just a label", async () => {
+    badge = {
+      state: "halted", label: "Trading Paused until 21 Sep 18:00",
+      detail: "daily loss limit reached", until: 1_800_000_000,
+      resume_ts: null, can_resume: true,
+    };
+    renderHeader();
+
+    await userEvent.click(await screen.findByTestId("trading-status-badge"));
+
+    expect(screen.getByTestId("resume-confirm")).toBeInTheDocument();
   });
 });
 

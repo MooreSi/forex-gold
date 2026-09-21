@@ -132,9 +132,9 @@ def _resolve_management(
         None,
     )
 
-    from backend.src.services.channels.repo import get_channel_strategy_override
+    from backend.src.services.risk.schedule import effective_channel_strategy
     try:
-        override = get_channel_strategy_override(channel_name)
+        override = effective_channel_strategy(channel_name)
     except Exception:
         return default
     if not override or override == "auto" or override == STRATEGY_LIMIT_RUNNER:
@@ -199,9 +199,9 @@ def _template_for_channel(channel_name: str) -> dict | None:
     the template".
     """
     from backend.src.services.broker import ea_templates as _tpl_mod
-    from backend.src.services.channels.repo import get_channel_strategy_override
+    from backend.src.services.risk.schedule import effective_channel_strategy
     try:
-        override = get_channel_strategy_override(channel_name)
+        override = effective_channel_strategy(channel_name)
         if not _tpl_mod.is_template_override(override):
             return None
         if _tpl_mod.is_grid_template(override):

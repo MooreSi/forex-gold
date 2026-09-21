@@ -1,6 +1,7 @@
 import { Clock } from "lucide-react";
 import { asObject } from "@/lib/asArray";
 import { offsetChoices, offsetToSave, selectedOffset } from "./clockOffsets";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface TradingClockCardProps {
   clock: Record<string, unknown>;
@@ -35,6 +36,7 @@ export function TradingClockCard({ clock, onSetOffset }: TradingClockCardProps) 
       </p>
       <label className="text-xs text-ink-2">
         Clock
+        <Tooltip label="Which clock the schedule's window hours are read in. Broker time is what MT5 stamps a trade with and is what the windows mean by default; choosing a fixed offset pins them to a timezone instead, so they do not shift when the broker changes its own.">
         <select
           aria-label="Trading clock"
           value={selectedOffset(
@@ -47,6 +49,7 @@ export function TradingClockCard({ clock, onSetOffset }: TradingClockCardProps) 
             <option key={c.value} value={c.value}>{c.label}</option>
           ))}
         </select>
+        </Tooltip>
       </label>
     </section>
   );

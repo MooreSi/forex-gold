@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { CandlestickChart } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { DialogShell } from "@/components/shared/DialogShell";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { StatCard } from "@/components/shared/StatCard";
@@ -201,12 +202,14 @@ export function OrbSection() {
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="text-xs text-ink-2">
           Lot size
-          <input
-            aria-label="ORB lot size"
-            className="num mt-0.5 w-28 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-            defaultValue={String(data.lot_size ?? 0)}
-            onBlur={(e) => void save({ lot_size: Number(e.target.value) || 0 })}
-          />
+          <Tooltip label="The size this setup is opened at, by hand or automatically. 0 hands sizing back to your risk % and the stop distance, which is the safer default — a fixed size ignores how far away the stop is. Saved when you leave the box.">
+            <input
+              aria-label="ORB lot size"
+              className="num mt-0.5 w-28 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+              defaultValue={String(data.lot_size ?? 0)}
+              onBlur={(e) => void save({ lot_size: Number(e.target.value) || 0 })}
+            />
+          </Tooltip>
           <span className="mt-0.5 block text-[10px] text-ink-3">
             0 sizes it from your risk % and the stop distance.
           </span>
@@ -223,13 +226,15 @@ export function OrbSection() {
       </div>
 
       <label className="mt-3 flex items-start gap-2 text-xs text-ink-2">
-        <input
-          type="checkbox"
-          aria-label="Auto-execute this setup every morning (unattended)"
-          className="accent-accent mt-0.5"
-          checked={data.auto_execute === true}
-          onChange={(e) => void save({ auto_execute: e.target.checked })}
-        />
+        <Tooltip label="Places this trade automatically at 08:15 UK each weekday, with nobody watching. In a paired setup only the active trader executes it, so there is no double trade. Off by default, and the one control on this tab that opens a position without a click.">
+          <input
+            type="checkbox"
+            aria-label="Auto-execute this setup every morning (unattended)"
+            className="accent-accent mt-0.5"
+            checked={data.auto_execute === true}
+            onChange={(e) => void save({ auto_execute: e.target.checked })}
+          />
+        </Tooltip>
         <span>
           Auto-execute this setup every morning (unattended)
           <span className="mt-0.5 block text-[10px] text-ink-3">

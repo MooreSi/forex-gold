@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { DialogShell } from "@/components/shared/DialogShell";
 
 interface SignalEditorDialogProps {
@@ -9,13 +10,19 @@ interface SignalEditorDialogProps {
   onSaved: () => void;
 }
 
-const FIELDS: { key: string; label: string }[] = [
-  { key: "entry_low", label: "Entry low" },
-  { key: "entry_high", label: "Entry high" },
-  { key: "stop_loss", label: "Stop loss" },
-  { key: "tp1", label: "TP1" },
-  { key: "tp2", label: "TP2" },
-  { key: "tp3", label: "TP3" },
+const FIELDS: { key: string; label: string; help: string }[] = [
+  { key: "entry_low", label: "Entry low",
+    help: "The near end of the entry band. A signal quotes a range; the position is opened anywhere inside it." },
+  { key: "entry_high", label: "Entry high",
+    help: "The far end of the entry band. Set it equal to Entry low to make the signal a single price." },
+  { key: "stop_loss", label: "Stop loss",
+    help: "Where the position is closed for a loss. This is the number position sizing is derived from, so moving it changes how big the trade will be." },
+  { key: "tp1", label: "TP1",
+    help: "The first take-profit. Scale-out strategies close part of the position here and manage the rest." },
+  { key: "tp2", label: "TP2",
+    help: "The second take-profit. Leave it blank if the signal does not carry one — a blank is not the same as 0, which is a real price." },
+  { key: "tp3", label: "TP3",
+    help: "The third take-profit. A signal can carry up to eight; the ones past TP3 are left as the signal sent them." },
 ];
 
 /**
@@ -78,13 +85,15 @@ export function SignalEditorDialog({ signal, onClose, onSaved }: SignalEditorDia
         {FIELDS.map((f) => (
           <label key={f.key} className="block">
             <span className="text-xs text-ink-2">{f.label}</span>
-            <input
-              aria-label={f.label}
-              inputMode="decimal"
-              value={draft[f.key] ?? ""}
-              onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
-              className="num mt-1 w-full rounded border border-line bg-surface-1 px-2 py-1.5 text-sm text-ink-1"
-            />
+            <Tooltip label={f.help}>
+              <input
+                aria-label={f.label}
+                inputMode="decimal"
+                value={draft[f.key] ?? ""}
+                onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                className="num mt-1 w-full rounded border border-line bg-surface-1 px-2 py-1.5 text-sm text-ink-1"
+              />
+            </Tooltip>
           </label>
         ))}
       </div>

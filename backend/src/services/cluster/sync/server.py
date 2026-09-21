@@ -162,6 +162,14 @@ _SYNCED_SETTINGS_KEYS = (
     # signal, so a toggle set on the Mac has to reach the VPS or the engine
     # there keeps scoring with pro_likeness pinned at its neutral.
     "re_learn_from_ref_signals",
+    # Trading > Which signals are taken / Exposure -- the stale-release
+    # guards (2026-09-21). Same reasoning as every execution-affecting flag
+    # above, and it applies with particular force here: the pending watcher
+    # runs on whichever node is the active trader, so a guard switched on
+    # from the Mac that never reached the VPS would leave the backlog
+    # releasing exactly as it did on the day these were written.
+    "stale_better_fill_cap_enabled", "stale_better_fill_cap_pts",
+    "pending_momentum_gate_enabled", "burst_hedge_guard_enabled",
 )
 
 

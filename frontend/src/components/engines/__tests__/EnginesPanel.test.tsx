@@ -302,19 +302,31 @@ describe("the two engines have a tab each", () => {
    * Breakout splits meant scrolling past the reversal model, its capability
    * switches and its virtual trade ledger. Asked for on 2026-09-20.
    */
-  it("opens on Breakout, as the original did", async () => {
+  it("opens on Reversal, which is the engine that trades", async () => {
+    // Reversed on 2026-09-21. The tab opened on Breakout from 2026-09-20,
+    // matching the NiceGUI order; the owner asked for Reversal first
+    // ("this is the main one"), so the page now opens on the engine whose
+    // model, switches and ledger are the ones actually read each day.
     render(<EnginesPanel />);
 
-    expect(await screen.findByRole("tab", { name: /Breakout engine/ }))
+    expect(await screen.findByRole("tab", { name: /Reversal engine/ }))
       .toHaveAttribute("aria-selected", "true");
   });
 
-  it("keeps the reversal detail off the Breakout tab", async () => {
+  it("lists Reversal before Breakout", async () => {
+    render(<EnginesPanel />);
+    await screen.findByRole("tab", { name: /Reversal engine/ });
+
+    const names = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(names).toEqual(["Reversal engine", "Breakout engine"]);
+  });
+
+  it("keeps the Breakout detail off the Reversal tab", async () => {
     // The whole point of the split: one engine's numbers at a time.
     render(<EnginesPanel />);
-    await screen.findByRole("tab", { name: /Breakout engine/ });
+    await screen.findByRole("tab", { name: /Reversal engine/ });
 
-    expect(screen.queryByTestId("capability-htf_bias_asian_exempt")).toBeNull();
+    expect(screen.queryByTestId("bo-edge")).toBeNull();
   });
 
   it("shows the reversal detail once its tab is chosen", async () => {

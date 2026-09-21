@@ -6,9 +6,11 @@ import { PanelShell } from "@/components/shared/PanelShell";
 import { asArray } from "@/lib/asArray";
 import { AboutHomeSection } from "./internal/AboutHomeSection";
 import { GlossarySection } from "./internal/GlossarySection";
+import { SetupSection } from "./internal/SetupSection";
 import { VersionSection } from "./internal/VersionSection";
 
 const TITLES: Record<string, string> = {
+  setup: "Setup instructions",
   glossary: "Glossary",
   version: "Version history",
 };
@@ -56,6 +58,7 @@ export function AboutPanel() {
       }
     >
       {section === null && <AboutHomeSection version={version} onOpen={setSection} />}
+      {section === "setup" && <SetupSection />}
       {section === "glossary" && <GlossarySection />}
       {section === "version" && <VersionSection version={version} releases={releases} />}
     </PanelShell>

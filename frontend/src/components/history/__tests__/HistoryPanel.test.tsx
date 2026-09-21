@@ -47,6 +47,35 @@ afterEach(() => {
 const gets = () => fetchMock.mock.calls.filter((c) => !c[1]?.method || c[1].method === "GET");
 const writes = () => fetchMock.mock.calls.filter((c) => c[1]?.method && c[1].method !== "GET");
 
+describe("the order of the sub-tabs", () => {
+  /**
+   * Owner, 2026-09-21: the per-trade list is what this page is opened for,
+   * so it reads first -- before the equity curve. The page still OPENS on
+   * the heatmap ("When it trades"), which is a separate decision: listing
+   * Trades first costs nothing because Radix only mounts a tab's content
+   * once it is selected, and that tab carries a request of its own.
+   */
+  it("puts Trades first, ahead of the equity curve", async () => {
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+
+    const names = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(names.slice(0, 2)).toEqual(["Trades", "Equity curve"]);
+  });
+
+  it("still opens on the heatmap, not on Trades", async () => {
+    // Trades costs a request of its own. Listing it first must not start
+    // spending one on every visit to the page.
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+
+    expect(screen.getByRole("tab", { name: "When it trades" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Trades" }))
+      .toHaveAttribute("aria-selected", "false");
+  });
+});
+
 describe("how often it asks", () => {
   it("renders every panel from ONE request", async () => {
     // bugs/030: three panels each polling the bridge produced 388 round-trips

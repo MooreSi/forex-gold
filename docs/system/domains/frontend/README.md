@@ -291,3 +291,156 @@ and cannot answer "is it learning?". The React port
 (`components/engines/internal/learning_series.ts`) uses the rolling window and
 keeps the reasoning in its docstring. The two lines it draws are on different
 scales and are deliberately **not** comparable to each other.
+
+## Four ports finished on 2026-09-21
+
+Each was reported by the owner as "missing", and in three of the four the
+backend was already there and working — what was missing was the surface, or
+half of it. That is the shape to expect from the rest of the port backlog, so
+**look for the service before writing one.**
+
+- **EA template Import / Export.** `ea_templates.export_templates` /
+  `import_templates` — the envelope, the validate-everything-before-writing
+  rule and the overwrite guard — have been in the tree since the NiceGUI app,
+  and `broker_controller` already forwarded all four functions. Only the two
+  routes (`GET /api/trading/templates/export`, `POST …/import`) and the
+  buttons were missing. Both routes are declared **before** `/{name}`, the
+  same trap `/schema` documents. `TemplateTransfer.tsx` reads the file with
+  `FileReader`, not `File.prototype.text` — jsdom does not implement the
+  latter, so a component using it reads every import as "chosen.text is not a
+  function" under test while working in the browser.
+
+- **The keep-alive watchdog toggle.** Not missing: reported by half and
+  labelled as something else. `/api/node/state` returned `installed` (does the
+  OS scheduler entry exist) and never `enabled` (did the operator turn it on),
+  and the checkbox — called "Start the app when this machine boots" — was
+  bound to `installed`. So the one state worth showing, the setting on with
+  the entry lost to an OS upgrade or a machine migration, rendered as a plain
+  unticked box. Worse, the toggle **wrote to `/api/node/state`**, which has no
+  PUT handler: it answered 405, `useSettingsResource.save` swallowed it into
+  its own error field, and nothing reached the screen. It had never worked.
+  `KeepAliveSection.tsx` reports four states and writes to
+  `/api/node/autostart`. A *disarmed* watchdog is not a fault — the Stop
+  scripts disarm it so Stop genuinely stops.
+
+- **The equity curve.** Kept its realised-P&L-from-zero meaning, which is a
+  documented decision and not a cosmetic one. What it gained is the axes:
+  without them, +$120 and +$12,000 draw the identical picture. The tick values
+  are 1/2/5×10ⁿ and always include zero (`equityGeometry.niceTicks`), and the
+  gradient area closes back to the **zero line**, not to the floor of the box
+  — filled to the floor, a losing window shades exactly like a winning one.
+  The gradient's `id` carries the window length, because two of these on one
+  page would share one definition.
+
+- **About → Setup instructions.** Ported from `frontend/app/_about.py` and
+  brought up to date rather than transcribed: every Settings path in the
+  original names a NiceGUI page that no longer exists, and two ports moved
+  with the fork (bridge 9000→9010, EA bridge 9101→9111, so the two apps can
+  share a machine without one trading through the other's bridge).
+  `SetupSection.test.tsx` asserts that every `Settings → X` in the copy names
+  a tab this build has, and that neither old port number appears. Instructions
+  that confidently send someone to a screen that is not there are worse than
+  no instructions, and nothing else would catch it.
+
+## What the owner reported on 2026-09-21, and what each one turned out to be
+
+Nine reports in one sitting. Six of them were **a screen reading a field name
+that is not a column**, or a screen that could not tell it had been lied to.
+That is now the first thing to check when a panel "shows nothing".
+
+- **Parsing → Channels could not be ticked or unticked.** Not a frontend bug at
+  all: `PUT /api/parsing/channel-parser` called
+  `save_channel_parser_config(channel, {…})` and that function takes **six**
+  positional arguments. Every click raised `TypeError` and answered 500. The
+  router's own test faked the writer with a two-argument lambda — a fake
+  describing a function nobody had written — so it stayed green throughout.
+  The merge moved into `channels/performance.set_parser_enabled` and is pinned
+  against the real table. **A router test that fakes a controller function is
+  only as true as its arity.**
+
+- **Trading → Signals showed a direction, a status and four em dashes.** The
+  rows are `vantage_signals` columns (`source_name`, `entry_low`, `stop_loss`,
+  `lot_size`) and the table read `source` and `entry`, which are not columns.
+  Fixed the way the Positions table was two days earlier: a response model
+  (`SignalOut`) that **fills** the short names from the real ones and never
+  renames them, because the signal editor and the commentary panel read the
+  long names. `GET /api/trading/signals` had no response model at all before.
+
+- **Positions showed no P&L, and one position where MT5 had two.** Both in the
+  positions domain — `mt5_profit` is only written at close, and the table is
+  the app's own record. See that domain's README.
+
+- **The restart banner never went away.** The reconnect-and-reload in
+  `AuthContext` only ran once something had *already* discovered the server was
+  gone, and the only thing that ever read the session was the first mount.
+  Every other poll fails quietly into its own error state, so a running page
+  never noticed a restart. There is a 5s **heartbeat** now, which covers every
+  cause — the header button, the Telegram `/restartapp`, an environment
+  switch, the bridge watchdog, a crash — rather than the one button that was
+  reported. The two "it worked" lines it left behind go through `Notice`,
+  which clears itself; its countdown deliberately does **not** depend on
+  `children`, because both parents poll and a fresh object each render would
+  reset the timer for ever.
+
+- **Switching account did the opposite of what the badge implied.** The badge
+  shows what the BRIDGE says is connected; the direction of the switch comes
+  from what the APP is configured for. An install had `account_env: live` while
+  MetaTrader was logged into demo, so the badge read DEMO, the owner pressed it
+  expecting live, and it correctly switched to demo. That disagreement is the
+  half-switched state `services/broker/environment.py` exists to prevent, so
+  it is now **stated** (`environment-mismatch`), the dialog names the account
+  being left as well as the one being taken, and the control re-reads its state
+  on a poll instead of once on mount.
+
+- **Three statements of the halt on one header.** A badge of its own, the
+  trading-status badge, and the Pause button growing into a "Paused" pill — on
+  a bar that already forced the document to 1153px at a 1024px viewport. One
+  survives: `TradingStatusBadge`, because it reads the backend's decision
+  across all **four** mechanisms that can hold an entry where the removed badge
+  knew about two. Its all-clear reads "Trading Active", not "Circuit Breaker
+  OK" — naming one of the four mechanisms in the all-clear made the whole badge
+  look like a breaker readout.
+
+## Hover help
+
+`components/shared/Tooltip.tsx` is the one place hover help is drawn. Half the
+app carried a `title` attribute — the browser's own tooltip, about a second
+late and in no theme — and the other half carried nothing.
+
+- **It is hand-rolled, not `@radix-ui/react-tooltip`**, which is already a
+  dependency and was the obvious choice. Radix positions its content with
+  floating-ui, and under jsdom — where every element measures 0×0 — that
+  settles into a render loop that never stops. The tooltip *does* open; React
+  then never goes idle, so every `findBy*` in the test times out. Checked, not
+  assumed. A component this small is not worth a class of test that cannot be
+  written.
+- **The wrapper is `display: contents`**, so putting one around an input or a
+  table cell changes no layout. That is what made it safe to apply across every
+  panel in one pass. The bubble is portalled to `document.body` and positioned
+  against the trigger's own rectangle, so the header's `overflow-hidden` and a
+  panel's scroll container cannot clip it. It measures the **first element
+  child**, never the wrapper — the wrapper has no box, so measuring it puts
+  every bubble at 0,0.
+- **`<tr>` may only contain `<th>` and `<td>`.** A tooltip around a header cell
+  must wrap the span *inside* it. React says so out loud in the console.
+- **Buttons keep the native `title`.** A disabled button fires no pointer
+  events at all, so a hover wrapper never hears about it — and the reason a
+  control is unavailable is the one piece of hover text that must not go
+  missing. `Button` therefore has both: `title` always, and the themed tooltip
+  only through an explicit `tooltip` prop.
+
+## Adjustable panes
+
+`components/shared/SplitPane.tsx`. The Chart tab put a fixed `20rem` beside the
+candles for a table with seven columns; the split is now the operator's, drawn
+with a real `separator` that arrow keys move.
+
+- The position is remembered per `storageKey` **in `localStorage` only**. It is
+  a view preference: it decides nothing about trading, it differs between a
+  laptop and a desk monitor, and putting it in the shared `config.yaml` would
+  make one machine's window shape the other machine's problem.
+- **This repository's jsdom provides no `localStorage` at all** — tests stub
+  the global, as `ThemeContext`'s do. Every read and write is guarded anyway.
+- The drag uses **mouse** events, not pointer events: the divider only renders
+  at `md` and above where there is a mouse, and jsdom's pointer events carry no
+  `clientX`, so a pointer-based drag is one that cannot be tested.

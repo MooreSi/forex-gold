@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Tooltip } from "./Tooltip";
 import { cn } from "@/lib/cn";
 
 type Variant = "primary" | "ghost" | "danger" | "success";
@@ -15,6 +16,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
    * the caller cannot disable a control and forget to say why.
    */
   disabledReason?: string | null;
+  /** Hover help for an ENABLED button. `disabledReason` covers the other case
+   *  and wins, because why a control is unavailable outranks what it does. */
+  tooltip?: ReactNode;
 }
 
 const VARIANTS: Record<Variant, string> = {
@@ -29,14 +33,22 @@ export function Button({
   className,
   children,
   disabledReason,
+  tooltip,
   disabled,
   ...rest
 }: ButtonProps) {
   const isDisabled = disabled || Boolean(disabledReason);
-  return (
+  const button = (
     <button
       {...rest}
       disabled={isDisabled}
+      // **The browser's own tooltip, not the `Tooltip` component.** A
+      // disabled button fires no pointer events at all, so a hover wrapper
+      // never hears about it -- and the reason a control is unavailable is the
+      // one piece of hover text that must not go missing. Buttons keep the
+      // native one for that reason; `Tooltip` is for the fields and the
+      // indicators, which have no such hole and mostly had no hover text at
+      // all.
       title={disabledReason ?? rest.title}
       aria-describedby={rest["aria-describedby"]}
       className={cn(
@@ -49,4 +61,5 @@ export function Button({
       {children}
     </button>
   );
+  return tooltip && !isDisabled ? <Tooltip label={tooltip}>{button}</Tooltip> : button;
 }

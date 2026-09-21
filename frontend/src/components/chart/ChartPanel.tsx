@@ -1,4 +1,5 @@
 import { PanelShell } from "@/components/shared/PanelShell";
+import { SplitPane } from "@/components/shared/SplitPane";
 import { asArray } from "@/lib/asArray";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatPrice } from "@/components/shared/format";
@@ -8,15 +9,29 @@ import { CandleChart } from "./internal/CandleChart";
 import { ChartToolbar } from "./internal/ChartToolbar";
 import { ChartTradesSection } from "./internal/ChartTradesSection";
 
-/** Thin wrapper: composition and nothing else. State is in the controller
- *  hook, JSX is in internal/. */
+/**
+ * Thin wrapper: composition and nothing else. State is in the controller
+ * hook, JSX is in internal/.
+ *
+ * The chart and the positions table are separated by a divider the operator
+ * can drag, and the table starts with a third of the width rather than a fixed
+ * 20rem. Asked for on 2026-09-21: "reduce the width of the chart and increase
+ * the width of the open positions table so the detail within the open
+ * positions can be viewed easily, may be easier to make the tables adjustable
+ * on the screen". Seven columns in 20rem wrapped every one of them.
+ */
 export function ChartPanel() {
   const c = useChartController();
   const candles = asArray<Candle>(c.candles.data);
   const trades = asArray<Trade>(c.trades.data);
 
   return (
-    <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+    <SplitPane
+      storageKey="chart-positions-split"
+      defaultRightPct={33}
+      minRightPct={18}
+      maxRightPct={65}
+      left={
       <PanelShell
         icon="candlestick"
         title="XAUUSD"
@@ -50,10 +65,12 @@ export function ChartPanel() {
           />
         )}
       </PanelShell>
-
-      <PanelShell title="Open positions" subtitle="drawn on the chart" icon="positions">
-        <ChartTradesSection trades={trades} />
-      </PanelShell>
-    </div>
+      }
+      right={
+        <PanelShell title="Open positions" subtitle="drawn on the chart" icon="positions">
+          <ChartTradesSection trades={trades} />
+        </PanelShell>
+      }
+    />
   );
 }

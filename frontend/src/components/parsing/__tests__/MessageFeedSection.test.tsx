@@ -1,16 +1,23 @@
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+
 import { describe, expect, it } from "vitest";
 import { MessageFeedSection } from "../internal/MessageFeedSection";
 
 /**
- * The stored Telegram feed, one tab per channel.
+ * The stored Telegram feed, one table per channel, all on one page.
  *
  * Two things the owner asked for on 2026-09-19: a table per channel rather
  * than one mixed stream, and a feed that stops looking like it is updating
  * when nothing has arrived. The second was a backend fix (`id` was missing
  * from the SELECT, so React keyed the list on array position) — the part that
  * belongs here is that rows are keyed on that identity and never on position.
+ *
+ * The first shipped as tabs and was corrected on 2026-09-21: "instead of four
+ * tabs there should be three tables on the page each with its own telegram
+ * feed to keep it simple to view on one page". Tabs answer "what is this
+ * channel like" one at a time; side by side answers "what is each channel
+ * doing right now", which is the question somebody watching three signal
+ * sources has.
  */
 function msg(id: number, over: Record<string, unknown> = {}) {
   return {
@@ -22,54 +29,61 @@ function msg(id: number, over: Record<string, unknown> = {}) {
   };
 }
 
-describe("grouping by channel", () => {
-  it("offers a tab per channel, plus everything", async () => {
-    render(<MessageFeedSection total={3} messages={[
-      msg(1), msg(2, { group_name: "NoisyChannel" }), msg(3),
-    ]} />);
+describe("a table per channel", () => {
+  const three = [msg(1), msg(2, { group_name: "NoisyChannel" }), msg(3)];
 
-    expect(screen.getByRole("tab", { name: /All channels/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /GoldSignals/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /NoisyChannel/ })).toBeInTheDocument();
+  it("gives every channel its own table", async () => {
+    render(<MessageFeedSection total={3} messages={three} />);
+
+    expect(screen.getByTestId("feed-channel-GoldSignals")).toBeInTheDocument();
+    expect(screen.getByTestId("feed-channel-NoisyChannel")).toBeInTheDocument();
   });
 
-  it("counts the messages in each channel's tab", async () => {
+  it("shows them all at once, with nothing behind a tab", async () => {
+    // The change asked for. Nothing on this page should need a click to read.
+    render(<MessageFeedSection total={3} messages={three} />);
+
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.getByText("message 1")).toBeInTheDocument();
+    expect(screen.getByText("message 2")).toBeInTheDocument();
+  });
+
+  it("counts each channel's messages", async () => {
     // Which channel is noisy is the question this view is for.
-    render(<MessageFeedSection total={3} messages={[
-      msg(1), msg(2, { group_name: "NoisyChannel" }), msg(3),
-    ]} />);
+    render(<MessageFeedSection total={3} messages={three} />);
 
-    expect(screen.getByRole("tab", { name: /GoldSignals/ })).toHaveTextContent("2");
-    expect(screen.getByRole("tab", { name: /NoisyChannel/ })).toHaveTextContent("1");
+    expect(screen.getByTestId("feed-channel-GoldSignals")).toHaveTextContent("2");
+    expect(screen.getByTestId("feed-channel-NoisyChannel")).toHaveTextContent("1");
   });
 
-  it("shows only that channel's messages once one is chosen", async () => {
-    render(<MessageFeedSection total={3} messages={[
-      msg(1), msg(2, { group_name: "NoisyChannel" }), msg(3),
-    ]} />);
+  it("keeps each channel's messages in its own table", async () => {
+    render(<MessageFeedSection total={3} messages={three} />);
+    const noisy = screen.getByTestId("feed-table-NoisyChannel");
 
-    await userEvent.click(screen.getByRole("tab", { name: /NoisyChannel/ }));
-    const table = screen.getByTestId("feed-table");
-
-    expect(within(table).getByText("message 2")).toBeInTheDocument();
-    expect(within(table).queryByText("message 1")).not.toBeInTheDocument();
+    expect(within(noisy).getByText("message 2")).toBeInTheDocument();
+    expect(within(noisy).queryByText("message 1")).not.toBeInTheDocument();
   });
 
-  it("opens on everything, so nothing is hidden by default", async () => {
-    render(<MessageFeedSection total={2} messages={[
-      msg(1), msg(2, { group_name: "NoisyChannel" }),
-    ]} />);
-    const table = screen.getByTestId("feed-table");
+  it("puts the busiest channel first", async () => {
+    render(<MessageFeedSection total={3} messages={three} />);
+    const headings = screen.getAllByRole("heading", { level: 3 });
 
-    expect(within(table).getByText("message 1")).toBeInTheDocument();
-    expect(within(table).getByText("message 2")).toBeInTheDocument();
+    expect(headings[0]).toHaveTextContent("GoldSignals");
   });
 
   it("puts a message with no channel under one honest name", async () => {
     // Not blank, and not silently merged into whichever channel came first.
     render(<MessageFeedSection total={1} messages={[msg(1, { group_name: null })]} />);
 
-    expect(screen.getByRole("tab", { name: /unknown/i })).toBeInTheDocument();
+    expect(screen.getByTestId("feed-channel-unknown channel")).toBeInTheDocument();
+  });
+
+  it("does not repeat the channel on every row", async () => {
+    // The table is headed by its channel. Repeating it per row cost width the
+    // message text needed once the tables sit side by side.
+    render(<MessageFeedSection total={1} messages={[msg(1)]} />);
+
+    expect(screen.getByTestId("feed-row-1")).not.toHaveTextContent("GoldSignals");
   });
 });
 

@@ -15,7 +15,7 @@ from backend.src.api.deps import engine as engine_dep
 from backend.src.api.schemas.chart import ChartTrade
 from backend.src.api.errors import Refusal
 from backend.src.api.schemas.trading import (
-    ChannelStrategyOverride, HaltState, PauseWrite, RiskSettingsUpdate,
+    ChannelStrategyOverride, HaltState, PauseWrite, RiskSettingsUpdate, SignalOut,
 )
 from backend.src.controllers import trading_controller as trading_ctl
 
@@ -94,11 +94,18 @@ async def open_trades(eng: Any = Depends(engine_dep)) -> list[dict]:
     return await trading_ctl.get_open_trades(eng)
 
 
-@router.get("/signals")
+@router.get("/signals", response_model=list[SignalOut])
 async def signals(
     status: Optional[str] = Query(None),
     eng: Any = Depends(engine_dep),
 ) -> list[dict]:
+    """Signals for the Signals table.
+
+    Through `SignalOut`, which fills the short names the table reads from the
+    real `vantage_signals` columns. Until 2026-09-21 this route had no model at
+    all, so every cell but Side and Status was an em dash -- the same gap the
+    Positions table had, found the same day.
+    """
     return await trading_ctl.get_signals(eng, status)
 
 

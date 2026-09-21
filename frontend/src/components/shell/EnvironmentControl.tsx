@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { DialogShell } from "@/components/shared/DialogShell";
 import { Button } from "@/components/shared/Button";
+import { Notice } from "@/components/shared/Notice";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { AccountBadge } from "./AccountBadge";
 
 interface Account {
@@ -22,6 +25,11 @@ interface EnvironmentControlProps {
   account?: Record<string, unknown> | null;
 }
 
+/** How often the configured environment is re-read. */
+const POLL_MS = 15_000;
+
+const NAME: Record<string, string> = { demo: "Demo", live: "Live" };
+
 /**
  * Demo or live: which account the whole app is pointed at.
  *
@@ -34,15 +42,25 @@ interface EnvironmentControlProps {
  * what happens on whichever account is selected; this decides whether that
  * account holds real money.
  *
- * Switching to live asks twice, and the second ask names the account — the
- * login and the server — because "are you sure?" is a question people learn to
- * click through and "switch to 900123 on Vantage-Live?" is one they read.
- * Switching back to demo is the safe direction and does not: asking for that
- * too would train the habit this guard exists to prevent.
+ * Switching to live asks first, and the question names the account — the login
+ * and the server — because "are you sure?" is a question people learn to click
+ * through and "switch to 900123 on Vantage-Live?" is one they read. Switching
+ * back to demo is the safe direction and is asked more quietly: dressing it up
+ * the same way would train the habit this guard exists to prevent.
  *
- * The app restarts afterwards, which the dialog says before it happens. Every
- * cached handle — the runtime, the bridge, the engines — was built against the
- * old account.
+ * **The badge and the switch answer to different sources, and they can
+ * disagree.** The badge shows what the BRIDGE says is connected; the direction
+ * of the switch comes from what the APP is configured for. On 2026-09-21 an
+ * install had `account_env: live` while MetaTrader was still logged into demo:
+ * the badge read DEMO, the owner pressed it expecting live, and the control
+ * correctly switched to demo — which looked exactly like doing nothing. That
+ * disagreement is the half-switched state `services/broker/environment.py`
+ * exists to prevent, so it is now said out loud, and the dialog names the
+ * account being LEFT as well as the one being taken.
+ *
+ * The state is re-read on a poll rather than once on mount, because it changes
+ * under this component: a switch, or the other paired node taking over, leaves
+ * a button offering the direction that was right ten minutes ago.
  */
 export function EnvironmentControl({ account = null }: EnvironmentControlProps) {
   const [state, setState] = useState<EnvState | null>(null);
@@ -50,24 +68,36 @@ export function EnvironmentControl({ account = null }: EnvironmentControlProps) 
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        setState(await api.get<EnvState>("/api/settings/environment"));
-      } catch {
-        // A header control that cannot read its own state renders nothing
-        // rather than a wrong answer. "DEMO" on a live account is the one
-        // outcome worth avoiding at any cost.
-        setState(null);
-      }
-    })();
+  const read = useCallback(async () => {
+    try {
+      setState(await api.get<EnvState>("/api/settings/environment"));
+    } catch {
+      // A header control that cannot read its own state renders nothing
+      // rather than a wrong answer. "DEMO" on a live account is the one
+      // outcome worth avoiding at any cost.
+      setState(null);
+    }
   }, []);
+
+  useEffect(() => {
+    void read();
+    const id = setInterval(() => void read(), POLL_MS);
+    return () => clearInterval(id);
+  }, [read]);
+
+  const dismiss = useCallback(() => setOutcome(null), []);
 
   if (!state) return null;
 
   const live = state.current === "live";
   const target = live ? "demo" : "live";
   const targetAccount = state.environments?.[target];
+
+  // What the bridge says, against what this app is configured for. `is_demo`
+  // is only an opinion when the bridge has answered at all.
+  const bridgeIsDemo = account?.["is_demo"];
+  const mismatch =
+    (bridgeIsDemo === true && live) || (bridgeIsDemo === false && !live);
 
   async function apply() {
     setBusy(true);
@@ -82,6 +112,7 @@ export function EnvironmentControl({ account = null }: EnvironmentControlProps) 
       setAsking(null);
     } finally {
       setBusy(false);
+      void read();
     }
   }
 
@@ -103,21 +134,47 @@ export function EnvironmentControl({ account = null }: EnvironmentControlProps) 
               + "with the project's own .venv, which has the keychain library."
             : !targetAccount?.configured
               ? `No ${target} account is configured. Add it under Settings > MT5.`
-              : live
-                ? "This app is pointed at the LIVE account. Click to switch back to demo."
-                : "This app is pointed at the demo account. Click to switch to live."
+              // The direction, in the words of the CONFIG, not the badge. The
+              // badge can be showing the other account -- see the mismatch
+              // marker beside it.
+              : `This app is configured for the ${NAME[state.current]} account. `
+                + `Click to switch it to ${NAME[target]}.`
         }
         className="rounded transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <AccountBadge account={account} configured={state.current} />
       </button>
 
+      {mismatch && (
+        <Tooltip
+          label={
+            `This app is configured for the ${NAME[state.current]} account, but `
+            + `MetaTrader 5 is logged into the ${NAME[live ? "demo" : "live"]} one. `
+            + "Log MT5 into the configured account, or switch the app to match it. "
+            + "Until they agree, the badge and the switch are describing different "
+            + "accounts."
+          }
+        >
+          <span
+            data-testid="environment-mismatch"
+            title={
+              `This app is configured for the ${NAME[state.current]} account, but `
+              + `MetaTrader 5 is logged into the ${NAME[live ? "demo" : "live"]} one.`
+            }
+            className="flex shrink-0 items-center gap-1 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold text-warning"
+          >
+            <TriangleAlert size={11} aria-hidden />
+            <span className="hidden lg:inline">MT5 ≠ {NAME[state.current]}</span>
+          </span>
+        </Tooltip>
+      )}
+
       <DialogShell
         open={asking !== null}
         onOpenChange={(v) => setAsking(v ? target : null)}
         title={target === "live" ? "Switch to the LIVE account?" : "Switch back to demo?"}
       >
-        <div className="space-y-3 text-xs text-ink-2">
+        <div data-testid="environment-dialog" className="space-y-3 text-xs text-ink-2">
           {target === "live" ? (
             <p className="rounded border border-loss/40 bg-loss/10 px-2 py-1.5 text-loss">
               This points every engine, every order and every number in this app
@@ -127,14 +184,27 @@ export function EnvironmentControl({ account = null }: EnvironmentControlProps) 
             <p>Trading, history and every number go back to the demo account.</p>
           )}
 
+          {/* Both sides, always. "Switch to demo" on a badge reading DEMO is
+              the sentence that made this look like it had done nothing. */}
           <p className="text-ink-3">
-            Account <span className="num text-ink-2">{targetAccount?.login}</span> on{" "}
+            Away from the <strong>{NAME[state.current]}</strong> account this app
+            is configured for, to account{" "}
+            <span className="num text-ink-2">{targetAccount?.login}</span> on{" "}
             <span className="num text-ink-2">{targetAccount?.server}</span>. Make sure
             MetaTrader 5 is logged into that account.
           </p>
+          {mismatch && (
+            <p className="rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-warning">
+              MetaTrader 5 is currently logged into the{" "}
+              {NAME[live ? "demo" : "live"]} account, which is not the one this
+              app is configured for. Check which account you mean before
+              switching.
+            </p>
+          )}
           <p className="text-ink-3">
             The app restarts to apply it — every cached handle was built against
-            the account it is leaving.
+            the account it is leaving. This page reloads itself when it comes
+            back.
           </p>
 
           <div className="flex justify-end gap-2 pt-1">
@@ -149,12 +219,9 @@ export function EnvironmentControl({ account = null }: EnvironmentControlProps) 
       </DialogShell>
 
       {outcome && (
-        <span
-          role={outcome.ok ? "status" : "alert"}
-          className={`max-w-sm text-[11px] ${outcome.ok ? "text-profit" : "text-loss"}`}
-        >
+        <Notice tone={outcome.ok ? "ok" : "bad"} onDismiss={dismiss}>
           {outcome.text}
-        </span>
+        </Notice>
       )}
     </>
   );

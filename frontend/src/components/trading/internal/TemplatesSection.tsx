@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Plug, PlugZap, Search } from "lucide-react";
 import { api } from "@/api/client";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { TemplateEditor, type SchemaField } from "./TemplateEditor";
+import { TemplateTransfer } from "./TemplateTransfer";
 
 interface TemplatesSectionProps {
   templates: Record<string, unknown>[];
@@ -14,6 +16,8 @@ interface TemplatesSectionProps {
   onSave: (name: string, values: Record<string, unknown>) => Promise<{ pushed: boolean }>;
   onDelete: (name: string) => void;
   onInstallBuiltin: () => void;
+  /** Reload the list after an import wrote something. */
+  onImported: () => void;
 }
 
 /**
@@ -34,6 +38,7 @@ interface TemplatesSectionProps {
  */
 export function TemplatesSection({
   templates, eaConnected, eaLastSeen, onSave, onDelete, onInstallBuiltin,
+  onImported,
 }: TemplatesSectionProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -77,6 +82,12 @@ export function TemplatesSection({
         </Button>
       </div>
 
+      {/* Import/Export sit above the list, not beside a selected template:
+          Export is "all of them" and Import may add several, so neither is
+          an operation on the one that happens to be open. Delete stays at
+          the bottom, with the template it deletes named on the button. */}
+      <TemplateTransfer onImported={onImported} />
+
       {templates.length === 0 ? (
         <EmptyState
           title="No EA templates saved"
@@ -87,13 +98,15 @@ export function TemplatesSection({
           <div className="flex min-h-0 flex-col rounded-lg border border-line bg-surface-1">
             <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-2 py-1.5">
               <Search size={12} className="text-ink-3" aria-hidden />
-              <input
-                aria-label="Filter templates"
-                placeholder="Filter templates"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                className="w-full bg-transparent text-[11px] text-ink-1 outline-none"
-              />
+              <Tooltip label="Narrow the list to templates whose name contains what you type. It only hides rows — nothing is deleted and nothing stops being used by the EA.">
+                <input
+                  aria-label="Filter templates"
+                  placeholder="Filter templates"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="w-full bg-transparent text-[11px] text-ink-1 outline-none"
+                />
+              </Tooltip>
             </div>
             <ul className="min-h-0 flex-1 overflow-auto p-1">
               {shown.map((t, i) => {

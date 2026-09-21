@@ -1,8 +1,6 @@
-import { useMemo, useState } from "react";
-import * as Tabs from "@radix-ui/react-tabs";
+import { useMemo } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { cn } from "@/lib/cn";
 
 interface MessageFeedSectionProps {
   messages: Record<string, unknown>[];
@@ -10,11 +8,20 @@ interface MessageFeedSectionProps {
 }
 
 /**
- * The stored Telegram feed, one table per channel.
+ * The stored Telegram feed: one table per channel, all on one page.
  *
- * Asked for on 2026-09-19: "separate tables/tabs for each channel for ease of
- * viewing". One mixed stream answers "what arrived"; it does not answer "what
- * is this channel like", which is the question anybody scrolling this has.
+ * Asked for on 2026-09-19 as tabs ("separate tables/tabs for each channel for
+ * ease of viewing"), and corrected on 2026-09-21 once they existed: "instead
+ * of four tabs there should be three tables on the page each with its own
+ * telegram feed to keep it simple to view on one page". Tabs answer "what is
+ * this channel like" one channel at a time; side by side answers "what is each
+ * channel doing right now", which is the question somebody watching three
+ * signal sources actually has. There is no All tab any more either -- the
+ * columns together ARE the whole feed.
+ *
+ * The channel column is gone with the tabs. Each table is headed by its own
+ * channel, so repeating it on every row cost width that the message text
+ * needed.
  *
  * **Rows are keyed on the message id, never on position.** That is the other
  * half of the owner's report that the feed "appears to be updating when there
@@ -28,7 +35,6 @@ interface MessageFeedSectionProps {
  * first.
  */
 const NO_CHANNEL = "unknown channel";
-const ALL = "__all__";
 
 function channelOf(row: Record<string, unknown>): string {
   const raw = row["group_name"] ?? row["channel"];
@@ -77,9 +83,6 @@ function Row({ row }: { row: Record<string, unknown> }) {
       <td className="num whitespace-nowrap px-2 py-1.5 text-[10px] text-ink-3">
         {stamp(row)}
       </td>
-      <td className="whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-2">
-        {channelOf(row)}
-      </td>
       <td className="px-2 py-1.5 text-xs text-ink-1">
         <span className="whitespace-pre-wrap">{text}</span>
         {media && (
@@ -94,16 +97,44 @@ function Row({ row }: { row: Record<string, unknown> }) {
   );
 }
 
-export function MessageFeedSection({ messages, total }: MessageFeedSectionProps) {
-  const [tab, setTab] = useState(ALL);
+function ChannelFeed({ name, rows }: { name: string; rows: Record<string, unknown>[] }) {
+  return (
+    <section
+      data-testid={`feed-channel-${name}`}
+      className="flex min-h-0 flex-col rounded border border-line bg-surface-1"
+    >
+      <header className="flex shrink-0 items-baseline justify-between gap-2 border-b border-line px-2 py-1.5">
+        <h3 className="truncate text-[11px] font-semibold text-ink-1" title={name}>
+          {name}
+        </h3>
+        <span className="num shrink-0 text-[10px] text-ink-3">{rows.length}</span>
+      </header>
+      {/* Each column scrolls on its own. One tall page of three stacked feeds
+          means scrolling past the whole of the first to reach the third. */}
+      <div className="max-h-[28rem] min-h-0 overflow-auto">
+        <table data-testid={`feed-table-${name}`} className="w-full text-left">
+          <tbody>
+            {rows.map((m, i) => (
+              <Row key={String(m["id"] ?? `pos-${i}`)} row={m} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
+export function MessageFeedSection({ messages, total }: MessageFeedSectionProps) {
   const channels = useMemo(() => {
-    const counts = new Map<string, number>();
+    const grouped = new Map<string, Record<string, unknown>[]>();
     for (const m of messages) {
       const c = channelOf(m);
-      counts.set(c, (counts.get(c) ?? 0) + 1);
+      const bucket = grouped.get(c);
+      if (bucket) bucket.push(m);
+      else grouped.set(c, [m]);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    // Busiest first: which channel is noisy is the question this view is for.
+    return [...grouped.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [messages]);
 
   if (messages.length === 0) {
@@ -115,45 +146,24 @@ export function MessageFeedSection({ messages, total }: MessageFeedSectionProps)
     );
   }
 
-  const shown = tab === ALL ? messages : messages.filter((m) => channelOf(m) === tab);
-
   return (
     <div className="flex min-h-0 flex-col">
       <p data-testid="feed-count" className="mb-2 text-[11px] text-ink-3">
-        showing <span className="num">{shown.length}</span> of{" "}
-        <span className="num">{total}</span> stored
+        showing <span className="num">{messages.length}</span> of{" "}
+        <span className="num">{total}</span> stored, across{" "}
+        <span className="num">{channels.length}</span>{" "}
+        channel{channels.length === 1 ? "" : "s"}
       </p>
 
-      <Tabs.Root value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
-        <Tabs.List className="mb-2 flex flex-wrap gap-1 border-b border-line">
-          <Tabs.Trigger value={ALL} className={TRIGGER}>
-            All channels
-            <span className="num ml-1.5 text-ink-3">{messages.length}</span>
-          </Tabs.Trigger>
-          {channels.map(([name, count]) => (
-            <Tabs.Trigger key={name} value={name} className={TRIGGER}>
-              {name}
-              <span className="num ml-1.5 text-ink-3">{count}</span>
-            </Tabs.Trigger>
-          ))}
-        </Tabs.List>
-
-        <div className="min-h-0 overflow-auto">
-          <table data-testid="feed-table" className="w-full text-left">
-            <tbody>
-              {shown.map((m, i) => (
-                <Row key={String(m["id"] ?? `pos-${i}`)} row={m} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Tabs.Root>
+      {/* Side by side while there is room, stacked when there is not. Not a
+          fixed three columns: the number of channels is whatever the reader
+          has been given, and a hardcoded three would either squeeze a fourth
+          or leave a gap. */}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {channels.map(([name, rows]) => (
+          <ChannelFeed key={name} name={name} rows={rows} />
+        ))}
+      </div>
     </div>
   );
 }
-
-const TRIGGER = cn(
-  "-mb-px whitespace-nowrap border-b-2 px-2.5 py-1 text-[11px] transition-colors",
-  "border-transparent text-ink-3 hover:text-ink-2",
-  "data-[state=active]:border-accent data-[state=active]:text-ink-1",
-);

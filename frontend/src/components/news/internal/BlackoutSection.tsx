@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import type { BlackoutSettings } from "@/api/types";
 
 interface BlackoutSectionProps {
@@ -54,17 +55,20 @@ export function BlackoutSection({ settings, onSave }: BlackoutSectionProps) {
   return (
     <div className="flex flex-wrap items-end gap-3">
       <label className="flex items-center gap-2 text-xs text-ink-2">
-        <input
-          type="checkbox"
-          checked={enabled}
-          aria-label="Hold automated entries around high-impact news"
-          onChange={(e) => setEnabled(e.target.checked)}
-          className="accent-accent"
-        />
+        <Tooltip label="The master switch for the news blackout. Off, the calendar is still shown but nothing is held around a release. Manual orders are never held either way.">
+          <input
+            type="checkbox"
+            checked={enabled}
+            aria-label="Hold automated entries around high-impact news"
+            onChange={(e) => setEnabled(e.target.checked)}
+            className="accent-accent"
+          />
+        </Tooltip>
         Hold automated entries around high-impact news
       </label>
       <label className="text-xs text-ink-2">
         Blackout on
+        <Tooltip label="Which releases trigger a blackout. Adding medium-impact events catches far more of the calendar, so the engines sit out a lot more of the day.">
         <select
           aria-label="Blackout on"
           value={impact}
@@ -74,26 +78,31 @@ export function BlackoutSection({ settings, onSave }: BlackoutSectionProps) {
           <option value="high">High impact only</option>
           <option value="high_medium">High + Medium impact</option>
         </select>
+        </Tooltip>
       </label>
       <label className="text-xs text-ink-2">
         Minutes before
-        <input
-          value={before}
-          inputMode="numeric"
-          aria-label="Minutes before"
-          onChange={(e) => setBefore(e.target.value)}
-          className="num ml-2 w-16 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-        />
+        <Tooltip label="How long before a release the hold starts. The calendar clamps this, so what you type and what the governor uses are not always the same number — the box shows what was stored.">
+          <input
+            value={before}
+            inputMode="numeric"
+            aria-label="Minutes before"
+            onChange={(e) => setBefore(e.target.value)}
+            className="num ml-2 w-16 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+          />
+        </Tooltip>
       </label>
       <label className="text-xs text-ink-2">
         Minutes after
-        <input
-          value={after}
-          inputMode="numeric"
-          aria-label="Minutes after"
-          onChange={(e) => setAfter(e.target.value)}
-          className="num ml-2 w-16 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-        />
+        <Tooltip label="How long after a release the hold lasts. This one lifts itself — the trading-status badge counts it down rather than offering a Resume.">
+          <input
+            value={after}
+            inputMode="numeric"
+            aria-label="Minutes after"
+            onChange={(e) => setAfter(e.target.value)}
+            className="num ml-2 w-16 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+          />
+        </Tooltip>
       </label>
       <Button onClick={() => void save()} disabled={saving}>
         {saving ? "Saving…" : "Save"}

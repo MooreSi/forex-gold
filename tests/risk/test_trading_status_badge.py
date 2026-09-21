@@ -6,7 +6,7 @@ showed nothing at all while entries were being held.
 
 **Four states, in a fixed order, and the order is the design.** Each of the
 lower three is a true statement that would be misleading on its own, which
-is why "Circuit Breaker OK" is last and only reachable when nothing else
+is why the all-clear is last and only reachable when nothing else
 applies:
 
 1. **Halted** -- the circuit breaker tripped, or a manual pause is in force.
@@ -19,7 +19,7 @@ applies:
    lifts itself.
 4. **OK.**
 
-Getting this wrong is not cosmetic: a badge reading "Circuit Breaker OK"
+Getting this wrong is not cosmetic: a badge reading "Trading Active"
 while every entry is being held is a false all-clear, which is the exact
 complaint that put the news box and the profit-target state into the
 NiceGUI header in the first place.
@@ -63,7 +63,7 @@ def test_a_clear_system_reports_ok(lab):
     out = ts.badge()
 
     assert out["state"] == "ok"
-    assert out["label"] == "Circuit Breaker OK"
+    assert out["label"] == "Trading Active"
     assert out["can_resume"] is False
 
 
@@ -154,7 +154,7 @@ class TestTheProfitTarget:
 class TestANewsBlackout:
 
     def test_it_takes_the_badge_over_the_all_clear(self, lab):
-        """Entries ARE being held, so "Circuit Breaker OK" would be true and
+        """Entries ARE being held, so "Trading Active" would be true and
         misleading at the same time."""
         lab["news"] = {"paused": True, "label": "NFP", "detail": "Non-farm payrolls",
                        "resume_ts": _NOW + 300, "mins_remaining": 5}

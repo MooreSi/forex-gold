@@ -7,7 +7,7 @@ the day. Until now the only thing that lifted it was the clock.
 
 Two things were missing and are added here (owner, 2026-09-16):
 
-  * The header said "Circuit Breaker OK" while this gate was holding every
+  * The header said the all-clear while this gate was holding every
     order -- the same false all-clear the news blackout box was added to fix
     on 2026-09-04, for a gate that lasts the whole day rather than minutes.
   * There was no way to say "I know, carry on". A target that cannot be

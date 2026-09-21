@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Direction = Literal["BUY", "SELL"]
 
@@ -96,3 +96,61 @@ class PauseWrite(BaseModel):
 
     hours: float | None = None
     until: float | None = None
+
+
+# Short name -> the `vantage_signals` column it is filled from. Module level
+# rather than a class attribute, for the same reason as `_TRADE_COLUMN_FOR` in
+# schemas/chart.py: a leading underscore inside a pydantic model makes it a
+# private attribute, not a dict.
+_SIGNAL_COLUMN_FOR = {
+    "id": "signal_id", "source": "source_name", "entry": "entry_low",
+    "sl": "stop_loss", "tp": "tp1", "lots": "lot_size",
+}
+
+
+class SignalOut(BaseModel):
+    """A signal as the Signals table draws it.
+
+    **The short names are filled from the real columns, not renamed.** The rows
+    are `vantage_signals` verbatim and the browser was reading `source` and
+    `entry` -- neither of which is a column -- so every cell but Side and
+    Status rendered an em dash and the table was, in the owner's words, in need
+    of "populating with details" (2026-09-21). Exactly the shape of the
+    Positions table's bug the same day, and fixed the same way.
+
+    They are COPIED, never moved. `get_signals` also feeds the signal editor
+    and the AI commentary panel, which read the long names; a validation alias
+    would consume the original and break both to fix this one.
+
+    `entry` is the LOW end of the band, and `entry_high` travels under its own
+    name, because a signal quotes a range and a single number implies a
+    precision it does not have.
+
+    `extra="allow"` for the same reason as `ChartTrade`: this layer is not the
+    place to decide which of a signal's twenty columns the UI may see.
+    """
+    model_config = {"extra": "allow"}
+
+    id: Optional[str] = None
+    source: Optional[str] = None
+    direction: Optional[str] = None
+    entry: Optional[float] = None
+    entry_high: Optional[float] = None
+    sl: Optional[float] = None
+    # One of up to eight. The rest travel under their own names.
+    tp: Optional[float] = None
+    lots: Optional[float] = None
+    status: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_short_names(cls, data):
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        for short, column in _SIGNAL_COLUMN_FOR.items():
+            # Only when the short name is genuinely absent or null: a caller
+            # that already speaks the short names is answering for itself.
+            if out.get(short) is None and out.get(column) is not None:
+                out[short] = out[column]
+        return out

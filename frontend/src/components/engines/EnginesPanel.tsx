@@ -14,9 +14,12 @@ import { ModelSection } from "./internal/ModelSection";
 import { LearningChartSection } from "./internal/LearningChartSection";
 import { ShadowSection } from "./internal/ShadowSection";
 
+// Reversal first, and the one the page opens on. Owner, 2026-09-21: "this is
+// the main one" -- it is the engine that trades, and the one whose model,
+// switches and ledger are read daily. Breakout keeps its own tab, unchanged.
 const SUB_TABS = [
-  { id: "breakout", label: "Breakout engine" },
   { id: "reversal", label: "Reversal engine" },
+  { id: "breakout", label: "Breakout engine" },
 ];
 
 export function EnginesPanel() {
@@ -58,7 +61,7 @@ export function EnginesPanel() {
               past the reversal model, its switches and its ledger. Start and
               Stop stay ABOVE the tabs: stopping an engine should not mean
               finding the right tab first. */}
-          <Tabs.Root defaultValue="breakout" className="flex min-h-0 flex-1 flex-col">
+          <Tabs.Root defaultValue="reversal" className="flex min-h-0 flex-1 flex-col">
             <Tabs.List className="mb-3 flex gap-1 border-b border-line">
               {SUB_TABS.map((t) => (
                 <Tabs.Trigger

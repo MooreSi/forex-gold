@@ -23,7 +23,8 @@ __all__ = [
     "scorecard", "recompute", "performance_map", "set_paused",
     "all_strategy_settings", "strategy_rec", "strategy_recs",
     "set_strategy_override",
-    "parser_config", "save_parser_config", "save_learned_rule",
+    "parser_config", "save_parser_config", "set_parser_enabled",
+    "save_learned_rule",
     "pending_unrecognised", "update_unrecognised",
 ]
 
@@ -94,6 +95,34 @@ def parser_config(channel_name: str) -> Optional[dict]:
 
 def save_parser_config(*args, **kwargs):
     return _parser.save_channel_parser_config(*args, **kwargs)
+
+
+def set_parser_enabled(channel_name: str, enabled: bool) -> dict:
+    """Turn one channel's parser on or off, carrying the rest of its row.
+
+    Here rather than in the router, which had been calling the repo's
+    six-argument writer with two -- a TypeError on every click, so the Parsing
+    -> Channels checkboxes did nothing at all until 2026-09-21.
+
+    **The other five columns are read back and re-written, not defaulted.**
+    `parser_format` decides how that channel's messages are READ; resetting it
+    while switching the channel off would be a silent change to a parsing rule
+    behind a checkbox that claims to do one thing.
+
+    A channel with no row yet gets one: the list on that tab is built from
+    stored messages, so a channel can be visible and switchable before anything
+    has ever configured it.
+    """
+    existing = _parser.get_channel_parser_config(channel_name) or {}
+    _parser.save_channel_parser_config(
+        channel_name,
+        str(existing.get("parser_format") or ""),
+        str(existing.get("signal_prefix") or ""),
+        bool(existing.get("instant_entry_enabled")),
+        bool(enabled),
+        str(existing.get("notes") or ""),
+    )
+    return _parser.get_channel_parser_config(channel_name) or {}
 
 
 def save_learned_rule(*args, **kwargs):

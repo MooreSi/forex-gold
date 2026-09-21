@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from backend.src.api.errors import Refusal
 from backend.src.controllers import broker_controller as broker_ctl
@@ -41,6 +41,46 @@ async def schema() -> dict:
     "schema" and answers 404.
     """
     return {"fields": broker_ctl.ea_template_schema()}
+
+
+@router.get("/export")
+async def export_templates(names: list[str] = Query(default=[])) -> dict:
+    """The saved templates as a file the operator can keep or share.
+
+    Declared BEFORE `/{name}` for the same reason `/schema` is: FastAPI
+    matches in definition order, so the other way round this reads as a
+    request for a template called "export" and answers 404.
+
+    No `names` means every template -- which is what the button does. The
+    service reads `None` as "all" and an empty list as "none", so the empty
+    query has to become None here or Export All exports nothing.
+    """
+    return {
+        "content": broker_ctl.export_templates(list(names) or None),
+        "filename": broker_ctl.export_filename(),
+    }
+
+
+@router.post("/import")
+async def import_templates(body: dict) -> dict:
+    """Add a file's templates to this install.
+
+    `overwrite` defaults to false, and stays that way here: a shared file must
+    never silently replace a locally tuned template. The service validates
+    every template in the file before writing any of them, so a file with one
+    bad entry imports nothing rather than half of itself -- and a bad file is
+    the operator picking the wrong one, which is a refusal that names the
+    problem, not a 500.
+    """
+    content = str(body.get("content") or "")
+    if not content.strip():
+        raise Refusal("That file is empty — there is nothing to import.")
+    try:
+        result = broker_ctl.import_templates(
+            content, overwrite=bool(body.get("overwrite")))
+    except ValueError as exc:
+        raise Refusal(str(exc)) from exc
+    return {**result, "templates": broker_ctl.list_ea_templates()}
 
 
 @router.get("/{name}")

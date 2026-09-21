@@ -1,3 +1,4 @@
+import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import type { usePlaceLimitOrderController } from "../hooks/usePlaceLimitOrderController";
 
@@ -12,6 +13,9 @@ function Field({
   return (
     <label className="block">
       <span className="text-xs text-ink-2">{label}</span>
+      {/* The hint is BOTH under the field and on hover: under it for somebody
+          reading the form, on hover for somebody already typing in the box. */}
+      <Tooltip label={hint}>
       <input
         aria-label={label}
         value={value}
@@ -20,6 +24,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         className="num mt-1 w-full rounded border border-line bg-surface-1 px-2 py-1.5 text-sm text-ink-1 placeholder:text-ink-3"
       />
+      </Tooltip>
       {hint && <span className="mt-1 block text-[11px] text-ink-3">{hint}</span>}
     </label>
   );
@@ -70,15 +75,21 @@ export function LimitOrderForm({ controller: c }: { controller: Controller }) {
         <span className="text-xs text-ink-2">Targets</span>
         <div className="mt-1 grid grid-cols-4 gap-2">
           {c.targets.map((value, i) => (
-            <input
+            <Tooltip
               key={i}
-              aria-label={`TP${i + 1}`}
-              value={value}
-              inputMode="decimal"
-              placeholder={`TP${i + 1}`}
-              onChange={(e) => c.setTarget(i, e.target.value)}
-              className="num rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1 placeholder:text-ink-3"
-            />
+              label={i === 0
+                ? "The first take-profit. A scale-out strategy closes part of the position here and manages the rest."
+                : `Take-profit ${i + 1}. Optional — leave it blank and the ladder simply stops at the level before it. Blank is not the same as 0, which is a real price.`}
+            >
+              <input
+                aria-label={`TP${i + 1}`}
+                value={value}
+                inputMode="decimal"
+                placeholder={`TP${i + 1}`}
+                onChange={(e) => c.setTarget(i, e.target.value)}
+                className="num rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1 placeholder:text-ink-3"
+              />
+            </Tooltip>
           ))}
         </div>
         <span className="mt-1 block text-[11px] text-ink-3">

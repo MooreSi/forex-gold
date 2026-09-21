@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { asArray } from "@/lib/asArray";
 import { useSettingsResource } from "../hooks/useSettingsResource";
@@ -87,6 +88,7 @@ export function AiTab() {
         <p className="mb-2 text-[11px] text-ink-3">
           Which service answers. Each keeps its own key and model below.
         </p>
+        <Tooltip label="Which service answers for trade commentary, the Analysis tab and the strategy recommendations. Each provider keeps its own key and model, so switching does not lose the other one's settings.">
         <select
           aria-label="AI provider"
           value={provider}
@@ -97,6 +99,7 @@ export function AiTab() {
             <option key={p} value={p}>{LABEL[p] ?? p}</option>
           ))}
         </select>
+        </Tooltip>
       </section>
 
       <section data-testid="ai-provider-card" className="rounded border border-line p-3">
@@ -105,13 +108,15 @@ export function AiTab() {
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
           <label className="block text-xs text-ink-2">
             API key
-            <input
-              aria-label="API key"
-              type="password"
-              value={draftKey}
-              onChange={(e) => setDraftKey(e.target.value)}
-              className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-            />
+            <Tooltip label="This provider's key. It is stored encrypted and never shown again, so the box is blank even when one is set — leaving it blank keeps the stored key.">
+              <input
+                aria-label="API key"
+                type="password"
+                value={draftKey}
+                onChange={(e) => setDraftKey(e.target.value)}
+                className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+              />
+            </Tooltip>
             <span className="mt-0.5 block text-[10px] text-ink-3">
               {keyStored ? "stored; leave blank to keep it" : "not set"}
             </span>
@@ -119,6 +124,7 @@ export function AiTab() {
 
           <label className="block text-xs text-ink-2">
             Model
+            <Tooltip label="Which model this provider answers with. A bigger model costs more per call and every AI feature here is billable. A stored model the key can no longer use is still listed, so the box never shows a model you are not on.">
             <select
               aria-label="Model"
               value={model}
@@ -135,6 +141,7 @@ export function AiTab() {
               {(models.includes(model) || !model ? models : [model, ...models])
                 .map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
+            </Tooltip>
           </label>
         </div>
 
@@ -154,6 +161,7 @@ export function AiTab() {
             variant="ghost"
             disabled={busy}
             title="Sends five tokens to prove the key works. Billable."
+            tooltip="Sends about five tokens to the provider to prove the key works. Billable, but the smallest call this app can make."
             onClick={() => void call("/api/ai/settings/test",
               { provider, api_key: draftKey },
               (r: { note?: string }) => r.note ?? "It answered.")}

@@ -3,6 +3,7 @@ import { Pause, Play } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface PauseControlProps {
   paused: boolean;
@@ -70,11 +71,15 @@ export function PauseControl({ paused, onChanged }: PauseControlProps) {
         aria-label={paused ? "Paused — resume trading" : "Pause trading"}
         onClick={() => { setError(null); setOpen(true); }}
         title={paused ? "Trading is paused. Resume it." : "Stop sending new orders."}
+        // An icon either way. It used to grow into a "Paused" pill, which was
+        // the THIRD statement of the halt on a bar that already carried the
+        // status badge and a halt badge (owner report, 2026-09-21). The badge
+        // says what is happening; this says what you can do about it.
         className={paused
-          ? "flex items-center gap-1 rounded bg-warning/15 px-2 py-1 text-[11px] font-semibold text-warning transition-colors hover:bg-warning/25"
+          ? "rounded bg-warning/15 p-1.5 text-warning transition-colors hover:bg-warning/25"
           : "rounded p-1.5 text-warning transition-colors hover:bg-surface-2"}
       >
-        {paused ? <><Play size={13} /> Paused</> : <Pause size={15} />}
+        {paused ? <Play size={15} /> : <Pause size={15} />}
       </button>
 
       <DialogShell
@@ -99,25 +104,29 @@ export function PauseControl({ paused, onChanged }: PauseControlProps) {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 Pause for (hours)
-                <input
-                  aria-label="Pause for (hours)"
-                  className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-                  value={hours}
-                  onChange={(e) => setHours(e.target.value)}
-                />
+                <Tooltip label="How long to stop sending new orders for, counted from now. Fractions are allowed — 0.25 is fifteen minutes. Trading resumes on its own when it expires.">
+                  <input
+                    aria-label="Pause for (hours)"
+                    className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                    value={hours}
+                    onChange={(e) => setHours(e.target.value)}
+                  />
+                </Tooltip>
                 <span className="mt-0.5 block text-[10px] text-ink-3">
                   0.25 is fifteen minutes.
                 </span>
               </label>
               <label className="block">
                 Or until (YYYY-MM-DD HH:MM)
-                <input
-                  aria-label="Or until (YYYY-MM-DD HH:MM)"
-                  className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-                  value={until}
-                  onChange={(e) => setUntil(e.target.value)}
-                  placeholder="leave blank to use hours"
-                />
+                <Tooltip label="A specific moment to pause until, which wins over the hours box beside it. A time already in the past is refused rather than stored — that would be a pause that never stops anything while this screen said it had.">
+                  <input
+                    aria-label="Or until (YYYY-MM-DD HH:MM)"
+                    className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                    value={until}
+                    onChange={(e) => setUntil(e.target.value)}
+                    placeholder="leave blank to use hours"
+                  />
+                </Tooltip>
               </label>
             </div>
           )}

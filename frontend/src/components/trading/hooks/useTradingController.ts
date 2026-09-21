@@ -145,6 +145,12 @@ export function useTradingController() {
     await templates.refresh();
   }, [templates]);
 
+  // The import POST is TemplateTransfer's own -- it needs the file's text and
+  // reports its own added/replaced/skipped -- so this is the reload half only.
+  const refreshTemplates = useCallback(async () => {
+    await templates.refresh();
+  }, [templates]);
+
   return useMemo(
     () => ({
       trades, halt, signals, disabledReason, refreshAll,
@@ -156,11 +162,12 @@ export function useTradingController() {
       eaLastSeen: typeof templates.data?.ea_last_seen_secs === "number"
         ? templates.data.ea_last_seen_secs
         : null,
-      saveTemplate, deleteTemplate, installBuiltin,
+      saveTemplate, deleteTemplate, installBuiltin, refreshTemplates,
     }),
     [trades, halt, signals, disabledReason, refreshAll, schedule.data,
      setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
      setMarket, setClockOffset,
-     templates.data, saveTemplate, deleteTemplate, installBuiltin],
+     templates.data, saveTemplate, deleteTemplate, installBuiltin,
+     refreshTemplates],
   );
 }

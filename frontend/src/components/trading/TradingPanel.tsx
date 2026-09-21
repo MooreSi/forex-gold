@@ -132,6 +132,7 @@ export function TradingPanel() {
             onSave={c.saveTemplate}
             onDelete={(name) => void c.deleteTemplate(name)}
             onInstallBuiltin={() => void c.installBuiltin()}
+            onImported={() => void c.refreshTemplates()}
           />
         </Tabs.Content>
       </Tabs.Root>

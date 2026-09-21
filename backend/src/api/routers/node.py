@@ -62,6 +62,13 @@ async def state() -> dict:
         "registered_email": remote_ctl.get_stored_email(),
         "autostart": {
             "supported": system_ctl.autostart_is_supported(),
+            # What the operator asked for, as opposed to what the OS has.
+            # `app.py` reconciles the OS to this on every boot, so the two
+            # disagree exactly when the scheduler entry has been lost -- to an
+            # OS upgrade or a machine migration -- and that is the one state
+            # worth telling somebody about. Reporting only `installed` (until
+            # 2026-09-21) rendered it as a plain unticked box.
+            "enabled": settings_ctl.get_app_config("auto_restart_enabled") == "1",
             "installed": system_ctl.autostart_is_installed(),
             "armed": system_ctl.autostart_is_armed(),
             "check_interval_secs": system_ctl.AUTOSTART_CHECK_INTERVAL_SECS,

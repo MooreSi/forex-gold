@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { SettingsField } from "../internal/SettingsField";
@@ -86,15 +87,17 @@ export function Mt5Tab() {
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs text-ink-2">
               Backend
-              <select
-                aria-label="Backend"
-                value={String(app.data["bridge_backend"] ?? "crossover")}
-                onChange={(e) => void app.save({ bridge_backend: e.target.value })}
-                className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-              >
-                <option value="crossover">CrossOver</option>
-                <option value="wine">Wine (independent prefix)</option>
-              </select>
+              <Tooltip label="Which Windows layer MetaTrader 5 runs under on this Mac. Changing it points the app at a different MT5 installation entirely — a different terminal, a different logged-in account and different credentials — so check the account badge afterwards.">
+                <select
+                  aria-label="Backend"
+                  value={String(app.data["bridge_backend"] ?? "crossover")}
+                  onChange={(e) => void app.save({ bridge_backend: e.target.value })}
+                  className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                >
+                  <option value="crossover">CrossOver</option>
+                  <option value="wine">Wine (independent prefix)</option>
+                </select>
+              </Tooltip>
               <span className="mt-0.5 block text-[10px] text-ink-3">
                 Wine uses the prefix at the bottle path below; run
                 setup_wine_bridge.sh first.

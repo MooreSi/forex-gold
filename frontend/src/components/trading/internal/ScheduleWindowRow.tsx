@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { asObject } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 
@@ -63,37 +64,44 @@ export function ScheduleWindowRow({
         enabled ? "border-line bg-surface-2" : "border-line/50 bg-surface-1")}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="checkbox"
-          aria-label={`${dayLabel} window ${index + 1}`}
-          checked={enabled}
-          onChange={(e) => onPatch({ enabled: e.target.checked })}
-          className="accent-accent"
-        />
+        <Tooltip label={`Whether automated entries are allowed at all during this window on ${dayLabel}. Unticked, the hours and the channels below are kept but nothing trades.`}>
+          <input
+            type="checkbox"
+            aria-label={`${dayLabel} window ${index + 1}`}
+            checked={enabled}
+            onChange={(e) => onPatch({ enabled: e.target.checked })}
+            className="accent-accent"
+          />
+        </Tooltip>
         <span className="w-16 text-[11px] text-ink-3">Window {index + 1}</span>
-        <input
-          aria-label={`${dayLabel} window ${index + 1} start`}
-          defaultValue={String(block["start"] ?? "")}
-          onBlur={(e) => onPatch({ start: e.target.value })}
-          className="num w-14 rounded border border-line bg-surface-1 px-1 py-0.5 text-[11px] text-ink-1"
-        />
+        <Tooltip label="When this window opens, as HH:MM in broker time. Saved when you leave the box.">
+          <input
+            aria-label={`${dayLabel} window ${index + 1} start`}
+            defaultValue={String(block["start"] ?? "")}
+            onBlur={(e) => onPatch({ start: e.target.value })}
+            className="num w-14 rounded border border-line bg-surface-1 px-1 py-0.5 text-[11px] text-ink-1"
+          />
+        </Tooltip>
         <span className="text-ink-3">–</span>
-        <input
-          aria-label={`${dayLabel} window ${index + 1} end`}
-          defaultValue={String(block["end"] ?? "")}
-          onBlur={(e) => onPatch({ end: e.target.value })}
-          className="num w-14 rounded border border-line bg-surface-1 px-1 py-0.5 text-[11px] text-ink-1"
-        />
+        <Tooltip label="When this window closes, as HH:MM in broker time. Positions already open are not closed by it.">
+          <input
+            aria-label={`${dayLabel} window ${index + 1} end`}
+            defaultValue={String(block["end"] ?? "")}
+            onBlur={(e) => onPatch({ end: e.target.value })}
+            className="num w-14 rounded border border-line bg-surface-1 px-1 py-0.5 text-[11px] text-ink-1"
+          />
+        </Tooltip>
         <label className="flex items-center gap-1 text-[11px] text-ink-3">
           Target $
-          <input
-            aria-label={`${dayLabel} window ${index + 1} target`}
-            inputMode="decimal"
-            defaultValue={String(block["target"] ?? 0)}
-            onBlur={(e) => onPatch({ target: Number(e.target.value) || 0 })}
-            title="0 = no profit cap, only the time window applies"
-            className="num w-16 rounded border border-line bg-surface-1 px-1 py-0.5 text-ink-1"
-          />
+          <Tooltip label="Stop opening new positions in this window once it has earned this much. 0 means no profit cap — only the hours apply.">
+            <input
+              aria-label={`${dayLabel} window ${index + 1} target`}
+              inputMode="decimal"
+              defaultValue={String(block["target"] ?? 0)}
+              onBlur={(e) => onPatch({ target: Number(e.target.value) || 0 })}
+              className="num w-16 rounded border border-line bg-surface-1 px-1 py-0.5 text-ink-1"
+            />
+          </Tooltip>
         </label>
         <button
           type="button"
@@ -110,12 +118,14 @@ export function ScheduleWindowRow({
       {open && (
         <div className="mt-2 space-y-1.5 rounded bg-surface-1 p-2">
           <label className="flex items-center gap-2 text-[11px] text-ink-3">
-            <input
-              type="checkbox"
-              checked={tgDefault}
-              onChange={(e) => onPatch({ telegram_default_enabled: e.target.checked })}
-              className="accent-accent"
-            />
+            <Tooltip label="What happens to a channel that is not listed below — one added after this window was set up. Ticked, it trades in this window; unticked, it is blocked until you allow it here.">
+              <input
+                type="checkbox"
+                checked={tgDefault}
+                onChange={(e) => onPatch({ telegram_default_enabled: e.target.checked })}
+                className="accent-accent"
+              />
+            </Tooltip>
             New or unlisted channels default to enabled
           </label>
 
@@ -125,25 +135,29 @@ export function ScheduleWindowRow({
             return (
               <div key={name} className="flex flex-wrap items-center gap-2">
                 <label className="flex w-48 items-center gap-2 text-[11px] text-ink-2">
-                  <input
-                    type="checkbox"
-                    aria-label={`${name} in ${dayLabel} window ${index + 1}`}
-                    checked={on}
-                    onChange={(e) => patchChannel(name, { enabled: e.target.checked })}
-                    className="accent-accent"
-                  />
+                  <Tooltip label={`Whether ${name}'s signals may open a position during this window. It blocks only this channel; the others are unaffected.`}>
+                    <input
+                      type="checkbox"
+                      aria-label={`${name} in ${dayLabel} window ${index + 1}`}
+                      checked={on}
+                      onChange={(e) => patchChannel(name, { enabled: e.target.checked })}
+                      className="accent-accent"
+                    />
+                  </Tooltip>
                   <span className="truncate">{name}</span>
                 </label>
-                <select
-                  aria-label={`${name} override in ${dayLabel} window ${index + 1}`}
-                  value={String(cfg["strategy_override"] ?? "")}
-                  onChange={(e) => patchChannel(name, { strategy_override: e.target.value })}
-                  className="w-44 rounded border border-line bg-surface-2 px-1 py-0.5 text-[11px] text-ink-1"
-                >
-                  {options.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
+                <Tooltip label={`The strategy ${name} trades under inside these hours only. Blank leaves it on whatever the Strategy tab says. Two channels can run different strategies in the same window.`}>
+                  <select
+                    aria-label={`${name} override in ${dayLabel} window ${index + 1}`}
+                    value={String(cfg["strategy_override"] ?? "")}
+                    onChange={(e) => patchChannel(name, { strategy_override: e.target.value })}
+                    className="w-44 rounded border border-line bg-surface-2 px-1 py-0.5 text-[11px] text-ink-1"
+                  >
+                    {options.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </Tooltip>
               </div>
             );
           })}
@@ -154,25 +168,29 @@ export function ScheduleWindowRow({
           {ENGINES.map(({ key, label }) => (
             <div key={key} className="flex flex-wrap items-center gap-2">
               <label className="flex w-48 items-center gap-2 text-[11px] text-ink-2">
-                <input
-                  type="checkbox"
-                  aria-label={`${label} in ${dayLabel} window ${index + 1}`}
-                  checked={block[key] !== false}
-                  onChange={(e) => onPatch({ [key]: e.target.checked })}
-                  className="accent-accent"
-                />
+                <Tooltip label={`Whether the ${label}'s own signals may open a position during this window.`}>
+                  <input
+                    type="checkbox"
+                    aria-label={`${label} in ${dayLabel} window ${index + 1}`}
+                    checked={block[key] !== false}
+                    onChange={(e) => onPatch({ [key]: e.target.checked })}
+                    className="accent-accent"
+                  />
+                </Tooltip>
                 {label}
               </label>
-              <select
-                aria-label={`${label} override in ${dayLabel} window ${index + 1}`}
-                value={String(block[`${key}_override`] ?? "")}
-                onChange={(e) => onPatch({ [`${key}_override`]: e.target.value })}
-                className="w-44 rounded border border-line bg-surface-2 px-1 py-0.5 text-[11px] text-ink-1"
-              >
-                {options.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <Tooltip label={`The strategy the ${label} trades under inside these hours only. Blank leaves it on its usual one.`}>
+                <select
+                  aria-label={`${label} override in ${dayLabel} window ${index + 1}`}
+                  value={String(block[`${key}_override`] ?? "")}
+                  onChange={(e) => onPatch({ [`${key}_override`]: e.target.value })}
+                  className="w-44 rounded border border-line bg-surface-2 px-1 py-0.5 text-[11px] text-ink-1"
+                >
+                  {options.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </Tooltip>
             </div>
           ))}
         </div>

@@ -112,7 +112,13 @@ def delete_tg_signal_row(row_id) -> None:
 # -- Engine reads (polled from ui.timer callbacks) ---------------------------
 
 async def get_open_trades(engine) -> list[dict]:
-    return await _reads.open_trades(engine)
+    """The Positions table's rows.
+
+    The merged view, not the bare table: the stored rows carry no running P&L
+    (`mt5_profit` is written at close) and they cannot show a position opened
+    by hand in MetaTrader. Both were reported on 2026-09-21.
+    """
+    return await _reads.open_positions_view(engine)
 
 
 async def get_signals(engine, status=None) -> list[dict]:

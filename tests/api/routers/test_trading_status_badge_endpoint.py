@@ -13,7 +13,7 @@ from backend.src.api.routers import trading_status as router_mod
 @pytest.fixture
 def lab(monkeypatch):
     state = {
-        "badge": {"state": "ok", "label": "Circuit Breaker OK",
+        "badge": {"state": "ok", "label": "Trading Active",
                   "detail": "Nothing is holding automated entries.",
                   "until": None, "resume_ts": None, "can_resume": False},
         "resumed": [],
@@ -33,7 +33,7 @@ def test_the_badge_is_readable(make_client, lab):
     body = make_client().get("/api/trading/status-badge").json()
 
     assert body["state"] == "ok"
-    assert body["label"] == "Circuit Breaker OK"
+    assert body["label"] == "Trading Active"
 
 
 def test_a_halt_reaches_the_header_with_its_reason(make_client, lab):

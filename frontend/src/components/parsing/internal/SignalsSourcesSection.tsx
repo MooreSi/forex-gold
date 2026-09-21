@@ -1,4 +1,5 @@
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface SignalsSourcesSectionProps {
   settings: Record<string, unknown>;
@@ -111,9 +112,11 @@ export function SignalsSourcesSection(
               data-testid={`source-${s.key}`}
               className="flex flex-col rounded border border-line bg-surface-2 p-2.5"
             >
-              <span className="text-xs font-semibold text-ink-1" title={s.help}>
-                {s.title}
-              </span>
+              <Tooltip label={s.help}>
+                <span className="cursor-help text-xs font-semibold text-ink-1">
+                  {s.title}
+                </span>
+              </Tooltip>
               <span className="mt-0.5 text-[11px] leading-snug text-ink-3">
                 {s.blurb}
               </span>
@@ -123,6 +126,7 @@ export function SignalsSourcesSection(
                   aria-pressed={on}
                   onClick={() => onSave(s.key, on ? 0 : 1)}
                   title={s.help}
+                  tooltip={s.help}
                 >
                   <span className={on ? "text-profit" : "text-ink-3"}>
                     {on ? s.onLabel : s.offLabel}

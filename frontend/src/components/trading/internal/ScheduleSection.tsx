@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { Copy } from "lucide-react";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney } from "@/components/shared/format";
 import { asArray, asObject } from "@/lib/asArray";
@@ -96,24 +97,28 @@ export function ScheduleSection({
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-xs text-ink-2">
-          <input
-            type="checkbox"
-            aria-label="Only trade inside these windows"
-            checked={state.enabled}
-            onChange={(e) => onSetEnabled(e.target.checked)}
-            className="accent-accent"
-          />
+          <Tooltip label="The master switch for the whole schedule. Off, the windows below are ignored entirely and automated entries are allowed at any hour.">
+            <input
+              type="checkbox"
+              aria-label="Only trade inside these windows"
+              checked={state.enabled}
+              onChange={(e) => onSetEnabled(e.target.checked)}
+              className="accent-accent"
+            />
+          </Tooltip>
           Only trade inside these windows
         </label>
         <label className="text-xs text-ink-2">
           Whole-day profit target
-          <input
-            aria-label="Whole-day profit target"
-            inputMode="decimal"
-            defaultValue={String(state.daily_target)}
-            onBlur={(e) => onSetTarget(Number(e.target.value) || 0)}
-            className="num ml-2 w-24 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-          />
+          <Tooltip label="Once the day has earned this much, automated entries are held for the rest of it, whatever the windows say. 0 turns the gate off. Open positions keep running.">
+            <input
+              aria-label="Whole-day profit target"
+              inputMode="decimal"
+              defaultValue={String(state.daily_target)}
+              onBlur={(e) => onSetTarget(Number(e.target.value) || 0)}
+              className="num ml-2 w-24 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+            />
+          </Tooltip>
           <span className="ml-1 text-[11px] text-ink-3">0 turns this gate off</span>
         </label>
         <Button variant="ghost" onClick={copyMondayToAll}>

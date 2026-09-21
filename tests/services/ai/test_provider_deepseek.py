@@ -221,3 +221,37 @@ class TestTheImageSniffer:
         """A zero-byte download is a real outcome, and an IndexError here
         would surface far from its cause."""
         assert provider._sniff_image_mime(b"") == "image/jpeg"
+
+
+class TestActiveModel:
+    """Which model id the selected provider would actually send.
+
+    The Set & Forget review prints this beside the verdict. It used to be read
+    as `claude_model or deepseek_model`, and `claude_model` carries a default
+    that is present whether or not Claude is selected -- so a DeepSeek review
+    was labelled with a Claude model it had never called.
+    """
+
+    def test_deepseek_selected_names_the_deepseek_model(self):
+        assert provider.active_model({
+            "ai_provider": "deepseek",
+            "deepseek_model": "deepseek-flash",
+            "claude_model": "claude-sonnet-4-6",
+        }) == "deepseek-flash"
+
+    def test_claude_selected_names_the_claude_model(self):
+        assert provider.active_model({
+            "ai_provider": "claude",
+            "deepseek_model": "deepseek-flash",
+            "claude_model": "claude-sonnet-4-6",
+        }) == "claude-sonnet-4-6"
+
+    def test_an_unset_provider_is_claude_like_complete(self):
+        """`complete()` falls through to Claude when ai_provider is absent.
+        The label has to fall the same way or it describes a different call."""
+        assert provider.active_model(
+            {"claude_model": "claude-sonnet-4-6"}) == "claude-sonnet-4-6"
+
+    def test_a_provider_with_no_model_set_is_empty_not_the_other_one(self):
+        assert provider.active_model(
+            {"ai_provider": "deepseek", "claude_model": "claude-sonnet-4-6"}) == ""

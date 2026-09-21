@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { iconFor } from "@/components/shared/icons";
 import { cn } from "@/lib/cn";
 import {
@@ -81,14 +82,16 @@ function Field({ field, value, onChange }: {
   if (field.type === "boolean") {
     return (
       <label className="flex items-start gap-2 py-1">
-        <input
-          id={id}
-          type="checkbox"
-          aria-label={label}
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-          className="mt-0.5 size-3.5 accent-[var(--color-accent)]"
-        />
+        <Tooltip label={hint}>
+          <input
+            id={id}
+            type="checkbox"
+            aria-label={label}
+            checked={Boolean(value)}
+            onChange={(e) => onChange(e.target.checked)}
+            className="mt-0.5 size-3.5 accent-[var(--color-accent)]"
+          />
+        </Tooltip>
         <span>
           <span className="text-xs text-ink-1">{label}</span>
           {hint && <span className="block text-[10px] text-ink-3">{hint}</span>}
@@ -102,24 +105,28 @@ function Field({ field, value, onChange }: {
       <label htmlFor={id} className="block text-[11px] text-ink-2">{label}</label>
       <div className="mt-0.5 flex items-center gap-1.5">
         {field.type === "choice" ? (
-          <select
-            id={id}
-            aria-label={label}
-            value={String(value)}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
-          >
-            {field.choices.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <Tooltip label={hint}>
+            <select
+              id={id}
+              aria-label={label}
+              value={String(value)}
+              onChange={(e) => onChange(e.target.value)}
+              className="w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
+            >
+              {field.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Tooltip>
         ) : (
-          <input
-            id={id}
-            aria-label={label}
-            inputMode="decimal"
-            value={String(value)}
-            onChange={(e) => onChange(e.target.value)}
-            className="num w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
-          />
+          <Tooltip label={hint}>
+            <input
+              id={id}
+              aria-label={label}
+              inputMode="decimal"
+              value={String(value)}
+              onChange={(e) => onChange(e.target.value)}
+              className="num w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
+            />
+          </Tooltip>
         )}
         {unit && (
           <span data-testid={`unit-${field.name}`} className="shrink-0 text-[10px] text-ink-3">
@@ -202,13 +209,15 @@ export function TemplateEditor({
     <div className="flex min-h-0 flex-col rounded-lg border border-line bg-surface-1">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <h4 className="text-sm font-semibold text-ink-1">{name}</h4>
-        <input
-          aria-label="Search settings"
-          placeholder="Search settings"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="ml-auto w-44 rounded border border-line bg-surface-2 px-2 py-1 text-[11px] text-ink-1"
-        />
+        <Tooltip label="Narrow this template to the settings whose name or label contains what you type. An EA template carries dozens.">
+          <input
+            aria-label="Search settings"
+            placeholder="Search settings"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="ml-auto w-44 rounded border border-line bg-surface-2 px-2 py-1 text-[11px] text-ink-1"
+          />
+        </Tooltip>
         <Button onClick={() => void save()} disabled={busy}>
           {busy ? "Saving…" : "Save"}
         </Button>

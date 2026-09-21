@@ -1,5 +1,6 @@
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatPercent, formatSignedMoney, pnlColour } from "@/components/shared/format";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface ChannelsScorecardProps {
   channels: Record<string, unknown>[];
@@ -46,13 +47,15 @@ export function ChannelsScorecard({ channels, onPause }: ChannelsScorecardProps)
               <td className="num py-1.5 text-ink-2">{formatPercent(num(row, "win_rate"))}</td>
               <td className={`num py-1.5 ${pnlColour(pnl)}`}>{formatSignedMoney(pnl)}</td>
               <td className="py-1.5">
-                <input
-                  type="checkbox"
-                  aria-label={`Take signals from ${source}`}
-                  checked={!paused}
-                  onChange={(e) => void onPause(source, !e.target.checked)}
-                  className="accent-accent"
-                />
+                <Tooltip label={`Whether ${source}'s signals may open a position. Unticked, its messages are still read and still scored here — so you can keep watching a channel's record while it is not costing you anything.`}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Take signals from ${source}`}
+                    checked={!paused}
+                    onChange={(e) => void onPause(source, !e.target.checked)}
+                    className="accent-accent"
+                  />
+                </Tooltip>
               </td>
             </tr>
           );

@@ -1,5 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { asObject } from "@/lib/asArray";
@@ -33,26 +34,31 @@ export function NewsPanel() {
       actions={
         <>
           <label className="flex items-center gap-1.5 text-[11px] text-ink-2">
-            <input
-              type="checkbox"
-              checked={c.goldOnly}
-              aria-label="Gold-relevant currencies only"
-              onChange={(e) => c.setGoldOnly(e.target.checked)}
-              className="accent-accent"
-            />
+            <Tooltip label="Hide releases in currencies that do not move gold. A display filter only — the blackout below still reads the whole calendar, so hiding an event here does not stop it holding the engines.">
+              <input
+                type="checkbox"
+                checked={c.goldOnly}
+                aria-label="Gold-relevant currencies only"
+                onChange={(e) => c.setGoldOnly(e.target.checked)}
+                className="accent-accent"
+              />
+            </Tooltip>
             Gold only
           </label>
           <label className="flex items-center gap-1.5 text-[11px] text-ink-2">
-            <input
-              type="checkbox"
-              checked={c.upcomingOnly}
-              aria-label="Upcoming only"
-              onChange={(e) => c.setUpcomingOnly(e.target.checked)}
-              className="accent-accent"
-            />
+            <Tooltip label="Hide releases that have already happened. Also a display filter — one that has just passed may still be inside the blackout's minutes-after window.">
+              <input
+                type="checkbox"
+                checked={c.upcomingOnly}
+                aria-label="Upcoming only"
+                onChange={(e) => c.setUpcomingOnly(e.target.checked)}
+                className="accent-accent"
+              />
+            </Tooltip>
             Upcoming only
           </label>
-          <Button variant="ghost" onClick={() => void c.refresh()} title="Re-fetch the calendar">
+          <Button variant="ghost" onClick={() => void c.refresh()} title="Re-fetch the calendar"
+            tooltip="Drop the cached calendar and fetch it again. The calendar is cached because the provider rate-limits it, so this is for when a release has been revised.">
             <RefreshCw size={13} />
           </Button>
         </>

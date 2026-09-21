@@ -1,4 +1,4 @@
-import { CircleDot, LogOut, Server, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleDot, LogOut, Server, ShieldCheck } from "lucide-react";
 import { ActiveTraderControl } from "./ActiveTraderControl";
 import { EaBadge } from "./EaBadge";
 import { EnvironmentControl } from "./EnvironmentControl";
@@ -7,7 +7,7 @@ import { PauseControl } from "./PauseControl";
 import { PowerControl } from "./PowerControl";
 import { TradingStatusBadge } from "./TradingStatusBadge";
 import { UpdateBadge } from "./UpdateBadge";
-import { formatClock } from "@/components/shared/format";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminConsole } from "@/hooks/useAdminConsole";
 import { useHeaderState } from "@/hooks/useHeaderState";
@@ -51,39 +51,32 @@ export function AppHeader() {
         stale={stale || Boolean(error)}
       />
 
-      {data?.pause?.paused && (
-        // Both halts. The circuit breaker writes a different key from the risk
-        // governor, so a header that read only the governor said nothing while
-        // automated entries were being refused.
-        <span
-          data-testid="pause-badge"
-          className="flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] text-warning"
-          title={data.pause.reason}
-        >
-          <TriangleAlert size={12} />
-          {data.pause.reason}
-          {data.pause.until && (
-            // "Halted" without a resume time leaves the operator watching the
-            // screen to find out when it lifts.
-            <span className="text-ink-3">· until {formatClock(data.pause.until)}</span>
-          )}
-        </span>
-      )}
+      {/* The halt used to be stated HERE as well, in a badge of its own, and
+          a third time on the Pause button's label. Three versions of one fact
+          across a bar that is already tight (owner report, 2026-09-21). There
+          is one now: `TradingStatusBadge` on the right, which reads the
+          backend's own decision and covers all FOUR mechanisms rather than the
+          two this badge knew about. */}
 
       <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-2 lg:gap-3">
         <UpdateBadge update={data?.update ?? null} />
         {data?.remote_connected && (
-          <span className="flex items-center gap-1 text-remote" title="Linked to the remote node">
-            <Server size={13} /> <span className="hidden xl:inline">remote</span>
-          </span>
+          <Tooltip label="This node is linked to the other paired node.">
+            <span className="flex items-center gap-1 text-remote">
+              <Server size={13} /> <span className="hidden xl:inline">remote</span>
+            </span>
+          </Tooltip>
         )}
-        <span
-          className="flex items-center gap-1"
-          title={bridgeUp ? "MT5 bridge connected" : "MT5 bridge not connected"}
+        <Tooltip
+          label={bridgeUp
+            ? "The MT5 bridge is connected. Prices, orders and positions can reach MetaTrader."
+            : "The MT5 bridge is NOT connected. No price, order or position can reach MetaTrader."}
         >
-          <CircleDot size={13} className={bridgeUp ? "text-profit" : "text-loss"} />
-          <span className="hidden xl:inline">Bridge</span>
-        </span>
+          <span className="flex items-center gap-1">
+            <CircleDot size={13} className={bridgeUp ? "text-profit" : "text-loss"} />
+            <span className="hidden xl:inline">Bridge</span>
+          </span>
+        </Tooltip>
         {/* Colour and words come from the backend. A stale EA build shown as
             a green badge is the screen contradicting the log — the bug
             `ea_badge_state` was extracted for. The UI renders the decision,
@@ -101,7 +94,8 @@ export function AppHeader() {
 
         {/* Whether anything is holding automated entries, and which of the
             four mechanisms it is. Always visible, next to the controls that
-            change it. */}
+            change it, and since 2026-09-21 the ONLY place the header states
+            it — click it to resume. */}
         <TradingStatusBadge />
 
         <PauseControl

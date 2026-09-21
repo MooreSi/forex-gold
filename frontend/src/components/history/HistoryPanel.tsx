@@ -17,15 +17,17 @@ import { TradeAnalysisPanel } from "@/components/ai/TradeAnalysisPanel";
 import { TradeTableSection } from "./internal/TradeTableSection";
 
 const SUB_TABS = [
+  // First, and still not the default: the tab opens on the heatmap, which
+  // HistoryPanel.test.tsx pins. Radix mounts a tab's content when it is
+  // selected, so listing this one first costs nothing until it is asked for
+  // -- it is a row per trade and a request of its own. Owner, 2026-09-21:
+  // the per-trade list is what the page is opened for, so it reads first.
+  { id: "trades", label: "Trades" },
   { id: "equity", label: "Equity curve" },
   { id: "calendar", label: "Calendar" },
   { id: "hours", label: "When it trades" },
   { id: "channels", label: "Channels" },
   { id: "ladder", label: "Ladder reach" },
-  // Last, and not the default: the tab opens on the heatmap, which
-  // HistoryPanel.test.tsx pins. This one is a row per trade and costs a
-  // request of its own, so it loads when it is asked for.
-  { id: "trades", label: "Trades" },
   { id: "dpm", label: "DPM" },
   // Where the NiceGUI app had it: `frontend/pages/history/__init__.py`
   // renders `ai_trade_analysis` inside this tab. The React port mounted it on

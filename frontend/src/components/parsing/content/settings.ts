@@ -123,7 +123,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
         key: "tg_decision_log_enabled",
         label: "Signal Decision Log",
         description:
-          "Records what the app decided about every Telegram signal — executed or blocked, on both the normal and the Immediate Market Buy/Sell path — what the trade then did, and what four gates that are currently switched OFF would have decided. It changes no trading decision and blocks nothing: it only writes down what happened, so a gate can be judged on this account's own trades before being switched on. Costs nothing on the order path; nothing is fetched.",
+          "Records what the app decided about every Telegram signal — executed or blocked, on both the normal and the Immediate Market Buy/Sell path — what the trade then did, and what each shadow gate would have decided. It changes no trading decision and blocks nothing itself: it writes down what happened, so a gate can be judged on this account's own trades before being switched on. The event-tier gate below was promoted out of this record on 2026-09-21 and is the only one of them that can now refuse a trade. Costs nothing on the order path; nothing is fetched.",
         defaultOn: false,
       },
       {
@@ -131,6 +131,23 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
         label: "Signal Contradiction Study",
         description:
           "Records what would happen when two sources disagree about direction — a Telegram channel against an internal engine, or one channel against another. Each policy (first wins, freshest wins, half size) has its verdict written down; none of them is applied, and no trade is blocked, resized or cancelled. Switching it on also puts Telegram signals on the shared signal bus, which is what makes the disagreement visible at all; with it off, the bus is exactly as it was.",
+        defaultOn: false,
+      },
+    ],
+  },
+  {
+    // Its own group, and deliberately NOT under RESEARCH. Everything there
+    // only writes things down; this refuses trades, and a switch that can
+    // stop the app trading must not sit under a heading that promises it
+    // cannot.
+    badge: "EVENT GUARD",
+    tone: "warning",
+    toggles: [
+      {
+        key: "tg_event_tier_gate_enabled",
+        label: "Event Tier Gate",
+        description:
+          "Stand aside near a scheduled economic release, sized by how much that release actually moves gold: 60 min before and 90 after an FOMC statement, a rate decision, CPI or Non-Farm Payrolls; 30/45 for the second rank (PPI, retail sales, GDP, ISM); 10/20 for everything else. This is the finer version of the News blackout, which applies one window to every high-impact print. THIS ONE BLOCKS TRADES — on both the normal and the Immediate Market Buy/Sell path. Promoted on 2026-09-21 from the Signal Decision Log, where over 322 recorded decisions it stood aside from 4 of the 39 it had an opinion about and avoided $219.50 of a $869.96 loss on those rows. That is a small sample: arm it for a session you are watching. A calendar that cannot be read never blocks.",
         defaultOn: false,
       },
     ],

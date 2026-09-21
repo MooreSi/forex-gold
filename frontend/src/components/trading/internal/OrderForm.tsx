@@ -1,3 +1,4 @@
+import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import type { usePlaceOrderDialogController } from "../hooks/usePlaceOrderDialogController";
 
@@ -15,6 +16,9 @@ function Field({
   return (
     <label className="block">
       <span className="text-xs text-ink-2">{label}</span>
+      {/* The hint is BOTH under the field and on hover: under it for somebody
+          reading the form, on hover for somebody already typing in the box. */}
+      <Tooltip label={hint}>
       <input
         value={value}
         inputMode="decimal"
@@ -22,6 +26,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         className="num mt-1 w-full rounded border border-line bg-surface-1 px-2 py-1.5 text-sm text-ink-1 placeholder:text-ink-3"
       />
+      </Tooltip>
       <span className="mt-1 block text-[11px] text-ink-3">{hint}</span>
     </label>
   );

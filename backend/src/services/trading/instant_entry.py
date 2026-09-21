@@ -242,6 +242,22 @@ async def process_instant_entry(
         _dl(False, str(_ime_news_reason))
         return
 
+    # Event-tier gate — the fifth gate this path keeps its own copy of, for
+    # the same reason as the four above: it never calls
+    # resolve_open_trade_params(), where the shared one lives. Stage 2 of
+    # docs/todo/signal-validation, off unless the owner turns it on.
+    #
+    # ABOVE the bias gate and the tick read on purpose. Both of those reach
+    # the bridge, and this decides on a clock read against a disk-cached
+    # calendar -- so a refusal here costs nothing on a path whose budget is
+    # 269 ms with 256 ms of it the broker.
+    from backend.src.services.risk import capability_gates as _caps_ime
+    _ime_tier_reason = _caps_ime.tg_event_tier_blocks(rs)
+    if _ime_tier_reason:
+        log.info("[IME] Instant %s blocked — %s", direction, _ime_tier_reason)
+        _dl(False, str(_ime_tier_reason))
+        return
+
     # Higher-timeframe bias gate — the fourth gate this path has to keep its
     # own copy of, for the same reason as the three above: it never calls
     # resolve_open_trade_params(), where the shared one lives. Off unless the
@@ -272,7 +288,12 @@ async def process_instant_entry(
     # Apply per-channel strategy override — same priority as the full signal path.
     # At IME time we have no full parsed signal to give to per-signal AI eval,
     # so for "auto" channels we fall back to the last Claude recommendation.
-    _ch_ov_ime = db_module.get_channel_strategy_override(channel_name)
+    # Through the shared resolver since 2026-09-21: this path read the
+    # channel tier alone and never saw the Trading Schedule window, so the
+    # same channel ran a different template here than it did on the full
+    # signal path. tests/core/test_one_strategy_per_channel.py.
+    from backend.src.services.risk.schedule import effective_channel_strategy
+    _ch_ov_ime = effective_channel_strategy(channel_name)
     if _ch_ov_ime == "auto":
         _ch_rec_ime = db_module.get_channel_strategy_rec(channel_name)
         strategy = _ch_rec_ime.get("strategy") or strategy

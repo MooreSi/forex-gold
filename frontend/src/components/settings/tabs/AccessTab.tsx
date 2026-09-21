@@ -1,5 +1,6 @@
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useSettingsResource } from "../hooks/useSettingsResource";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface AccessState {
   auto_login: boolean;
@@ -53,18 +54,22 @@ export function AccessTab() {
 
         <div className="space-y-1.5">
           {[
-            { value: false, label: "Ask for the dashboard password" },
-            { value: true, label: "Log in automatically" },
+            { value: false, label: "Ask for the dashboard password",
+              help: "Anybody opening the dashboard has to sign in. The right choice on a machine other people can reach." },
+            { value: true, label: "Log in automatically",
+              help: "The dashboard opens straight into the app with no password — including after a restart, and for anyone who can reach this machine's browser. It does not disable the licence or change what the engines do." },
           ].map((opt) => (
             <label key={String(opt.value)} className="flex items-center gap-2 text-xs text-ink-2">
-              <input
-                type="radio"
-                name="app-access"
-                aria-label={opt.label}
-                checked={auto === opt.value}
-                onChange={() => void access.save({ auto_login: opt.value })}
-                className="accent-accent"
-              />
+              <Tooltip label={opt.help}>
+                <input
+                  type="radio"
+                  name="app-access"
+                  aria-label={opt.label}
+                  checked={auto === opt.value}
+                  onChange={() => void access.save({ auto_login: opt.value })}
+                  className="accent-accent"
+                />
+              </Tooltip>
               {opt.label}
             </label>
           ))}

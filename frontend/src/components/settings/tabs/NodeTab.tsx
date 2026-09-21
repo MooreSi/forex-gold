@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { asObject } from "@/lib/asArray";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { GitHubUpdateSection } from "../internal/GitHubUpdateSection";
+import { KeepAliveSection } from "../internal/KeepAliveSection";
 import { SettingsField } from "../internal/SettingsField";
 
 interface NodeState {
@@ -160,28 +161,21 @@ export function NodeTab() {
         </div>
       </section>
 
-      <section>
-        <h3 className="text-xs font-semibold text-ink-1">Start with the machine</h3>
-        {autostart["supported"] === true ? (
-          <label className="mt-1 flex items-center gap-2 text-xs text-ink-2">
-            <input
-              type="checkbox"
-              aria-label="Start the app when this machine boots"
-              checked={autostart["installed"] === true}
-              onChange={async (e) => {
-                await node.save({ enabled: e.target.checked });
-                await node.reload();
-              }}
-              className="accent-accent"
-            />
-            Start the app when this machine boots
-          </label>
-        ) : (
-          <p className="mt-0.5 text-[11px] text-ink-3">
-            Not supported on this platform.
-          </p>
-        )}
-      </section>
+      {/* Was one checkbox bound to `installed` and called "Start the app when
+          this machine boots" -- which is neither what the operator switched on
+          nor all of what the watchdog does. See KeepAliveSection. */}
+      <KeepAliveSection
+        autostart={autostart}
+        onChange={async (enabled) => {
+          // `/api/node/autostart`, not `node.save` -- that PUTs the resource's
+          // own path, and `/api/node/state` has no PUT handler. It answered
+          // 405 and `useSettingsResource` swallowed it into its error field,
+          // so the box moved and nothing was written. Left to throw on
+          // purpose: KeepAliveSection shows the OS's own refusal.
+          await api.put("/api/node/autostart", { enabled });
+          await node.reload();
+        }}
+      />
 
       <GitHubUpdateSection version={node.data.version} />
     </div>

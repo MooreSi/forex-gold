@@ -3,6 +3,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { SettingsField } from "./SettingsField";
 import { SettingsToggle } from "./SettingsToggle";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 export interface FieldSpec {
   key: string;
@@ -79,16 +80,20 @@ export function ConnectionSection(
             return (
               <label key={f.key} className="block text-xs text-ink-2">
                 {f.label}
-                <select
-                  aria-label={f.label}
-                  value={String(data[f.key] ?? "")}
-                  onChange={(e) => commit(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-                >
-                  {f.choices?.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
+                {/* The text fields here go through SettingsField, which
+                    carries its own. Only the choice kind is rendered inline. */}
+                <Tooltip label={f.hint}>
+                  <select
+                    aria-label={f.label}
+                    value={String(data[f.key] ?? "")}
+                    onChange={(e) => commit(e.target.value)}
+                    className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+                  >
+                    {f.choices?.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </Tooltip>
                 {f.hint && <span className="mt-0.5 block text-[10px] text-ink-3">{f.hint}</span>}
               </label>
             );

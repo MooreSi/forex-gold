@@ -60,8 +60,12 @@ def telegram(monkeypatch):
                         lambda: state["channels"])
     monkeypatch.setattr(parsing_router.tg_ctl, "get_channel_parser_config",
                         lambda ch: state["parser"].get(ch))
-    monkeypatch.setattr(parsing_router.tg_ctl, "save_channel_parser_config",
-                        lambda ch, cfg: state["saved_parser"].append((ch, cfg)))
+    def _set_enabled(ch, enabled):
+        state["saved_parser"].append((ch, enabled))
+        state["parser"].setdefault(ch, {})["enabled"] = enabled
+        return state["parser"][ch]
+
+    monkeypatch.setattr(parsing_router.tg_ctl, "set_channel_parser_enabled", _set_enabled)
     monkeypatch.setattr(parsing_router.tg_ctl, "fetch_stored_messages",
                         lambda limit: state["messages"])
     monkeypatch.setattr(parsing_router.tg_ctl, "get_pending_unrecognised", _pending)
@@ -176,17 +180,27 @@ def test_a_lexicon_is_written_with_the_phrases_it_was_given(make_client, telegra
     assert telegram["lexicon_writes"] == [("close_all", ["close all", "shut it"])]
 
 
-def test_toggling_a_channel_keeps_the_rest_of_its_parser_config(make_client, telegram):
-    """The config carries learned rules. A write that replaced the whole object
-    with {"enabled": false} would delete everything the parser had learned."""
+def test_toggling_a_channel_forwards_to_the_controller_and_answers_the_new_row(
+    make_client, telegram,
+):
+    """One controller call, and the row it wrote comes back.
+
+    This test used to fake `save_channel_parser_config` with a two-argument
+    lambda and assert the merged dict the router passed it. That function takes
+    SIX arguments, so what the test described was a function nobody had
+    written, and the real endpoint raised TypeError on every click while this
+    stayed green (owner report, 2026-09-21). Merging the row is now the
+    service's job and is pinned against the real table in
+    tests/services/channels/test_parser_enable_toggle.py; what is left here is
+    what a router is allowed to do -- forward, and return the answer.
+    """
     telegram["parser"] = {"GoldSignals": {"enabled": True, "learned": ["entry zone"]}}
 
-    _client(make_client).put("/api/parsing/channel-parser",
-                             json={"channel": "GoldSignals", "enabled": False})
+    r = _client(make_client).put("/api/parsing/channel-parser",
+                                 json={"channel": "GoldSignals", "enabled": False})
 
-    assert telegram["saved_parser"] == [
-        ("GoldSignals", {"enabled": False, "learned": ["entry zone"]}),
-    ]
+    assert telegram["saved_parser"] == [("GoldSignals", False)]
+    assert r.json()["enabled"] is False
 
 
 # ── Teaching the parser ──────────────────────────────────────────────────────

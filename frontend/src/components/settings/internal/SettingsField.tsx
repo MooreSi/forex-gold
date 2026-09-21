@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface SettingsFieldProps {
   label: string;
@@ -55,6 +56,11 @@ export function SettingsField({
   return (
     <label className="block text-xs text-ink-2">
       {label}
+      {/* The hint is BOTH printed underneath and shown on hover. Underneath is
+          where somebody reading the form finds it; on hover is where somebody
+          who has already started typing in the box finds it, which is the
+          moment they actually want it (owner request, 2026-09-21). */}
+      <Tooltip label={hint}>
       <input
         aria-label={label}
         type={type === "password" ? "password" : "text"}
@@ -68,6 +74,7 @@ export function SettingsField({
         }}
         className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
       />
+      </Tooltip>
       {hint && <span className="mt-0.5 block text-[10px] text-ink-3">{hint}</span>}
     </label>
   );

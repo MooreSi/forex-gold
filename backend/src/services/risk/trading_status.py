@@ -17,9 +17,15 @@ three is a true statement that would be misleading on its own:
 3. `news_blackout` -- entries held for a news window, which lifts itself.
 4. `ok`            -- nothing is holding anything.
 
-"Circuit Breaker OK" is reachable only when none of the others apply. A badge
-saying that while every entry is being held is a false all-clear, which is the
-complaint that put states 2 and 3 into the NiceGUI header in the first place.
+`ok` is reachable only when none of the others apply. A badge saying so while
+every entry is being held is a false all-clear, which is the complaint that put
+states 2 and 3 into the NiceGUI header in the first place.
+
+The `ok` label reads "Trading Active", not "Circuit Breaker OK". The breaker is
+one of four mechanisms this reports and naming it in the all-clear made the
+header look like a breaker readout -- so the owner read the other three states
+as breaker messages too (report, 2026-09-21). The badge reports the STATUS; the
+detail line names the mechanism.
 
 There is a fifth, `unknown`, for when the breaker itself cannot be read. It
 exists because the alternative is reporting an all-clear on no evidence, and
@@ -172,7 +178,7 @@ def badge() -> dict:
 
     return {
         "state": "ok",
-        "label": "Circuit Breaker OK",
+        "label": "Trading Active",
         "detail": "Nothing is holding automated entries.",
         "until": None, "resume_ts": None, "can_resume": False,
     }

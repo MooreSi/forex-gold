@@ -32,6 +32,7 @@ class SentinelEngine:
         self.account: dict = {"login": 123, "is_demo": True}
         self.health: dict = {"connected": True}
         self.open_trades: list = []
+        self.positions_view: list | None = None
         self.raises: Exception | None = None
 
     def _record(self, name: str, args: tuple, kwargs: dict):
@@ -88,6 +89,15 @@ class SentinelEngine:
         only to report how many positions keep running to their own SL/TP."""
         self.calls.append(("get_open_trades", (), {}))
         return self.open_trades
+
+    async def get_open_positions_view(self, open_trades):
+        """The Positions table's merged view. The real one asks the bridge for
+        a running P&L and for positions the app has no record of; this returns
+        whatever the test put in `positions_view`, defaulting to the stored
+        rows so a test that does not care about the merge sees the table it
+        always saw."""
+        self.calls.append(("get_open_positions_view", (open_trades,), {}))
+        return self.open_trades if self.positions_view is None else self.positions_view
 
 
 @pytest.fixture

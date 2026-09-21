@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/shared/EmptyState";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { useSettingsResource } from "@/components/settings/hooks/useSettingsResource";
 import { SettingsField } from "@/components/settings/internal/SettingsField";
 import { SettingsToggle } from "@/components/settings/internal/SettingsToggle";
@@ -67,16 +68,21 @@ export function RiskSection() {
       return (
         <label key={f.key} data-testid={`risk-${f.key}`} className="block text-xs text-ink-2">
           {f.label}
-          <select
-            aria-label={f.label}
-            value={String(data[f.key] ?? "off")}
-            onChange={(e) => void risk.save({ [f.key]: e.target.value })}
-            className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-          >
-            {f.choices?.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
+          {/* The number and toggle kinds get their hover help from
+              SettingsField / SettingsToggle. This one is rendered here, so it
+              needs its own. */}
+          <Tooltip label={f.hint}>
+            <select
+              aria-label={f.label}
+              value={String(data[f.key] ?? "off")}
+              onChange={(e) => void risk.save({ [f.key]: e.target.value })}
+              className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+            >
+              {f.choices?.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </Tooltip>
           {f.hint && <span className="mt-0.5 block text-[10px] text-ink-3">{f.hint}</span>}
         </label>
       );

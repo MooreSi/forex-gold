@@ -7,6 +7,10 @@ interface AboutHomeSectionProps {
 }
 
 const CARDS = [
+  // First: it is what a fresh install needs, and the only card here that is
+  // about getting the app working rather than about reading it.
+  { section: "setup", title: "Setup instructions",
+    desc: "Getting MT5, the bridge, the EA, Telegram and the licence working — Windows, Mac or VPS." },
   { section: "glossary", title: "Glossary",
     desc: "Plain-English explanations of every trading term the app uses." },
   { section: "version", title: "Version history",

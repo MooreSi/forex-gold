@@ -1,4 +1,5 @@
 import { CAPABILITIES } from "../content/capabilities";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface CapabilitiesSectionProps {
   settings: Record<string, unknown>;
@@ -29,13 +30,15 @@ export function CapabilitiesSection({ settings, onSave }: CapabilitiesSectionPro
             className="flex h-full flex-col rounded border border-line bg-surface-2 p-2.5"
           >
             <span className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                aria-label={cap.label}
-                checked={on(settings, cap.key)}
-                onChange={(e) => onSave(cap.key, e.target.checked ? 1 : 0)}
-                className="mt-0.5 accent-accent"
-              />
+              <Tooltip label={cap.description}>
+                <input
+                  type="checkbox"
+                  aria-label={cap.label}
+                  checked={on(settings, cap.key)}
+                  onChange={(e) => onSave(cap.key, e.target.checked ? 1 : 0)}
+                  className="mt-0.5 accent-accent"
+                />
+              </Tooltip>
               <span className="text-xs font-semibold text-ink-1">{cap.label}</span>
             </span>
             <span className="mt-1 text-[11px] leading-snug text-ink-3">

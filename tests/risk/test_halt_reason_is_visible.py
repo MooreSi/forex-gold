@@ -210,15 +210,46 @@ class TestTheUiShowsIt:
         assert trading_router.router.prefix == "/api/trading"
 
     def test_the_header_renders_the_reason(self):
-        src = (self.WEB_ROOT / "components" / "shell" / "AppHeader.tsx").read_text(
+        """The claim is unchanged; the element carrying it moved.
+
+        Until 2026-09-21 the header said this three times -- a badge of its
+        own reading `pause.reason`, the trading-status badge, and the Pause
+        button growing into a "Paused" pill -- on a bar that runs out of room
+        at 1024px. The owner reported the congestion and asked for one.
+
+        The one that survived is `TradingStatusBadge`, because it knows the
+        most: it reads the backend's own decision across all FOUR mechanisms
+        that can hold an entry, where the removed badge knew about two (a
+        profit target reached and a news blackout reached no badge at all).
+        `label` carries when trading resumes, `detail` carries why it stopped
+        -- the 2026-09-01 session got the time and not the cause, and both are
+        still wanted.
+        """
+        badge = (self.WEB_ROOT / "components" / "shell"
+                 / "TradingStatusBadge.tsx").read_text(encoding="utf-8")
+        header = (self.WEB_ROOT / "components" / "shell" / "AppHeader.tsx").read_text(
             encoding="utf-8")
 
-        assert "pause.reason" in src, (
+        assert "data.detail" in badge, (
             "the header badge no longer shows why trading stopped"
         )
-        assert "pause.until" in src, (
+        assert "data.label" in badge, (
             "and it no longer says when trading resumes -- the 2026-09-01 "
             "session got the time and not the cause; both are wanted"
+        )
+        assert "<TradingStatusBadge" in header, (
+            "the header no longer renders the badge that carries either"
+        )
+
+    def test_the_header_states_the_halt_once(self):
+        """The other half of the same report. Two elements saying "paused" on
+        one bar is what made the third unreadable."""
+        header = (self.WEB_ROOT / "components" / "shell" / "AppHeader.tsx").read_text(
+            encoding="utf-8")
+
+        assert "pause-badge" not in header, (
+            "the halt badge is back beside the trading-status badge, which is "
+            "the duplication removed on 2026-09-21"
         )
 
     def test_the_trading_controls_say_why_they_are_disabled(self):

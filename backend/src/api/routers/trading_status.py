@@ -20,7 +20,7 @@ async def status_badge() -> dict:
     """What the header shows: whether anything is holding automated entries.
 
     One read for four mechanisms. They are always displayed together and the
-    order between them matters -- a badge reading "Circuit Breaker OK" while a
+    order between them matters -- a badge reading "Trading Active" while a
     news window is holding every entry is a false all-clear, and that is the
     complaint this indicator exists to answer.
     """

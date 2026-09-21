@@ -501,6 +501,68 @@ def get_schedule_strategy_override(source: str) -> Optional[str]:
     return override
 
 
+def schedule_source_key(source: str) -> str:
+    """The key a window gates `source` by.
+
+    ENGINE_SOURCE_KEYS are per-engine, not per-channel: "Reversal Engine" and
+    "Breakout Engine" are the two literal source_name values those engines
+    stamp on their own signals, and a window holds their toggle and override
+    under `reversal_engine` / `breakout_engine`. Everything else is a Telegram
+    channel and is looked up by its canonical name inside telegram_channels.
+
+    Lifted verbatim out of core_signal_resolution 2026-09-21 so the six routes
+    that never had it can share it rather than each grow their own.
+    """
+    return (
+        "reversal_engine" if source == "Reversal Engine" else
+        "breakout_engine" if source == "Breakout Engine" else
+        source
+    )
+
+
+def effective_channel_strategy(source: str) -> Optional[str]:
+    """The strategy a signal from `source` must run under. One answer, one place.
+
+    Precedence, which is the owner's 2026-09-21 decision and the one
+    core_signal_resolution already applied:
+
+        active Trading Schedule window override  >  Channel Strategy pick
+
+    Returns a STRATEGY_* key, a "template:<name>" override, the literal
+    "auto", or None for "nothing is set -- fall back to the global Active
+    Strategy". "auto" is passed through unchanged: it is a real answer that
+    every caller branches on, not an absent one.
+
+    WHY THIS EXISTS. Six routes to the broker -- IME, the IME follow-up, both
+    limit-order lookups, pending activation and the grid dispatch -- asked
+    `get_channel_strategy_override()` alone and never saw the schedule.
+    core_signal_resolution asked both. So on 2026-09-21 one channel ran two
+    different templates at once, decided by nothing but which path reached the
+    order first: the bare "GOLD DIGGERS INSTITUTIONAL" trades took the
+    channel's pick and the "Telegram Auto (...)" ones took the window's. See
+    tests/core/test_one_strategy_per_channel.py.
+
+    A window that has this source DISABLED returns no opinion, not a refusal.
+    Standing a source down is `check_trading_schedule`'s job; conflating the
+    two here would turn a stand-down into a strategy.
+    """
+    if not source:
+        return None
+    try:
+        window = get_schedule_strategy_override(schedule_source_key(source))
+    except Exception:
+        window = None
+    if window:
+        return window
+    try:
+        return db_module.get_channel_strategy_override(source)
+    except Exception:
+        # This is read on the path that decides how to trade. No opinion is
+        # the only safe failure: the caller falls back to its own default
+        # exactly as it did before either override existed.
+        return None
+
+
 def _parse_hm(hhmm: str) -> int:
     """'HH:MM' -> minutes since midnight."""
     h, m = hhmm.split(":")

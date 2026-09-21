@@ -71,3 +71,50 @@ class TestClosingCanIdentifyThePosition:
 # tested against it directly in
 # tests/analytics/test_open_trades_carry_display_labels.py. Stubbing the
 # controller here would test a fake.
+
+
+class TestThePositionThatWasNotThere:
+    """Reported 2026-09-21: "it is showing one position when on mt5 there are
+    two". The table is the app's own record; a position opened by hand in
+    MetaTrader has no record and was simply absent, with nothing on screen
+    saying so. `services/positions/live_view.py` merges the broker's live
+    payload in, and these pin that the merge survives the response model --
+    `ChartTrade` declares six fields and would drop the rest without
+    `extra="allow"`."""
+
+    @pytest.fixture
+    def untracked(self, monkeypatch):
+        async def _open(engine):
+            return [
+                dict(ROW, pnl=-12.40, untracked=False),
+                {"trade_id": None, "mt5_ticket": 2050682688, "direction": "BUY",
+                 "lot_size": 0.25, "entry_price": 4300.0, "stop_loss": 4290.0,
+                 "tp1": None, "pnl": 33.75, "untracked": True,
+                 "strategy_label": "—", "source_label": "Opened in MT5 (not tracked)"},
+            ]
+
+        monkeypatch.setattr(trading_router.trading_ctl, "get_open_trades", _open)
+
+    def test_both_positions_reach_the_browser(self, make_client, untracked):
+        assert len(make_client().get("/api/trading/trades").json()) == 2
+
+    def test_the_untracked_flag_survives_the_response_model(self, make_client, untracked):
+        assert make_client().get("/api/trading/trades").json()[1]["untracked"] is True
+
+    def test_the_untracked_row_has_no_id_to_close_against(self, make_client, untracked):
+        """The frontend disables Close on it; this is the backstop. A row with
+        an id would post a close for a position with no record to update."""
+        assert make_client().get("/api/trading/trades").json()[1]["id"] is None
+
+    def test_a_running_pnl_is_not_replaced_by_the_stored_column(
+        self, make_client, monkeypatch,
+    ):
+        """`ChartTrade` fills `pnl` from `mt5_profit` when it is absent. The
+        live figure must win -- otherwise the merge is undone one layer later
+        and every open row goes back to its realised (null) number."""
+        async def _open(engine):
+            return [dict(ROW, mt5_profit=-12.40, pnl=91.20)]
+
+        monkeypatch.setattr(trading_router.trading_ctl, "get_open_trades", _open)
+
+        assert make_client().get("/api/trading/trades").json()[0]["pnl"] == 91.20

@@ -105,3 +105,49 @@ describe("a server that answers", () => {
     await waitFor(() => expect(screen.queryByText(/reconnect/i)).toBeNull());
   });
 });
+
+describe("a restart nobody was watching for", () => {
+  /**
+   * The third report of the same shape, 2026-09-21: after pressing Restart in
+   * the header, "the wording 'Restarting app in 5 seconds — reconnect your
+   * browser shortly.' never goes away after it has restarted".
+   *
+   * It could not. The reconnect above only runs once something has ALREADY
+   * discovered the server is gone -- and the only thing that ever read the
+   * session was the first mount. Every other poll on the page fails quietly
+   * into its own error state, so a running page never noticed the restart, never
+   * reloaded, and sat there with a five-second countdown from ten minutes ago.
+   *
+   * A heartbeat fixes it for every cause, not just the button: the Telegram
+   * `/restartapp` command, the bridge watchdog, an environment switch and a
+   * crash all look the same from here.
+   */
+  it("notices the server going away and coming back on its own", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<App />);
+      await vi.advanceTimersByTimeAsync(50);
+
+      mode = "down";
+      await vi.advanceTimersByTimeAsync(30_000);
+      mode = "ok";
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(reloads).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reload while the server keeps answering", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<App />);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(reloads).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

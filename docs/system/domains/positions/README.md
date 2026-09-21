@@ -29,6 +29,7 @@ shaped around "no behaviour change".
 - `services/positions/repo.py`, `ladder_repo.py`, `spread_cache.py` — position SQL, `vantage_ladder_legs` CRUD, cached spread cost
 - `services/broker/position_sync.py` — reconciliation against broker-held tickets (`sync_closed_mt5_positions`, `PositionSyncCtx`)
 - `services/broker/untracked.py` — live MT5 positions with no app trade record (`_untracked=True`)
+- `services/positions/live_view.py` — the Positions table's rows: stored open trades carrying the broker's RUNNING P&L, plus positions open at the broker with no record here
 - `services/trading/profit_sync.py` — realised P&L reconstruction from MT5 deal history
 
 ## Constraints / must not change
@@ -54,6 +55,11 @@ shaped around "no behaviour change".
 - `reclaim_ea_managed_trade`: while the EA is healthy Python skips dispatch; if unhealthy it flips `managed_by` in the DB, alerts, and Python takes over the same cycle. Nothing is ever left with no manager.
 - Profit sync falls back from per-ticket history to filtering 90 days of deal history; realised profit sums `profit + swap + fee`.
 - `dpm_candles` is the one piece of state the cycle writes back onto the runtime rather than keeping locally — `open_trade_from_signal` and the scan context also read it.
+
+- **`mt5_profit` is the REALISED figure and is never written while a position is open.** `record_close`, the history importer and the profit sync all write it after the fact, and the balance report reads it. That is why the dashboard's Positions table showed an em dash for P&L on every open row until 2026-09-21: it was reading a column that is null until the trade closes. `live_view.build` puts the broker's running number on a **display-only `pnl` field** and leaves the column alone. Anything that starts writing a running figure into `mt5_profit` corrupts three readers at once.
+- **The open-positions table is the app's own record, not the broker's.** `reporting.get_open_trades` selects `vantage_simulated_trades WHERE status='open'`, so a position opened by hand in MetaTrader — or one whose record was lost — is open at the broker and invisible here. Reported on 2026-09-21 as "it is showing one position when on mt5 there are two". `live_view.build` appends those rows flagged `untracked: True` and with **no `trade_id`**: there is nothing to close against and no record to update afterwards, so the dashboard's Close button is disabled on them and the missing id is the backstop behind that.
+- A running P&L is `profit + swap`, matching MT5's own Profit column. A figure here that disagrees with the terminal is worse than no figure.
+- An unreachable bridge costs this view its P&L column and its untracked rows, never the table. The app's own record is still worth showing when the broker cannot be reached.
 
 ## Open questions
 

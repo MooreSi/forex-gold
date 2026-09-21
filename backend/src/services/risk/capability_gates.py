@@ -134,6 +134,64 @@ def liquidity_blocks(now_ts: float, rs: dict,
     return None
 
 
+def tg_event_tier_blocks(rs: dict, events: Optional[list] = None) -> Optional[str]:
+    """A reason for the TELEGRAM path to stand aside near an event, or None.
+
+    Stage 2 of docs/todo/signal-validation: the first gate promoted from the
+    decision log's shadow record onto a path that can refuse a trade. Read
+    over 322 scored decisions on 2026-09-21, the event tier stood aside from
+    4 of the 39 it had an opinion about and avoided $219.50 of a $869.96
+    loss on those rows -- a quarter of the loss for a tenth of the trades,
+    and the only favourable ratio in the record that is not a blanket
+    refusal. (`confirmed entry` refuses 99.4% of signals, which is a verdict
+    on the channel rather than a filter; session liquidity and the spread
+    guard changed nothing at all.)
+
+    **Its own switch, not `event_tier_gate_enabled`.** That column is read by
+    `liquidity_blocks` above, which the Reversal Engine's live path calls.
+    Arming two engines from one switch destroys the attribution the staged
+    plan exists for. The WINDOWS are shared -- `event_tiers.Config()`, the
+    same default the shadow variant was scored against -- so there is one
+    definition of what a tier-1 blackout is and two independent decisions
+    about who honours it.
+
+    **Off reads nothing.** `get_events` can reach the network, and a feed
+    call on the order path for a gate nobody enabled is a cost with no
+    benefit. It also matters that the switch is checked BEFORE the read: a
+    gate that reads first is indistinguishable from one that is on, on any
+    trace of the order path.
+
+    **A calendar that could not be read does not block.** A feed that is down
+    has not said no. That is the direction `upcoming_events` already fails,
+    and the direction the shadow log ABSTAINS rather than refusing -- the
+    alternative is a broken feed silently halting trading with nothing on any
+    screen saying why.
+    """
+    if not _on(rs, "tg_event_tier_gate_enabled"):
+        return None
+    try:
+        evs = _tg_events() if events is None else events
+        ok, reason = _events.check(evs, _events.Config())
+        return None if ok else reason
+    except Exception:
+        return None
+
+
+def _tg_events() -> list:
+    """Calendar events shaped for `event_tiers.check`.
+
+    `news_calendar` caches the weekly feed to disk, so on the IME path -- 269
+    ms end to end with 256 ms of it the broker POST -- this is a warm read,
+    not a fetch. `mins_until` is derived here because the calendar stores
+    absolute timestamps and the tier windows are relative.
+    """
+    import time as _time
+    from backend.src.utils.news_calendar import get_events
+    now = _time.time()
+    return [dict(ev, mins_until=(float(ev.get("ts", 0)) - now) / 60.0)
+            for ev in get_events()]
+
+
 def sizing_inputs(rs: dict, atr: float, reference_atr: float,
                   drawdown_pct: float,
                   open_correlated_lots: float) -> _sizing.SizingInputs:

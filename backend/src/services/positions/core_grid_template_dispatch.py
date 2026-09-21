@@ -66,7 +66,8 @@ def grid_template_for_source(source_name: Optional[str]) -> Optional[dict]:
     if not source_name:
         return None
     try:
-        override = db_module.get_channel_strategy_override(source_name)
+        from backend.src.services.risk.schedule import effective_channel_strategy
+        override = effective_channel_strategy(source_name)
     except Exception as exc:
         log.debug("[GridDispatch] override lookup failed for %s: %s", source_name, exc)
         return None

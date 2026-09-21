@@ -53,6 +53,15 @@ export interface Trade {
   /** Decided by the backend — see services/analytics/labels.py. */
   source_label?: string;
   strategy_label?: string;
+  /**
+   * Open at the broker with no record in this app: opened by hand in
+   * MetaTrader, or a record that was lost. Decided by
+   * `services/positions/live_view.py`, never here.
+   *
+   * It cannot be closed from the dashboard — there is no `trade_id` to close
+   * against and no record to update afterwards.
+   */
+  untracked?: boolean;
   [key: string]: unknown;
 }
 

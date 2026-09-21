@@ -84,6 +84,7 @@ from backend.src.services.positions.monitor_loop import reclaim_ea_managed_trade
 from backend.src.services.positions.monitor_loop import reconcile_sl_hit as _reconcile_sl_hit_impl
 from backend.src.services.dpm.handler import run_dpm_calibration as _run_dpm_calibration_impl
 from backend.src.services.signals.pending_activation import try_activate_pending_signals as _try_activate_pending_signals_impl
+from backend.src.services.signals import stale_release as _stale_release
 from backend.src.db import database as db_module
 
 
@@ -336,9 +337,32 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                     log.warning("Strategy handler [%s] error: %s", strategy, exc)
 
             # ── Pending signal watcher ───────────────────────────────
+            # The candle list the watcher's momentum check reads. Normally
+            # the shared DPM cache refreshed above -- but that cache is only
+            # ever filled when `dpm_enabled`, so on an install with Dynamic
+            # Profit Management off the check has never run at all, and on
+            # 2026-09-21 that let a BUY and a SELL out of the same backlog
+            # against the same tick.
+            #
+            # `pending_momentum_gate_enabled` fills it for the watcher alone,
+            # into a LOCAL list rather than through set_dpm_candles(). That
+            # is the load-bearing part: the shared cache is also read by the
+            # Auto strategy picker (resolution.regime_from_candles), the
+            # trailing ADX and the resting-order sweep, and one toggle must
+            # not quietly change four behaviours. Pinned by
+            # tests/positions/test_momentum_gate_feeds_the_watcher.py.
+            _pa_candles = ctx.get_dpm_candles() if ctx.get_dpm_candles else []
+            if (_pending_watch and not _pa_candles
+                    and _stale_release.momentum_gate_enabled(rs)):
+                try:
+                    _pa_candles = await ctx.get_candles("M5", 30)
+                except Exception:
+                    # Same rule as the DPM refresh above: a dead bridge must
+                    # leave the watcher with nothing rather than a stale bar.
+                    _pa_candles = []
             if _pending_watch and not await db_module.to_db_thread(ctx.is_trading_paused):
                 try:
-                    ctx.state.has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, ctx.bridge, ctx.pending_activation_retry_after, ctx.get_dpm_candles(), starting_balance=ctx.cfg.get('starting_balance', 1000.0), background_open_commentary=ctx.background_open_commentary)
+                    ctx.state.has_pending_signals = await _try_activate_pending_signals_impl(tick, rs, ctx.bridge, ctx.pending_activation_retry_after, _pa_candles, starting_balance=ctx.cfg.get('starting_balance', 1000.0), background_open_commentary=ctx.background_open_commentary)
                 except Exception as exc:
                     log.debug("[PendingWatcher] Error: %s", exc)
                     ctx.state.has_pending_signals = False

@@ -128,9 +128,8 @@ from backend.src.services.risk.governor import (
     rg_apply_halts_on_close as _rg_apply_halts_on_close_impl,
 )
 from backend.src.services.positions.safety_net import tp_safety_net_sweep as _tp_safety_net_sweep_impl
-from backend.src.services.broker.untracked import (
-    get_untracked_mt5_positions as _get_untracked_mt5_positions_impl,
-)
+from backend.src.services.broker.untracked import get_untracked_mt5_positions as _untracked_impl
+from backend.src.services.positions.live_view import build as _open_positions_view_impl
 from backend.src.services.trading.ai_signal_fallback import (
     try_ai_signal_fallback as _try_ai_signal_fallback_impl,
     queue_unrecognised as _queue_unrecognised_impl,
@@ -548,12 +547,12 @@ class TradingRuntime:
         return _get_open_trades_impl()
 
     async def get_untracked_mt5_positions(self) -> list[dict]:
-        """
-        Return live MT5 positions that the app has no open trade record for.
-        These are positions opened directly in MT5 (not via the app's signal system).
-        Each dict is the raw bridge position payload plus a `_untracked=True` marker.
-        """
-        return await _get_untracked_mt5_positions_impl(self._bridge)
+        """Live MT5 positions with no record here, marked `_untracked=True`."""
+        return await _untracked_impl(self._bridge)
+
+    async def get_open_positions_view(self, open_trades: list[dict]) -> list[dict]:
+        """`open_trades` carrying the broker's RUNNING P&L, plus anything open there with no record."""
+        return await _open_positions_view_impl(open_trades, self._bridge)
 
     # ── Performance ───────────────────────────────────────────────────────────
 

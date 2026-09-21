@@ -15,6 +15,7 @@
   "get_deal_history",
   "get_fresh_tick",
   "get_mt5_account",
+  "get_open_positions_view",
   "get_open_trades",
   "get_signals",
   "get_tg_signals",

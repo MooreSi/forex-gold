@@ -32,11 +32,14 @@ from backend.src.services.risk.governor import (
     check_pre_trade_filters, htf_bias_blocks as check_htf_bias,
     price_in_entry_range, rg_size_and_check,
 )
+from backend.src.services.risk import capability_gates as _caps
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
 from backend.src.services.trading.template_levels import template_sl_at as _template_sl_at
-from backend.src.services.risk.schedule import check_trading_schedule, get_schedule_strategy_override
+from backend.src.services.risk.schedule import (
+    check_trading_schedule, effective_channel_strategy, schedule_source_key,
+)
 from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
     Tick,
@@ -214,11 +217,10 @@ async def resolve_open_trade_params(
     # breakout_signal_live_execute.py); every other source_name is a
     # Telegram channel, gated (and possibly strategy-overridden) per-channel.
     _ch_src_early = sig.get("source_name") or ""
-    _sched_src_key = (
-        "reversal_engine" if _ch_src_early == "Reversal Engine" else
-        "breakout_engine" if _ch_src_early == "Breakout Engine" else
-        _ch_src_early
-    )
+    # The mapping itself moved to schedule.schedule_source_key on 2026-09-21
+    # so the strategy lookup and this gate cannot drift apart about what a
+    # window calls this source.
+    _sched_src_key = schedule_source_key(_ch_src_early)
     _sched_ok, _sched_reason = check_trading_schedule(source=_sched_src_key)
     if not _sched_ok:
         raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
@@ -233,18 +235,26 @@ async def resolve_open_trade_params(
     if not _news_ok:
         raise ValueError(f"{_news_reason} (Trading > News)")
 
+    # Event-tier gate (docs/todo/signal-validation, Stage 2, 2026-09-21).
+    # Beside the news blackout because it is the finer version of the same
+    # idea: one before/after window for every high-impact print treats an
+    # FOMC statement and a trade-balance release identically, and they are
+    # not the same, nor is the danger symmetric. Off by default; the owner
+    # arms it for a demo session.
+    _tier_reason = _caps.tg_event_tier_blocks(rs)
+    if _tier_reason:
+        raise ValueError(f"{_tier_reason} (Parsing > Event tier gate)")
+
     # Resolve strategy: Trading Schedule window override > channel override >
     # auto-Claude rec > global Active Strategy.
-    _ch_override  = db_module.get_channel_strategy_override(_ch_src_early)
-
-    # Trading Schedule per-window override (Trading > Schedule) -- when the
-    # schedule is enabled and the active window has a strategy/template
-    # assigned for this engine or (for Telegram) this specific channel, it
-    # wins over the channel's own Channel Strategy pick for as long as that
-    # window is active.
-    _sched_override = get_schedule_strategy_override(_sched_src_key)
-    if _sched_override:
-        _ch_override = _sched_override
+    #
+    # The first two tiers moved into `effective_channel_strategy` on
+    # 2026-09-21. They were written here and nowhere else, so the six other
+    # routes to the broker only ever saw the channel tier and one channel
+    # ended up running two templates at once -- see
+    # tests/core/test_one_strategy_per_channel.py. Same precedence, same
+    # answer; this is now the shared one rather than the only one.
+    _ch_override = effective_channel_strategy(_ch_src_early)
 
     if _ch_override == "auto":
         # Auto mode (2026-08-14): the AI/auto-manage layer's current pick for

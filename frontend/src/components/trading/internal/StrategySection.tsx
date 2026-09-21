@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/shared/Button";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney, pnlColour } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
@@ -65,6 +66,7 @@ export function StrategySection() {
           disabled={c.busy === "recommend"}
           onClick={() => void c.requestRecommendations(sources)}
           title="Asks the configured AI model. This costs money."
+          tooltip="Asks the configured AI model to re-pick a strategy for every channel marked Auto, from that channel's own trading record. Billable, and it changes nothing until you apply a recommendation."
         >
           <Sparkles size={13} />
           {c.busy === "recommend" ? "Asking…" : "Ask the AI (billable)"}
@@ -103,6 +105,7 @@ export function StrategySection() {
                     </span>
                   </td>
                   <td className="px-2 py-1.5">
+                    <Tooltip label={`How a position from ${ch.source} is managed once it is open — where the stop moves, how the size is scaled out, what the targets are. "Use the default" leaves it on the app's own choice. A schedule window can override this again for its own hours.`}>
                     <select
                       aria-label={`Strategy for ${ch.source}`}
                       value={ch.strategy_override ?? ""}
@@ -116,17 +119,20 @@ export function StrategySection() {
                         <option key={s.key} value={s.key}>{s.label}</option>
                       ))}
                     </select>
+                    </Tooltip>
                   </td>
                   <td className="px-2 py-1.5">
-                    <input
-                      type="checkbox"
-                      aria-label={`Auto strategy for ${ch.source}`}
-                      checked={ch.auto_strategy}
-                      disabled={c.busy === ch.source}
-                      onChange={(e) => void c.assign(
-                        ch.source, ch.strategy_override, e.target.checked)}
-                      className="size-3.5 accent-[var(--color-accent)]"
-                    />
+                    <Tooltip label={`Let the AI re-pick ${ch.source}'s strategy from its own record when you press Evaluate. Off, the strategy stays exactly as set here until you change it yourself. It never changes anything on its own.`}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Auto strategy for ${ch.source}`}
+                        checked={ch.auto_strategy}
+                        disabled={c.busy === ch.source}
+                        onChange={(e) => void c.assign(
+                          ch.source, ch.strategy_override, e.target.checked)}
+                        className="size-3.5 accent-[var(--color-accent)]"
+                      />
+                    </Tooltip>
                   </td>
                   <td className="num px-2 py-1.5 text-ink-3">
                     {Number(ch.lot_mult ?? 1).toFixed(2)}x

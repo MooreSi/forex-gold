@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Power, PowerOff, RotateCw } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Notice } from "@/components/shared/Notice";
 
 /**
  * Restart and Stop, restored from the NiceGUI header's power button.
@@ -21,6 +22,7 @@ export function PowerControl() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const clearNote = useCallback(() => setNote(null), []);
 
   async function send(path: string, label: string) {
     setBusy(label);
@@ -52,8 +54,8 @@ export function PowerControl() {
       <DialogShell open={open} onOpenChange={setOpen} title="Power options">
         <div className="space-y-3 text-xs text-ink-2">
           <p>
-            Restart relaunches the app and your browser reconnects in a few
-            seconds. Stop shuts it down — it <strong>does not start itself
+            Restart relaunches the app and this page reloads itself as soon as
+            it answers again. Stop shuts it down — it <strong>does not start itself
             again</strong>, so you would launch it from the desktop shortcut.
           </p>
           <p className="text-ink-3">
@@ -84,8 +86,15 @@ export function PowerControl() {
         </div>
       </DialogShell>
 
+      {/* Through `Notice`, which clears itself. This was a plain span and
+          nothing ever took it down: "Restarting app in 5 seconds — reconnect
+          your browser shortly." stayed on the header long after the app had
+          restarted (owner report, 2026-09-21). The page now reloads itself
+          when the backend answers again (AuthContext's heartbeat), and the
+          timeout in `Notice` covers the case where it never does — Stop, or a
+          restart that failed. */}
       {note && (
-        <span role="status" className="max-w-xs text-[11px] text-ink-3">{note}</span>
+        <Notice onDismiss={clearNote}>{note}</Notice>
       )}
     </>
   );

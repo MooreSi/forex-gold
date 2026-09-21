@@ -1,3 +1,5 @@
+import { Tooltip } from "@/components/shared/Tooltip";
+
 interface SettingsToggleProps {
   label: string;
   checked: boolean;
@@ -16,13 +18,15 @@ interface SettingsToggleProps {
 export function SettingsToggle({ label, checked, hint, onChange }: SettingsToggleProps) {
   return (
     <label className="flex items-start gap-2 text-xs text-ink-2">
-      <input
-        type="checkbox"
-        checked={checked}
-        aria-label={label}
-        onChange={(e) => onChange(e.target.checked)}
-        className="accent-accent mt-0.5"
-      />
+      <Tooltip label={hint}>
+        <input
+          type="checkbox"
+          checked={checked}
+          aria-label={label}
+          onChange={(e) => onChange(e.target.checked)}
+          className="accent-accent mt-0.5"
+        />
+      </Tooltip>
       <span>
         {label}
         {hint && <span className="mt-0.5 block text-[10px] text-ink-3">{hint}</span>}

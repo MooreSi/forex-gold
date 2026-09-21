@@ -137,12 +137,34 @@ export const RISK_GROUPS: RiskGroup[] = [
         label: "Skip live execution during measured toxic hours", kind: "toggle",
         hint: "Hours this account has measurably lost money in.",
       },
+      {
+        key: "stale_better_fill_cap_enabled",
+        label: "Cap how far past its zone a queued signal may fill",
+        kind: "toggle",
+        hint: "A fill far beyond the zone on the good side is a different setup, not a better price.",
+      },
+      {
+        key: "stale_better_fill_cap_pts", label: "Better-fill cap (points)",
+        kind: "number",
+        dependsOn: { key: "stale_better_fill_cap_enabled", label: "the better-fill cap" },
+      },
+      {
+        key: "pending_momentum_gate_enabled",
+        label: "Check M5 momentum before releasing a queued signal",
+        kind: "toggle",
+        hint: "Defer a signal the last candle disagrees with. Needs no Dynamic Profit Management.",
+      },
     ],
   },
   {
     title: "Exposure",
     blurb: "What may be open in opposite directions at the same time.",
     fields: [
+      {
+        key: "burst_hedge_guard_enabled",
+        label: "One direction per queued-signal release", kind: "toggle",
+        hint: "After a pause, the backlog empties in one pass. This stops it opening both sides.",
+      },
       {
         key: "internal_hedge_mode", label: "Hedging", kind: "choice",
         choices: [

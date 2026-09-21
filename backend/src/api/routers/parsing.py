@@ -132,9 +132,15 @@ async def set_lexicon(body: LexiconUpdate) -> dict:
 
 @router.put("/channel-parser")
 async def set_channel_parser(body: ChannelParserUpdate) -> dict:
-    existing = tg_ctl.get_channel_parser_config(body.channel) or {}
-    tg_ctl.save_channel_parser_config(body.channel, {**existing, "enabled": body.enabled})
-    return tg_ctl.get_channel_parser_config(body.channel) or {}
+    """Switch one channel's parser on or off.
+
+    One controller call. This used to read the config here and hand the merged
+    dict back as the writer's SECOND POSITIONAL ARGUMENT -- and the writer
+    takes six, so every checkbox on Parsing -> Channels raised TypeError and
+    answered 500 (owner report, 2026-09-21). Merging is the service's job; the
+    router forwards and returns what it wrote.
+    """
+    return tg_ctl.set_channel_parser_enabled(body.channel, body.enabled)
 
 
 @router.post("/unrecognised/resolve")

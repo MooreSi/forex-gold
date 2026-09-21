@@ -88,7 +88,10 @@ async def apply_followup_to_instant_trade(
         # Detect this mismatch now: if the channel override points to a different
         # strategy, correct the trade's strategy record and fall through to apply
         # the actual SL/TP from the full signal.
-        _ch_ov_fu = db_module.get_channel_strategy_override(channel_name)
+        # The same resolver the entry used, or the follow-up "corrects" a
+        # trade to the tier the entry deliberately did not use (2026-09-21).
+        from backend.src.services.risk.schedule import effective_channel_strategy
+        _ch_ov_fu = effective_channel_strategy(channel_name)
         _trade_strategy = instant_trade.get("strategy")
         _mismatch = (
             _ch_ov_fu

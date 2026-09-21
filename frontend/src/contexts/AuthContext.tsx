@@ -21,6 +21,21 @@ const AuthContext = createContext<AuthValue | null>(null);
 /** How often to re-check a backend that is not answering. */
 const RETRY_MS = 1500;
 
+/**
+ * How often to re-check one that IS answering.
+ *
+ * Without this nothing on a running page ever notices a restart. Every other
+ * poll in the app fails quietly into its own error state, and the session read
+ * only happened on the first mount -- so after the header's Restart button the
+ * page sat on stale state, with "Restarting app in 5 seconds" still on screen
+ * long after it had restarted (owner report, 2026-09-21).
+ *
+ * A heartbeat covers every cause rather than that one button: the Telegram
+ * `/restartapp` command, an environment switch, the bridge watchdog and a
+ * crash all look identical from the browser.
+ */
+const HEARTBEAT_MS = 5000;
+
 const UNKNOWN: SessionState = {
   authenticated: false,
   needs_setup: false,
@@ -70,10 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  // Keep trying while it is away, so the page comes back on its own.
+  // Keep trying while it is away, so the page comes back on its own -- and
+  // keep checking while it is here, so something notices when it leaves.
   useEffect(() => {
-    if (reachable) return;
-    const id = setInterval(() => void refresh(), RETRY_MS);
+    const id = setInterval(() => void refresh(), reachable ? HEARTBEAT_MS : RETRY_MS);
     return () => clearInterval(id);
   }, [reachable, refresh]);
 

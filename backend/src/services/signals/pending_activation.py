@@ -34,6 +34,7 @@ from backend.src.db import database as db_module
 from backend.src.services.signals import repo as signals_repo
 from backend.src.services.signals import tg_repo
 from backend.src.services.signals import gap_revalidation as _gap
+from backend.src.services.signals import stale_release as _stale
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_grid_template_dispatch import grid_template
@@ -192,7 +193,8 @@ def _resolve_effective_strategy(source_name: str | None, current_strategy: str) 
     which is the default.
     """
     src = source_name or ""
-    override = db_module.get_channel_strategy_override(src)
+    from backend.src.services.risk.schedule import effective_channel_strategy
+    override = effective_channel_strategy(src)
     if override == "auto":
         rec = db_module.get_channel_strategy_rec(src)
         return (rec.get("strategy") or "").strip() or current_strategy
@@ -300,6 +302,11 @@ async def try_activate_pending_signals(
     open_count  = len(open_trades) + _slots.count_slots_not_yet_open()
     max_trades  = int(rs.get("max_open_trades", 1))
     current_strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
+    # Directions actually released by THIS pass, for the burst hedge guard.
+    # Per-pass and local: the whole point is the backlog emptying against a
+    # single tick, so it must not survive into the next cycle, and it must
+    # not be confused with what is already open.
+    _released_dirs: list[str] = []
 
     for sig in pending:
         # Expire signals that did not fill within the allowed window
@@ -471,6 +478,24 @@ async def try_activate_pending_signals(
                      sig["signal_id"][:8], _pa_soon)
             continue
 
+        # How far past its own zone this fill has drifted on the FAVOURABLE
+        # side (owner, 2026-09-21, off by default). price_in_entry_range
+        # admits any distance there as an "equal or better fill", uncapped,
+        # while the unfavourable side is capped at MAX_GAP_FIRE_PTS -- so a
+        # 45-minute-old SELL sold 7.17 pts above a zone that topped out at
+        # 4354.65, at the same tick two gap-fired BUYs were chasing up to.
+        # Not asked of a grid template: its legs rest AT the zone on the
+        # broker's book, so where price is right now is not what decides it.
+        # See signals/stale_release.better_fill_blocked.
+        if _grid_tpl is None:
+            _pa_far = _stale.better_fill_blocked(
+                rs, sig["direction"], float(sig["entry_low"]),
+                float(sig["entry_high"]), tick)
+            if _pa_far:
+                log.info("[PendingWatcher] Signal %s held — %s",
+                         sig["signal_id"][:8], _pa_far)
+                continue
+
         # Pre-trade filters: R:R and directional cap.
         #
         # The bypass list is imported from the fresh-signal scan path rather
@@ -559,6 +584,18 @@ async def try_activate_pending_signals(
                     )
                     continue
 
+        # Would this empty the backlog into both directions at once? (owner,
+        # 2026-09-21, off by default.) Asked last, because it is the only
+        # gate whose answer depends on what the gates above have already let
+        # through in THIS pass -- see signals/stale_release.burst_hedge_
+        # blocked for why it is scoped to the pass and not to the book.
+        _pa_hedge = _stale.burst_hedge_blocked(
+            rs, sig["direction"], _released_dirs)
+        if _pa_hedge:
+            log.info("[PendingWatcher] Signal %s held — %s",
+                     sig["signal_id"][:8], _pa_hedge)
+            continue
+
         # All fills within the 2-minute window are treated as fresh (full lot)
         _age_lot_mult = 1.0
 
@@ -624,6 +661,7 @@ async def try_activate_pending_signals(
             retry_after.pop(sig["signal_id"], None)
             _ACTIVATION_FAILURES.pop(sig["signal_id"], None)
             _gap.clear(sig["signal_id"])
+            _released_dirs.append(sig["direction"])
         except Exception as exc:
             _exc_msg = str(exc)
             # Undo the gap-fire write so the next attempt re-measures from the

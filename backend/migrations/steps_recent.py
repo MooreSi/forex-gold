@@ -181,4 +181,44 @@ _RECENT: list[tuple[int, str, object]] = [
     (49, "Signal contradiction study, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN tg_contradiction_log_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Stage 2 of docs/todo/signal-validation (2026-09-21): the FIRST gate
+    # promoted from the decision log's shadow record onto the Telegram
+    # execution path. Unlike 47 and 49 above, this one can refuse a trade.
+    #
+    # Its own column rather than the existing `event_tier_gate_enabled`,
+    # which the Reversal Engine's live path already reads through
+    # capability_gates.liquidity_blocks. One switch arming two engines
+    # destroys the attribution the staged plan is built on -- "promote one
+    # at a time, because a stack promoted together cannot be attributed when
+    # the number moves". The tier windows themselves stay in
+    # event_tiers.Config: one definition, two independent decisions about
+    # who honours it.
+    #
+    # Off by default (rules/60-adding-a-tunable). The owner authorised
+    # arming it for a demo session on 2026-09-21; it has not shipped on.
+    (50, "Telegram event-tier gate, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN tg_event_tier_gate_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # Three guards for the moment a backlog of queued signals is released
+    # at once (2026-09-21). A resume from the daily-loss halt opened two
+    # buys and a sell on XAUUSD inside 700ms, all within half a point: the
+    # blind-gap re-validation ran and every instantaneous gate passed,
+    # because none of them asks about the SPREAD of the release. See
+    # services/signals/stale_release.py for what each one does and why the
+    # burst guard is scoped to the pass rather than to the open book.
+    #
+    # All three OFF, and the cap's own value is the chase-side cap it
+    # mirrors (scan_auto_execute.MAX_GAP_FIRE_PTS), so the pair is inert
+    # rather than merely unused. Each can only ever REFUSE a trade the app
+    # would otherwise take, which makes switching one on a live behaviour
+    # change and a demo-session decision, not an upgrade (owner,
+    # 2026-09-21; rules/60-adding-a-tunable).
+    (51, "Stale-release guards for the queued-signal backlog, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN stale_better_fill_cap_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN stale_better_fill_cap_pts REAL NOT NULL DEFAULT 15.0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN pending_momentum_gate_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN burst_hedge_guard_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

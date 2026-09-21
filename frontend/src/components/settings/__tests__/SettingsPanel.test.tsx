@@ -495,13 +495,18 @@ describe("node and updates", () => {
   it("says when autostart is not supported rather than offering a dead switch", async () => {
     overrides["/api/node/state"] = {
       ...(BODIES["/api/node/state"] as object),
-      autostart: { supported: false, installed: false, armed: false },
+      autostart: { supported: false, enabled: false, installed: false,
+                   armed: false, check_interval_secs: 120 },
     };
     render(<SettingsPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Node & updates" }));
 
-    expect(await screen.findByText("Not supported on this platform.")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Start the app when this machine boots/)).toBeNull();
+    // Reworded 2026-09-21 with the section (KeepAliveSection): the same rule,
+    // which is that an unsupported platform gets a sentence and no switch.
+    expect(await screen.findByText(/Not supported on this platform/))
+      .toBeInTheDocument();
+    expect(screen.queryByLabelText(/Keep the app, the bridge and MT5 running/))
+      .toBeNull();
   });
 });
 

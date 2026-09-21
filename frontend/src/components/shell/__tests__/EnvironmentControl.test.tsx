@@ -247,3 +247,100 @@ describe("when the credentials are saved but cannot be read", () => {
       .toMatch(/Add it under Settings > MT5/);
   });
 });
+
+describe("when the badge and the config disagree", () => {
+  /**
+   * Reported by the owner, 2026-09-21: "when i clicked DEMO on the top title
+   * bar to switch to the live account ... it didn't switch either the app to
+   * the live account", and the message that came back read "Now pointed at the
+   * **Demo** account 26004592 on VantageMarkets-Demo".
+   *
+   * It did exactly what it was asked. The badge shows the BRIDGE's account --
+   * ground truth, and MT5 was logged into demo -- while the switch acts on the
+   * CONFIG's `account_env`, which already said live. So the badge read DEMO,
+   * the operator pressed it expecting live, and the control dutifully switched
+   * to demo.
+   *
+   * That disagreement is the half-switched state the environment service is
+   * written to prevent, and it is worth saying out loud rather than resolving
+   * silently in either direction.
+   */
+  const mismatch = () => {
+    state.current = "live";   // what this app is configured for
+    // ...while MT5 is logged into the demo account.
+  };
+
+  it("says which account the app is configured for, not just what MT5 answered", async () => {
+    mismatch();
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+
+    expect(await screen.findByTestId("environment-mismatch")).toBeInTheDocument();
+  });
+
+  it("names both sides of the disagreement", async () => {
+    mismatch();
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+
+    const warning = await screen.findByTestId("environment-mismatch");
+    expect(warning.getAttribute("title")).toMatch(/live/i);
+    expect(warning.getAttribute("title")).toMatch(/demo/i);
+  });
+
+  it("says nothing when the two agree", async () => {
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+    await screen.findByTestId("environment-control");
+
+    expect(screen.queryByTestId("environment-mismatch")).not.toBeInTheDocument();
+  });
+
+  it("the dialog names the account being left as well as the one being taken", async () => {
+    // "Switch to demo" on a badge reading DEMO is the sentence that made this
+    // look like it had done nothing.
+    mismatch();
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+
+    await userEvent.click(await screen.findByTestId("environment-control"));
+
+    expect(screen.getByTestId("environment-dialog")).toHaveTextContent(/from the Live account/i);
+  });
+});
+
+describe("keeping up with the app it is describing", () => {
+  it("re-reads the configured environment rather than trusting the first answer", async () => {
+    // The control read `/api/settings/environment` once, on mount. After a
+    // switch -- or after the OTHER paired node switched -- the button went on
+    // offering the direction that was right ten minutes ago.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+      await vi.advanceTimersByTimeAsync(50);
+      const first = fetchMock.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("the note it leaves behind", () => {
+  it("can be dismissed", async () => {
+    // It used to be permanent. "Restarting app in 5 seconds" was still on the
+    // header long after the app had restarted (owner report, 2026-09-21).
+    render(<EnvironmentControl account={DEMO_ACCOUNT} />);
+    await userEvent.click(await screen.findByTestId("environment-control"));
+    await userEvent.click(screen.getByRole("button", { name: "Switch to LIVE" }));
+    await screen.findByRole("status");
+
+    await userEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  // That it also clears ITSELF, so a restart that never comes back does not
+  // leave this on the header for ever, is `Notice`'s own behaviour and is
+  // tested there — with the timers faked from before it mounts, which is the
+  // only way a timeout scheduled on mount can be advanced at all.
+});

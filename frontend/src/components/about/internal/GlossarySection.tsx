@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { GLOSSARY } from "../content/glossary";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 /** Every term the app uses, in plain English, with a filter. */
 export function GlossarySection() {
@@ -19,13 +20,15 @@ export function GlossarySection() {
 
   return (
     <div className="space-y-5">
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Filter terms"
-        aria-label="Filter terms"
-        className="w-full max-w-sm rounded border border-line bg-surface-1 px-3 py-1.5 text-sm text-ink-1 placeholder:text-ink-3"
-      />
+      <Tooltip label="Narrow the glossary to terms whose name or explanation contains what you type.">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter terms"
+          aria-label="Filter terms"
+          className="w-full max-w-sm rounded border border-line bg-surface-1 px-3 py-1.5 text-sm text-ink-1 placeholder:text-ink-3"
+        />
+      </Tooltip>
       {sections.length === 0 && (
         <p className="text-xs text-ink-3">No term matches “{query}”.</p>
       )}

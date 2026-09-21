@@ -2,8 +2,8 @@
 and the header's flashing "Update Available" badge (2026-08-01).
 
 Uses `git fetch`/`git rev-parse`/`git log` against the `origin` remote
-(already configured to https://github.com/MooreSi/forex.git in this
-checkout) to detect commits not yet in the local working tree, rather than
+(already configured to https://github.com/MooreSi/forex-react.git in
+this checkout) to detect commits not yet in the local working tree, rather than
 the GitHub REST API -- avoids API rate limits/auth entirely, and reuses
 the exact same git plumbing the actual update (`git pull`) needs anyway.
 
@@ -29,7 +29,14 @@ log = logging.getLogger(__name__)
 
 _REPO_ROOT = _repo_root()  # walks up for run.py -- see os_utils.repo_root()
 _BRANCH = "main"
-_GITHUB_REPO_URL = "https://github.com/MooreSi/forex"
+# The remote a machine with NO `.git` is wired to -- the installers copy, they
+# never clone, so this is every fresh download's first sight of a repository.
+# It must be the repo THIS checkout pulls from: it named MooreSi/forex (the
+# NiceGUI app) here until 2026-09-21, which meant Set Up Updates force-checked
+# out the old app over a React folder. Owner's decision that day: forex-react
+# is canonical for this checkout. `~/Forex-Update` keeps MooreSi/forex, which
+# is its own origin -- see rules/80, this is a legitimate difference, not drift.
+_GITHUB_REPO_URL = "https://github.com/MooreSi/forex-react"
 
 
 async def _run_git(*args: str, timeout: float = 30.0) -> tuple[int, str, str]:

@@ -108,6 +108,41 @@ reads or rewrites it — an *empty* directory proves nothing there, because
 then skips the write, so a version wired to the shared directory would pass an
 emptiness check without doing anything.
 
+## Rule 3 — the update remote is per-checkout too (2026-09-21)
+
+The second deliberate difference, for the same reason as the version: it
+describes *the code*, not *the account*.
+
+`core_app_update._GITHUB_REPO_URL` is the remote a machine with **no `.git`**
+is wired to -- and the installers copy rather than clone, so every fresh
+download is such a machine. It must name the repo its own checkout pulls from:
+
+| Checkout | `origin` | `_GITHUB_REPO_URL` |
+|---|---|---|
+| `~/Forex-React` | `MooreSi/forex-react` | `https://github.com/MooreSi/forex-react` |
+| `~/Forex-Update` | `MooreSi/forex` | `https://github.com/MooreSi/forex` |
+
+**The two lines differ on purpose. Do not "fix" one to match the other.**
+
+Until 2026-09-21 the React checkout carried the NiceGUI repo's URL. That is
+not a cosmetic mismatch: `apply_update()` on a folder with no `.git` does
+`remote add origin <this>` then `checkout -B main --track origin/main -f`, so
+pressing **Set Up Updates** on a downloaded React folder would have
+force-checked-out the *old app over it*. `link_checkout()` hit the same
+constant at every startup, matched nothing, and deleted the `.git` it had just
+made -- leaving the machine permanently unable to self-update, silently.
+
+Owner's decision the same day: **forex-react is canonical for the React
+checkout.** Making the NiceGUI app update itself into the React app is a
+separate change, with its own demo session, not a line edit here.
+
+Pinned by
+`tests/positions/test_app_update.py::TestTheBootstrapPointsAtTHISRepo`, which
+compares the constant against `git remote get-url origin` rather than only
+against a literal -- the two disagreeing is what the bug WAS. Note that
+`"forex-react"` contains `"forex"`, so a substring check passes on the old
+value and proves nothing; the test asserts the suffix.
+
 ---
 
 ## When you add shared state
@@ -117,5 +152,6 @@ Ask which of the two rules it falls under:
 - **Shared** (the default): trade history, settings, credentials, learned
   rules, templates, ML models, backups. Put it in `USER_DATA_DIR`.
 - **Per-checkout**: anything that describes *the code* rather than *the
-  account* — the version, the git commit, the checkout path. Put it in the
+  account* — the version, the git commit, the update remote, the checkout
+  path. Put it in the
   repo, and derive it from `os_utils.repo_root()`.

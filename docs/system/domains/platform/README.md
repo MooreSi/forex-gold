@@ -24,7 +24,7 @@ allowed to call.
 - `services/cluster/node.py`, `node_roles.py` — node identity, sync token, which paired node owns which job
 - `services/cluster/sync/` — Mac client / VPS server for the 1:1 link, settings mirroring, STAND_DOWN/RESUME, the consolidated closed-trade ledger, remote stats facades, one-shot ML model transfer
 - `services/cluster/remote/` — hub-and-spoke admin/licence/update channel (wss to the admin server)
-- `backend/src/services/positions/core_app_update.py` — the other update mechanism: client-initiated, `git fetch`/`checkout` straight from `https://github.com/MooreSi/forex`, no admin server involved. Lives under `services/positions/` despite having nothing to do with trade positions.
+- `backend/src/services/positions/core_app_update.py` — the other update mechanism: client-initiated, `git fetch`/`checkout` straight from `origin` -- `https://github.com/MooreSi/forex-react` for this checkout since 2026-09-21 -- no admin server involved. Lives under `services/positions/` despite having nothing to do with trade positions.
 - `backend/src/controllers/__init__.py` — the controller contract; one flat `<page>_controller.py` per page
 - `installer/FOREX_Trader_Setup.iss` + `BUILD_INSTALLER.md` — Inno Setup 6 Windows installer
 

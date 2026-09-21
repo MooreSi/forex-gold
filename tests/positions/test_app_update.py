@@ -439,3 +439,69 @@ def test_repo_root_resolves_to_the_actual_checkout_root():
 
     assert upd._REPO_ROOT == os_utils.repo_root()
     assert (upd._REPO_ROOT / "run.py").exists()
+
+
+class TestTheBootstrapPointsAtTHISRepo:
+    """`_GITHUB_REPO_URL` is the remote a machine with no `.git` is wired to.
+
+    It named `MooreSi/forex` -- the NiceGUI repo -- in a checkout whose own
+    `origin` is `MooreSi/forex-react`. The installers copy rather than clone,
+    so a downloaded folder has no `.git` and hits this constant twice:
+
+      * `link_checkout()` wires origin to it at every startup, finds no commit
+        whose tree matches a React folder, and deletes the `.git` it just made.
+        Harmless, but that machine can never self-update.
+      * Settings > Update then offers **Set Up Updates**, and `apply_update()`
+        does `remote add origin <this>` + `checkout -B main --track
+        origin/main -f`. Force-checking-out the OLD app over the new folder,
+        which is the failure this whole session started from: a Mac running
+        the React app that came up serving NiceGUI.
+
+    Owner's decision 2026-09-21: forex-react is canonical for this checkout.
+    `~/Forex-Update` keeps `MooreSi/forex` -- its own `origin` -- and this is
+    the second thing that must legitimately differ between the two checkouts,
+    after the version number. See rules/80.
+    """
+
+    EXPECTED = "https://github.com/MooreSi/forex-react"
+
+    def test_the_bootstrap_url_is_this_repo(self):
+        assert upd._GITHUB_REPO_URL == self.EXPECTED
+
+    def test_it_is_not_the_nicegui_repo(self):
+        """"forex-react" CONTAINS "forex", so a substring check passes on the
+        old value and proves nothing. The suffix is what separates them."""
+        assert not upd._GITHUB_REPO_URL.rstrip("/").endswith("/forex")
+
+    def test_the_composed_clone_url_is_well_formed(self):
+        """Both call sites build `f"{_GITHUB_REPO_URL}.git"`; a constant that
+        already ended in .git would produce forex-react.git.git."""
+        composed = f"{upd._GITHUB_REPO_URL}.git"
+        assert composed.endswith("/forex-react.git")
+        assert ".git.git" not in composed
+
+    def test_it_names_the_repo_this_checkout_actually_pulls_from(self):
+        """The constant and `origin` disagreeing is what the bug WAS, so the
+        two are compared rather than only pinned to a literal.
+
+        Compares the repository name, not the whole URL: a fork or an SSH
+        remote is a different URL for the same repo, and neither is wrong.
+        """
+        import subprocess
+
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(upd._REPO_ROOT), "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            pytest.skip(f"git unavailable: {exc}")
+        if out.returncode != 0:
+            pytest.skip("no origin remote here (a copied install, or an archive)")
+
+        origin_repo = out.stdout.strip().rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+        constant_repo = upd._GITHUB_REPO_URL.rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+
+        assert constant_repo == origin_repo, (
+            f"the bootstrap would wire a copied install to {constant_repo!r} "
+            f"while this checkout pulls from {origin_repo!r}")

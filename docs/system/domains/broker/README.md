@@ -79,6 +79,34 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
   sitting as the deploy — see `docs/todo/bugs/041`, which is blocked on exactly
   this.
 
+- **Boot never started the bridge on a Mac, and the watchdog hid it for
+  months (2026-09-21, live, after a power cut).** `run._start_mt5_bridge`
+  asked for a `WINE_PYTHON` environment variable on any non-Windows platform
+  and returned `None` without it. Nothing in this repo sets that variable —
+  not the launcher, not the installer, not `Start MT5 Bridge.command`, which
+  invokes Wine with `C:\Python311\python.exe` as an *argument*, not as a
+  single interpreter path. So the branch was unreachable and the log line
+  "WINE_PYTHON not set — skipping bridge auto-start" was printed on every
+  single Mac boot. It looked like a configuration notice. It was the bridge
+  never starting.
+  This was invisible while MT5 was already up: a normal app restart found a
+  live bridge on 9010 and connected in under a second. The power cut removed
+  that cover. The app started at 19:40:58 with nothing running, failed 186
+  consecutive tick requests, and only recovered at 19:45:20 — the bridge
+  watchdog's own restart path launched it, first try, with no `WINE_PYTHON`
+  anywhere. Four and a half minutes of dead app, none of it necessary.
+  Boot now uses `bridge_process.wine_bridge_launch()`, the exact function the
+  watchdog restart uses, and skips the launch when something is already
+  LISTENing on the bridge port — the Wine relaunch tears down wineserver and
+  every child, so doing it to a healthy bridge would turn a restart into an
+  outage. **Two spellings of one launch is how these drifted; there is now
+  one.** Pinned by `tests/core/test_bridge_autostart_on_macos.py`.
+  The delay itself is not a watchdog bug: `watchdog_loop` deliberately waits
+  180s before its first check, then needs two failures 60s apart, because a
+  genuine MT5 cold start takes up to ~150s and a false restart is worse than
+  a slow one. That patience is correct. It was being spent waiting for
+  something nobody had started.
+
 - **The running bridge process can be older than `mt5_bridge.py`, and it fails
   by 404 rather than by looking broken (2026-09-04, live).** The bridge had
   been up since 16:28:08 on 09-03; `/ticks` was added at 16:38 that same day

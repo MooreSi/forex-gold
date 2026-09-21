@@ -212,32 +212,58 @@ def _start_mt5_bridge() -> subprocess.Popen | None:
             log.info("mt5_bridge.py not found — skipping bridge auto-start")
             return None
 
+        from urllib.parse import urlparse
+        # 9010, not 9000: the fallback has to match the one the launch itself
+        # uses (bridge_process.wine_bridge_launch), or the "is it already
+        # running" probe below asks about a port nothing was ever started on.
+        bridge_port = urlparse(bridge_url).port or 9010
+
+        # A bridge that is already serving must be left alone. On macOS the
+        # launch below is a fresh Wine session, and starting a second one
+        # against a live terminal is how you get two MT5 windows — or, once
+        # the watchdog reaches for its own restart, a wineserver teardown
+        # that kills a terminal the app was happily trading through. A plain
+        # app restart is the common case and must stay a 10-second event.
+        from backend.src.utils.os_utils import is_port_listening
+        if is_port_listening(bridge_port):
+            log.info("MT5 bridge already listening on port %s — leaving it alone",
+                     bridge_port)
+            return None
+
         if sys.platform == "win32":
             cmd = [sys.executable, str(bridge_script)]
+            # Without this, mt5_bridge.py falls back to its sibling-file default
+            # instead of USER_DATA_DIR/bridge_credentials.json (the file the app
+            # actually writes credentials to), so every cold boot connects with
+            # no credentials at all — silently "self-healed" only because the
+            # bridge watchdog's own restart path (engine.py's _start_bridge_process)
+            # sets this env var correctly, masking the bug as a normal startup delay.
+            from backend.src.config import USER_DATA_DIR
+            bridge_env = {
+                **os.environ,
+                "BRIDGE_CREDS_PATH": str(USER_DATA_DIR / "bridge_credentials.json"),
+                "MT5_BRIDGE_PORT": str(bridge_port),
+            }
         else:
-            wine_python = os.environ.get("WINE_PYTHON", "")
-            if not wine_python:
-                log.info("WINE_PYTHON not set — skipping bridge auto-start")
-                return None
-            cmd = [wine_python, str(bridge_script)]
-
-        # Without this, mt5_bridge.py falls back to its sibling-file default
-        # instead of USER_DATA_DIR/bridge_credentials.json (the file the app
-        # actually writes credentials to), so every cold boot connects with
-        # no credentials at all — silently "self-healed" only because the
-        # bridge watchdog's own restart path (engine.py's _start_bridge_process)
-        # sets this env var correctly, masking the bug as a normal startup delay.
-        from backend.src.config import USER_DATA_DIR
-        from urllib.parse import urlparse
-        bridge_port = urlparse(bridge_url).port or 9000
-        bridge_env = {
-            **os.environ,
-            "BRIDGE_CREDS_PATH": str(USER_DATA_DIR / "bridge_credentials.json"),
-            "MT5_BRIDGE_PORT": str(bridge_port),
-        }
+            # MT5 runs under Wine here, so the bridge is a Windows process and
+            # the launch needs a bottle, a Z:-mapped script path and Z:-mapped
+            # credentials. This used to ask for a WINE_PYTHON environment
+            # variable instead — one that nothing in this repo has ever set,
+            # so the branch was unreachable and the Mac never auto-started its
+            # bridge at all (2026-09-21, after a power cut: 4m30s of dead app
+            # before the watchdog ran this same launch itself and it worked).
+            # Shared with that watchdog path so the two cannot drift again.
+            from backend.src.services.broker.bridge_process import wine_bridge_launch
+            cmd, bridge_env = wine_bridge_launch(str(bridge_script))
 
         log.info("Starting MT5 bridge: %s", " ".join(cmd))
-        proc = subprocess.Popen(cmd, env=bridge_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(
+            cmd,
+            env=bridge_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
         log.info("MT5 bridge started (pid=%s)", proc.pid)
         return proc
     except Exception as e:

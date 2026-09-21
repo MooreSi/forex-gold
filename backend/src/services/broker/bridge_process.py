@@ -35,6 +35,56 @@ def bridge_script_path() -> str:
     return os.path.join(_REPO_ROOT, "mt5_bridge.py")
 
 
+def wine_bridge_launch(bridge_script: str) -> tuple[list[str], dict[str, str]]:
+    """The command and environment that start `bridge_script` under Wine.
+
+    Named and shared because it has two callers that must not drift: the
+    watchdog's restart below, and `run._start_mt5_bridge` at boot. They HAD
+    drifted. The watchdog spelled the launch this way and worked; boot asked
+    for a `WINE_PYTHON` environment variable that nothing in this repo sets,
+    so on 2026-09-21 -- a power cut, a cold Mac, nothing running -- boot
+    logged "WINE_PYTHON not set" and started no bridge. The app sat with a
+    dead bridge for four and a half minutes until the watchdog noticed and
+    ran this, which worked first time. One spelling, one place.
+
+    Wine maps the Mac filesystem as Z:, so both the script and the
+    credentials file are handed over as Z: paths; the bridge runs as a
+    Windows process and cannot read a POSIX one.
+    """
+    import os as _os
+    from urllib.parse import urlparse as _urlparse
+
+    from backend.src.config import load as _cfg_load, USER_DATA_DIR
+
+    cfg = _cfg_load()
+    wine = (
+        cfg.get("wine_bin")
+        or "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
+    )
+    if cfg.get("bridge_backend", "crossover") == "crossover":
+        bottle = _os.path.expanduser(
+            "~/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+        )
+        extra_env = {"CX_BOTTLE": bottle, "CX_NO_BROWSER": "1"}
+    else:
+        bottle = _os.path.expanduser(cfg.get("mt5_bottle_path") or "~/.wine_mt5")
+        extra_env = {}
+
+    bridge_win = "Z:" + bridge_script.replace("/", "\\")
+    win_creds = "Z:" + str(USER_DATA_DIR / "bridge_credentials.json").replace("/", "\\")
+    port = _urlparse(cfg.get("mt5_bridge_url", "")).port or 9010
+
+    env = {
+        **_os.environ,
+        "WINEPREFIX":        bottle,
+        "WINEDEBUG":         "-all",
+        "MT5_BRIDGE_PORT":   str(port),
+        "BRIDGE_CREDS_PATH": win_creds,
+        **extra_env,
+    }
+    return [wine, "C:\\Python311\\python.exe", bridge_win], env
+
+
 async def start_bridge_process(bridge, using_native_bridge: bool) -> bool:
     """Tear down any running bridge and start a clean new one.
 
@@ -131,40 +181,9 @@ async def start_bridge_process(bridge, using_native_bridge: bool) -> bool:
         log.info("Bridge restart: clean slate — no terminal64.exe or wineserver running")
 
     try:
-        from backend.src.config import load as _cfg_load, USER_DATA_DIR
-        _cfg = _cfg_load()
-        _wine = (
-            _cfg.get("wine_bin")
-            or "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
-        )
-        _backend = _cfg.get("bridge_backend", "crossover")
-        if _backend == "crossover":
-            _bottle = _os.path.expanduser(
-                "~/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
-            )
-            _extra_env = {"CX_BOTTLE": _bottle, "CX_NO_BROWSER": "1"}
-        else:
-            _bottle = _os.path.expanduser(
-                _cfg.get("mt5_bottle_path") or "~/.wine_mt5"
-            )
-            _extra_env = {}
-
-        _bridge_win = "Z:" + _bridge_py.replace("/", "\\")
-        _mac_creds  = str(USER_DATA_DIR / "bridge_credentials.json")
-        _win_creds  = "Z:" + _mac_creds.replace("/", "\\")
-        from urllib.parse import urlparse as _urlparse
-        _bridge_port = _urlparse(_cfg.get("mt5_bridge_url", "")).port or 9010
-
-        _env = {
-            **_os.environ,
-            "WINEPREFIX":        _bottle,
-            "WINEDEBUG":         "-all",
-            "MT5_BRIDGE_PORT":   str(_bridge_port),
-            "BRIDGE_CREDS_PATH": _win_creds,
-            **_extra_env,
-        }
+        _cmd, _env = wine_bridge_launch(_bridge_py)
         subprocess.Popen(
-            [_wine, "C:\\Python311\\python.exe", _bridge_win],
+            _cmd,
             env=_env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

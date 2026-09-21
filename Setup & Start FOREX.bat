@@ -21,6 +21,17 @@ set "REQ_FILE=%SCRIPT_DIR%requirements.txt"
 set "MARKER=%SCRIPT_DIR%.venv\req_hash.txt"
 set "USER_DATA=%APPDATA%\ForexTrader"
 
+:: -- Pause the auto-restart watchdog for the length of this launch -------------
+:: The mirror of what Stop FOREX.bat does, for the mirror-image reason. Setup
+:: below can take minutes on a cold machine, so for that whole window the app
+:: reads as "down" to a watchdog tick, which starts one — and with two
+:: checkouts sharing this data directory the Scheduled Task launches whichever
+:: checkout enabled it last, which then wins the port and the single-instance
+:: lock while this one is still installing (seen live on macOS, 2026-09-21).
+:: Only intent is cleared, never the task: run.py re-arms through
+:: core_autostart.sync_from_setting() once the app is genuinely up.
+del /q "%USER_DATA%\data\watchdog.armed" >nul 2>&1
+
 :: -- Python / venv check -------------------------------------------------------
 :: If venv already exists skip straight to the hash check
 if exist "%VENV_PYTHON%" goto :check_deps

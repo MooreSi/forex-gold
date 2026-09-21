@@ -28,6 +28,7 @@ scheduler entry stays installed but every tick is a no-op.
 import logging
 import os
 import plistlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -179,6 +180,24 @@ def _mac_installed() -> bool:
     return LAUNCHD_LABEL in (res.stdout or "")
 
 
+def _mac_entry_target() -> Path | None:
+    """The watchdog script the installed LaunchAgent actually runs.
+
+    None means "could not tell" -- no plist, or one this version cannot
+    read -- which `points_at_this_checkout` deliberately treats as fine.
+    """
+    try:
+        with open(_PLIST_PATH, "rb") as fh:
+            plist = plistlib.load(fh)
+        args = plist.get("ProgramArguments") or []
+        if len(args) < 2:
+            return None
+        return Path(args[-1])
+    except Exception as exc:
+        log.debug("[Autostart] could not read %s: %s", _PLIST_PATH, exc)
+        return None
+
+
 # ── Windows: Task Scheduler ───────────────────────────────────────────────────
 
 def _win_python() -> str:
@@ -226,6 +245,31 @@ def _win_installed() -> bool:
     return res.returncode == 0
 
 
+def _win_entry_target() -> Path | None:
+    """The watchdog script the installed Scheduled Task actually runs.
+
+    `/fo LIST /v` prints the whole command back as one "Task To Run:" value,
+    in the quoted form `_win_install` wrote it. Split on the first colon only:
+    the value contains a drive-letter colon of its own.
+    """
+    try:
+        res = _schtasks("/query", "/tn", WIN_TASK_NAME, "/fo", "LIST", "/v")
+        if res.returncode != 0:
+            return None
+        for line in (res.stdout or "").splitlines():
+            name, sep, value = line.partition(":")
+            if not sep or name.strip().lower() != "task to run":
+                continue
+            quoted = re.findall(r'"([^"]+)"', value)
+            if quoted:
+                return Path(quoted[-1])
+            parts = value.split()
+            return Path(parts[-1]) if parts else None
+    except Exception as exc:
+        log.debug("[Autostart] could not read the scheduled task: %s", exc)
+    return None
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def is_installed() -> bool:
@@ -238,6 +282,44 @@ def is_installed() -> bool:
     except Exception as exc:
         log.debug("[Autostart] install check failed: %s", exc)
     return False
+
+
+def entry_target() -> Path | None:
+    """Which checkout's watchdog the installed scheduler entry runs, if known."""
+    if sys.platform == "darwin":
+        return _mac_entry_target()
+    if sys.platform == "win32":
+        return _win_entry_target()
+    return None
+
+
+def points_at_this_checkout() -> bool:
+    """Whether the installed entry supervises THIS checkout, not another one.
+
+    Two checkouts share one USER_DATA_DIR and one scheduler label, so there is
+    one entry for both and it runs whichever checkout enabled it last. The
+    path is baked in by `_launchd_plist` at enable() time, and `watchdog.py`
+    resolves its own root from its own file -- so a stale entry launches the
+    OTHER app, at login and every 120s, with `--no-browser` so nothing visible
+    happens.
+
+    That is not hypothetical. On 2026-09-21 a remote Mac was told to start the
+    React checkout; the agent left behind by the NiceGUI one relaunched it into
+    the port during the first-run venv build, `run.py` refused to start against
+    the single-instance lock, and the dashboard that came up was the old app
+    from a folder nobody had launched. `is_installed()` said yes throughout.
+
+    **Unknown counts as pointing here.** A machine whose plist cannot be read
+    would otherwise reinstall the agent on every single boot.
+    """
+    target = entry_target()
+    if target is None:
+        return True
+    mine = watchdog_script()
+    try:
+        return target.resolve() == mine.resolve()
+    except OSError:
+        return str(target) == str(mine)
 
 
 def _record(enabled: bool) -> None:
@@ -299,7 +381,9 @@ def sync_from_setting(enabled: bool) -> None:
     """Reconcile the OS to the stored toggle. Called on app startup.
 
     Re-arms after a stop script disarmed us, and repairs a scheduler entry that
-    was lost to an OS upgrade or a machine migration. Never raises -- a
+    was lost to an OS upgrade or a machine migration, or that points at another
+    checkout (see `points_at_this_checkout`) -- starting the app you want is
+    what makes the watchdog supervise the app you want. Never raises -- a
     supervision feature must not be able to block the app from booting.
     """
     if not is_supported():
@@ -307,6 +391,14 @@ def sync_from_setting(enabled: bool) -> None:
     try:
         if enabled:
             if not is_installed():
+                enable()
+            elif not points_at_this_checkout():
+                log.warning(
+                    "[Autostart] the scheduler entry runs %s, not this "
+                    "checkout's %s — repointing it here. Until now every tick "
+                    "was restarting the other app.",
+                    entry_target(), watchdog_script(),
+                )
                 enable()
             else:
                 arm()

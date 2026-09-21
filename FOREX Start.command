@@ -25,6 +25,20 @@ for f in "$SCRIPT_DIR"/*.command "$SCRIPT_DIR"/*.sh; do
 done
 xattr -d com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
 
+# ── Pause the auto-restart watchdog for the length of this launch ────────────
+# The mirror of what the stop scripts do, for the mirror-image reason. Setup
+# below can take minutes on a cold machine, and the port is freed before the
+# app is up — so for that whole window the app reads as "down" to a watchdog
+# tick, which starts one. With two checkouts sharing this data directory the
+# scheduler entry launches whichever checkout enabled it last, and that
+# instance wins the port and the single-instance lock while this one is still
+# installing. Seen live 2026-09-21: a Mac told to start the React app came up
+# serving the NiceGUI one.
+# Only intent is cleared, never the scheduler entry: run.py re-arms through
+# core_autostart.sync_from_setting() once the app is genuinely up, and repoints
+# the entry at this checkout if it was aimed at the other one.
+rm -f "$USER_DATA/data/watchdog.armed" 2>/dev/null
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 reqs_hash() {

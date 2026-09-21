@@ -39,9 +39,15 @@ def flags(tmp_path, monkeypatch):
     """Redirect both flag files into tmp_path for the duration of a test."""
     armed = tmp_path / "watchdog.armed"
     last = tmp_path / "watchdog.last_launch"
+    # The plist too: reading the developer's real ~/Library/LaunchAgents entry
+    # would make points_at_this_checkout() answer about THEIR machine, so a
+    # developer who has auto-restart enabled from another checkout would see
+    # these tests fail for a reason that has nothing to do with the code.
+    plist = tmp_path / "LaunchAgents" / f"{autostart.LAUNCHD_LABEL}.plist"
     monkeypatch.setattr(autostart, "ARMED_FLAG", armed)
     monkeypatch.setattr(autostart, "LAST_LAUNCH_FILE", last)
-    return {"armed": armed, "last": last}
+    monkeypatch.setattr(autostart, "_PLIST_PATH", plist)
+    return {"armed": armed, "last": last, "plist": plist}
 
 
 # ── Armed flag ────────────────────────────────────────────────────────────────
@@ -359,3 +365,143 @@ class TestTheSettingSurvivesARestart:
         monkeypatch.setattr(autostart.db_module, "set_app_config", _boom)
 
         autostart.enable()   # must not raise
+
+
+# ── A scheduler entry left behind by a DIFFERENT checkout ────────────────────
+
+class TestTheEntryPointsAtThisCheckout:
+    """Two checkouts of this app share one USER_DATA_DIR, and the LaunchAgent
+    lives in the home directory with a fixed label — so there is exactly one
+    entry for both of them, and it runs whichever checkout was enabled last.
+
+    `_launchd_plist()` bakes that path in at enable() time and `watchdog.py`
+    resolves its own ROOT from its own file, so a stale entry launches the
+    OTHER app, every 120s and at login, with `--no-browser` so nothing visible
+    happens. Observed 2026-09-21 on a remote Mac: the owner started the React
+    checkout, the agent relaunched the NiceGUI one into the port during the
+    first-run venv build, and `run.py` then refused to start against the
+    single-instance lock. The dashboard that came up was the old app, from a
+    folder the owner had not launched.
+
+    `sync_from_setting()` only asked whether an entry EXISTS, so starting the
+    right app could never repair it — it re-armed the wrong one instead.
+    """
+
+    @pytest.fixture
+    def here(self, tmp_path, monkeypatch):
+        """This checkout's watchdog script, as an existing file."""
+        script = tmp_path / "here" / "tools" / "watchdog.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("# watchdog\n", encoding="utf-8")
+        monkeypatch.setattr(autostart, "watchdog_script", lambda: script)
+        return script
+
+    def _write_plist(self, path: Path, script: Path) -> None:
+        import plistlib
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fh:
+            plistlib.dump(
+                {"Label": autostart.LAUNCHD_LABEL,
+                 "ProgramArguments": ["/some/.venv/bin/python", str(script)]},
+                fh,
+            )
+
+    # ── Reading back what is installed ───────────────────────────────────────
+
+    def test_mac_target_is_the_script_the_plist_runs(self, flags, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        other = tmp_path / "other" / "tools" / "watchdog.py"
+        self._write_plist(flags["plist"], other)
+        assert autostart.entry_target() == other
+
+    def test_mac_target_is_unknown_when_there_is_no_plist(self, flags, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert autostart.entry_target() is None
+
+    def test_mac_target_is_unknown_when_the_plist_is_corrupt(self, flags, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        flags["plist"].parent.mkdir(parents=True, exist_ok=True)
+        flags["plist"].write_bytes(b"not a plist")
+        assert autostart.entry_target() is None
+
+    def test_win_target_is_parsed_out_of_the_task_command(self, monkeypatch):
+        """schtasks reports the whole command as one quoted string, and the
+        paths contain both spaces and a drive-letter colon."""
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(autostart, "_schtasks", lambda *a: mock.Mock(
+            returncode=0,
+            stdout=(
+                "Folder: \\\r\n"
+                "TaskName:      \\FOREXTraderWatchdog\r\n"
+                'Task To Run:   "C:\\FOREX Trader\\.venv\\pythonw.exe" '
+                '"C:\\FOREX Trader\\tools\\watchdog.py"\r\n'
+                "Scheduled Task State: Enabled\r\n"
+            ),
+            stderr="",
+        ))
+        assert autostart.entry_target() == Path(r"C:\FOREX Trader\tools\watchdog.py")
+
+    def test_win_target_is_unknown_when_the_query_fails(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(autostart, "_schtasks", lambda *a: mock.Mock(
+            returncode=1, stdout="", stderr="ERROR: The system cannot find the file"))
+        assert autostart.entry_target() is None
+
+    # ── The comparison ───────────────────────────────────────────────────────
+
+    def test_an_entry_running_this_checkout_points_here(self, flags, here, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        self._write_plist(flags["plist"], here)
+        assert autostart.points_at_this_checkout() is True
+
+    def test_an_entry_running_another_checkout_does_not(self, flags, here, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        self._write_plist(flags["plist"], tmp_path / "other" / "tools" / "watchdog.py")
+        assert autostart.points_at_this_checkout() is False
+
+    def test_an_unreadable_entry_counts_as_pointing_here(self, flags, here, monkeypatch):
+        """Unknown must not mean "wrong", or every boot on a machine whose
+        plist cannot be read would reinstall the agent for no reason."""
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert autostart.points_at_this_checkout() is True
+
+    # ── What startup does about it ───────────────────────────────────────────
+
+    def test_sync_reinstalls_an_entry_that_points_at_another_checkout(
+        self, flags, here, tmp_path, monkeypatch
+    ):
+        """The whole point: starting the app you want must make the watchdog
+        supervise the app you want."""
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(autostart, "is_installed", lambda: True)
+        self._write_plist(flags["plist"], tmp_path / "other" / "tools" / "watchdog.py")
+        install = mock.Mock()
+        monkeypatch.setattr(autostart, "_mac_install", install)
+
+        autostart.sync_from_setting(True)
+
+        assert install.called, "a stale entry from another checkout must be repaired"
+        assert autostart.is_armed() is True
+
+    def test_sync_leaves_an_entry_that_already_points_here_alone(
+        self, flags, here, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(autostart, "is_installed", lambda: True)
+        self._write_plist(flags["plist"], here)
+        install = mock.Mock()
+        monkeypatch.setattr(autostart, "_mac_install", install)
+
+        autostart.sync_from_setting(True)
+
+        assert not install.called, "reinstalling a correct entry on every boot is churn"
+        assert autostart.is_armed() is True
+
+    def test_sync_still_cannot_be_blocked_by_an_unreadable_entry(
+        self, flags, here, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(autostart, "is_installed", lambda: True)
+        monkeypatch.setattr(autostart, "entry_target",
+                            mock.Mock(side_effect=RuntimeError("launchctl gone")))
+        autostart.sync_from_setting(True)  # must swallow

@@ -166,6 +166,66 @@ log filter that judged lines individually instead of records. See
 `services/diagnostics/log_bundle.py`.
 
 
+## The auto-restart watchdog is shared by both checkouts too (2026-09-21)
+
+Same root cause as the shared log file, with teeth: there is **one** LaunchAgent
+(`com.forextrader.watchdog`, in `~/Library/LaunchAgents/`) and one Windows task
+name for both checkouts, because the label is fixed and the home directory is
+shared. `core_autostart._launchd_plist()` bakes `repo_root()` into it at
+`enable()` time, and `tools/watchdog.py` resolves its own `ROOT` from its own
+file -- so the entry runs **whichever checkout enabled auto-restart last**,
+at login and every 120s, with `--no-browser` so nothing visible happens.
+
+Reported live 2026-09-21. A remote Mac was told to run the React checkout and
+came up with the NiceGUI dashboard. The sequence:
+
+1. `FOREX Start.command` kills whatever holds `:8888`, then does the first-run
+   venv build -- minutes on a cold machine.
+2. Inside that window the stale agent ticks, sees `:8888` down, and launches
+   `~/Forex-Update/run.py --no-browser`.
+3. The old app has a built venv, so it wins: it takes the single-instance lock
+   and binds the port.
+4. The new `run.py` reaches `_claim_single_instance()` and refuses -- correctly,
+   loudly, into a Terminal window that then closes.
+5. `localhost:8888` serves the old app, from a folder nobody launched.
+
+`sync_from_setting()` could not repair this because it asked only whether an
+entry EXISTS (`is_installed()`), which was true throughout -- so starting the
+right app **re-armed the wrong one**. It now also asks
+`points_at_this_checkout()`, which reads the installed entry back (the plist's
+`ProgramArguments[-1]`; `schtasks /fo LIST /v`'s `Task To Run:`) and compares
+the resolved path against `watchdog_script()`. A mismatch re-`enable()`s,
+repointing the entry here and logging what it found. **An unreadable entry
+counts as pointing here**, or a machine whose plist cannot be parsed would
+reinstall the agent on every boot.
+
+The other half is the race itself, closed in the launchers. **`FOREX Start.command`
+and `Setup & Start FOREX.bat` now delete `data/watchdog.armed` before they do
+anything slow**, mirroring what the stop scripts have always done. The app
+re-arms itself through `sync_from_setting()` once it is genuinely up -- which
+is also when it repoints a stale entry -- so the window that closes is exactly
+the window in which the app is not up to re-arm. The cost, accepted: a launch
+that fails for an unrelated reason leaves the machine unsupervised until
+someone starts it by hand. Pinned by
+`tests/core/test_launchers_disarm_the_watchdog.py`, which asserts the ORDERING
+inside the four scripts, not merely that the string is present.
+
+Two things this does NOT fix, both deliberate:
+
+* Neither half runs until this checkout boots. On a machine already in the
+  loop above, it never does, so the entry must be cleared by hand once:
+  `launchctl bootout gui/$(id -u)/com.forextrader.watchdog`, delete the plist
+  and `data/watchdog.armed`, then start the app you want.
+* The armed flag and `watchdog.last_launch` live in the shared data dir, so
+  either checkout's stop script still disarms the other's watchdog, and either
+  one's Start script now does too. That is the existing intent-vs-entry design
+  (see the module docstring), not a bug.
+
+Pinned by `tests/core/test_autostart.py::TestTheEntryPointsAtThisCheckout`.
+The module and the test are identical in both checkouts and must change
+together (rules/80).
+
+
 ## Open questions
 
 - `controllers/remote/` (licence-token issuance, admin authority) has limited tests — the largest known gap (see `docs/todo/refactor/stage0/OPEN_QUESTIONS.md`).

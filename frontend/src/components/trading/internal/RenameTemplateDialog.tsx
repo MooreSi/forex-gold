@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 /** Counts per place a `template:<name>` override is stored. Optional because
  *  the backend may grow another one; a missing count reads as zero. */
@@ -124,15 +125,25 @@ export function RenameTemplateDialog({
       <div className="space-y-3 text-xs">
         <label className="block">
           <span className="mb-1 block text-[11px] text-ink-3">New name</span>
-          <input
-            aria-label="New name"
-            value={value}
-            autoFocus
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
-            className="w-full rounded border border-line bg-surface-1 px-2 py-1.5
-                       text-xs text-ink-1 outline-none focus:border-accent"
-          />
+          {/* The name is a foreign key nobody declared -- see this file's own
+              docstring. The hover help says so at the box, because that is
+              where somebody is when they decide what to type. */}
+          <Tooltip label={
+            "The name is how the schedule, the channels, the AI recommendation "
+            + "and the global strategy refer to this template. Renaming repoints "
+            + "every one of them, so the same template keeps trading. Closed "
+            + "trades keep the name they were placed under."
+          }>
+            <input
+              aria-label="New name"
+              value={value}
+              autoFocus
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+              className="w-full rounded border border-line bg-surface-1 px-2 py-1.5
+                         text-xs text-ink-1 outline-none focus:border-accent"
+            />
+          </Tooltip>
         </label>
 
         {refs && (

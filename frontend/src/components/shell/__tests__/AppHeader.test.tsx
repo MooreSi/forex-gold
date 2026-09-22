@@ -169,47 +169,86 @@ describe("the halt, stated once", () => {
 
     await userEvent.click(await screen.findByTestId("trading-status-badge"));
 
-    expect(screen.getByTestId("resume-confirm")).toBeInTheDocument();
+    expect(screen.getByTestId("trading-status-dialog")).toBeInTheDocument();
   });
 });
 
-describe("pausing trading by hand", () => {
+describe("pausing and resuming, from the one control", () => {
   /**
-   * Restored 2026-09-18. The NiceGUI header had this; the React port dropped
-   * it, so there was no way to halt trading from the dashboard at all — an
-   * operator who wanted to stop had to disable sources one at a time or edit
-   * the database.
+   * Restored 2026-09-18 as a Pause button of its own. Merged into the status
+   * badge on 2026-09-22: two controls for one fact was congestion on a bar
+   * that runs out of room at 1024px, and the Pause button read only the
+   * governor's manual pause — with a profit target reached it offered "Pause"
+   * while every automated entry was already being held.
+   *
+   * The badge reads the backend's decision across all four mechanisms, so it
+   * is the one that knows which half to offer.
    */
   const writes = () =>
     (global.fetch as ReturnType<typeof vi.fn>).mock.calls
       .filter((c) => c[1]?.method === "POST");
 
+  const HALTED = {
+    state: "halted", label: "Trading Paused until 21 Sep 18:00",
+    detail: "manually paused", until: 1_800_000_000,
+    resume_ts: null, can_resume: true,
+  };
+
+  const openStatus = async () =>
+    userEvent.click(await screen.findByTestId("trading-status-badge"));
+
+  it("is the only pause control on the bar", async () => {
+    renderHeader();
+    await screen.findByTestId("trading-status-badge");
+
+    // The removed button. Its absence is the change; a second control that
+    // knows less than this one is how the "Pause" offer appeared during a
+    // profit-target hold.
+    expect(screen.queryByTestId("pause-control")).not.toBeInTheDocument();
+  });
+
   it("offers Pause when trading is running", async () => {
     renderHeader();
+    await openStatus();
 
-    expect(await screen.findByRole("button", { name: /Pause/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Pause now" })).toBeInTheDocument();
   });
 
   it("offers Resume when it is paused", async () => {
-    body = header({
-      pause: { paused: true, reason: "manually paused", until: null, source: "governor" },
-    });
+    badge = HALTED;
     renderHeader();
+    await openStatus();
 
-    expect(await screen.findByRole("button", { name: /Paused/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Resume Trading" })).toBeInTheDocument();
+  });
+
+  it("offers Resume — not Pause — when the profit target is what holds entries", async () => {
+    // The bug the merge fixes. The old Pause button read `pause.paused`,
+    // which a daily target does not set, so it offered to pause something
+    // already stopped and the way to lift it was elsewhere.
+    badge = {
+      state: "profit_target", label: "Profit Target Reached",
+      detail: "Daily profit target reached ($120.00 of $100.00)",
+      until: null, resume_ts: null, can_resume: true,
+    };
+    renderHeader();
+    await openStatus();
+
+    expect(await screen.findByRole("button", { name: "Resume Trading" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause now" })).not.toBeInTheDocument();
   });
 
   it("does not pause on the first press", async () => {
     renderHeader();
 
-    await userEvent.click(await screen.findByRole("button", { name: /Pause/ }));
+    await openStatus();
 
     expect(writes()).toHaveLength(0);
   });
 
   it("says what a pause does NOT stop, which is the part people get wrong", async () => {
     renderHeader();
-    await userEvent.click(await screen.findByRole("button", { name: /Pause/ }));
+    await openStatus();
 
     expect(screen.getByText(/SL\/TP monitoring\) continues as normal/)).toBeInTheDocument();
     expect(screen.getByText(/generators and Telegram signals continue/)).toBeInTheDocument();
@@ -217,7 +256,7 @@ describe("pausing trading by hand", () => {
 
   it("pauses for the hours given", async () => {
     renderHeader();
-    await userEvent.click(await screen.findByRole("button", { name: /Pause/ }));
+    await openStatus();
 
     const hours = screen.getByLabelText("Pause for (hours)");
     await userEvent.clear(hours);
@@ -231,7 +270,7 @@ describe("pausing trading by hand", () => {
 
   it("a typed moment wins over the hours box", async () => {
     renderHeader();
-    await userEvent.click(await screen.findByRole("button", { name: /Pause/ }));
+    await openStatus();
 
     await userEvent.type(
       screen.getByLabelText("Or until (YYYY-MM-DD HH:MM)"), "2030-01-02 09:30");
@@ -247,7 +286,7 @@ describe("pausing trading by hand", () => {
     // Falling back to the hours default here would pause for a length the
     // operator never asked for and did not see.
     renderHeader();
-    await userEvent.click(await screen.findByRole("button", { name: /Pause/ }));
+    await openStatus();
 
     await userEvent.type(
       screen.getByLabelText("Or until (YYYY-MM-DD HH:MM)"), "next tuesday");
@@ -258,15 +297,13 @@ describe("pausing trading by hand", () => {
   });
 
   it("resuming says the guards are re-armed, and asks the backend to do it", async () => {
-    body = header({
-      pause: { paused: true, reason: "give-back guard", until: null, source: "governor" },
-    });
+    badge = HALTED;
     renderHeader();
-    await userEvent.click(await screen.findByRole("button", { name: /Paused/ }));
+    await openStatus();
 
     expect(screen.getByText(/restarts the post-close guards/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Resume trading" }));
+    await userEvent.click(screen.getByRole("button", { name: "Resume Trading" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
     // `resume-all` since 2026-09-21: it re-arms the post-close guards exactly

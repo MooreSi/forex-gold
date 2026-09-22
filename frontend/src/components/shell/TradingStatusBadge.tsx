@@ -1,17 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Ban, HelpCircle, Newspaper, Shield, Trophy } from "lucide-react";
+import { TradingStatusDialog } from "./TradingStatusDialog";
+import type { TradingStatus } from "./TradingStatusDialog";
 import { api } from "@/api/client";
 import { usePoll } from "@/hooks/usePoll";
 import { cn } from "@/lib/cn";
-
-interface BadgeState {
-  state: string;
-  label: string;
-  detail: string;
-  until: number | null;
-  resume_ts: number | null;
-  can_resume: boolean;
-}
 
 /**
  * Is trading actually running right now?
@@ -22,8 +15,11 @@ interface BadgeState {
  * and never computes it, because a second opinion about a risk state produces
  * two answers that drift.
  *
- * Clicking it offers a Resume, and only when one would actually do something:
- * a news blackout lifts itself, so it is shown without a button.
+ * Clicking it opens the one control for all of this (`TradingStatusDialog`):
+ * a Resume when one would actually do something, and the pause form when
+ * nothing is holding entries. Until 2026-09-22 the header also carried a
+ * separate Pause button, which knew about one of the four mechanisms and so
+ * offered "Pause" while a profit target already held every entry.
  */
 const LOOK: Record<string, { Icon: typeof Shield; className: string }> = {
   ok: { Icon: Shield, className: "text-profit" },
@@ -42,13 +38,12 @@ function countdown(resumeTs: number | null, now: number): string {
 }
 
 export function TradingStatusBadge() {
-  const { data, refresh } = usePoll<BadgeState>(
+  const { data, refresh } = usePoll<TradingStatus>(
     "trading/status-badge",
-    useCallback(() => api.get<BadgeState>("/api/trading/status-badge"), []),
+    useCallback(() => api.get<TradingStatus>("/api/trading/status-badge"), []),
     5_000,
   );
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   // Ticks once a second purely so a blackout countdown moves between the
   // five-second polls, instead of freezing at whatever the last one said.
   const [now, setNow] = useState(() => Date.now());
@@ -62,24 +57,13 @@ export function TradingStatusBadge() {
   const look = LOOK[data.state] ?? LOOK.unknown;
   const { Icon } = look;
 
-  const resume = async () => {
-    setBusy(true);
-    try {
-      await api.post("/api/trading/resume-all");
-      await refresh();
-      setConfirming(false);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="relative shrink-0">
       <button
         type="button"
         data-testid="trading-status-badge"
         title={data.detail || data.label}
-        onClick={() => setConfirming((v) => !v)}
+        onClick={() => setOpen(true)}
         className={cn(
           "flex items-center gap-1.5 border-l border-line px-3 text-xs font-semibold",
           look.className,
@@ -90,46 +74,12 @@ export function TradingStatusBadge() {
         {data.state === "news_blackout" && countdown(data.resume_ts, now)}
       </button>
 
-      {confirming && (
-        <div
-          data-testid="resume-confirm"
-          className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-line bg-surface-1 p-3 shadow-lg"
-        >
-          <p className="mb-1 text-sm font-semibold text-ink-1">
-            {data.can_resume ? "Re-enable trading?" : data.label}
-          </p>
-          <p className="mb-3 text-[11px] text-ink-3">
-            {data.detail || "Trading is not currently paused."}
-          </p>
-          {data.can_resume ? (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void resume()}
-                className="rounded border border-profit/40 bg-profit/15 px-3 py-1 text-xs text-profit disabled:opacity-50"
-              >
-                {busy ? "Resuming…" : "Resume Trading"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                className="rounded border border-line bg-surface-2 px-3 py-1 text-xs text-ink-2"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              className="rounded border border-line bg-surface-2 px-3 py-1 text-xs text-ink-2"
-            >
-              Close
-            </button>
-          )}
-        </div>
-      )}
+      <TradingStatusDialog
+        open={open}
+        onOpenChange={setOpen}
+        status={data}
+        onChanged={() => void refresh()}
+      />
     </div>
   );
 }

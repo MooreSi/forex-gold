@@ -3,7 +3,6 @@ import { ActiveTraderControl } from "./ActiveTraderControl";
 import { EaBadge } from "./EaBadge";
 import { EnvironmentControl } from "./EnvironmentControl";
 import { HeaderStats } from "./HeaderStats";
-import { PauseControl } from "./PauseControl";
 import { PowerControl } from "./PowerControl";
 import { TradingStatusBadge } from "./TradingStatusBadge";
 import { UpdateBadge } from "./UpdateBadge";
@@ -93,15 +92,13 @@ export function AppHeader() {
         <span aria-hidden className="h-5 w-px bg-line" />
 
         {/* Whether anything is holding automated entries, and which of the
-            four mechanisms it is. Always visible, next to the controls that
-            change it, and since 2026-09-21 the ONLY place the header states
-            it — click it to resume. */}
+            four mechanisms it is. Always visible, and since 2026-09-22 the
+            ONLY control for it as well: click it to pause or to resume. The
+            separate Pause button beside it read one of the four mechanisms,
+            so it offered "Pause" while a profit target already held every
+            entry. */}
         <TradingStatusBadge />
 
-        <PauseControl
-          paused={data?.pause?.paused === true}
-          onChanged={() => void refresh()}
-        />
         <PowerControl />
         {/* Only on the licence-issuer machine, and only when the console
             actually mounted -- useAdminConsole probes the route rather than

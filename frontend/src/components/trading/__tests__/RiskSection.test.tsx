@@ -24,6 +24,7 @@ const BODIES: Record<string, unknown> = {
     circuit_breaker_cooldown_mins: 60, internal_hedge_mode: "off",
     internal_net_exposure_max_lots: 0.5, dpm_enabled: 0, profit_close_usd: 0,
     risk_governor_enabled: 0,
+    global_harvest_enabled: 1, global_harvest_threshold_usd: 75,
   },
 };
 
@@ -144,5 +145,75 @@ describe("risk", () => {
 
     expect(within(screen.getByTestId("risk-giveback_arm_usd"))
       .queryByText(/Does nothing until/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Global harvest — the EA-side setting that had no control at all.
+ *
+ * `global_harvest_enabled` / `global_harvest_threshold_usd` were a toggle and a
+ * number on the NiceGUI Trading tab (`_strategy_cards.py:385-441`), dropped by
+ * the React port (4da2526) and never rebuilt. Nothing in the port's own gap
+ * list mentioned them.
+ *
+ * They are not cosmetic. `ea_bridge.set_global_config` pushes the pair to the
+ * EA, whose `CheckGlobalHarvest()` runs on EVERY tick against EVERY open
+ * position on the symbol and closes them on aggregate floating profit. On this
+ * install it was found live, on, at $75 — a setting closing real positions
+ * that the operator could not see, let alone change.
+ */
+describe("global harvest", () => {
+  it("offers the switch and the threshold, showing what is stored", async () => {
+    render(<RiskSection />);
+    await screen.findByLabelText("Risk per trade (%)");
+
+    expect(screen.getByLabelText("Harvest open trades at a combined profit")).toBeChecked();
+    expect(screen.getByLabelText("Combined profit to harvest at ($)")).toHaveValue("75");
+  });
+
+  it("saves the threshold as a number when the field is left", async () => {
+    render(<RiskSection />);
+    const field = await screen.findByLabelText("Combined profit to harvest at ($)");
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "150");
+    await userEvent.tab();
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ global_harvest_threshold_usd: 150 });
+  });
+
+  it("saves the switch as the 0/1 the column holds", async () => {
+    render(<RiskSection />);
+
+    await userEvent.click(
+      await screen.findByLabelText("Harvest open trades at a combined profit"));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ global_harvest_enabled: 0 });
+  });
+
+  it("says the threshold does nothing while the switch is off", async () => {
+    // The failure this screen exists to prevent: a threshold that looks set
+    // and a switch that is off look identical once the control is missing.
+    overrides["/api/settings/risk"] = {
+      ...BODIES["/api/settings/risk"] as object, global_harvest_enabled: 0,
+    };
+    render(<RiskSection />);
+    await screen.findByLabelText("Risk per trade (%)");
+
+    expect(within(screen.getByTestId("risk-global_harvest_threshold_usd"))
+      .getByText(/Does nothing until/)).toBeInTheDocument();
+  });
+
+  it("keeps it distinct from the per-trade close, which is a different thing", async () => {
+    // `profit_close_usd` closes ONE trade that is far enough ahead on its own.
+    // Global harvest closes EVERY open position once they are COMBINED far
+    // enough ahead. Two screens' worth of confusion if they read alike.
+    render(<RiskSection />);
+    await screen.findByLabelText("Risk per trade (%)");
+
+    expect(screen.getByLabelText("Close at profit ($)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Combined profit to harvest at ($)")).toBeInTheDocument();
   });
 });

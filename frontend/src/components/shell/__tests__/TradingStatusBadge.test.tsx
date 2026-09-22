@@ -73,7 +73,7 @@ describe("TradingStatusBadge", () => {
     expect(await screen.findByText("Resume Trading")).toBeInTheDocument();
   });
 
-  it("does not offer a Resume for a blackout that lifts itself", async () => {
+  it("offers the pause form, not a Resume, for a blackout that lifts itself", async () => {
     mockBadge({
       state: "news_blackout", label: "News Blackout", detail: "Non-farm payrolls",
       until: null, resume_ts: null, can_resume: false,
@@ -83,7 +83,9 @@ describe("TradingStatusBadge", () => {
 
     await userEvent.click(screen.getByTestId("trading-status-badge"));
 
-    expect(await screen.findByTestId("resume-confirm")).toBeInTheDocument();
+    // The dialog still opens — a blackout is no reason to lose the ability
+    // to stop trading by hand — but nothing offers to lift what lifts itself.
+    expect(await screen.findByTestId("trading-status-dialog")).toBeInTheDocument();
     expect(screen.queryByText("Resume Trading")).not.toBeInTheDocument();
   });
 

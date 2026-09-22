@@ -191,6 +191,17 @@ export const RISK_GROUPS: RiskGroup[] = [
         key: "profit_close_usd", label: "Close at profit ($)", kind: "number",
         hint: "Close any open trade once it is this far ahead in dollars. 0 is off. This runs on every open trade whether or not adaptive management is on — it sits here for grouping, not because it needs it.",
       },
+      {
+        key: "global_harvest_enabled", kind: "toggle",
+        label: "Harvest open trades at a combined profit",
+        hint: "Closes EVERY open position at once when their profit ADDS UP to the threshold below — unlike the setting above, which closes one trade that is far enough ahead on its own. The EA does this, checking on every tick, so it applies to positions that are already open when the setting changes. It only sees the symbol the EA's own chart is on.",
+      },
+      {
+        key: "global_harvest_threshold_usd",
+        label: "Combined profit to harvest at ($)", kind: "number",
+        hint: "Combined floating profit across all open positions. Found live at $75 on 2026-09-22 with no control on this screen at all — it had been dropped in the React port, so it was closing real positions where nobody could see it.",
+        dependsOn: { key: "global_harvest_enabled", label: "harvesting" },
+      },
     ],
   },
   {

@@ -327,16 +327,22 @@ machine goes away mid-trade, the position is still being managed. (The reverse
 is covered too: on EA silence past the heartbeat timeout, Python takes
 management back for anything marked `managed_by='ea'`.)
 
-![Trading → Strategy](docs/images/dashboard-trading.png)
+Which template manages which source is bound in **Trading → Strategy**, one
+dropdown per channel and per engine. The built-in Python strategies are still
+selectable and still work, but the app is no longer built around them.
 
-*Trading → Strategy — what manages each source's trades. Every dropdown here
-names an EA template, and a source bound to one is managed entirely by the EA
-on the chart. The built-in Python strategies are still selectable and still
-work, but the app is no longer built around them — the row still pointing at
-one says so in the name.*
+Templates themselves are created, tuned, imported and exported in **Trading →
+EA templates**.
 
-Templates are created, tuned, imported and exported by you in **Trading → EA
-templates** — around a hundred fields, grouped:
+![Trading → EA templates](docs/images/dashboard-ea-templates.png)
+
+*Trading → EA templates — the saved rule sets down the left, the selected one's
+full field set on the right. This is `30 TP1 SL50 and Trail`: a single market
+entry of 0.1 lots, a 50-pip stop set when the signal carries none, a spread
+refusal above 6 pips and a 10-second staleness guard. Every field here travels
+with the order to the terminal, so changing one never needs an EA recompile.*
+
+Around a hundred fields, grouped:
 
 | Group | What it decides |
 |---|---|
@@ -429,14 +435,11 @@ checks that decide who owns the Telegram bot and who may trade **fail open**
 for an unpaired install, because an error there must not silently stop trading
 on a machine that has no counterpart to hand over to.
 
-![Settings](docs/images/dashboard-settings.png)
-
-*Settings — Remote Node is a tab here, and exactly one role per machine: the
-VPS accepts the connection, the local machine initiates it. Two of its switches
-change what the engines do next and say so before and after. The badge at the
-top right of every screen — LOCAL or REMOTE — is which machine is allowed to
-open a position right now. It is a stored value both nodes hold, not something
-inferred from whether the link happens to be up.*
+Remote Node is a tab under **Settings**, and each machine holds exactly one
+role: the VPS accepts the connection, the local machine initiates it. The badge
+at the top right of every screen — LOCAL or REMOTE — is which machine is
+allowed to open a position right now. It is a stored value both nodes hold, not
+something inferred from whether the link happens to be up.
 
 ---
 

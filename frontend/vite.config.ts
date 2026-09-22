@@ -1,4 +1,7 @@
-import { defineConfig } from "vite";
+// `defineConfig` comes from vitest/config, not vite: since vitest 4 the
+// `test` block below is no longer part of vite's own config type, and
+// importing it from "vite" fails the typecheck with TS2769.
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";

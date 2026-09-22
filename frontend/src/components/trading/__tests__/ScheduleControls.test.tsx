@@ -11,7 +11,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ScheduleSection } from "../internal/ScheduleSection";
 
 function block(over: Record<string, unknown> = {}) {
@@ -22,6 +22,30 @@ function block(over: Record<string, unknown> = {}) {
     telegram_channels: {}, telegram_default_enabled: true,
     ...over,
   };
+}
+
+// `onSetSchedule` is typed `Record<string, unknown>`, so a captured payload
+// reads back as `unknown` per key. Before vitest 4 an untyped mock made it
+// `any` and the assertions below walked straight in; this names the shape the
+// component actually sends instead of restoring that looseness.
+type SentBlock = {
+  start: string;
+  end: string;
+  enabled: boolean;
+  target: number;
+  reversal_engine: boolean;
+  breakout_engine: boolean;
+  reversal_engine_override: string;
+  breakout_engine_override: string;
+  telegram_channels: Record<
+    string,
+    { enabled: boolean; strategy_override: string }
+  >;
+  telegram_default_enabled: boolean;
+};
+
+function lastSchedule(): Record<string, SentBlock[]> {
+  return setSchedule.mock.calls.at(-1)![0] as Record<string, SentBlock[]>;
 }
 
 function state(over: Record<string, unknown> = {}) {
@@ -44,10 +68,14 @@ function state(over: Record<string, unknown> = {}) {
   };
 }
 
-let props: Parameters<typeof ScheduleSection>[0];
-let setSchedule: ReturnType<typeof vi.fn>;
-let setMarket: ReturnType<typeof vi.fn>;
-let setClockOffset: ReturnType<typeof vi.fn>;
+// Typed to the prop each one stands in for, not to bare `vi.fn`: since
+// vitest 4 an untyped mock is `Mock<Procedure | Constructable>`, which no
+// longer narrows to a specific call signature.
+type ScheduleProps = Parameters<typeof ScheduleSection>[0];
+let props: ScheduleProps;
+let setSchedule: Mock<NonNullable<ScheduleProps["onSetSchedule"]>>;
+let setMarket: Mock<NonNullable<ScheduleProps["onSetMarket"]>>;
+let setClockOffset: Mock<NonNullable<ScheduleProps["onSetClockOffset"]>>;
 
 beforeEach(() => {
   setSchedule = vi.fn();
@@ -157,7 +185,7 @@ describe("a window's profit target", () => {
     await userEvent.tab();
 
     await waitFor(() => expect(setSchedule).toHaveBeenCalled());
-    const sent = setSchedule.mock.calls.at(-1)![0];
+    const sent = lastSchedule();
     expect(sent.monday[0].target).toBe(75);
   });
 });
@@ -189,7 +217,7 @@ describe("a window's channels panel", () => {
 
     await userEvent.click(screen.getByLabelText("GoldSignals in monday window 1"));
 
-    const sent = setSchedule.mock.calls.at(-1)![0];
+    const sent = lastSchedule();
     expect(sent.monday[0].telegram_channels.GoldSignals.enabled).toBe(false);
     expect(sent.monday[0].breakout_engine).toBe(true);
   });
@@ -202,7 +230,7 @@ describe("a window's channels panel", () => {
       screen.getByLabelText("GoldSignals override in monday window 1"),
       "template:Grid-A");
 
-    const sent = setSchedule.mock.calls.at(-1)![0];
+    const sent = lastSchedule();
     expect(sent.monday[0].telegram_channels.GoldSignals.strategy_override)
       .toBe("template:Grid-A");
   });
@@ -217,7 +245,7 @@ describe("a window's channels panel", () => {
       screen.getByLabelText("Reversal Engine override in monday window 1"),
       "auto");
 
-    const sent = setSchedule.mock.calls.at(-1)![0];
+    const sent = lastSchedule();
     expect(sent.monday[0].reversal_engine_override).toBe("auto");
     expect(sent.monday[0].breakout_engine_override).toBe("");
   });
@@ -243,7 +271,7 @@ describe("copy Monday to all days", () => {
 
     await userEvent.click(screen.getByText(/Copy Monday to all days/));
 
-    const sent = setSchedule.mock.calls.at(-1)![0];
+    const sent = lastSchedule();
     expect(sent.tuesday[0].enabled).toBe(true);
     expect(sent.tuesday[0].start).toBe("08:00");
   });
@@ -253,7 +281,7 @@ describe("copy Monday to all days", () => {
 
     await userEvent.click(screen.getByText(/Copy Monday to all days/));
 
-    const sent = setSchedule.mock.calls.at(-1)![0];
+    const sent = lastSchedule();
     expect(sent.monday[0].start).toBe("08:00");
   });
 });

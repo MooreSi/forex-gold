@@ -502,3 +502,18 @@ with a real `separator` that arrow keys move.
   table wants. `whitespace-nowrap` on the table, a gutter on every cell but
   the last, and `overflow-x-auto` on the wrapper: scrolling sideways beats
   both wrapping a price across two lines and running four of them together.
+- **Vitest 4 stopped augmenting Vite's config type, and an untyped `vi.fn()`
+  no longer narrows.** Upgrading 3.2.7 -> 4.1.11 (2026-09-22, for advisory
+  GHSA-82fw-gwwq-j7x9) passed all 1014 tests unchanged and broke nothing at
+  runtime, but failed `tsc -b` in two places. `vite.config.ts` must import
+  `defineConfig` from **`vitest/config`**, not `vite`, or the `test` block is
+  `TS2769: 'test' does not exist in type 'UserConfigExport'`. And
+  `ReturnType<typeof vi.fn>` is now `Mock<Procedure | Constructable>`, which
+  is assignable to nothing specific — a mock standing in for a prop wants
+  `Mock<NonNullable<Props["onThing"]>>`. Typing it properly then reveals what
+  the old `any` hid: a payload captured from a `Record<string, unknown>` prop
+  reads back as `unknown` per key, so the shape has to be named. That is a
+  better test, not a worse one, but it is three changes deep from what looks
+  like a version bump. **`npm test` passing is not evidence the upgrade is
+  done — `npm run build` runs `tsc -b` first, so a type-only break stops you
+  rebuilding `dist/`.**

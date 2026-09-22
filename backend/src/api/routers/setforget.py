@@ -128,8 +128,11 @@ async def state(eng: Any = Depends(engine_dep)) -> dict:
         # renderer and one "as of" line rather than two.
         "generated_at": time.time(),
         "price": evidence.get("price"),
-        "evidence": {k: v for k, v in evidence.items()
-                     if k not in ("candles", "weekly_candles", "daily_candles")},
+        # Asked for, not restated. This route used to spell the series names
+        # out here, and the two lists drifted: `trigger_candles` joined the
+        # evidence, the billable read dropped it and this one -- polled every
+        # sixty seconds -- shipped it to the browser.
+        "evidence": sf_ctl.public_evidence(evidence),
         "candidate": candidate,
         "no_setup_reason": why,
         "confluence": sf_ctl.score(evidence, candidate),

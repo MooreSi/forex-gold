@@ -53,6 +53,10 @@ def sf(monkeypatch):
             # showing, and a second series here is a second answer to "what
             # was the last bar".
             "candles": [{"ts": 1.0}], "weekly_candles": [], "daily_candles": [],
+            # `trigger_candles` is one of them and does not end in the same
+            # word as the others -- which is exactly how it survived the free
+            # read's filter while the billable one dropped it.
+            "trigger_candles": [{"ts": 1.0}],
         },
         "candidate": _candidate(),
         "why": "",
@@ -160,6 +164,12 @@ class TestTheFreeRead:
 
         assert "candles" not in body["evidence"]
         assert "weekly_candles" not in body["evidence"]
+        # Every series, named or not. Until 2026-09-22 this route filtered by
+        # a list it spelled out itself rather than asking the service, so when
+        # `trigger_candles` was added to the evidence the billable read
+        # dropped it and the free one -- polled every sixty seconds -- shipped
+        # it. Two reads of the same chart, two different payloads.
+        assert "trigger_candles" not in body["evidence"]
         assert body["evidence"]["weekly_bias"] == "bullish"
 
     def test_no_setup_is_a_state_with_a_reason_not_an_empty_card(

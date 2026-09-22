@@ -45,7 +45,10 @@ export function ChartPanel() {
             onRefresh={() => void c.refreshAll()}
           />
         }
-        className="min-h-[24rem]"
+        // `flex-1` is what claims the slot's height; `min-h-[24rem]` is the
+        // floor on a short window. Without the first of those the panel sits at
+        // content height and the canvas inside it collapses to its time axis.
+        className="min-h-[24rem] flex-1"
       >
         {candles.length === 0 ? (
           <EmptyState
@@ -67,7 +70,12 @@ export function ChartPanel() {
       </PanelShell>
       }
       right={
-        <PanelShell title="Open positions" subtitle="drawn on the chart" icon="positions">
+        <PanelShell
+          title="Open positions"
+          subtitle="drawn on the chart"
+          icon="positions"
+          className="min-h-0 flex-1"
+        >
           <ChartTradesSection trades={trades} />
         </PanelShell>
       }

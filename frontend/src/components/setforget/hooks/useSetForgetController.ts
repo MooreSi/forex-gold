@@ -82,6 +82,7 @@ export function useSetForgetController() {
   const [placing, setPlacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [lots, setLots] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const data = review ?? state.data;
   const candidate = data?.candidate ?? null;
@@ -97,17 +98,88 @@ export function useSetForgetController() {
     return data?.suggested_lot ?? null;
   }, [lots, data?.lot_size, data?.suggested_lot]);
 
+  /**
+   * What an evaluation that came back should SAY, given that most of them
+   * change nothing on screen.
+   *
+   * Reported 2026-09-22: "when i click 'evaluate the market' it just flickers
+   * and doesn't appear to analyse the market for a setup". It did analyse.
+   * With no candidate the backend skips the model on purpose — paying for one
+   * to repeat what the rules already refused is money for nothing — and
+   * returns a payload that renders pixel for pixel like the one already
+   * there. The repaint IS the flicker. A run that leaves no trace is
+   * indistinguishable from a button that does nothing, so every run says what
+   * it did and whether it cost anything.
+   */
+  const evaluationOutcome = useCallback((result: SetForgetState): Outcome => {
+    if (result.ai?.error) return { ok: false, text: result.ai.error };
+    if (result.ai?.verdict) {
+      return {
+        ok: true,
+        text: `${result.ai.model ?? "The model"} reviewed the setup: `
+          + `${result.ai.verdict}.`,
+      };
+    }
+    if (!result.candidate) {
+      return {
+        ok: true,
+        text: `The chart was read again and there is still no setup to judge. `
+          + `${result.no_setup_reason} No model was asked, so nothing was `
+          + `billed.`,
+      };
+    }
+    return {
+      ok: true,
+      text: "The chart was read again. No model reviewed it, so nothing was "
+        + "billed.",
+    };
+  }, []);
+
   const evaluate = useCallback(async () => {
     setEvaluating(true);
     setOutcome(null);
     try {
-      setReview(await api.post<SetForgetState>("/api/trading/setforget/evaluate"));
+      const result = await api.post<SetForgetState>(
+        "/api/trading/setforget/evaluate");
+      setReview(result);
+      setOutcome(evaluationOutcome(result));
     } catch (e) {
       setOutcome({ ok: false, text: e instanceof ApiError ? e.message : String(e) });
     } finally {
       setEvaluating(false);
     }
-  }, []);
+  }, [evaluationOutcome]);
+
+  /**
+   * Read everything on the page again, free.
+   *
+   * All three polls, not just the setup: the candles and their averages are on
+   * their own sixty-second timer, and a Refresh that left the chart on the bars
+   * it opened with is two thirds of a refresh. And the held evaluation is
+   * dropped first — `data` prefers it over the polled state, so until
+   * 2026-09-22 pressing Refresh after a single Evaluate changed nothing
+   * whatsoever. "what does refresh do, does it do anything" was a fair
+   * question about a control that had stopped doing anything.
+   */
+  // The three `refresh` functions, NOT the three poll objects. `usePoll`
+  // returns a new object every render (it spreads its state), so a dependency
+  // on `state` rebuilds this callback, the memo below it and every prop this
+  // section hands its children, on every render. `state.refresh` is the stable
+  // half: it closes over the registry entry, which is looked up by key.
+  const refreshState = state.refresh;
+  const refreshCandles = candles.refresh;
+  const refreshOverlays = overlays.refresh;
+
+  const refreshAll = useCallback(async () => {
+    setRefreshing(true);
+    setReview(null);
+    setOutcome(null);
+    try {
+      await Promise.all([refreshState(), refreshCandles(), refreshOverlays()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshState, refreshCandles, refreshOverlays]);
 
   const saveLotSize = useCallback(async (value: number) => {
     setLots(value);
@@ -160,13 +232,13 @@ export function useSetForgetController() {
           ? `Limit order resting at ${candidate.entry.toFixed(2)} · ticket ${ticket ?? "—"}`
           : `Opened at market · ticket ${ticket ?? "—"}`,
       });
-      await state.refresh();
+      await refreshState();
     } catch (e) {
       setOutcome({ ok: false, text: e instanceof ApiError ? e.message : String(e) });
     } finally {
       setPlacing(false);
     }
-  }, [candidate, data, effectiveLots, state]);
+  }, [candidate, data, effectiveLots, refreshState]);
 
   return useMemo(
     () => ({
@@ -175,11 +247,11 @@ export function useSetForgetController() {
       evaluate, evaluating,
       execute, placing, outcome, setOutcome,
       lots: effectiveLots, setLots, saveLotSize,
-      refresh: state.refresh,
+      refresh: refreshAll, refreshing,
     }),
-    [data, candidate, state.loading, state.error, state.refresh,
+    [data, candidate, state.loading, state.error,
      candles.data, overlays.data, evaluate, evaluating, execute, placing,
-     outcome, effectiveLots, saveLotSize],
+     outcome, effectiveLots, saveLotSize, refreshAll, refreshing],
   );
 }
 

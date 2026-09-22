@@ -56,8 +56,17 @@ export function SetForgetPanel() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="ghost" onClick={() => void c.refresh()}>
-            <RefreshCw size={12} /> Refresh
+          {/* Not `ghost`. A transparent, borderless control next to two
+              bordered ones reads as decoration — "what does refresh do, does
+              it do anything as i cant click it", 2026-09-22. It is a button,
+              so it looks like one, and it spins while it is working. */}
+          <Button
+            onClick={() => void c.refresh()}
+            disabled={c.refreshing}
+            tooltip="Re-read the chart, the zones and the checklist. Free — no model is asked."
+          >
+            <RefreshCw size={12} className={c.refreshing ? "animate-spin" : undefined} />
+            {c.refreshing ? "Refreshing…" : "Refresh"}
           </Button>
           <Button
             onClick={() => void c.evaluate()}
@@ -84,6 +93,25 @@ export function SetForgetPanel() {
           </Button>
         </div>
       </header>
+
+      {/* Directly under the buttons, not at the foot of the page. Every one of
+          these lines is the answer to something the operator just pressed, and
+          the page below is long enough that an answer rendered last is an
+          answer nobody scrolls to — which is how "it just flickers and doesn't
+          appear to analyse the market" (2026-09-22) survived having a message
+          written for it. */}
+      {c.outcome && (
+        <p
+          role={c.outcome.ok ? "status" : "alert"}
+          className={`rounded-md border px-3 py-2 text-[11px] ${
+            c.outcome.ok
+              ? "border-profit/40 bg-profit/10 text-profit"
+              : "border-loss/40 bg-loss/10 text-loss"
+          }`}
+        >
+          {c.outcome.text}
+        </p>
+      )}
 
       {data?.ai_configured === false && (
         <p className="rounded-md border border-line bg-surface-2/60 px-3 py-2
@@ -144,19 +172,6 @@ export function SetForgetPanel() {
             <ConfluenceSection confluence={data.confluence} />
           </div>
         </>
-      )}
-
-      {c.outcome && (
-        <p
-          role={c.outcome.ok ? "status" : "alert"}
-          className={`rounded-md border px-3 py-2 text-[11px] ${
-            c.outcome.ok
-              ? "border-profit/40 bg-profit/10 text-profit"
-              : "border-loss/40 bg-loss/10 text-loss"
-          }`}
-        >
-          {c.outcome.text}
-        </p>
       )}
 
       {candidate && data && (

@@ -437,3 +437,34 @@ and worse shape — an intermittent red that is easier to re-run than to read.
 - The section reads XAUUSD only, per the owner's instruction 2026-09-19. The
   services take a candle series and know nothing about the symbol, so widening
   it is a bridge question, not a maths one.
+
+## Both reads strip the candles through the same function (2026-09-22)
+
+`analysis.public_evidence` — public for this reason — is the only place that
+decides what of the evidence the browser may see. It was private, and the free
+`GET /api/trading/setforget` route filtered by a tuple of series names it spelt
+out for itself. The two drifted the moment `trigger_candles` was added to the
+evidence: the billable read dropped it, and the free read — polled every sixty
+seconds by an open tab — went on shipping a whole candle series the page never
+draws. Found by asking the live endpoint what keys it returns.
+
+The failure is worth naming because nothing looked wrong. The page rendered
+correctly, both routes answered, and the only symptom was a payload nobody had
+measured. **A second reader of a shape is a second definition of that shape.**
+Pinned by `tests/api/routers/test_setforget.py`, whose fixture now carries a
+series whose name does not match the others' pattern, because that is precisely
+how this one got through.
+
+## The outcome line goes under the buttons (2026-09-22)
+
+"When i click 'evaluate the market' it just flickers and doesn't appear to
+analyse the market for a setup." It did analyse: with no candidate the backend
+skips the model on purpose, and the response renders pixel for pixel like the
+one already on screen. The repaint is the flicker.
+
+Saying so is half the fix. The other half is WHERE — the line was rendered last
+in the panel, under the chart, the indicator strip, the no-setup card, the lot
+selector and the confluence grid, some two thousand pixels below the button
+that had just been pressed. **An answer to a control belongs beside the
+control.** Same rule as `disabledReason`: a message the operator has to go
+looking for is a message that was not sent.

@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChartPanel } from "../ChartPanel";
 import { resetPolls } from "@/hooks/usePoll";
+import { touchedAfterRemove } from "@/test/chartStub";
 
 // lightweight-charts wants a real canvas and `window.matchMedia`; jsdom has
 // neither. The stand-in is shared with the ORB chart's tests -- see
@@ -32,6 +33,7 @@ let overlaysBody: Record<string, unknown>;
 
 beforeEach(() => {
   resetPolls();
+  touchedAfterRemove.length = 0;
   overlaysBody = { timeframe: "5m", count: 1, emas: {}, rsi: [], fvgs: [] };
   fetchMock = vi.fn(async (url: string) => {
     if (url.startsWith("/api/chart/candles")) {
@@ -223,5 +225,39 @@ describe("fair-value gaps", () => {
 
     expect(screen.queryByTestId("fvg-overlay")).not.toBeInTheDocument();
     restore();
+  });
+});
+
+/**
+ * Leaving the tab must leave nothing behind.
+ *
+ * Three uncaught "Object is disposed" errors landed in the browser console
+ * every time the Chart tab was left after the window had been resized,
+ * 2026-09-22. None of them carried an application frame: the throw happens a
+ * frame later, inside lightweight-charts' own `requestAnimationFrame` repaint,
+ * so the stack points at the library and the cause is already gone.
+ *
+ * The cause is ordering. React runs a component's effect cleanups in the order
+ * the effects were DEFINED, and the effect that creates the chart is defined
+ * first — so `chart.remove()` has already run by the time the bid/ask effect's
+ * cleanup removes its two price lines. Removing a price line reaches the
+ * model, the model queues a repaint, and the repaint finds a disposed object.
+ *
+ * `disposed` already existed in this component, with a comment explaining this
+ * exact hazard, and guarded the time-scale unsubscribe. The price lines were
+ * the half that was missed.
+ */
+describe("leaving the tab", () => {
+  it("touches nothing on the chart after it has been removed", async () => {
+    const { unmount } = render(<ChartPanel />);
+    await screen.findByTestId("candle-chart");
+    // The bid/ask lines only exist once a tick has arrived, and it is their
+    // cleanup that is on trial.
+    await waitFor(() => expect(fetchMock.mock.calls.some(
+      ([u]) => String(u).startsWith("/api/chart/tick"))).toBe(true));
+
+    unmount();
+
+    expect(touchedAfterRemove).toEqual([]);
   });
 });

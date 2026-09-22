@@ -26,6 +26,15 @@ import { cn } from "@/lib/cn";
  *
  * Below `md` the panes stack and the divider is not rendered: dragging a
  * vertical split on a phone-width screen is not a thing worth having.
+ *
+ * **Each slot is a flex column, not a plain block.** A panel in a block slot
+ * is a block box at content height, and `height: 100%` on anything inside it
+ * resolves against an auto height — that is, against nothing. On 2026-09-22
+ * that cost the Chart tab its candles: the canvas came back 30 pixels tall,
+ * the height of the only piece of the chart that can size itself, with a
+ * correct 200-candle payload behind it. A slot that is a flex column gives the
+ * panel a height flex layout has resolved, and percentages below it resolve
+ * too. A panel that wants the room still has to ask, with `flex-1`.
  */
 interface SplitPaneProps {
   /** Where this pane's position is remembered. Unique per screen. */
@@ -101,7 +110,7 @@ export function SplitPane({
       // the divider. Without this the browser starts selecting text instead.
       style={dragging ? { userSelect: "none", cursor: "col-resize" } : undefined}
     >
-      <div className="min-h-0 min-w-0 flex-1">{left}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{left}</div>
 
       <div
         role="separator"
@@ -136,7 +145,7 @@ export function SplitPane({
       </div>
 
       <div
-        className="min-h-0 md:min-w-0"
+        className="flex min-h-0 flex-col md:min-w-0"
         style={{ flexBasis: `${rightPct}%`, flexGrow: 0, flexShrink: 0 }}
       >
         {right}

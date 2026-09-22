@@ -19,7 +19,8 @@ from backend.src.services.setforget import analysis as _analysis
 from backend.src.services.setforget import setup as _setup
 
 __all__ = [
-    "read_chart", "propose", "evaluate", "score", "invalidations",
+    "read_chart", "public_evidence", "propose", "evaluate", "score",
+    "invalidations",
     "lot_from_risk", "money_at_risk", "money_at_target",
     "get_risk_settings", "update_risk_settings",
     "MIN_RR", "PREFERRED_RR",
@@ -34,6 +35,11 @@ PREFERRED_RR = _setup.PREFERRED_RR
 async def read_chart(engine: Any) -> dict:
     """The measured evidence. No model, nothing billed."""
     return await _analysis.gather(engine)
+
+
+def public_evidence(evidence: dict) -> dict:
+    """The evidence with the candle series taken out, ready for the browser."""
+    return _analysis.public_evidence(evidence)
 
 
 def propose(evidence: dict) -> tuple[Optional[dict], str]:

@@ -139,6 +139,65 @@ describe("a day's detail", () => {
     expect(within(dialog).getByText("GoldSignals")).toBeInTheDocument();
   });
 
+  /**
+   * Asked for on 2026-09-22: "when clicking into each day it should also list
+   * the profitability per market as well". The NiceGUI page had it — a "By
+   * Market Session" table beside the source one — and the React port dropped
+   * it. One instrument is traded here, so the market that varies is WHICH ONE
+   * WAS OPEN: Asian, London, the overlap, New York.
+   *
+   * The session is on the row, from the backend. See `trade_table._session`
+   * for why it is not derived here.
+   */
+  it("breaks the day down by market session", async () => {
+    body = { ...body, rows: [
+      trade({ ticket: 1, pnl: -40, session: "asian" }),
+      trade({ ticket: 2, pnl: 90, session: "london" }),
+      trade({ ticket: 3, pnl: 10, session: "london" }),
+    ] };
+    render(<CalendarSection days={30} />);
+
+    await userEvent.click(await screen.findByTestId("day-2026-09-15"));
+
+    const asian = within(screen.getByRole("dialog")).getByTestId("session-asian");
+    expect(asian).toHaveTextContent("Asian");
+    expect(asian).toHaveTextContent("-$40.00");
+    expect(within(screen.getByRole("dialog")).getByTestId("session-london"))
+      .toHaveTextContent("$100.00");
+  });
+
+  it("says how many trades it could not place in a session", async () => {
+    // A row with no close stamp carries no session. Dropping it silently
+    // makes the totals disagree with the day's own header for no visible
+    // reason; bucketing it makes a quiet session look busy.
+    body = { ...body, rows: [
+      trade({ ticket: 1, pnl: 50, session: "london" }),
+      trade({ ticket: 2, pnl: 10, session: null }),
+    ] };
+    render(<CalendarSection days={30} />);
+
+    await userEvent.click(await screen.findByTestId("day-2026-09-15"));
+
+    expect(within(screen.getByRole("dialog"))
+      .getByText(/1 trade had no close time/i)).toBeInTheDocument();
+  });
+
+  it("shows the win rate behind each breakdown row, not just the total",
+    async () => {
+      // "$10" from one trade in four and "$10" from four in four are not the
+      // same day. The NiceGUI table showed wins as "3 / 5" for that reason.
+      body = { ...body, rows: [
+        trade({ ticket: 1, pnl: 50, source: "GoldSignals" }),
+        trade({ ticket: 2, pnl: -40, source: "GoldSignals" }),
+      ] };
+      render(<CalendarSection days={30} />);
+
+      await userEvent.click(await screen.findByTestId("day-2026-09-15"));
+
+      expect(within(screen.getByRole("dialog")).getByTestId("source-GoldSignals"))
+        .toHaveTextContent("1 / 2");
+    });
+
   it("lists the individual trades", async () => {
     render(<CalendarSection days={30} />);
 

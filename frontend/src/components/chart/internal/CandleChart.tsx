@@ -191,6 +191,13 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
       lineStyle: 2, axisLabelVisible: true, title: "Ask",
     });
     return () => {
+      // Guarded for the reason `disposed` exists, one effect up. This cleanup
+      // runs AFTER the chart has been removed, and removing a price line from
+      // a disposed series does not throw here -- it reaches the model, the
+      // model queues a repaint, and a frame later that repaint throws
+      // "Object is disposed" with no application frame in its stack. Three of
+      // them per unmount, seen in the console on 2026-09-22.
+      if (disposed.current) return;
       series.removePriceLine(bid);
       series.removePriceLine(ask);
     };

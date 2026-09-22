@@ -446,7 +446,7 @@ async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:
     result = {
         "generated_at": time.time(),
         "price": evidence["price"],
-        "evidence": _public(evidence),
+        "evidence": public_evidence(evidence),
         "candidate": candidate,
         "no_setup_reason": why,
         "confluence": score(evidence, candidate),
@@ -495,12 +495,19 @@ async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:
     return result
 
 
-def _public(evidence: dict) -> dict:
+def public_evidence(evidence: dict) -> dict:
     """The evidence minus the candle series.
 
     The browser fetches its own candles for the chart from `/api/chart`, at the
     window it is drawing. Shipping a second copy here would put two series on
     one page that can disagree about what the last bar was.
+
+    **Public because BOTH reads have to use it.** It was private, and the free
+    `GET ""` route filtered by a tuple it spelled out for itself. The two lists
+    then drifted: `trigger_candles` was added to the evidence and only this one
+    learned about it, so the billable read dropped a series that the free read
+    -- polled every sixty seconds -- went on shipping to the browser. One
+    filter, named here, is the whole fix.
     """
     return {k: v for k, v in evidence.items()
             if k not in ("candles", "weekly_candles", "daily_candles",

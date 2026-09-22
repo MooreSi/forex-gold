@@ -444,3 +444,49 @@ with a real `separator` that arrow keys move.
 - The drag uses **mouse** events, not pointer events: the divider only renders
   at `md` and above where there is a mouse, and jsdom's pointer events carry no
   `clientX`, so a pointer-based drag is one that cannot be tested.
+- **Each slot is a flex column, and a panel that wants the height asks with
+  `flex-1`.** Discovered on 2026-09-22, when the Chart tab lost its candles:
+  the canvas rendered 30 pixels tall — its time axis and nothing else — behind
+  a correct 200-candle payload. `height: 100%` resolves against a containing
+  block whose height is definite, and a `PanelShell` sitting as a plain block
+  child of a plain block slot has neither: the section takes its height from
+  `min-h-[24rem]`, its body from `flex-1` inside an indefinite chain, and every
+  percentage below that collapses to the tallest thing that can size itself.
+  Making the slot `flex flex-col` gives the panel a height flex layout has
+  already resolved. **`flex-1` on the panel is the other half** — a flex item
+  in a column container still takes its height from its content otherwise.
+  Pinned in `SplitPane.test.tsx`; jsdom does no layout, so what the test can
+  pin is the class contract, not the pixels.
+- **The symptom to recognise:** a chart, canvas or map that renders as a thin
+  strip with its axis or frame visible. It is almost never the charting library
+  and almost never the data. Walk the ancestors in the browser console and find
+  the first one whose *specified* height is `auto`.
+- **A disposed lightweight-charts SERIES does not throw — it queues a repaint
+  that does.** The chart and its time scale throw "Object is disposed" the
+  moment you touch them after `remove()`, which is loud and easy to find. A
+  series is worse: `removePriceLine` reaches the model, `updateSource` marks
+  the chart dirty, and `requestAnimationFrame` schedules a paint. A frame
+  later that paint hits the disposed object and throws with **no application
+  frame anywhere in the stack** — the component that caused it is already
+  gone. Three of them per unmount, in the console on 2026-09-22, from the
+  Chart tab's bid/ask price lines: React runs effect cleanups in definition
+  order, so `chart.remove()` had already run when the tick effect removed its
+  two lines. `CandleChart`'s `disposed` ref existed for exactly this and
+  guarded only the time-scale unsubscribe. **Every cleanup that touches a
+  chart object needs the guard, not just the ones that throw where you can
+  see it.**
+- **`src/test/chartStub.ts` records series calls rather than throwing on
+  them,** and `touchedAfterRemove` is the assertion: nothing may touch a chart
+  after `remove()`. A stub that threw would catch the bug by inventing a
+  behaviour the real library does not have, and the next person would go
+  looking for the try/except that ought to exist.
+- **An answer to a control belongs beside the control.** The Set & Forget
+  outcome line was rendered last in a panel two thousand pixels tall, so a
+  correctly written message about an evaluation that had just run was never
+  seen. Same rule `disabledReason` follows.
+- **A table in a draggable pane needs its gutters declared.** Seven columns of
+  similar-looking numbers with no cell padding render as
+  `BUY0.104320.444315.424324.42` the moment the pane is narrower than the
+  table wants. `whitespace-nowrap` on the table, a gutter on every cell but
+  the last, and `overflow-x-auto` on the wrapper: scrolling sideways beats
+  both wrapping a price across two lines and running four of them together.

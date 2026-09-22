@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bySource, groupByDay, monthGrid, tradingDate } from "../internal/calendarGrid";
+import { bySession, bySource, groupByDay, monthGrid, tradingDate } from "../internal/calendarGrid";
 import type { TradeRow } from "../hooks/useClosedTrades";
 
 /**
@@ -155,9 +155,12 @@ describe("a day's breakdown", () => {
       row({ source: "NoisyChannel", pnl: -80 }),
     ];
 
+    // `wins` joined the row on 2026-09-22: "$30 from two trades" reads very
+    // differently from one winner and one loser, which is what this is. Whole
+    // dicts still, so a field that appears without a reason fails here.
     expect(bySource(rows)).toEqual([
-      { source: "NoisyChannel", pnl: -80, n: 1 },
-      { source: "GoldSignals", pnl: 30, n: 2 },
+      { source: "NoisyChannel", pnl: -80, n: 1, wins: 0 },
+      { source: "GoldSignals", pnl: 30, n: 2, wins: 1 },
     ]);
   });
 
@@ -165,6 +168,35 @@ describe("a day's breakdown", () => {
     const rows = [row({ source: "Good", pnl: 100 }), row({ source: "Bad", pnl: -100 })];
 
     expect(bySource(rows)[0]!.source).toBe("Bad");
+  });
+
+  /**
+   * "when clicking into each day it should also list the profitability per
+   * market as well" — 2026-09-22. One instrument is traded here, so the market
+   * that varies is which session was open when the trade closed.
+   */
+  it("totals each session in the order a day runs through them", () => {
+    const rows = [
+      row({ session: "ny", pnl: 10 }),
+      row({ session: "asian", pnl: -40 }),
+      row({ session: "london", pnl: 90 }),
+      row({ session: "london", pnl: 10 }),
+    ];
+
+    const split = bySession(rows);
+
+    expect(split.rows.map((r) => r.key)).toEqual(["asian", "london", "ny"]);
+    expect(split.rows[1]).toMatchObject({ label: "London", pnl: 100, n: 2, wins: 2 });
+  });
+
+  it("counts a trade with no session rather than bucketing it", () => {
+    // A close with no timestamp carries no session. Filing it under whichever
+    // session contains hour zero makes a quiet session look busy.
+    const split = bySession([row({ session: null, pnl: 5 }),
+                             row({ session: "ny", pnl: 5 })]);
+
+    expect(split.unplaced).toBe(1);
+    expect(split.rows).toHaveLength(1);
   });
 
   it("names an unattributed trade rather than dropping it", () => {

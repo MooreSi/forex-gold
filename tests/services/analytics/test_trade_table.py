@@ -350,3 +350,55 @@ class TestTheEquityCurveRidesAlong:
 
         assert out["curve"] == {"points": [], "net": 0.0, "peak": 0.0,
                                 "max_drawdown": 0.0, "trades": 0}
+
+
+class TestWhichSessionATradeClosedIn:
+    """Asked for on 2026-09-22: the calendar's day view should break a day
+    down "per market" as well as per signal source, the way the NiceGUI page's
+    "By Market Session" table did.
+
+    The session is attributed here rather than in the browser for the reason
+    every other number on this row is: `_session_for_hour` already defines
+    where London ends and New York begins, and a second copy of those
+    boundaries in TypeScript is a second answer to which session a trade was
+    in.
+
+    The close stamp is broker time -- UTC+3 stored as-if-UTC -- and the offset
+    has to come off before the hour means anything. It is the same unwind that
+    decides which calendar DAY the trade lands on, so a trade can never be
+    filed under Monday by one reading of the clock and the Asian session by
+    another.
+    """
+
+    @staticmethod
+    def _closed_at(utc_hour: int) -> float:
+        """A close stamp whose real UTC hour is `utc_hour`."""
+        # 1_750_000_000 is 2025-06-15 14:26:40 UTC. Anchor on a midnight so the
+        # hour under test is the only thing that varies.
+        midnight_utc = 1_749_945_600.0  # 2025-06-15 00:00:00 UTC
+        return midnight_utc + utc_hour * 3600 + trade_table._BROKER_OFFSET
+
+    @pytest.mark.parametrize("utc_hour,session", [
+        (2, "asian"),
+        (9, "london"),
+        (14, "overlap"),
+        (19, "ny"),
+        (23, "asian"),
+    ])
+    async def test_the_close_hour_decides_the_session(self, maps, utc_hour,
+                                                      session):
+        engine = _Engine([_deal(entry=1, type=1,
+                                time=self._closed_at(utc_hour))])
+
+        rows = (await trade_table.closed_trades(engine, 30))["rows"]
+
+        assert rows[0]["session"] == session
+
+    async def test_a_close_with_no_timestamp_has_no_session(self, maps):
+        """Not "asian". A missing stamp bucketed into the session that happens
+        to contain hour zero is a quiet session made to look busy."""
+        engine = _Engine([_deal(entry=1, type=1, time=0)])
+
+        rows = (await trade_table.closed_trades(engine, 30))["rows"]
+
+        assert rows[0]["session"] is None

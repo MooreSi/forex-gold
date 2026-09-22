@@ -944,4 +944,4 @@ class TestGatherReadsTheTriggerTimeframe:
 
         ev = await analysis.gather(engine)
 
-        assert "trigger_candles" not in analysis._public(ev)
+        assert "trigger_candles" not in analysis.public_evidence(ev)

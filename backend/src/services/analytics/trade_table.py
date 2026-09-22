@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.src.services.analytics import equity_curve as _curve
+from backend.src.services.analytics import formatting as _formatting
 from backend.src.services.analytics import labels as _labels
+from backend.src.services.analytics import pnl as _pnl
 from backend.src.services.analytics import ticket_maps as _maps
 from backend.src.services.broker import fees as _fees
 from backend.src.services.positions import spread_cache_repo as _spreads
@@ -50,6 +53,32 @@ _MAX_TP_DELAY_SECS = 1800
 
 # Vantage XAUUSD: one pip is a $0.10 price move.
 _PIP = 10.0
+
+# The broker stores UTC+3 timestamps as-if-UTC. Imported rather than repeated
+# so a row's session and the calendar day it is filed under can never be
+# derived from two different readings of the same clock.
+_BROKER_OFFSET = _formatting.BROKER_OFFSET
+
+
+def _session(close_ts: float) -> Optional[str]:
+    """Which trading session a close happened in, or None with no stamp.
+
+    None rather than a default: a trade with no close time bucketed into
+    whichever session contains hour zero is a quiet session made to look busy,
+    and the day view says how many rows it could not place instead.
+
+    The boundaries themselves are `analytics.pnl.session_for_hour`, the same
+    ones the hourly heat map reads. A second copy of them -- here or in the
+    browser -- would be a second answer to where London ends.
+    """
+    if not close_ts:
+        return None
+    try:
+        hour = datetime.fromtimestamp(
+            float(close_ts) - _BROKER_OFFSET, tz=timezone.utc).hour
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    return _pnl.session_for_hour(hour)
 
 
 def _direction_and_entry(open_deal: Optional[dict], close_deal: dict) -> tuple[str, float, float]:
@@ -180,6 +209,10 @@ async def closed_trades(engine: Any, days: int) -> dict:
             "order_type": "Limit" if kind == "limit" else "Market",
             "pending_secs": (open_ts - pending_at) if pending_at and open_ts else None,
             "reason": _labels.parse_reason(close_deal.get("comment") or "", pnl),
+            # Which market was open when it closed. The calendar's day view
+            # totals by this as well as by signal source -- asked for on
+            # 2026-09-22, and the question the Asian-hours losses raised.
+            "session": _session(close_ts),
             "source": source.get(str(ticket), ""),
             "strategy": strategy.get(str(ticket), ""),
             "max_tp": _max_tp_cell(max_tp.get(str(ticket)), close_ts, now),

@@ -157,3 +157,29 @@ describe("SplitPane", () => {
     expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "30");
   });
 });
+
+/**
+ * The chart came back 30 pixels tall — a time axis and no candles — on
+ * 2026-09-22. Nothing was wrong with the data or with lightweight-charts.
+ *
+ * `height: 100%` resolves against a containing block whose own height is
+ * definite. Each slot here was a plain `div`, so the panel inside it was a
+ * block box at content height, and every percentage height below it collapsed
+ * to the tallest thing that could size itself: the chart's time scale. A
+ * full-height child needs its slot to be a flex column so the panel it holds
+ * is a flex item with a height flex layout has already resolved.
+ *
+ * jsdom does no layout, so what is pinned here is the contract that makes the
+ * layout possible, not the pixels it produced.
+ */
+describe("a pane that wants the full height", () => {
+  it("lays each slot out as a flex column", () => {
+    render(pane());
+
+    for (const text of ["the chart", "the table"]) {
+      const slot = screen.getByText(text).parentElement as HTMLElement;
+      expect(slot.className).toContain("flex-col");
+      expect(slot.className).toContain("min-h-0");
+    }
+  });
+});

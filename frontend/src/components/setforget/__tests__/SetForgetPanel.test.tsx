@@ -15,10 +15,11 @@
  *
  * Nothing here reaches a broker: `fetch` is a recorder.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SetForgetPanel } from "../SetForgetPanel";
+import { useSetForgetController } from "../hooks/useSetForgetController";
 import { resetPolls } from "@/hooks/usePoll";
 
 // lightweight-charts wants a real canvas, a matchMedia and a ResizeObserver;
@@ -108,12 +109,17 @@ beforeEach(() => {
     }
     if (init?.method && init.method !== "GET") {
       if (url.includes("/setforget/evaluate")) {
+        // With no candidate the real endpoint skips the model and bills
+        // nothing — see `analysis.evaluate`. A fake that answered with a
+        // verdict anyway would hide the case this page reads worst.
         return { ok: true, status: 200,
-                 json: async () => ({ ...state, billed: true,
-                                      ai: { verdict: "take",
-                                            reasoning: "Daily demand holds.",
-                                            levels_rejected: [],
-                                            model: "a-model", error: null } }) };
+                 json: async () => (state.candidate
+                   ? { ...state, billed: true,
+                       ai: { verdict: "take",
+                             reasoning: "Daily demand holds.",
+                             levels_rejected: [],
+                             model: "a-model", error: null } }
+                   : { ...state, billed: false, ai: null }) };
       }
       return { ok: orderResponse.status < 400, status: orderResponse.status,
                json: async () => orderResponse.body };
@@ -265,6 +271,43 @@ describe("the evaluation", () => {
     expect(posts("/setforget/evaluate")).toHaveLength(1);
   });
 
+  /**
+   * Reported 2026-09-22: "when i click 'evaluate the market' it just flickers
+   * and doesn't appear to analyse the market for a setup".
+   *
+   * It did analyse. With no candidate the backend deliberately skips the model
+   * -- paying to be told what the rules already said is money for nothing --
+   * and returns a payload that renders identically to the one already on
+   * screen. A button whose entire effect is to repaint the same pixels is
+   * indistinguishable from a broken one, so the run has to say it happened.
+   */
+  it("says the evaluation ran when there was nothing for the model to judge",
+    async () => {
+      state = baseState({
+        candidate: null,
+        no_setup_reason: "There is no supply zone above price to rest an "
+          + "order at.",
+      });
+      render(<SetForgetPanel />);
+      await screen.findByRole("button", { name: /Evaluate the market/i });
+
+      await userEvent.click(
+        screen.getByRole("button", { name: /Evaluate the market/i }));
+
+      const said = await screen.findByRole("status");
+      expect(said).toHaveTextContent(/no supply zone above price/i);
+      expect(said).toHaveTextContent(/nothing was billed/i);
+    });
+
+  it("names the model that was billed when one did run", async () => {
+    await open();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Evaluate the market/i }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/a-model/);
+  });
+
   it("says where the button leads when no provider is configured", async () => {
     state = baseState({ ai_configured: false });
     await open();
@@ -273,6 +316,74 @@ describe("the evaluation", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", expect.stringContaining("Settings > AI"));
   });
+});
+
+/**
+ * Reported 2026-09-22: "what does refresh do, does it do anything as i cant
+ * click it".
+ *
+ * It did one third of a refresh. It re-read `/api/trading/setforget` and left
+ * the chart's own candles on their sixty-second poll, and -- worse -- an
+ * earlier evaluation shadows the polled state in the controller, so after
+ * pressing Evaluate once the button was genuinely dead. A control that does
+ * nothing after the operator has used the page is a control that lies.
+ */
+describe("refreshing the read", () => {
+  it("re-reads the chart's candles too, not only the setup", async () => {
+    await open();
+    const before = fetchMock.mock.calls.filter(
+      ([url]) => String(url).startsWith("/api/chart/candles")).length;
+
+    await userEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(
+      ([url]) => String(url).startsWith("/api/chart/candles")).length)
+      .toBeGreaterThan(before));
+  });
+
+  it("drops an evaluation it has replaced rather than showing it forever",
+    async () => {
+      await open();
+      await userEvent.click(
+        screen.getByRole("button", { name: /Evaluate the market/i }));
+      expect(await screen.findByText(/AI review: Take it/)).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+
+      await waitFor(() =>
+        expect(screen.queryByText(/AI review: Take it/)).not.toBeInTheDocument());
+    });
+});
+
+/**
+ * The other half of "it just flickers".
+ *
+ * Saying what an evaluation did is only worth anything where the person who
+ * pressed the button is looking. The three buttons are in the header; the
+ * outcome line was rendered last, under the chart, the indicator strip, the
+ * no-setup card, the lot selector and the confluence grid -- around two
+ * thousand pixels below the fold on the owner's screen. A message nobody
+ * scrolls to is the same as no message.
+ */
+describe("where the outcome is said", () => {
+  it("puts the outcome above the chart, not at the foot of the page",
+    async () => {
+      state = baseState({
+        candidate: null,
+        no_setup_reason: "There is no supply zone above price.",
+      });
+      render(<SetForgetPanel />);
+      await screen.findByRole("button", { name: /Evaluate the market/i });
+
+      await userEvent.click(
+        screen.getByRole("button", { name: /Evaluate the market/i }));
+
+      const said = await screen.findByRole("status");
+      const chart = screen.getByTestId("setforget-chart");
+      // DOCUMENT_POSITION_FOLLOWING: the chart comes after the message.
+      expect(said.compareDocumentPosition(chart)
+        & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
 });
 
 describe("the checklist and the sizing", () => {
@@ -310,5 +421,30 @@ describe("the checklist and the sizing", () => {
       expect(JSON.parse(String((puts[0][1] as RequestInit).body)))
         .toEqual({ lot_size: 0.2 });
     });
+  });
+});
+
+/**
+ * The controller's callbacks have to hold still.
+ *
+ * `usePoll` returns a fresh object on every render — it spreads its state and
+ * attaches a `refresh`. A `useCallback` that lists that OBJECT as a dependency
+ * is therefore rebuilt on every render, and so is the `useMemo` that carries
+ * it, and so is every prop this section hands its children. The hook's whole
+ * memo goes from "a stable handle" to a new one per keystroke.
+ *
+ * The polls' own `refresh` functions are stable — they close over the registry
+ * entry, which is looked up by key — so the dependency to name is `x.refresh`,
+ * not `x`. It was, until the three-way Refresh replaced it on 2026-09-22.
+ */
+describe("the controller's handles", () => {
+  it("hands back the same refresh across a re-render", async () => {
+    const { result, rerender } = renderHook(() => useSetForgetController());
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+
+    const first = result.current.refresh;
+    rerender();
+
+    expect(result.current.refresh).toBe(first);
   });
 });

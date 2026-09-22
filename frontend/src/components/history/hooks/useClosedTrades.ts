@@ -19,6 +19,12 @@ export interface TradeRow {
   pending_secs: number | null;
   reason: string;
   source: string;
+  /**
+   * Which market was open when the trade closed: "asian", "london",
+   * "overlap" or "ny". Null when the broker's record carried no close time.
+   * Attributed by the backend — `trade_table._session` says why not here.
+   */
+  session: string | null;
   strategy: string;
   max_tp: string;
   rr: number | null;

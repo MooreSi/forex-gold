@@ -125,17 +125,68 @@ export function monthGrid(rows: TradeRow[], year: number, month: number): MonthG
   };
 }
 
-/** Per-source totals for one day, worst first. */
-export function bySource(trades: TradeRow[]): { source: string; pnl: number; n: number }[] {
-  const acc = new Map<string, { pnl: number; n: number }>();
+export interface Tally {
+  pnl: number;
+  /** Trades in this bucket. */
+  n: number;
+  /** Winners among them. Shown as "3 / 5": on a two-trade day a bare "50%"
+   *  says almost nothing, and this panel is most useful on those days. */
+  wins: number;
+}
+
+function tally(
+  trades: TradeRow[],
+  keyOf: (t: TradeRow) => string | null,
+): (Tally & { key: string })[] {
+  const acc = new Map<string, { pnl: number; n: number; wins: number }>();
   for (const t of trades ?? []) {
-    const key = t.source || "unattributed";
-    const cur = acc.get(key) ?? { pnl: 0, n: 0 };
-    cur.pnl += Number(t.pnl) || 0;
+    const key = keyOf(t);
+    if (key === null) continue;
+    const cur = acc.get(key) ?? { pnl: 0, n: 0, wins: 0 };
+    const pnl = Number(t.pnl) || 0;
+    cur.pnl += pnl;
     cur.n += 1;
+    if (pnl > 0) cur.wins += 1;
     acc.set(key, cur);
   }
-  return [...acc.entries()]
-    .map(([source, v]) => ({ source, ...v }))
+  return [...acc.entries()].map(([key, v]) => ({ key, ...v }));
+}
+
+/** Per-source totals for one day, worst first. */
+export function bySource(trades: TradeRow[]): (Tally & { source: string })[] {
+  return tally(trades, (t) => t.source || "unattributed")
+    .map(({ key, ...v }) => ({ source: key, ...v }))
     .sort((a, b) => a.pnl - b.pnl);
+}
+
+/**
+ * The trading sessions, in the order a day runs through them.
+ *
+ * The same four the backend's `_session_for_hour` names and the hourly heat
+ * map reads. Chronological rather than sorted by P&L: this table is read as a
+ * day, and "the Asian session gave it all back" is a sentence about order.
+ */
+export const SESSIONS: readonly { key: string; label: string }[] = [
+  { key: "asian", label: "Asian" },
+  { key: "london", label: "London" },
+  { key: "overlap", label: "Overlap (LDN+NY)" },
+  { key: "ny", label: "New York" },
+];
+
+export interface SessionSplit {
+  rows: (Tally & { key: string; label: string })[];
+  /** Trades with no session on them — no close stamp in the broker's record.
+   *  Counted, never bucketed: a wrong session reads as a real result. */
+  unplaced: number;
+}
+
+/** Per-session totals for one day, in session order. */
+export function bySession(trades: TradeRow[]): SessionSplit {
+  const found = new Map(tally(trades, (t) => t.session || null).map((r) => [r.key, r]));
+  const rows = SESSIONS
+    .filter((s) => found.has(s.key))
+    .map((s) => ({ ...(found.get(s.key) as Tally & { key: string }),
+                   label: s.label }));
+  const placed = rows.reduce((sum, r) => sum + r.n, 0);
+  return { rows, unplaced: (trades ?? []).length - placed };
 }

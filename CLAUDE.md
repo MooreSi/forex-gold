@@ -194,7 +194,7 @@ Each of these cost real time in a past session:
 - **PS 5.1 `;` chains continue past failures** (no `&&`) — verify state
   after multi-step git chains.
 - Check doc links after moving files: `python tools/check_doc_links.py`.
-- **`~/Forex-Update` and `~/Forex-React` share one `USER_DATA_DIR`** — one
+- **`~/Forex-Update` and `~/Forex-Gold` share one `USER_DATA_DIR`** — one
   `config.yaml`, one `forex_trader_<env>.db`, one bridge port. That is
   deliberate: it is what lets the owner switch between the two apps. Only one
   may RUN at a time (`utils/single_instance.py`, claimed in `run.main()`

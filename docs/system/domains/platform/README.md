@@ -33,7 +33,7 @@ allowed to call.
 
 - All user data (config, DBs, sessions, logs) lives **outside** the project tree; every downstream path derives from `USER_DATA_DIR`.
 - **This checkout DOES use the `ForexTrader` folder, and that is now correct.** The fork-era isolation (`ForexTrader-Refactor2`) was reverted upstream in 212fd87 and taken in the 2026-08-25 merge, because every launcher and the installer's `[Dirs]` section still said `ForexTrader` while the code wrote to `ForexTrader-Refactor2`, stranding a `config.yaml` on the Windows client. This line said the opposite until 2026-09-19; the code is the fact. `run.py`'s log dir must still match `backend.src.config.USER_DATA_DIR` exactly.
-- **`~/Forex-Update` (the original NiceGUI app) and `~/Forex-React` therefore share one `USER_DATA_DIR`** — one `config.yaml`, one `forex_trader_<env>.db`, one `reversal_engine.db`, one bridge port. Deliberate: it is what lets the owner switch between the two apps and keep one history. Only one may run at a time, and the version number is per-checkout. Both rules in [../../rules/80-two-checkouts-one-data-dir.md](../../rules/80-two-checkouts-one-data-dir.md).
+- **`~/Forex-Update` (the original NiceGUI app) and `~/Forex-Gold` therefore share one `USER_DATA_DIR`** — one `config.yaml`, one `forex_trader_<env>.db`, one `reversal_engine.db`, one bridge port. Deliberate: it is what lets the owner switch between the two apps and keep one history. Only one may run at a time, and the version number is per-checkout. Both rules in [../../rules/80-two-checkouts-one-data-dir.md](../../rules/80-two-checkouts-one-data-dir.md).
 - **The licence gate and the dashboard login are both OFF in this build, and neither is deleted.** Owner, 2026-09-22: the repo is going open source, and a clone that demands an activation code from an issuer only he runs is a clone nobody can start. `backend/src/config/edition.py` is the only place that decides, and `run.py` is the only place that acts on it — it calls `_licence_enforce()` only under `edition.licence_required()`, and passes `edition.authentication_required()` to `build_app`'s `install_auth_gate`. `/api/auth/session` reports `auto_login: true` when there is no login, because `App.tsx` reads that to decide whether to draw the login page; a server with the gate off and a client still drawing the form is a password prompt with nothing behind it. **Re-enabling is one constant** — `LICENCE_REQUIRED` or `AUTHENTICATION_REQUIRED` — or `FOREX_REQUIRE_LICENCE=1` / `FOREX_REQUIRE_LOGIN=1` for a single run. The env override can only turn a gate **on**: one that could turn a licence check off would travel with every build made from this tree, which is the bypass the rules forbid. Pinned by `tests/config/test_edition.py`, `tests/licence/test_the_open_build_skips_the_gates.py` and `tests/api/test_open_build_needs_no_login.py`.
 - `config/licence/` itself is untouched and still fully tested (`tests/licence/`): the guard, the activation screen, the fingerprint, the issuer, the admin console and the remote self-heal push all still work, and a build that turns the gate back on gets exactly the behaviour it had before.
 - The licence auth server URL is hardcoded and cert-pinned; `guard.enforce()` runs at startup before the server starts; `keygen.py`'s `_SERVER_SECRET` must match the admin tools.
@@ -149,10 +149,12 @@ allowed to call.
 
 ## The log file is shared by both checkouts (2026-09-20)
 
-`~/Forex-Update` and `~/Forex-React` share one `USER_DATA_DIR` (rules/80), and
+`~/Forex-Update` and `~/Forex-Gold` share one `USER_DATA_DIR` (rules/80), and
 that includes `forex_trader.log`. Both apps append to the same file, so a
 5-day export off this machine carries 1,494 lines naming `Forex-Update`
 paths and 2,297 naming `Forex-React`, including NiceGUI's own stack traces.
+(`Forex-React` was this checkout's folder name until the 2026-09-22 rename to
+`Forex-Gold`; a log that old naturally carries the old path.)
 
 Not filtered, deliberately: they are the same user, the same machine and the
 same database, and a support bundle that hid half the machine's behaviour

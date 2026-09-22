@@ -440,7 +440,29 @@ inferred from whether the link happens to be up.*
 
 ---
 
-Built and run by [Simon Moore](https://github.com/MooreSi). Contributions
-welcome — the rules the codebase holds itself to are in
-[docs/system/rules/](docs/system/rules/), starting with
-[the golden rules](docs/system/rules/10-golden-rules.md).
+## Contributing
+
+Contributions are welcome, and the bar is the same one the codebase already
+holds itself to: [docs/system/rules/](docs/system/rules/), starting with
+[the golden rules](docs/system/rules/10-golden-rules.md). The short version is
+in [CONTRIBUTING.md](CONTRIBUTING.md) — write the test first and watch it fail,
+never edit a test to make a change pass, run
+`.venv/bin/python -m tools.checks all` before you open a pull request, and
+never point an automated test at a real broker.
+
+The rules are strict because of what this is. A change here can place an order
+on somebody's live account.
+
+## Licence
+
+[GNU AGPL-3.0](LICENSE). You may use, modify and redistribute this, including
+commercially, provided derivative work carries the same licence and keeps the
+source available.
+
+The "A" is the part that matters here: **if you run a modified version as a
+network service, section 13 obliges you to offer its source to the people
+using it.** Running the app privately to trade your own account — which is
+what it is for — carries no such obligation, and nothing about it phones home
+or reports what you do with it.
+
+Built and run by [Simon Moore](https://github.com/MooreSi).

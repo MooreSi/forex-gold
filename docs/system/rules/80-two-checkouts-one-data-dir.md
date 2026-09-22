@@ -5,7 +5,8 @@ Two checkouts of this app live on the owner's machine:
 | | |
 |---|---|
 | `~/Forex-Update` | the original app, NiceGUI dashboard |
-| `~/Forex-React` | this one, React dashboard (replaced NiceGUI 2026-09-18) |
+| `~/Forex-Gold` | this one, React dashboard (replaced NiceGUI 2026-09-18).
+  Named `~/Forex-React` until 2026-09-22 — an older log line or path may still say so |
 
 `backend/src/config/__init__.py` is identical in both, so both resolve to the
 **same** `USER_DATA_DIR`:
@@ -69,7 +70,7 @@ is about processes, so nothing else proves it) and
 one of them is half a guard: that app declines to start while the other runs,
 but the other still kills it. `backend/src/utils/single_instance.py`, the
 `_claim_single_instance()` helper in `run.py`, its call site in `main()` and
-the two test files are byte-identical in `~/Forex-Update` and `~/Forex-React`
+the two test files are byte-identical in `~/Forex-Update` and `~/Forex-Gold`
 as of 2026-09-19. **A change to any of them belongs in both checkouts, in the
 same sitting** — they contend for one lock file, so a divergence in the
 offset, the filename or the data directory silently turns the guard off.
@@ -119,7 +120,7 @@ download is such a machine. It must name the repo its own checkout pulls from:
 
 | Checkout | `origin` | `_GITHUB_REPO_URL` |
 |---|---|---|
-| `~/Forex-React` | `MooreSi/forex-gold` | `https://github.com/MooreSi/forex-gold` |
+| `~/Forex-Gold` | `MooreSi/forex-gold` | `https://github.com/MooreSi/forex-gold` |
 | `~/Forex-Update` | `MooreSi/forex` | `https://github.com/MooreSi/forex` |
 
 **The two lines differ on purpose. Do not "fix" one to match the other.**

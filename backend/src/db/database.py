@@ -301,23 +301,20 @@ from backend.src.db.retention import (  # noqa: E402,F401
     set_data_retention_days,
     prune_historical_data,
 )
-from backend.src.services.cluster.sync_repo import (  # noqa: E402,F401
-    _ensure_sync_tables,
-    get_or_create_node_id,
-    record_consolidated_trade,
-    get_consolidated_ticket_maps,
-    get_consolidated_extra_maps,
-    get_consolidated_trade,
-    get_consolidated_trades,
-    get_active_trader,
-    set_active_trader,
-    is_remote_node,
-    should_generate_signals_here,
-    get_stood_down_engines,
-    set_stood_down_engines,
-    generate_sync_token,
-    get_sync_token,
-)
+# Sync names resolve lazily for the same reason as the analytics ones below,
+# and it had already gone wrong once: sync_repo imports backend.src.db, whose
+# __init__ imports this module, so an eager from-import here meant a cold
+# `import backend.src.controllers.remote_node_controller` died on a
+# partially-initialised sync_repo while the app -- which reaches db/database.py
+# first -- booted fine. Pinned by tests/refactor/test_controllers_import_cold.py.
+_SYNC_LAZY = {
+    "_ensure_sync_tables", "get_or_create_node_id", "record_consolidated_trade",
+    "get_consolidated_ticket_maps", "get_consolidated_extra_maps",
+    "get_consolidated_trade", "get_consolidated_trades", "get_active_trader",
+    "set_active_trader", "is_remote_node", "should_generate_signals_here",
+    "get_stood_down_engines", "set_stood_down_engines", "generate_sync_token",
+    "get_sync_token",
+}
 # Analytics names resolve lazily via __getattr__ below rather than an eager
 # from-import. read_repo lives in backend/ now and legitimately gets imported
 # on its own; an eager import here made "which module was imported first"
@@ -334,41 +331,51 @@ def __getattr__(name):
     if name in _ANALYTICS_LAZY:
         from backend.src.services.analytics import read_repo as _rr
         return getattr(_rr, name)
+    if name in _SYNC_LAZY:
+        from backend.src.services.cluster import sync_repo as _sr
+        return getattr(_sr, name)
+    if name in _CHANNELS_LAZY:
+        from backend.src.services.channels import repo as _cr
+        return getattr(_cr, name)
+    if name in _SCORECARD_LAZY:
+        from backend.src.services.channels import scorecard_repo as _sc
+        return getattr(_sc, name)
+    if name in _BROKER_CREDS_LAZY:
+        from backend.src.services.broker import credentials_repo as _bc
+        return getattr(_bc, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-from backend.src.services.channels.scorecard_repo import (  # noqa: F401
-    get_channel_performance_map,
-)
-from backend.src.services.channels.repo import (  # noqa: E402,F401
-    _TG_GROUP_ID_MAP,
-    _normalise_tg_source,
-    sync_channel_rename,
-    get_channel_scorecard,
-    get_channel_strategy_breakdown,
-    _CHANNEL_MIN_SAMPLE,
-    _CHANNEL_PAUSE_PF,
-    _CHANNEL_NO_AUTO_PAUSE,
-    _channel_profit_factor,
-    recompute_channel_performance,
-    get_channel_lot_mult,
-    _CHANNEL_TRUST_MIN_SAMPLES,
-    _CHANNEL_TRUST_MIN_WR,
-    get_channel_trust,
-    CANONICAL_CHANNELS,
-    _canonical,
-    get_channel_strategy_override,
-    _applying_sync_channel_strategy,
-    set_channel_strategy_override,
-    get_all_channel_strategy_overrides,
-    _forward_channel_strategy_over_sync,
-    get_channel_strategy_rec,
-    set_channel_strategy_rec,
-    get_open_trade_count,
-    get_open_trade_count_for_channel,
-    get_all_channel_strategy_settings,
-    set_channel_paused,
-)
+# channels/repo.py is the second edge of the same cycle: it imports
+# cluster/sync_repo at module scope, so an eager import here dragged sync_repo
+# in through this module even after the sync block above went lazy.
+# scorecard_repo is listed with it because it imports channels/repo itself.
+_CHANNELS_LAZY = {
+    "_TG_GROUP_ID_MAP", "_normalise_tg_source", "sync_channel_rename",
+    "get_channel_scorecard", "get_channel_strategy_breakdown",
+    "_CHANNEL_MIN_SAMPLE", "_CHANNEL_PAUSE_PF", "_CHANNEL_NO_AUTO_PAUSE",
+    "_channel_profit_factor", "recompute_channel_performance",
+    "get_channel_lot_mult", "_CHANNEL_TRUST_MIN_SAMPLES",
+    "_CHANNEL_TRUST_MIN_WR", "get_channel_trust", "CANONICAL_CHANNELS",
+    "_canonical", "get_channel_strategy_override",
+    "_applying_sync_channel_strategy", "set_channel_strategy_override",
+    "get_all_channel_strategy_overrides", "_forward_channel_strategy_over_sync",
+    "get_channel_strategy_rec", "set_channel_strategy_rec",
+    "get_open_trade_count", "get_open_trade_count_for_channel",
+    "get_all_channel_strategy_settings", "set_channel_paused",
+}
+_SCORECARD_LAZY = {"get_channel_performance_map"}
+# broker/credentials_repo is the third edge of the same cycle, and the one the
+# 2026-09-19 fix did not reach: it imports backend.src.db.database at module
+# scope, so an eager from-import here meant a cold
+# `import backend.src.controllers.environment_controller` died on a
+# partially-initialised credentials_repo. Same shape as the two above, found
+# the same way -- by the test, against code that had moved on underneath it.
+_BROKER_CREDS_LAZY = {
+    "_master_creds_path", "_CRED_SECRET_COLS", "get_mt5_credentials",
+    "save_mt5_credentials", "_bridge_creds_path",
+    "sync_bridge_credentials_file",
+}
 from backend.src.services.risk.custom_strategies_repo import (  # noqa: E402,F401
     get_custom_strategies,
     save_custom_strategy,
@@ -405,14 +412,6 @@ from backend.src.services.positions.max_tp_repo import (  # noqa: E402,F401
 from backend.src.services.positions.spread_cache_repo import (  # noqa: E402,F401
     get_cached_spreads,
     cache_spread,
-)
-from backend.src.services.broker.credentials_repo import (  # noqa: E402,F401
-    _master_creds_path,
-    _CRED_SECRET_COLS,
-    get_mt5_credentials,
-    save_mt5_credentials,
-    _bridge_creds_path,
-    sync_bridge_credentials_file,
 )
 from backend.src.services.channels.parser_repo import (  # noqa: E402,F401
     get_channel_parser_config,

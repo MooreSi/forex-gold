@@ -1,0 +1,105 @@
+{
+  "_comment": [
+    "Reward-per-unit-risk for a TP ladder, as BOTH implementations must compute it.",
+    "",
+    "The arithmetic exists twice on purpose: backend/src/services/broker/ea_templates.py",
+    "ladder_rr() answers for anything server-side, and frontend/src/components/trading/",
+    "internal/ladderRr.ts answers while the operator is still typing in the EA template",
+    "editor, where a round trip per keystroke is not a readout, it is a lag.",
+    "",
+    "Two implementations of one rule is exactly the thing this repo has been burned by,",
+    "so neither is allowed to be the reference: both are checked against the cases below.",
+    "tests/core/test_ladder_rr_shared_cases.py runs them through Python;",
+    "frontend/src/components/trading/__tests__/ladderRr.test.ts reads THIS file and runs",
+    "the same cases through TypeScript. A change to one side that the other does not",
+    "follow fails on the side that did not move.",
+    "",
+    "Every expected number here was worked out from the rule, not captured from a run:",
+    "rr = pips / sl; a level can only close what is still open (the EA's DoPartialClose",
+    "takes MathMin(lots, remaining)); and with close_full_on_last the deepest CONFIGURED",
+    "level banks whatever remains regardless of its own %.",
+    "",
+    "levels are [level, pips, pct]; rows are [level, rr, closed_pct, contribution_r].",
+    "A level with pips <= 0 produces no row but still counts toward pct_sum and can",
+    "still be the last level."
+  ],
+  "cases": [
+    {
+      "id": "basic-three-level",
+      "why": "The plain case: 50/30/20 over a 40-pip stop, each level closing exactly its own share.",
+      "sl_pips": 40,
+      "close_full_on_last": true,
+      "levels": [[1, 40, 50], [2, 80, 30], [3, 130, 20]],
+      "rows": [[1, 1.0, 50, 0.5], [2, 2.0, 30, 0.6], [3, 3.25, 20, 0.65]],
+      "total_r": 1.75,
+      "remaining": 0,
+      "pct_sum": 100
+    },
+    {
+      "id": "oversubscribed-grid",
+      "why": "25/25/25/100 sums to 175% and looks like 4.00R if the % column is summed. It banks 2.50R: TP4 can only take the 25% the earlier levels left.",
+      "sl_pips": 40,
+      "close_full_on_last": true,
+      "levels": [[1, 40, 25], [2, 80, 25], [3, 120, 25], [4, 160, 100]],
+      "rows": [[1, 1.0, 25, 0.25], [2, 2.0, 25, 0.5], [3, 3.0, 25, 0.75], [4, 4.0, 25, 1.0]],
+      "total_r": 2.5,
+      "remaining": 0,
+      "pct_sum": 175
+    },
+    {
+      "id": "runner-left-open",
+      "why": "close_full_on_last off, %s stopping at 70: 30% is genuinely left running on the trail.",
+      "sl_pips": 50,
+      "close_full_on_last": false,
+      "levels": [[1, 50, 50], [2, 100, 20]],
+      "rows": [[1, 1.0, 50, 0.5], [2, 2.0, 20, 0.4]],
+      "total_r": 0.9,
+      "remaining": 30,
+      "pct_sum": 70
+    },
+    {
+      "id": "close-full-banks-the-rest",
+      "why": "One level at 50%. With the switch on it closes the whole position there, so the ladder is worth 1.00R and not 0.50R.",
+      "sl_pips": 40,
+      "close_full_on_last": true,
+      "levels": [[1, 40, 50]],
+      "rows": [[1, 1.0, 100, 1.0]],
+      "total_r": 1.0,
+      "remaining": 0,
+      "pct_sum": 50
+    },
+    {
+      "id": "same-ladder-without-close-full",
+      "why": "The same ladder with the switch off. The pair is what pins that the switch is read at all.",
+      "sl_pips": 40,
+      "close_full_on_last": false,
+      "levels": [[1, 40, 50]],
+      "rows": [[1, 1.0, 50, 0.5]],
+      "total_r": 0.5,
+      "remaining": 50,
+      "pct_sum": 50
+    },
+    {
+      "id": "zero-pip-level-is-skipped",
+      "why": "A level with a % but no distance is not a target. It produces no row, and TP2 is the last configured level, so it takes the lot.",
+      "sl_pips": 40,
+      "close_full_on_last": true,
+      "levels": [[1, 0, 50], [2, 80, 50]],
+      "rows": [[2, 2.0, 100, 2.0]],
+      "total_r": 2.0,
+      "remaining": 0,
+      "pct_sum": 100
+    },
+    {
+      "id": "no-stop-no-readout",
+      "why": "R:R is reward over risk. With no stop there is no risk to divide by, and the answer is no answer rather than a number.",
+      "sl_pips": 0,
+      "close_full_on_last": true,
+      "levels": [[1, 40, 50]],
+      "rows": [],
+      "total_r": 0.0,
+      "remaining": 100,
+      "pct_sum": 50
+    }
+  ]
+}

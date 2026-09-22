@@ -6,6 +6,8 @@ import { cn } from "@/lib/cn";
 import {
   FIELD_HINTS, FIELD_GROUPS, FIELD_UNITS, OTHER_GROUP_ID, labelFor,
 } from "../content/templateGroups";
+import { LadderRrSection } from "./LadderRrSection";
+import { maxLadderLevel } from "./ladderRr";
 
 export interface SchemaField {
   name: string;
@@ -175,6 +177,16 @@ export function TemplateEditor({
     return out;
   }, [schema]);
 
+  // Which groups get an R:R readout under them, and which ladder each reads.
+  // The stop it is valued against lives in a different group further up, which
+  // is the whole reason the readout has to exist rather than be done by eye.
+  const RR_LADDERS: Record<string, "tp" | "tp_pen"> = {
+    ladder: "tp", "ladder-pending": "tp_pen",
+  };
+  // From the schema rather than the group, so a search that hides half the
+  // ladder does not quietly shorten the ladder being valued.
+  const fieldNames = useMemo(() => schema.map((f) => f.name), [schema]);
+
   const matches = (field: SchemaField) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
@@ -257,6 +269,13 @@ export function TemplateEditor({
                       />
                     ))}
                   </div>
+                  {RR_LADDERS[group.id] && (
+                    <LadderRrSection
+                      prefix={RR_LADDERS[group.id]}
+                      maxLevel={maxLadderLevel(fieldNames, RR_LADDERS[group.id])}
+                      draft={draft}
+                    />
+                  )}
                 </section>
               );
             })}

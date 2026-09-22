@@ -135,3 +135,26 @@ what `trading_status.resume_all`'s docstring had already predicted in as many
 words. Both Resume controls now use `/api/trading/resume-all`, which re-arms
 the post-close guards exactly as `resume` did and clears the other two as
 well.
+
+- **An EA template's name is a foreign key nobody declared (2026-09-22).** A
+  strategy override is stored as the literal string `template:<name>` in four
+  separate places: every window of `app_config['trading_schedule']` (and again
+  per Telegram channel nested inside each window), `channel_performance
+  .strategy_override`, `channel_strategy_rec.strategy` (the AI's per-channel
+  recommendation) and `vantage_risk_settings.trade_strategy` /
+  `display_strategy_id`. SQLite knows about none of it. What makes a dangling
+  one dangerous rather than merely broken is
+  `ea_templates.template_for_channel`: it walks those routes **in order and
+  falls through** a name that no longer resolves, so a rename that left the
+  references behind would raise nothing, show nothing, and quietly start
+  trading the channel under the next strategy in the chain. `broker/
+  template_rename.py` repoints all four and reports what it moved; the panel
+  shows the count before the rename and the API exposes it at
+  `GET /api/trading/templates/{name}/references`.
+- **History is not a reference.** The same string is also stored on
+  `vantage_simulated_trades.strategy`, `consolidated_trades.strategy`,
+  `execution_quality`, `vantage_pending_orders.strategy` and
+  `vantage_signals.notes`. Those are a record of what a trade was actually
+  placed under, and the Analysis tab's attribution is built from them.
+  A rename deliberately does not touch them. Pinned by
+  `tests/core/test_ea_template_rename.py::TestWhatMustNotMove`.

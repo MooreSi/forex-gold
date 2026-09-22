@@ -433,3 +433,16 @@ def incr_grid_leg_cancelled(trade_id: str) -> int:
             (trade_id,),
         ).fetchone()
         return int(row[0]) if row else 0
+
+
+def set_ea_template_created_at(name: str, created_at: float) -> None:
+    """Stamp a template's creation time.
+
+    Only `template_rename` uses this: a renamed template is written as a new
+    row, and `upsert_ea_template` gives a row it has not seen before a fresh
+    `created_at`. A template that claims to have been created today is one
+    whose history has been lost in a rename.
+    """
+    with db() as conn:
+        conn.execute("UPDATE ea_trade_templates SET created_at=? WHERE name=?",
+                     (created_at, name))

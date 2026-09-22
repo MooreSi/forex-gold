@@ -33,7 +33,8 @@ __all__ = [
     "ea_is_healthy", "ea_seconds_since_last_seen", "push_template",
     "ea_template_schema",
     "push_global_config", "list_ea_templates", "get_ea_template",
-    "save_ea_template", "delete_ea_template", "export_templates",
+    "save_ea_template", "delete_ea_template", "rename_ea_template",
+    "template_references", "export_templates",
     "import_templates", "export_filename", "override_for_template",
     "ladder_rr", "DEFAULTS", "EXPORT_EXTENSION", "MAX_TP_LEVELS",
     "BUILTIN_PRESET_NAME", "install_builtin_template",
@@ -126,6 +127,14 @@ def save_ea_template(*args, **kwargs):
 
 def delete_ea_template(*args, **kwargs):
     return _templates.delete_ea_template(*args, **kwargs)
+
+
+def rename_ea_template(*args, **kwargs):
+    return _templates.rename_ea_template(*args, **kwargs)
+
+
+def template_references(*args, **kwargs):
+    return _templates.template_references(*args, **kwargs)
 
 
 def install_builtin_template(*args, **kwargs):

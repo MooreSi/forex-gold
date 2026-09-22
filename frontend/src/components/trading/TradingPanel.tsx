@@ -131,6 +131,7 @@ export function TradingPanel() {
             eaLastSeen={c.eaLastSeen}
             onSave={c.saveTemplate}
             onDelete={(name) => void c.deleteTemplate(name)}
+            onRename={c.renameTemplate}
             onInstallBuiltin={() => void c.installBuiltin()}
             onImported={() => void c.refreshTemplates()}
           />

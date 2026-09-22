@@ -663,6 +663,25 @@ def delete_ea_template(name: str) -> None:
     log.info("[EATemplates] deleted template %r", name)
 
 
+def rename_ea_template(old: str, new: str) -> dict:
+    """Rename a template and repoint every live reference to it.
+
+    In `template_rename` rather than here: this file is at its size ceiling,
+    and the work is mostly about the FOUR OTHER places a template name is
+    stored as `template:<name>` -- see that module's docstring for why a
+    rename that skipped them would change which strategy a channel trades
+    without raising or showing anything.
+    """
+    from backend.src.services.broker import template_rename as _rename
+    return _rename.rename(old, new)
+
+
+def template_references(name: str) -> dict:
+    """Where `name` is named in live configuration. Changes nothing."""
+    from backend.src.services.broker import template_rename as _rename
+    return _rename.references(name)
+
+
 # ── Import / export (2026-08-06) ─────────────────────────────────────────
 # Templates are the one piece of app state worth moving between installs
 # (and between users -- a working ladder/trail/guard combination is the

@@ -6,6 +6,7 @@ import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
+import { RenameTemplateDialog } from "./RenameTemplateDialog";
 import { TemplateEditor, type SchemaField } from "./TemplateEditor";
 import { TemplateTransfer } from "./TemplateTransfer";
 
@@ -15,6 +16,9 @@ interface TemplatesSectionProps {
   eaLastSeen: number | null;
   onSave: (name: string, values: Record<string, unknown>) => Promise<{ pushed: boolean }>;
   onDelete: (name: string) => void;
+  /** Rename, repointing every live reference. Rejects with the backend's own
+   *  words so the dialog can show them rather than closing on a failure. */
+  onRename: (from: string, to: string) => Promise<{ repointed: Record<string, number> }>;
   onInstallBuiltin: () => void;
   /** Reload the list after an import wrote something. */
   onImported: () => void;
@@ -37,10 +41,11 @@ interface TemplatesSectionProps {
  * from a failed save, and one that must not read as an error.
  */
 export function TemplatesSection({
-  templates, eaConnected, eaLastSeen, onSave, onDelete, onInstallBuiltin,
-  onImported,
+  templates, eaConnected, eaLastSeen, onSave, onDelete, onRename,
+  onInstallBuiltin, onImported,
 }: TemplatesSectionProps) {
   const [selected, setSelected] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [filter, setFilter] = useState("");
   const [schema, setSchema] = useState<SchemaField[] | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -171,7 +176,13 @@ export function TemplatesSection({
       )}
 
       {current && (
-        <div className="flex shrink-0 justify-end">
+        <div className="flex shrink-0 justify-end gap-2">
+          {/* Beside Delete, because both act on the selected template rather
+              than on the list. Rename is not destructive but it does move
+              live configuration, so it says what it will move first. */}
+          <Button onClick={() => setRenaming(true)}>
+            Rename {String(current["name"])}
+          </Button>
           <Button variant="danger" onClick={() => {
             onDelete(String(current["name"]));
             setSelected(null);
@@ -179,6 +190,21 @@ export function TemplatesSection({
             Delete {String(current["name"])}
           </Button>
         </div>
+      )}
+
+      {current && (
+        <RenameTemplateDialog
+          open={renaming}
+          onOpenChange={setRenaming}
+          name={String(current["name"])}
+          onRename={async (from, to) => {
+            const result = await onRename(from, to);
+            // Follow the template to its new name rather than dropping the
+            // selection: the operator was editing it a moment ago.
+            setSelected(to);
+            return result;
+          }}
+        />
       )}
     </div>
   );

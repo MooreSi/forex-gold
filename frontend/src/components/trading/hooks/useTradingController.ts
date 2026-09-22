@@ -140,6 +140,23 @@ export function useTradingController() {
     await templates.refresh();
   }, [templates]);
 
+  /**
+   * Rename a template. The backend repoints every live reference to it — the
+   * trading schedule, channel assignments, the AI's recommendation and the
+   * global strategy — and reports what it moved; the error is left to
+   * propagate so the dialog can show the refusal instead of closing on it.
+   */
+  const renameTemplate = useCallback(
+    async (from: string, to: string) => {
+      const body = await api.post<{ repointed: Record<string, number> }>(
+        `/api/trading/templates/${encodeURIComponent(from)}/rename`,
+        { name: to });
+      await templates.refresh();
+      return { repointed: body?.repointed ?? {} };
+    },
+    [templates],
+  );
+
   const installBuiltin = useCallback(async () => {
     await api.post("/api/trading/templates/install-builtin");
     await templates.refresh();
@@ -162,12 +179,13 @@ export function useTradingController() {
       eaLastSeen: typeof templates.data?.ea_last_seen_secs === "number"
         ? templates.data.ea_last_seen_secs
         : null,
-      saveTemplate, deleteTemplate, installBuiltin, refreshTemplates,
+      saveTemplate, deleteTemplate, renameTemplate, installBuiltin,
+      refreshTemplates,
     }),
     [trades, halt, signals, disabledReason, refreshAll, schedule.data,
      setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
      setMarket, setClockOffset,
-     templates.data, saveTemplate, deleteTemplate, installBuiltin,
-     refreshTemplates],
+     templates.data, saveTemplate, deleteTemplate, renameTemplate,
+     installBuiltin, refreshTemplates],
   );
 }

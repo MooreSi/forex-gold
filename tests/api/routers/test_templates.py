@@ -41,6 +41,19 @@ def ea(monkeypatch):
     monkeypatch.setattr(templates_router.broker_ctl, "ea_seconds_since_last_seen",
                         lambda: state["last_seen"])
     monkeypatch.setattr(templates_router.broker_ctl, "BUILTIN_PRESET_NAME", "Shipped Default")
+
+    def _rename(old, new):
+        if new == "Trail Runner":
+            raise ValueError(f"There is already an EA template called {new!r}.")
+        state["writes"].append(("rename", old, new))
+        return {"template": {"name": new},
+                "repointed": {"schedule": 2, "channel_assignments": 1,
+                              "ai_recommendations": 0, "risk_settings": 1}}
+
+    monkeypatch.setattr(templates_router.broker_ctl, "rename_ea_template", _rename)
+    monkeypatch.setattr(templates_router.broker_ctl, "template_references",
+                        lambda name: {"schedule": 2, "channel_assignments": 1,
+                                      "ai_recommendations": 0, "risk_settings": 1})
     return state
 
 
@@ -278,3 +291,69 @@ def test_an_import_with_no_content_is_refused_before_the_service_sees_it(
 
     assert r.status_code == 409
     assert [w for w in transfer["writes"] if w[0] == "import"] == []
+
+
+# ── Renaming ─────────────────────────────────────────────────────────────────
+# A strategy override is stored as the string `template:<name>` in the trading
+# schedule, on a channel, in the AI's recommendation and in the global risk
+# settings, and `template_for_channel` falls THROUGH a name that no longer
+# resolves to the next route. So the thing worth asserting about this endpoint
+# is not that the row moved -- it is that the move is REPORTED, because a
+# rename silently changing which strategy a channel trades is the failure the
+# whole feature is built around.
+
+
+def test_renaming_reports_what_it_repointed(make_client, ea):
+    client = make_client()
+
+    r = client.post("/api/trading/templates/Grid Runner/rename",
+                    json={"name": "Grid Runner v2"})
+
+    assert r.status_code == 200
+    assert r.json()["repointed"] == {
+        "schedule": 2, "channel_assignments": 1,
+        "ai_recommendations": 0, "risk_settings": 1}
+    assert ("rename", "Grid Runner", "Grid Runner v2") in ea["writes"]
+
+
+def test_renaming_onto_an_existing_name_is_refused_in_the_user_s_words(
+        make_client, ea):
+    client = make_client()
+
+    r = client.post("/api/trading/templates/Grid Runner/rename",
+                    json={"name": "Trail Runner"})
+
+    assert r.status_code >= 400
+    assert "already" in r.text
+    assert not [w for w in ea["writes"] if w[0] == "rename"]
+
+
+def test_a_rename_with_no_new_name_never_reaches_the_service(make_client, ea):
+    """An empty name would otherwise be a template called "" that no override
+    can ever name again."""
+    client = make_client()
+
+    r = client.post("/api/trading/templates/Grid Runner/rename",
+                    json={"name": "   "})
+
+    assert r.status_code >= 400
+
+
+def test_the_references_endpoint_changes_nothing(make_client, ea):
+    """It exists so the panel can warn BEFORE a rename. A read that renamed
+    anything would be the opposite of that."""
+    client = make_client()
+
+    r = client.get("/api/trading/templates/Grid Runner/references")
+
+    assert r.status_code == 200
+    assert r.json()["references"]["schedule"] == 2
+    assert ea["writes"] == []
+
+
+def test_references_for_a_template_that_is_not_there(make_client, ea):
+    client = make_client()
+
+    r = client.get("/api/trading/templates/Ghost/references")
+
+    assert r.status_code == 404

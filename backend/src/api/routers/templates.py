@@ -106,6 +106,42 @@ async def save_template(name: str, body: dict) -> dict:
     }
 
 
+@router.get("/{name}/references")
+async def template_references(name: str) -> dict:
+    """Where this template is named in live configuration.
+
+    So the panel can say what a rename is about to move BEFORE it moves it.
+    Read-only, and it counts configuration only — the name a closed trade was
+    placed under is history and is never rewritten.
+    """
+    if not broker_ctl.get_ea_template(name):
+        raise Refusal(f"No EA template called {name!r}.", status_code=404)
+    return {"name": name, "references": broker_ctl.template_references(name)}
+
+
+@router.post("/{name}/rename")
+async def rename_template(name: str, body: dict) -> dict:
+    """Rename a template, repointing every live reference to it.
+
+    A strategy override is the string `template:<name>` in four other places,
+    and `template_for_channel` falls THROUGH a name that no longer resolves to
+    the next route — so a rename that left them behind would change which
+    strategy a channel trades without raising anything. The response reports
+    what was repointed so that is visible rather than implied.
+    """
+    new_name = str(body.get("name") or "").strip()
+    if not new_name:
+        # Refused here as well as in the service. An empty name would be a
+        # template no override can ever name again, and the message the
+        # operator gets should name the field they left blank.
+        raise Refusal("A new template name is required.")
+    try:
+        result = broker_ctl.rename_ea_template(name, new_name)
+    except ValueError as exc:
+        raise Refusal(str(exc)) from exc
+    return result
+
+
 @router.delete("/{name}")
 async def delete_template(name: str) -> dict:
     broker_ctl.delete_ea_template(name)

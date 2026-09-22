@@ -795,5 +795,3 @@ def set_channel_paused(source: str, paused: bool) -> None:
             "  manual_override=1, updated_at=excluded.updated_at",
             (_canonical(source), 1 if paused else 0, _t.time()),
         )
-
-

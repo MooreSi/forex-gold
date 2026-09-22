@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The rules this codebase holds itself to
+    url: https://github.com/MooreSi/forex-gold/blob/main/docs/system/rules/10-golden-rules.md
+    about: Read before proposing a change. Short, and not optional.
+  - name: How the system works
+    url: https://github.com/MooreSi/forex-gold/tree/main/docs/system
+    about: The knowledge base — one living directory per part of the system.

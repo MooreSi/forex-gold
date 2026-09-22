@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaves differently from what it says it does
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **If this concerns a trade that involved real money, say so in the
+        first line.** Do not paste account numbers, MT5 credentials, licence
+        keys or API keys — a log line with a ticket number is enough.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: |
+        The steps, and whether it happens every time. If it involved a signal
+        or a trade, the channel and the approximate time help more than
+        anything else.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: |
+        From `forex_trader.log` in your user data directory. Redact anything
+        that identifies your account.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: The version string in the header, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Wine/CrossOver MT5 bridge)
+        - Windows (native MetaTrader5 package)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: account
+    attributes:
+      label: Account type
+      options:
+        - Demo
+        - Live
+        - Not connected to a broker
+    validations:
+      required: true

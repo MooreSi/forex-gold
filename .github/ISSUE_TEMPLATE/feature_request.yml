@@ -1,0 +1,43 @@
+name: Feature or change request
+description: Propose something new, or a change to how something behaves
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Open this before writing code if the change can move money** —
+        order placement, closing, position sizing, the MT5 bridge or the risk
+        governor. Those need the owner's sign-off and a demo session, so a
+        pull request that arrives without one cannot be merged however good it
+        is. See [20-trading-safety.md](../../docs/system/rules/20-trading-safety.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is hard, wrong or missing today. Not the solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+    validations:
+      required: true
+  - type: dropdown
+    id: money
+    attributes:
+      label: Can this change what reaches the broker?
+      options:
+        - "No"
+        - "Yes — order placement, closing, sizing, the bridge or the risk governor"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: |
+        Optional, and worth a lot. This codebase prefers measured claims to
+        designed ones — if you have numbers from your own closed trades or a
+        backtest, put them here.

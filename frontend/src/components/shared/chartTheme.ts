@@ -33,12 +33,37 @@ export function chartColours() {
   };
 }
 
-/** A hex token at an alpha. Returns the input unchanged if it is not a hex. */
+/**
+ * A hex token at an alpha. Returns the input unchanged if it is not a hex.
+ *
+ * **All four hex spellings, not just the six-digit one.** The theme is
+ * authored in six digits, but what reaches `getComputedStyle` is what the CSS
+ * minifier emitted, and a minifier shortens `#00cc88` to `#0c8`. Accepting
+ * only six digits therefore depended on whether a given colour happened to be
+ * shortenable: the dark theme's profit green and loss red both are, and the
+ * light theme's `#059669` and `#dc2626` are not. So every fair-value gap on
+ * the chart — and every ORB session band — was a translucent tint in light
+ * mode and a solid block painted over the candles in dark mode, from the same
+ * token. Reported on 2026-09-22 and pinned by `chartTheme.test.ts`.
+ *
+ * An alpha carried by the token (the `-dim` variants are eight digits) is
+ * dropped in favour of the requested one. The argument is what the caller
+ * means; honouring the token's instead would make it a suggestion.
+ */
 export function rgba(colour: string, alpha: number): string {
-  const hex = colour.trim().replace("#", "");
+  let hex = colour.trim().replace("#", "");
+  // Shorthand first: `#rgb` and `#rgba` each double every digit.
+  if (hex.length === 3 || hex.length === 4) {
+    hex = hex.split("").map((d) => d + d).join("");
+  }
+  // Drop a trailing alpha pair; `alpha` is the one that applies.
+  if (hex.length === 8) hex = hex.slice(0, 6);
   if (hex.length !== 6) return colour;
+  // `parseInt` stops at the first character it cannot read, so "zzzzzz" is
+  // NaN but "00zzzz" would be 0 — a silent black. Reject anything that is not
+  // six hex digits before parsing it.
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return colour;
   const n = parseInt(hex, 16);
-  if (!Number.isFinite(n)) return colour;
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 

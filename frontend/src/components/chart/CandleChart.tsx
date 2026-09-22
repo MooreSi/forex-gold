@@ -5,7 +5,7 @@ import {
 } from "lightweight-charts";
 import type { Candle, Overlays, Tick, Trade } from "@/api/types";
 import { chartColours, rgba, token, watchTheme } from "@/components/shared/chartTheme";
-import { rectsFor, type FvgRect } from "./fvgGeometry";
+import { rectsFor, type FvgRect } from "./internal/fvgGeometry";
 
 interface CandleChartProps {
   candles: Candle[];

@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { formatPrice } from "@/components/shared/format";
 import type { Candle, Trade } from "@/api/types";
 import { useChartController } from "./hooks/useChartController";
-import { CandleChart } from "./internal/CandleChart";
+import { CandleChart } from "./CandleChart";
 import { ChartToolbar } from "./internal/ChartToolbar";
 import { ChartTradesSection } from "./internal/ChartTradesSection";
 

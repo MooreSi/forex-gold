@@ -2,6 +2,7 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { useState, type ComponentType } from "react";
 import { AppHeader } from "./AppHeader";
 import { DEFAULT_TAB, TABS } from "./tabs";
+import { DashboardPanel } from "@/components/dashboard/DashboardPanel";
 import { ChartPanel } from "@/components/chart/ChartPanel";
 import { TradingPanel } from "@/components/trading/TradingPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
@@ -17,6 +18,7 @@ import { iconFor } from "@/components/shared/icons";
 import { cn } from "@/lib/cn";
 
 const PANELS: Record<string, ComponentType> = {
+  dashboard: DashboardPanel,
   chart: ChartPanel,
   trading: TradingPanel,
   news: NewsPanel,
@@ -30,7 +32,7 @@ const PANELS: Record<string, ComponentType> = {
 };
 
 /**
- * The shell: header, the ten tabs, and the panel for whichever is selected.
+ * The shell: header, the tabs, and the panel for whichever is selected.
  *
  * A tab is rendered only while it is selected. The NiceGUI version built every
  * panel up front and left their timers running, which is how one unattended

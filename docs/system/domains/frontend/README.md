@@ -29,9 +29,9 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - `frontend/src/api/client.ts` — the one HTTP client. Nothing calls `fetch` directly. It is also where a 401 becomes "go to the login screen" and where a refusal is told apart from a failure.
 - `frontend/src/hooks/usePoll.ts` — the **only** polling primitive. One interval per key however many components subscribe, deduped in flight, paused while the tab is hidden.
 - `frontend/src/components/shared/` — `PanelShell`, `DialogShell`, `Button`, `StatCard`, `EmptyState`, `NotPortedPanel`, and `format.ts`, the single place money, prices and MT5 timestamps are formatted.
-- `frontend/src/components/<domain>/` — `shell/`, `chart/`, `trading/`, `news/`, `about/`, `backtest/`, `parsing/`, `history/`, `ai/`, `engines/`, `settings/`. A domain folder is named after a business concept and matches the backend's vocabulary.
+- `frontend/src/components/<domain>/` — `shell/`, `dashboard/`, `chart/`, `trading/`, `news/`, `about/`, `backtest/`, `parsing/`, `history/`, `ai/`, `engines/`, `settings/`. A domain folder is named after a business concept and matches the backend's vocabulary.
 - `frontend/src/components/<domain>/content/` — copy and switch definitions transcribed from the NiceGUI pages **by parsing their source, not by retyping**: the Glossary's 47 terms, the 12 parsing switches, the reversal capabilities, the risk warning. A typo in a hand copy is a wrong definition nobody notices, and a missing switch is a feature that cannot be turned on.
-- `frontend/src/index.css` — the colour tokens. Dark only.
+- `frontend/src/index.css` — the colour tokens. Dark, light and auto: light landed 2026-09-19 (QUESTIONS Q3, answered by the owner). Only the neutral scale is re-skinned; every accent keeps its hue, and therefore its meaning, in both.
 - `frontend/static/` — favicon and icons, served at `/static`.
 - `frontend/dist/` — the compiled bundle. **Committed on purpose.**
 - `backend/src/api/server.py` — the composition root: mounts routers, then the bundle, and injects the engine.
@@ -42,7 +42,7 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - **Layer rule:** `frontend (browser) → backend/src/api → controllers → services → db`. A router asks a controller a named question and never reaches past it. Two contracts enforce it at zero: `the-api-layer-never-imports-the-database` and `the-api-layer-reaches-the-backend-through-controllers`. `server.py` is the single named exemption, because it holds the engine handle.
 - **No SQL and no `backend.src.db` import anywhere in `backend/src/api/**`** — enforced at zero.
 - **Controllers:** flat `<name>_controller.py`, never a package, hard 200-line ceiling, no loops/merges/formatting/fallbacks. Routers inherit the same ceiling and the same "no logic" rule.
-- **Semantic colours are frozen.** green = profit, red = loss, yellow/amber = warning and the app's accent, blue = remote/VPS, gray = neutral. They are CSS tokens now instead of hand-written utility classes; they are the same colours. There is no light mode (QUESTIONS Q3).
+- **Semantic colours are frozen.** green = profit, red = loss, yellow/amber = warning and the app's accent, blue = remote/VPS, gray = neutral. They are CSS tokens now instead of hand-written utility classes; they are the same colours. Light mode (2026-09-19) moves their LIGHTNESS only -- #00cc88 on white fails contrast at 11px, which on a P&L column is not a styling problem -- and remaps nothing.
 - **Money rules, unchanged from the NiceGUI conventions:** every order action goes through a controller; an explicit confirmation names instrument, direction and size; the backend decides whether an order is allowed and the page renders the answer; a refusal is surfaced verbatim; demo vs live is unmistakable; no destructive action on a single click.
 - **Component size budgets:** Dialog/Panel/Tab top-level files under 150 LOC, 250 is a refactor warning, 400 is a hard stop. Push state into a `hooks/use*Controller.ts` and JSX into `internal/`.
 
@@ -57,6 +57,9 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - **A numeric input's state is a string while it is being edited (2026-09-18).** `Number("1.")` is 1, so a field that stores a number drops the decimal point as it is typed and "1.25" arrives as 125 — a spread of 125 points instead of 1.25, which turns a profitable backtest into a disaster and still looks like a strategy result. `SettingsField` and the Backtest form both hold strings and convert once, on submit.
 - **A settings field must re-sync after every save, not only when the value changes (2026-09-18).** "The backend rejected your number" and "the backend agreed with what was stored" both leave the value where it was, so a field keyed on the value alone keeps the rejected input on screen: typing 99 into a risk field the service clamps to 2 left "99" in the box. `useSettingsResource` exposes a `version` counter for this.
 - **Guard the array boundary between the typed client and the untyped wire (2026-09-18).** A response that is an object where a list was expected makes `.map` throw *inside render*, and React tears down the whole tree — one wrong endpoint blanks the entire dashboard rather than one panel. `frontend/src/lib/asArray.ts` is that boundary — and `asObject` beside it, because a MISSING object field throws the same way (`Object.keys(undefined)`), which the shell test found by answering `{}` for every endpoint: exactly what a half-deployed backend looks like from the browser.
+- **`/api/chart/trades` answers `pnl: null`; `/api/trading/trades` carries the running profit (2026-09-22).** The chart's payload exists to place markers. A positions list built on it shows an em dash for every position's P&L -- honest, and needlessly so, since the broker's number is one endpoint away. The Dashboard reads the chart's copy for the chart and the trading copy for the positions card, and `DashboardPanel.test.tsx` stubs them with DIFFERENT values so the two cannot be swapped back silently.
+- **`/api/chart/candles` refuses a `count` below 10 (2026-09-22).** The query is declared `ge=10`, so asking for the two daily bars you actually want is a 422, not a short answer. The Dashboard's "today's move" showed an em dash for a figure the feed had all along, and the test suite could not see it: a stubbed fetch answers whatever it is asked. Found by opening the running app. `DAILY_COUNT` in `dashboard/hooks/useDashboardController.ts` asks for ten and reads the last.
+- **The Set & Forget `zones` are sorted by price, not by distance (2026-09-22).** The backend picks the nearest few by `aoi.distance` and then re-sorts what it picked by `low`, so `zones[0]` is the LOWEST of them. A card labelling it "the nearest zone" would be confidently wrong; the Dashboard shows the range they span instead, and does not re-derive the distance in TypeScript.
 - **MT5 timestamps are UTC+3 encoded as an epoch.** `formatBrokerTime` in `shared/format.ts` shifts them back; it is the port of `_uk()` from the NiceGUI `pages/trading/_shared.py`. Do not roll your own — formatting the raw stamp puts every trade three hours into the future, which looks plausible.
 - **The account badge has three states, not two.** A bridge that has not answered renders UNKNOWN in amber. A missing answer shown as "DEMO" is how somebody places a live order believing otherwise. Note that `is_demo` must be compared strictly: the string `"false"` is truthy.
 - **A settings switch that vanishes fails silently and expensively.** The DB column keeps its default, the backend keeps gating on it, and the page still renders. This bit the Parsing tab under NiceGUI (shipped 1e383fe with its whole settings body in a function nothing called, so `immediate_market_entry` could not be turned on and a bare "Buy Now" signal was missed). It is a React problem in exactly the same way: when the Settings tab is ported (task 080), pin every row of the category list reaching the screen, not just the most eye-catching card.
@@ -66,7 +69,25 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 
 ## What each tab is built on
 
-All ten tabs are React as of 2026-09-18. Three are narrower than their NiceGUI
+All eleven tabs are React. Ten of them since 2026-09-18; **Dashboard** was
+added on 2026-09-22 at the owner's request -- one screen that answers "what is
+happening right now" without moving between the other ten.
+
+**The Dashboard summarises and controls nothing.** No close button, no lot-size
+box, no engine switch: every card names the tab that owns what it shows. A
+control on a summary screen is one misclick from something that costs money,
+and the tabs that own those controls confirm first.
+
+**It opens no poll key of its own** (`dashboard/hooks/useDashboardController.ts`).
+Every read is the key the owning tab already uses -- the shell's 5s header, the
+chart's candles, the Analysis window, the free Set & Forget read -- so the tab
+costs what the tabs it summarises cost, and two screens cannot disagree about a
+number. Its tick comes from `/api/system/header`, which already carries one,
+rather than from `/api/chart/tick`.
+
+**Nothing on it bills a model.** The AI figures are read back from what the AI
+Analysis tab last produced. A screen that bills by being looked at is a screen
+nobody can leave open, and this is the tab left open all day. Three are narrower than their NiceGUI
 originals, and the reasons are about the boundary rather than effort — see
 `docs/todo/frontend/react-port/080-remaining-tabs.md` for the list, including
 the Analysis tab's missing deal-level trade table (it needs `get_deal_history`
@@ -517,3 +538,17 @@ with a real `separator` that arrow keys move.
   like a version bump. **`npm test` passing is not evidence the upgrade is
   done — `npm run build` runs `tsc -b` first, so a type-only break stops you
   rebuilding `dist/`.**
+- **One rule, deliberately written twice — and pinned against itself.** The TP
+  ladder's reward-per-unit-risk is computed in `services/broker/ea_templates.py`
+  (`ladder_rr`) and again in
+  `components/trading/internal/ladderRr.ts`. The duplication is the decision,
+  not an accident: the readout under the EA template editor's ladders has to
+  move on every keystroke, and a round trip per character is a lag, not a
+  readout. What makes it safe is that **neither copy is the reference** —
+  `tests/fixtures/ladder_rr_cases.json` holds the cases, its expected numbers
+  worked out from the rule rather than captured from a run, and both
+  `tests/core/test_ladder_rr_shared_cases.py` and
+  `components/trading/__tests__/ladderRr.test.ts` run them. A change to one
+  side that the other does not follow fails on the side that did not move.
+  If a third place ever needs this arithmetic, it joins the case file; it does
+  not get its own copy of the rule.

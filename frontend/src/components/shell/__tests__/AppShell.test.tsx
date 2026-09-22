@@ -21,26 +21,50 @@ afterEach(() => {
 const renderShell = () => render(<AuthProvider><AppShell /></AuthProvider>);
 
 describe("the tab strip", () => {
-  it("has the ten tabs, with the names and in the order the NiceGUI shell used", () => {
+  it("still carries the NiceGUI ten, with its names and in its order", () => {
     // frontend/app/__init__.py:411-420. The order is not cosmetic: it is the
-    // order the operator has learned.
-    expect(TABS.map((t) => t.label)).toEqual([
+    // order the operator has learned. Dashboard was added IN FRONT of it on
+    // 2026-09-22 at the owner's request, which is why this asserts the tail
+    // rather than the whole list -- the ten must not be reordered or renamed
+    // by anything added later.
+    expect(TABS.map((t) => t.label).slice(1)).toEqual([
       "AI Analysis", "Chart", "Trading", "Parsing", "Signal Generator",
       "Backtest", "Analysis", "Settings", "News", "About",
     ]);
+  });
+
+  it("leads with Dashboard, the one screen that summarises the rest", () => {
+    expect(TABS[0]).toMatchObject({ id: "dashboard", label: "Dashboard" });
   });
 
   it("renders every one of them", () => {
     renderShell();
     const tabs = screen.getAllByRole("tab").filter((t) =>
       TABS.some((s) => t.textContent?.startsWith(s.label)));
-    expect(tabs).toHaveLength(10);
+    expect(tabs).toHaveLength(TABS.length);
+    expect(TABS).toHaveLength(11);
   });
 
-  it("opens on Chart, as the app always has", () => {
-    expect(DEFAULT_TAB).toBe("chart");
+  it("opens on Dashboard", () => {
+    // Chart until 2026-09-22, when the owner asked for the Dashboard to be
+    // the landing screen. The tab the app opens on is rendered on every
+    // start, so this pins WHICH one rather than merely that one is active:
+    // a default pointing at an id with no panel renders the not-ported
+    // placeholder to every user, on every launch.
+    expect(DEFAULT_TAB).toBe("dashboard");
     renderShell();
-    expect(screen.getByRole("tab", { name: /^Chart/ })).toHaveAttribute("data-state", "active");
+    expect(screen.getByRole("tab", { name: /^Dashboard/ }))
+      .toHaveAttribute("data-state", "active");
+    expect(screen.getByRole("tab", { name: /^Chart/ }))
+      .toHaveAttribute("data-state", "inactive");
+  });
+
+  it("opens on a tab that has a real panel behind it", () => {
+    // The guard the rename above could otherwise lose: DEFAULT_TAB is a
+    // string, and a typo in it is invisible until somebody launches the app.
+    renderShell();
+    expect(TABS.map((t) => t.id)).toContain(DEFAULT_TAB);
+    expect(screen.queryByText(/has not been rebuilt in React yet/)).toBeNull();
   });
 });
 

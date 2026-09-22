@@ -107,6 +107,44 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
   a slow one. That patience is correct. It was being spent waiting for
   something nobody had started.
 
+- **Switching demo/live moved everything except MetaTrader 5, because the
+  restart does not own the bridge (2026-09-22, live, owner's Mac).** The
+  React port's `services/broker/environment.switch` writes the target
+  account's credentials to `bridge_credentials.json`, re-points the database,
+  persists `account_env` and restarts the app, on the stated reasoning that a
+  restart rebuilds "every cached handle -- the runtime, the bridge, the
+  engines". It rebuilds every handle *that process* owns. The bridge is a
+  separate process, and `run._start_mt5_bridge` deliberately leaves one that
+  is already LISTENing alone (the Wine relaunch tears down wineserver and
+  every child -- see the boot gotcha above). The bridge reads its credentials
+  exactly once, in `_connect`, so it outlived the restart on the old account.
+  Measured: bridge and terminal up since 10:12, switch to live and restart at
+  17:17, `config.yaml` reading `account_env: live` and the credentials file
+  holding 29377272 on VantageMarkets-Live 6 -- and `GET :9010/account` still
+  answering 26004592 on VantageMarkets-Demo. The header badge reports the
+  BRIDGE, so it still read DEMO, which is what "the switch did nothing" looks
+  like from the outside.
+  The NiceGUI app never had this: `telegram/bot_infra.cmd_switch_env` told the
+  running bridge to change account (`POST /credentials` ->
+  `_apply_credentials`, which re-logs in on the existing connection and
+  re-enables AutoTrading, which MT5 resets on an account switch). That call is
+  what the restart replaced.
+  `environment.align_bridge`, called from `app.startup` after the credentials
+  file is synced, is the missing half: it compares the bridge's login against
+  the configured environment's and re-points it only when they disagree. Three
+  rules in it are the load-bearing part -- only on a genuine disagreement (a
+  re-login costs a terminal round trip and resets AutoTrading, and every
+  restart would pay it), never on silence (a cold MT5 answers nothing for up
+  to ~150s; logging a guess in turns a restart into an outage), and the result
+  is verified by reading the account back rather than trusting the reply.
+  **Consequence worth stating: with `account_env: live`, a plain app restart
+  now logs the terminal into the live account.** That is what the switch
+  means, and the alternative is the half-switched state above -- but it is a
+  boot that reaches a real account with nobody clicking anything. Pinned by
+  `tests/broker/test_bridge_follows_the_switch.py` and the
+  `TestAligningTheRunningBridge` block in
+  `tests/broker/test_environment_switch.py`.
+
 - **The running bridge process can be older than `mt5_bridge.py`, and it fails
   by 404 rather than by looking broken (2026-09-04, live).** The bridge had
   been up since 16:28:08 on 09-03; `/ticks` was added at 16:38 that same day

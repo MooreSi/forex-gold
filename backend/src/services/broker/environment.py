@@ -14,8 +14,9 @@ screen saying so:
      which is what the bridge reads when it starts;
   2. the shared database connection is re-pointed at that environment's file;
   3. `account_env` is persisted, so a restart comes back to the same place;
-  4. the app restarts, so every cached handle — the runtime, the bridge, the
-     engines — is rebuilt against the new account.
+  4. the app restarts, so every cached handle is rebuilt against the new
+     account — and, because the bridge is NOT one of those handles, the app
+     tells it which account to log into on the way back up (`align_bridge`).
 
 **The order is the safety property**, and the first three live here. Nothing is
 written until the target's credentials have been checked: a database pointed at
@@ -25,13 +26,18 @@ failure this sequencing exists to prevent.
 The restart is step four and is the caller's, so that "what changed" and "the
 app went away" are separate, testable things.
 
-**Restart rather than an in-place bridge reconnect.** The NiceGUI version told
-the running bridge to change account, with a long tail of handling for a
-reconnect that half-worked, an older bridge build, or autotrading that would
-not re-enable. A restart makes the switch atomic and needs nothing past the
-runtime facade. It costs a few seconds and removes a class of half-switched
-states; the in-place version can be added later if those seconds matter, and
-would need `send_credentials`/`reconnect`/`enable_autotrading` on the facade.
+**A restart alone does not move the bridge, and for six weeks that was this
+module's central mistake.** The NiceGUI version told the running bridge to
+change account; the React port replaced that with the restart, on the
+reasoning that a restart rebuilds every cached handle and so needs nothing
+past the runtime facade. It rebuilds every handle THIS PROCESS owns. The
+bridge is a separate process — under Wine on a Mac, with the MT5 terminal
+behind it — and `run._start_mt5_bridge` deliberately leaves one that is
+already listening alone, because a Wine relaunch tears down wineserver and
+every child. So the switch wrote the live credentials, the app came back on
+the live database, and the terminal stayed logged into demo (owner's Mac,
+2026-09-22). `align_bridge` below is the missing half of step four: the app
+tells the bridge, on the way up, when the two disagree.
 
 Credentials for BOTH accounts live in the demo database, deliberately: they
 have to be readable while pointing at either environment, and a per-environment
@@ -47,7 +53,7 @@ from backend.src.services.risk import retention as _retention
 
 log = logging.getLogger(__name__)
 
-__all__ = ["current", "describe", "switch"]
+__all__ = ["align_bridge", "current", "describe", "switch"]
 
 ENVIRONMENTS = ("demo", "live")
 DEFAULT = "demo"
@@ -158,7 +164,88 @@ def switch(environment: str) -> dict:
         "restart_required": True,
         "note": (
             f"Now pointed at the {label} account {login} on {server}. "
-            "Make sure MetaTrader 5 is logged into that account before trading "
-            "resumes."
+            "MetaTrader 5 is logged into that account as the app comes back "
+            "up; the header says so if it could not be."
         ),
     }
+
+
+async def align_bridge(bridge) -> dict:
+    """Make the RUNNING bridge log into the account this app is pointed at.
+
+    **The step the restart does not perform.** `switch` writes the target's
+    credentials to `bridge_credentials.json` and the app restarts, on the
+    stated assumption that a restart rebuilds "every cached handle — the
+    runtime, the bridge, the engines". That is only true of handles this
+    process owns. On a Mac the bridge is a Wine subprocess with the MT5
+    terminal behind it, and `run._start_mt5_bridge` deliberately leaves a
+    bridge that is already listening alone (a Wine relaunch tears down
+    wineserver and every child, which would turn a restart into an outage).
+    It reads its credentials once, when it connects, and never again.
+
+    So the bridge outlived the restart on the account the app had just left:
+    config, database and orders on live, the terminal still on demo.
+    Confirmed on the owner's Mac 2026-09-22 — bridge up since 10:12, app
+    restarted at 17:17, `bridge_credentials.json` correctly holding the live
+    account, MT5 never moved. The NiceGUI app never had this bug because it
+    re-pointed the bridge in place (`telegram/bot_infra.cmd_switch_env`,
+    still does); the React port swapped that for the restart.
+
+    Three rules, and each of them cost something to learn:
+
+    * **Only on a genuine disagreement.** A re-login costs a terminal round
+      trip and resets AutoTrading. Doing it on every boot would pay that on
+      every restart.
+    * **Silence is not disagreement.** A bridge that answers nothing gets
+      nothing sent to it: a cold MT5 can take ~150s to answer, and logging a
+      guess in is how a restart becomes an outage.
+    * **Verify from the bridge, not from the reply.** The status this returns
+      names the account the bridge says it is on afterwards, because "the
+      accounts agree" is the one claim that must not be taken on trust.
+
+    Never raises. The caller is a startup path; an app that will not start is
+    worse than one whose badge disagrees with its terminal — and the header's
+    mismatch marker says so out loud.
+    """
+    environment = current()
+    login, password, server = _account(environment)
+    if not (login and password and server):
+        return {"status": "skipped", "environment": environment,
+                "reason": f"no {environment} credentials are readable"}
+
+    async def _bridge_login() -> str:
+        try:
+            account = await bridge.get_account()
+        except Exception as exc:
+            log.warning("[env] could not read the bridge's account: %s", exc)
+            return ""
+        return str((account or {}).get("login") or "").strip()
+
+    before = await _bridge_login()
+    if not before:
+        return {"status": "unknown", "environment": environment,
+                "expected_login": login,
+                "reason": "the bridge did not say which account it is on"}
+    if before == login:
+        return {"status": "aligned", "environment": environment,
+                "expected_login": login, "bridge_login": before}
+
+    log.warning("[env] the app is pointed at %s (%s) but the bridge is on %s "
+                "— re-pointing it", environment, login, before)
+    try:
+        await bridge.send_credentials(int(login), password, server)
+    except Exception as exc:
+        log.error("[env] re-pointing the bridge at %s failed: %s", login, exc)
+        return {"status": "failed", "environment": environment,
+                "expected_login": login, "bridge_login": before,
+                "reason": str(exc)}
+
+    after = await _bridge_login()
+    if after != login:
+        log.error("[env] the bridge is still on %s, not %s — MetaTrader 5 and "
+                  "this app are pointed at different accounts", after or "?", login)
+        return {"status": "failed", "environment": environment,
+                "expected_login": login, "bridge_login": after or before}
+    log.warning("[env] the bridge is now on %s (%s)", login, server)
+    return {"status": "repointed", "environment": environment,
+            "expected_login": login, "bridge_login": after}

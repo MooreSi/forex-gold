@@ -497,6 +497,22 @@ async def startup() -> None:
     except Exception as _e:
         log.error("[startup] TradingRuntime startup failed: %s", _e)
 
+    # The bridge is not one of the handles this restart rebuilt. On a Mac it is
+    # a Wine subprocess with the MT5 terminal behind it, and run.py leaves one
+    # that is already listening alone -- so after a demo/live switch it is
+    # still logged into the account the app just left, with the terminal on one
+    # account and every order, number and database row on the other. It reads
+    # bridge_credentials.json (synced above) only when it connects, so it has
+    # to be told. Nothing happens unless the accounts actually disagree; see
+    # services/broker/environment.align_bridge.
+    if not cfg_module.is_debug():
+        try:
+            from backend.src.services.broker import environment as _env_svc
+            await _env_svc.align_bridge(_engine._bridge)
+        except Exception as _e:
+            log.error("[startup] Could not check which account the bridge is "
+                      "on: %s", _e)
+
     # The Bounce engine used to be started here. Its panel went on 2026-09-02,
     # it was stopped on 2026-09-13 (bugs/046) and its code was deleted on
     # 2026-09-14. Nothing replaces it: Breakout and Reversal below are the two

@@ -176,3 +176,114 @@ class TestTheStoreIsReadFromOnePlace:
 
         assert "get_mt5_credentials" in src
         assert "live_password_enc" in src
+
+
+class _RecordingBridge:
+    """A bridge that remembers what it was told and what it answered.
+
+    Models the one thing that matters here: a bridge holds a LOGIN, it only
+    changes when something tells it to, and it reports whatever it currently
+    holds. `send_credentials` moves it, exactly as `_apply_credentials` in
+    `mt5_bridge.py` does.
+    """
+
+    def __init__(self, login, *, accepts=True, answers=True):
+        self.login = login
+        self.accepts = accepts
+        self.answers = answers
+        self.sent: list[tuple] = []
+        self.account_reads = 0
+
+    async def get_account(self):
+        self.account_reads += 1
+        if not self.answers or self.login is None:
+            return None
+        return {"login": int(self.login), "server": "whatever", "is_demo": True}
+
+    async def send_credentials(self, login, password, server):
+        self.sent.append((login, password, server))
+        if not self.accepts:
+            return {"status": "credentials_saved_connect_failed", "error": "no"}
+        self.login = login
+        return {"status": "connected", "trade_allowed": True}
+
+
+@pytest.mark.asyncio
+class TestAligningTheRunningBridge:
+    """The fourth step of the switch — "the app restarts, so every cached
+    handle is rebuilt" — is only true of handles THIS process owns. On a Mac
+    the bridge is a Wine subprocess with the MT5 terminal behind it, and
+    `run._start_mt5_bridge` deliberately leaves a bridge that is already
+    listening alone. So it outlives the restart still logged into the account
+    the app just left: config, database and orders on live, the terminal on
+    demo. Confirmed on the owner's Mac 2026-09-22, bridge up since 10:12,
+    app restarted 17:17, account never moved.
+    """
+
+    async def test_a_bridge_on_the_wrong_account_is_sent_the_right_credentials(self, machine):
+        machine["env"] = "live"
+        bridge = _RecordingBridge(5203117)          # still the demo account
+
+        await env_svc.align_bridge(bridge)
+
+        assert bridge.sent == [(900123, "live-pw", "Vantage-Live")]
+
+    async def test_it_reports_the_account_the_bridge_ended_up_on(self, machine):
+        machine["env"] = "live"
+        bridge = _RecordingBridge(5203117)
+
+        result = await env_svc.align_bridge(bridge)
+
+        assert result["status"] == "repointed"
+        assert result["bridge_login"] == "900123"
+
+    async def test_a_bridge_already_on_the_right_account_is_left_alone(self, machine):
+        """Re-logging in costs a terminal round trip and resets AutoTrading.
+        Every app restart would pay it."""
+        bridge = _RecordingBridge(5203117)          # demo, and demo is current
+
+        result = await env_svc.align_bridge(bridge)
+
+        assert bridge.sent == []
+        assert result["status"] == "aligned"
+
+    async def test_a_bridge_that_does_not_answer_is_not_re_pointed(self, machine):
+        """None is not evidence of the wrong account — it is no evidence at
+        all, and a cold bridge answers nothing for up to ~150s. Logging one
+        in on a guess is how a switch becomes an outage."""
+        bridge = _RecordingBridge(None, answers=False)
+
+        result = await env_svc.align_bridge(bridge)
+
+        assert bridge.sent == []
+        assert result["status"] == "unknown"
+
+    async def test_a_login_the_bridge_refuses_is_reported_as_a_failure(self, machine):
+        """Reported, not raised: the app must still start. But it must not
+        claim the accounts agree when the terminal never moved."""
+        machine["env"] = "live"
+        bridge = _RecordingBridge(5203117, accepts=False)
+
+        result = await env_svc.align_bridge(bridge)
+
+        assert result["status"] == "failed"
+        assert result["bridge_login"] == "5203117"
+
+    async def test_missing_credentials_send_nothing(self, machine):
+        machine["env"] = "live"
+        machine["creds"]["live_password_enc"] = ""
+        bridge = _RecordingBridge(5203117)
+
+        result = await env_svc.align_bridge(bridge)
+
+        assert bridge.sent == []
+        assert result["status"] == "skipped"
+
+    async def test_a_bridge_that_raises_never_stops_the_app_starting(self, machine):
+        class _Broken:
+            async def get_account(self):
+                raise RuntimeError("bridge exploded")
+
+        result = await env_svc.align_bridge(_Broken())
+
+        assert result["status"] == "unknown"

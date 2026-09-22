@@ -118,7 +118,7 @@ flowchart TD
 
     BUS --> GATES["Pre-trade gates, in order<br/>1 freshness · 2 content filters<br/>3 reward:risk floor · 4 correlation cap<br/>5 session &amp; schedule · 6 news window"]
     GATES --> GOV["Risk Governor<br/>risk-% sizing from the real stop distance<br/>per-trade $ ceiling · daily-loss halt<br/>loss-streak cooldown · directional cap"]
-    GOV --> STRAT["Strategy resolution<br/>which of the 16 templates manages this trade"]
+    GOV --> STRAT["Strategy resolution<br/>which EA template manages this trade"]
 
     STRAT --> EXEC["Order placement<br/>Python bridge or EA bridge"]
     EXEC --> MT5OUT["MetaTrader 5<br/>market &amp; pending orders"]
@@ -201,14 +201,14 @@ place orders.
 | **AI only where it earns it** | Model calls for format drift, market commentary and strategy advice — never in the order path |
 | **Risk Governor** | Risk-% sizing from the real stop distance, hard per-trade ceiling, daily-loss halt, loss-streak cooldown, R:R floor, directional cap |
 | **Daily profit target** | Up to three windows a day, each with a target; hitting it stands the system down until the next window |
-| **16 strategy templates** | From one-stop-one-target to eight-rung ladders with adaptive trails — per channel, per engine, or per trade |
+| **EA templates** | The unit of trade management: entry shape, an eight-rung ladder, breakeven, five trailing modes, an ATR-sized stop and group protection — one rule set the EA runs natively, chosen per channel, per engine or per trade |
 | **Adaptive position management** | Trail distance, breakeven trigger and TP1 close-% computed live from ATR, ADX, session and momentum, self-calibrated from closed trades |
 | **EA bridge** | Optional Expert Advisor inside MetaTrader, so stops and partials are applied at the terminal rather than over the wire — and reclaimed by the app if the EA drops |
 | **Reconciliation** | The app's view is continuously checked against what the broker actually holds; bridge outages are recovered, not assumed away |
 | **Circuit breaker** | New trades pause after a run of losses, and the failure direction of every risk check is refuse-to-trade |
 | **Backtesting** | Every strategy template replayed side by side against historical candles or your own closed trades |
 | **Telegram control** | Outbound trade alerts plus ~23 bot commands; the four that can place, close or restart are injected, never owned by the bot layer |
-| **Fleet** | A remote client/admin channel so several deployed instances — VPS, test machines — are monitored and updated from one console |
+| **Local + VPS pair** | The trading half runs on an always-on VPS beside the broker; your own machine is a console that can take trading back. One active trader, enforced, with settings, history and learning mirrored both ways |
 | **10,000+ tests** | Plus nine structural gates and a coverage ratchet that only tightens |
 
 ---
@@ -314,45 +314,70 @@ short reachable ladder beats a trail-heavy runner in a 25-pip chop band.*
 ## Trading strategies
 
 A signal carries a direction and some levels. What happens to the position
-afterwards is the **strategy**, chosen per channel, per engine or per trade.
-Sixteen are built in, from one broker-side stop and target with nothing polling
-it, to eight-rung ladders with adaptive trails.
+afterwards is an **EA template** — a complete, self-contained trade-management
+definition that the Expert Advisor runs *natively inside MetaTrader*, assigned
+per channel, per engine or per trade.
 
-| Strategy | What it does |
+Management lives in the terminal rather than in Python on purpose. The EA sees
+every tick, and a breakeven move, a partial close or a trail step is a decision
+that has to land inside the bar it was triggered by — not after a round trip
+over a home broadband link. Nothing polls a template's trade: the app pushes
+the rule set and the terminal applies it. If the app, the bridge or the whole
+machine goes away mid-trade, the position is still being managed. (The reverse
+is covered too: on EA silence past the heartbeat timeout, Python takes
+management back for anything marked `managed_by='ea'`.)
+
+![Trading → Strategy](docs/images/dashboard-trading.png)
+
+*Trading → Strategy — what manages each source's trades. Every dropdown here
+names an EA template, and a source bound to one is managed entirely by the EA
+on the chart. The built-in Python strategies are still selectable and still
+work, but the app is no longer built around them — the row still pointing at
+one says so in the name.*
+
+Templates are created, tuned, imported and exported by you in **Trading → EA
+templates** — around a hundred fields, grouped:
+
+| Group | What it decides |
 |---|---|
-| **Fixed R:R** | One stop, one target, both set at the broker. No partials, no breakeven, no trailing — MT5 executes them even if the app and the EA are both offline |
-| **Scale Out + Breakeven** | The balanced default: 40/30/20/10% closed at TP1–TP4, stop to entry after TP1 |
-| **Breakeven Runner** | Bank a first clip, move to breakeven, let the rest run |
-| **Trailing Stop** | Trail the whole position behind price |
-| **Protected Scale** | Scale out with protection applied earlier in the trade |
-| **Conservative** / **Conservative Trial** | Compute their own stop from the fill price and ignore the signal's levels |
-| **Scalp Runner** | Short-target, own-stop scalping |
-| **Signal Climber** | Front-loaded ladder that banks the heaviest clips first |
-| **Trend Ratchet** | Ratchets the stop upward with the trend rather than scaling out |
-| **Gold Diggers VIP Copy** | Mirrors that channel's own management style |
-| **Reversal Runner** | The reversal engine's TP1–TP8 ladder |
-| **Adaptive Runner** / **Adaptive Runner 2** | Trail distance and breakeven trigger recomputed live from ATR, ADX, session and momentum |
-| **Limit Runner** | The only strategy that places a genuine broker-side pending limit, via the EA |
-| **ORB/IVB Fixed** | The fixed pre-London opening-range setup |
+| **Entry and lots** | Single market entry or a grid of anchor and resting legs, lots per leg, whether pendings span the signal's own zone or step away from price — and the guards that refuse a fill: late-signal distance, signal age, maximum spread, slippage |
+| **Stop loss** | Fixed pip stop, a stop derived when the signal carries none, the R:R floor used when a target has to be derived, the hard safety cap, and whether SL/TP sit at the broker, are hidden, or are off |
+| **Take-profit ladder** | Up to eight levels, each with a distance and the share of the position closed there; a separate ladder for resting legs; and whether the signal's own targets win over the template's |
+| **Breakeven** | Which TP level arms it, and whether it lands on entry or entry plus a buffer |
+| **Trailing stop** | Off, candle, step, fractal, TP-following or staged — with activation, distance, step and padding |
+| **Staged stop ratchet** | Up to three fixed rungs, each locking the stop at its own level independent of the price that armed it; the last rung can strip the take-profit so the position rides the trail |
+| **Volatility (ATR)** | Stop and first target from ATR multiples instead of fixed pips, with the whole ladder rescaled so the rungs keep their shape |
+| **Protection and harvesting** | Close the whole group on a combined floating loss or a combined profit |
 
-Two design rules run through all of them:
+Four things are worth knowing before you build one:
 
-**A strategy that computes its own stop ignores the channel's.** Conservative,
-Conservative Trial, Scalp Runner and Fixed R:R set their stop from the actual
-fill price, so a mid-trade "SL is now at ..." message from the channel is
-refused — it would replace the very level the strategy exists to control.
-Signal-following strategies do the opposite on purpose: a channel updating its
-levels is information, not interference.
+**Every field is re-sent on every order.** Changing a template's values never
+needs an EA recompile — the rule set travels with the order.
 
-**The geometry is measured, not designed.** Fixed R:R's 4-point stop and
-6-point target came out of reconstructing the M1 path of every closed trade,
-which showed an average stop of 7.89 points against an average best-case move of
-4.29 — upside-down geometry that capped a perfect exit near +0.54R. The
-exploitable detail was in the excursions: winners only travelled 2.04 points
-against entry before working, losers travelled 8.55. It deliberately has **no**
-breakeven move, because adding one reduced expectancy in 8 of 8 configurations
-tested — it converts would-be winners into scratches while losers still pay full
-freight.
+**A stale EA is refused, not tolerated.** If the chart is running a different
+EA build from the one this app ships, every template order is refused with
+both version numbers in the message. A template is managed entirely by the
+build on the chart, so running one against a replaced build is the worse
+outcome.
+
+**The ladder describes a position the trade actually has.** Levels are cheap to
+add and mean nothing if price never reaches them; the shipped preset carries
+two rungs for that reason, not eight.
+
+**A template the backtest cannot reproduce says so.** `template_simulator`
+refuses grid mode, resting entries and the staged and fractal trails, and
+returns the reason — a refused template arriving in the comparison table as
+"0 trades, 0 loss" would sit beside a real drawdown and read as an argument
+for the thing that was never tested.
+
+One preset ships in the build: **Reversal ATR v1** — ATR-derived stop with a
+1:1 first target so R is constant across regimes, a two-rung ladder, and
+breakeven armed only after a partial has been booked. It is installed on
+request and **bound to nothing**, so it trades nothing until you select it.
+
+Templates are named, and the name is the reference: a channel is bound to one
+with a `template:<name>` override, and renaming repoints every live reference
+rather than orphaning them.
 
 ![Trading → Set & Forget](docs/images/dashboard-setforget.png)
 
@@ -364,6 +389,54 @@ round number; the target is the next zone, so the reward:risk falls out of the
 distance instead of being reverse-engineered to look acceptable. Evaluate the
 market scores the current read against the checklist, and Execute stays disabled
 until it passes.*
+
+---
+
+## Local and VPS — the same account, two machines
+
+The app is built to run as a **pair**: an always-on instance on a forex VPS
+sitting beside the broker's execution servers, and an instance on your own
+machine. Both point at the same MT5 account, and exactly one of them may open
+new positions at any moment.
+
+**This is the part that is hard to add later.** Everything the system does in a
+trade — the EA's on-tick management, the breakeven move, the partial at TP1,
+the trail step, an entry taken the moment price touches a zone — is a decision
+whose value decays in milliseconds. A VPS in the broker's own data centre
+puts the order round trip in single-digit milliseconds rather than the tens or
+hundreds a home connection adds, and removes every variable that connection
+contributes: a sleeping laptop, a router
+reboot, an ISP that re-routes at 3am, a Wi-Fi drop during London open. The
+trading half runs there permanently; the machine in front of you becomes a
+console.
+
+| | |
+|---|---|
+| **One active trader, enforced** | A control in the header hands trading between the two. Taking over locally sends STAND_DOWN and the VPS answers with a summary of the positions it still holds — they run on to their own SL/TP; handing back sends RESUME, which restarts only what the handover itself paused |
+| **Settings mirrored, VPS authoritative** | The local machine *proposes* a change and the VPS confirms it with a full snapshot: risk settings, per-channel strategy overrides, the trading schedule, strategy parameters and AI provider config each have their own message pair, so two edits in different screens cannot race |
+| **The buttons act on the machine that trades** | While you are stood down, engine start/stop/run-now, manual market orders and instant-entry follow-ups are routed to the VPS rather than acting on your own idle instance — the failure this prevents is a button that looks like it worked |
+| **Centralised signal generation** | Optionally, one node does all the analysis and forwards fully-resolved trade decisions to the other for execution. Risk sizing, gates and levels are already settled before the order crosses the link |
+| **One consolidated history** | A close on either side appends to a shared ledger, with periodic full pulls, so P&L and the trade record are the same on both screens |
+| **Shared learning** | Approved parser rules and the AI-recovered signal queue are mirrored, so teaching one node a channel's new format teaches both — and the second node never pays for the same AI call |
+| **Model snapshots move on request** | ML models are transferred as a one-shot, user-triggered copy, never continuously: a retrain on one machine is not allowed to quietly become the other machine's model |
+| **Headless** | The VPS can run with no web UI at all, toggled remotely over the Telegram bot |
+| **Its own channel** | A 1:1 WebSocket over TLS with a shared token and a pinned self-signed certificate, on its own port and its own cert files — deliberately separate from the licence/admin channel so the two can never interfere |
+
+The defaults are the cautious ones. A configured pair reads REMOTE until
+somebody takes over, because a paired machine must not assume it is in charge;
+a standalone install — in neither role — trades locally. The mutual-exclusion
+checks that decide who owns the Telegram bot and who may trade **fail open**
+for an unpaired install, because an error there must not silently stop trading
+on a machine that has no counterpart to hand over to.
+
+![Settings](docs/images/dashboard-settings.png)
+
+*Settings — Remote Node is a tab here, and exactly one role per machine: the
+VPS accepts the connection, the local machine initiates it. Two of its switches
+change what the engines do next and say so before and after. The badge at the
+top right of every screen — LOCAL or REMOTE — is which machine is allowed to
+open a position right now. It is a stored value both nodes hold, not something
+inferred from whether the link happens to be up.*
 
 ---
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from backend.src import config as _config
+from backend.src.config import edition as _edition
 from backend.src.config.licence import fingerprint as _fingerprint
 from backend.src.config.licence import store as _lic
 from backend.src.services.auth import dashboard_auth as _auth
@@ -9,11 +10,22 @@ from backend.src.services.auth import dashboard_auth as _auth
 __all__ = [
     "verify", "is_set", "set_password", "is_debug", "needs_setup",
     "create_initial_password", "load_licence", "get_fingerprint",
+    "authentication_required",
 ]
 
 
 def verify(username: str, password: str) -> bool:
     return _auth.verify(username, password)
+
+
+def authentication_required() -> bool:
+    """Whether this build asks for a dashboard password at all.
+
+    False in the open-source build. Exposed here rather than read from
+    `config.edition` in the API layer for the same reason `is_debug` is: the
+    router forwards to a controller, and the controller does the importing.
+    """
+    return _edition.authentication_required()
 
 
 def is_debug() -> bool:

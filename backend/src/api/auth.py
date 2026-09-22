@@ -104,3 +104,15 @@ def create_initial_password(password: str) -> bool:
 
 def is_debug() -> bool:
     return bool(_auth.is_debug())
+
+
+def authentication_required() -> bool:
+    """Whether this build has a login at all — see `config/edition.py`.
+
+    Deliberately NOT consulted by `may_pass`. Whether the gate stands is
+    decided once, in `run.py`, by installing this middleware or not; a second
+    switch inside the gate itself would be a door that opens on a flag, which
+    is exactly the shape of a bypass. With authentication off the middleware
+    is simply never added, and everything below is unchanged and still tested.
+    """
+    return bool(_auth.authentication_required())

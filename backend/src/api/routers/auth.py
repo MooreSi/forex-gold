@@ -30,11 +30,23 @@ async def session_state(request: Request) -> dict:
     `needs_setup` is why this is not just a boolean: a fresh real install has
     no password and no debug seed, so a plain login form could never succeed
     (review 2026-08-11, C2). The client offers one-time setup instead.
+
+    `auto_login` is what `App.tsx` reads to skip the login page, so a build
+    with no authentication must report it true whatever the operator's own
+    setting says -- otherwise the gate is off on the server and the client
+    still draws a password form with nothing behind it to check the answer.
+    The operator's setting is still what decides it in a build that DOES
+    authenticate: this only collapses the question when there is no login.
+
+    `needs_setup` is reported unchanged either way. It is the answer to "does
+    this install have a password yet", which stays true and stays useful --
+    the Access tab still offers to set one -- and the client never reaches the
+    setup form anyway once `auto_login` is true.
     """
     return {
         "authenticated": bool(request.session.get(gate.SESSION_KEY, False)),
         "needs_setup": gate.needs_setup(),
-        "auto_login": gate.auto_login_enabled(),
+        "auto_login": True if not gate.authentication_required() else gate.auto_login_enabled(),
         "debug": gate.is_debug(),
     }
 

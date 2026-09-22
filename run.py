@@ -526,7 +526,19 @@ def main():
         asyncio.create_task(activation_bot_loop(lambda: True))
 
     register_activation_agent(_start_activation_approval_loop)
-    _licence_enforce()
+
+    # Off in the open-source build (backend/src/config/edition.py). The guard
+    # and its activation screen are untouched and still tested -- this build
+    # simply does not ask for a key, because the issuer that grants one is a
+    # single machine the owner runs and a clone could never reach it.
+    #
+    # The two ordering rules above still hold whichever way the switch is set:
+    # the database is open before this point, and nothing that can trade has
+    # started yet. See tests/licence/test_activation_screen_has_a_database.py.
+    from backend.src.config import edition as _edition
+
+    if _edition.licence_required():
+        _licence_enforce()
 
     bridge_proc = _start_mt5_bridge()
 
@@ -585,9 +597,14 @@ def main():
         from backend.src.api.server import build_app
         from backend.src.utils.os_utils import register_ui_stopper
 
+        # The login gate is off in the open-source build for the same reason
+        # (edition.py). The middleware, the session endpoints and the password
+        # store all remain: turning AUTHENTICATION_REQUIRED back on restores
+        # the gate this app has always had, with nothing to rebuild.
         app = build_app(
             session_secret=_dashboard_storage_secret(),
             with_lifecycle=True,
+            install_auth_gate=_edition.authentication_required(),
         )
 
         # Last thing before binding — see _claim_port. Everything above this

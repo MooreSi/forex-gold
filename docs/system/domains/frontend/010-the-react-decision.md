@@ -46,7 +46,8 @@ What answers the 2026-08-06 objections:
 | 17,842 lines rewritten | Unanswered, and real. This is the cost of the decision, sequenced in `docs/todo/frontend/react-port/`. |
 | SSR / CDN / code-splitting do not apply | Still true. That is why the port is **Vite**, not Next.js — a static bundle, no Node server, no SSR. |
 
-The port happens in **`MooreSi/forex-react`**, a separate repository cloned from `MooreSi/forex`
+The port happens in **`MooreSi/forex-gold`** — named `forex-react` at the time, renamed
+2026-09-22 — a separate repository cloned from `MooreSi/forex`
 at commit `1d594cb`. The NiceGUI app in `MooreSi/forex` keeps trading and is not modified by this
 work. That is what makes the reversal affordable: if the port stalls, nothing that places orders
 has been touched.

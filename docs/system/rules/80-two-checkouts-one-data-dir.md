@@ -119,7 +119,7 @@ download is such a machine. It must name the repo its own checkout pulls from:
 
 | Checkout | `origin` | `_GITHUB_REPO_URL` |
 |---|---|---|
-| `~/Forex-React` | `MooreSi/forex-react` | `https://github.com/MooreSi/forex-react` |
+| `~/Forex-React` | `MooreSi/forex-gold` | `https://github.com/MooreSi/forex-gold` |
 | `~/Forex-Update` | `MooreSi/forex` | `https://github.com/MooreSi/forex` |
 
 **The two lines differ on purpose. Do not "fix" one to match the other.**
@@ -132,15 +132,21 @@ force-checked-out the *old app over it*. `link_checkout()` hit the same
 constant at every startup, matched nothing, and deleted the `.git` it had just
 made -- leaving the machine permanently unable to self-update, silently.
 
-Owner's decision the same day: **forex-react is canonical for the React
-checkout.** Making the NiceGUI app update itself into the React app is a
-separate change, with its own demo session, not a line edit here.
+Owner's decision the same day: **this checkout's own repo is canonical.**
+Making the NiceGUI app update itself into the React app is a separate change,
+with its own demo session, not a line edit here.
+
+**Renamed 2026-09-22**: `MooreSi/forex-react` became `MooreSi/forex-gold`, to
+say what it trades rather than what it is built with. GitHub redirects the old
+URL, so a checkout still pointing at `forex-react` keeps fetching — but the
+constant, `origin` and the tests were all moved together, because the test
+above compares the constant against `origin` and a redirect is not agreement.
 
 Pinned by
 `tests/positions/test_app_update.py::TestTheBootstrapPointsAtTHISRepo`, which
 compares the constant against `git remote get-url origin` rather than only
 against a literal -- the two disagreeing is what the bug WAS. Note that
-`"forex-react"` contains `"forex"`, so a substring check passes on the old
+`"forex-gold"` contains `"forex"`, so a substring check passes on the old
 value and proves nothing; the test asserts the suffix.
 
 ---

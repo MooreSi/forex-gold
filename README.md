@@ -24,8 +24,8 @@ separate chart widget.*
 ## Running it
 
 ```bash
-git clone https://github.com/MooreSi/forex-react.git
-cd forex-react
+git clone https://github.com/MooreSi/forex-gold.git
+cd forex-gold
 pip install -r requirements.txt
 python run.py
 ```

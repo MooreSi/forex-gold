@@ -16,7 +16,7 @@ process: the bundle is built by a developer and committed, which is what keeps
 the install Python-only.
 
 It replaced a NiceGUI dashboard on 2026-09-18 in this repository
-(`MooreSi/forex-react`). `MooreSi/forex` still runs the NiceGUI version.
+(`MooreSi/forex-gold`). `MooreSi/forex` still runs the NiceGUI version.
 
 ```
 browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
@@ -400,6 +400,18 @@ That is now the first thing to check when a panel "shows nothing".
   knew about two. Its all-clear reads "Trading Active", not "Circuit Breaker
   OK" — naming one of the four mechanisms in the all-clear made the whole badge
   look like a breaker readout.
+
+- **Two controls for one fact, 2026-09-22.** The Pause button survived that
+  clean-up as an icon and kept its own pause/resume dialog, so the header had
+  two controls for the same thing — and the Pause button read only
+  `pause.paused`, the governor's manual pause. With a profit target reached or
+  the breaker tripped it offered "Pause" while every automated entry was
+  already held, and the way to lift it was the other control. Merged: the
+  badge is the only one now (`TradingStatusDialog`), and which half it offers
+  — Resume or the pause form — is the backend's own `can_resume`, never a
+  second opinion computed here. A news blackout has no Resume (it lifts
+  itself) but still offers the pause form, because a blackout is no reason to
+  lose the ability to stop trading by hand.
 
 ## Hover help
 

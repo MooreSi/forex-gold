@@ -1,7 +1,7 @@
 """The update screen says which repository and branch it is comparing against.
 
 Found while wiring the Node & Updates card on 2026-09-20. This checkout's
-`origin` is `MooreSi/forex-react`, `_BRANCH` is "main", and the app runs on
+`origin` is `MooreSi/forex-gold`, `_BRANCH` is "main", and the app runs on
 `react-dashboard` -- so "Up to date" is true of a branch nobody is running,
 and the card's hardcoded link pointed at `MooreSi/forex`, a different
 repository entirely.
@@ -26,7 +26,7 @@ def git(monkeypatch):
     async def _run(*args, timeout=30.0):
         calls.append(args)
         if args[:2] == ("remote", "get-url"):
-            return 0, "https://github.com/MooreSi/forex-react.git\n", ""
+            return 0, "https://github.com/MooreSi/forex-gold.git\n", ""
         return 1, "", "no"
 
     monkeypatch.setattr(upd, "_run_git", _run)
@@ -42,7 +42,7 @@ def test_it_names_the_repository_origin_actually_points_at(git):
     """Not the constant. The constant is what a bootstrap would CREATE; it is
     not evidence of what this checkout fetches from."""
     assert asyncio.run(upd.tracking())["repo_url"] \
-        == "https://github.com/MooreSi/forex-react"
+        == "https://github.com/MooreSi/forex-gold"
 
 
 def test_a_checkout_with_no_remote_says_nothing_rather_than_guessing(monkeypatch):

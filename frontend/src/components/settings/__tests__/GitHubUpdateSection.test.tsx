@@ -90,15 +90,15 @@ describe("what is installed against what is on GitHub", () => {
 
 describe("what it is comparing against", () => {
   it("names the repository and branch, not a hardcoded one", async () => {
-    // This checkout's origin is MooreSi/forex-react and it runs
+    // This checkout's origin is MooreSi/forex-gold and it runs
     // `react-dashboard`, while the check compares against `main`. "Up to
     // date" can therefore be true of a branch nobody is running, and the
     // screen has to be honest about which one it asked about.
-    body = { ...UP_TO_DATE, tracking: { repo_url: "https://github.com/MooreSi/forex-react", branch: "main" } };
+    body = { ...UP_TO_DATE, tracking: { repo_url: "https://github.com/MooreSi/forex-gold", branch: "main" } };
     render(<GitHubUpdateSection version="0.5" />);
 
-    const link = await screen.findByRole("link", { name: /forex-react/ });
-    expect(link).toHaveAttribute("href", "https://github.com/MooreSi/forex-react");
+    const link = await screen.findByRole("link", { name: /forex-gold/ });
+    expect(link).toHaveAttribute("href", "https://github.com/MooreSi/forex-gold");
     expect(await screen.findByTestId("tracking-branch")).toHaveTextContent("main");
   });
 

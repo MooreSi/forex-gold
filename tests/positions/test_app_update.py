@@ -445,7 +445,7 @@ class TestTheBootstrapPointsAtTHISRepo:
     """`_GITHUB_REPO_URL` is the remote a machine with no `.git` is wired to.
 
     It named `MooreSi/forex` -- the NiceGUI repo -- in a checkout whose own
-    `origin` is `MooreSi/forex-react`. The installers copy rather than clone,
+    `origin` is `MooreSi/forex-gold`. The installers copy rather than clone,
     so a downloaded folder has no `.git` and hits this constant twice:
 
       * `link_checkout()` wires origin to it at every startup, finds no commit
@@ -457,27 +457,28 @@ class TestTheBootstrapPointsAtTHISRepo:
         which is the failure this whole session started from: a Mac running
         the React app that came up serving NiceGUI.
 
-    Owner's decision 2026-09-21: forex-react is canonical for this checkout.
+    Owner's decision 2026-09-21: this checkout's own repo is canonical --
+    `forex-react` then, `forex-gold` since the 2026-09-22 rename.
     `~/Forex-Update` keeps `MooreSi/forex` -- its own `origin` -- and this is
     the second thing that must legitimately differ between the two checkouts,
     after the version number. See rules/80.
     """
 
-    EXPECTED = "https://github.com/MooreSi/forex-react"
+    EXPECTED = "https://github.com/MooreSi/forex-gold"
 
     def test_the_bootstrap_url_is_this_repo(self):
         assert upd._GITHUB_REPO_URL == self.EXPECTED
 
     def test_it_is_not_the_nicegui_repo(self):
-        """"forex-react" CONTAINS "forex", so a substring check passes on the
+        """"forex-gold" CONTAINS "forex", so a substring check passes on the
         old value and proves nothing. The suffix is what separates them."""
         assert not upd._GITHUB_REPO_URL.rstrip("/").endswith("/forex")
 
     def test_the_composed_clone_url_is_well_formed(self):
         """Both call sites build `f"{_GITHUB_REPO_URL}.git"`; a constant that
-        already ended in .git would produce forex-react.git.git."""
+        already ended in .git would produce forex-gold.git.git."""
         composed = f"{upd._GITHUB_REPO_URL}.git"
-        assert composed.endswith("/forex-react.git")
+        assert composed.endswith("/forex-gold.git")
         assert ".git.git" not in composed
 
     def test_it_names_the_repo_this_checkout_actually_pulls_from(self):

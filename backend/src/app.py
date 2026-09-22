@@ -235,7 +235,7 @@ def _is_admin_host() -> bool:
 
     Until 2026-09-19 this was `_find_admin_open_fn() is not None`, which made
     the answer depend on a successful `import forex_admin` -- and that module
-    imports NiceGUI. The React app (MooreSi/forex-react) removed NiceGUI from
+    imports NiceGUI. The React app (MooreSi/forex-gold) removed NiceGUI from
     its dependencies entirely on 2026-09-18, so on a clean install of that app
     the import fails, this reads False, and **the licence-issuer Mac quietly
     starts the remote CLIENT instead of the server** -- dialling a fleet

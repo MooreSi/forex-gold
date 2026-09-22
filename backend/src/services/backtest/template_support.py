@@ -135,10 +135,23 @@ def summarise(templates: list) -> list[dict]:
     Every template gets a row, including the unsupported ones. Omitting them
     would read as "this template does not exist" rather than "this template
     cannot be backtested, and here is why".
+
+    Asked with `atr_available=True`, because this list feeds the picker and
+    the picker's default granularity is candles -- and the candle walk always
+    has an ATR (`engine._simulate_template` hands `_atr14` to the simulator on
+    the line it calls it). Asking without the flag reported every
+    volatility-sized template as un-backtestable while the bar walk was
+    simulating them correctly, which hid the only class of template that
+    adapts to market conditions at all.
+
+    A TICK run still refuses a dynamic-ATR template -- `simulate_ticks` has no
+    candle series to derive an ATR from -- and says so through
+    `run_backtest`'s own refusal, which is where that belongs: it is a
+    property of the granularity the operator chose, not of the template.
     """
     out: list[dict] = []
     for t in templates or []:
-        ok, reasons = can_simulate(t)
+        ok, reasons = can_simulate(t, atr_available=True)
         out.append({
             "name": (t or {}).get("name", ""),
             "supported": ok,

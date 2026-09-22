@@ -25,6 +25,10 @@ from typing import Optional
 # and this file sits at the 800-line ceiling. `refusals` imports back from
 # here lazily, inside its functions, so there is no cycle.
 from backend.src.services.backtest import refusals as _refusals
+# Where a zone signal fills. Its own module: see that file's header for the
+# 664-fill measurement that replaced the midpoint, and why engine.py is not
+# where it lives.
+from backend.src.services.backtest.fills import entry_fill_price
 
 _USD_PER_PT_PER_LOT  = 100.0
 _MAX_HOLD_BARS       = 96        # ~8h on M5, ~24h on M15
@@ -477,9 +481,8 @@ def _simulate_ticks(
     if fill_idx is None:
         return None
 
-    half_spread = spread_pts / 2.0
     is_buy      = sig.direction == "BUY"
-    fill_price  = sig.entry_mid + half_spread if is_buy else sig.entry_mid - half_spread
+    fill_price  = entry_fill_price(sig, is_buy, spread_pts)
 
     trade = _simulate_ticks_template(ticks, sig, strategy, fill_idx, fill_price, is_buy, balance)
 
@@ -536,9 +539,8 @@ def _simulate(
     if fill_bar is None:
         return None
 
-    half_spread = spread_pts / 2.0
     is_buy      = sig.direction == "BUY"
-    fill_price  = sig.entry_mid + half_spread if is_buy else sig.entry_mid - half_spread
+    fill_price  = entry_fill_price(sig, is_buy, spread_pts)
     sl_dist     = abs(fill_price - sig.stop_loss)
 
     if strategy.startswith(TEMPLATE_PREFIX):
@@ -612,7 +614,21 @@ def run_backtest(
         trades:          list[BtTrade] = []
         current_balance: float         = starting_balance
 
-        for sig in signals:
+        # A trail narrower than these candles cannot be walked on them, and a
+        # bar walk that tries reports an edge that is only the bar size. Asked
+        # here rather than in `can_simulate` because it is a property of the
+        # template AND the series: honest at M1, meaningless at H1. Refused
+        # with a sentence, never as a row of zeros.
+        bar_refusal = ""
+        if strategy.startswith(TEMPLATE_PREFIX):
+            from backend.src.services.backtest.template_simulator import (
+                trail_inside_bars_reason as _trail_reason,
+            )
+            _tpl = _load_backtest_template(strategy[len(TEMPLATE_PREFIX):])
+            if _tpl:
+                bar_refusal = _trail_reason(_tpl, candles)
+
+        for sig in ([] if bar_refusal else signals):
             t = _simulate(candles, sig, strategy, current_balance, risk_pct,
                           spread_pts, lots_per_trade, commission_per_lot)
             if t is not None:
@@ -620,7 +636,8 @@ def run_backtest(
                 current_balance = max(current_balance + t.pnl_usd, 1.0)
 
         stats = _compute_stats(strategy, trades, starting_balance)
-        stats.unsupported_reason = _refusals.why(strategy, tick_mode=False)
+        stats.unsupported_reason = (
+            _refusals.why(strategy, tick_mode=False) or bar_refusal)
         if split_fraction > 0.0:
             # Lazy: split.py imports this module's dataclasses at load time.
             from backend.src.services.backtest.split import (

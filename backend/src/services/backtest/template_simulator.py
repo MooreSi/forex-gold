@@ -45,7 +45,7 @@ from typing import Optional
 from backend.src.services.backtest.template_support import can_simulate
 
 __all__ = ["simulate", "simulate_ticks", "pips_to_price", "TemplateResult",
-           "UnsupportedTemplate"]
+           "UnsupportedTemplate", "trail_inside_bars_reason"]
 
 # XAUUSD. The EA's own conversion, kept as one constant so a symbol change is
 # one edit rather than a hunt: PipsToPrice(p) = p * 10 * _Point.
@@ -150,6 +150,50 @@ def _lot_for(template: dict, sl_distance: float, balance: float) -> float:
     else:
         lot = _f(template, "lot_anchor", _MIN_LOT)
     return round(min(_MAX_LOT, max(_MIN_LOT, lot)), 2)
+
+
+def trail_inside_bars_reason(template: dict, bars: list) -> str:
+    """Why this trail cannot be walked on THESE bars, or "" when it can.
+
+    A property of the pairing, not of the template, which is why it is asked
+    here and not in `can_simulate`: the same template is honest on one series
+    and meaningless on a coarser one.
+
+    `simulate` tests the stop using the level it held at the END of the
+    previous bar, then advances the trail from THIS bar's high. Inside a
+    single bar the trail can therefore move and never be tested, while the
+    live EA trails and tests on every tick. The error is invisible while the
+    trail is wide and decisive once it is narrow, and it announces itself only
+    as an edge that GROWS the coarser the bars get. Measured 2026-09-22 on 261
+    real fills, one template, identical entries, only the bar size changing:
+
+        M1  PF 1.22 (+0.26)   M5  1.74 (+1.24)
+        M15 1.92 (+2.27)      H1  1.91 (+4.80)
+
+    A real edge does not depend on the resolution it is measured at. That
+    template carried a $1.50 trail against median bar ranges of $1.73 (M1)
+    through $16.68 (H1) -- unsimulatable on every series available, including
+    the finest. It was recommended off the M5 number and lost money live.
+
+    Deliberately NOT enforced inside `simulate`: the trail mechanics are unit
+    tested on coarse synthetic bars where the arithmetic is readable, and
+    those tests are right. This is for the callers that walk real market data.
+    """
+    mode = str(template.get("trail_mode") or "off").strip().lower()
+    dist = pips_to_price(_f(template, "trail_distance", 0.0))
+    if mode in ("off", "") or dist <= 0 or not bars:
+        return ""
+    ranges = sorted(float(b["high"]) - float(b["low"]) for b in bars)
+    median = ranges[len(ranges) // 2]
+    if median <= 0 or dist >= median:
+        return ""
+    return (
+        f"trail_distance {dist:.2f} is inside the bars it would be walked on "
+        f"(median range {median:.2f}): the stop would move and be hit within "
+        f"a single bar, which a bar walk cannot see. The result would report "
+        f"an edge that is only the bar size. Use the tick walk, choose a finer "
+        f"timeframe, or widen the trail."
+    )
 
 
 def unsupported_reason(template: dict, tick_mode: bool = False,

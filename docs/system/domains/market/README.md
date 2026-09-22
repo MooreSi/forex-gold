@@ -50,6 +50,23 @@ number or a word out. Two things about them are worth knowing:
   actually held is now the constant `ASIAN_SESSION_QUALITY = "low"`, with the
   history in the module docstring. `docs/todo/bugs/045`.
 
+**Which trade management actually works**, and the two backtest bugs that
+had to be fixed before the question could be asked honestly, are in
+[030-what-actually-manages-a-trade-well.md](030-what-actually-manages-a-trade-well.md).
+It supersedes 020's conclusions about templates. Headline: the backtest filled
+at the zone MIDPOINT and so scored 135 of 283 real losses as wins; with that
+fixed, sizing the stop from live volatility beats every fixed template, and
+the trail must NOT be scaled the same way.
+
+**What the sessions actually do** — 8.5 years of XAUUSD H1 measured against
+these boundaries — is in
+[020-xauusd-session-behaviour.md](020-xauusd-session-behaviour.md), together
+with two timestamp gotchas that bite anything joining bridge history to stored
+data. Headline: the overlap carries ~2x any other hour's volatility and posts
+the day's biggest range on 61-78% of days in every year measured; direction does
+not carry from one session to the next (49-50%, a coin flip); and these
+fixed-UTC boundaries run an hour late from April to October.
+
 `sessions.get_session` is **one of four disagreeing definitions** of a trading
 session in this app (the others are in `reversal_engine/level_detector`,
 `dpm/engine` and `channels/strategy_ai`). Moving it here did not reconcile

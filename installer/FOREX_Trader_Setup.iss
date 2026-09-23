@@ -19,7 +19,7 @@
 ;   requires. No third-party download plugin, no local prerequisite files.
 
 #define AppName      "FOREX Trader"
-#define AppVersion   "0.42"
+#define AppVersion   "0.5"
 #define AppPublisher "FOREX Trader"
 #define AppURL       "http://localhost:8888"
 #define AppExeName   "Setup && Start FOREX.bat"
@@ -49,7 +49,7 @@ UninstallDisplayIcon     = {app}\frontend\static\gold_bag.ico
 ArchitecturesInstallIn64BitMode = x64compatible
 MinVersion               = 10.0.17763
 ; Windows 10 1809+ required (needed for Python 3.11 + modern TLS)
-VersionInfoVersion       = 1.2.0.0
+VersionInfoVersion       = 1.3.0.0
 VersionInfoCompany       = {#AppPublisher}
 VersionInfoDescription   = {#AppName} Installer
 SetupIconFile            = ..\frontend\static\gold_bag.ico
@@ -78,7 +78,8 @@ Name: "{userappdata}\ForexTrader\data\sessions"
 ; on a [Files] entry that matches nothing), so the installer had been
 ; unbuildable since then -- see tests/refactor/test_installer_packages_the_real_tree.py.
 Source: "..\backend\*";           DestDir: "{app}\backend";           Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
-Source: "..\frontend\*";          DestDir: "{app}\frontend";          Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
+; node_modules is developer-only (160+ MB); the app serves the committed dist/.
+Source: "..\frontend\*";          DestDir: "{app}\frontend";          Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo,node_modules"
 Source: "..\run.py";               DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\mt5_bridge.py";        DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\requirements.txt";     DestDir: "{app}";                    Flags: ignoreversion
@@ -90,6 +91,11 @@ Source: "..\Stop FOREX.bat";       DestDir: "{app}";                    Flags: i
 ; Update tab reports no version and an empty changelog.
 Source: "..\VERSION";              DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\CHANGELOG.md";         DestDir: "{app}";                    Flags: ignoreversion
+; Read by the running app from the install directory (2026-09-23):
+; the EA the Install button copies into MetaTrader (ea_deploy.py), and the
+; script the keep-alive Scheduled Task runs (core_autostart.watchdog_script).
+Source: "..\mql5\*";               DestDir: "{app}\mql5";               Flags: ignoreversion
+Source: "..\tools\watchdog.py";    DestDir: "{app}\tools";              Flags: ignoreversion
 
 ; ── install_deps.py only -- the embedded Python runtime + get-pip.py are no
 ; longer bundled here; CurStepChanged (below) downloads both fresh into
@@ -126,7 +132,7 @@ Filename: "{app}\python_embed\python.exe"; \
     Flags: runhidden waituntilterminated
 
 ; ── Step 4: Add Windows Firewall rules (admin context) ────────────────────────
-; Port 8888 — NiceGUI web UI (browser access)
+; Port 8888 — the dashboard (browser access)
 Filename: "netsh"; \
     Parameters: "advfirewall firewall add rule name=""FOREX Trader UI (port 8888)"" dir=in action=allow protocol=TCP localport=8888 profile=private"; \
     StatusMsg: "Adding firewall rule for port 8888..."; \

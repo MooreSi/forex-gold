@@ -62,6 +62,12 @@ export interface Trade {
    * against and no record to update afterwards.
    */
   untracked?: boolean;
+  /**
+   * Opened by the PAIRED node, which holds its record and manages it. Still
+   * `untracked` on this machine and still not closable here, but not a
+   * stranger's position either -- `services/positions/live_view.py` decides.
+   */
+  remote?: boolean;
   [key: string]: unknown;
 }
 

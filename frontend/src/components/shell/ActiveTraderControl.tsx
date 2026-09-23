@@ -63,7 +63,7 @@ export function ActiveTraderControl(
         disabledReason={
           remoteConnected
             ? undefined
-            : "No remote node is connected. Pair one in Settings > Node."
+            : "No remote node is connected. Pair one in Settings > Remote node."
         }
         title={
           isLocal

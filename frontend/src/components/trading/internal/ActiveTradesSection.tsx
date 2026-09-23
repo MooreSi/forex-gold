@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { Server, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
@@ -19,6 +19,18 @@ const UNTRACKED_REASON =
   "This position is open at the broker but this app has no record of it, so "
   + "there is nothing to close against and nothing to update afterwards. "
   + "Close it in MetaTrader 5.";
+
+/**
+ * Why a position the paired node opened has no Close button here.
+ *
+ * Both nodes trade one MT5 account, so everything the remote node opens is
+ * open at the broker with no record on this machine. That is not a stranger's
+ * position: the remote node holds its record and is managing it.
+ */
+const REMOTE_REASON =
+  "The remote node opened this position and is managing it, so the record to "
+  + "close it against is on that machine, not this one. Take over trading from "
+  + "the header, or close it on the remote node.";
 
 /**
  * Open positions, and the control that closes one.
@@ -75,7 +87,10 @@ export function ActiveTradesSection({
     );
   }
 
-  const untrackedCount = trades.filter((t) => t.untracked).length;
+  // A position the remote node opened is not one this app "has no record
+  // of" -- the other node has it. Counting it here would tell the operator a
+  // healthy pair has lost track of its trades.
+  const untrackedCount = trades.filter((t) => t.untracked && !t.remote).length;
 
   return (
     <>
@@ -114,12 +129,16 @@ export function ActiveTradesSection({
         <tbody>
           {trades.map((t, i) => {
             const pnl = typeof t["pnl"] === "number" ? (t["pnl"] as number) : null;
-            const untracked = t.untracked === true;
+            const remote = t.remote === true;
+            const untracked = t.untracked === true && !remote;
+            const noClose = remote ? REMOTE_REASON : untracked ? UNTRACKED_REASON : null;
             return (
               <tr
                 key={String(t.id ?? t.mt5_ticket ?? i)}
-                data-testid={untracked ? "position-row-untracked" : "position-row"}
-                className={untracked ? "border-t border-warning/40 bg-warning/5" : "border-t border-line"}
+                data-testid={remote ? "position-row-remote"
+                  : untracked ? "position-row-untracked" : "position-row"}
+                className={untracked ? "border-t border-warning/40 bg-warning/5"
+                  : remote ? "border-t border-remote/40 bg-remote/5" : "border-t border-line"}
               >
                 <td className={t.direction === "SELL" ? "py-1.5 text-loss" : "py-1.5 text-profit"}>
                   {String(t.direction ?? "—")}
@@ -139,7 +158,14 @@ export function ActiveTradesSection({
                   {t.strategy_label ? String(t.strategy_label) : "—"}
                 </td>
                 <td className="py-1.5 text-ink-2">
-                  {untracked ? (
+                  {remote ? (
+                    <Tooltip label={REMOTE_REASON}>
+                      <span className="inline-flex items-center gap-1 text-remote">
+                        <Server size={11} aria-hidden />
+                        {t.source_label ? String(t.source_label) : "remote node"}
+                      </span>
+                    </Tooltip>
+                  ) : untracked ? (
                     <Tooltip label={UNTRACKED_REASON}>
                       <span className="inline-flex items-center gap-1 text-warning">
                         <TriangleAlert size={11} aria-hidden />
@@ -157,7 +183,7 @@ export function ActiveTradesSection({
                   <Button
                     variant="danger"
                     onClick={() => { setRefusal(null); setClosing(t); }}
-                    disabledReason={untracked ? UNTRACKED_REASON : disabledReason}
+                    disabledReason={noClose ?? disabledReason}
                   >
                     Close
                   </Button>

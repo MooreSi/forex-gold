@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { Tooltip } from "@/components/shared/Tooltip";
@@ -34,8 +34,36 @@ interface RemoteState {
  * Two of these switches change what the engines do next, and both say so
  * before and after. The backend writes those notes; this renders them.
  */
+/**
+ * How often the link state is re-read while this tab is open.
+ *
+ * The NiceGUI page ticked every 2 s. Read once on mount, "Save and connect"
+ * left the tab saying "connecting" for ever, and the operator could not tell
+ * a pair that had come up from one that never would. Its own interval rather
+ * than `usePoll`, as `EnvironmentControl` does: it runs only while this tab is
+ * mounted, and nothing else shares the key.
+ */
+const LINK_POLL_MS = 3_000;
+
+/** Green, amber or red, at the thresholds the NiceGUI page used. */
+function loadTone(percent: number): string {
+  if (percent >= 85) return "text-loss";
+  if (percent >= 60) return "text-warning";
+  return "text-profit";
+}
+
+function engineLabel(name: string): string {
+  return name.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
 export function RemoteTab() {
   const resource = useSettingsResource<RemoteState>("/api/remote/state");
+  const { reload } = resource;
+
+  useEffect(() => {
+    const id = setInterval(() => void reload(), LINK_POLL_MS);
+    return () => clearInterval(id);
+  }, [reload]);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -211,6 +239,7 @@ export function RemoteTab() {
               Open positions {Array.isArray(peer.open_positions) ? peer.open_positions.length : 0}
               {" · active trader "}{String(peer.active_trader ?? "?")}
             </p>
+            <PeerHealth peer={peer} />
           </div>
         )}
       </section>
@@ -260,6 +289,51 @@ export function RemoteTab() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * The remote node's own health, from its 3 s heartbeat.
+ *
+ * On a headless VPS there is no other screen that says any of this. The
+ * NiceGUI page showed it; the port kept the balance and dropped the rest.
+ */
+function PeerHealth({ peer }: { peer: Record<string, unknown> }) {
+  const engines = asObject<Record<string, unknown>>(peer.engines);
+  const cpu = typeof peer.cpu_percent === "number" ? peer.cpu_percent : null;
+  const memPct = Number(peer.mem_percent ?? 0);
+  const memUsed = Number(peer.mem_used_mb ?? 0);
+  const memTotal = Number(peer.mem_total_mb ?? 0);
+  const whole = (n: number) => Math.round(n).toLocaleString("en-GB");
+
+  return (
+    <div data-testid="remote-health" className="space-y-0.5">
+      <p className="flex flex-wrap gap-x-4">
+        {cpu !== null && (
+          <>
+            <span data-testid="remote-cpu" className={`num font-semibold ${loadTone(cpu)}`}>
+              CPU {Math.round(cpu)}%
+            </span>
+            <span className={`num font-semibold ${loadTone(memPct)}`}>
+              Memory {whole(memUsed)} / {whole(memTotal)} MB ({Math.round(memPct)}%)
+            </span>
+          </>
+        )}
+        {"ea_connected" in peer && (
+          <span className={peer.ea_connected ? "text-profit" : "text-ink-3"}>
+            {peer.ea_connected ? "EA connected" : "EA not connected"}
+          </span>
+        )}
+      </p>
+      {Object.keys(engines).length > 0 && (
+        <p data-testid="remote-engines" className="text-ink-3">
+          Engines:{" "}
+          {Object.entries(engines)
+            .map(([name, on]) => `${engineLabel(name)} ${on ? "on" : "off"}`)
+            .join(" · ")}
+        </p>
+      )}
     </div>
   );
 }

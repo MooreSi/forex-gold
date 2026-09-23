@@ -65,6 +65,19 @@ class Mt5Credentials(BaseModel):
     environment: str = "demo"
 
 
+class TerminalPathWrite(BaseModel):
+    path: str = ""
+    environment: str = "demo"
+
+
+def _account_prefix(environment: str) -> tuple[str, str]:
+    """`(environment, column prefix)`, or a 400 for an account that does not exist."""
+    env = (environment or "demo").strip().lower()
+    if env not in ("demo", "live"):
+        raise Refusal(f"Unknown environment {environment!r}.", status_code=400)
+    return env, ("live_" if env == "live" else "")
+
+
 @router.get("/risk")
 async def risk() -> dict:
     return settings_ctl.get_risk_settings()
@@ -118,11 +131,7 @@ async def save_mt5(body: Mt5Credentials) -> dict:
     leave the bridge authenticating as the previous account, which is the same
     shape of bug as backing up the wrong database — it looks like it worked.
     """
-    environment = (body.environment or "demo").strip().lower()
-    if environment not in ("demo", "live"):
-        raise Refusal(f"Unknown environment {body.environment!r}.", status_code=400)
-
-    prefix = "live_" if environment == "live" else ""
+    environment, prefix = _account_prefix(body.environment)
     updates = {
         f"{prefix}login": body.login,
         f"{prefix}password_enc": body.password,
@@ -133,6 +142,23 @@ async def save_mt5(body: Mt5Credentials) -> dict:
     # Only when this IS the account the app is pointed at. Rewriting the file
     # after editing the OTHER account's credentials would hand the bridge an
     # account nobody asked it to use.
+    if environment == env_ctl.describe_environments()["current"]:
+        settings_ctl.sync_bridge_credentials_file(environment)
+    return _redacted(settings_ctl.get_mt5_credentials() or {})
+
+
+@router.put("/mt5/terminal-path")
+async def save_terminal_path(body: TerminalPathWrite) -> dict:
+    """Where one account's terminal64.exe lives. Blank means auto-detect.
+
+    The bridge hands it to `mt5.initialize(path=...)` when no terminal is
+    running -- the state of a headless VPS after a reboot. Its own write, so it
+    can be set without re-typing a password and cannot blank one. Synced to the
+    bridge file on the same rule as the credentials above.
+    """
+    environment, prefix = _account_prefix(body.environment)
+    settings_ctl.save_mt5_credentials(
+        {f"{prefix}terminal_path": body.path.strip() or None})
     if environment == env_ctl.describe_environments()["current"]:
         settings_ctl.sync_bridge_credentials_file(environment)
     return _redacted(settings_ctl.get_mt5_credentials() or {})

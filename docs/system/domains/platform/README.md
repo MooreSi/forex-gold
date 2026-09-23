@@ -307,3 +307,55 @@ trading altogether**. Caught by
 `tests/core/test_sync_server_auth.py::TestStandDown::test_the_TRADE_GATE_FOLLOWS`,
 which exists for exactly that. A standalone install is one that is in neither
 role.
+
+## The Local/Remote pair after the React port: an audit (2026-09-23)
+
+Compared against `~/Forex-Update` (the NiceGUI app, which worked). The
+cluster services (`services/cluster/**`), the settings forwarding in
+`risk_settings_repo`, `schedule`, `strategy_params` and `channels/repo`, the
+boot-time sync server/client start in `app.py` and the headless entry point
+in `run.py` are the same code in both. Every gap was in the API and the
+dashboard.
+
+Fixed in this change:
+
+- **VPS-opened positions were "untracked".** Both nodes trade one MT5
+  account, so every position the VPS opens has no row on the Mac. NiceGUI
+  looked each such ticket up in the sync heartbeat
+  (`get_remote_open_position`); the port did not, so the Mac told the
+  operator to close VPS trades in MetaTrader. `positions/live_view.py` now
+  does the lookup and marks the row `remote`. Still `untracked`, still no
+  `trade_id`, still not closable here.
+- **The Remote tab read the link once.** "Save and connect" showed
+  "connecting" for ever. It now re-reads every 3 s while open, and shows the
+  VPS's CPU, memory, engines and EA state from the heartbeat.
+- **MT5 terminal path per account** had no field. The bridge launches MT5
+  from it when no terminal is running, which is a headless VPS after a
+  reboot. `PUT /api/settings/mt5/terminal-path`, separate from the
+  credentials so it needs no password and cannot blank one.
+- **Wine prefix and Wine binary** had no fields, though the Backend hint
+  pointed at "the bottle path below".
+
+Still open, and why each was left:
+
+- **The engines banner is wrong.** `ControlTargetBanner` says tunables other
+  than the AI switch "have no route between nodes". False: ~50 keys in
+  `sync/server.py::_SYNCED_SETTINGS_KEYS` are forwarded, including
+  `bo_live_execution`, `re_live_execution` and `sg_live_execution`. An
+  operator told a switch is local-only may flip live execution on the VPS.
+  `EnginesPanel.test.tsx` pins the false sentence, so correcting it means
+  changing a test: an owner call.
+- **Bridge Start/Stop/Restart/Status and "Setup Bridge Dependencies"** are
+  not on any screen. The watchdog restarts the bridge on its own
+  (`runtime.start_bridge_process`), so nothing is stuck without them, but
+  restarting the Wine session kills the MT5 terminal and the EA with it:
+  `/safe-change` territory.
+- **Save credentials no longer pushes them to a running bridge**, and there
+  is no "Test connection". NiceGUI called `bridge.send_credentials`; the port
+  writes only the bridge file, which takes effect on the next bridge start.
+- **Nothing can restart, update or un-headless the VPS from the Mac.** The
+  sync protocol has no message for it. On a headless VPS the only remote
+  controls are Telegram (`/headless`, `/restartapp`) and RDP.
+
+Queued for the owner as
+[043](../../../simon-handover/043-controlling-a-headless-vps-from-the-mac.md).

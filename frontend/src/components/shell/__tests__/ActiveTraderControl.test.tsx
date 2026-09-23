@@ -63,6 +63,15 @@ describe("what it shows", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", expect.stringContaining("Pair one"));
   });
+
+  it("sends the operator to the tab where pairing actually happens", () => {
+    // It said "Settings > Node". Node & updates generates the token; the
+    // address, the token and the Connect button are on Remote node.
+    renderIt({ remoteConnected: false });
+
+    expect(screen.getByRole("button", { name: /LOCAL/ }))
+      .toHaveAttribute("title", expect.stringContaining("Settings > Remote node"));
+  });
 });
 
 describe("switching", () => {

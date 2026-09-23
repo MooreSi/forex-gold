@@ -134,3 +134,42 @@ describe("when trading is halted", () => {
     expect(button).toHaveAttribute("title", "The circuit breaker has tripped.");
   });
 });
+
+describe("a position the remote node opened", () => {
+  // Both nodes share one MT5 account. Everything the VPS opens has no record
+  // on this machine, and until 2026-09-23 each one was called "not tracked"
+  // and the operator was told to close it in MetaTrader.
+  const remote = (over: Partial<Trade> = {}) => trade({
+    id: undefined, mt5_ticket: 222, untracked: true, remote: true,
+    source_label: "Remote node: GoldSignals", ...over,
+  });
+
+  it("gets its own row marker, not the untracked one", () => {
+    render_([remote()]);
+
+    expect(screen.getByTestId("position-row-remote"))
+      .toHaveTextContent("Remote node: GoldSignals");
+    expect(screen.queryByTestId("position-row-untracked")).not.toBeInTheDocument();
+  });
+
+  it("is not counted as a position this app has no record of", () => {
+    render_([remote()]);
+
+    expect(screen.queryByTestId("untracked-summary")).not.toBeInTheDocument();
+  });
+
+  it("is counted apart from a genuinely untracked one beside it", () => {
+    render_([remote(), trade({ id: undefined, mt5_ticket: 333, untracked: true })]);
+
+    expect(screen.getByTestId("untracked-summary")).toHaveTextContent("1 position is open");
+  });
+
+  it("cannot be closed from here, and says the remote node manages it", () => {
+    render_([remote()]);
+
+    const button = within(screen.getByTestId("position-row-remote"))
+      .getByRole("button", { name: "Close" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", expect.stringContaining("remote node"));
+  });
+});

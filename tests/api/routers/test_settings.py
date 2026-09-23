@@ -221,6 +221,66 @@ def test_the_mt5_response_still_carries_no_password(make_client, config):
     assert "new-one" not in body
 
 
+# ── MT5 terminal path ────────────────────────────────────────────────────────
+#
+# Where terminal64.exe lives, per account. `mt5_bridge.py` passes it to
+# `mt5.initialize(path=...)` when no terminal is running -- which is exactly
+# the state of a headless VPS after a reboot. The NiceGUI MT5 page had the
+# field; the React port did not, so a new VPS could not be told where its
+# terminal was without editing the database by hand (2026-09-23).
+
+def test_the_terminal_path_is_stored_under_the_accounts_own_field(make_client, config):
+    make_client().put("/api/settings/mt5/terminal-path", json={
+        "path": r"C:\Program Files\Vantage MT5\terminal64.exe", "environment": "live",
+    })
+
+    written = next(a[0] for name, a, _k in config["writes"] if name == "mt5")
+    assert written == {"live_terminal_path": r"C:\Program Files\Vantage MT5\terminal64.exe"}
+
+
+def test_setting_the_terminal_path_touches_no_credential(make_client, config):
+    """A separate write, so the path can be set without re-typing a password --
+    and so it cannot blank one."""
+    make_client().put("/api/settings/mt5/terminal-path", json={"path": "C:\\mt5\\terminal64.exe"})
+
+    written = next(a[0] for name, a, _k in config["writes"] if name == "mt5")
+    assert set(written) == {"terminal_path"}
+
+
+def test_a_blank_terminal_path_means_auto_detect(make_client, config):
+    make_client().put("/api/settings/mt5/terminal-path", json={"path": "   "})
+
+    written = next(a[0] for name, a, _k in config["writes"] if name == "mt5")
+    assert written == {"terminal_path": None}
+
+
+def test_the_terminal_path_reaches_the_bridge_file_for_the_current_account(
+    make_client, config,
+):
+    make_client().put("/api/settings/mt5/terminal-path", json={"path": "C:\\t.exe"})
+
+    assert config["synced"] == 1
+
+
+def test_the_other_accounts_terminal_path_leaves_the_bridge_file_alone(
+    make_client, config,
+):
+    make_client().put("/api/settings/mt5/terminal-path", json={
+        "path": "C:\\t.exe", "environment": "live",
+    })
+
+    assert config["synced"] == 0
+
+
+def test_the_terminal_path_refuses_an_unknown_environment(make_client, config):
+    res = make_client().put("/api/settings/mt5/terminal-path", json={
+        "path": "C:\\t.exe", "environment": "staging",
+    })
+
+    assert res.status_code == 400
+    assert not [w for w in config["writes"] if w[0] == "mt5"]
+
+
 # ── Retention ────────────────────────────────────────────────────────────────
 
 def test_retention_is_read_and_written(make_client, config):

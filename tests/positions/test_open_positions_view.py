@@ -191,3 +191,138 @@ async def test_a_position_with_a_ticket_that_is_not_a_number_is_not_matched():
     assert rows[0]["pnl"] is None
     # ...and the live position is then untracked, because nothing claimed it.
     assert len(rows) == 2
+
+
+# ── A position the OTHER node opened ─────────────────────────────────────────
+#
+# The Mac and the VPS share one MT5 account. When the VPS is trading, every
+# position it opens is open at the broker and has no row in the Mac's own
+# database -- so until 2026-09-23 the Mac's table called each one "Opened in
+# MT5 (not tracked)" and told the operator to close it in MetaTrader. The
+# NiceGUI Trading and Chart panels looked the ticket up in the sync heartbeat
+# first (`get_remote_open_position`) and drew the VPS's own detail; the React
+# port dropped that lookup.
+
+def _remote(**over):
+    """A VPS open position as the sync heartbeat carries it (_telemetry.py)."""
+    p = {
+        "trade_id": "vps-1", "mt5_ticket": 222, "direction": "SELL",
+        "entry_price": 2700.0, "strategy": "scale_out", "tg_source": "GoldSignals",
+        "stop_loss": 2710.0, "lot_size": 0.30, "remaining_lots": 0.20,
+        "open_time": 1_700_000_500, "sl_moved_to_be": 0, "triggered_tps": [1],
+    }
+    p.update(over)
+    return p
+
+
+def _lookup(*positions):
+    by_ticket = {int(p["mt5_ticket"]): p for p in positions}
+    return lambda ticket: by_ticket.get(int(ticket)) if ticket else None
+
+
+@pytest.mark.asyncio
+async def test_a_position_the_remote_node_opened_says_so():
+    rows = await live_view.build(
+        [], FakeBridge([_live(ticket=222, type="SELL")]),
+        remote_lookup=_lookup(_remote()),
+    )
+
+    assert rows[0]["remote"] is True
+    assert "remote" in rows[0]["source_label"].lower()
+    assert "GoldSignals" in rows[0]["source_label"]
+
+
+@pytest.mark.asyncio
+async def test_a_remote_position_carries_the_remote_nodes_strategy():
+    rows = await live_view.build(
+        [], FakeBridge([_live(ticket=222, type="SELL")]),
+        remote_lookup=_lookup(_remote(strategy="")),
+    )
+
+    # An empty strategy is the labeller's "—", not a crash and not the
+    # untracked placeholder by accident.
+    assert rows[0]["strategy_label"] == "—"
+    rows = await live_view.build(
+        [], FakeBridge([_live(ticket=222, type="SELL")]),
+        remote_lookup=_lookup(_remote(strategy="template:Gold")),
+    )
+    assert rows[0]["strategy_label"] == "Template: Gold"
+
+
+@pytest.mark.asyncio
+async def test_a_remote_position_is_still_not_closable_here():
+    """The VPS holds the record and manages the position. A Close here would
+    have no trade_id to close against on THIS node, and closing is frozen
+    behaviour -- so the row keeps `untracked` and gets no id."""
+    rows = await live_view.build(
+        [], FakeBridge([_live(ticket=222)]), remote_lookup=_lookup(_remote()),
+    )
+
+    assert rows[0]["untracked"] is True
+    assert rows[0].get("trade_id") is None
+
+
+@pytest.mark.asyncio
+async def test_the_brokers_numbers_win_over_the_heartbeats():
+    """The heartbeat is up to 3 s old and is the VPS's own record; the broker
+    payload is the account right now. Price, lots and stop come from the
+    broker, exactly as they do for any other untracked row."""
+    rows = await live_view.build(
+        [], FakeBridge([_live(ticket=222, volume=0.20, sl=2705.0, profit=7.0, swap=0.0)]),
+        remote_lookup=_lookup(_remote(stop_loss=2710.0, lot_size=0.30)),
+    )
+
+    assert rows[0]["stop_loss"] == 2705.0
+    assert rows[0]["lot_size"] == 0.20
+    assert rows[0]["pnl"] == pytest.approx(7.0)
+
+
+@pytest.mark.asyncio
+async def test_a_position_the_heartbeat_does_not_know_stays_untracked():
+    rows = await live_view.build(
+        [], FakeBridge([_live(ticket=333)]), remote_lookup=_lookup(_remote()),
+    )
+
+    assert rows[0].get("remote") is False
+    assert "MT5" in rows[0]["source_label"]
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_raises_costs_only_the_enrichment():
+    def exploding(_ticket):
+        raise RuntimeError("sync client went away")
+
+    rows = await live_view.build(
+        [_tracked()], FakeBridge([_live(), _live(ticket=222)]),
+        remote_lookup=exploding,
+    )
+
+    assert len(rows) == 2
+    assert rows[1]["untracked"] is True and rows[1].get("remote") is False
+
+
+@pytest.mark.asyncio
+async def test_by_default_the_sync_heartbeat_is_what_is_asked(monkeypatch):
+    from backend.src.services.cluster.sync import client as sync_client
+
+    class Paired:
+        def get_remote_open_position(self, ticket):
+            return _remote() if int(ticket) == 222 else None
+
+    monkeypatch.setattr(sync_client, "_instance", Paired())
+    rows = await live_view.build([], FakeBridge([_live(ticket=222)]))
+
+    assert rows[0]["remote"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_unpaired_install_builds_no_sync_client(monkeypatch):
+    """`get_instance()` constructs a client on first call. A positions table
+    must not be the thing that does that on a machine that was never paired."""
+    from backend.src.services.cluster.sync import client as sync_client
+
+    monkeypatch.setattr(sync_client, "_instance", None)
+    rows = await live_view.build([], FakeBridge([_live(ticket=222)]))
+
+    assert rows[0]["remote"] is False
+    assert sync_client._instance is None

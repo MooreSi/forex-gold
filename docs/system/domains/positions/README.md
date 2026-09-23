@@ -64,3 +64,14 @@ shaped around "no behaviour change".
 ## Open questions
 
 - None currently flagged.
+
+## A position the other node opened is not a stranger's (2026-09-23)
+
+`live_view.build` looks every untracked ticket up in the sync heartbeat
+(`sync/client.get_remote_open_position`) before calling it "Opened in MT5
+(not tracked)". A hit becomes `remote: True` with the VPS's strategy and
+source. The broker's price, lots, stop and P&L still win (the heartbeat is
+up to 3 s old), and the row keeps `untracked: True` and no `trade_id`: the
+VPS holds the record. The default lookup reads the client only if one
+already exists. `get_instance()` would build one on an install that was
+never paired.

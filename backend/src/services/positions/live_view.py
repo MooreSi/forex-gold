@@ -30,9 +30,12 @@ bridge, merged with one read the app already made.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 log = logging.getLogger(__name__)
+
+# ticket -> the other node's record of that position, or None.
+RemoteLookup = Callable[[Any], Optional[dict]]
 
 __all__ = ["build"]
 
@@ -80,6 +83,64 @@ async def _live_positions(bridge: Any) -> list[dict]:
         return []
 
 
+def _paired_node_lookup(ticket: Any) -> Optional[dict]:
+    """The VPS's record of `ticket`, from the last sync heartbeat.
+
+    Reads the sync client only if one already exists. `get_instance()` would
+    build one on an install that has never been paired, which is not a side
+    effect a positions table is entitled to.
+    """
+    from backend.src.services.cluster.sync import client as _sync_client
+    client = getattr(_sync_client, "_instance", None)
+    if client is None:
+        return None
+    return client.get_remote_open_position(ticket)
+
+
+def _remote_record(lookup: RemoteLookup, ticket: Optional[int]) -> Optional[dict]:
+    """The other node's record of a position, or None -- never an exception.
+
+    A failed lookup costs the row its enrichment and nothing else: it is
+    still drawn as untracked, which is what it was before this existed.
+    """
+    if ticket is None:
+        return None
+    try:
+        return lookup(ticket) or None
+    except Exception as exc:
+        log.debug("[positions] remote lookup for %s failed: %s", ticket, exc)
+        return None
+
+
+def _remote_row(position: dict, remote: dict) -> dict:
+    """A position the paired node opened, told apart from a stranger's.
+
+    The Mac and the VPS share one MT5 account, so everything the active VPS
+    opens is open at the broker with no row here. The NiceGUI panels looked
+    the ticket up in the sync heartbeat and drew the VPS's detail; without
+    that, every VPS trade reads "Opened in MT5 (not tracked)" and the operator
+    is told to close it in MetaTrader.
+
+    Only the labels come from the heartbeat. Price, lots, stop and P&L stay the
+    broker's -- the heartbeat is the VPS's own record and up to 3 s old. And the
+    row stays `untracked` with no `trade_id`: the VPS holds the record and
+    manages the position, so there is nothing on THIS node to close against.
+    """
+    from backend.src.services.analytics import labels as _labels
+
+    row = _untracked_row(position)
+    source = _labels.trade_source_label(remote.get("tg_source") or "")
+    row.update({
+        "remote": True,
+        "strategy_label": _labels.strategy_display_label(remote.get("strategy") or ""),
+        "source_label": f"Remote node: {source}",
+        "tg_source": remote.get("tg_source"),
+        "remote_trade_id": remote.get("trade_id"),
+        "triggered_tps": list(remote.get("triggered_tps") or []),
+    })
+    return row
+
+
 def _untracked_row(position: dict) -> dict:
     """A broker position the app has no record of, in the table's own columns.
 
@@ -101,6 +162,7 @@ def _untracked_row(position: dict) -> dict:
         "status": "open",
         "pnl": _running_pnl(position),
         "untracked": True,
+        "remote": False,
         "strategy_label": "—",
         # Says where it came from. An em dash here is the least useful thing
         # this table could report about a position that appeared out of
@@ -109,12 +171,16 @@ def _untracked_row(position: dict) -> dict:
     }
 
 
-async def build(open_trades: list[dict], bridge: Any) -> list[dict]:
+async def build(open_trades: list[dict], bridge: Any,
+                remote_lookup: RemoteLookup = _paired_node_lookup) -> list[dict]:
     """The rows the Positions table draws, tracked first then untracked.
 
     `open_trades` is `analytics.reporting.get_open_trades()` -- passed in
     rather than read here, so this stays one function over two inputs and the
     caller keeps deciding which account's records it is looking at.
+
+    `remote_lookup` finds the paired node's record of a position this node has
+    none of. The default reads the sync heartbeat; tests pass their own.
     """
     live = await _live_positions(bridge)
     by_ticket = {}
@@ -142,5 +208,7 @@ async def build(open_trades: list[dict], bridge: Any) -> list[dict]:
 
     for number, position in by_ticket.items():
         if number not in claimed:
-            rows.append(_untracked_row(position))
+            remote = _remote_record(remote_lookup, number)
+            rows.append(_remote_row(position, remote) if remote
+                        else _untracked_row(position))
     return rows

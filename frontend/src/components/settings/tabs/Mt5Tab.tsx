@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -55,7 +56,14 @@ export function Mt5Tab() {
       {ACCOUNTS.map((account) => (
         <AccountSection key={account.prefix} account={account}
           stored={mt5.data as Record<string, unknown>}
-          onSave={(body) => mt5.save(body)} />
+          version={mt5.version}
+          onSave={(body) => mt5.save(body)}
+          onTerminalPath={async (path) => {
+            await api.put("/api/settings/mt5/terminal-path", {
+              path, environment: account.prefix === "live_" ? "live" : "demo",
+            });
+            await mt5.reload();
+          }} />
       ))}
 
       <section data-testid="ea-bridge" className="rounded border border-line p-3">
@@ -110,6 +118,24 @@ export function Mt5Tab() {
               value={String(app.data["mt5_bridge_url"] ?? "")}
               onCommit={(v) => void app.save({ mt5_bridge_url: v })}
             />
+            {/* The two paths the Wine backend launches with
+                (`bridge_process.wine_bridge_launch`). The Backend hint has
+                always said "the bottle path below"; until 2026-09-23 there
+                was none. */}
+            <SettingsField
+              label="Wine prefix"
+              hint="The Wine bottle MetaTrader 5 is installed in, used when Backend is Wine. Blank means ~/.wine_mt5, which setup_wine_bridge.sh creates."
+              version={app.version}
+              value={String(app.data["mt5_bottle_path"] ?? "")}
+              onCommit={(v) => void app.save({ mt5_bottle_path: v })}
+            />
+            <SettingsField
+              label="Wine binary"
+              hint="The wine executable the bridge is launched with. Blank means CrossOver's own; set /opt/homebrew/bin/wine after installing Wine with Homebrew."
+              version={app.version}
+              value={String(app.data["wine_bin"] ?? "")}
+              onCommit={(v) => void app.save({ wine_bin: v })}
+            />
           </div>
         )}
       </section>
@@ -118,10 +144,12 @@ export function Mt5Tab() {
 }
 
 function AccountSection(
-  { account, stored, onSave }: {
+  { account, stored, version, onSave, onTerminalPath }: {
     account: Account;
     stored: Record<string, unknown>;
+    version: number;
     onSave: (body: unknown) => Promise<void>;
+    onTerminalPath: (path: string) => Promise<void>;
   },
 ) {
   const [login, setLogin] = useState("");
@@ -181,6 +209,18 @@ function AccountSection(
         >
           Save {live ? "live" : "demo"} credentials
         </Button>
+      </div>
+
+      {/* Its own write: setting where the terminal lives must not need the
+          password re-typed, and must not be able to blank one. */}
+      <div className="mt-3">
+        <SettingsField
+          label={`${account.title} terminal path`}
+          hint="Full path to terminal64.exe. The bridge launches it from here when no terminal is running, which is the state of a headless VPS after a reboot. Blank means auto-detect. Saved when you leave the box."
+          version={version}
+          value={String(stored[`${account.prefix}terminal_path`] ?? "")}
+          onCommit={(v) => void onTerminalPath(v)}
+        />
       </div>
     </section>
   );

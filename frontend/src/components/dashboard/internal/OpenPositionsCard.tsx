@@ -71,7 +71,8 @@ export function OpenPositionsCard({ trades }: { trades: Trade[] }) {
                   {formatLots(t.lots)} lots
                 </span>
                 <span className="truncate text-[10px] text-ink-3">
-                  {t.untracked ? "untracked" : (t.tg_source ? String(t.tg_source) : "")}
+                  {t.remote ? "remote node"
+                    : t.untracked ? "untracked" : (t.tg_source ? String(t.tg_source) : "")}
                 </span>
               </span>
               <span className={cn("num shrink-0 text-xs font-semibold",

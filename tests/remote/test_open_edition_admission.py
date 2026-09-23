@@ -202,6 +202,15 @@ class TestEverythingElseIsUnchanged:
 # ── The client says which build it is ────────────────────────────────────────
 
 class TestTheClientSaysWhichBuildItIs:
+    @pytest.fixture(autouse=True)
+    def no_fingerprinting(self, monkeypatch):
+        """`_build_register` fingerprints the machine, which on Windows shells
+        out to wmic/PowerShell with a 6 s timeout per field. The suite runs
+        within minutes of CI's 60-minute limit there; this test is about one
+        field, not the fingerprint."""
+        from backend.src.config.licence import fingerprint
+        monkeypatch.setattr(fingerprint, "get_fingerprint", lambda: "FP")
+
     async def test_the_open_build_says_so(self, monkeypatch):
         from backend.src.services.cluster.remote import client as rc
         monkeypatch.delenv("FOREX_REQUIRE_LICENCE", raising=False)

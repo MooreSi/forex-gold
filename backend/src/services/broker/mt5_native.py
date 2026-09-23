@@ -246,6 +246,14 @@ class NativeMT5Bridge:
             log.debug("NativeMT5Bridge candles_range fetch failed: %s", e)
             return []
 
+    async def get_candles_range_for_symbol(self, symbol: str, from_ts: float,
+                                           to_ts: float, timeframe: str = "M5") -> list[dict]:
+        try:
+            return await self._call("_get_candles_range", from_ts, to_ts, timeframe, symbol) or []
+        except Exception as e:
+            log.debug("NativeMT5Bridge candles_range(%s) fetch failed: %s", symbol, e)
+            return []
+
     async def get_ticks_range(self, from_ts: float, to_ts: float) -> list[dict]:
         try:
             return await self._call("_get_ticks_range", from_ts, to_ts, SYMBOL,

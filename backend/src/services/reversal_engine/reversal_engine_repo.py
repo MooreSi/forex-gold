@@ -87,6 +87,8 @@ def _run_migrations() -> None:
         # the sampler, which is the only thing that wrote one before this
         # column existed. See measure_repo and reversal-engine/200.
         "ALTER TABLE re_signals ADD COLUMN excursion_source TEXT",
+        # Cross-asset context at creation (2026-09-23, reversal-engine/230).
+        "ALTER TABLE re_signals ADD COLUMN xasset_json TEXT",
     ]
     for stmt in migrations:
         try:

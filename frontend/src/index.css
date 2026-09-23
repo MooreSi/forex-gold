@@ -57,6 +57,17 @@
   --color-ink-2: #9ca3af;
   --color-ink-3: #6b7280;
 
+  /* Categorical series for multi-line charts (Reversal tab, other markets).
+     Deliberately none of the semantic hues above: a line's colour names the
+     series, not a profit, a loss or the remote node. */
+  --color-series-1: #cbd5e1;
+  --color-series-2: #a78bfa;
+  --color-series-3: #22d3ee;
+  --color-series-4: #f472b6;
+  --color-series-5: #fb923c;
+  --color-series-6: #e879f9;
+  --color-series-7: #a3e635;
+
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 }
 
@@ -98,6 +109,14 @@
     --color-ink-1: #0f172a;
     --color-ink-2: #475569;
     --color-ink-3: #7c8aa0;
+
+    --color-series-1: #64748b;
+    --color-series-2: #7c3aed;
+    --color-series-3: #0891b2;
+    --color-series-4: #db2777;
+    --color-series-5: #ea580c;
+    --color-series-6: #c026d3;
+    --color-series-7: #65a30d;
   }
 }
 
@@ -119,6 +138,14 @@
   --color-ink-1: #0f172a;
   --color-ink-2: #475569;
   --color-ink-3: #7c8aa0;
+
+  --color-series-1: #64748b;
+  --color-series-2: #7c3aed;
+  --color-series-3: #0891b2;
+  --color-series-4: #db2777;
+  --color-series-5: #ea580c;
+  --color-series-6: #c026d3;
+  --color-series-7: #65a30d;
 }
 
 /* `auto` under a dark machine, and the explicit dark choice, both fall through

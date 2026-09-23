@@ -10,6 +10,8 @@ import { CapabilitiesSection } from "./internal/CapabilitiesSection";
 import { ControlTargetBanner } from "./internal/ControlTargetBanner";
 import { EngineCard } from "./internal/EngineCard";
 import { BreakoutSection } from "./internal/BreakoutSection";
+import { BenchmarkSection } from "./internal/BenchmarkSection";
+import { CrossAssetSection } from "./internal/CrossAssetSection";
 import { ModelSection } from "./internal/ModelSection";
 import { LearningChartSection } from "./internal/LearningChartSection";
 import { ShadowSection } from "./internal/ShadowSection";
@@ -90,6 +92,14 @@ export function EnginesPanel() {
                 metrics={asObject(asObject(c.report.data?.ml)["metrics"])}
                 summary={asObject(asObject(c.report.data?.ml)["summary"])}
               />
+
+              <section className="border-t border-line pt-3">
+                <BenchmarkSection benchmark={c.report.data?.benchmark} />
+              </section>
+
+              <section className="border-t border-line pt-3">
+                <CrossAssetSection data={c.report.data?.cross_asset} />
+              </section>
 
               <section className="border-t border-line pt-3">
                 <h3 className="mb-2 text-xs font-semibold text-ink-1">

@@ -294,6 +294,28 @@ class MT5BridgeClient:
             log.debug("bridge candles_range fetch failed: %s", e)
             return []
 
+    async def get_candles_range_for_symbol(self, symbol: str, from_ts: float,
+                                           to_ts: float, timeframe: str = "M5") -> list[dict]:
+        """Candles for ANY symbol between two Unix timestamps. Read-only.
+
+        The range path, not `/candles_symbol`: on 2026-09-23 the latter
+        (`copy_rates_from_pos`) served peers stale by hours to months, while
+        this one returned bars minutes old. See reversal-engine/230."""
+        if not self._url:
+            return []
+        try:
+            r = await self._request(
+                "get", f"{self._url}/candles_range",
+                timeout=60.0,
+                params={"from": str(from_ts), "to": str(to_ts),
+                        "timeframe": timeframe, "symbol": symbol},
+            )
+            r.raise_for_status()
+            return r.json().get("candles", [])
+        except Exception as e:
+            log.debug("bridge candles_range(%s) fetch failed: %s", symbol, e)
+            return []
+
     async def get_ticks_range(self, from_ts: float, to_ts: float) -> list[dict]:
         """Fetch XAUUSD ticks between two Unix timestamps -- bounded to one
         day by the bridge itself (docs/todo/backtest/010 phase 1; a measured

@@ -146,6 +146,19 @@ def create_schema(get_db: Callable[[], Any]) -> None:
         UNIQUE(signal_ref, variant)
     );
 
+    -- One row per meta-labeller refit (2026-09-23, reversal-engine/230):
+    -- out-of-sample AUC with and without the cross-asset features, on the
+    -- same rows, so their impact is measured whatever the toggle says.
+    CREATE TABLE IF NOT EXISTS re_xasset_fits (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts              REAL NOT NULL,
+        n               INTEGER,
+        auc_base        REAL,
+        auc_xasset      REAL,
+        installed       TEXT,
+        per_peer_json   TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS re_daily_research (
         date                TEXT PRIMARY KEY,
         discipline_score    REAL,

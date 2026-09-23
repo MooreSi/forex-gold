@@ -72,30 +72,47 @@ def label_for(realised_r: Optional[float],
 
 
 def auc(scores: Sequence[float], labels: Sequence[int]) -> Optional[float]:
-    """Rank-based area under the ROC curve (Mann-Whitney U).
+    """Rank-based area under the ROC curve (Mann-Whitney U), ties averaged.
 
-    Hand-rolled rather than imported: it is eight lines, it must work when
-    one class is absent (returning None rather than 0.5, because "no
-    positives to separate" is not "no separation"), and this module must be
-    able to report honestly on a fold that happens to be one-sided.
+    Hand-rolled rather than imported: it must work when one class is absent
+    (returning None rather than 0.5, because "no positives to separate" is
+    not "no separation"), and this module must be able to report honestly on
+    a fold that happens to be one-sided.
+
+    By ranks since 2026-09-23 rather than every positive against every
+    negative: the same number, in O(n log n) instead of O(n^2). The pairwise
+    version took ~10s on 5,500 rows, and a refit now fits three models
+    (reversal-engine/230).
     """
-    pairs = [(s, l) for s, l in zip(scores, labels) if s is not None]
-    pos = [s for s, l in pairs if l == 1]
-    neg = [s for s, l in pairs if l == 0]
-    if not pos or not neg:
+    pairs = [(float(s), l) for s, l in zip(scores, labels) if s is not None]
+    n_pos = sum(1 for _, l in pairs if l == 1)
+    n_neg = sum(1 for _, l in pairs if l == 0)
+    if not n_pos or not n_neg:
         return None
-    wins = 0.0
-    for p in pos:
-        for q in neg:
-            wins += 1.0 if p > q else (0.5 if p == q else 0.0)
-    return wins / (len(pos) * len(neg))
+    pairs = [(s, l) for s, l in pairs if l in (0, 1)]
+    order = sorted(range(len(pairs)), key=lambda i: pairs[i][0])
+    ranks = [0.0] * len(pairs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and pairs[order[j + 1]][0] == pairs[order[i]][0]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2.0 + 1.0
+        i = j + 1
+    rank_sum = sum(r for r, (_, l) in zip(ranks, pairs) if l == 1)
+    return (rank_sum - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
 
 
 class MetaLabeller:
     def __init__(self, min_samples: int = DEFAULT_MIN_SAMPLES,
                  min_auc: float = DEFAULT_MIN_AUC,
                  folds: int = DEFAULT_FOLDS,
-                 embargo_s: float = DEFAULT_EMBARGO_S):
+                 embargo_s: float = DEFAULT_EMBARGO_S,
+                 uses_xasset: bool = False):
+        # Whether this model's vector carries the cross-asset features after
+        # the base ones. Scoring must build the same vector it was fitted on.
+        self.uses_xasset = uses_xasset
         self.min_samples = min_samples
         self.min_auc = min_auc
         self.folds = folds
@@ -212,6 +229,59 @@ class MetaLabeller:
         return True if p is None else p >= threshold
 
 
+# ── Training rows from closed signals ─────────────────────────────────────
+
+def rows_from_signals(signals: Sequence[dict], xasset: bool = False) -> list[dict]:
+    """`re_signals` rows -> the `{features, realised_r, cost_r, open_time,
+    close_time}` rows `fit` takes. Rows that cannot be labelled are dropped.
+
+    `cost_r` is 0.0 because the cost is already charged: `net_pnl_dollars`
+    is after spread, commission and slippage (`reversal_engine_manage.
+    _net_pnl`, or the broker's own figure on a reconciled live trade), so
+    `realised_r > 0` IS "cleared its cost". Adding a `tca` cost on top would
+    count it twice. This is a measured cost, not the unmeasured one
+    `label_for` refuses to guess.
+
+    The span starts at the fill, not the creation: a zone signal can wait
+    hours before it is exposed to the market, and the purge is about
+    exposure.
+
+    With `xasset`, the cross-asset vector (`cross_asset.vector`) follows the
+    base features, and a signal the sweep has not measured yet is left out
+    rather than given all-neutral peers it never had.
+    """
+    import json
+    from backend.src.services.reversal_engine.ml_engine._feature_schema import pad_to_schema
+    from backend.src.services.reversal_engine.ml_engine._training_data import _realised_r
+
+    out: list[dict] = []
+    for s in signals or ():
+        if s.get("outcome") not in ("win", "loss", "be"):
+            continue
+        close_time = s.get("close_time")
+        if not close_time:
+            continue
+        try:
+            feats = pad_to_schema(json.loads(s.get("ml_features_json") or ""))
+        except (TypeError, ValueError):
+            continue
+        if not feats:
+            continue
+        r = _realised_r(s)
+        if r is None:
+            continue
+        if xasset:
+            from backend.src.services.reversal_engine import cross_asset as _xa
+            xv = _xa.vector(s.get("xasset_json"))
+            if xv is None:
+                continue
+            feats = list(feats) + xv
+        out.append({"features": feats, "realised_r": r, "cost_r": 0.0,
+                    "open_time": float(s.get("trigger_time") or s.get("created_at") or 0.0),
+                    "close_time": float(close_time)})
+    return out
+
+
 # ── The one live instance ─────────────────────────────────────────────────
 #
 # A module singleton rather than state on the engine: the engine is recreated
@@ -252,4 +322,13 @@ def score_signal(sig: dict) -> Optional[float]:
         return None
     if not feats:
         return None
+    if model.uses_xasset:
+        # Fitted with the peers, so it is scored with them or not at all. A
+        # signal the sweep has not reached yet gets no opinion rather than
+        # all-neutral peers it never had.
+        from backend.src.services.reversal_engine import cross_asset as _xa
+        xv = _xa.vector(sig.get("xasset_json"))
+        if xv is None:
+            return None
+        feats = list(feats) + xv
     return model.probability(feats)

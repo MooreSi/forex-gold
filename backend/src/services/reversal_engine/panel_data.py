@@ -23,7 +23,7 @@ from backend.src.db import database as _core_db
 
 _db, _ml, _ = make_facades("reversal_engine", _real_db, _real_ml)
 
-__all__ = ["virtual_balance", "max_drawdown", "stats", "active_levels", "open_signals", "all_signals", "perf_by_session", "perf_by_bias", "perf_by_level_type", "analysis_log", "ml_summary", "ml_metrics", "ml_thresholds"]
+__all__ = ["virtual_balance", "max_drawdown", "stats", "active_levels", "open_signals", "all_signals", "perf_by_session", "perf_by_bias", "perf_by_level_type", "analysis_log", "ml_summary", "ml_metrics", "ml_thresholds", "chance_benchmark", "cross_asset_report"]
 
 async def virtual_balance():
     return await to_db_thread(_db.get_virtual_balance)
@@ -118,3 +118,67 @@ async def reset_stats() -> float:
     from backend.src.services.reversal_engine.stats_repo import reset_stats as _reset
     return await to_db_thread(_reset)
 
+
+
+# -- Does it beat chance? (docs/todo/reversal-engine/220) ----------------------
+
+# The report polls every 30s; the answer moves by one trade at a time. Five
+# minutes of staleness costs nothing a reader could act on.
+_BENCH_TTL_S = 300.0
+_bench_cache: tuple[float, dict] = (0.0, {})
+
+
+async def chance_benchmark() -> dict:
+    """Win rate against the no-edge rate SL/(SL+TP), by group.
+
+    Local rows only, deliberately not through the remote facade: the mirror
+    carries summary stats, not the per-signal rows this needs.
+    """
+    import time as _time
+    global _bench_cache
+    now = _time.time()
+    ts, cached = _bench_cache
+    if cached and now - ts < _BENCH_TTL_S:
+        return cached
+    from backend.src.services.reversal_engine import chance_benchmark as _cb
+    from backend.src.services.reversal_engine import stats_repo as _stats
+
+    def _compute() -> dict:
+        return _cb.benchmark(_stats.benchmark_rows(), now=now)
+
+    report = await to_db_thread(_compute)
+    _bench_cache = (now, report)
+    return report
+
+
+# -- Cross-asset context (docs/todo/reversal-engine/230) ----------------------
+
+_xa_cache: tuple[float, dict] = (0.0, {})
+
+
+async def cross_asset_report() -> dict:
+    """What the chart draws: each peer's daily correlation with gold, and the
+    meta-labeller's out-of-sample AUC with and without the peers at every
+    refit. Same five-minute cache and local-only reasoning as the benchmark."""
+    import time as _time
+    global _xa_cache
+    now = _time.time()
+    ts, cached = _xa_cache
+    if cached and now - ts < _BENCH_TTL_S:
+        return cached
+    from backend.src.services.reversal_engine import cross_asset as _xa
+    from backend.src.services.reversal_engine import xasset_repo as _xr
+
+    def _compute() -> dict:
+        records = _xr.stored_records()
+        return {
+            "peers": list(_xa.PEERS),
+            "coverage": {"measured": len(records),
+                         "missing": len(_xr.signals_missing_xasset())},
+            "daily_corr": _xa.daily_correlation(records),
+            "fits": _xr.fit_history(),
+        }
+
+    report = await to_db_thread(_compute)
+    _xa_cache = (now, report)
+    return report

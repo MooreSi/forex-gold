@@ -86,4 +86,21 @@ export const CAPABILITIES: Capability[] = [
       "that futures flow predicts anything about these trades. See " +
       "docs/simon-handover/039.",
   },
+  {
+    key: "re_xasset_features_enabled",
+    label: "Use other markets in the meta-labeller",
+    description:
+      "Trains the meta-labeller on what silver, platinum, the dollar index, " +
+      "USDJPY, the S&P 500, VIX and oil were doing when each signal fired " +
+      "(direction, move size and volatility, and how closely each was moving " +
+      "with gold). The data is recorded for every signal whether this is on or " +
+      "not, and every refit measures the model both ways — the chart below " +
+      "shows whether it helps. It changes no trade unless the meta-labeller " +
+      "gate is on too.",
+    dependsOn: {
+      key: "meta_label_gate_enabled",
+      label: "Ask the meta-labeller",
+      where: "this card",
+    },
+  },
 ];

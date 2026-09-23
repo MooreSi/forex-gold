@@ -38,6 +38,12 @@ export interface ReversalReport {
    *  the backend, so an install with no ML table sends empty objects here
    *  rather than failing the whole report. */
   ml?: { metrics: Record<string, unknown>; summary: Record<string, unknown> };
+  /** Win rate against the no-edge rate SL/(SL+TP). Guarded: {} when it
+   *  cannot be computed. docs/todo/reversal-engine/220. */
+  benchmark?: unknown;
+  /** Other markets against gold, and the meta-labeller with and without them
+   *  at every refit. Guarded: {} when unreadable. reversal-engine/230. */
+  cross_asset?: unknown;
 }
 
 export function useEnginesController() {

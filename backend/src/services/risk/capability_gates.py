@@ -218,6 +218,16 @@ def sizing_inputs(rs: dict, atr: float, reference_atr: float,
     )
 
 
+def xasset_features_enabled(rs: dict) -> bool:
+    """Does the meta-labeller train and score with the cross-asset features?
+
+    Decides nothing on its own: the live path consults the meta-labeller
+    only when `meta_label_gate_enabled` is on. Migration 52, off by default.
+    docs/todo/reversal-engine/230.
+    """
+    return _on(rs, "re_xasset_features_enabled")
+
+
 def cme_context_enabled(rs: dict) -> bool:
     """Should the engine read CME futures context? Off, and inert either way.
 

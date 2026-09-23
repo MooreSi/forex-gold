@@ -170,3 +170,19 @@ def reset_stats(now: Optional[float] = None) -> float:
     _log.info("[RE-Stats] reporting reset to %.0f; balance back to %.2f. "
               "No signal rows were removed.", ts, _STARTING_BALANCE)
     return ts
+
+
+def benchmark_rows() -> list[dict]:
+    """Every closed signal, with the columns `chance_benchmark` scores.
+
+    NOT epoch-filtered, unlike the P&L reads above: the epoch is a reporting
+    boundary for money figures, and a test of whether the entries beat chance
+    needs every row it can get. The benchmark states its own windows.
+    """
+    rows = get_db().all(
+        "SELECT outcome, sl_dist, tp1, trigger_price, price_at_signal, direction, "
+        "level_type, session, htf_bias, htf_bias_at_fill, trigger_time, created_at, "
+        "live_exec_status, net_pnl_dollars, ml_prob "
+        "FROM re_signals WHERE status='closed'"
+    )
+    return [dict(r) for r in rows]

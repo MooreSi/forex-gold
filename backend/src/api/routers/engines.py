@@ -197,6 +197,11 @@ async def reversal_report() -> dict:
         # epoch as `realised` above: two figures on one screen computed over
         # different trades is worse than either being absent.
         "edge": await _guarded(reversal_ctl.reversal_edge_stats, {}),
+        # Win rate against the no-edge rate SL/(SL+TP). Research, so guarded.
+        "benchmark": await _guarded(reversal_ctl.reversal_chance_benchmark, {}),
+        # Other markets against gold, and the meta-labeller with and without
+        # them at every refit. Research, so guarded.
+        "cross_asset": await _guarded(reversal_ctl.reversal_cross_asset, {}),
         "shadow": reversal_ctl.reversal_shadow_report(),
         "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
         # The learning curve. `panel_data.ml_metrics()` has answered since the

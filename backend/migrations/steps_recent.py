@@ -221,4 +221,15 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN pending_momentum_gate_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN burst_hedge_guard_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Cross-asset context for the Reversal Engine (2026-09-23,
+    # docs/todo/reversal-engine/230). Decides only whether the META-LABELLER
+    # is trained and scores with silver, platinum, the dollar index, USDJPY,
+    # the S&P, VIX and oil. The features are recorded for every signal either
+    # way, and every refit measures both variants, so the chart shows the
+    # impact whatever this says. Places nothing unless meta_label_gate_enabled
+    # is also on. Off by default (rules/60-adding-a-tunable).
+    (52, "Cross-asset features for the meta-labeller, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_xasset_features_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

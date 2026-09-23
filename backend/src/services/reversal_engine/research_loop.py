@@ -1,9 +1,11 @@
 """The Reversal Engine's daily jobs (22:00 Europe/London), on one timer.
 
-Two of them now: the Telegram research sweep this module was built for, and
-the phase-1 research study (`study_schedule`), which was button-only until
-2026-09-16 and had gone four days stale while the AI tuner kept presenting
-its numbers as current.
+The Telegram research sweep this module was built for, and the phase-1
+research study (`study_schedule`), which was button-only until 2026-09-16
+and had gone four days stale while the AI tuner kept presenting its numbers
+as current. Also the meta-labeller's daily refit (`meta_label_schedule`),
+which is NOT tied to 22:00 -- its model lives in memory, so a restarted app
+fits on the first pass.
 
 They share this minute timer rather than each claiming an asyncio task in
 runtime.py, and they share the hour for the same reason: 22:00 London is the
@@ -35,6 +37,12 @@ from backend.src.services.reversal_engine.study_schedule import (
 )
 from backend.src.services.breakout_signal.excursion_sweep import (
     breakout_excursion_sweep as _breakout_excursion_sweep_impl,
+)
+from backend.src.services.reversal_engine.meta_label_schedule import (
+    meta_label_refit_sweep as _meta_label_refit_sweep_impl,
+)
+from backend.src.services.reversal_engine.xasset_sweep import (
+    xasset_sweep as _xasset_sweep_impl,
 )
 
 
@@ -87,4 +95,20 @@ async def reversal_engine_research_loop(engine: Any, is_running: Callable[[], bo
             break
         except Exception as e:
             log.warning("_breakout_excursion_sweep error: %s", e)
+        # Not in the 22:00 slot: the model lives in memory, so a restarted
+        # app fits on its first pass. See meta_label_schedule.
+        try:
+            await _meta_label_refit_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_meta_label_refit_sweep error: %s", e)
+        # Cross-asset context, one day per pass, newest first.
+        # docs/todo/reversal-engine/230.
+        try:
+            await _xasset_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_xasset_sweep error: %s", e)
         await asyncio.sleep(60)

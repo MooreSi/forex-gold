@@ -49,6 +49,18 @@ async def reversal_realised_pnl() -> dict:
     return await reversal.get_realised_pnl()
 
 
+async def reversal_chance_benchmark() -> dict:
+    """Does the engine's win rate beat what its stop/target geometry alone
+    would give with no edge? docs/todo/reversal-engine/220."""
+    return await reversal.chance_benchmark()
+
+
+async def reversal_cross_asset() -> dict:
+    """Other markets against gold, and whether they help the meta-labeller.
+    docs/todo/reversal-engine/230."""
+    return await reversal.cross_asset_report()
+
+
 # ── Reversal Engine: the pro-likeness sub-model ──────────────────────────────
 
 async def reversal_ml_metrics() -> dict:

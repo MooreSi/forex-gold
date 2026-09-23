@@ -11,13 +11,16 @@ it made in a local web dashboard.
 > account until you understand what every switch does, and confirm your risk
 > settings before you ever point it at live funds.
 
-![The chart tab](docs/images/dashboard-chart.png)
+![The dashboard](docs/images/dashboard-home.png)
 
-*The Chart tab — XAUUSD with the structure the engines actually trade drawn on
-it: fair value gaps as shaded zones, the EMA 9/21/50 stack, live bid/ask rails
-and every open position marked at its entry, stop and targets. Timeframe and
-bar count are switchable; this is the same candle data the engines read, not a
-separate chart widget.*
+*The Dashboard — one screen for "what is happening right now". The live gold
+price and the account above; XAUUSD with the structure the engines actually
+trade drawn on it — fair value gaps as shaded zones, the EMA 9/21/50 stack,
+live bid/ask rails, and every open position marked at its entry, stop and
+targets. Down the right: what is open, the signals that arrived, and the risk
+limits the engines are actually reading. Below, the realised record over the
+window — the app's own P&L, shown whichever way it points. Account figures are
+blurred; the prices are live market data. This is a demo account.*
 
 ---
 

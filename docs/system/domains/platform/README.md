@@ -359,3 +359,33 @@ Still open, and why each was left:
 
 Queued for the owner as
 [043](../../../simon-handover/043-controlling-a-headless-vps-from-the-mac.md).
+
+## An open-build install is admitted, not queued for approval (2026-09-23)
+
+The licence gate was switched off on 2026-09-22 (`config/edition.py`), but the
+admin server still treated every unknown client as a registration request:
+Approve/Reject buttons on Telegram, and a client retrying every ~20 s until
+somebody pressed one. The first install from GitHub did it 160 times over two
+and a half hours.
+
+Now the client's registration says `licence_required` (the value of
+`edition.licence_required()`), and a registration saying the boolean `False`
+is admitted by `remote/_admission.py`: listed in Remote Clients with
+subscription "Open source", one Telegram with no buttons ("New install"), and
+nothing left pending. On its next connection the hello path welcomes it like
+any approved client.
+
+- **Admission is not a licence.** Nothing is signed, and the record stores no
+  `machine_id`. That second part is load-bearing: `resign_all_licences` runs on
+  every console start and signs a key for every approved client that HAS a
+  machine id. Pinned by `test_resigning_every_licence_does_not_issue_it_one`.
+- **Only the open build.** A missing field, `True`, or anything but the boolean
+  `False` goes through approval as before. That is every licensed build and
+  every build older than this change, including the one that prompted it.
+- **Revoked stays revoked.** A revoked token is not re-admitted by itself.
+- **Both intake paths.** The server takes a registration in its own message
+  and as a follow-up on the connection that was just told `invalid_token`. The
+  check sits in the condition of each queueing branch, which is why the
+  queueing code is still in `server.py`.
+- **The admin server has to be running this code.** The change is on the
+  server's side. A server running `~/Forex-Update` still prompts.

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from backend.src.config import USER_DATA_DIR
+from backend.src.config import USER_DATA_DIR, edition as _edition
 from backend.src.config.licence import store as _licence_store
 from backend.src import config as _app_config
 from backend.src.services.cluster.remote.protocol import (
@@ -343,6 +343,7 @@ def _build_register() -> dict:
         email=get_stored_email(),
         nickname=get_stored_nickname(),
         machine_id=get_fingerprint(),
+        licence_required=_edition.licence_required(),  # False: admitted, see _admission.py
         ts=time.time(),
     )
 

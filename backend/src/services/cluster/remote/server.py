@@ -13,13 +13,12 @@ Startup:
 import asyncio
 import json
 import logging
-import os
-import socket
 import time
 from pathlib import Path
 from typing import Optional
 
 from backend.src.config import USER_DATA_DIR
+from backend.src.services.cluster.remote import _admission
 from backend.src.services.cluster.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
@@ -815,7 +814,7 @@ async def _handler(websocket) -> None:
             # admin approved it moments ago) — don't re-queue it as pending.
             log.info("[RemoteServer] Registration from %s (%s) ignored — "
                       "token already approved", hostname, ip)
-        elif token:
+        elif token and not _admission.admit_open(token, msg, ip):
             # machine_id is what approve_registration signs the licence for:
             # without it the approval SUCCEEDS with an empty key (bugs/022).
             _reg = {"hostname": hostname, "platform": platform,
@@ -889,7 +888,7 @@ async def _handler(websocket) -> None:
                     # has a valid licence for it.
                     log.info("[RemoteServer] Registration from %s (%s) ignored — "
                               "token already approved", hostname, ip)
-                elif reg_token:
+                elif reg_token and not _admission.admit_open(reg_token, msg2, ip):
                     _pending[reg_token] = {
                         "hostname":   msg2.get("hostname", hostname),
                         "platform":   msg2.get("platform", platform),

@@ -7,6 +7,61 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.6",
+        "React Frontend Migration",
+        "blue",
+        "",
+        [
+            "New dashboard. The NiceGUI screens are replaced by a React app "
+            "over a new HTTP API, and every tab has been ported. It opens on "
+            "a Dashboard page that shows what is happening now, and adds a "
+            "light and dark theme, a trading-status badge in the title bar, "
+            "a Schedule screen, fair-value gaps on the chart, and a candle "
+            "chart for each day in Analysis.",
+            "Demo/live switch: one database per MT5 account, and switching "
+            "now moves MetaTrader 5 as well as the database and config.",
+            "Only trade with the trend: an optional gate (off by default) "
+            "that every order route honours. When the trend turns, it "
+            "withdraws resting orders, and it re-checks queued signals "
+            "before they execute.",
+            "Limit orders rest at the broker and the EA template manages "
+            "the fill. Immediate Market Entry is one global setting, and a "
+            "template's own stop and anchor lot are used as written.",
+            "Reversal Engine: a measurement and gating layer (every switch "
+            "off by default), macro context (DXY, yields, VIX, gold "
+            "volatility), a nightly research study, AI tuning of its "
+            "switches (off by default), and its ML model is handed over on "
+            "an upgrade instead of discarded.",
+            "Reversal Engine ML: the meta-labeller is now trained every day. "
+            "The Signal Generator tab shows whether the engine's win rate "
+            "beats what its stop and target alone would give by chance, "
+            "and charts silver, platinum, the dollar, USDJPY, the S&P 500, "
+            "VIX and oil against gold. A new switch (off) feeds those "
+            "markets to the meta-labeller.",
+            "Backtests run EA templates tick by tick, fill at the edge of "
+            "a zone, and report their two halves separately.",
+            "Telegram: a record of what the app decided for each signal, "
+            "a study of sources calling opposite directions, and "
+            "event-window and stale-release guards, all off by default.",
+            "Set & Forget with the 30-minute trigger, a real editor for EA "
+            "templates (with renaming), the Breakout engine's own panel, "
+            "DPM Analysis, the AI page and Export Logs.",
+            "The Mac now recognises trades the VPS opened. The Remote tab "
+            "shows the VPS's health, and each account can have its own "
+            "MT5 terminal path.",
+            "Only one copy of the app can run at a time, even across two "
+            "checkouts. Boot starts MT5 on a Mac, and the watchdog no "
+            "longer restarts the other checkout's app.",
+            "Open source: the repo is public under AGPL-3.0. A fresh "
+            "install from GitHub runs without asking for licence "
+            "approval, and can no longer update itself into the old app.",
+            "Removed: the Bounce engine, and Out of Hours from "
+            "Trading > Strategy.",
+            "Security: the Telegram bot token no longer leaves the machine "
+            "in a diagnostics upload.",
+        ],
+    ),
+    (
         "v0.5",
         "Refactor",
         "purple",

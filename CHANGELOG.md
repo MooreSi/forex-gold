@@ -1,3 +1,53 @@
+## v0.6 — React Frontend Migration (2026-09-24)
+
+The dashboard moved from NiceGUI to React. The About screen carries the
+user-facing summary; this is the engineering record. 280 commits since v0.5.
+
+**The dashboard**
+- React app in `frontend/src`, built to `frontend/dist` (committed and served
+  by the app), over a new HTTP layer in `backend/src/api/`. Routers forward to
+  controllers only; `api/` never imports the database or a service. The
+  decision, and the 2026-08-06 one it reverses, is in
+  `docs/system/domains/frontend/010-the-react-decision.md`.
+- Every tab ported, plus what the old one never had: a Dashboard home page,
+  light/dark theme, trading-status badge, Schedule screen, fair-value gaps,
+  per-day candles in Analysis, the Breakout panel, DPM Analysis, the AI page,
+  Set & Forget, an EA template editor with rename, Export Logs.
+- CI builds the dashboard and fails on a stale bundle.
+
+**Accounts and nodes**
+- One database per MT5 account, and a demo/live switch that moves MetaTrader 5
+  as well as the database and config.
+- Single-instance boot across both checkouts (`utils/single_instance.py`),
+  MT5 started on a Mac at boot, and a watchdog that no longer restarts the
+  other checkout's app.
+- The Mac recognises positions the VPS opened; per-account MT5 terminal path.
+
+**Trading behaviour** (each new gate off by default, and the owner's to arm)
+- Only trade with the trend (`htf_bias_gate_enabled`), honoured by every order
+  route; resting orders withdrawn against the trend; queued signals
+  re-validated before execution.
+- Limit orders rest and the template manages the fill; Immediate Market Entry
+  is one global setting; a template's own stop and anchor lot are used as
+  written.
+- Telegram decision log, contradiction study, event-tier gate and stale-release
+  guards.
+
+**Reversal Engine**
+- Measurement and gating layer, macro context, nightly research study, AI
+  tuning of the switches, and an ML model handed over across a version bump.
+- The meta-labeller is fitted daily (it had never been fitted). The panel shows
+  the win rate against the no-edge rate SL/(SL+TP): 75.5% expected, 74.4%
+  actual over 4,681 signals. Cross-asset context (reversal-engine/230) is
+  recorded for every signal; toggle `re_xasset_features_enabled` is off. It
+  lifted the meta-labeller's out-of-sample AUC from 0.553 to 0.558.
+- The Bounce engine is deleted.
+
+**Open source**
+- Public under AGPL-3.0. A GitHub install is admitted without licence approval
+  and cannot update itself into the old app.
+- The Telegram bot token no longer leaves in a diagnostics upload.
+
 ## v0.5 — Refactor (2026-09-02)
 
 The release the refactor closes out. Version history and the About screen

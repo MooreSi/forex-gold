@@ -32,6 +32,34 @@ log = logging.getLogger("forex_trader")
 _LOGGING_READY = False
 
 
+class _SecretScrubber(logging.Filter):
+    """Rewrite a record with any credential removed, before a handler writes it.
+
+    httpx logs every request URL at INFO, and a Telegram bot URL carries the
+    token in its path. `scrub_log_secrets` already cleaned the diagnostics
+    upload (2026-09-12), but the local log file held the token in full on
+    every getUpdates poll -- and that file is what Export Logs emails.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from backend.src.utils.os_utils import scrub_log_secrets
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        cleaned = scrub_log_secrets(message)
+        if cleaned != message:
+            record.msg, record.args = cleaned, None
+        return True
+
+
+def _attach_secret_scrubber(logger: logging.Logger) -> None:
+    """Put the scrubber on every handler of `logger`, once each."""
+    for handler in logger.handlers:
+        if not any(isinstance(f, _SecretScrubber) for f in handler.filters):
+            handler.addFilter(_SecretScrubber())
+
+
 def setup_logging() -> None:
     """Attach the app's console + rotating-file logging to the root logger.
 
@@ -80,6 +108,7 @@ def setup_logging() -> None:
     )
     fh.setFormatter(logging.Formatter(_LOG_FORMAT))
     logging.getLogger().addHandler(fh)
+    _attach_secret_scrubber(logging.getLogger())
     _LOGGING_READY = True
 
 

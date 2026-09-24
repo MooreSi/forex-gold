@@ -342,12 +342,15 @@ from ._training_data import (  # noqa: E402
 )
 
 
-def _retrain() -> None:
-    global _model_batch, _labeled_count, _train_history
-    X, y = _get_training_data()
-    if len(X) < _MIN_TRAIN:
-        return
+def _fit_batch(X: list, y: list) -> tuple:
+    """Fit a batch model into a LOCAL and return it, with what to record.
 
+    Pure: reads and writes no module state, so it can run on a worker thread
+    while the event loop goes on predicting with the previous model. The old
+    `_retrain` assigned `_model_batch` BEFORE fitting it, so for the length of
+    the fit the gate's model was an unfitted one -- harmless only while nothing
+    else could run in between, and the gate fails open (engines README).
+    """
     import numpy as np
     Xa = np.array(X, dtype=float)
     ya = np.array(y, dtype=float)
@@ -359,35 +362,90 @@ def _retrain() -> None:
     # Try LightGBM regressor, fall back to RandomForestRegressor
     try:
         import lightgbm as lgb
-        _model_batch = lgb.LGBMRegressor(
+        model = lgb.LGBMRegressor(
             n_estimators=100, learning_rate=0.05, num_leaves=15,
             min_child_samples=5, random_state=42, verbose=-1,
         )
-        _model_batch.fit(Xa, ya, sample_weight=weights)
+        model.fit(Xa, ya, sample_weight=weights)
         backend = "lgb"
     except ImportError:
         from sklearn.ensemble import RandomForestRegressor
-        _model_batch = RandomForestRegressor(
+        model = RandomForestRegressor(
             n_estimators=80, max_depth=5, random_state=42
         )
-        _model_batch.fit(Xa, ya, sample_weight=weights)
+        model.fit(Xa, ya, sample_weight=weights)
         backend = "rf"
+    return model, backend, round(float(np.mean(ya)), 4)
 
-    _labeled_count = len(X)
+
+def _install_batch(model, backend: str, n: int, mean_r: float) -> None:
+    """Swap a FITTED model in, in one assignment, and record the retrain."""
+    global _model_batch, _labeled_count
+    _model_batch = model
+    _labeled_count = n
     _ho.end()
-    _train_history.append({
-        "ts": time.time(), "n": len(X), "mean_r": round(float(np.mean(ya)), 4), "backend": backend
-    })
+    _train_history.append({"ts": time.time(), "n": n, "mean_r": mean_r, "backend": backend})
     _save_all()
-    _log.info("[RE-ML] retrained — n=%d backend=%s", len(X), backend)
+    _log.info("[RE-ML] retrained — n=%d backend=%s", n, backend)
 
 
-def retrain_now() -> None:
-    """Public wrapper so callers outside this module (telegram_research.py's
-    nightly job) can force an immediate retrain rather than waiting for the
-    next _RETRAIN_EVERY outcome — used right after the daily discipline/
-    aggression scores update so the model reflects them without delay."""
-    _retrain()
+def _retrain() -> None:
+    X, y = _get_training_data()
+    if len(X) < _MIN_TRAIN:
+        return
+    model, backend, mean_r = _fit_batch(X, y)
+    _install_batch(model, backend, len(X), mean_r)
+
+
+async def retrain_async() -> None:
+    """`_retrain`, with the read and the fit on a worker thread.
+
+    ~450 ms of work that used to run on the event loop every fifth closed
+    signal and again at 22:00 (measured 2026-09-24). The install stays on the
+    loop, so every reader sees the old fitted model or the new fitted one.
+    """
+    import asyncio
+    X, y = await asyncio.to_thread(_get_training_data)
+    if len(X) < _MIN_TRAIN:
+        return
+    model, backend, mean_r = await asyncio.to_thread(_fit_batch, X, y)
+    _install_batch(model, backend, len(X), mean_r)
+
+
+_retrain_task = None
+_retrain_again = False
+
+
+def _request_retrain() -> None:
+    """Retrain now: off the loop when there is one, inline when there is not.
+
+    One at a time. A request while one is running is remembered and run once
+    after it -- dropped, the model would be a batch behind; run alongside, two
+    fits would race to install.
+    """
+    import asyncio
+    global _retrain_task, _retrain_again
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _retrain()
+        return
+    if _retrain_task is not None and not _retrain_task.done():
+        _retrain_again = True
+        return
+
+    async def _run() -> None:
+        global _retrain_again
+        while True:
+            _retrain_again = False
+            try:
+                await retrain_async()
+            except Exception as exc:
+                _log.warning("[RE-ML] retrain failed: %s", exc)
+            if not _retrain_again:
+                return
+
+    _retrain_task = loop.create_task(_run())
 
 
 def get_daily_research_scores() -> tuple[float, float]:
@@ -507,7 +565,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
 
     # Batch retrain
     if _labeled_count % _RETRAIN_EVERY == 0 and _labeled_count >= _MIN_TRAIN:
-        _retrain()
+        _request_retrain()
     else:
         _save_all()
 

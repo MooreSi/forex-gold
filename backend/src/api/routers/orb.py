@@ -23,6 +23,8 @@ the numbers printed beside it.
 """
 from __future__ import annotations
 
+import asyncio
+
 import base64
 import logging
 from typing import Any
@@ -78,7 +80,8 @@ async def state() -> dict:
     chart = None
     if report:
         try:
-            png = notify_ctl.build_orb_chart_image(report)
+            # Off the loop: a matplotlib render, ~1.8 s measured.
+            png = await asyncio.to_thread(notify_ctl.build_orb_chart_image, report)
             chart = base64.b64encode(png).decode() if png else None
         except Exception as exc:
             # The numbers are the point; the picture is not. A chart that will

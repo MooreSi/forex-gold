@@ -398,3 +398,24 @@ if either phrase is removed.
 from this account's own measured trade history; there is no CME evidence for
 it to argue from, so the switch would be a coin flip with a rationale
 attached.
+
+## The Reversal Engine retrains off the event loop (2026-09-24)
+
+`record_outcome` ran the batch retrain inline every fifth closed signal, and
+the 22:00 nightly research did the same: ~450 ms each (103 ms reading training
+data, 354 ms fitting, profiled on a copy of the live data), with the position
+monitor, EA link and Telegram all waiting. Now `_request_retrain` schedules
+`retrain_async`, which reads and fits on worker threads and installs the model
+back on the loop. One at a time; a request during a retrain runs once more
+after it. With no running loop (scripts, tests) it retrains inline as before.
+`retrain_now` is gone; the nightly job awaits `retrain_async`.
+
+- **The old `_retrain` installed the model before fitting it.** For the length
+  of the fit, `_model_batch` was an unfitted LightGBM whose `predict` raises,
+  which `predict()` swallows. That was invisible only while nothing could run
+  in between, and **the gate fails open.** `_fit_batch` now fits into a local
+  and `_install_batch` swaps it in with one assignment, on both paths. Pinned by
+  `test_the_old_model_stays_in_place_until_the_new_one_is_fitted`.
+- The online SGD update and the pattern stats stay on the loop. They are
+  milliseconds, and they mutate state `predict` and `record_level_touch` read
+  there.

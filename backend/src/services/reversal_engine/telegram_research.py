@@ -290,7 +290,7 @@ async def run_nightly_research(engine) -> dict:
     re_db.set_config("ref_aggression_score", str(aggression))
 
     try:
-        re_ml.retrain_now()
+        await re_ml.retrain_async()  # off the loop: this runs at 22:00
         retrained = True
     except Exception as e:
         _log.warning("[RE-Research] retrain failed: %s", e)

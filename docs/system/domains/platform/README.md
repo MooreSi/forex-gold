@@ -389,3 +389,35 @@ any approved client.
   queueing code is still in `server.py`.
 - **The admin server has to be running this code.** The change is on the
   server's side. A server running `~/Forex-Update` still prompts.
+
+## Stalls and latency: the 2026-09-24 audit
+
+Measured from 14 days of logs, MetaTrader's own logs and live timings. The
+dashboard API answers in 1–60 ms and the bridge in 1–2 ms. What was slow:
+
+- **A backtest froze the whole process**: 86 s twice, 35 s three times. The
+  route called the walk inside `async def`. Each heavy step is now
+  `asyncio.to_thread`, so the loop keeps running, slower, because of the GIL.
+- **The ORB chart** (1.8 s at 08:15, and on every dashboard ORB refresh) is
+  drawn on a worker thread, and with matplotlib's object API rather than
+  pyplot. pyplot's figure registry is global and not thread-safe, and the two
+  callers can draw at once.
+- **The Reversal Engine retrain.** See the engines domain file.
+- **The 22:00 signal-scanner stall (1–7 s nightly) is still unattributed.**
+  The scanner does ~200 synchronous DB calls a cycle, and the worst stall
+  (4.9 s) sits just under `busy_timeout=5000`. That suggests a write waiting
+  on a lock, but the DB is WAL and it is unproven. `LoopMonitor` now finds out:
+  a sampler thread reads the loop thread's stack while it is stuck, and the
+  warning says `blocked in: file:line fn < caller ...`. Read the first 22:00
+  warning after this ships before changing the scanner.
+- **The bot token was in the local log** on every getUpdates poll (httpx logs
+  full URLs). `run._SecretScrubber` now scrubs every record before any handler
+  writes it. The 2026-09-12 fix only scrubbed the diagnostics upload.
+- **Broker execution got slow from the week of 14 Sep.** p90 went from
+  0.2–1.1 s to 7–9 s on the demo server, with the median unchanged. That is
+  outside the app. `python -m tools.order_latency_report` reads it from
+  MetaTrader's logs. Its effect on EA opens is
+  [045](../../../simon-handover/045-a-slow-broker-fill-leaves-a-trade-unmanaged-for-25-seconds.md).
+- Not changed: asyncio debug mode stays on (`loop_monitor.start`) for
+  slow-callback attribution. It records a creation traceback for every task,
+  which has a cost; the stack sampler may make it unnecessary.

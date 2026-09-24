@@ -11,6 +11,8 @@ argument for the strategy that was never tested.
 """
 from __future__ import annotations
 
+import asyncio
+
 import dataclasses
 import logging
 import time
@@ -73,7 +75,12 @@ async def run(body: BacktestRequest, eng: Any = Depends(engine_dep)) -> dict:
     if body.granularity not in GRANULARITIES:
         raise Refusal(f"Unknown granularity {body.granularity!r}.", status_code=400)
 
-    signals = bt_ctl.signals_from_db(body.live_trades_only)
+    # Every heavy step runs on a worker thread, never on the event loop. The
+    # walk is pure Python over tens of thousands of bars, and called inline it
+    # held the loop for up to 86 s (2026-09-22): no position monitor, no EA
+    # link, no Telegram for that long. A thread shares the GIL, so the loop
+    # runs slower during a backtest rather than not at all.
+    signals = await asyncio.to_thread(bt_ctl.signals_from_db, body.live_trades_only)
     if not signals:
         return {
             "results": [], "filtered": {}, "signals_loaded": 0, "candles_loaded": 0,
@@ -92,7 +99,8 @@ async def run(body: BacktestRequest, eng: Any = Depends(engine_dep)) -> dict:
 
     # Filtering is always against candles: it decides which signals fall inside
     # the window at all, and a tick range cannot answer that for a month.
-    kept, stats = bt_ctl.filter_signals(signals, candles, body.max_sl_pts)
+    kept, stats = await asyncio.to_thread(
+        bt_ctl.filter_signals, signals, candles, body.max_sl_pts)
 
     if body.granularity == "ticks":
         # The tick walk gets TICKS. Handing it candles produces a full set of
@@ -106,8 +114,8 @@ async def run(body: BacktestRequest, eng: Any = Depends(engine_dep)) -> dict:
                 "The bridge returned no ticks. Tick history is bounded to one "
                 "day per request and needs the MT5 bridge connected.",
             )
-        results = bt_ctl.run_backtest_ticks(
-            kept, ticks, body.strategies,
+        results = await asyncio.to_thread(
+            bt_ctl.run_backtest_ticks, kept, ticks, body.strategies,
             starting_balance=body.starting_balance,
             spread_pts=body.spread_pts,
             commission_per_lot=body.commission_per_lot,
@@ -123,8 +131,8 @@ async def run(body: BacktestRequest, eng: Any = Depends(engine_dep)) -> dict:
                      "to one day per request."),
         }
 
-    results = bt_ctl.run_backtest(
-        kept, candles, body.strategies,
+    results = await asyncio.to_thread(
+        bt_ctl.run_backtest, kept, candles, body.strategies,
         starting_balance=body.starting_balance,
         risk_pct=body.risk_pct,
         spread_pts=body.spread_pts,

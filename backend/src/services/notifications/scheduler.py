@@ -23,6 +23,8 @@ injectable for tests.
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import time
 from datetime import datetime
@@ -76,7 +78,9 @@ async def _run_orb_section(bridge: Any, cfg: dict, is_active_trader_node: bool,
             if db_module.get_app_config("email_last_orb") != uk_date_str:
                 report = await build_orb_report(bridge)
                 if report:
-                    chart_png = email_service.build_orb_chart_image(report)
+                    # ~1.8 s of matplotlib (2026-09-23 08:15) -- off the loop.
+                    chart_png = await asyncio.to_thread(
+                        email_service.build_orb_chart_image, report)
                     orb_html = email_service.build_orb_html(
                         report, uk_now.strftime("%A, %d %B %Y"),
                         has_chart=bool(chart_png),

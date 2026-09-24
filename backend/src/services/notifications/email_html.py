@@ -463,9 +463,12 @@ def build_orb_chart_image(report: dict) -> Optional[bytes]:
     if not candles or "or_start" not in report:
         return None
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        # The object API, not pyplot: pyplot keeps one global registry of
+        # open figures and is not thread-safe, and this is drawn on a worker
+        # thread -- the 08:15 email and the dashboard panel can draw at once.
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        from matplotlib.lines import Line2D
         from matplotlib.patches import Rectangle
         from matplotlib.dates import DateFormatter, date2num
         import io
@@ -480,7 +483,9 @@ def build_orb_chart_image(report: dict) -> Optional[bytes]:
         width = (x[1] - x[0]) * 0.7 if len(x) > 1 else 0.0006
         x_pad = (x[-1] - x[0]) * 0.18 if len(x) > 1 else 0.01  # room for right-edge annotations
 
-        fig, ax = plt.subplots(figsize=(9, 5), dpi=150)
+        fig = Figure(figsize=(9, 5), dpi=150)
+        FigureCanvasAgg(fig)
+        ax = fig.add_subplot()
         fig.patch.set_facecolor(_DARK)
         ax.set_facecolor(_DARK)
         ax.set_xlim(x[0] - width, x[-1] + x_pad)
@@ -488,7 +493,7 @@ def build_orb_chart_image(report: dict) -> Optional[bytes]:
         for xi, c in zip(x, candles):
             o, h, l, cl = c["open"], c["high"], c["low"], c["close"]
             color = _GREEN if cl >= o else _RED
-            ax.add_line(plt.Line2D([xi, xi], [l, h], color=color, linewidth=0.8))
+            ax.add_line(Line2D([xi, xi], [l, h], color=color, linewidth=0.8))
             body_bottom = min(o, cl)
             body_height = max(abs(cl - o), 0.02)
             ax.add_patch(Rectangle((xi - width / 2, body_bottom), width, body_height,
@@ -535,7 +540,6 @@ def build_orb_chart_image(report: dict) -> Optional[bytes]:
 
         buf = io.BytesIO()
         fig.savefig(buf, format="png", facecolor=fig.get_facecolor())
-        plt.close(fig)
         return buf.getvalue()
     except Exception as e:
         log.warning("[ORB] chart render failed: %s", e)

@@ -14,6 +14,11 @@ required — any AI agent or human reads the same files.
 | [reviews/](reviews/) | Point-in-time review snapshots | when auditing |
 | [todo/refactor/stage0/](todo/refactor/stage0/) | Audit trail of the 2026 refactor (was docs/history/refactor-2026/) — **read-only** | archaeology |
 
+`todo/`, `simon-handover/` and `reviews/` are private: they come from the
+private repo `MooreSi/forex-gold-notes`, attached by `tools/private_notes.sh`,
+and are not in the public repo. Without that repo, those links do not
+resolve. See CLAUDE.md, "Private notes".
+
 ## If you are an AI agent
 
 Read **[system/rules/00-start-here.md](system/rules/00-start-here.md)** first.

@@ -45,6 +45,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # docs/simon-handover, docs/todo and docs/reviews are private (CLAUDE.md,
+      # "Private notes") and are not in this repo. The suite reads them -- the
+      # demo runbook test, the doc-link gate -- so CI puts them back at the
+      # same paths. NOTES_TOKEN is a read-only token for forex-gold-notes. If
+      # it is missing this step fails, on purpose: skipping would turn those
+      # checks green by not running them.
+      - uses: actions/checkout@v5
+        with:
+          repository: MooreSi/forex-gold-notes
+          token: ${{ secrets.NOTES_TOKEN }}
+          path: .notes-checkout
+
+      - name: Put the private notes under docs/
+        shell: bash
+        run: |
+          for p in .notes-checkout/*; do cp -R "$p" docs/; done
+          rm -rf .notes-checkout
+          test -f docs/simon-handover/013-the-five-demos-runbook.md
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"

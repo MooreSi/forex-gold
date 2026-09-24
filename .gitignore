@@ -62,3 +62,13 @@ mql5/*.set
 frontend/node_modules/
 frontend/tsconfig.tsbuildinfo
 frontend/*.tsbuildinfo
+
+# ── Private notes ─────────────────────────────────────────────────────────────
+# The owner's Q&A, plan packs and review snapshots live in the private repo
+# MooreSi/forex-gold-notes, checked out at these same paths by
+# tools/private_notes.sh (its git directory is .notes.git/). See CLAUDE.md,
+# "Private notes".
+/.notes.git/
+/docs/simon-handover/
+/docs/todo/
+/docs/reviews/

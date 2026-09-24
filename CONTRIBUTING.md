@@ -59,7 +59,9 @@ protocol.
 
 The same applies to trading policy, risk numbers and anything about how the
 money behaves: those are the owner's decisions, and open ones live in
-`docs/simon-handover/`.
+`docs/simon-handover/`. That folder, `docs/todo/` and `docs/reviews/` are
+kept in a private repo and are not part of this one; ask the owner if you
+need what is in them.
 
 ## Running it locally
 

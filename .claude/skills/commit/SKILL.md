@@ -59,6 +59,12 @@ git commit -F <path-to-message-file>
 git status --short  # must be clean (or intentionally holding back files)
 ```
 
+`docs/todo/`, `docs/simon-handover/` and `docs/reviews/` (so PROGRESS.md
+too) belong to the private notes repo, which plain `git` ignores. Commit them
+separately with `git private add -A todo simon-handover reviews`,
+`git private commit -F <msgfile>` and `git private push`. See CLAUDE.md,
+"Private notes".
+
 Message shape: one imperative subject line; a body saying what shipped, what
 was deliberately NOT done, and the checks result. Never mention which AI
 model made the change. Separate restructuring commits from behaviour

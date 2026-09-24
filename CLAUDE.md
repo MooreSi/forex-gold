@@ -12,6 +12,14 @@ locally, current state, and where the work is tracked.
 **[docs/simon-handover/](docs/simon-handover/)** — the owner answers those; an agent can't. Choose a safe
 provisional default, proceed, and record the open decision.
 
+**Private notes.** `docs/simon-handover/`, `docs/todo/` and `docs/reviews/`
+are NOT in this repo (it is public). They live in the private repo
+`MooreSi/forex-gold-notes`, attached at the same paths. If those folders are
+missing, run `bash tools/private_notes.sh` once in this checkout (worktrees
+included). Changes to them are committed with `git private ...` (`status`,
+`add -A simon-handover todo reviews`, `commit -F`, `push`), not plain `git`;
+plain `git` ignores them. CI gets them through the `NOTES_TOKEN` secret.
+
 ---
 
 ## The five rules that matter most

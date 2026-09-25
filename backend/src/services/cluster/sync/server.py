@@ -245,6 +245,10 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
     def is_listening(self) -> bool:
         return getattr(self, "_server_obj", None) is not None
 
+    def set_token(self, token: str) -> None:
+        """A new pairing token, effective from the next handshake."""
+        self._token = token
+
     def _check_token(self, token: str) -> bool:
         import secrets as _secrets
         if not self._token or not token:

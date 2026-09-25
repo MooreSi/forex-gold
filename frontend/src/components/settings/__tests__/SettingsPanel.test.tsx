@@ -742,6 +742,38 @@ describe("remote node", () => {
       expect(screen.queryByRole("button", { name: "Make this node a VPS" })).toBeNull();
     });
 
+    // 2026-09-25: a VPS that kept its old token showed none, and the operator
+    // pasted the certificate fingerprint into the other machine's token box.
+    const openVps = async () => {
+      overrides["/api/remote/state"] = {
+        ...REMOTE, server: { ...REMOTE.server, enabled: true, running: true },
+      };
+      render(<SettingsPanel />);
+      await userEvent.click(await screen.findByRole("tab", { name: "Remote node" }));
+    };
+
+    it("makes a new pairing token on the VPS and shows it", async () => {
+      overrides["/api/node/sync-token"] = {
+        token: "brand-new-token", note: "Copy this into the other node now.",
+      };
+      await openVps();
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "New pairing token" }));
+
+      await waitFor(() => expect(writes()).toHaveLength(1));
+      expect(writes()[0][0]).toBe("/api/node/sync-token");
+      expect(await screen.findByTestId("remote-new-token"))
+        .toHaveTextContent("brand-new-token");
+    });
+
+    it("says the fingerprint is not the token", async () => {
+      await openVps();
+
+      expect(await screen.findByText(/Cert fingerprint/))
+        .toHaveTextContent(/not the pairing token/i);
+    });
+
     it("offers to open the port when the VPS's firewall rule is missing", async () => {
       overrides["/api/remote/state"] = {
         ...REMOTE,

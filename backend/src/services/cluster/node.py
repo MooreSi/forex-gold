@@ -22,7 +22,15 @@ def set_active_trader(value: str, *args, **kwargs):
 
 
 def generate_sync_token() -> str:
-    return _repo.generate_sync_token()
+    """Store a new token and hand it to the sync server if one is running,
+    which otherwise keeps checking the token it started with and refuses the
+    new one as "bad token" until a restart (2026-09-25)."""
+    token = _repo.generate_sync_token()
+    from backend.src.services.cluster.sync import server as _sync_server
+    srv = _sync_server.get_instance()
+    if srv is not None:
+        srv.set_token(token)
+    return token
 
 
 def get_sync_token() -> Optional[str]:

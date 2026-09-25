@@ -477,3 +477,11 @@ class TestStoppingBeingAVps:
         make_client().post("/api/remote/stop-vps", json={})
 
         assert vps["token"] == "vps-token"
+
+
+def test_keeping_an_existing_token_says_how_to_get_one(make_client, vps):
+    """2026-09-25: a VPS kept its 6.1-era token, so nothing was shown, and the
+    certificate fingerprint went into the other machine's token box instead."""
+    body = make_client().post("/api/remote/make-vps", json={"port": 8765}).json()
+
+    assert "New pairing token" in body["note"]

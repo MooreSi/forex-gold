@@ -38,6 +38,14 @@ export function RemoteServerSection({ server, busy, act }: Props) {
     return res;
   });
 
+  // Replaces the stored token; the running server takes it at once, and a
+  // machine paired with the old one must be given this one.
+  const newPairingToken = () => act(async () => {
+    const res = await api.post<{ note?: string; token?: string }>("/api/node/sync-token", {});
+    if (res?.token) setNewToken(res.token);
+    return res;
+  });
+
   return (
     <section data-testid="remote-server" className="rounded border border-line p-3">
       <h3 className="text-xs font-semibold text-ink-1">This machine accepts connections</h3>
@@ -48,10 +56,15 @@ export function RemoteServerSection({ server, busy, act }: Props) {
       </p>
       <div className="flex flex-wrap items-end gap-4">
         {isVps ? (
-          <Button variant="ghost" disabled={busy}
-            onClick={() => void act(() => api.post("/api/remote/stop-vps", {}))}>
-            Stop being a VPS
-          </Button>
+          <>
+            <Button variant="ghost" disabled={busy}
+              onClick={() => void act(() => api.post("/api/remote/stop-vps", {}))}>
+              Stop being a VPS
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => void newPairingToken()}>
+              New pairing token
+            </Button>
+          </>
         ) : (
           <Button disabled={busy} onClick={() => void makeVps()}>
             Make this node a VPS
@@ -87,7 +100,8 @@ export function RemoteServerSection({ server, busy, act }: Props) {
       {isVps && (
         <>
           <p className="mt-2 break-all font-mono text-[10px] text-ink-3">
-            Cert fingerprint: {server.fingerprint || "(generated on first start)"}
+            Cert fingerprint (not the pairing token; the other machine checks
+            it by itself): {server.fingerprint || "(generated on first start)"}
           </p>
           <RemoteReachabilitySection
             reach={asObject<Reachability>(server.reachability)}

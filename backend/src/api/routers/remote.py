@@ -185,6 +185,10 @@ async def make_vps(body: PortWrite, eng: Any = Depends(engine_dep)) -> dict:
                    + _FIREWALL_NOTE.get(firewall, "").format(port=port))
     if new_token:
         out["token"] = new_token
+    else:
+        out["note"] += (" The existing pairing token was kept, so it is not shown "
+                        "again. If the other machine does not have it, press New "
+                        "pairing token.")
     return out
 
 

@@ -4,6 +4,7 @@ import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatClock, formatPrice } from "@/components/shared/format";
 import { useSetForgetController } from "./hooks/useSetForgetController";
+import { AutoStatusLine, AutoToggle } from "./internal/AutoToggle";
 import { ConfluenceSection } from "./internal/ConfluenceSection";
 import { ExecuteSetupDialog } from "./internal/ExecuteSetupDialog";
 import { IndicatorStrip } from "./internal/IndicatorStrip";
@@ -20,7 +21,8 @@ import { StrategyBriefSection } from "./internal/StrategyBriefSection";
  * The section reads the chart for free and only bills when Evaluate is
  * pressed; Execute is gated behind a confirmation that names every number.
  * Everything that decides anything lives in the controller hook and the
- * backend — this file is the arrangement.
+ * backend — this file is the arrangement. "Auto" (2026-09-24) switches the
+ * backend's own 15-minute long scan; its refusals are server-side.
  */
 export function SetForgetPanel() {
   const c = useSetForgetController();
@@ -91,8 +93,11 @@ export function SetForgetPanel() {
             <Play size={12} />
             {candidate?.order_type === "limit" ? "Place limit order" : "Execute"}
           </Button>
+          <AutoToggle />
         </div>
       </header>
+
+      <AutoStatusLine />
 
       {/* Directly under the buttons, not at the foot of the page. Every one of
           these lines is the answer to something the operator just pressed, and

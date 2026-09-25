@@ -17,6 +17,7 @@ import json
 import logging
 import time as _time
 
+from backend.src.services.risk import lot_sizing
 from backend.src.services.risk import governor as _gov
 from backend.src.services.risk import capability_gates as _caps
 import time
@@ -97,7 +98,7 @@ class _LiveExecuteMixin:
             # core_internal_exposure_guard.py for the modes and for the
             # measured reason the default is off.
             from backend.src.services.positions.core_internal_exposure_guard import check_internal_exposure
-            _exp_lot = float(rs.get("strategy_lot_size", 0) or 0) or 0.01
+            _exp_lot = lot_sizing.global_fixed_lot(rs) or 0.01
             _exp_ok, _exp_reason = check_internal_exposure(
                 sig.get("direction", ""), _exp_lot, rs,
             )
@@ -139,6 +140,9 @@ class _LiveExecuteMixin:
             # etc.) rather than skipping the gates entirely.
             fresh_prob = sig.get("ml_prob")
             direction  = sig.get("direction")
+            # The fill-time vector for the proven-edge gate. Stays None when
+            # the re-evaluation below cannot run, and that gate refuses None.
+            _edge_feats = None
             try:
                 h1_candles  = await self._bridge.get_candles("H1", 50)
                 m15_candles = await self._bridge.get_candles("M15", 80)
@@ -276,6 +280,7 @@ class _LiveExecuteMixin:
                     from backend.src.services.reversal_engine import ml_engine as re_ml
                     win_rate = re_db.get_recent_win_rate(20)
                     fresh_feats = re_ml.extract_features(fresh_sig, win_rate)
+                    _edge_feats = fresh_feats
                     if fresh_feats:
                         _fp = re_ml.predict(fresh_feats)
                         if _fp is not None:
@@ -339,6 +344,19 @@ class _LiveExecuteMixin:
                 _log.info("[RE-Engine] entry trigger blocked live exec %s -- %s",
                           sig.get("signal_ref"), _trigger_reason)
                 return
+
+            # Proven edge (reversal-engine/240), off by default. Unlike every
+            # gate above, no answer is a refusal: on, nothing trades until
+            # the edge model has shown out of sample that the trades it takes
+            # make money on the template's own exits.
+            if _caps.require_proven_edge(rs):
+                from backend.src.services.reversal_engine import edge_model
+                _edge_ok, _edge_why, _ = edge_model.decide(_edge_feats)
+                if not _edge_ok:
+                    re_db.update_live_exec(sig["id"], status="skipped:unproven_edge")
+                    _log.info("[RE-Engine] proven-edge gate blocked live exec %s -- %s",
+                              sig.get("signal_ref"), _edge_why)
+                    return
 
             # The meta-labeller (section 5.2): act or do not act, as a
             # question of its own. None -- no opinion -- until it has costed

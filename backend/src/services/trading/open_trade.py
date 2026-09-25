@@ -35,6 +35,7 @@ from backend.src.services.trading.send_dedup import (
 )
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
+from backend.src.services.risk import lot_sizing
 from backend.src.services.risk.governor import is_trading_paused, price_in_entry_range
 from backend.src.utils.models import (
     Tick, CONTRACT_SIZE, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
@@ -275,6 +276,10 @@ async def open_trade(
     tg_source: Optional[str] = None,
     mt5_tp_override: Optional[float] = None,
 ) -> dict:
+    # A lot the broker would reject is refused by name before anything runs:
+    # a 0-lot template order reached MT5 as "invalid volume" (docs/todo/risk/010).
+    if not lot_size or lot_size < lot_sizing.MIN_LOT:
+        lot_sizing.refuse_unplaceable(lot_size, await db_module.to_db_thread(db_module.get_risk_settings))
     # Remote stand-down — the Local/Remote sync feature's mutual-exclusion
     # gate. Deliberately separate from the manual pause flag below: pause
     # can be cleared by the user's Resume button at any time, which must
@@ -571,13 +576,15 @@ async def open_trade(
                             _ea_template, entry_low, entry_high,
                         )
                 _ea_lot = lot_size
+                if _ea_template is not None:  # legs at lot_size unless the template sized it
+                    _ea_template = lot_sizing.ea_template_for_lot(ea_rs, _ea_template, lot_size)
                 if _ea_template is not None and _ea_template.get("mode") == "grid":
                     # Global Parameters > Fixed Lot Size (Grid) -- used for
                     # EACH leg the EA stages in HandleOpenTemplateGrid, in
                     # place of whatever lot_size normal (non-grid) sizing
                     # computed above. 0 (default) leaves lot_size untouched.
                     _grid_lot = float(ea_rs.get("strategy_lot_size_grid", 0))
-                    if _grid_lot > 0:
+                    if _grid_lot > 0 and lot_sizing.template_sizes_its_own_legs(ea_rs, _ea_template):
                         _ea_lot = _grid_lot
 
                     # ── Anchor legs: always take the market entry immediately ──

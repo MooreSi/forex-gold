@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { useSettingsResource } from "@/components/settings/hooks/useSettingsResource";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { RenameTemplateDialog } from "./RenameTemplateDialog";
@@ -44,6 +45,9 @@ export function TemplatesSection({
   templates, eaConnected, eaLastSeen, onSave, onDelete, onRename,
   onInstallBuiltin, onImported,
 }: TemplatesSectionProps) {
+  // Only to know whether Trading > Risk's EA template override is on, which
+  // greys out the template's own lot and risk % fields (risk/010).
+  const risk = useSettingsResource<Record<string, unknown>>("/api/settings/risk");
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [filter, setFilter] = useState("");
@@ -169,6 +173,7 @@ export function TemplatesSection({
                 schema={schema}
                 onSave={onSave}
                 onClose={() => setSelected(null)}
+                sizingOverridden={Boolean(Number(risk.data?.global_sizing_override ?? 0))}
               />
             )}
           </div>

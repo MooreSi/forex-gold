@@ -131,6 +131,43 @@ describe("usePoll", () => {
     expect(first).toHaveBeenCalledTimes(1);
   });
 
+  it("adopts the SHORTEST interval any live subscriber asked for", async () => {
+    // The interval used to be fixed when the entry was created, so whichever
+    // tab mounted FIRST decided the cadence for every later one. Visiting
+    // Trading (5s) and then the Dashboard (3s) left the Dashboard on 5s, and
+    // visiting them the other way round quietly sped Trading up -- neither
+    // visible anywhere. A screen that asks for a faster refresh has to get
+    // one, or asking is theatre.
+    const fetcher = vi.fn().mockResolvedValue(1);
+    const slow = renderHook(() => usePoll("cadence", fetcher, 5000));
+    await waitFor(() => expect(slow.result.current.data).toBe(1));
+
+    renderHook(() => usePoll("cadence", fetcher, 1000));
+    fetcher.mockClear();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes back to the slower interval when the fast subscriber leaves", async () => {
+    // Otherwise one visit to a fast screen speeds an endpoint up for the rest
+    // of the session. This one reaches the MT5 bridge, and an uncached read
+    // polled harder than anybody asked for is how bugs/030 stalled the event
+    // loop.
+    const fetcher = vi.fn().mockResolvedValue(1);
+    renderHook(() => usePoll("cadence-back", fetcher, 4000));
+    const fast = renderHook(() => usePoll("cadence-back", fetcher, 1000));
+    await waitFor(() => expect(fast.result.current.data).toBe(1));
+
+    fast.unmount();
+    fetcher.mockClear();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(fetcher).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("stops the interval when the last subscriber unmounts", async () => {
     const fetcher = vi.fn().mockResolvedValue(1);
     const { unmount } = renderHook(() => usePoll("lonely", fetcher, 100));

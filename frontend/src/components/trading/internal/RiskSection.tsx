@@ -4,6 +4,7 @@ import { useSettingsResource } from "@/components/settings/hooks/useSettingsReso
 import { SettingsField } from "@/components/settings/internal/SettingsField";
 import { SettingsToggle } from "@/components/settings/internal/SettingsToggle";
 import { RISK_GROUPS, type RiskField } from "../content/risk";
+import { PerTradeSizingSection } from "./PerTradeSizingSection";
 
 /**
  * The numbers that decide how much money a trade can lose.
@@ -122,8 +123,14 @@ export function RiskSection() {
           {group.blurb && (
             <p className="mb-2 text-[11px] text-ink-3">{group.blurb}</p>
           )}
+          {group.fields.some((f) => f.sizing) && (
+            <div className="mb-3">
+              <PerTradeSizingSection data={data} version={risk.version}
+                save={(body) => risk.save(body)} />
+            </div>
+          )}
           <div className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {group.fields.map(field)}
+            {group.fields.filter((f) => !f.sizing).map(field)}
           </div>
         </section>
       ))}

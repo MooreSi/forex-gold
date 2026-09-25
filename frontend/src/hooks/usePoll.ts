@@ -21,10 +21,24 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
+type Subscriber<T> = (state: PollState<T>) => void;
+
 interface PollEntry<T> {
   fetcher: () => Promise<T>;
+  /**
+   * The cadence currently running: the SHORTEST any live subscriber asked
+   * for. Derived from `subscribers`, never set directly — see `syncTimer`.
+   */
   intervalMs: number;
-  subscribers: Set<(state: PollState<T>) => void>;
+  /**
+   * Subscriber -> the interval THAT subscriber asked for.
+   *
+   * A Map rather than a Set because the interval belongs to the subscriber,
+   * not to the key. It used to belong to the key, fixed by whoever created
+   * the entry first, which made the cadence depend on the order tabs were
+   * visited in. See `syncTimer`.
+   */
+  subscribers: Map<Subscriber<T>, number>;
   state: PollState<T>;
   timer: ReturnType<typeof setInterval> | null;
   inFlight: Promise<void> | null;
@@ -41,7 +55,7 @@ export interface PollState<T> {
 const registry = new Map<string, PollEntry<unknown>>();
 
 function emit<T>(entry: PollEntry<T>) {
-  entry.subscribers.forEach((s) => s(entry.state));
+  entry.subscribers.forEach((_interval, listener) => listener(entry.state));
 }
 
 function runOnce<T>(entry: PollEntry<T>): Promise<void> {
@@ -81,6 +95,32 @@ function startTimer<T>(entry: PollEntry<T>) {
   }, entry.intervalMs);
 }
 
+/**
+ * Run at the shortest cadence any live subscriber asked for.
+ *
+ * The interval used to be fixed when the entry was created and every later
+ * subscriber's was ignored, so the cadence of a shared key depended on which
+ * tab had been opened first. The Dashboard asking for a 3s refresh of the
+ * open positions got 5s if Trading had been visited before it, and Trading
+ * silently got 3s if it had not — neither of them visible anywhere.
+ *
+ * It falls back when the fast subscriber leaves, deliberately: this key
+ * reaches the MT5 bridge uncached, and one visit to a fast screen must not
+ * leave an endpoint polled harder than anybody is asking for it (bugs/030 is
+ * what that costs).
+ */
+function syncTimer<T>(entry: PollEntry<T>) {
+  if (entry.subscribers.size === 0) {
+    stopTimer(entry);
+    return;
+  }
+  const wanted = Math.min(...entry.subscribers.values());
+  if (entry.timer !== null && wanted === entry.intervalMs) return;
+  stopTimer(entry);
+  entry.intervalMs = wanted;
+  startTimer(entry);
+}
+
 function stopTimer<T>(entry: PollEntry<T>) {
   if (entry.timer === null) return;
   clearInterval(entry.timer);
@@ -102,7 +142,7 @@ function entryFor<T>(
   const entry: PollEntry<T> = {
     fetcher,
     intervalMs,
-    subscribers: new Set(),
+    subscribers: new Map(),
     state: { data: null, error: null, loading: false, updatedAt: null },
     timer: null,
     inFlight: null,
@@ -133,18 +173,20 @@ export function usePoll<T>(
   entry.fetcher = fetcher;
 
   useEffect(() => {
-    entry.subscribers.add(setState);
+    entry.subscribers.set(setState, intervalMs);
     setState(entry.state);
     // Populate before the first tick, exactly as the NiceGUI pages did with
     // `ensure_future(_refresh())` beside `ui.timer(n, _refresh)`. Without it
     // the panel is empty for a whole interval on every page load.
     if (entry.state.updatedAt === null) void runOnce(entry);
-    startTimer(entry);
+    syncTimer(entry);
     return () => {
       entry.subscribers.delete(setState);
-      if (entry.subscribers.size === 0) stopTimer(entry);
+      // Not just "stop if nobody is left": a fast subscriber leaving must
+      // hand the key back to the slower ones rather than keep their cadence.
+      syncTimer(entry);
     };
-  }, [entry]);
+  }, [entry, intervalMs]);
 
   useEffect(() => {
     const onVisible = () => {

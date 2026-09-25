@@ -48,6 +48,7 @@ from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.risk import governor as _gov
+from backend.src.services.risk import lot_sizing
 from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
     Tick,
@@ -482,20 +483,15 @@ async def _execute_auto_signal(
                         if ea_templates.is_template_override(strategy):
                             _tpl_for_sizing = ea_templates.get_ea_template(
                                 ea_templates.template_name_from_override(strategy))
+                        # One decision for every order path: lot_sizing (docs/todo/risk/010).
                         if _tpl_for_sizing is not None:
-                            _tpl_risk_pct = float(_tpl_for_sizing.get("risk_pct") or 0)
-                            if _tpl_risk_pct > 0:
-                                lot = suggest_lot_size_fn(
-                                    entry_mid, float(parsed["stop_loss"]), balance, _tpl_risk_pct)
-                            else:
-                                _max_lot = float(rs.get("max_lot_size", 0.10))
-                                lot = min(float(_tpl_for_sizing.get("lot_anchor") or 0.01), _max_lot)
+                            lot = lot_sizing.template_lot(
+                                rs, _tpl_for_sizing, entry_mid, float(parsed["stop_loss"]),
+                                balance, suggest_lot_size_fn).lot
                         else:
-                            lot = suggest_lot_size_fn(entry_mid, float(parsed["stop_loss"]),
-                                                      balance, float(rs.get("risk_per_trade_pct", 0.5)))
-                            strategy_lot = float(rs.get("strategy_lot_size", 0))
-                            if strategy_lot > 0:
-                                lot = strategy_lot
+                            lot = (lot_sizing.global_fixed_lot(rs)
+                                   or suggest_lot_size_fn(entry_mid, float(parsed["stop_loss"]),
+                                                          balance, lot_sizing.global_risk_pct(rs)))
 
                         direction = parsed["direction"]
                         el = float(parsed["entry_low"])

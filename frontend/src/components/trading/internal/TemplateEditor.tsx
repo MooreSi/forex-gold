@@ -22,7 +22,14 @@ interface TemplateEditorProps {
   schema: SchemaField[];
   onSave: (name: string, values: Record<string, unknown>) => Promise<{ pushed: boolean }>;
   onClose: () => void;
+  /** Trading > Risk's EA template override is on, so this template's own
+   *  lots and risk % size nothing. They stay editable-looking at your peril,
+   *  so they are shown greyed out, with their values kept. */
+  sizingOverridden?: boolean;
 }
+
+/** The fields the EA template override replaces (docs/todo/risk/010). */
+const SIZING_FIELDS = new Set(["lot_anchor", "lot_pending", "risk_pct"]);
 
 /**
  * The EA template form.
@@ -71,15 +78,17 @@ function coerce(field: SchemaField, raw: string | boolean): unknown {
   return field.type === "integer" ? Math.round(n) : n;
 }
 
-function Field({ field, value, onChange }: {
+function Field({ field, value, onChange, overriddenBy }: {
   field: SchemaField;
   value: string | boolean;
   onChange: (v: string | boolean) => void;
+  /** Why this field sizes nothing right now, when it does not. */
+  overriddenBy?: string;
 }) {
   const id = `tpl-${field.name}`;
   const label = labelFor(field.name);
   const unit = FIELD_UNITS[field.name];
-  const hint = FIELD_HINTS[field.name];
+  const hint = overriddenBy ?? FIELD_HINTS[field.name];
 
   if (field.type === "boolean") {
     return (
@@ -103,7 +112,7 @@ function Field({ field, value, onChange }: {
   }
 
   return (
-    <div className="py-1">
+    <div className={cn("py-1", overriddenBy && "opacity-60")} data-overridden={overriddenBy ? "true" : undefined}>
       <label htmlFor={id} className="block text-[11px] text-ink-2">{label}</label>
       <div className="mt-0.5 flex items-center gap-1.5">
         {field.type === "choice" ? (
@@ -124,6 +133,7 @@ function Field({ field, value, onChange }: {
               id={id}
               aria-label={label}
               inputMode="decimal"
+              disabled={Boolean(overriddenBy)}
               value={String(value)}
               onChange={(e) => onChange(e.target.value)}
               className="num w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
@@ -142,7 +152,7 @@ function Field({ field, value, onChange }: {
 }
 
 export function TemplateEditor({
-  name, values, schema, onSave, onClose,
+  name, values, schema, onSave, onClose, sizingOverridden = false,
 }: TemplateEditorProps) {
   const [draft, setDraft] = useState(() => initialDraft(values, schema));
   const [search, setSearch] = useState("");
@@ -266,6 +276,9 @@ export function TemplateEditor({
                         field={field}
                         value={draft[field.name]}
                         onChange={(v) => setDraft((d) => ({ ...d, [field.name]: v }))}
+                        overriddenBy={sizingOverridden && SIZING_FIELDS.has(field.name)
+                          ? "Not in use: the EA template override on Trading > Risk sizes every trade."
+                          : undefined}
                       />
                     ))}
                   </div>

@@ -12,9 +12,10 @@ A section of the Trading tab that reads gold top-down the way Alex G
 (fxalexg / Swing Trading Lab) teaches it, proposes one trade, optionally has the
 configured AI review that proposal, and hands it to the operator to place.
 
-**It is not an engine.** Nothing here runs unattended, nothing polls for
-setups on its own behalf, and there is no scheduler. Every order starts with a
-person reading the card and pressing a button.
+**One part of it is an engine now: "Auto" (2026-09-24).** Everything else on
+the page waits for a person. Auto, when switched on, scans every 15 minutes
+for a LONG and places it when the rules and the AI agree -- demo account
+only. See "Auto" below. With Auto off, nothing here runs unattended.
 
 ## Where the code lives
 
@@ -468,3 +469,91 @@ selector and the confluence grid, some two thousand pixels below the button
 that had just been pressed. **An answer to a control belongs beside the
 control.** Same rule as `disabledReason`: a message the operator has to go
 looking for is a message that was not sent.
+
+## Why the page never offered a setup, and the fix (2026-09-24)
+
+Owner: "it hasn't provided any setups when I expect it should deliver several
+long setups each day". Measured by replaying the production rules on real
+gold candles from the bridge (1,500 D1, 3,000 H4, 12,000 M30) at every 4H
+close for 240 days -- 1,440 reads:
+
+| Refusal | Reads |
+|---|---|
+| Weekly and Daily disagree | 901 (63%) |
+| Both bearish, no usable supply above | 366 |
+| Both bullish, no usable demand below | 121 |
+| Both ranging | 52 |
+| **A candidate of any stage** | **0** |
+
+The zones were the defect. `aoi.zones` spans each swing candle's BODY and
+merges bands that overlap; gold's daily bodies are 50-150 points and overlap
+in a trend, so the merge chained them into bands 80-500 points wide, and
+`propose` refused every one as wider than `MAX_ZONE_WIDTH_PCT`. Sampled every
+ten days, 24 of 25 dates had **no** usable zone on the chart.
+
+**Fix:** `aoi.levels` clusters the turning points themselves -- each swing
+candle's body edge on the wick side -- and a cluster never grows wider than
+`LEVEL_WIDTH_PCT` (0.8% of price, ~$34). Three turns inside that band are a
+level; scattered turns are not. The side of price decides the kind (role
+reversal: old resistance below price is support). `gather` passes
+`cluster_width_pct` to `aoi.mark`; without it `mark` is unchanged, so every
+older caller and test still reads body bands. Pinned by
+`tests/services/setforget/test_levels.py`, including the live failure.
+
+**What the fixed rules would have done** (replay, 330 days, first-touch
+stop/target on M30, one trade at a time):
+
+| Rule | Trades | Won | Net |
+|---|---|---|---|
+| Faithful (Weekly = Daily), 0.8% levels | 16 | 2 | -7.4R |
+| Daily bias only, 0.8% levels | 18 | 3 | -6.3R |
+| Longs at any demand zone, 0.8% | 22 | 3 | -6.7R |
+| Longs at any demand zone, 1.5% | 24 | 2 | -12.6R |
+
+So: about two setups a MONTH, not several a day, and losing before any AI
+filter. The target is the next opposing level, often 5-15R away, and few
+reach it. The guide's own cadence is "1-2 trades per week (at most)", and the
+page is now capable of that; "several longs a day" is not this method.
+
+## Auto (2026-09-24)
+
+The owner's spec, same day: an "Auto" button; every 15 minutes review the
+market with the AI for a LONG, and execute when there is one. His answers to
+the two policy questions: **longs at any validated demand zone whatever the
+higher-timeframe bias, the AI decides**; **at most two a day**, one open at a
+time.
+
+| Piece | File |
+|---|---|
+| The scan, its refusals, the order | `services/setforget/auto.py` |
+| Its two ledger counts | `services/setforget/auto_repo.py` |
+| Switch and status | `controllers/setforget_auto_controller.py`, `api/routers/setforget_auto.py` |
+| Loop start | `app.startup` -> `auto.run_forever` |
+| Button | `frontend/src/components/setforget/internal/AutoToggle.tsx` |
+
+Refusals, in order: off; account not `demo`; two Auto trades today (UTC day)
+or one still open; no AI configured; the rules give no long, or it has not
+TRIGGERED on the 30m, or it breaks a rule; the AI does not say take/adjust, or
+its adjusted entry is away from price; the stop would risk more than
+`MAX_RISK_PCT` (5%) of the balance at the lot sent.
+
+**Still one order path.** Auto orders through `engine.open_manual_market_order`,
+what `/orders/market` reaches, tagged `tg_source = "Set & Forget Auto"`, which
+is how `auto_repo` counts it. The switch has its own router because
+`setforget.py`'s route list is pinned to reads and a setting.
+
+**`analysis.propose(evidence, direction=...)`** skips the bias gate for the
+direction given. Only Auto passes it; the page's own read keeps the method's
+Weekly = Daily rule. **`analysis.review`** is the AI review split out of
+`evaluate` so Auto is judged by the page's own prompt and re-validation.
+
+**Live is refused by design.** Turning it on for live needs the owner's
+sign-off after a demo session (CLAUDE.md, rules/20).
+
+**Telegram title (2026-09-25).** `manual_market_order` announced every
+non-manual source as "ORB/IVB Trade Executed", so both Set & Forget paths
+were posted as ORB trades. `manual_market_order.telegram_title` now gives any
+source starting "Set & Forget" the title "Set & Forget Executed" (owner's
+wording); the manual and ORB titles are unchanged. Only the message text
+changed, nothing about the order. Pinned by
+`tests/core/test_manual_market_order_telegram_title.py`.

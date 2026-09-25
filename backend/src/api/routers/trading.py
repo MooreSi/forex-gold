@@ -29,7 +29,10 @@ async def risk_settings() -> dict:
 
 @router.put("/risk")
 async def update_risk_settings(body: RiskSettingsUpdate) -> dict:
-    trading_ctl.update_risk_settings(body.model_dump())
+    try:
+        trading_ctl.update_risk_settings(body.model_dump())
+    except ValueError as exc:
+        raise Refusal(str(exc), status_code=400) from exc
     return await trading_ctl.get_risk_settings_async()
 
 

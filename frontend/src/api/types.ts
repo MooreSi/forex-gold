@@ -402,3 +402,16 @@ export interface SetForgetState {
   ai_provider: string;
   ai_model: string;
 }
+
+/** Set & Forget "Auto": the backend's 15-minute long scan, and its last word. */
+export interface SetForgetAutoStatus {
+  enabled: boolean;
+  /** placed | no_setup | ai_declined | refused | failed | off, or null before
+   *  the first scan. */
+  decision: string | null;
+  reason: string;
+  last_run: number | null;
+  next_run?: number | null;
+  interval_s: number;
+  max_trades_per_day: number;
+}

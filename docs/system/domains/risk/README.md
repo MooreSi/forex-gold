@@ -194,3 +194,48 @@ capability's), and `tests/risk/test_sizing_policy_respects_the_lot_ceiling.py`
 holds the negative control that shows the 0.15. Nothing caught this because
 `apply` still has no callers: an unwired module gets no test pressure from its
 call sites, so its own tests are all it has.
+
+## One per-trade size, and the EA template override (2026-09-25)
+
+`services/risk/lot_sizing.py` is the one place that decides which number sizes
+a trade (docs/todo/risk/010). Before it, five order paths each carried a copy
+of the precedence, and they disagreed: on 2026-09-24 Gold Diggers VIP's
+template (anchor 0.1) was capped by a Maximum lot size of 0 and the immediate
+Telegram path sent MT5 **0 lots** twice ("invalid volume"), while the queued
+path treated the same 0 as "size from risk %".
+
+Load-bearing properties:
+
+- **Risk % or Fixed lots, by construction.** Fixed lots is live exactly when
+  `strategy_lot_size > 0` -- how every reader already read it. There is no
+  mode column on purpose: the first version of this work added one, and 8
+  existing tests (plus any paired node on an older build) that set
+  `strategy_lot_size` alone stopped meaning "fixed lot wins". Choosing Risk %
+  on the Risk tab writes 0 and parks the lot in `strategy_lot_size_parked`,
+  which only the screen reads.
+- **`global_sizing_override`** (off) makes every automated trade -- immediate,
+  queued (all engines), limit, IME, grid legs -- use the global size instead of
+  the template's `lot_anchor`/`risk_pct`. Risk % is the TOTAL for a grid
+  signal, split across its legs; Fixed lots is per leg (owner, 2026-09-25). A
+  lot a person typed (`lot_size_override`, manual orders) always wins. ORB and
+  Set & Forget never call this module. With the override on, a lot or risk %
+  the app stored on the signal (Telegram auto-sizing, the Breakout Engine's
+  ML/Kelly lot) is ignored and re-sized.
+- **The EA prefers a template's own leg lots.** `HandleOpenTemplateGrid` uses
+  `tpl_lot_anchor`/`tpl_lot_pending` whenever they are non-zero and only falls
+  back to the lot it is sent. `ea_template_for_lot` therefore rewrites the COPY
+  sent to the EA whenever the template is not the source of the size -- which
+  also fixes a template `risk_pct` that grids silently ignored.
+- **A 0-lot trade is refused by name** at the top of `open_trade` (and in the
+  limit path), before the stand-down check and before any bridge call. The
+  queued path refuses too rather than falling back to risk %.
+- **Settings validation** (`settings.update`) refuses a Maximum lot size below
+  0.01, a fixed lot below 0.01 or above the maximum -- checking only the keys a
+  save touches, so an old bad value never blocks an unrelated save.
+
+Behaviour that changed with the override OFF, deliberately: a template
+`risk_pct` now sizes the IME path (it was a 0.01 placeholder nothing
+recomputed) and grid legs (the EA ignored it). No template on the live
+install had `risk_pct > 0` on either path when this landed.
+
+Needs a demo session before the override is switched on for the live account.

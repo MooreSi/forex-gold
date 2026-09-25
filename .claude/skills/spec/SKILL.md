@@ -130,6 +130,8 @@ Print the pack tree, then:
   starts.
 - If any task is money-touching, name those tasks and say they route through `/safe-change` and need
   a demo session.
+- Commit and push the pack to the notes repo (`git private add todo/<domain>/<feature>`,
+  `git private commit -F <msgfile>`, `git private push`). See the rule below.
 
 **Stop.** The user holds the next move.
 
@@ -170,6 +172,10 @@ Never touch `docs/todo/refactor/stage0/` at any point — it is an audit trail.
 - **Money-touching is declared, not discovered.** The README header and every affected task say so.
   A pack that quietly reshapes the close path is the exact failure this repo's rules exist to stop.
 - **Answered questions are annotated, not deleted** (in `QUESTIONS.md` and the README short list).
+- **Every change to the pack is pushed to the notes repo in the same session.** `docs/todo/` is
+  the private repo `MooreSi/forex-gold-notes`: scaffolding, PROGRESS rows, QUESTIONS answers,
+  status changes and `/spec done` deletions all go out with `git private add` /
+  `commit -F` / `push`, whether or not a code commit follows. Stage only your own files.
 - **User-facing copy is the user's, not yours.** Never invent the strings a UI shows and treat them
   as settled — put them in `QUESTIONS.md` for the user to confirm.
 

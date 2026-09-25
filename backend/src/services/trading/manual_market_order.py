@@ -21,6 +21,7 @@ import time
 import uuid
 from typing import Any, Awaitable, Callable, Optional
 
+from backend.src.services.risk import lot_sizing
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.dpm import engine as dpm_engine
@@ -29,6 +30,20 @@ from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
 from backend.src.services.trading.open_trade import open_trade
 from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_NAMES
+
+
+def telegram_title(source_name: str) -> str:
+    """The title a market order is announced under on Telegram.
+
+    Set & Forget -- its Execute button and its Auto scan -- has its own
+    (owner, 2026-09-25). Until then every caller that was not the plain
+    Market Order dialog was announced as an ORB/IVB trade.
+    """
+    if source_name == "manual_market":
+        return "*Manual Market Order Placed*"
+    if source_name.startswith("Set & Forget"):
+        return "*Set & Forget Executed*"
+    return "*ORB/IVB Trade Executed*"
 
 
 async def open_manual_market_order(
@@ -113,7 +128,7 @@ async def open_manual_market_order(
 
     # Resolve lot size
     strategy = strategy or rs.get("trade_strategy", STRATEGY_SCALE_OUT)
-    strategy_lot = float(rs.get("strategy_lot_size", 0))
+    strategy_lot = lot_sizing.global_fixed_lot(rs)  # 0 unless Fixed lots mode
     if lot_size and float(lot_size) > 0:
         final_lot = round(float(lot_size), 2)
     elif strategy_lot > 0:
@@ -144,7 +159,7 @@ async def open_manual_market_order(
     dpm_label    = "DPM" if dpm_on else STRATEGY_NAMES.get(strategy, strategy)
     sl_label     = f"{sl:.2f}" if sl else "none"
     tp_line      = f"\nTarget: ${take_profit:.2f}" if take_profit else ""
-    _title       = "*ORB/IVB Trade Executed*" if source_name != "manual_market" else "*Manual Market Order Placed*"
+    _title       = telegram_title(source_name)
     _tg_text = (
         f"{_title}\n"
         f"Direction: {direction}  |  Lots: {final_lot}\n"

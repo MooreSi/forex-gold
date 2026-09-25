@@ -19,6 +19,7 @@ import asyncio
 import logging
 
 from backend.src.services.risk import governor as _gov
+from backend.src.services.risk import lot_sizing
 import time
 import uuid
 from typing import Any, Optional
@@ -28,6 +29,7 @@ from backend.src.services.trading import trade_repo
 from backend.src.services.dpm import engine as dpm_engine
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
+from backend.src.services.trading.fees_sizing import suggest_lot_size
 from backend.src.services.trading.open_trade import open_trade
 from backend.src.services.analytics.reporting import get_open_trades
 from backend.src.services.trading import signal_state_repo as _slots
@@ -341,21 +343,10 @@ async def process_instant_entry(
         log.info("[IME] Instant %s — max_trades (%d) reached, skipped", direction, max_trades)
         _dl(False, f"max open trades ({max_trades}) reached", tick=tick)
         return
-    strategy_lot = float(rs.get("strategy_lot_size", 0))
-    if _template_ime is not None:
-        # Templates size from their own Entries & Lots fields even on the
-        # IME path -- this used to hardcode 0.01 (or the global fixed lot)
-        # regardless of the template's configured Anchor Lot, same gap as
-        # the full-signal and immediate-grid-placement paths. See
-        # core_signal_resolution.py's matching fix for the full reasoning.
-        _tpl_risk_ime = float(_template_ime.get("risk_pct") or 0)
-        if _tpl_risk_ime <= 0:
-            lot = min(float(_template_ime.get("lot_anchor") or 0.01),
-                     float(rs.get("max_lot_size", 0.10)))
-        else:
-            lot = 0.01  # placeholder -- the risk_pct>0 branches below recompute it
-    else:
-        lot = strategy_lot if strategy_lot > 0 else 0.01
+    strategy_lot = lot_sizing.global_fixed_lot(rs)
+    # A template's lot is decided below, once its own stop is known, by
+    # lot_sizing -- the same rule every other order path uses (risk/010).
+    lot = 0.01 if _template_ime is not None else (strategy_lot if strategy_lot > 0 else 0.01)
     # Use the signalled price as the entry reference if one was provided.
     # Execution is always at market; the price is used for entry_low/high only.
     market_px = tick.ask if direction == "BUY" else tick.bid
@@ -412,6 +403,11 @@ async def process_instant_entry(
         provisional_sl = round(
             entry_px - _IME_SL_DIST if direction == "BUY" else entry_px + _IME_SL_DIST, 2
         )
+        # Sized from the template's own stop. A template risk % used to be
+        # left at a 0.01 placeholder here that nothing recomputed.
+        lot = lot_sizing.template_lot(
+            rs, _template_ime, entry_px, provisional_sl,
+            await get_trading_balance(bridge, starting_balance), suggest_lot_size).lot
         _ime_max_loss = round(_IME_SL_DIST * lot * 100.0, 2)
     elif bool(rs.get("risk_governor_enabled", 0)):
         # Tier 1 Risk Governor: compute ATR-based provisional SL distance.

@@ -18,6 +18,7 @@ from typing import Optional
 
 from backend.src.db import transaction
 from backend.src.db import database as db_module
+from backend.src.services.signals.outcomes import attach as attach_outcomes
 from backend.src.services.signals.parser import validate_signal
 
 
@@ -48,6 +49,36 @@ def create_signal(source_name: str, direction: str, entry_low: float,
     return {"signal_id": signal_id, "status": "pending"}
 
 
+def trade_totals_by_signal() -> list[dict]:
+    """Per signal: the net P&L of its trades, and how many of them are done.
+
+    The DATA half of "did this signal win". The RULE that turns these numbers
+    into a word lives in `outcomes.py`, which has no SQL in it -- SQL belongs
+    to a repo and nowhere else, and the structure gate enforces that at a
+    count it will not let rise.
+
+    `status='closed'` is counted rather than filtered in the WHERE, because a
+    signal with one closed trade and one still open has NOT finished:
+    filtering would hand back the closed half as if it were the whole result.
+    `legs` against `closed_legs` is what lets the caller see that.
+
+    One grouped query for the whole table, not a lookup per signal. The
+    owner's database holds 608 signals and this read is polled every ten
+    seconds by an open Dashboard.
+    """
+    with db_module.db() as conn:
+        rows = conn.execute(
+            "SELECT signal_id, "
+            "       SUM(CASE WHEN status = 'closed' THEN net_pnl ELSE 0 END) AS net, "
+            "       COUNT(*) AS legs, "
+            "       SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_legs "
+            "FROM vantage_simulated_trades "
+            "WHERE signal_id IS NOT NULL "
+            "GROUP BY signal_id"
+        ).fetchall()
+    return [db_module.row_to_dict(r) for r in rows]
+
+
 def get_signals(status: Optional[str] = None) -> list[dict]:
     with db_module.db() as conn:
         # rowid DESC is the tie-break: created_at is float seconds, so two
@@ -71,7 +102,12 @@ def get_signals(status: Optional[str] = None) -> list[dict]:
                 r["claude_commentary"] = json.loads(r["claude_commentary"])
             except Exception:
                 pass
-    return result
+    # What actually happened to each signal -- won, lost or flat -- from the
+    # trades it produced. Attached to THIS read rather than fetched separately
+    # by the screens that want it, so the Dashboard's feed and the Trading
+    # tab's Signals table cannot disagree about the same signal. One grouped
+    # query for the whole list; see services/signals/outcomes.py.
+    return attach_outcomes(result)
 
 
 def activate_signal(signal_id: str) -> None:

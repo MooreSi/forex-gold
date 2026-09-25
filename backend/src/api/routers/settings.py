@@ -90,7 +90,10 @@ async def update_risk(body: ConfigWrite) -> dict:
     The echo is the point: the risk service clamps and normalises, so what was
     typed and what the engine will use are not always the same number.
     """
-    settings_ctl.update_risk_settings(dict(body.model_dump()))
+    try:
+        settings_ctl.update_risk_settings(dict(body.model_dump()))
+    except ValueError as exc:
+        raise Refusal(str(exc), status_code=400) from exc
     return settings_ctl.get_risk_settings()
 
 

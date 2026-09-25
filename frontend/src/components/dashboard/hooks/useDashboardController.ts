@@ -11,6 +11,24 @@ import type { Candle, HistoryState, NewsState, SetForgetState, Trade } from "@/a
 export const DASHBOARD_DAYS = 30;
 
 /**
+ * How often the open positions are re-read, in ms.
+ *
+ * The Trading tab asks for these every 5s. The Dashboard is the screen left
+ * open while a position runs, so it asks for 3s — the cadence the chart's own
+ * tick poll already uses, which is what the running P&L moves with. Since
+ * 2026-09-23 `usePoll` gives a shared key the SHORTEST interval any live
+ * subscriber asked for, so this is honoured whichever tab was opened first;
+ * before that it silently depended on the order.
+ *
+ * **Not faster than this.** `/api/trading/trades` reaches the MT5 bridge with
+ * no cache in front of it, and uncached per-panel polling of the bridge is
+ * what stalled the event loop in bugs/030 — 388 round trips in 25 seconds.
+ * The number this screen shows is the broker's own, so polling faster than
+ * the broker's price arrives buys nothing and costs the bridge.
+ */
+export const POSITIONS_INTERVAL_MS = 3_000;
+
+/**
  * How many daily candles to ask for when one is wanted.
  *
  * `/api/chart/candles` validates `count` as `ge=10`. Asking for fewer is a
@@ -71,7 +89,7 @@ export function useDashboardController() {
   const positions = usePoll<Trade[]>(
     "trading/trades",
     useCallback(() => api.get<Trade[]>("/api/trading/trades"), []),
-    5_000,
+    POSITIONS_INTERVAL_MS,
   );
 
   const signals = usePoll<Record<string, unknown>[]>(

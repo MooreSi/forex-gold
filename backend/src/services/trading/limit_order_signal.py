@@ -54,6 +54,7 @@ import json
 import logging
 
 from backend.src.services.risk import governor as _gov
+from backend.src.services.risk import lot_sizing
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -349,19 +350,18 @@ async def handle_limit_order_signal(
     # applies on the market path (limit-orders/020). risk_pct wins when set;
     # otherwise the anchor lot, capped at the account's own ceiling so a
     # template edited to a large anchor cannot walk past it.
+    # The EA template override, and the one-or-the-other Risk % / Fixed lots
+    # choice, are decided in lot_sizing for every order path (risk/010).
     if _template is not None:
-        _tpl_risk_pct = float(_template.get("risk_pct") or 0)
-        if _tpl_risk_pct > 0:
-            lot = suggest_lot_size_fn(price, stop_loss, balance, _tpl_risk_pct)
-        else:
-            lot = min(float(_template.get("lot_anchor") or 0.01),
-                      float(rs.get("max_lot_size", 0.10)))
+        lot = lot_sizing.template_lot(rs, _template, price, stop_loss, balance,
+                                      suggest_lot_size_fn).lot
     else:
-        lot = suggest_lot_size_fn(price, stop_loss, balance,
-                                  float(rs.get("risk_per_trade_pct", 0.5)))
-        strategy_lot = float(rs.get("strategy_lot_size", 0))
-        if strategy_lot > 0:
-            lot = strategy_lot
+        lot = (lot_sizing.global_fixed_lot(rs)
+               or suggest_lot_size_fn(price, stop_loss, balance, lot_sizing.global_risk_pct(rs)))
+    try:
+        lot_sizing.refuse_unplaceable(lot, rs)
+    except lot_sizing.UnplaceableLot as exc:
+        return {"skip_reason": f"Limit order skipped — {exc}"}
 
     if bool(rs.get("lk_entry_realignment", 0)) and bridge is not None:
         tick = await bridge.get_tick()

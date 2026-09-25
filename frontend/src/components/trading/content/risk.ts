@@ -26,6 +26,9 @@ export interface RiskField {
   choices?: { value: string; label: string }[];
   /** The switch this one does nothing without, and where that switch lives. */
   dependsOn?: { key: string; label: string };
+  /** Drawn by PerTradeSizingSection, not the generic grid: these three are one
+   *  either/or choice plus the switch that applies it to EA templates. */
+  sizing?: boolean;
 }
 
 export interface RiskGroup {
@@ -40,8 +43,16 @@ export const RISK_GROUPS: RiskGroup[] = [
     blurb: "How much one entry may risk, and how many may be open at once.",
     fields: [
       {
-        key: "risk_per_trade_pct", label: "Risk per trade (%)", kind: "number",
-        hint: "Percentage of the account risked on each entry. The service clamps this.",
+        key: "risk_per_trade_pct", label: "Risk per trade (%)", kind: "number", sizing: true,
+        hint: "Percentage of the account risked on each entry.",
+      },
+      {
+        key: "strategy_lot_size", label: "Fixed lot size", kind: "number", sizing: true,
+        hint: "Lots on every entry. Above 0 it replaces Risk per trade (%).",
+      },
+      {
+        key: "global_sizing_override", label: "EA template override", kind: "toggle", sizing: true,
+        hint: "EA templates use this size instead of their own. Not ORB or Set & Forget.",
       },
       {
         key: "max_risk_per_trade_pct", label: "Maximum risk per trade (%)",
@@ -54,7 +65,7 @@ export const RISK_GROUPS: RiskGroup[] = [
       },
       {
         key: "max_lot_size", label: "Maximum lot size", kind: "number",
-        hint: "A hard ceiling applied after sizing, whatever the risk maths asks for.",
+        hint: "A hard ceiling applied after sizing, whatever the risk maths asks for. At least 0.01.",
       },
     ],
   },

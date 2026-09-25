@@ -119,10 +119,83 @@ def zones(candles: list[dict], lookback: int = structure.DEFAULT_LOOKBACK,
     return sorted(nearest, key=lambda z: z["low"])
 
 
+# How wide a LEVEL may be when it is built from turning points, as a fraction
+# of price (2026-09-24). About $34 on gold at $4,300. Narrower than the
+# `MAX_ZONE_WIDTH_PCT` rail on purpose: that rail refuses a band too wide to be
+# one level; this is how wide a level is DRAWN. Replayed on 330 days of gold,
+# 0.8% lost less than 1.5% (-6.7R against -12.6R over 22-24 trades) because
+# the stop sits just beyond the level, so the level's width is the risk.
+# A reasoned number, not the guide's -- the "60 pips" question is still open.
+LEVEL_WIDTH_PCT = 0.008
+
+# A level built from one exact price still needs height, or price can never be
+# inside it. This fraction of the width is the least a level is drawn at.
+_MIN_LEVEL_HEIGHT = 0.2
+
+
+def levels(candles: list[dict], price: float,
+           width_pct: float = LEVEL_WIDTH_PCT,
+           min_touches: int = MIN_TOUCHES,
+           lookback: int = structure.DEFAULT_LOOKBACK) -> list[dict]:
+    """Horizontal levels where price TURNED at least `min_touches` times.
+
+    Added 2026-09-24, when a replay over a year of gold showed `zones` never
+    produced a usable band: gold's daily bodies are 50-150 points, neighbouring
+    bodies overlap in a trend, and the overlap-merge chains them into bands far
+    wider than `MAX_ZONE_WIDTH_PCT`, which `propose` then refuses. See
+    tests/services/setforget/test_levels.py.
+
+    Each confirmed swing contributes its body edge on the wick side -- the
+    bottom of a swing low's body, the top of a swing high's -- which is where
+    the traders who turned it closed (bodies, not wicks, per the guide). Edges
+    are clustered in price order and a cluster never grows wider than
+    `width_pct` of price, so three turns at one price are a level and three
+    turns scattered along a trend are not.
+
+    The side of price decides the kind (role reversal): a level below price is
+    demand whichever kind of swing formed it, one above is supply.
+    """
+    if not candles or price <= 0:
+        return []
+    cap = price * width_pct
+    edges: list[tuple[float, float]] = []
+    for point in structure.swing_points(candles, lookback):
+        c = candles[point["idx"]]
+        o, close = float(c.get("open") or 0.0), float(c.get("close") or 0.0)
+        edge = min(o, close) if point["kind"] == "low" else max(o, close)
+        edges.append((edge, point["ts"]))
+
+    clusters: list[dict] = []
+    for edge, ts in sorted(edges):
+        if clusters and edge - clusters[-1]["low"] <= cap:
+            last = clusters[-1]
+            last["high"] = max(last["high"], edge)
+            last["ts"] = max(last["ts"], ts)
+            last["touches"] += 1
+        else:
+            clusters.append({"low": edge, "high": edge, "ts": ts, "touches": 1})
+
+    out: list[dict] = []
+    for c in clusters:
+        if c["touches"] < min_touches:
+            continue
+        low, high = c["low"], c["high"]
+        least = cap * _MIN_LEVEL_HEIGHT
+        if high - low < least:
+            mid = (low + high) / 2.0
+            low, high = mid - least / 2.0, mid + least / 2.0
+        mid = (low + high) / 2.0
+        kind = "demand" if mid < price else "supply"
+        out.append({"kind": kind, "low": low, "high": high,
+                    "ts": c["ts"], "touches": c["touches"]})
+    return out
+
+
 def mark(candles: list[dict], price: float,
          lookback: int = structure.DEFAULT_LOOKBACK,
          min_touches: int = MIN_TOUCHES,
-         limit: int = DEFAULT_LIMIT) -> tuple[list[dict], int]:
+         limit: int = DEFAULT_LIMIT,
+         cluster_width_pct: Optional[float] = None) -> tuple[list[dict], int]:
     """The major levels, found by scanning BACKWARD until they are, and no
     further. Returns `(zones, bars_scanned)`.
 
@@ -158,8 +231,14 @@ def mark(candles: list[dict], price: float,
     widths = list(range(SCAN_START, len(candles), SCAN_STEP)) + [len(candles)]
     found: list[dict] = []
     for width in widths:
-        found = zones(candles[-width:], lookback=lookback, limit=limit,
-                      reference=price, gap=0.0, min_touches=min_touches)
+        if cluster_width_pct:
+            # Levels where price turned -- see `levels`. The body bands below
+            # are kept for every caller that does not ask for this.
+            found = levels(candles[-width:], price, width_pct=cluster_width_pct,
+                           min_touches=min_touches, lookback=lookback)
+        else:
+            found = zones(candles[-width:], lookback=lookback, limit=limit,
+                          reference=price, gap=0.0, min_touches=min_touches)
         pair = _nearest_pair(found, price)
         if len(pair) == 2:
             return pair, width

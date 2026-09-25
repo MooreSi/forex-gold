@@ -103,4 +103,16 @@ export const CAPABILITIES: Capability[] = [
       where: "this card",
     },
   },
+  {
+    key: "re_require_proven_edge",
+    label: "Trade only on a proven edge",
+    description:
+      "Places no orders unless the edge model has shown, on signals it was " +
+      "not trained on, that the trades it would take make money after costs " +
+      "on the EA template's own stop and targets. Until it has, this engine " +
+      "places no orders at all: signals are still generated and tracked " +
+      "virtually, so it keeps learning. Measured 2026-09-24, no model and no " +
+      "entry rule tested on this engine's history cleared that bar, so " +
+      "expect it to stay silent. See docs/todo/reversal-engine/240.",
+  },
 ];

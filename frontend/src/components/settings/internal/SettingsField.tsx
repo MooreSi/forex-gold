@@ -8,6 +8,8 @@ interface SettingsFieldProps {
   type?: "text" | "password" | "number";
   /** Bumped by the owning resource after every save; see useSettingsResource. */
   version?: number;
+  /** Shown but not editable -- a value kept for later, not one in use. */
+  disabled?: boolean;
   onCommit: (value: string) => void;
 }
 
@@ -20,7 +22,7 @@ interface SettingsFieldProps {
  * exists rather than each tab rolling its own input.
  */
 export function SettingsField({
-  label, value, hint, type = "text", version = 0, onCommit,
+  label, value, hint, type = "text", version = 0, disabled = false, onCommit,
 }: SettingsFieldProps) {
   const [draft, setDraft] = useState(value);
   // Whether the operator is in this field right now. A ref, not state: it must
@@ -54,7 +56,7 @@ export function SettingsField({
   }, [value, version]);
 
   return (
-    <label className="block text-xs text-ink-2">
+    <label className={disabled ? "block text-xs text-ink-3 opacity-60" : "block text-xs text-ink-2"}>
       {label}
       {/* The hint is BOTH printed underneath and shown on hover. Underneath is
           where somebody reading the form finds it; on hover is where somebody
@@ -66,13 +68,14 @@ export function SettingsField({
         type={type === "password" ? "password" : "text"}
         inputMode={type === "number" ? "decimal" : undefined}
         value={draft}
+        disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => { editing.current = true; }}
         onBlur={() => {
           editing.current = false;
           if (draft !== value) onCommit(draft);
         }}
-        className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+        className="num mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1 disabled:cursor-not-allowed"
       />
       </Tooltip>
       {hint && <span className="mt-0.5 block text-[10px] text-ink-3">{hint}</span>}

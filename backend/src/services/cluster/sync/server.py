@@ -128,6 +128,9 @@ _SYNCED_SETTINGS_KEYS = (
     # every entry above this one already documents.
     "strategy_lot_size_grid", "global_harvest_enabled", "global_harvest_threshold_usd",
     "hour_blocklist_enabled",
+    # Per-trade sizing (docs/todo/risk/010). Whichever node trades must size
+    # the way the operator chose, whichever node they chose it on.
+    "global_sizing_override", "strategy_lot_size_parked",
     # ORB/IVB Report's auto-execute toggle — whichever node ends up as the
     # active trader is the one whose scheduler actually checks this flag, so
     # toggling it from the other node's UI must reach it or the setting is

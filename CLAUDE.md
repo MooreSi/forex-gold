@@ -9,16 +9,23 @@ changing anything. It is short and it is not optional.
 locally, current state, and where the work is tracked.
 
 **A question you can't answer** (trading policy, risk numbers, money behaviour, licensing) goes in
-**[docs/simon-handover/](docs/simon-handover/)** — the owner answers those; an agent can't. Choose a safe
+the private deferred-decisions folder (path in the private notes repo, see below) —
+the owner answers those; an agent can't. Choose a safe
 provisional default, proceed, and record the open decision.
 
-**Private notes.** `docs/simon-handover/`, `docs/todo/` and `docs/reviews/`
+**Private notes.** The deferred-decisions folder, `docs/todo/` and `docs/reviews/`
 are NOT in this repo (it is public). They live in the private repo
 `MooreSi/forex-gold-notes`, attached at the same paths. If those folders are
 missing, run `bash tools/private_notes.sh` once in this checkout (worktrees
 included). Changes to them are committed with `git private ...` (`status`,
-`add -A simon-handover todo reviews`, `commit -F`, `push`), not plain `git`;
+`add -A` followed by the private folder names, `commit -F`, `push`), not plain `git`;
 plain `git` ignores them. CI gets them through the `NOTES_TOKEN` secret.
+**Every write to those folders is committed and pushed to the notes repo in
+the same session** (`git private add <files>`, `git private commit -F
+<msgfile>`, `git private push`), whether or not a code commit follows: a new
+spec, a status or results update, a handover note, a PROGRESS row. A spec that
+exists only on one machine is lost to every other session (owner,
+2026-09-24). Stage only your own files: `git private status` first.
 
 ---
 

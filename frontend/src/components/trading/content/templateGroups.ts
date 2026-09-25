@@ -207,7 +207,7 @@ export const FIELD_UNITS: Record<string, string> = {
 
 /** Fields where 0 is not "none" but a real setting, or vice versa. */
 export const FIELD_HINTS: Record<string, string> = {
-  risk_pct: "0 falls back to the app's own risk-per-trade sizing.",
+  risk_pct: "0 sizes from the lot fields instead. The EA template override on Trading > Risk replaces both.",
   equity_protect: "0 is off.",
   basket_harvest_threshold: "0 is off.",
   late_guard_pips: "0 is no guard.",

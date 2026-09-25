@@ -7,6 +7,29 @@
 
 RELEASES: list[tuple] = [
     (
+        "v6.1",
+        "Stall fixes and a quieter log",
+        "blue",
+        "",
+        [
+            "Backtests, the ORB chart and the Reversal Engine's batch "
+            "retrain no longer block the event loop: a backtest run could "
+            "freeze trade management for up to 86 seconds with no position "
+            "monitor, EA link or Telegram running. All three now run on "
+            "worker threads. A stall sampler now names the blocking line "
+            "when one happens.",
+            "The Telegram bot token no longer appears in the local log "
+            "file, which Export Logs sends by email. Every log record is "
+            "scrubbed at the handler, not just the diagnostics upload.",
+            "A new report (tools/order_latency_report.py) reads MetaTrader's "
+            "own daily logs to measure broker execution time per trade "
+            "server, for diagnosing slow fills without touching a broker.",
+            "The owner's private notes (docs/simon-handover, docs/todo, "
+            "docs/reviews) moved out of this public repo into a private "
+            "one, attached back at the same paths.",
+        ],
+    ),
+    (
         "v0.6",
         "React Frontend Migration",
         "blue",

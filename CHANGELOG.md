@@ -1,3 +1,40 @@
+## v6.1 — Stall fixes and a quieter log (2026-09-25)
+
+The About screen carries the user-facing summary; this is the engineering
+record. 4 commits since v0.6.
+
+**Stalls**
+- `POST /api/backtest/run` ran the walk inside `async def`, blocking the event
+  loop for up to 86 seconds with no position monitor, EA link or Telegram
+  running. The heavy steps now run on `asyncio.to_thread`; the route calls the
+  same controller names.
+- The ORB chart is now drawn on a thread with matplotlib's object API rather
+  than `pyplot`, whose global figure registry is not thread-safe.
+- The Reversal Engine's batch retrain now reads and fits on a thread and
+  installs on the loop; the fit goes into a local and is swapped in fitted,
+  rather than installing before fitting. `retrain_now` is removed; its one
+  caller now awaits `retrain_async`.
+- `LoopMonitor` gains a sampler thread that reads the loop thread's stack
+  while a stall is in progress, so a warning names the blocking line.
+
+**Security**
+- The Telegram bot token no longer appears in `forex_trader.log`, which
+  Export Logs emails. `run._SecretScrubber` rewrites every record on the
+  app's handlers, not just the diagnostics upload. Tokens already in older
+  log files are untouched; rotating the token is the owner's call.
+
+**Diagnostics**
+- `tools/order_latency_report.py` reads MetaTrader's own daily logs and
+  reports, per trade server, how long executions took (count, median, p90,
+  max, and how many ran over 5s). Reads files only; places nothing and
+  reaches no broker.
+
+**Repository**
+- The owner's private notes (`docs/simon-handover`, `docs/todo`,
+  `docs/reviews`) moved out of this public repo into the private
+  `MooreSi/forex-gold-notes`, attached back at the same paths via
+  `tools/private_notes.sh` and `git private`.
+
 ## v0.6 — React Frontend Migration (2026-09-24)
 
 The dashboard moved from NiceGUI to React. The About screen carries the

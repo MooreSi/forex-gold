@@ -7,6 +7,31 @@
 
 RELEASES: list[tuple] = [
     (
+        "v6.11",
+        "Windows install and VPS setup",
+        "blue",
+        "",
+        [
+            "The Windows installer now installs the Microsoft Visual C++ "
+            "Redistributable. Without it a fresh machine could not load "
+            "LightGBM and the app crashed on every start.",
+            "A Windows install now links itself to GitHub, so Settings > "
+            "Update can check for and apply updates and the admin console "
+            "shows its commit. An install left broken by an earlier attempt "
+            "repairs itself on the next start.",
+            "Settings > Remote node has a Make this node a VPS button: one "
+            "press creates the pairing token, opens the sync port in the "
+            "Windows firewall (with the normal permission prompt) and starts "
+            "listening. Stop being a VPS undoes it. A PC used as a main "
+            "machine no longer has any port opened by the installer.",
+            "On a VPS the tab shows the address and port to enter on the "
+            "other machine, whether the firewall lets it in, and what "
+            "secures the link.",
+            "The first start after an install opens the dashboard in the "
+            "browser, including on a VPS.",
+        ],
+    ),
+    (
         "v6.1",
         "Stall fixes and a quieter log",
         "blue",

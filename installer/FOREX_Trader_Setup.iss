@@ -20,7 +20,7 @@
 ;   third-party download plugin, no local prerequisite files.
 
 #define AppName      "FOREX Trader"
-#define AppVersion   "6.1"
+#define AppVersion   "6.11"
 #define AppPublisher "FOREX Trader"
 #define AppURL       "http://localhost:8888"
 #define AppExeName   "Setup && Start FOREX.bat"
@@ -50,7 +50,7 @@ UninstallDisplayIcon     = {app}\frontend\static\gold_bag.ico
 ArchitecturesInstallIn64BitMode = x64compatible
 MinVersion               = 10.0.17763
 ; Windows 10 1809+ required (needed for Python 3.11 + modern TLS)
-VersionInfoVersion       = 1.5.0.0
+VersionInfoVersion       = 1.6.0.0
 VersionInfoCompany       = {#AppPublisher}
 VersionInfoDescription   = {#AppName} Installer
 SetupIconFile            = ..\frontend\static\gold_bag.ico

@@ -1,3 +1,29 @@
+## v6.11 — Windows install and VPS setup (2026-09-25)
+
+The About screen carries the user-facing summary; this is the engineering
+record. Found installing v6.1 on a fresh Windows VPS.
+
+**Installer**
+- Installs the Visual C++ Redistributable (x64) before the pip install:
+  `lib_lightgbm.dll` links the MSVC runtime, and a bare Windows image has none,
+  so `import lightgbm` failed at startup and the app crash-looped (bugs/066).
+- No longer opens TCP 8765; removes that rule on uninstall. Writes
+  `open_browser_once`, which `run.py` honours once, even on a VPS.
+
+**Updates**
+- `link_checkout()` could never link an installer copy (part of the tree, no
+  `.gitignore`) and, on Windows, left an unborn `.git` behind because rmtree
+  could not delete git's read-only objects. That produced "could not resolve
+  local HEAD" on Settings > Update and "commit unreadable" in the admin
+  console. Now a subset match with install-local paths excluded, a
+  read-only-safe clean-up, and a self-repair for the leftover (bugs/067).
+
+**Remote node**
+- "Make this node a VPS": token if none (shown once), firewall rule on every
+  profile (plain `netsh`, then a UAC prompt), listener started. "Stop being a
+  VPS" reverses it. On the VPS: addresses, NAT warning, firewall status, and
+  what secures the link. `services/cluster/sync/reachability.py`.
+
 ## v6.1 — Stall fixes and a quieter log (2026-09-25)
 
 The About screen carries the user-facing summary; this is the engineering

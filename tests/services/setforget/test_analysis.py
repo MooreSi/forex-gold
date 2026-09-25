@@ -379,6 +379,80 @@ class TestEvaluate:
         assert "529" in result["ai"]["error"]
 
 
+class TestTheModelsLevelsKeepTheRulesStage:
+    """A model's levels replace the rules' levels, not the rules' reading.
+
+    Reported 2026-09-25: Evaluate turned the page blank. The model's revised
+    candidate was rebuilt from its three prices alone, so it arrived without
+    `distance`, and the summary's `distance.toFixed` threw. Worse, it arrived
+    without `stage`: `setup.invalidations` refuses an armed or waiting setup
+    by reading that key, so a SELL limit resting 38 points from price came
+    back with no invalidations and an Execute button that was not disabled.
+    Where price is relative to the zone is a fact about the chart; a model
+    moving the stop by a dollar does not change it.
+    """
+
+    @pytest.fixture
+    def engine(self):
+        return _Engine({
+            "D1": zigzag([(1900.0, 0), (2000.0, 40), (1960.0, 20), (2060.0, 40)]),
+            "H4": zigzag([(1980.0, 0), (2050.0, 30), (2000.0, 30)]),
+        })
+
+    async def _evaluate(self, engine, monkeypatch, stage):
+        monkeypatch.setattr(analysis._ai, "is_configured", lambda cfg: True)
+
+        async def _complete(cfg, system, prompt, max_tokens, timeout=30):
+            return json.dumps({
+                "verdict": "adjust", "entry": 1984.0, "stop_loss": 1970.0,
+                "take_profit": 2040.0, "reasoning": "Tighter entry."})
+        monkeypatch.setattr(analysis._ai, "complete", _complete)
+        monkeypatch.setattr(analysis, "propose", lambda ev: (
+            {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
+             "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
+             "reward": 55.0, "rr": 4.23, "stage": stage, "trigger": None,
+             "zone": _zone("demand", 1975.0, 1985.0),
+             "target_zone": _zone("supply", 2040.0, 2050.0),
+             "distance": 15.0, "distance_days": 0.5}, ""))
+        return await analysis.evaluate(engine, {"ai_provider": "claude"})
+
+    @pytest.mark.asyncio
+    async def test_an_armed_setup_stays_unplaceable_after_the_model_adjusts_it(
+            self, engine, monkeypatch):
+        result = await self._evaluate(engine, monkeypatch, "armed")
+
+        assert result["candidate"]["entry"] == 1984.0, "the model's levels stand"
+        assert result["candidate"]["stage"] == "armed"
+        assert any("not reached the zone" in r for r in result["invalidations"])
+
+    @pytest.mark.asyncio
+    async def test_the_stage_is_not_reported_as_a_fault_in_the_models_levels(
+            self, engine, monkeypatch):
+        """Armed is the chart's state, not something wrong with the prices the
+        model chose. Rejecting its levels for it would throw away a review
+        that was sound."""
+        result = await self._evaluate(engine, monkeypatch, "armed")
+
+        assert result["ai"]["levels_rejected"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_distance_is_measured_from_the_models_entry(
+            self, engine, monkeypatch):
+        result = await self._evaluate(engine, monkeypatch, "armed")
+        candidate = result["candidate"]
+
+        assert candidate["distance"] == pytest.approx(
+            abs(result["price"] - 1984.0))
+        assert "distance_days" in candidate
+
+    @pytest.mark.asyncio
+    async def test_a_triggered_setup_stays_triggered(self, engine, monkeypatch):
+        result = await self._evaluate(engine, monkeypatch, "triggered")
+
+        assert result["candidate"]["stage"] == "triggered"
+        assert not any("zone" in r for r in result["invalidations"])
+
+
 class TestTheAreasOfInterestAreMarkedNotMerged:
     """Replaces `TestTheZoneMergeGapIsWired`, deleted 2026-09-21.
 

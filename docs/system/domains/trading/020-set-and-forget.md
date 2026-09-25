@@ -557,3 +557,27 @@ source starting "Set & Forget" the title "Set & Forget Executed" (owner's
 wording); the manual and ORB titles are unchanged. Only the message text
 changed, nothing about the order. Pinned by
 `tests/core/test_manual_market_order_telegram_title.py`.
+
+## A model's levels keep the rules' stage (2026-09-25)
+
+Reported: "when i click evaluate it starts something and then just presents a
+blank page". `_review_levels` rebuilt the model's candidate from its three
+prices with `setup.build`, which knows nothing about the chart, so the revised
+candidate lost `stage`, `trigger`, `distance` and `distance_days`. The summary
+called `candidate.distance.toFixed` on `undefined` and React unmounted the
+whole app.
+
+The blank page was the lesser half. `setup.invalidations` refuses an armed or
+waiting setup by reading `stage`; without it, a SELL limit resting 38 points
+from price came back from Evaluate with no invalidations, so the page's
+Execute button was enabled for a plan the rules say is not placeable yet.
+(The crash hid it: nobody could reach the button.) Auto was not exposed: it
+only reviews a candidate that already passed `invalidations`, so it is
+triggered, and it refuses anything that is not a market order.
+
+Now `_review_levels` copies `stage`, `trigger`, `zone` and `target_zone` onto
+the revised candidate AFTER its own validity check, so "price has not reached
+the zone" is never reported as a fault in the model's levels, and `review`
+re-measures the distance from the model's entry through `_measure`, the same
+helper `propose` uses. Pinned by `TestTheModelsLevelsKeepTheRulesStage` in
+`tests/services/setforget/test_analysis.py`.

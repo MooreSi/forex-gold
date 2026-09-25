@@ -347,12 +347,19 @@ def _build(evidence: dict, direction: str,
     candidate["trigger"] = fired
     candidate["zone"] = zone
     candidate["target_zone"] = target_zone
-    # On the candidate rather than derived in the browser, so the page can say
-    # "about two days away" beside the entry instead of leaving the operator to
-    # judge it off the chart -- which is what went wrong on 2026-09-21.
+    _measure(candidate, price, evidence)
+    return candidate, ""
+
+
+def _measure(candidate: dict, price: float, evidence: dict) -> None:
+    """Put how far the entry is from price on the candidate, in place.
+
+    On the candidate rather than derived in the browser, so the page can say
+    "about two days away" beside the entry instead of leaving the operator to
+    judge it off the chart -- which is what went wrong on 2026-09-21.
+    """
     candidate["distance"] = abs(price - candidate["entry"])
     candidate["distance_days"] = _days_away(candidate["distance"], evidence)
-    return candidate, ""
 
 
 def _days_away(distance: float, evidence: dict) -> Optional[float]:
@@ -450,8 +457,14 @@ def _review_levels(reply: dict, candidate: dict, price: float,
     reasons = setup.invalidations(revised)
     if reasons:
         return None, reasons
-    revised["zone"] = candidate.get("zone")
-    revised["target_zone"] = candidate.get("target_zone")
+    # After the check, not before: the stage is where price is relative to the
+    # zone, a fact about the chart rather than a fault in the model's prices,
+    # so it must not be reported as a reason its levels were rejected. But it
+    # has to travel -- `setup.invalidations` refuses an armed setup by reading
+    # it, and without it (until 2026-09-25) a model's adjustment made a resting
+    # plan placeable.
+    for key in ("stage", "trigger", "zone", "target_zone"):
+        revised[key] = candidate.get(key)
     return revised, []
 
 
@@ -519,6 +532,8 @@ async def review(evidence: dict, candidate: dict, cfg: dict,
 
     revised, rejected = _review_levels(
         reply, candidate, float(evidence["price"]), tolerance(evidence))
+    if revised is not None:
+        _measure(revised, float(evidence["price"]), evidence)
     return {
         "ai": {
             "verdict": str(reply.get("verdict") or "").lower() or None,

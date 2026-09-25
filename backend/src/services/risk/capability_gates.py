@@ -228,6 +228,18 @@ def xasset_features_enabled(rs: dict) -> bool:
     return _on(rs, "re_xasset_features_enabled")
 
 
+def require_proven_edge(rs: dict) -> bool:
+    """Must the Reversal Engine's edge model have PROVEN itself before any
+    Reversal order is placed?
+
+    On, an unproven or unfitted model means no order. That is the opposite
+    of every other model gate in this engine, which passes a signal when
+    the model has no opinion. Migration 53, off by default.
+    docs/todo/reversal-engine/240.
+    """
+    return _on(rs, "re_require_proven_edge")
+
+
 def cme_context_enabled(rs: dict) -> bool:
     """Should the engine read CME futures context? Off, and inert either way.
 

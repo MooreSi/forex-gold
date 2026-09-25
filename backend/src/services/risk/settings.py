@@ -15,6 +15,7 @@ from __future__ import annotations
 from backend.src.db.database import to_db_thread
 from backend.src.services.risk import circuit_breaker_repo as _breaker
 from backend.src.services.risk import custom_strategies_repo as _custom
+from backend.src.services.risk import lot_sizing as _lot_sizing
 from backend.src.services.risk import risk_settings_repo as _repo
 
 __all__ = [
@@ -34,6 +35,9 @@ async def get_async() -> dict:
 
 
 def update(fields: dict) -> None:
+    """Raises ValueError, before anything is written, for a per-trade sizing
+    value that would leave trades unplaceable (docs/todo/risk/010)."""
+    _lot_sizing.validate_update(fields, _repo.get_risk_settings())
     _repo.update_risk_settings(fields)
 
 

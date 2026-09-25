@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from backend.src.services.risk import lot_sizing
 from backend.src.services.risk import clock as _clock
 from datetime import datetime
 from typing import Any
@@ -80,7 +81,7 @@ async def cmd_activate(args: list, bridge: Any, starting_balance: float = 1000.0
     entry_mid    = (tg_sig["entry_low"] + tg_sig["entry_high"]) / 2
     lot          = suggest_lot_size(entry_mid, tg_sig["stop_loss"], balance,
                                     float(rs.get("risk_per_trade_pct", 0.5)))
-    strategy_lot = float(rs.get("strategy_lot_size", 0))
+    strategy_lot = lot_sizing.global_fixed_lot(rs)  # 0 unless Fixed lots mode
     if strategy_lot > 0:
         lot = strategy_lot
 

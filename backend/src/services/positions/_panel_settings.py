@@ -108,7 +108,11 @@ def _write_value(chan: dict, field: str, value) -> None:
     rewrites every column from DEFAULTS -- so the current row must be loaded
     and merged first, or every other field silently resets to its default."""
     if field in GLOBAL_FIELDS:
-        db_module.update_risk_settings({field: value})
+        updates = {field: value}
+        if field == "strategy_lot_size":
+            # "0 = AUTO" here IS the Risk % / Fixed lots choice (risk/010).
+            updates["global_sizing_mode"] = "lots" if float(value or 0) > 0 else "risk"
+        db_module.update_risk_settings(updates)
         return
     name = chan.get("template")
     if not name:

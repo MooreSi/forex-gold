@@ -44,6 +44,12 @@ from backend.src.services.reversal_engine.meta_label_schedule import (
 from backend.src.services.reversal_engine.xasset_sweep import (
     xasset_sweep as _xasset_sweep_impl,
 )
+from backend.src.services.reversal_engine.tpl_label import (
+    tpl_label_sweep as _tpl_label_sweep_impl,
+)
+from backend.src.services.reversal_engine.edge_model import (
+    edge_model_refit_sweep as _edge_model_refit_sweep_impl,
+)
 
 
 log = logging.getLogger(__name__)
@@ -111,4 +117,19 @@ async def reversal_engine_research_loop(engine: Any, is_running: Callable[[], bo
             break
         except Exception as e:
             log.warning("_xasset_sweep error: %s", e)
+        # The template's own exits for every triggered signal, one day per
+        # pass, newest first; then the edge model's daily refit on them.
+        # docs/todo/reversal-engine/240.
+        try:
+            await _tpl_label_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_tpl_label_sweep error: %s", e)
+        try:
+            await _edge_model_refit_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_edge_model_refit_sweep error: %s", e)
         await asyncio.sleep(60)

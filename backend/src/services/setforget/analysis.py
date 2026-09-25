@@ -132,8 +132,13 @@ async def gather(engine: Any) -> dict:
     # OVERLAP, because a weekly band and a daily band at the same price are
     # one level a trader would draw once -- and a level both timeframes agree
     # on is the strongest kind the method recognises.
-    daily_zones, daily_bars = aoi.mark(daily, price) if daily and price else ([], 0)
-    weekly_zones, weekly_bars = (aoi.mark(weekly, price)
+    # Levels where price TURNED, not merged candle bodies (2026-09-24): on gold
+    # the body-merge never produced a band narrow enough to trade -- zero
+    # candidates in a year of replay. See aoi.levels.
+    width = aoi.LEVEL_WIDTH_PCT
+    daily_zones, daily_bars = (aoi.mark(daily, price, cluster_width_pct=width)
+                               if daily and price else ([], 0))
+    weekly_zones, weekly_bars = (aoi.mark(weekly, price, cluster_width_pct=width)
                                  if weekly and price else ([], 0))
     zones = aoi.merge(daily_zones + weekly_zones)
     if len(zones) > aoi.DEFAULT_LIMIT:
@@ -219,19 +224,30 @@ def tolerance(evidence: dict) -> float:
     return price * _FALLBACK_TOLERANCE_PCT
 
 
-def propose(evidence: dict) -> tuple[Optional[dict], str]:
+def propose(evidence: dict,
+            direction: Optional[str] = None) -> tuple[Optional[dict], str]:
     """The candidate the rules produce, or None and the reason there is none.
 
     The reason is the product when there is no trade. "No setup" on a screen
     the operator has just pressed a button on is indistinguishable from a
     broken page; "the Weekly is bullish and the Daily is bearish, so the pair
     is too noisy" is the method working.
+
+    `direction` skips the higher-timeframe bias gate and builds that side's
+    candidate at its zones. Only Auto passes it (owner, 2026-09-24: longs at
+    any validated demand zone, the AI decides). Every other rule -- the zone,
+    the reach, the target, the 30m trigger, the ratio -- still applies.
     """
     weekly, daily = evidence.get("weekly_bias"), evidence.get("daily_bias")
     price = evidence.get("price")
     if price is None:
         return None, ("No price is available — the bridge returned no candles. "
                       "Check the MT5 connection.")
+    if direction is not None:
+        direction = str(direction).strip().upper()
+        if direction not in ("BUY", "SELL"):
+            return None, f"{direction!r} is not a direction."
+        return _build(evidence, direction, float(price))
     if weekly != daily:
         return None, (f"The Weekly ({weekly}) and the Daily ({daily}) disagree. "
                       f"Set & Forget skips a pair whose higher timeframes are "
@@ -241,7 +257,12 @@ def propose(evidence: dict) -> tuple[Optional[dict], str]:
                       f"higher-timeframe direction to trade with, so there is "
                       f"no setup — this is a wait, not a failure.")
 
-    direction = "BUY" if weekly == "bullish" else "SELL"
+    return _build(evidence, "BUY" if weekly == "bullish" else "SELL", price)
+
+
+def _build(evidence: dict, direction: str,
+           price: float) -> tuple[Optional[dict], str]:
+    """The candidate for one direction, once that direction is settled."""
     want_kind = "demand" if direction == "BUY" else "supply"
     # Only bands narrow enough to BE a level can carry an entry or a target.
     # Alex G's guide: "keep the zone reasonably narrow". A band wide enough to
@@ -457,6 +478,25 @@ async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:
     if candidate is None or not _ai.is_configured(cfg):
         return result
 
+    reviewed = await review(evidence, candidate, cfg, timeout=timeout)
+    result["ai"] = reviewed["ai"]
+    result["billed"] = reviewed["billed"]
+    if reviewed["candidate"] is not candidate:
+        result["candidate"] = reviewed["candidate"]
+        result["invalidations"] = setup.invalidations(reviewed["candidate"])
+    return result
+
+
+async def review(evidence: dict, candidate: dict, cfg: dict,
+                 timeout: int = 60) -> dict:
+    """The configured model's judgement of one candidate. **Billable.**
+
+    Returns `{"ai", "candidate", "billed"}`. `candidate` is the model's levels
+    rebuilt and re-validated when they pass the rules, otherwise the one it was
+    given -- the same object, so a caller can tell nothing was replaced.
+    Split out of `evaluate` on 2026-09-24 so Auto is judged by exactly the
+    review the page shows, not a second prompt that could drift from it.
+    """
     try:
         raw = await _ai.complete(
             cfg, _prompt.SYSTEM, _prompt.render(evidence, candidate),
@@ -464,35 +504,33 @@ async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:
         )
     except Exception as exc:
         log.warning("[setforget] the provider did not answer: %s", exc)
-        result["ai"] = {"error": f"The AI provider did not answer: {exc}",
-                        "verdict": None}
-        return result
+        return {"ai": {"error": f"The AI provider did not answer: {exc}",
+                       "verdict": None},
+                "candidate": candidate, "billed": False}
 
-    result["billed"] = True
     try:
         reply = _parse(raw)
     except Exception as exc:
         log.warning("[setforget] could not parse the model's reply: %s", exc)
-        result["ai"] = {"error": "The model's reply was not the JSON object it "
-                                 "was asked for, so its levels were not used.",
-                        "verdict": None, "raw": raw[:500]}
-        return result
+        return {"ai": {"error": "The model's reply was not the JSON object it "
+                                "was asked for, so its levels were not used.",
+                       "verdict": None, "raw": raw[:500]},
+                "candidate": candidate, "billed": True}
 
     revised, rejected = _review_levels(
         reply, candidate, float(evidence["price"]), tolerance(evidence))
-    if revised is not None:
-        result["candidate"] = revised
-        result["invalidations"] = setup.invalidations(revised)
-
-    result["ai"] = {
-        "verdict": str(reply.get("verdict") or "").lower() or None,
-        "reasoning": str(reply.get("reasoning") or ""),
-        "risks": str(reply.get("risks") or ""),
-        "levels_rejected": rejected,
-        "model": _ai.active_model(cfg),
-        "error": None,
+    return {
+        "ai": {
+            "verdict": str(reply.get("verdict") or "").lower() or None,
+            "reasoning": str(reply.get("reasoning") or ""),
+            "risks": str(reply.get("risks") or ""),
+            "levels_rejected": rejected,
+            "model": _ai.active_model(cfg),
+            "error": None,
+        },
+        "candidate": revised if revised is not None else candidate,
+        "billed": True,
     }
-    return result
 
 
 def public_evidence(evidence: dict) -> dict:

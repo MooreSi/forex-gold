@@ -89,6 +89,8 @@ def _run_migrations() -> None:
         "ALTER TABLE re_signals ADD COLUMN excursion_source TEXT",
         # Cross-asset context at creation (2026-09-23, reversal-engine/230).
         "ALTER TABLE re_signals ADD COLUMN xasset_json TEXT",
+        # R on the EA template's own exits, replayed (reversal-engine/240).
+        "ALTER TABLE re_signals ADD COLUMN tpl_r REAL",
     ]
     for stmt in migrations:
         try:

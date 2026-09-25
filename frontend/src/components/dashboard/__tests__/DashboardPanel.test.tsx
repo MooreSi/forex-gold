@@ -10,9 +10,10 @@
  * - a dashboard is the tab left open all day, so it must not bill a model and
  *   must not open a second poll against an endpoint the shell already reads.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardPanel } from "../DashboardPanel";
+import { POSITIONS_INTERVAL_MS } from "../hooks/useDashboardController";
 import { resetPolls } from "@/hooks/usePoll";
 import { touchedAfterRemove } from "@/test/chartStub";
 
@@ -274,5 +275,42 @@ describe("the figures it summarises", () => {
     render(<DashboardPanel />);
 
     expect(await screen.findByTestId("dash-halt")).toHaveTextContent("daily loss limit");
+  });
+});
+
+describe("the open positions keep up with the broker", () => {
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("re-renders the running P&L as it moves, without being reopened", async () => {
+    // The card is watched while a position runs. Owner, 2026-09-22: it has to
+    // update on its own. This moves the broker's number under a mounted
+    // component and expects the screen to follow it.
+    render(<DashboardPanel />);
+    await waitFor(() => expect(screen.getAllByText("+$28.40").length).toBeGreaterThan(0));
+
+    tradesBody = [{ ...tradesBody[0], pnl: -12.75 }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(POSITIONS_INTERVAL_MS); });
+
+    await waitFor(() => expect(screen.getAllByText("-$12.75").length).toBeGreaterThan(0));
+    expect(screen.queryByText("+$28.40")).toBeNull();
+  });
+
+  it("asks the broker again on its own interval, not only when opened", async () => {
+    render(<DashboardPanel />);
+    await screen.findByTestId("dash-open-count");
+
+    const before = getsTo("/api/trading/trades").length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(POSITIONS_INTERVAL_MS * 2); });
+
+    expect(getsTo("/api/trading/trades").length).toBeGreaterThan(before);
+  });
+
+  it("polls positions faster than the 30-day history it sits beside", async () => {
+    // A number that moves every tick and one that moves when a trade closes
+    // do not want the same cadence. Pinned so the positions interval cannot
+    // drift up to the others' without somebody meaning it.
+    expect(POSITIONS_INTERVAL_MS).toBeLessThan(15_000);
+    expect(POSITIONS_INTERVAL_MS).toBeGreaterThanOrEqual(3_000);
   });
 });

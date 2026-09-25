@@ -50,6 +50,7 @@ from backend.src.api.routers import orb as orb_router
 from backend.src.api.routers import orders as orders_router
 from backend.src.api.routers import schedule as schedule_router
 from backend.src.api.routers import setforget as setforget_router
+from backend.src.api.routers import setforget_auto as setforget_auto_router
 from backend.src.api.routers import settings as settings_router
 from backend.src.api.routers import system as system_router
 from backend.src.api.routers import templates as templates_router
@@ -95,6 +96,7 @@ ROUTERS = (
     orb_router.router,
     orders_router.router,
     setforget_router.router,
+    setforget_auto_router.router,
 )
 
 

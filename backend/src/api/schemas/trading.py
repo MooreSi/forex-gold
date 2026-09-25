@@ -141,6 +141,15 @@ class SignalOut(BaseModel):
     tp: Optional[float] = None
     lots: Optional[float] = None
     status: Optional[str] = None
+    # What HAPPENED, as opposed to how the signal ended. "closed" is the same
+    # word for a signal that took 300 dollars and one that gave back 300, so
+    # the screens were showing a list of finished things with no way to tell
+    # which had worked. Decided by services/signals/outcomes.py from the
+    # trades the signal produced -- never in the browser, which would be a
+    # second answer to "did this win". Null for a signal that never traded or
+    # is still running; "won", "lost" or "flat" otherwise.
+    outcome: Optional[str] = None
+    net_pnl: Optional[float] = None
 
     @model_validator(mode="before")
     @classmethod

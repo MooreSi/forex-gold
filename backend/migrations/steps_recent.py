@@ -232,4 +232,26 @@ _RECENT: list[tuple[int, str, object]] = [
     (52, "Cross-asset features for the meta-labeller, off by default", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN re_xasset_features_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # The Reversal Engine trades only on a proven edge (2026-09-24,
+    # docs/todo/reversal-engine/240). On, no Reversal order is placed unless
+    # its edge model has shown positive expectancy out of sample on the EA
+    # template's own exits; an unproven model REFUSES rather than letting
+    # everything through. Off by default, so nothing changes until the owner
+    # switches it on; demo only on 2026-09-24.
+    (53, "Reversal Engine trades only on a proven edge, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_require_proven_edge INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # One global per-trade size, and a switch that makes EA templates obey it
+    # (2026-09-25, docs/todo/risk/010). The mode is written from today's
+    # precedence -- a fixed lot above 0 always beat Risk per trade % -- so
+    # every order sizes exactly as before until the owner changes it. The
+    # override is off, so every EA template still sizes itself.
+    (54, "Per-trade sizing mode and the EA template override, off by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN global_sizing_override INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN global_sizing_mode TEXT NOT NULL DEFAULT 'risk'",
+        "UPDATE vantage_risk_settings SET global_sizing_mode = "
+        "CASE WHEN COALESCE(strategy_lot_size, 0) > 0 THEN 'lots' ELSE 'risk' END",
+    ]),
 ]

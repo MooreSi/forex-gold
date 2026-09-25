@@ -585,6 +585,12 @@ async def startup() -> None:
     # App-level watchdog — recovers unexpected crashes every 5 min.
     asyncio.create_task(_signal_engine_watchdog_loop())
 
+    # Set & Forget Auto (2026-09-24): scans for a long every 15 minutes while
+    # its switch on the page is on. Off by default, demo account only -- the
+    # refusals are in services/setforget/auto.py.
+    from backend.src.services.setforget import auto as _sf_auto
+    asyncio.create_task(_sf_auto.run_forever(get_engine, cfg_module.load))
+
     # News calendar: start the background refresher so the signal engines read a
     # cached snapshot instead of doing up to ~10s of blocking urllib on the event
     # loop every cycle (backend review 2026-08-08, #5).

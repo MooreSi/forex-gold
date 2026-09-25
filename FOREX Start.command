@@ -229,7 +229,25 @@ if [ ! -f "$MARKER" ] || [ "$STORED_HASH" != "$CURRENT_HASH" ]; then
     # ── Install / upgrade Python dependencies ─────────────────────────────────
     echo "  Installing / upgrading dependencies (this may take a minute)..."
     "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-    "$VENV_DIR/bin/pip" install --quiet --upgrade -r "$REQS_FILE"
+    # A failed install must stop here. Falling through wrote the marker below,
+    # so every later launch skipped setup and crashed on a missing module
+    # (seen 2026-09-24: disk full mid-install, then "No module named
+    # 'cryptography'"). No marker means the next launch retries the install.
+    if ! "$VENV_DIR/bin/pip" install --quiet --upgrade -r "$REQS_FILE"; then
+        echo ""
+        echo "  ──────────────────────────────────────────"
+        echo "  ERROR: Failed to install dependencies."
+        echo ""
+        echo "  Read the error above. The usual causes are no free disk"
+        echo "  space (\"No space left on device\") or no internet connection."
+        echo "  Fix that, then double-click FOREX Start.command again —"
+        echo "  setup will retry automatically."
+        echo "  ──────────────────────────────────────────"
+        echo ""
+        echo "  Press any key to close this window."
+        read -rn1
+        exit 1
+    fi
     echo "  Done."
     echo ""
 

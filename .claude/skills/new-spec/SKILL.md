@@ -67,6 +67,22 @@ left at "Draft" forever is a decision nobody made.
 When it ships, fill in the Verification checklist at the bottom — including
 the line about no real or demo order being touched.
 
+## Push it to the notes repo, every time
+
+`docs/todo/` is the private repo `MooreSi/forex-gold-notes`, not this one.
+After writing the spec, and after every later update to it (status, results,
+decisions), commit and push it there in the same session, whether or not a
+code commit follows:
+
+```bash
+git private status
+git private add todo/NNN-short-name.md
+git private commit -F <msgfile>
+git private push
+```
+
+Stage only your own files. See CLAUDE.md, "Private notes".
+
 ## Naming
 
 `docs/todo/NNN-short-name.md`, NNN sequential. Keep the number even if the

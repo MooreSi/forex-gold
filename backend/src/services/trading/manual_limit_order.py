@@ -26,6 +26,7 @@ import time
 import uuid
 from typing import Any, Optional
 
+from backend.src.services.risk import lot_sizing
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
@@ -74,7 +75,7 @@ async def open_manual_limit_order(
     price = entry_high if direction == "BUY" else entry_low
 
     rs = db_module.get_risk_settings()
-    strategy_lot = float(rs.get("strategy_lot_size", 0))
+    strategy_lot = lot_sizing.global_fixed_lot(rs)  # 0 unless Fixed lots mode
     if lot_size and float(lot_size) > 0:
         lot = round(float(lot_size), 2)
     elif strategy_lot > 0:

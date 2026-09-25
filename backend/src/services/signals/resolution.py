@@ -33,6 +33,7 @@ from backend.src.services.risk.governor import (
     price_in_entry_range, rg_size_and_check,
 )
 from backend.src.services.risk import capability_gates as _caps
+from backend.src.services.risk import lot_sizing
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
@@ -138,7 +139,7 @@ def _sig_guard_blocks(channel_name: str, direction: str,
 
 
 
-def _template_lot_is_fixed(is_template: bool, template) -> bool:
+def _template_lot_is_fixed(is_template: bool, template, rs=None) -> bool:
     """Is this trade's lot a template's own fixed Anchor Lot?
 
     Such a lot is a deliberate manual value and must not be scaled by the
@@ -159,6 +160,9 @@ def _template_lot_is_fixed(is_template: bool, template) -> bool:
     """
     if not is_template or template is None:
         return False
+    if rs is not None and lot_sizing.override_on(rs):
+        # The global size replaced the template's: fixed only in Fixed lots mode.
+        return lot_sizing.global_fixed_lot(rs) > 0
     try:
         return float(template.get("risk_pct") or 0) <= 0
     except (TypeError, ValueError):
@@ -478,42 +482,30 @@ async def resolve_open_trade_params(
     if _ch_paused:
         raise ValueError(f"Channel '{_ch_src}' is paused by the scorecard — trade skipped")
 
-    lot_size = lot_size_override or sig.get("lot_size")
+    # With the EA template override on, a lot or risk % the app stored on the
+    # signal (Telegram auto-sizing, the Breakout Engine's own lot) gives way
+    # to the global per-trade size. A lot a person typed still wins.
+    _ovr = lot_sizing.override_on(rs)
+    _sig_lot = None if _ovr else sig.get("lot_size")
+    _sig_risk = None if _ovr else sig.get("risk_pct")
+    lot_size = lot_size_override or _sig_lot
     # Derived from the template itself, so it holds however the lot was
     # obtained -- see _template_lot_is_fixed for what this used to miss.
-    _lot_is_template_fixed = _template_lot_is_fixed(_is_template, _template)
+    _lot_is_template_fixed = _template_lot_is_fixed(_is_template, _template, rs)
     if not lot_size and _is_template and _template is not None:
         # A template's own Entries & Lots fields are authoritative for
-        # sizing, not the generic per-strategy path below. Grid mode's
-        # resting legs already read tpl_lot_anchor/tpl_lot_pending directly
-        # on the EA side (HandleOpenTemplateGrid) and only fall back to
-        # whatever this function computes if those are zero -- but single
-        # mode reuses the plain market-order path with no such override, so
-        # it silently used the generic risk-based/global-fixed-lot size
-        # instead of the template's own Anchor Lot. This also fixes the
-        # value recorded in the DB placeholder row and reported via
-        # Telegram, which was never the true anchor size for grid trades
-        # either.
-        #
-        # risk_pct (0 = OFF) lets a template size itself from account risk
-        # instead of a flat lot, same convention as every other strategy's
-        # own risk_pct field.
-        _tpl_risk_pct = float(_template.get("risk_pct") or 0)
-        if _tpl_risk_pct > 0:
-            balance   = await get_trading_balance(bridge, starting_balance)
-            entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
-            lot_size  = suggest_lot_size(entry_mid, float(sig["stop_loss"]), balance, _tpl_risk_pct)
-        else:
-            # Global parameters still apply as a ceiling even though the
-            # template's fixed lot is the primary source -- suggest_lot_size
-            # would clamp to this too, but the raw-anchor-lot path bypasses
-            # that function entirely so it needs its own cap.
-            _max_lot = float(rs.get("max_lot_size", 0.10))
-            lot_size = min(float(_template.get("lot_anchor") or 0.01), _max_lot)
-            # _lot_is_template_fixed is already True: set above from the
-            # template, so it holds whether or not this branch ran.
+        # sizing, not the generic per-strategy path below -- unless the EA
+        # template override is on. lot_sizing decides both, for every order
+        # path (docs/todo/risk/010).
+        balance   = await get_trading_balance(bridge, starting_balance)
+        entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+        lot_size  = lot_sizing.template_lot(
+            rs, _template, entry_mid, float(sig["stop_loss"]), balance, suggest_lot_size).lot
+        # A 0 here used to fall through to risk % below, so this route traded
+        # a signal the immediate route sent to MT5 as 0 lots. Both refuse now.
+        lot_sizing.refuse_unplaceable(lot_size, rs)
     if not lot_size:
-        risk_pct  = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        risk_pct  = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
         balance   = await get_trading_balance(bridge, starting_balance)
         entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
         lot_size  = suggest_lot_size(entry_mid, float(sig["stop_loss"]), balance, risk_pct)
@@ -537,7 +529,7 @@ async def resolve_open_trade_params(
     # Lot), and letting one global toggle silently overwrite that would
     # defeat the entire point of those fields being on the template at all.
     # Every other strategy keeps "fixed lot always wins".
-    strategy_lot = float(rs.get("strategy_lot_size", 0))
+    strategy_lot = lot_sizing.global_fixed_lot(rs)
     if strategy_lot > 0 and not _is_template:
         lot_size = strategy_lot
 
@@ -610,8 +602,8 @@ async def resolve_open_trade_params(
         _fr_sign      = 1.0 if sig["direction"].upper() == "BUY" else -1.0
         _fr_entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
         stop_loss_to_use = round(_fr_entry_mid - _fr_sign * _fr_sl_pt, 2)
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _fr_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _fr_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _fr_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_fr_entry_mid, stop_loss_to_use, _fr_balance, _fr_risk_pct), 2
@@ -625,8 +617,8 @@ async def resolve_open_trade_params(
         _co_entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
         stop_loss_to_use = round(_co_entry_mid - _co_sign * _co_sl_pt, 2)
         # Recompute lot size from the fixed SL (unless user set a fixed lot)
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _co_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _co_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _co_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_co_entry_mid, stop_loss_to_use, _co_balance, _co_risk_pct), 2
@@ -645,16 +637,16 @@ async def resolve_open_trade_params(
         _ts_sl_pts       = float(rs.get("trail_stop_sl_pts", 5.0))
         stop_loss_to_use = round(_ts_entry_mid - _ts_sign * _ts_sl_pts, 2)
         # Recompute lot size from the configured SL (unless fixed lot is set)
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _ts_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _ts_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _ts_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_ts_entry_mid, stop_loss_to_use, _ts_balance, _ts_risk_pct), 2
             ))
     elif strategy == STRATEGY_SIGNAL_CLIMBER:
         # Signal Climber uses the signal's SL exactly; compute lot from that SL.
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _sc_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _sc_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _sc_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(
@@ -672,8 +664,8 @@ async def resolve_open_trade_params(
         _gv_stated_dist  = abs(_gv_entry_mid - float(sig["stop_loss"]))
         _gv_sl_pt        = _rr_sl_dist(_gv_stated_dist)
         stop_loss_to_use = round(_gv_entry_mid - _gv_sign * _gv_sl_pt, 2)
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _gv_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _gv_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _gv_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_gv_entry_mid, stop_loss_to_use, _gv_balance, _gv_risk_pct), 2
@@ -689,8 +681,8 @@ async def resolve_open_trade_params(
         _ar_final_tp_dist = _adaptive_final_tp_dist(sig, _ar_entry_mid, _ar_sign > 0)
         _ar_sl_pt         = _adaptive_sl_dist(_ar_stated_dist, _ar_final_tp_dist)
         stop_loss_to_use  = round(_ar_entry_mid - _ar_sign * _ar_sl_pt, 2)
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _ar_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _ar_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _ar_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_ar_entry_mid, stop_loss_to_use, _ar_balance, _ar_risk_pct), 2
@@ -705,8 +697,8 @@ async def resolve_open_trade_params(
         _ar2_sign        = 1.0 if sig["direction"].upper() == "BUY" else -1.0
         _ar2_sl_pt       = get_strategy_params(STRATEGY_ADAPTIVE_RUNNER_2)["sl_pt"]
         stop_loss_to_use = round(_ar2_entry_mid - _ar2_sign * _ar2_sl_pt, 2)
-        if not (float(rs.get("strategy_lot_size", 0)) > 0) and not lot_size_override and not sig.get("lot_size"):
-            _ar2_risk_pct = float(sig.get("risk_pct") or rs.get("risk_per_trade_pct", 0.5))
+        if not strategy_lot and not lot_size_override and not _sig_lot:
+            _ar2_risk_pct = float(_sig_risk or rs.get("risk_per_trade_pct", 0.5))
             _ar2_balance  = await get_trading_balance(bridge, starting_balance)
             lot_size = max(0.01, round(
                 suggest_lot_size(_ar2_entry_mid, stop_loss_to_use, _ar2_balance, _ar2_risk_pct), 2

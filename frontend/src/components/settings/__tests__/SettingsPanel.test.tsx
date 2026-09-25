@@ -572,7 +572,7 @@ describe("remote node", () => {
     await openTab();
 
     expect(await screen.findByLabelText("Shared token")).toHaveValue("");
-    expect(screen.getByText("one is stored; re-enter it to reconnect")).toBeInTheDocument();
+    expect(screen.getByText("one is stored; leave blank to use it")).toBeInTheDocument();
   });
 
   it("will not transfer models while disconnected, and says why", async () => {

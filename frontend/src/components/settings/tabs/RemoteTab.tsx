@@ -145,7 +145,7 @@ export function RemoteTab() {
           </label>
           <label className="block text-xs text-ink-2">
             Shared token
-            <Tooltip label="The pairing token, shown once on the VPS when it was made a VPS (or generated under Node & updates). It is stored but never shown again here, so reconnecting means pasting it in fresh.">
+            <Tooltip label="The pairing token, shown once on the VPS when it was made a VPS (or generated under Node & updates). It is stored (encrypted) but never shown again here. Leave the box blank to reconnect with the stored one; paste a new one only if the VPS token changed.">
               <input
                 aria-label="Shared token"
                 type="password"
@@ -156,7 +156,7 @@ export function RemoteTab() {
             </Tooltip>
             <span className="mt-0.5 block text-[10px] text-ink-3">
               {client.token_set
-                ? "one is stored; re-enter it to reconnect"
+                ? "one is stored; leave blank to use it"
                 : "not set"}
             </span>
           </label>

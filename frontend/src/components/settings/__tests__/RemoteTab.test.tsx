@@ -95,3 +95,15 @@ describe("the link state", () => {
     expect(await screen.findByTestId("remote-health")).toBeInTheDocument();
   });
 });
+
+describe("reconnecting", () => {
+  it("says a stored token is used when the box is left blank", async () => {
+    responses = [{ ...STATE, client: { ...STATE.client, conn_state: "disconnected",
+                                       remote_status: {} } }];
+    render(<RemoteTab />);
+
+    await screen.findByLabelText("Shared token");
+    expect(screen.getByText(/leave blank to use it/i)).toBeInTheDocument();
+    expect(screen.queryByText(/re-enter it/i)).not.toBeInTheDocument();
+  });
+});

@@ -241,13 +241,33 @@ class TestConnectingOut:
         assert res.status_code == 409
         assert remote["calls"] == []
 
-    def test_a_blank_token_is_refused_rather_than_reusing_the_stored_one(
+    def test_a_blank_token_reconnects_with_the_stored_one(
         self, make_client, remote,
     ):
-        """"Keep the stored one" here would hide which of two failures the
-        operator has: a wrong token looks exactly like a network problem."""
+        """Disconnect then reconnect to the same VPS must not need the token
+        pasted again (owner, 2026-09-25): switching between local and remote
+        is routine. The same address is not re-configured, because configure()
+        drops the certificate pin and a plain reconnect is not a re-pair."""
         res = make_client().put("/api/remote/client",
-                                json={"host": "10.0.0.9", "token": ""})
+                                json={"host": "10.0.0.5", "port": 8765, "token": ""})
+
+        assert res.status_code == 200
+        assert remote["calls"] == [("start", "10.0.0.5", 8765, "stored-client-token")]
+
+    def test_a_blank_token_with_a_new_address_saves_it_with_the_stored_token(
+        self, make_client, remote,
+    ):
+        res = make_client().put("/api/remote/client",
+                                json={"host": "10.0.0.9", "port": 9001, "token": ""})
+
+        assert res.status_code == 200
+        assert ("configure", "10.0.0.9", 9001, "stored-client-token") in remote["calls"]
+        assert ("start", "10.0.0.9", 9001, "stored-client-token") in remote["calls"]
+
+    def test_a_blank_token_with_none_stored_is_refused(self, make_client, remote):
+        remote["client_config"] = ("10.0.0.5", 8765, "")
+        res = make_client().put("/api/remote/client",
+                                json={"host": "10.0.0.5", "token": ""})
 
         assert res.status_code == 409
         assert "token" in _message(res)

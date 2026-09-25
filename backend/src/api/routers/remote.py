@@ -214,17 +214,26 @@ async def connect(body: ClientWrite) -> dict:
     Saved and connected are one action on purpose: a stored address that was
     never dialled is the shape of bug where the operator believes they are
     paired and the link has never been up.
+
+    A blank token means "use the stored one", so switching back to the VPS
+    after a disconnect needs no re-paste (owner, 2026-09-25). A wrong stored
+    token still shows as the VPS's "bad token" in last_error.
     """
     host = body.host.strip()
     token = body.token.strip()
     if not host:
         raise Refusal("The VPS address is needed.")
-    if not token:
-        # Not "keep the stored one": a wrong token looks exactly like a
-        # network failure, and re-using a stale one hides which it is.
-        raise Refusal("The shared token from the VPS is needed.")
-
     port = int(body.port or sync_ctl.DEFAULT_SYNC_PORT)
+    if not token:
+        stored_host, stored_port, token = sync_ctl.load_config()
+        if not token:
+            raise Refusal("The shared token from the VPS is needed.")
+        if (stored_host, int(stored_port)) == (host, port):
+            # Not configure(): it drops the certificate pin, and a reconnect
+            # to the same VPS is not a re-pair.
+            sync_ctl.start(host, port, token)
+            return await state()
+
     sync_ctl.configure(host, port, token)
     sync_ctl.start(host, port, token)
     return await state()

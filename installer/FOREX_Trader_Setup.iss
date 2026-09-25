@@ -12,11 +12,12 @@
 ;      always bump both, even for a same-day rebuild (see [Code]'s
 ;      InitializeSetup: a same-numbered rebuild skips reinstalling on any
 ;      machine that already has that version).
-;   That's it -- the embedded Python runtime and get-pip.py are no longer
-;   bundled at compile time; they're downloaded fresh during install (see
-;   [Code]'s CurStepChanged) using PowerShell's Invoke-WebRequest/Expand-
-;   Archive, both built into every Windows 10+ target this installer already
-;   requires. No third-party download plugin, no local prerequisite files.
+;   That's it -- the embedded Python runtime, get-pip.py, and the Visual C++
+;   Redistributable (lightgbm needs its runtime DLLs) are no longer bundled at
+;   compile time; they're downloaded fresh during install (see [Code]'s
+;   CurStepChanged) using PowerShell's Invoke-WebRequest/Expand-Archive, both
+;   built into every Windows 10+ target this installer already requires. No
+;   third-party download plugin, no local prerequisite files.
 
 #define AppName      "FOREX Trader"
 #define AppVersion   "6.1"
@@ -238,6 +239,52 @@ begin
             and (ResultCode = 0);
 end;
 
+// Downloads the Microsoft Visual C++ Redistributable (x64) and installs it
+// silently. lightgbm's compiled lib_lightgbm.dll links against the MSVC
+// runtime (vcruntime140.dll, msvcp140.dll, vcruntime140_1.dll); a bare/minimal
+// Windows image -- Server Core, a fresh VPS, a Windows install that skipped
+// optional updates -- does not have these, and the DLL load then fails with
+// "Could not find module ... (or one of its dependencies)", which crash-loops
+// the app before it can render the traceback usefully (bugs, 2026-09-25: a
+// fresh VPS install died 5x in 30s on this exact error before auto-restart
+// gave up). The Windows 10 SDK does not ship it either -- only the
+// redistributable does. aka.ms/vs/17/release/vc_redist.x64.exe is Microsoft's
+// own stable, versionless redirect for the latest VC++ redist; used the same
+// way FetchPythonEmbed uses python.org/bootstrap.pypa.io below.
+function FetchAndInstallVCRedist(): Boolean;
+var
+  ExePath: String;
+  ResultCode: Integer;
+begin
+  ExePath := ExpandConstant('{app}\vc_redist.x64.exe');
+
+  WizardForm.StatusLabel.Caption := 'Downloading Visual C++ Redistributable...';
+  WizardForm.Update;
+  RunPowerShell(
+    'Invoke-WebRequest -Uri ''https://aka.ms/vs/17/release/vc_redist.x64.exe'' ' +
+    '-OutFile ''' + ExePath + ''' -UseBasicParsing'
+  );
+
+  if not FileExists(ExePath) then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  WizardForm.StatusLabel.Caption := 'Installing Visual C++ Redistributable...';
+  WizardForm.Update;
+  // /install /quiet /norestart: silent, no forced reboot. Exit codes 0 (fresh
+  // install), 1638 (equal/newer already present) and 3010 (installed, reboot
+  // wanted but not required for the DLL to load) all mean lightgbm's runtime
+  // deps are satisfied; anything else is a real failure.
+  Result := Exec(ExePath, '/install /quiet /norestart', '', SW_HIDE,
+                  ewWaitUntilTerminated, ResultCode);
+  if Result then
+    Result := (ResultCode = 0) or (ResultCode = 1638) or (ResultCode = 3010);
+
+  DeleteFile(ExePath);
+end;
+
 // Downloads the Python 3.11.9 embeddable runtime + get-pip.py fresh at
 // install time (2026-07-24 -- previously bundled via [Files], which meant
 // every builder needed to manually pre-stage installer\python_embed\ before
@@ -287,6 +334,23 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    // Must run before install_deps.py's pip install ([Run], below) -- lightgbm
+    // (a hard dependency, imported at app startup by the breakout/reversal
+    // engines) needs the MSVC runtime this installs to load its DLL. Warn but
+    // don't abort the whole install on failure: a network hiccup here
+    // shouldn't block someone who already has the redist from a prior VS/
+    // driver install, and the app tells the user plainly if lightgbm still
+    // can't load.
+    if not FetchAndInstallVCRedist() then
+      MsgBox(
+        'Could not install the Visual C++ Redistributable needed by one of ' +
+        'FOREX Trader''s dependencies (lightgbm).' + #13#10 + #13#10 +
+        'Setup will continue, but the app may fail to start with a ' +
+        '"lib_lightgbm.dll" error. If that happens, install the redistributable ' +
+        'manually from https://aka.ms/vs/17/release/vc_redist.x64.exe and try again.',
+        mbError, MB_OK
+      );
+
     if not FetchPythonEmbed() then
     begin
       MsgBox(

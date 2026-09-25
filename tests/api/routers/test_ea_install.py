@@ -31,8 +31,11 @@ def lab(monkeypatch):
     state = {
         "stale": True,
         "detail": "The EA on the chart is v1.08, but its source has been edited.",
+        # The shape ea_deploy.deploy() returns, including the per-terminal
+        # list the button compiles from (added 2026-09-25).
         "report": {"targets": ["/t1"], "deployed": 1, "already_current": 0,
-                   "needs_compile": 1, "errors": []},
+                   "needs_compile": 1, "needs_compile_targets": ["/t1"],
+                   "errors": []},
         "compile": {"ok": False, "detail": "compiling is Windows-only"},
         "compiled_calls": 0,
         "has_ex5": False,
@@ -130,3 +133,32 @@ class TestInstalling:
 
         assert r.status_code >= 400
         assert "no metatrader" in r.json()["error"]["message"].lower()
+
+
+def test_every_terminal_that_needs_it_is_compiled_not_just_the_first(make_client, lab):
+    """2026-09-25: the button compiled report["targets"][0] only, so on a
+    machine with a demo and a live terminal the second kept its old build."""
+    lab["report"] = {"targets": ["/demo", "/live"], "deployed": 2, "already_current": 0,
+                     "needs_compile": 2, "needs_compile_targets": ["/demo", "/live"],
+                     "errors": []}
+    lab["compile"] = {"ok": True, "detail": "compiled"}
+
+    body = make_client().post("/api/settings/ea/install", json={}).json()
+
+    assert lab["compiled_calls"] == 2
+    assert body["compiled"] is True and body["needs_compile"] is False
+
+
+def test_one_failed_compile_among_several_is_still_reported(make_client, lab, monkeypatch):
+    lab["report"] = {"targets": ["/demo", "/live"], "deployed": 2, "already_current": 0,
+                     "needs_compile": 2, "needs_compile_targets": ["/demo", "/live"],
+                     "errors": []}
+    results = iter([{"ok": True, "detail": "compiled"},
+                    {"ok": False, "detail": "nothing was rebuilt"}])
+    monkeypatch.setattr(settings_router.broker_ctl, "ea_compile",
+                        lambda d, platform=None: next(results))
+
+    body = make_client().post("/api/settings/ea/install", json={}).json()
+
+    assert body["compiled"] is False and body["needs_compile"] is True
+    assert "nothing was rebuilt" in body["next_step"]

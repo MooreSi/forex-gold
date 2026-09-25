@@ -293,17 +293,22 @@ async def ea_install() -> dict:
     next_step = ""
 
     if needs_compile:
-        result = broker_ctl.ea_compile(report["targets"][0])
-        compiled = bool(result.get("ok"))
+        # Every terminal that needs it, not just the first (2026-09-25: a
+        # demo and a live terminal on one machine, and only one was rebuilt).
+        results = [broker_ctl.ea_compile(t)
+                   for t in report.get("needs_compile_targets") or []]
+        failed = [r for r in results if not r.get("ok")]
+        compiled = bool(results) and not failed
         if compiled:
             needs_compile = False
             next_step = ("The EA was rebuilt. The chart reloads it by itself, "
                          "so there is nothing left to do.")
         else:
+            detail = "; ".join(r.get("detail", "") for r in failed)
             next_step = (
                 f"Open MetaEditor, open {EA_FILE_NAME} and press F7 to compile "
                 f"it. The chart reloads the new build by itself afterwards. "
-                f"({result.get('detail', '')})"
+                f"({detail})"
             )
     else:
         next_step = ("The compiled EA was installed. The chart reloads it by "

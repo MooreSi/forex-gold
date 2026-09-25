@@ -406,3 +406,31 @@ a success would recreate the exact silent staleness the badge exists to end.
 everywhere**, which is what the owner chose on 2026-09-20. It costs one
 compile per `EA_VERSION` bump, on a machine that can compile, committed with
 the source change.
+
+## A Windows install gets the latest EA by itself (2026-09-25)
+
+Reported: a fresh Windows install did not install the latest EA. Three gaps,
+all in `services/broker/ea_deploy.py` and its callers:
+
+- **Nothing deployed at install or start.** The EA was deployed only after
+  Update to latest, and even then `deploy_after_update` only COPIED the `.mq5`;
+  MetaTrader runs the `.ex5`, and no `.ex5` is committed. Now
+  `app._install_ea_at_startup` calls `ea_deploy.install_when_idle` on every
+  start: on Windows, with **no trade slot in use**, it copies into every
+  terminal and compiles each one whose build is missing or older than its
+  source. Compiling makes an attached EA reload with the new build, which
+  changes the rules managing any open position, so it waits for an empty book
+  exactly as `reload_decision` does for a terminal restart; an unreadable count
+  is busy. A terminal already current is not recompiled (that would reload the
+  EA for nothing). macOS is untouched: nothing can compile there.
+- **The Install button compiled only `targets[0]`.** A demo and a live terminal
+  on one machine meant only one was rebuilt. `deploy()` now reports
+  `needs_compile_targets`, and the button compiles every one.
+- **MetaEditor was looked for only in `C:\Program Files\MetaTrader 5`.** A
+  broker-branded MT5 is elsewhere. Each terminal's data folder holds
+  `origin.txt` (UTF-16 with a BOM) naming its install folder; `_metaeditor_for`
+  uses that terminal's own `metaeditor64.exe`, falling back to the old path.
+
+Pinned by `tests/services/broker/test_ea_deploy.py` (`TestFindingEachTerminalsMetaEditor`,
+`TestInstallingWhenIdle`), `test_ea_installs_at_startup.py` and
+`tests/api/routers/test_ea_install.py`. **Not yet run on Windows.**

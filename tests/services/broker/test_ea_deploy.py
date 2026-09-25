@@ -346,3 +346,135 @@ class TestCompiling:
 
         assert calls and str(editor) == calls[0][0]
         assert any(a.startswith("/compile:") and a.endswith(f"{EA}.mq5") for a in calls[0])
+
+
+# ── A Windows install gets the latest EA by itself (2026-09-25) ───────────────
+# Reported: a fresh Windows install did not install the latest EA. Three gaps:
+# nothing deployed at install or startup (only after Update to latest, and
+# then only COPIED the source -- MetaTrader runs the .ex5); the Install button
+# compiled only the first terminal; and MetaEditor was looked for only in
+# C:\Program Files\MetaTrader 5, where a broker-branded MT5 is not.
+
+def _with_origin(experts: Path, install: Path, encoding: str = "utf-16") -> Path:
+    """MetaTrader records each terminal's install folder in origin.txt, in the
+    data folder two levels above MQL5/Experts. It writes UTF-16 with a BOM."""
+    install.mkdir(parents=True, exist_ok=True)
+    (install / "metaeditor64.exe").write_text("")
+    (experts.parent.parent / "origin.txt").write_text(str(install), encoding=encoding)
+    return install / "metaeditor64.exe"
+
+
+class TestFindingEachTerminalsMetaEditor:
+    def test_it_uses_the_install_folder_the_terminal_records(self, tmp_path, monkeypatch):
+        experts = _windows_terminal(tmp_path / "home")
+        editor = _with_origin(experts, tmp_path / "Vantage International MT5 Terminal")
+        monkeypatch.setattr(ea_deploy, "_metaeditor_path", lambda: None)
+
+        assert ea_deploy._metaeditor_for(experts) == editor
+
+    def test_a_plain_utf8_origin_file_is_read_too(self, tmp_path, monkeypatch):
+        experts = _windows_terminal(tmp_path / "home")
+        editor = _with_origin(experts, tmp_path / "MT5", encoding="utf-8")
+        monkeypatch.setattr(ea_deploy, "_metaeditor_path", lambda: None)
+
+        assert ea_deploy._metaeditor_for(experts) == editor
+
+    def test_without_an_origin_file_it_falls_back_to_the_usual_place(self, tmp_path, monkeypatch):
+        experts = _windows_terminal(tmp_path / "home")
+        fallback = tmp_path / "fallback" / "metaeditor64.exe"
+        monkeypatch.setattr(ea_deploy, "_metaeditor_path", lambda: fallback)
+
+        assert ea_deploy._metaeditor_for(experts) == fallback
+
+    def test_compiling_runs_that_terminals_own_metaeditor(self, tmp_path, monkeypatch):
+        experts = _windows_terminal(tmp_path / "home")
+        editor = _with_origin(experts, tmp_path / "Vantage MT5")
+        (experts / f"{EA}.mq5").write_text("// ea\n")
+        calls = []
+
+        class _Done:
+            returncode = 0
+            stdout = ""
+        monkeypatch.setattr(ea_deploy, "_metaeditor_path", lambda: None)
+        monkeypatch.setattr(ea_deploy.subprocess, "run",
+                            lambda args, **kw: calls.append(args) or _Done())
+
+        ea_deploy.compile_ea(experts, platform="win32")
+
+        assert calls and calls[0][0] == str(editor)
+
+
+class TestTheReportNamesWhatNeedsCompiling:
+    def test_every_terminal_without_a_current_build_is_listed(self, tmp_path):
+        home = tmp_path / "home"
+        demo = _windows_terminal(home, "AAAA")
+        live = _windows_terminal(home, "BBBB")
+
+        report = ea_deploy.deploy(repo_root=_repo(tmp_path), home=home)
+
+        assert sorted(report["needs_compile_targets"]) == sorted([str(demo), str(live)])
+
+
+class TestInstallingWhenIdle:
+    """Startup on Windows: copy and compile into every terminal, but only when
+    nothing is open. Compiling makes an attached EA reload with the new build,
+    which changes the rules managing any open position; the owner's rule for a
+    new EA build (ea_deploy.reload_decision, 2026-09-04) is to wait for an
+    empty book. Unknown counts as busy."""
+
+    @pytest.fixture
+    def machine(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        terminals = [_windows_terminal(home, "AAAA"), _windows_terminal(home, "BBBB")]
+        compiled = []
+        monkeypatch.setattr(ea_deploy, "compile_ea",
+                            lambda d, platform=None: compiled.append(str(d)) or {"ok": True, "detail": "compiled"})
+        return {"home": home, "repo": _repo(tmp_path), "terminals": terminals, "compiled": compiled}
+
+    def _run(self, m, slots, platform="win32"):
+        return ea_deploy.install_when_idle(slots=slots, platform=platform,
+                                           repo_root=m["repo"], home=m["home"])
+
+    def test_with_nothing_open_every_terminal_is_copied_and_compiled(self, machine):
+        result = self._run(machine, slots=lambda: 0)
+
+        assert result["installed"] is True
+        assert sorted(machine["compiled"]) == sorted(str(t) for t in machine["terminals"])
+        assert all((t / f"{EA}.mq5").exists() for t in machine["terminals"])
+
+    def test_an_open_trade_holds_it_back_and_writes_nothing(self, machine):
+        result = self._run(machine, slots=lambda: 1)
+
+        assert result["installed"] is False
+        assert "open" in result["reason"]
+        assert machine["compiled"] == []
+        assert not any((t / f"{EA}.mq5").exists() for t in machine["terminals"])
+
+    def test_a_slot_count_that_cannot_be_read_counts_as_busy(self, machine):
+        def _boom():
+            raise RuntimeError("db not ready")
+
+        result = self._run(machine, slots=_boom)
+
+        assert result["installed"] is False
+        assert machine["compiled"] == []
+
+    def test_off_windows_it_does_nothing(self, machine):
+        """macOS cannot compile (MetaEditor does nothing under CrossOver), and
+        copying source into bottles on every start would change nothing that
+        runs."""
+        result = self._run(machine, slots=lambda: 0, platform="darwin")
+
+        assert result["installed"] is False
+        assert machine["compiled"] == []
+
+    def test_a_terminal_already_current_is_not_recompiled(self, machine):
+        """A recompile reloads the attached EA for nothing."""
+        self._run(machine, slots=lambda: 0)
+        for t in machine["terminals"]:
+            (t / f"{EA}.ex5").write_bytes(b"built")   # newer than the .mq5
+        machine["compiled"].clear()
+
+        self._run(machine, slots=lambda: 0)
+
+        assert machine["compiled"] == []

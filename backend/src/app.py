@@ -382,6 +382,31 @@ async def _link_checkout_at_startup() -> None:
         log.info("[startup] This install is not linked to GitHub (%s)", result["reason"])
 
 
+async def _install_ea_at_startup() -> None:
+    """Install the repo's EA into this machine's terminals, if nothing is open.
+
+    A fresh Windows install never got the latest EA (2026-09-25): it was only
+    deployed after Update to latest, and only copied, never compiled. The
+    rules (Windows only, empty book only) are ea_deploy.install_when_idle's.
+    The open-trade count is read here, on the loop's thread, because the
+    database connection is per thread; the copying and compiling run off it.
+    """
+    from backend.src.services.broker import ea_deploy
+    from backend.src.services.trading import signal_state_repo
+    try:
+        in_use = signal_state_repo.count_trade_slots_used()
+    except Exception as e:
+        log.info("[startup] EA not installed: could not check for open trades (%s)", e)
+        return
+    try:
+        result = await asyncio.to_thread(ea_deploy.install_when_idle, lambda: in_use)
+    except Exception as e:
+        log.debug("[startup] EA install could not run: %s", e)
+        return
+    if not result.get("installed"):
+        log.info("[startup] EA not installed at startup: %s", result.get("reason"))
+
+
 async def startup() -> None:
     global _engine, _tg_reader
     config = cfg_module.load()
@@ -605,6 +630,10 @@ async def startup() -> None:
     # matches — see core_app_update.link_checkout(). Backgrounded because it
     # does a `git fetch`, and startup must not wait on the network.
     asyncio.create_task(_link_checkout_at_startup())
+
+    # The latest EA into every terminal on this machine, compiled, when the
+    # book is empty (Windows; see _install_ea_at_startup).
+    asyncio.create_task(_install_ea_at_startup())
 
     # Remote admin: server only starts on admin machine (KeyGen present + password set).
     # Client only runs on non-admin machines — the admin Mac doesn't connect to itself.

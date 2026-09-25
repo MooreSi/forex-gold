@@ -138,7 +138,8 @@ def deploy(repo_root: Optional[Path] = None, home: Optional[Path] = None) -> dic
     targets = experts_dirs(home=home)
 
     report = {"targets": [str(t) for t in targets], "deployed": 0,
-              "already_current": 0, "needs_compile": 0, "errors": []}
+              "already_current": 0, "needs_compile": 0,
+              "needs_compile_targets": [], "errors": []}
 
     for target in targets:
         dst_mq5 = target / f"{EA_NAME}.mq5"
@@ -151,6 +152,7 @@ def deploy(repo_root: Optional[Path] = None, home: Optional[Path] = None) -> dic
                 _copy_verified(src_ex5, dst_ex5)
             if _needs_compile(dst_mq5, dst_ex5):
                 report["needs_compile"] += 1
+                report["needs_compile_targets"].append(str(target))
         except OSError as e:
             # One unwritable terminal must not cost the others theirs.
             log.warning("[EADeploy] %s: %s", target, e)
@@ -175,6 +177,26 @@ def _metaeditor_path() -> Optional[Path]:
     return Path(found) if found else None
 
 
+def _metaeditor_for(experts_dir: Path) -> Optional[Path]:
+    """The MetaEditor belonging to the terminal that owns `experts_dir`.
+
+    Each terminal records its install folder in origin.txt, in its data folder
+    (two levels above MQL5/Experts), as UTF-16 with a BOM. A broker-branded
+    MT5 ("Vantage International MT5 Terminal") is not in C:\\Program
+    Files\\MetaTrader 5, which is all `_metaeditor_path` knows (2026-09-25).
+    """
+    origin = Path(experts_dir).parent.parent / "origin.txt"
+    try:
+        raw = origin.read_bytes()
+        text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8-sig")
+        candidate = Path(text.strip()) / "metaeditor64.exe"
+        if candidate.exists():
+            return candidate
+    except (OSError, UnicodeDecodeError):
+        pass
+    return _metaeditor_path()
+
+
 def compile_ea(experts_dir: Path, platform: Optional[str] = None) -> dict:
     """Compile the EA in `experts_dir`. Returns {"ok": bool, "detail": str}.
 
@@ -192,7 +214,7 @@ def compile_ea(experts_dir: Path, platform: Optional[str] = None) -> dict:
             "under CrossOver/Wine (exits 0, writes no log, rebuilds nothing). "
             "Ship a pre-compiled .ex5 in mql5/ instead.")}
 
-    editor = _metaeditor_path()
+    editor = _metaeditor_for(Path(experts_dir))
     if editor is None:
         return {"ok": False, "detail": "metaeditor64.exe not found on this machine"}
 
@@ -260,6 +282,41 @@ def deploy_after_update(repo_root: Optional[Path] = None,
              len(report["targets"]), report["deployed"],
              report["already_current"], report["needs_compile"])
     return {"ok": True, "report": report}
+
+
+def install_when_idle(slots, platform: Optional[str] = None,
+                      repo_root: Optional[Path] = None,
+                      home: Optional[Path] = None) -> dict:
+    """Copy the repo's EA into every terminal and compile the ones that need
+    it, if nothing is open. The startup hook on Windows (2026-09-25: a fresh
+    install never got the latest EA). `slots` is the open-position count.
+
+    Compiling makes an attached EA reload with the new build, which changes
+    the rules managing any open position, so it waits for an empty book, as
+    `reload_decision` does for a terminal restart. Unknown counts as busy.
+    Windows only: nothing can compile elsewhere. Never raises.
+    """
+    plat = platform if platform is not None else sys.platform
+    if plat != "win32":
+        return {"installed": False, "reason": "not Windows"}
+    try:
+        in_use = slots()
+    except Exception as e:
+        return {"installed": False, "reason": f"could not check for open trades ({e})"}
+    if in_use:
+        return {"installed": False, "reason": f"{in_use} trade slot(s) open; waiting for none"}
+    try:
+        report = deploy(repo_root=repo_root, home=home)
+        compiled = {t: compile_ea(Path(t), platform=plat)
+                    for t in report["needs_compile_targets"]}
+    except Exception as e:
+        log.warning("[EADeploy] install at startup failed: %s", e)
+        return {"installed": False, "reason": str(e)}
+    failed = {t: r["detail"] for t, r in compiled.items() if not r.get("ok")}
+    log.info("[EADeploy] startup: %d terminal(s), %d updated, %d compiled, %d failed%s",
+             len(report["targets"]), report["deployed"], len(compiled) - len(failed),
+             len(failed), f": {failed}" if failed else "")
+    return {"installed": True, "report": report, "compile_failed": failed}
 
 
 def reload_decision(*, ea_version_ok: Optional[bool], slots_in_use: int,

@@ -353,11 +353,16 @@ class TestTheSyncServer:
 
         assert len(stopped.calls) == 1
 
-    def test_is_running_reflects_whether_one_was_built(self, monkeypatch):
-        monkeypatch.setattr(sync_ctl._server, "get_instance", lambda: None)
+    def test_is_running_means_listening_not_merely_built(self, monkeypatch):
+        """It said "built" until 2026-09-25, and a server stays built after a
+        stop -- so Settings > Remote node said "listening" beside "Make this
+        node a VPS" on a machine that had stopped. It now asks the server
+        module which instance holds the port."""
+        monkeypatch.setattr(sync_ctl._server, "get_instance", lambda: object())
+        monkeypatch.setattr(sync_ctl._server, "is_listening", lambda: False)
         assert sync_ctl.server_is_running() is False
 
-        monkeypatch.setattr(sync_ctl._server, "get_instance", lambda: object())
+        monkeypatch.setattr(sync_ctl._server, "is_listening", lambda: True)
         assert sync_ctl.server_is_running() is True
 
 

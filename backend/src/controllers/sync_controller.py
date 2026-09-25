@@ -174,4 +174,4 @@ async def server_stop() -> None:
 
 
 def server_is_running() -> bool:
-    return _server.get_instance() is not None
+    return _server.is_listening()

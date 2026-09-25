@@ -78,9 +78,12 @@ Name: "{userappdata}\ForexTrader\data\sessions"
 ; Packaging the old path made this script fail at COMPILE time (Inno errors
 ; on a [Files] entry that matches nothing), so the installer had been
 ; unbuildable since then -- see tests/refactor/test_installer_packages_the_real_tree.py.
-Source: "..\backend\*";           DestDir: "{app}\backend";           Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
+; Build caches and Finder files are excluded: the .exe is built from a working
+; tree, and a file no commit has stops the install linking to GitHub (the v6.11
+; VPS said "Not linked" over one frontend/tsconfig.tsbuildinfo, 2026-09-25).
+Source: "..\backend\*";           DestDir: "{app}\backend";           Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo,*.tsbuildinfo,.DS_Store"
 ; node_modules is developer-only (160+ MB); the app serves the committed dist/.
-Source: "..\frontend\*";          DestDir: "{app}\frontend";          Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo,node_modules"
+Source: "..\frontend\*";          DestDir: "{app}\frontend";          Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo,node_modules,*.tsbuildinfo,.DS_Store"
 Source: "..\run.py";               DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\mt5_bridge.py";        DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\requirements.txt";     DestDir: "{app}";                    Flags: ignoreversion
@@ -90,6 +93,9 @@ Source: "..\Setup & Start FOREX.bat"; DestDir: "{app}";                Flags: ig
 Source: "..\Stop FOREX.bat";       DestDir: "{app}";                    Flags: ignoreversion
 ; The in-app updater reads both of these at runtime; without them the
 ; Update tab reports no version and an empty changelog.
+; The repo's own ignore rules, so linking to GitHub on the target ignores what
+; git ignores (core_app_update.link_checkout).
+Source: "..\.gitignore";           DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\VERSION";              DestDir: "{app}";                    Flags: ignoreversion
 Source: "..\CHANGELOG.md";         DestDir: "{app}";                    Flags: ignoreversion
 ; Read by the running app from the install directory (2026-09-23):

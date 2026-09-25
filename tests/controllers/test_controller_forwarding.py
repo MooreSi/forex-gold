@@ -29,7 +29,7 @@ service function is replaced before the controller is called, so the real
 implementation never runs; `test_the_real_service_function_never_runs` asserts
 that rather than assuming it.
 
-The 37 operations that are NOT plain forwarders are listed in
+The 31 operations that are NOT plain forwarders are listed in
 `test_the_complex_operations_are_the_ones_we_know_about`, and each has its own
 behavioural test in `test_controller_behaviour.py`. A controller that grows a
 branch leaves the sweep, which fails that list until somebody justifies it.
@@ -75,7 +75,6 @@ KNOWN_COMPLEX = [
     "sync_controller.request_stand_down",
     "sync_controller.send_engine_control",
     "sync_controller.send_market_order",
-    "sync_controller.server_is_running",
     "sync_controller.server_start",
     "sync_controller.server_stop",
     "sync_controller.start",

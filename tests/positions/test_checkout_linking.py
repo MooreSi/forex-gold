@@ -352,6 +352,29 @@ class TestAgainstRealGit:
         assert (install / "python_embed" / "python.exe").exists()
         assert (install / "run.py").read_text(encoding="utf-8") == "second\n"
 
+    def test_a_build_cache_the_installer_copied_does_not_stop_it_linking(
+        self, origin, tmp_path, monkeypatch, git_exists,
+    ):
+        """The v6.11 VPS install, 2026-09-25: still "Not linked". The .exe is
+        built from a developer's working tree, and the installer copied
+        `frontend/tsconfig.tsbuildinfo` -- a TypeScript build cache git
+        ignores, so no commit has it, so no commit matched. A Finder
+        `.DS_Store` does the same. Reproduced against GitHub with the real
+        installer file list: that one file was the whole difference."""
+        src, first_sha = origin
+        install = tmp_path / "install"
+        self._installer_copy(install)
+        (install / "frontend").mkdir()
+        (install / "frontend" / "tsconfig.tsbuildinfo").write_text("{}", encoding="utf-8")
+        (install / ".DS_Store").write_bytes(b"\0")
+        monkeypatch.setattr(upd, "_REPO_ROOT", install)
+        monkeypatch.setattr(upd, "_GITHUB_REPO_URL", str(src).removesuffix(".git"))
+
+        result = asyncio.run(upd.link_checkout())
+
+        assert result["linked"] is True, result
+        assert result["sha"] == first_sha
+
     def test_a_file_the_commit_does_not_have_still_refuses_to_match(
         self, origin, tmp_path, monkeypatch, git_exists,
     ):

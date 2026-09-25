@@ -201,7 +201,14 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
         rest via core.secrets (Fernet, key in the OS keychain) so this VPS
         can auto-start headlessly across reboots without re-entry."""
         import websockets
+        global _listening
         self._token = token
+
+        # A server already bound to the port (started at boot, or by an
+        # earlier press) is stopped first: binding twice failed with 10048 on
+        # Windows while the first went on listening (2026-09-25).
+        if _listening is not None and _listening is not self:
+            await _listening.stop()
 
         ctx = tls_util.server_ssl_context(host)
         # ping_timeout matches the client's (see sync/client.py) — 60s instead
@@ -211,16 +218,32 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
             self._handle_connection, "0.0.0.0", port, ssl=ctx,
             ping_interval=20, ping_timeout=60,
         )
-        asyncio.create_task(self._heartbeat_loop())
-        asyncio.create_task(self._signal_gen_stats_loop())
-        asyncio.create_task(self._liveness_watchdog_loop())
+        self._tasks = [
+            asyncio.create_task(self._heartbeat_loop()),
+            asyncio.create_task(self._signal_gen_stats_loop()),
+            asyncio.create_task(self._liveness_watchdog_loop()),
+        ]
+        _listening = self
         log.info("[SyncServer] listening on 0.0.0.0:%d (fingerprint %s)",
                   port, tls_util.cert_fingerprint())
 
     async def stop(self) -> None:
+        """Close the port and cancel this server's loops, which otherwise kept
+        heart-beating and could still send "Mac unreachable" alerts."""
+        global _listening
+        for task in getattr(self, "_tasks", []):
+            task.cancel()
+        self._tasks = []
         if self._server_obj:
             self._server_obj.close()
             await self._server_obj.wait_closed()
+            self._server_obj = None
+        if _listening is self:
+            _listening = None
+
+    @property
+    def is_listening(self) -> bool:
+        return getattr(self, "_server_obj", None) is not None
 
     def _check_token(self, token: str) -> bool:
         import secrets as _secrets
@@ -729,6 +752,14 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
 
 
 _instance: Optional[SyncServer] = None
+# The one bound to the port. Separate from _instance on purpose: several
+# trading paths read "an instance exists" as "this is the VPS", and a stop
+# does not change that until the next start of the app.
+_listening: Optional[SyncServer] = None
+
+
+def is_listening() -> bool:
+    return _listening is not None
 
 
 def get_instance() -> Optional[SyncServer]:

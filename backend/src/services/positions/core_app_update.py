@@ -557,6 +557,7 @@ def _tree_blobs(ls_tree_output: str) -> dict:
 _INSTALL_LOCAL_PATHS = (
     ".venv/", "python_embed/", "installed_version.txt", "open_browser_once", "__pycache__/",
     "*.pyc", "*.pyo", "*.log", "*.db", "config.yaml", "/data/", "mql5/*.set",
+    "*.tsbuildinfo", ".DS_Store", "node_modules/",
 )
 
 

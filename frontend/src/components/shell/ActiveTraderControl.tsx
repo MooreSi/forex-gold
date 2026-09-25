@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Tooltip } from "@/components/shared/Tooltip";
 
 interface ActiveTraderControlProps {
   activeTrader: string;
@@ -35,14 +36,21 @@ export function ActiveTraderControl(
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const [vouched, setVouched] = useState(false);
   const isLocal = activeTrader === "local";
   const target = isLocal ? "remote_vps" : "local";
+  // REMOTE with the VPS unreachable: the ordinary take-over needs the VPS to
+  // stand down and cannot happen, so this machine would stay not trading
+  // indefinitely. The owner chose to allow taking over anyway, on the
+  // operator's word that the VPS is not trading (2026-09-25).
+  const forced = !isLocal && !remoteConnected;
 
   async function apply() {
     setBusy(true);
     try {
       const res = await api.put<{ note?: string }>(
-        "/api/node/active-trader", { trader: target },
+        "/api/node/active-trader",
+        forced ? { trader: target, without_peer: true } : { trader: target },
       );
       setOutcome({ ok: true, text: res.note ?? "Done." });
       onChanged();
@@ -59,9 +67,9 @@ export function ActiveTraderControl(
     <>
       <Button
         variant="ghost"
-        onClick={() => { setOutcome(null); setAsking(true); }}
+        onClick={() => { setOutcome(null); setVouched(false); setAsking(true); }}
         disabledReason={
-          remoteConnected
+          remoteConnected || forced
             ? undefined
             : "No remote node is connected. Pair one in Settings > Remote node."
         }
@@ -79,10 +87,30 @@ export function ActiveTraderControl(
       <DialogShell
         open={asking}
         onOpenChange={setAsking}
-        title={isLocal ? "Hand control back to the remote node?" : "Take over trading here?"}
+        title={isLocal ? "Hand control back to the remote node?"
+          : forced ? "Take over without the VPS?" : "Take over trading here?"}
       >
           <div className="space-y-3 text-xs text-ink-2">
-            {isLocal ? (
+            {forced ? (
+              <>
+                <p>
+                  The VPS cannot be reached, so it cannot be asked to stand down.
+                  This machine starts trading anyway. If the VPS is in fact still
+                  running and trading, both will open trades on the same account.
+                </p>
+                <p className="text-ink-3">
+                  When the VPS reconnects, it is told to stand down before
+                  anything else.
+                </p>
+                <Tooltip label="Tick only once you have checked: the VPS is switched off, or MetaTrader 5 on it is closed. A VPS that is running and connected to the broker would trade the same account as this machine.">
+                  <label className="flex items-start gap-2 text-ink-1">
+                    <input type="checkbox" checked={vouched}
+                      onChange={(e) => setVouched(e.target.checked)} />
+                    The VPS is not trading: it is off, or MetaTrader 5 on it is closed.
+                  </label>
+                </Tooltip>
+              </>
+            ) : isLocal ? (
               <>
                 <p>
                   This machine's engines stop first, then the remote node is asked
@@ -108,7 +136,7 @@ export function ActiveTraderControl(
             )}
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button>
-              <Button onClick={() => void apply()} disabled={busy}>
+              <Button onClick={() => void apply()} disabled={busy || (forced && !vouched)}>
                 {busy ? "Switching…" : isLocal ? "Hand back" : "Take over"}
               </Button>
             </div>

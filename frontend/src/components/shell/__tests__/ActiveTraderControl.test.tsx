@@ -204,3 +204,53 @@ describe("what it reports", () => {
       expect(screen.queryByText(/engines stop first/)).not.toBeInTheDocument());
   });
 });
+
+describe("taking over without the VPS (owner's decision, 2026-09-25)", () => {
+  // The VPS became unreachable and the Mac sat on REMOTE with this button
+  // disabled: nothing was trading and nothing could be made to trade. The
+  // owner chose an explicit way out, behind a confirmation that the VPS is
+  // not trading, because a VPS that cannot be reached may still be.
+  const openIt = async () => {
+    response.body = { active_trader: "local", remote_open_positions: 0,
+      note: "Now trading on this machine. It will be told to stand down as soon as it reconnects." };
+    renderIt({ activeTrader: "remote_vps", remoteConnected: false });
+    await userEvent.click(screen.getByRole("button", { name: /REMOTE/ }));
+  };
+
+  it("is offered when this machine is on REMOTE and the VPS is unreachable", async () => {
+    await openIt();
+
+    expect(screen.getByRole("dialog")).toHaveTextContent(/Take over without the VPS/);
+  });
+
+  it("will not go until the operator confirms the VPS is not trading", async () => {
+    await openIt();
+
+    expect(screen.getByRole("button", { name: "Take over" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("button", { name: "Take over" })).toBeEnabled();
+  });
+
+  it("says what could go wrong before it happens", async () => {
+    await openIt();
+
+    expect(screen.getByRole("dialog")).toHaveTextContent(/same account/);
+    expect(screen.getByRole("dialog")).toHaveTextContent(/reconnects/);
+  });
+
+  it("asks for the forced take-over, and only that", async () => {
+    await openIt();
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.click(screen.getByRole("button", { name: "Take over" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ trader: "local", without_peer: true });
+    expect(await screen.findByRole("status")).toHaveTextContent(/stand down/);
+  });
+
+  it("is still disabled for handing back, which needs the VPS to answer", () => {
+    renderIt({ activeTrader: "local", remoteConnected: false });
+
+    expect(screen.getByRole("button", { name: /LOCAL/ })).toBeDisabled();
+  });
+});

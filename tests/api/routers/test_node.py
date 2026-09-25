@@ -372,3 +372,51 @@ def test_the_state_says_how_often_the_watchdog_checks(make_client, node):
     body = make_client().get("/api/node/state").json()["autostart"]
 
     assert body["check_interval_secs"] == 300
+
+
+# ── Taking over without the peer (owner's decision, 2026-09-25) ──────────────
+
+@pytest.fixture
+def without_peer(node, monkeypatch):
+    async def _forced(*a, **k):
+        node["handover"].append("take_over_without_peer")
+        if node["refuse"]:
+            raise node_router.sync_ctl.HandoverRefused(node["refuse"])
+        return {"active_trader": "local", "remote_open_positions": 0, "note": "forced"}
+
+    monkeypatch.setattr(node_router.sync_ctl, "take_over_without_peer", _forced)
+    return node
+
+
+def test_the_forced_take_over_is_only_used_when_asked_for(make_client, without_peer):
+    """The ordinary switch must never quietly become the forced one."""
+    make_client().put("/api/node/active-trader", json={"trader": "local"})
+
+    assert without_peer["handover"] == ["take_over"]
+
+
+def test_asking_for_it_goes_through_the_forced_handover(make_client, without_peer):
+    body = make_client().put("/api/node/active-trader",
+                             json={"trader": "local", "without_peer": True}).json()
+
+    assert without_peer["handover"] == ["take_over_without_peer"]
+    assert body["note"] == "forced"
+
+
+def test_a_forced_take_over_is_refused_in_its_own_words(make_client, without_peer):
+    without_peer["refuse"] = "The remote node is connected."
+
+    res = make_client().put("/api/node/active-trader",
+                            json={"trader": "local", "without_peer": True})
+
+    assert res.status_code == 409
+    assert "is connected" in res.json()["error"]["message"]
+
+
+def test_there_is_no_forced_hand_back(make_client, without_peer):
+    """Handing back without the peer would leave nothing trading and no way to
+    know the VPS resumed. Only taking over has a forced form."""
+    make_client().put("/api/node/active-trader",
+                      json={"trader": "remote_vps", "without_peer": True})
+
+    assert without_peer["handover"] == ["hand_back"]

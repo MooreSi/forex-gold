@@ -401,3 +401,62 @@ class TestReadingWhetherAPeerExists:
         )
 
         assert handover._paired_host() != ""
+
+
+# ── Taking over without the peer (owner's decision, 2026-09-25) ──────────────
+
+@pytest.mark.asyncio
+class TestTakingOverWithoutThePeer:
+    """The VPS became unreachable on 2026-09-25, and the Mac sat on REMOTE with
+    the switch disabled: a paired peer has to acknowledge a stand-down, and an
+    unreachable one never can. So nothing was trading and nothing could be
+    made to trade.
+
+    The owner chose an explicit way out. The operator confirms the VPS is not
+    trading (it is off, or its MT5 is closed), and this node takes over without
+    the handshake. It is a separate call, never a fallback inside
+    `take_over_locally`: the ordinary switch still refuses an unreachable peer
+    (TestAnInstallWithNoPeerAtAll::test_a_configured_peer_that_is_offline_still_refuses).
+    The peer is stood down when it next connects -- see
+    tests/core/test_sync_client_stands_down_the_vps_on_reconnect.py.
+    """
+
+    async def test_with_the_link_down_this_node_takes_over(self, cluster):
+        cluster["peer"].conn_state = "disconnected"
+
+        body = await handover.take_over_without_peer()
+
+        assert cluster["trader"] == "local"
+        assert body["active_trader"] == "local"
+
+    async def test_it_is_marked_active_before_its_engines_start(self, cluster):
+        cluster["peer"].conn_state = "disconnected"
+
+        await handover.take_over_without_peer()
+
+        assert cluster["order"] == ["trader:local", "start:breakout", "start:reversal"]
+
+    async def test_it_asks_nothing_of_a_peer_it_cannot_reach(self, cluster):
+        cluster["peer"].conn_state = "disconnected"
+
+        await handover.take_over_without_peer()
+
+        assert cluster["peer"].calls == []
+
+    async def test_with_the_link_up_it_refuses_and_changes_nothing(self, cluster):
+        """A reachable peer can be asked properly; skipping the handshake then
+        would be the only way two nodes end up trading."""
+        with pytest.raises(handover.HandoverRefused) as exc:
+            await handover.take_over_without_peer()
+
+        assert cluster["trader"] == "remote_vps"
+        assert cluster["order"] == []
+        assert "connected" in str(exc.value)
+
+    async def test_it_says_the_vps_will_be_stood_down_when_it_reconnects(self, cluster):
+        cluster["peer"].conn_state = "disconnected"
+
+        body = await handover.take_over_without_peer()
+
+        assert "stand down" in body["note"]
+        assert "reconnects" in body["note"]

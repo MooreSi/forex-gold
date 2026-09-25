@@ -48,6 +48,9 @@ class AutostartWrite(BaseModel):
 
 class ActiveTraderWrite(BaseModel):
     trader: str
+    # Take over although the paired VPS cannot be reached, on the operator's
+    # confirmation that it is not trading. Only ever for taking over.
+    without_peer: bool = False
 
 
 @router.get("/state")
@@ -132,6 +135,8 @@ async def set_active_trader(
     and goes back verbatim.
     """
     try:
+        if body.trader == "local" and body.without_peer:
+            return await sync_ctl.take_over_without_peer()
         if body.trader == "local":
             return await sync_ctl.take_over_locally()
         return await sync_ctl.hand_back_to_remote(

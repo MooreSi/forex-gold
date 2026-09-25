@@ -29,7 +29,8 @@ __all__ = [
     "load_config", "configure", "start", "stop",
     "send_engine_control", "send_market_order", "request_model_snapshot",
     "request_stand_down", "request_resume", "push_ai_config",
-    "take_over_locally", "hand_back_to_remote", "HandoverRefused",
+    "take_over_locally", "take_over_without_peer", "hand_back_to_remote",
+    "HandoverRefused",
     "get_remote_open_position",
     "make_stats_facades",
     "cert_fingerprint", "server_start", "server_stop", "server_is_running",
@@ -119,6 +120,10 @@ HandoverRefused = _handover.HandoverRefused
 
 async def take_over_locally(*args, **kwargs) -> dict:
     return await _handover.take_over_locally(*args, **kwargs)
+
+
+async def take_over_without_peer() -> dict:
+    return await _handover.take_over_without_peer()
 
 
 async def hand_back_to_remote(*args, **kwargs) -> dict:

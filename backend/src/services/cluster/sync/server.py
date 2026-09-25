@@ -663,6 +663,11 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
             if eng is not None and getattr(eng, "is_running", False):
                 eng.stop()
                 stopped.append(name)
+        # A repeat (the Mac stands the VPS down on every reconnect while it is
+        # LOCAL) must not forget what the first one stopped, or RESUME would
+        # restart nothing.
+        if db_module.get_active_trader() == TRADER_LOCAL:
+            stopped = sorted(set(stopped) | set(db_module.get_stood_down_engines()))
         db_module.set_stood_down_engines(stopped)
         db_module.set_active_trader(TRADER_LOCAL)
         log.warning(

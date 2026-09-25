@@ -41,7 +41,8 @@ from backend.src.services.engines import registry as _engines
 
 log = logging.getLogger(__name__)
 
-__all__ = ["take_over_locally", "hand_back_to_remote", "HandoverRefused"]
+__all__ = ["take_over_locally", "take_over_without_peer", "hand_back_to_remote",
+           "HandoverRefused"]
 
 TRADER_LOCAL = "local"
 
@@ -135,6 +136,35 @@ async def take_over_locally(timeout: float = 15.0) -> dict:
             + (f"; {still_open} of its position(s) keep running to their own "
                "SL/TP." if still_open else ".")
         ),
+    }
+
+
+async def take_over_without_peer() -> dict:
+    """Take control when the paired peer cannot be reached, on the operator's
+    word that it is not trading (owner's decision, 2026-09-25).
+
+    Never a fallback inside `take_over_locally`, which still refuses an
+    unreachable peer: this runs only when the operator presses it after
+    confirming the VPS is off or its MT5 is closed. Refused while the link is
+    up, because then the peer can be asked properly. The peer is told to stand
+    down the moment it reconnects (SyncClient.stand_down_peer_if_local), which
+    is what keeps "both trading" to the window the operator vouched for.
+    """
+    if _client.get_instance().conn_state == "connected":
+        raise HandoverRefused(
+            "The remote node is connected, so it can be asked to stand down "
+            "properly. Use the normal switch instead."
+        )
+    _node.set_active_trader(TRADER_LOCAL)
+    _start_stopped_engines()
+    log.warning("[handover] took over WITHOUT the peer's acknowledgement, on the "
+                "operator's confirmation that it is not trading")
+    return {
+        "active_trader": TRADER_LOCAL,
+        "remote_open_positions": 0,
+        "note": ("Now trading on this machine. The VPS could not be reached, so "
+                 "it has not been told yet: it will be told to stand down as "
+                 "soon as it reconnects."),
     }
 
 

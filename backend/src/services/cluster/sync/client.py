@@ -58,6 +58,14 @@ _LEDGER_PULL_INTERVAL_S = 120
 _LIVENESS_PING_INTERVAL_S = 20
 
 
+async def _alert_operator(text: str) -> None:
+    from backend.src.services.telegram import alerts as telegram_alerts
+    try:
+        await telegram_alerts.send_message(text, event_type="sync_liveness")
+    except Exception as e:
+        log.warning("[SyncClient] could not send the alert: %s", e)
+
+
 class SyncClient(PendingStoreMixin, PeerDataMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
@@ -257,6 +265,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
             asyncio.create_task(self._ledger_pull_loop())
             asyncio.create_task(self._ai_recovered_pull_loop())
             asyncio.create_task(self._liveness_ping_loop())
+            asyncio.create_task(self.stand_down_peer_if_local())
 
             async for raw in ws:
                 if isinstance(raw, bytes):
@@ -550,6 +559,24 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
             except Exception as e:
                 log.debug("[SyncClient] strategy params propose send failed (will retry "
                           "on next reconnect): %s", e)
+
+    async def stand_down_peer_if_local(self) -> None:
+        """While this machine is LOCAL the VPS must not trade, so a fresh link
+        stands it down first. Covers a take-over done while it was unreachable
+        (handover.take_over_without_peer); a failure is alerted, not raised."""
+        if db_module.get_active_trader() != "local":
+            return
+        try:
+            ack = await self.request_stand_down(timeout=30.0)
+            log.warning("[SyncClient] this machine is LOCAL: the VPS stood down on "
+                        "reconnect (%d open position(s) run on to SL/TP)",
+                        len((ack or {}).get("open_positions") or []))
+        except Exception as e:
+            log.error("[SyncClient] the VPS did not stand down on reconnect: %s", e)
+            await _alert_operator(
+                "*The VPS did not stand down on reconnect*\nThis machine is the "
+                f"active trader, but the VPS did not confirm it stopped ({e}). "
+                "Both may be trading the same account: check the VPS now.")
 
     async def request_stand_down(self, timeout: float = 15.0) -> dict:
         """Send STAND_DOWN and wait for the VPS's ack (with its open-position

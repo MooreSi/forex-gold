@@ -10,7 +10,8 @@ from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import settings as _risk
 
 __all__ = ["get_app_config", "set_app_config", "get_risk_settings",
-           "update_risk_settings", "server_reachability", "generate_sync_token",
+           "update_risk_settings", "server_reachability", "open_firewall",
+           "close_firewall", "generate_sync_token",
            "get_sync_token", "restart_app", "stop_app"]
 
 
@@ -32,6 +33,14 @@ def update_risk_settings(fields: dict) -> None:
 
 def server_reachability(port: int) -> dict:
     return _reach.describe(port)
+
+
+async def open_firewall(port: int) -> str:
+    return await _reach.open_port_async(port)
+
+
+async def close_firewall(port: int) -> str:
+    return await _reach.close_port_async(port)
 
 
 def generate_sync_token() -> str:

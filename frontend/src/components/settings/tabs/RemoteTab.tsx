@@ -6,16 +6,12 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney } from "@/components/shared/format";
 import { asObject } from "@/lib/asArray";
 import { RemotePeerHealthSection } from "../internal/RemotePeerHealthSection";
-import { RemoteReachabilitySection, type Reachability } from "../internal/RemoteReachabilitySection";
+import { RemoteServerSection, type ServerState } from "../internal/RemoteServerSection";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { SettingsToggle } from "../internal/SettingsToggle";
 
 interface RemoteState {
-  server: {
-    enabled: boolean; port: number; running: boolean;
-    fingerprint: string; token_set: boolean;
-    reachability?: Reachability;
-  };
+  server: ServerState;
   client: {
     host: string; port: number; token_set: boolean;
     conn_state: string; last_error: string;
@@ -101,8 +97,8 @@ export function RemoteTab() {
     <div className="space-y-4">
       <p className="text-[11px] text-ink-3">
         Configure exactly one role per machine: the VPS accepts the connection,
-        this Mac initiates it. Both use the same token — generate it on the VPS
-        under Node &amp; updates, then paste it here.
+        your own computer connects to it. Both use the same token, shown on the
+        VPS when you press Make this node a VPS; paste it here on the other one.
       </p>
 
       {note && (
@@ -115,44 +111,7 @@ export function RemoteTab() {
       )}
 
       {/* ── This machine is the VPS ─────────────────────────────────────── */}
-      <section data-testid="remote-server" className="rounded border border-line p-3">
-        <h3 className="text-xs font-semibold text-ink-1">This machine accepts connections</h3>
-        <p className="mb-2 text-[11px] text-ink-3">
-          Turn this on only on the VPS. It needs a pairing token first.
-        </p>
-        <div className="flex flex-wrap items-end gap-4">
-          <SettingsToggle
-            label="Accept remote connections"
-            checked={Boolean(server.enabled)}
-            onChange={(on) => void act(() =>
-              api.put("/api/remote/server", { enabled: on, port: Number(server.port) }))}
-          />
-          <label className="text-xs text-ink-2">
-            Listen port
-            <Tooltip label="The TCP port this machine listens on for the other node. It must match the port the other node dials, and be open in this machine's firewall. Saved when you leave the box.">
-              <input
-                aria-label="Listen port"
-                className="num mt-0.5 w-28 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-                defaultValue={String(server.port ?? "")}
-                onBlur={(e) => void act(() =>
-                  api.put("/api/remote/server",
-                    { enabled: Boolean(server.enabled), port: Number(e.target.value) }))}
-              />
-            </Tooltip>
-          </label>
-          <span className="text-[11px] text-ink-3">
-            {server.running ? "listening" : "stopped"}
-            {!server.token_set && " — no token generated yet"}
-          </span>
-        </div>
-        <p className="mt-2 break-all font-mono text-[10px] text-ink-3">
-          Cert fingerprint: {server.fingerprint || "(generated on first start)"}
-        </p>
-        <RemoteReachabilitySection
-          reach={asObject<Reachability>(server.reachability)}
-          port={Number(server.port)}
-        />
-      </section>
+      <RemoteServerSection server={server} busy={busy} act={act} />
 
       {/* ── This machine connects out ───────────────────────────────────── */}
       <section data-testid="remote-client" className="rounded border border-line p-3">
@@ -186,7 +145,7 @@ export function RemoteTab() {
           </label>
           <label className="block text-xs text-ink-2">
             Shared token
-            <Tooltip label="The pairing token, generated on the OTHER node under Node & updates and shown there exactly once. It is stored but never shown again here, so reconnecting means pasting it in fresh.">
+            <Tooltip label="The pairing token, shown once on the VPS when it was made a VPS (or generated under Node & updates). It is stored but never shown again here, so reconnecting means pasting it in fresh.">
               <input
                 aria-label="Shared token"
                 type="password"

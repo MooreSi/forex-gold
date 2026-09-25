@@ -72,14 +72,16 @@ class TestTheFirewall:
         assert "localport=9001" in out["firewall_command"]
         assert "profile=private" not in out["firewall_command"]
 
-    def test_it_looks_for_the_rule_the_installer_creates(self, netsh):
-        """Two names for one rule is a check that always says "missing"."""
+    def test_it_looks_for_the_rule_the_uninstaller_removes(self, netsh):
+        """The app creates the rule ("Make this node a VPS") and the
+        uninstaller deletes it. Two names for one rule is a check that always
+        says "missing" and an uninstall that leaves the port open."""
         calls, _ = netsh
         reach.describe(8765)
 
         iss = (REPO / "installer" / "FOREX_Trader_Setup.iss").read_text(encoding="utf-8")
-        installer_names = re.findall(r'add rule name=""([^"]+)""', iss)
-        assert any(f"name={n}" in calls[0] for n in installer_names)
+        uninstall_names = re.findall(r'delete rule name=""([^"]+)""', iss)
+        assert any(f'name="{n}"' in calls[0] for n in uninstall_names)
 
     def test_netsh_is_asked_once_a_minute_not_on_every_poll(self, netsh):
         """The tab re-reads its state every 3 seconds."""

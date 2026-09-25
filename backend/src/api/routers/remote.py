@@ -53,6 +53,10 @@ class ServerWrite(BaseModel):
     port: int = 0
 
 
+class PortWrite(BaseModel):
+    port: int = 0
+
+
 class ClientWrite(BaseModel):
     host: str = ""
     port: int = 0
@@ -152,6 +156,51 @@ async def set_server(body: ServerWrite, eng: Any = Depends(engine_dep)) -> dict:
         log.warning("[remote] sync server failed to start: %s", exc)
         raise Refusal(f"The sync server did not start: {exc}") from exc
     return await state()
+
+
+_FIREWALL_NOTE = {
+    "open": "Port {port} is open in the Windows firewall.",
+    "declined": ("Port {port} is not open: the Windows permission prompt was "
+                 "declined. Press the button again, or run the command below "
+                 "as administrator."),
+    "not-applicable": "Make sure port {port} is open in this machine's firewall.",
+}
+
+
+@router.post("/make-vps")
+async def make_vps(body: PortWrite, eng: Any = Depends(engine_dep)) -> dict:
+    """One press: a pairing token if there is none, the sync port open in the
+    Windows firewall, and the listener started. The installer does not open the
+    port (owner, 2026-09-25), because most installs are someone's main PC.
+
+    An existing token is kept: a new one would silently unpair the machine
+    already using the old. A new one is returned here once and never again.
+    """
+    port = int(body.port or node_ctl.get_app_config(SERVER_PORT)
+               or sync_ctl.DEFAULT_SYNC_PORT)
+    new_token = None if node_ctl.get_sync_token() else node_ctl.generate_sync_token()
+    firewall = await node_ctl.open_firewall(port)
+    out = await set_server(ServerWrite(enabled=True, port=port), eng)
+    out["note"] = ("This machine is now the VPS. "
+                   + _FIREWALL_NOTE.get(firewall, "").format(port=port))
+    if new_token:
+        out["token"] = new_token
+    return out
+
+
+@router.post("/stop-vps")
+async def stop_vps() -> dict:
+    """Stop listening and close the port again. The token is kept, so coming
+    back later does not unpair the other machine."""
+    port = int(node_ctl.get_app_config(SERVER_PORT) or sync_ctl.DEFAULT_SYNC_PORT)
+    node_ctl.set_app_config(SERVER_ENABLED, "0")
+    await sync_ctl.server_stop()
+    firewall = await node_ctl.close_firewall(port)
+    out = await state()
+    out["note"] = ("This machine is no longer the VPS."
+                   + (f" Port {port} could not be closed: the Windows permission "
+                      "prompt was declined." if firewall == "declined" else ""))
+    return out
 
 
 @router.put("/client")

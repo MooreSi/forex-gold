@@ -1,11 +1,12 @@
-"""The Windows installer leaves a VPS ready to pair and shows the dashboard.
+"""What the Windows installer does, and does not do, for a VPS.
 
 Found on a fresh VPS install, 2026-09-25:
 
-* The sync server listens on TCP 8765 (Settings > Remote node), and nothing
-  opened it. The installer added rules for 8888 and 9000 only, both limited to
-  the Private network profile, and a VPS's network is almost always Public. The
-  original app left this as a manual step on its About page.
+* The sync server listens on TCP 8765 (Settings > Remote node). The installer
+  opened it for a few hours on 2026-09-25; the owner then reversed that,
+  because most Windows installs are someone's main PC. The port is opened by
+  "Make this node a VPS" (tests/core/test_vps_firewall.py), and only removed
+  here, on uninstall.
 * The first start skipped the browser, because a VPS never opens one. The
   installer now leaves the marker run.py honours once (see
   tests/test_browser_after_install.py).
@@ -33,26 +34,18 @@ def _entries(section: str) -> list[str]:
             if e.strip() and not e.strip().startswith(";")]
 
 
-def _sync_rule() -> str:
-    rules = [e for e in _entries("Run")
-             if "firewall add rule" in e and f"localport={DEFAULT_SYNC_PORT}" in e]
-    assert len(rules) == 1, f"expected one inbound rule for TCP {DEFAULT_SYNC_PORT}"
-    return rules[0]
+def test_the_installer_does_not_open_the_sync_port():
+    """Owner, 2026-09-25: most Windows installs are a main PC, not a VPS, and
+    must accept nothing inbound. "Make this node a VPS" opens it instead."""
+    assert not any("add rule" in e and f"localport={DEFAULT_SYNC_PORT}" in e
+                   for e in _entries("Run"))
 
 
-def test_the_sync_port_is_opened_inbound_over_tcp():
-    rule = _sync_rule()
-    assert "dir=in" in rule and "action=allow" in rule and "protocol=TCP" in rule
-
-
-def test_the_sync_rule_is_not_limited_to_the_private_profile():
-    """A VPS's network is Public. A Private-only rule opens nothing there."""
-    assert "profile=private" not in _sync_rule().lower()
-
-
-def test_the_sync_rule_is_removed_on_uninstall():
-    name = re.search(r'name=""([^"]+)""', _sync_rule()).group(1)
-    assert any(name in e and "delete rule" in e for e in _entries("UninstallRun"))
+def test_the_uninstaller_removes_the_rule_the_app_may_have_made():
+    from backend.src.services.cluster.sync.reachability import RULE_NAME
+    name = RULE_NAME.format(port=DEFAULT_SYNC_PORT)
+    assert any(f'name=""{name}""' in e and "delete rule" in e
+               for e in _entries("UninstallRun"))
 
 
 def test_the_installer_leaves_the_marker_run_py_reads():

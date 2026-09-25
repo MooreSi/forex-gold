@@ -1,3 +1,5 @@
+import { Button } from "@/components/shared/Button";
+
 export interface Reachability {
   addresses?: string[];
   behind_nat?: boolean;
@@ -12,7 +14,9 @@ export interface Reachability {
  * lets it in, and what protects the link. A fresh VPS said only "listening"
  * (2026-09-25), which left the operator to find all three elsewhere.
  */
-export function RemoteReachabilitySection({ reach, port }: { reach: Reachability; port: number }) {
+export function RemoteReachabilitySection(
+  { reach, port, onOpenPort }: { reach: Reachability; port: number; onOpenPort?: () => void },
+) {
   if (!reach || !Array.isArray(reach.addresses)) return null;
   const addresses = reach.addresses;
 
@@ -44,8 +48,14 @@ export function RemoteReachabilitySection({ reach, port }: { reach: Reachability
             {reach.firewall === "missing"
               ? `Port ${port} is not open in the Windows firewall yet.`
               : `Could not check the Windows firewall for port ${port}.`}{" "}
-            Run this once in an administrator command prompt:
+            Open it here (Windows asks for permission), or run this once in an
+            administrator command prompt:
           </p>
+          {onOpenPort && (
+            <div className="mt-1">
+              <Button variant="ghost" onClick={onOpenPort}>Open port {port}</Button>
+            </div>
+          )}
           <code className="mt-0.5 block break-all rounded bg-surface-1 px-2 py-1 font-mono text-[10px] text-ink-1">
             {reach.firewall_command}
           </code>

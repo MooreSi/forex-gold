@@ -614,13 +614,22 @@ describe("remote node", () => {
       firewall_command: 'netsh advfirewall firewall add rule name="FOREX Trader Sync (port 8765)"',
       security: "Encrypted with TLS; every connection must present the shared pairing token.",
     };
-    const openWith = async (reachability: object) => {
+    // Shown on the VPS only (owner, 2026-09-25): on a main computer the port
+    // is meant to stay closed, and "not open" there would read as a fault.
+    const openWith = async (reachability: object, enabled = true) => {
       overrides["/api/remote/state"] = {
-        ...REMOTE, server: { ...REMOTE.server, reachability },
+        ...REMOTE, server: { ...REMOTE.server, enabled, running: enabled, reachability },
       };
       render(<SettingsPanel />);
       await userEvent.click(await screen.findByRole("tab", { name: "Remote node" }));
     };
+
+    it("is not shown on a machine that is not the VPS", async () => {
+      await openWith(REACH, false);
+
+      await screen.findByRole("button", { name: "Make this node a VPS" });
+      expect(screen.queryByTestId("remote-reachability")).toBeNull();
+    });
 
     it("names the address and port to enter on the other machine", async () => {
       await openWith(REACH);
@@ -662,17 +671,95 @@ describe("remote node", () => {
   });
 
   it("shows a refusal in the backend's own words", async () => {
-    overrides["/api/remote/server"] = {
+    overrides["/api/remote/make-vps"] = {
       __status: 409,
-      error: { kind: "refusal", message: "Generate a pairing token first.", ref: null },
+      error: { kind: "refusal", message: "The sync server did not start: address in use", ref: null },
     };
     await openTab();
 
     await userEvent.click(
-      await screen.findByLabelText("Accept remote connections"));
+      await screen.findByRole("button", { name: "Make this node a VPS" }));
 
     expect(await screen.findByRole("alert"))
-      .toHaveTextContent("Generate a pairing token first");
+      .toHaveTextContent("The sync server did not start");
+  });
+
+  describe("making this node a VPS (owner, 2026-09-25)", () => {
+    // The installer no longer opens the sync port: most Windows installs are
+    // someone's main PC. One press here does what a VPS needs instead.
+
+    it("offers it on a machine that is not the VPS, and says when not to", async () => {
+      await openTab();
+
+      expect(await screen.findByRole("button", { name: "Make this node a VPS" }))
+        .toBeInTheDocument();
+      expect(screen.getByTestId("remote-server")).toHaveTextContent(/main computer/i);
+      expect(screen.queryByRole("button", { name: "Stop being a VPS" })).toBeNull();
+    });
+
+    it("sets it up in one press and says what happened", async () => {
+      overrides["/api/remote/make-vps"] = {
+        ...REMOTE, server: { ...REMOTE.server, enabled: true, running: true },
+        note: "This machine is now the VPS. Port 8765 is open in the Windows firewall.",
+      };
+      await openTab();
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Make this node a VPS" }));
+
+      await waitFor(() => expect(writes()).toHaveLength(1));
+      expect(writes()[0][0]).toBe("/api/remote/make-vps");
+      expect(writes()[0][1].method).toBe("POST");
+      expect(JSON.parse(writes()[0][1].body)).toEqual({ port: 8765 });
+      expect(await screen.findByRole("status")).toHaveTextContent("now the VPS");
+    });
+
+    it("shows a newly made pairing token, because it is shown only once", async () => {
+      overrides["/api/remote/make-vps"] = {
+        ...REMOTE, token: "fresh-token-123", note: "This machine is now the VPS.",
+      };
+      await openTab();
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Make this node a VPS" }));
+
+      expect(await screen.findByTestId("remote-new-token"))
+        .toHaveTextContent("fresh-token-123");
+    });
+
+    it("offers to stop being the VPS once it is one", async () => {
+      overrides["/api/remote/state"] = {
+        ...REMOTE, server: { ...REMOTE.server, enabled: true, running: true },
+      };
+      render(<SettingsPanel />);
+      await userEvent.click(await screen.findByRole("tab", { name: "Remote node" }));
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Stop being a VPS" }));
+
+      await waitFor(() => expect(writes()).toHaveLength(1));
+      expect(writes()[0][0]).toBe("/api/remote/stop-vps");
+      expect(screen.queryByRole("button", { name: "Make this node a VPS" })).toBeNull();
+    });
+
+    it("offers to open the port when the VPS's firewall rule is missing", async () => {
+      overrides["/api/remote/state"] = {
+        ...REMOTE,
+        server: {
+          ...REMOTE.server, enabled: true, running: true,
+          reachability: { addresses: ["38.253.124.25"], firewall: "missing",
+            firewall_command: "netsh ...", security: "TLS" },
+        },
+      };
+      render(<SettingsPanel />);
+      await userEvent.click(await screen.findByRole("tab", { name: "Remote node" }));
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Open port 8765" }));
+
+      await waitFor(() => expect(writes()).toHaveLength(1));
+      expect(writes()[0][0]).toBe("/api/remote/make-vps");
+    });
   });
 });
 

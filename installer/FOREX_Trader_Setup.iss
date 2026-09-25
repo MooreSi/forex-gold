@@ -145,19 +145,10 @@ Filename: "netsh"; \
     StatusMsg: "Adding firewall rule for port 9000..."; \
     Flags: runhidden waituntilterminated
 
-; Port 8765 — the Remote-node sync server (Settings > Remote node), the one
-; port a VPS must accept from the paired machine. TLS plus a shared token
-; guard it. Every profile, not just Private: a VPS's network is almost always
-; Public, and a Private-only rule opens nothing there. Deleted first so a
-; reinstall does not stack duplicate rules. Needs admin, like the two above;
-; Settings > Remote node reports whether the rule exists.
-Filename: "netsh"; \
-    Parameters: "advfirewall firewall delete rule name=""FOREX Trader Sync (port 8765)"""; \
-    Flags: runhidden waituntilterminated
-Filename: "netsh"; \
-    Parameters: "advfirewall firewall add rule name=""FOREX Trader Sync (port 8765)"" dir=in action=allow protocol=TCP localport=8765"; \
-    StatusMsg: "Adding firewall rule for port 8765..."; \
-    Flags: runhidden waituntilterminated
+; Port 8765 (the Remote-node sync server) is deliberately NOT opened here: most
+; Windows installs are someone's main PC, not a VPS, and should accept nothing
+; inbound. Settings > Remote node > "Make this node a VPS" opens it, and the
+; uninstaller below removes it.
 
 ; ── Step 5: Open the app after install (optional) ─────────────────────────────
 Filename: "{app}\Setup & Start FOREX.bat"; \

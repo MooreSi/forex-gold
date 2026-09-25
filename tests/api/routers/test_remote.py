@@ -381,3 +381,99 @@ def test_the_state_says_how_the_other_machine_reaches_this_one(
     assert asked == [9001]
     assert body["server"]["reachability"]["addresses"] == ["38.253.124.25"]
     assert body["server"]["reachability"]["firewall"] == "missing"
+
+
+# ── Make this node a VPS / Stop being a VPS (owner, 2026-09-25) ──────────────
+# One press does what a VPS needs: a pairing token if there is none, the sync
+# port open in the Windows firewall, and the listener started. The installer no
+# longer opens that port, because most Windows installs are a main PC.
+
+@pytest.fixture
+def vps(remote, monkeypatch):
+    remote["firewall"] = []
+    remote["firewall_answer"] = "open"
+    remote["generated"] = []
+
+    async def _open(port):
+        remote["firewall"].append(("open", port))
+        return remote["firewall_answer"]
+
+    async def _close(port):
+        remote["firewall"].append(("close", port))
+        return remote["firewall_answer"]
+
+    def _generate():
+        remote["token"] = "fresh-token"
+        remote["generated"].append(1)
+        return "fresh-token"
+
+    monkeypatch.setattr(remote_router.node_ctl, "open_firewall", _open)
+    monkeypatch.setattr(remote_router.node_ctl, "close_firewall", _close)
+    monkeypatch.setattr(remote_router.node_ctl, "generate_sync_token", _generate)
+    monkeypatch.setattr(remote_router.node_ctl, "server_reachability",
+                        lambda port: {"addresses": [], "firewall": "open"})
+    return remote
+
+
+class TestMakingThisNodeAVps:
+    def test_it_opens_the_port_and_starts_the_listener(self, make_client, vps):
+        body = make_client().post("/api/remote/make-vps", json={"port": 8765}).json()
+
+        assert vps["firewall"] == [("open", 8765)]
+        assert ("server_start", ) == vps["calls"][-1][:1]
+        assert vps["config"]["sync_server_enabled"] == "1"
+        assert body["server"]["enabled"] is True
+
+    def test_with_no_token_it_makes_one_and_shows_it_once(self, make_client, vps):
+        vps["token"] = ""
+        client = make_client()
+
+        body = client.post("/api/remote/make-vps", json={"port": 8765}).json()
+
+        assert body["token"] == "fresh-token"
+        assert vps["calls"][-1] == ("server_start", vps["calls"][-1][1], 8765, "fresh-token")
+        assert "fresh-token" not in client.get("/api/remote/state").text
+
+    def test_an_existing_token_is_kept(self, make_client, vps):
+        """A new one would silently unpair the machine already using the old."""
+        body = make_client().post("/api/remote/make-vps", json={"port": 8765}).json()
+
+        assert vps["generated"] == []
+        assert "token" not in body
+
+    def test_a_declined_windows_prompt_still_sets_it_up_and_says_so(self, make_client, vps):
+        vps["firewall_answer"] = "declined"
+
+        body = make_client().post("/api/remote/make-vps", json={"port": 8765}).json()
+
+        assert vps["config"]["sync_server_enabled"] == "1"
+        assert "not open" in body["note"]
+
+    def test_a_listener_that_fails_to_start_is_refused(self, make_client, vps):
+        vps["server_start_raises"] = OSError("address in use")
+
+        res = make_client().post("/api/remote/make-vps", json={"port": 8765})
+
+        assert res.status_code == 409
+        assert vps["config"]["sync_server_enabled"] == "0"
+
+    def test_it_is_not_reachable_by_a_get(self, make_client, vps):
+        assert make_client().get("/api/remote/make-vps").status_code == 405
+        assert vps["firewall"] == []
+
+
+class TestStoppingBeingAVps:
+    def test_it_stops_the_listener_and_closes_the_port(self, make_client, vps):
+        vps["config"]["sync_server_enabled"] = "1"
+
+        body = make_client().post("/api/remote/stop-vps", json={}).json()
+
+        assert ("server_stop",) in vps["calls"]
+        assert vps["firewall"] == [("close", 8765)]
+        assert vps["config"]["sync_server_enabled"] == "0"
+        assert body["server"]["enabled"] is False
+
+    def test_the_token_is_kept_for_a_later_return(self, make_client, vps):
+        make_client().post("/api/remote/stop-vps", json={})
+
+        assert vps["token"] == "vps-token"

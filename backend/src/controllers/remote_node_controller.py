@@ -4,13 +4,14 @@ from __future__ import annotations
 from typing import Optional
 
 from backend.src.services.cluster import node as _node
+from backend.src.services.cluster.sync import reachability as _reach
 from backend.src.services.health import power as _power
 from backend.src.services.risk import app_config as _config
 from backend.src.services.risk import settings as _risk
 
 __all__ = ["get_app_config", "set_app_config", "get_risk_settings",
-           "update_risk_settings", "generate_sync_token", "get_sync_token",
-           "restart_app", "stop_app"]
+           "update_risk_settings", "server_reachability", "generate_sync_token",
+           "get_sync_token", "restart_app", "stop_app"]
 
 
 def get_app_config(key: str) -> Optional[str]:
@@ -27,6 +28,10 @@ def get_risk_settings() -> dict:
 
 def update_risk_settings(fields: dict) -> None:
     _risk.update(fields)
+
+
+def server_reachability(port: int) -> dict:
+    return _reach.describe(port)
 
 
 def generate_sync_token() -> str:

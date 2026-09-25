@@ -440,6 +440,18 @@ def _dashboard_storage_secret() -> str:
         return secrets.token_urlsafe(48)
 
 
+def _should_open_browser(*, no_browser: bool, is_vps: bool, marker: Path) -> bool:
+    """The installer's marker means a person just installed and is waiting on
+    the dashboard, so it wins once over both --no-browser and the VPS rule."""
+    if marker.exists():
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+        return True
+    return not no_browser and not is_vps
+
+
 def _open_browser_when_up(port: int, timeout: float = 20.0) -> None:
     """Open the dashboard once the server is actually listening.
 
@@ -607,15 +619,21 @@ def main():
         # --no-browser, so it can't be missed by a future code path. Local
         # (Mac) instances are completely unaffected — this only ever turns
         # the browser off, never on, so --no-browser still works as before.
-        show_browser = not _args.no_browser
+        is_vps = False
         try:
-            if _db_mod.get_app_config("sync_server_enabled") == "1":
-                show_browser = False
-                log.info("This instance is configured as the Remote (VPS) node — "
-                         "skipping automatic browser launch. Open "
-                         "http://localhost:%s manually if you need the dashboard.", port)
+            is_vps = _db_mod.get_app_config("sync_server_enabled") == "1"
         except Exception as exc:
             log.warning("Could not check Remote-node role for browser auto-launch: %s", exc)
+        # The one exception: the installer's marker, a person watching the
+        # first start after an install (see _should_open_browser).
+        show_browser = _should_open_browser(
+            no_browser=_args.no_browser, is_vps=is_vps,
+            marker=Path(__file__).resolve().parent / "open_browser_once",
+        )
+        if is_vps and not show_browser:
+            log.info("This instance is configured as the Remote (VPS) node — "
+                     "skipping automatic browser launch. Open "
+                     "http://localhost:%s manually if you need the dashboard.", port)
 
         # Serve the compiled React dashboard and the JSON API from one
         # uvicorn process. There is no second process and no Node runtime at

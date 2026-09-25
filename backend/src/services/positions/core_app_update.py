@@ -551,13 +551,49 @@ def _tree_blobs(ls_tree_output: str) -> dict:
     return blobs
 
 
+# What an install folder holds that is not the app's source. The installer
+# ships no .gitignore, so without these `add -A` staged the whole venv and the
+# downloaded Python, and no commit could ever match.
+_INSTALL_LOCAL_PATHS = (
+    ".venv/", "python_embed/", "installed_version.txt", "open_browser_once", "__pycache__/",
+    "*.pyc", "*.pyo", "*.log", "*.db", "config.yaml", "/data/", "mql5/*.set",
+)
+
+
+def _make_writable_and_retry(func, path, _exc_info) -> None:
+    """rmtree hook: git's objects are read-only, which Windows will not delete."""
+    import os
+    import stat
+    for p in (os.path.dirname(path), path):
+        try:
+            os.chmod(p, stat.S_IRWXU)
+        except OSError:
+            pass
+    func(path)
+
+
 def _discard_new_git_dir() -> None:
     git_dir = _REPO_ROOT / ".git"
     try:
         if git_dir.is_dir():
-            shutil.rmtree(git_dir)
+            shutil.rmtree(git_dir, onerror=_make_writable_and_retry)
     except Exception as e:                      # pragma: no cover -- best effort
         log.warning("[Update] could not remove the half-built .git: %s", e)
+
+
+def _is_abandoned_link() -> bool:
+    """A .git a failed link attempt could not remove: symbolic HEAD and no local
+    branch, loose or packed. Read off the files; any branch of its own keeps it."""
+    git_dir = _REPO_ROOT / ".git"
+    heads, packed = git_dir / "refs" / "heads", git_dir / "packed-refs"
+    try:
+        return (git_dir.is_dir()
+                and (git_dir / "HEAD").read_text(encoding="utf-8").startswith("ref:")
+                and not (heads.is_dir() and any(p.is_file() for p in heads.rglob("*")))
+                and not (packed.is_file()
+                         and "refs/heads/" in packed.read_text(encoding="utf-8")))
+    except OSError:
+        return False
 
 
 async def link_checkout() -> dict:
@@ -569,7 +605,10 @@ async def link_checkout() -> dict:
     modifies the working tree: the caller runs it on every startup.
     """
     if (_REPO_ROOT / ".git").exists():
-        return {"linked": False, "sha": "", "reason": "already-linked"}
+        if not _is_abandoned_link() or not shutil.which("git"):
+            return {"linked": False, "sha": "", "reason": "already-linked"}
+        log.info("[Update] removing a half-built .git from an earlier link attempt")
+        _discard_new_git_dir()
     if not shutil.which("git"):
         return {"linked": False, "sha": "", "reason": "no-git"}
 
@@ -592,8 +631,15 @@ async def link_checkout() -> dict:
                  err.strip()[:200])
         return _give_up("fetch-failed")
 
-    # `add -A` only writes the index; it honours .gitignore, so .venv, the
-    # config and the databases stay out of the comparison.
+    # `add -A` only writes the index; it honours .gitignore and info/exclude,
+    # so the venv, the config and the databases stay out of the comparison.
+    try:
+        exclude = _REPO_ROOT / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(_INSTALL_LOCAL_PATHS) + "\n")
+    except OSError as e:
+        log.debug("[Update] could not write info/exclude: %s", e)
     rc, _, _ = await _run_git("add", "-A")
     if rc != 0:
         return _give_up("index-failed")
@@ -608,10 +654,16 @@ async def link_checkout() -> dict:
     if rc != 0:
         return _give_up("no-matching-commit")
 
+    # Every installed file must be in the commit, byte for byte. The reverse is
+    # not required: the installer ships part of the tree (no tests/, no docs/),
+    # so the newest commit whose shipped files all match is the one this is.
     match = ""
     for sha in log_out.split():
         rc, tree_out, _ = await _run_git("ls-tree", "-r", sha)
-        if rc == 0 and _tree_blobs(tree_out) == installed:
+        if rc != 0:
+            continue
+        tree = _tree_blobs(tree_out)
+        if all(tree.get(path) == blob for path, blob in installed.items()):
             match = sha
             break
     if not match:

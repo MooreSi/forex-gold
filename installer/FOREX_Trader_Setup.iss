@@ -145,6 +145,20 @@ Filename: "netsh"; \
     StatusMsg: "Adding firewall rule for port 9000..."; \
     Flags: runhidden waituntilterminated
 
+; Port 8765 — the Remote-node sync server (Settings > Remote node), the one
+; port a VPS must accept from the paired machine. TLS plus a shared token
+; guard it. Every profile, not just Private: a VPS's network is almost always
+; Public, and a Private-only rule opens nothing there. Deleted first so a
+; reinstall does not stack duplicate rules. Needs admin, like the two above;
+; Settings > Remote node reports whether the rule exists.
+Filename: "netsh"; \
+    Parameters: "advfirewall firewall delete rule name=""FOREX Trader Sync (port 8765)"""; \
+    Flags: runhidden waituntilterminated
+Filename: "netsh"; \
+    Parameters: "advfirewall firewall add rule name=""FOREX Trader Sync (port 8765)"" dir=in action=allow protocol=TCP localport=8765"; \
+    StatusMsg: "Adding firewall rule for port 8765..."; \
+    Flags: runhidden waituntilterminated
+
 ; ── Step 5: Open the app after install (optional) ─────────────────────────────
 Filename: "{app}\Setup & Start FOREX.bat"; \
     Description: "Launch FOREX Trader now"; \
@@ -154,6 +168,7 @@ Filename: "{app}\Setup & Start FOREX.bat"; \
 ; Remove the firewall rules on uninstall
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""FOREX Trader UI (port 8888)""";    Flags: runhidden; RunOnceId: "DelFW8888"
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""FOREX Trader Bridge (port 9000)"""; Flags: runhidden; RunOnceId: "DelFW9000"
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""FOREX Trader Sync (port 8765)""";   Flags: runhidden; RunOnceId: "DelFW8765"
 
 [Code]
 
@@ -369,6 +384,10 @@ begin
         'python311.zip' + #13#10 + '.' + #13#10 + #13#10 + 'import site' + #13#10,
         False
       );
+
+    // The first start after this install opens the dashboard even on a VPS,
+    // where every other start skips it (run.py's _should_open_browser).
+    SaveStringToFile(ExpandConstant('{app}\open_browser_once'), '', False);
 
     // Write version marker so smart-launch detects this version on next run
     SaveStringToFile(

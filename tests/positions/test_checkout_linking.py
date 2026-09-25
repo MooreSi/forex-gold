@@ -215,6 +215,26 @@ class TestWhenItCannotBeSureAndSaysSo:
 
         assert not (root / ".git").exists()
 
+    def test_the_clean_up_removes_what_git_made_read_only(self, repo):
+        """Git writes its objects read-only. On Windows shutil.rmtree cannot
+        delete a read-only file, the failure was only logged, and the unborn
+        repository stayed. A read-only directory is the POSIX equivalent: the
+        same rmtree fails on it the same way."""
+        import os
+        import stat
+        root = repo(True)
+        pack = root / ".git" / "objects" / "pack"
+        pack.mkdir(parents=True)
+        (pack / "pack-1.pack").write_bytes(b"x")
+        os.chmod(pack / "pack-1.pack", stat.S_IREAD)
+        os.chmod(pack, stat.S_IREAD | stat.S_IEXEC)
+        try:
+            upd._discard_new_git_dir()
+            assert not (root / ".git").exists()
+        finally:
+            if pack.exists():
+                os.chmod(pack, stat.S_IRWXU)
+
     def test_a_fetch_that_cannot_reach_github_leaves_nothing_behind(
         self, repo, git, git_exists,
     ):
@@ -283,6 +303,119 @@ class TestAgainstRealGit:
         assert self._git(install, "rev-parse", "HEAD").stdout.strip() == first_sha
         assert (install / "run.py").read_text(encoding="utf-8") == "first\n"
         assert self._git(install, "status", "--porcelain").stdout.strip() == ""
+
+    def _installer_copy(self, install: Path) -> None:
+        """What FOREX_Trader_Setup.exe actually leaves behind (2026-09-25).
+
+        Only part of the tree is packaged -- no tests/, no docs/ -- and next
+        to it sit things the installer and first run create: the downloaded
+        Python, the version marker, the venv. The tests above always shipped
+        the whole tree plus a .gitignore, which no real install has ever had,
+        so they passed while every Windows install stayed unlinked.
+        """
+        install.mkdir()
+        (install / "run.py").write_text("first\n", encoding="utf-8")
+        for extra in (".venv", "python_embed"):
+            (install / extra).mkdir()
+            (install / extra / "python.exe").write_text("bin", encoding="utf-8")
+        (install / "installed_version.txt").write_text("6.1", encoding="utf-8")
+
+    @pytest.fixture
+    def origin_with_unshipped_files(self, origin):
+        src, _ = origin
+        (src / "tests").mkdir()
+        (src / "tests" / "test_x.py").write_text("t\n", encoding="utf-8")
+        self._git(src, "add", "-A")
+        self._git(src, "commit", "-m", "three: tests only")
+        third = self._git(src, "rev-parse", "HEAD").stdout.strip()
+        return src, third
+
+    def test_an_installer_copy_links_although_it_ships_only_part_of_the_tree(
+        self, origin_with_unshipped_files, tmp_path, monkeypatch, git_exists,
+    ):
+        """The unshipped tests/ and the installer's own files must not stop an
+        install matching the commit its code is."""
+        src, _ = origin_with_unshipped_files
+        install = tmp_path / "install"
+        self._installer_copy(install)
+        (install / "run.py").write_text("second\n", encoding="utf-8")
+        monkeypatch.setattr(upd, "_REPO_ROOT", install)
+        monkeypatch.setattr(upd, "_GITHUB_REPO_URL", str(src).removesuffix(".git"))
+
+        result = asyncio.run(upd.link_checkout())
+
+        # "second" is run.py in commits two AND three; three is newest and only
+        # adds files this install does not have, so three is what it is.
+        third = self._git(src, "rev-parse", "HEAD").stdout.strip()
+        assert result["linked"] is True, result
+        assert result["sha"] == third
+        assert (install / "python_embed" / "python.exe").exists()
+        assert (install / "run.py").read_text(encoding="utf-8") == "second\n"
+
+    def test_a_file_the_commit_does_not_have_still_refuses_to_match(
+        self, origin, tmp_path, monkeypatch, git_exists,
+    ):
+        """Shipping less than the tree is fine; shipping code the tree does not
+        have means these files are not that commit, and claiming it would badge
+        edited code as up to date."""
+        src, _ = origin
+        install = tmp_path / "install"
+        self._installer_copy(install)
+        (install / "backend.py").write_text("local edit\n", encoding="utf-8")
+        monkeypatch.setattr(upd, "_REPO_ROOT", install)
+        monkeypatch.setattr(upd, "_GITHUB_REPO_URL", str(src).removesuffix(".git"))
+
+        result = asyncio.run(upd.link_checkout())
+
+        assert result["linked"] is False
+        assert result["reason"] == "no-matching-commit"
+        assert not (install / ".git").exists()
+
+    def test_a_repository_left_half_built_by_an_earlier_run_is_rebuilt(
+        self, origin, tmp_path, monkeypatch, git_exists,
+    ):
+        """The VPS on 2026-09-25: an earlier link attempt gave up, its clean-up
+        could not delete git's read-only object files on Windows, and it left
+        a .git with an unborn HEAD. From then on every start said
+        "already-linked", the Update page said "could not resolve local HEAD"
+        and the admin console said "commit unreadable" -- for ever."""
+        src, first_sha = origin
+        install = tmp_path / "install"
+        self._installer_copy(install)
+        self._git(install, "init")
+        self._git(install, "remote", "add", "origin", str(src))
+        self._git(install, "fetch", "origin", "main")
+        monkeypatch.setattr(upd, "_REPO_ROOT", install)
+        monkeypatch.setattr(upd, "_GITHUB_REPO_URL", str(src).removesuffix(".git"))
+
+        result = asyncio.run(upd.link_checkout())
+
+        assert result["linked"] is True, result
+        assert result["sha"] == first_sha
+        assert upd.get_commit_report()[1] == ""
+
+    def test_a_repository_with_its_own_commits_is_never_rebuilt(
+        self, origin, tmp_path, monkeypatch, git_exists,
+    ):
+        """The leftover check deletes a .git. It must only ever match one that
+        holds nothing of its own -- a developer's detached, broken-HEAD
+        checkout is not that."""
+        src, _ = origin
+        install = tmp_path / "install"
+        install.mkdir()
+        self._git(install, "init", "-b", "main")
+        self._git(install, "config", "user.email", "t@t.t")
+        self._git(install, "config", "user.name", "t")
+        (install / "mine.py").write_text("mine\n", encoding="utf-8")
+        self._git(install, "add", "-A")
+        self._git(install, "commit", "-m", "local work")
+        (install / ".git" / "HEAD").write_text("ref: refs/heads/gone\n", encoding="utf-8")
+        monkeypatch.setattr(upd, "_REPO_ROOT", install)
+
+        result = asyncio.run(upd.link_checkout())
+
+        assert result["reason"] == "already-linked"
+        assert self._git(install, "rev-parse", "main").returncode == 0
 
     def test_the_update_check_then_sees_the_one_commit_it_is_behind(
         self, origin, tmp_path, monkeypatch, git_exists,

@@ -89,11 +89,12 @@ async def state() -> dict:
     """Both roles, the live link and the two behaviour switches, in one read."""
     host, port, token = sync_ctl.load_config()
     link = sync_ctl.link_state()
+    listen_port = int(node_ctl.get_app_config(SERVER_PORT) or sync_ctl.DEFAULT_SYNC_PORT)
     return {
         "server": {
             "enabled": _flag(SERVER_ENABLED),
-            "port": int(node_ctl.get_app_config(SERVER_PORT)
-                        or sync_ctl.DEFAULT_SYNC_PORT),
+            "port": listen_port,
+            "reachability": node_ctl.server_reachability(listen_port),
             "running": sync_ctl.server_is_running(),
             # Empty until the first start, which is when it is generated.
             "fingerprint": sync_ctl.cert_fingerprint() or "",

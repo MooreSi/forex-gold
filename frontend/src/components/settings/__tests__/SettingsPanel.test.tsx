@@ -606,6 +606,61 @@ describe("remote node", () => {
       .toHaveTextContent("only source of new signals");
   });
 
+  describe("how the other machine reaches this one", () => {
+    // A fresh VPS said "listening" and nothing else (2026-09-25): no address
+    // to dial, no word on the firewall, nothing on what protects the link.
+    const REACH = {
+      addresses: ["38.253.124.25"], behind_nat: false, firewall: "missing",
+      firewall_command: 'netsh advfirewall firewall add rule name="FOREX Trader Sync (port 8765)"',
+      security: "Encrypted with TLS; every connection must present the shared pairing token.",
+    };
+    const openWith = async (reachability: object) => {
+      overrides["/api/remote/state"] = {
+        ...REMOTE, server: { ...REMOTE.server, reachability },
+      };
+      render(<SettingsPanel />);
+      await userEvent.click(await screen.findByRole("tab", { name: "Remote node" }));
+    };
+
+    it("names the address and port to enter on the other machine", async () => {
+      await openWith(REACH);
+
+      const section = await screen.findByTestId("remote-reachability");
+      expect(section).toHaveTextContent("38.253.124.25");
+      expect(section).toHaveTextContent("8765");
+    });
+
+    it("says the firewall rule is missing and gives the command", async () => {
+      await openWith(REACH);
+
+      const section = await screen.findByTestId("remote-reachability");
+      expect(section).toHaveTextContent(/not open/i);
+      expect(section).toHaveTextContent(REACH.firewall_command);
+    });
+
+    it("says so when the port is open", async () => {
+      await openWith({ ...REACH, firewall: "open" });
+
+      const section = await screen.findByTestId("remote-reachability");
+      expect(section).toHaveTextContent(/open in the Windows firewall/i);
+      expect(section).not.toHaveTextContent("netsh");
+    });
+
+    it("warns that a private address is not the one to dial", async () => {
+      await openWith({ ...REACH, addresses: ["10.0.0.4"], behind_nat: true });
+
+      expect(await screen.findByTestId("remote-reachability"))
+        .toHaveTextContent(/public IP/i);
+    });
+
+    it("states what protects the link", async () => {
+      await openWith(REACH);
+
+      expect(await screen.findByTestId("remote-reachability"))
+        .toHaveTextContent("pairing token");
+    });
+  });
+
   it("shows a refusal in the backend's own words", async () => {
     overrides["/api/remote/server"] = {
       __status: 409,

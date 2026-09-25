@@ -355,3 +355,29 @@ class TestTheModelSnapshot:
 def test_an_action_is_not_reachable_by_a_get(path, make_client, remote):
     assert make_client().get(path).status_code == 405
     assert remote["calls"] == []
+
+
+# ── Being reachable (2026-09-25) ─────────────────────────────────────────────
+
+def test_the_state_says_how_the_other_machine_reaches_this_one(
+    make_client, remote, monkeypatch,
+):
+    """A fresh VPS said "listening" and nothing else: no address to dial, no
+    word on the firewall, nothing on what protects the link. The check is
+    asked about the port this machine actually listens on."""
+    asked = []
+
+    def _reach(port):
+        asked.append(port)
+        return {"addresses": ["38.253.124.25"], "behind_nat": False,
+                "firewall": "missing", "firewall_command": "netsh ...",
+                "security": "TLS and a token"}
+
+    monkeypatch.setattr(remote_router.node_ctl, "server_reachability", _reach)
+    remote["config"]["sync_server_port"] = "9001"
+
+    body = make_client().get("/api/remote/state").json()
+
+    assert asked == [9001]
+    assert body["server"]["reachability"]["addresses"] == ["38.253.124.25"]
+    assert body["server"]["reachability"]["firewall"] == "missing"

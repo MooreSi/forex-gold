@@ -1,48 +1,41 @@
-# Building the Windows Installer
+# The Windows installer
 
-## Prerequisites (on a Windows machine or VM)
+`FOREX_Trader_Setup.exe` is a **bootstrapper**. It carries no app files, so an
+app change never needs a new .exe (owner, 2026-09-25). Recompile only when
+`FOREX_Trader_Setup.iss` itself changes, and bump `InstallerVersion` when you do.
+Its version is its own; it does not follow the app's `VERSION`.
 
-1. Install **Inno Setup 6**: https://jrsoftware.org/isinfo.php
+## What it does on the user's machine
 
-That's it — the Python 3.11 embeddable runtime and get-pip.py are no longer bundled at
-compile time. `[Code]`'s `FetchPythonEmbed` downloads both fresh during install via
-PowerShell's `Invoke-WebRequest`/`Expand-Archive`, which ship with every Windows 10+ target
-this installer already requires. No local prerequisite files, no third-party download plugin.
+1. Warns if MetaTrader 5 is not installed.
+2. Installs the Microsoft Visual C++ Redistributable (x64). LightGBM's DLL needs
+   it, and a bare Windows image (a fresh VPS) has none (bugs/066).
+3. Downloads portable Git into `%LOCALAPPDATA%\Programs\PortableGit`, the same
+   build and folder `Setup & Start FOREX.bat` uses.
+4. Checks out `main` from `https://github.com/MooreSi/forex-gold.git` into
+   `%LOCALAPPDATA%\FOREX Trader` (`--depth=1`). An older copied install in that
+   folder becomes a checkout in place; its venv is kept.
+5. Adds firewall rules for 8888 and 9000 (Private profile; needs admin). It does
+   not open 8765: Settings > Remote node > "Make this node a VPS" does that.
+6. Runs `Setup & Start FOREX.bat`, which installs Python 3.11 if needed, builds
+   the venv, installs `requirements.txt` and starts the app. The first start
+   opens the dashboard in the browser, even on a VPS.
 
-## Build Steps
+Any failure in steps 3-4 keeps the wizard on the Ready page with the reason;
+nothing is half-installed, and pressing Install again retries.
 
-1. Open `installer/FOREX_Trader_Setup.iss` in Inno Setup Compiler
-2. Press **F9** (Build → Compile)
-3. Wait for compilation (2-5 minutes on first run)
-4. Installer appears at the repo root: `FOREX_Trader_Setup.exe` (per `OutputDir = ..` in the .iss)
+Running the .exe again on a machine that already has a checkout and a venv just
+starts the app. Updates arrive through Settings > Update (a `git pull`), not
+through the .exe. To reinstall from scratch, uninstall first: the uninstaller
+removes the whole install folder (settings, databases and logs live in
+`%APPDATA%\ForexTrader` and are kept).
 
-## What the Installer Does
+## Building
 
-For the user (hands-off):
-1. Checks if MetaTrader 5 is installed (warns if not)
-2. Copies all app files to `%LOCALAPPDATA%\FOREX Trader\`
-3. Downloads the Python 3.11 embeddable runtime + get-pip.py (requires internet)
-4. Bootstraps pip into the downloaded Python
-5. Creates a Python virtual environment at `%LOCALAPPDATA%\FOREX Trader\.venv\`
-6. Installs all packages from requirements.txt (~5 minutes, requires internet)
-7. Adds Windows Firewall rules for ports 8888 and 9000 (requires the one admin UAC prompt)
-8. Creates Start Menu and optional desktop shortcuts
-9. Optionally launches the app immediately after install
+On Windows (or under Wine), with Inno Setup 6: open
+`installer/FOREX_Trader_Setup.iss`, press **F9**. The .exe appears at the repo
+root. Commit it.
 
-## User Setup After Installation (MT5 side)
-
-The user still needs to:
-1. Open MetaTrader 5 from their broker and log in
-2. Enable "Algo Trading" in the MT5 toolbar (robot icon → green)
-3. Enter their credentials in FOREX Trader → Settings → MT5/Bridge
-
-These steps cannot be automated as they depend on the user's specific broker account.
-
-## Updating the Version
-
-Change `AppVersion` and `VersionInfoVersion` at the top of the .iss file — always bump both
-for every rebuild, even a same-day one. The installer's `[Code]` section skips reinstalling
-entirely when the target machine's `installed_version.txt` already matches `AppVersion`, so
-reusing an old version number means a new .exe will silently launch whatever stale app is
-already installed instead of deploying the new build. The output filename itself
-(`FOREX_Trader_Setup.exe`) does not change with version — Inno Setup overwrites it in place.
+`tests/refactor/test_installer_is_a_bootstrapper.py` pins the design: no bundled
+files, the same repo and branch as the in-app updater, the same portable Git as
+the launcher, and an uninstaller that can only delete its own folder.

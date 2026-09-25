@@ -16,8 +16,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from backend.src.services.cluster.sync.tls_util import DEFAULT_SYNC_PORT
 
 REPO = Path(__file__).resolve().parents[2]
@@ -54,27 +52,4 @@ def test_the_installer_leaves_the_marker_run_py_reads():
     run_py = (REPO / "run.py").read_text(encoding="utf-8")
     marker = re.search(r'parent / "([^"]+)"', run_py[run_py.index("_should_open_browser("
                                                                "\n"):]).group(1)
-    assert f"{{app}}\\{marker}" in _section("Code")
-
-
-# ── Shipping only what a commit has (2026-09-25) ─────────────────────────────
-# The v6.11 install stayed "Not linked": the .exe is built from a working tree,
-# and the installer copied `frontend/tsconfig.tsbuildinfo`, a build cache git
-# ignores. No commit has it, so no commit matched the install.
-
-def _files() -> list[str]:
-    return [l for l in ISS.splitlines() if l.strip().startswith("Source:")]
-
-
-def test_the_installer_ships_the_repos_gitignore():
-    """So linking on the target ignores exactly what the repo ignores, rather
-    than a hand-kept copy of the list inside the app."""
-    assert any('Source: "..\\.gitignore"' in l for l in _files())
-
-
-@pytest.mark.parametrize("tree", ["backend", "frontend"])
-@pytest.mark.parametrize("junk", ["*.tsbuildinfo", ".DS_Store"])
-def test_build_caches_are_not_copied(tree, junk):
-    line = next(l for l in _files() if f'"..\\{tree}\\*"' in l)
-    excludes = re.search(r'Excludes:\s*"([^"]*)"', line).group(1).split(",")
-    assert junk in excludes
+    assert f"AppDir() + '\\{marker}'" in _section("Code")

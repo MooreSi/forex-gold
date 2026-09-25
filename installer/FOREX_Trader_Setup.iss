@@ -1,43 +1,56 @@
-; FOREX Trader — Windows Installer Script
+; FOREX Trader — Windows installer (a bootstrapper)
 ; Built with Inno Setup 6 (https://jrsoftware.org/isinfo.php)
 ;
-; HOW TO BUILD:
-;   1. Install Inno Setup 6 on Windows.
-;   2. Open this file in Inno Setup Compiler.
-;   3. Press F9 (or Build → Compile).
-;   4. Installer .exe appears at the repo root (see OutputDir below).
+; This .exe carries NO app files. It installs the Visual C++ runtime, puts
+; portable Git where "Setup & Start FOREX.bat" looks for it, and pulls the
+; current app from GitHub (MooreSi/forex-gold, branch main) into the install
+; folder. It then runs "Setup & Start FOREX.bat", which installs Python if
+; needed, builds the venv, installs requirements.txt, and starts the app.
 ;
-; BEFORE BUILDING:
-;   a. Adjust AppVersion and VersionInfoVersion below to match the release --
-;      always bump both, even for a same-day rebuild (see [Code]'s
-;      InitializeSetup: a same-numbered rebuild skips reinstalling on any
-;      machine that already has that version).
-;   That's it -- the embedded Python runtime, get-pip.py, and the Visual C++
-;   Redistributable (lightgbm needs its runtime DLLs) are no longer bundled at
-;   compile time; they're downloaded fresh during install (see [Code]'s
-;   CurStepChanged) using PowerShell's Invoke-WebRequest/Expand-Archive, both
-;   built into every Windows 10+ target this installer already requires. No
-;   third-party download plugin, no local prerequisite files.
+; So an app change NEVER needs a new .exe (owner, 2026-09-25: "i dont want to
+; have to keep on compiling the iss and reshipping it"). Every install is a
+; git checkout from its first second, so Settings > Update and the admin
+; console see its commit without any matching. Recompile only when THIS file
+; changes, and bump InstallerVersion when you do.
+;
+; HOW TO BUILD: open this file in Inno Setup Compiler and press F9. The .exe
+; appears at the repo root (OutputDir below).
 
-#define AppName      "FOREX Trader"
-#define AppVersion   "6.11"
-#define AppPublisher "FOREX Trader"
-#define AppURL       "http://localhost:8888"
-#define AppExeName   "Setup && Start FOREX.bat"
+#define AppName          "FOREX Trader"
+; The installer's own version, deliberately NOT the app's (VERSION): the app
+; version moves with every release and this file should not.
+#define InstallerVersion "2.0"
+#define AppPublisher     "FOREX Trader"
+#define AppURL           "http://localhost:8888"
+
+; Where the app comes from. Must match core_app_update._GITHUB_REPO_URL and
+; _BRANCH, which the in-app updater pulls from (pinned by
+; tests/refactor/test_installer_is_a_bootstrapper.py).
+#define RepoUrl          "https://github.com/MooreSi/forex-gold.git"
+#define Branch           "main"
+; The same portable Git build "Setup & Start FOREX.bat" downloads, into the
+; same folder, so the app finds the git this installer used.
+#define PortableGitUrl   "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe"
 
 [Setup]
 AppId                    = {{9B4E8C3A-2F71-4D8B-A6E1-3C9D5F7B2E4A}
 AppName                  = {#AppName}
-AppVersion               = {#AppVersion}
+AppVersion               = {#InstallerVersion}
+AppVerName               = {#AppName}
 AppPublisher             = {#AppPublisher}
 AppPublisherURL          = {#AppURL}
 AppSupportURL            = {#AppURL}
 AppUpdatesURL            = {#AppURL}
 DefaultDirName           = {localappdata}\FOREX Trader
+; Always this folder: the uninstaller deletes {app} whole (the app files come
+; from git, so it cannot list them), which must never be a folder the user
+; picked, such as Documents.
+DisableDirPage           = yes
+UsePreviousAppDir        = no
 DefaultGroupName         = {#AppName}
 AllowNoIcons             = yes
 LicenseFile              =
-; Install to per-user localappdata; firewall steps self-elevate via netsh.
+; Per-user install; the firewall steps need admin and fail quietly without it.
 PrivilegesRequired            = lowest
 PrivilegesRequiredOverridesAllowed = commandline
 OutputDir                = ..
@@ -50,7 +63,7 @@ UninstallDisplayIcon     = {app}\frontend\static\gold_bag.ico
 ArchitecturesInstallIn64BitMode = x64compatible
 MinVersion               = 10.0.17763
 ; Windows 10 1809+ required (needed for Python 3.11 + modern TLS)
-VersionInfoVersion       = 1.6.0.0
+VersionInfoVersion       = 2.0.0.0
 VersionInfoCompany       = {#AppPublisher}
 VersionInfoDescription   = {#AppName} Installer
 SetupIconFile            = ..\frontend\static\gold_bag.ico
@@ -63,51 +76,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Dirs]
-; Ensure the user data directory tree exists (config.py also creates it, but
-; having it here means the shortcuts and first-run paths are valid immediately).
-; Must match config.py's _APP_DATA_FOLDER exactly (plain "ForexTrader" --
-; the "-Refactor2" suffix was a leftover fork-isolation default, reverted
-; now that this checkout is the only app, not a fork running alongside a
-; separate original).
+; Must match config.py's _APP_DATA_FOLDER exactly (plain "ForexTrader").
 Name: "{userappdata}\ForexTrader\data\sessions"
-
-[Files]
-; ── Application source files ──────────────────────────────────────────────────
-; Exclude Mac-only scripts, macOS-specific Wine setup, and build artefacts
-; backend/ and frontend/ replaced forex_trader/ in the 2026 restructure.
-; Packaging the old path made this script fail at COMPILE time (Inno errors
-; on a [Files] entry that matches nothing), so the installer had been
-; unbuildable since then -- see tests/refactor/test_installer_packages_the_real_tree.py.
-; Build caches and Finder files are excluded: the .exe is built from a working
-; tree, and a file no commit has stops the install linking to GitHub (the v6.11
-; VPS said "Not linked" over one frontend/tsconfig.tsbuildinfo, 2026-09-25).
-Source: "..\backend\*";           DestDir: "{app}\backend";           Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo,*.tsbuildinfo,.DS_Store"
-; node_modules is developer-only (160+ MB); the app serves the committed dist/.
-Source: "..\frontend\*";          DestDir: "{app}\frontend";          Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo,node_modules,*.tsbuildinfo,.DS_Store"
-Source: "..\run.py";               DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\mt5_bridge.py";        DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\requirements.txt";     DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\pyproject.toml";       DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\config.yaml.example";  DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\Setup & Start FOREX.bat"; DestDir: "{app}";                Flags: ignoreversion
-Source: "..\Stop FOREX.bat";       DestDir: "{app}";                    Flags: ignoreversion
-; The in-app updater reads both of these at runtime; without them the
-; Update tab reports no version and an empty changelog.
-; The repo's own ignore rules, so linking to GitHub on the target ignores what
-; git ignores (core_app_update.link_checkout).
-Source: "..\.gitignore";           DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\VERSION";              DestDir: "{app}";                    Flags: ignoreversion
-Source: "..\CHANGELOG.md";         DestDir: "{app}";                    Flags: ignoreversion
-; Read by the running app from the install directory (2026-09-23):
-; the EA the Install button copies into MetaTrader (ea_deploy.py), and the
-; script the keep-alive Scheduled Task runs (core_autostart.watchdog_script).
-Source: "..\mql5\*";               DestDir: "{app}\mql5";               Flags: ignoreversion
-Source: "..\tools\watchdog.py";    DestDir: "{app}\tools";              Flags: ignoreversion
-
-; ── install_deps.py only -- the embedded Python runtime + get-pip.py are no
-; longer bundled here; CurStepChanged (below) downloads both fresh into
-; {app}\python_embed at install time instead.
-Source: "install_deps.py"; DestDir: "{app}\installer";  Flags: ignoreversion
 
 [Icons]
 Name: "{group}\FOREX Trader";          Filename: "{app}\Setup & Start FOREX.bat"; WorkingDir: "{app}"; IconFilename: "{app}\frontend\static\gold_bag.ico"
@@ -116,29 +86,6 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\FOREX Trader";    Filename: "{app}\Setup & Start FOREX.bat"; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\frontend\static\gold_bag.ico"
 
 [Run]
-; ── Step 1: Bootstrap pip into the embedded Python ────────────────────────────
-Filename: "{app}\python_embed\python.exe"; \
-    Parameters: "{app}\python_embed\get-pip.py --no-warn-script-location"; \
-    WorkingDir: "{app}"; \
-    StatusMsg: "Bootstrapping pip..."; \
-    Flags: runhidden waituntilterminated
-
-; ── Step 2: Install virtualenv into the embedded Python ───────────────────────
-Filename: "{app}\python_embed\python.exe"; \
-    Parameters: "-m pip install --quiet virtualenv"; \
-    WorkingDir: "{app}"; \
-    StatusMsg: "Installing virtualenv..."; \
-    Flags: runhidden waituntilterminated
-
-; ── Step 3: Create the app virtual environment and install all packages ────────
-; install_deps.py handles venv creation, pip upgrade, and requirements install.
-Filename: "{app}\python_embed\python.exe"; \
-    Parameters: "{app}\installer\install_deps.py ""{app}"""; \
-    WorkingDir: "{app}"; \
-    StatusMsg: "Installing FOREX Trader dependencies (this may take a few minutes)..."; \
-    Flags: runhidden waituntilterminated
-
-; ── Step 4: Add Windows Firewall rules (admin context) ────────────────────────
 ; Port 8888 — the dashboard (browser access)
 Filename: "netsh"; \
     Parameters: "advfirewall firewall add rule name=""FOREX Trader UI (port 8888)"" dir=in action=allow protocol=TCP localport=8888 profile=private"; \
@@ -156,32 +103,42 @@ Filename: "netsh"; \
 ; inbound. Settings > Remote node > "Make this node a VPS" opens it, and the
 ; uninstaller below removes it.
 
-; ── Step 5: Open the app after install (optional) ─────────────────────────────
+; The launcher does the rest on its first run: Python, the venv,
+; requirements.txt, then the app.
 Filename: "{app}\Setup & Start FOREX.bat"; \
     Description: "Launch FOREX Trader now"; \
     Flags: postinstall shellexec skipifsilent
 
 [UninstallRun]
-; Remove the firewall rules on uninstall
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""FOREX Trader UI (port 8888)""";    Flags: runhidden; RunOnceId: "DelFW8888"
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""FOREX Trader Bridge (port 9000)"""; Flags: runhidden; RunOnceId: "DelFW9000"
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""FOREX Trader Sync (port 8765)""";   Flags: runhidden; RunOnceId: "DelFW8765"
 
+[UninstallDelete]
+; The app is a git checkout plus its venv, none of it installed from [Files],
+; so the uninstaller must remove the folder itself. Settings, databases and
+; logs live in %APPDATA%\ForexTrader and are untouched.
+Type: filesandordirs; Name: "{app}"
+
 [Code]
 
-// Reads the version written to installed_version.txt on the previous install.
-// Returns empty string if not installed.
-function GetInstalledVersion(): String;
 var
-  Lines: TArrayOfString;
-  VersionFile: String;
+  ProgressPage: TOutputProgressWizardPage;
+  Bootstrapped: Boolean;
+
+function AppDir(): String;
 begin
-  Result := '';
-  VersionFile := ExpandConstant('{localappdata}\FOREX Trader\installed_version.txt');
-  if FileExists(VersionFile) then
-    if LoadStringsFromFile(VersionFile, Lines) then
-      if GetArrayLength(Lines) > 0 then
-        Result := Trim(Lines[0]);
+  Result := WizardDirValue();
+end;
+
+function GitDir(): String;
+begin
+  Result := ExpandConstant('{localappdata}\Programs\PortableGit');
+end;
+
+function GitExe(): String;
+begin
+  Result := GitDir() + '\cmd\git.exe';
 end;
 
 // Returns True if MetaTrader 5 terminal64.exe is registered in the system.
@@ -198,21 +155,20 @@ begin
       '', RegValue);
 end;
 
-// Smart launch: if this exact version is already installed, skip the wizard
-// and launch the app directly.  Users keep one .exe and double-click it every
-// time -- first run installs, subsequent runs launch, new version upgrades.
+// Smart launch: a machine that already has the app as a git checkout with a
+// venv is simply started. Updates reach it through Settings > Update (git
+// pull), not through this .exe, so there is nothing for a re-run to install.
+// To reinstall from scratch, uninstall first.
 function InitializeSetup(): Boolean;
 var
   AppPath: String;
-  InstalledVersion: String;
   ErrorCode: Integer;
 begin
   Result := True;
   AppPath := ExpandConstant('{localappdata}\FOREX Trader');
-  InstalledVersion := GetInstalledVersion();
 
-  // Same version already installed -- skip wizard and launch immediately
-  if (InstalledVersion = '{#AppVersion}') and
+  if DirExists(AppPath + '\.git') and
+     FileExists(AppPath + '\Setup & Start FOREX.bat') and
      FileExists(AppPath + '\.venv\Scripts\python.exe') then
   begin
     ShellExec('open', AppPath + '\Setup & Start FOREX.bat', '',
@@ -221,7 +177,6 @@ begin
     Exit;
   end;
 
-  // Not installed or new version -- warn if MetaTrader 5 is missing
   if not MetaTraderInstalled() then
   begin
     if MsgBox(
@@ -236,10 +191,15 @@ begin
   end;
 end;
 
-// Runs a PowerShell -Command snippet hidden, waits for it to finish, and
-// returns True on a clean exit. TLS 1.2 is forced explicitly since some
-// Windows 10 builds don't negotiate it by default, which would otherwise
-// fail silently against python.org/bootstrap.pypa.io.
+procedure InitializeWizard();
+begin
+  ProgressPage := CreateOutputProgressPage('Downloading FOREX Trader',
+    'Fetching the app and what it needs from the internet.');
+  Bootstrapped := False;
+end;
+
+// Runs a PowerShell -Command snippet hidden and returns True on a clean exit.
+// TLS 1.2 is forced: some Windows 10 builds do not negotiate it by default.
 function RunPowerShell(const Cmd: String): Boolean;
 var
   ResultCode: Integer;
@@ -251,150 +211,115 @@ begin
             and (ResultCode = 0);
 end;
 
-// Downloads the Microsoft Visual C++ Redistributable (x64) and installs it
-// silently. lightgbm's compiled lib_lightgbm.dll links against the MSVC
-// runtime (vcruntime140.dll, msvcp140.dll, vcruntime140_1.dll); a bare/minimal
-// Windows image -- Server Core, a fresh VPS, a Windows install that skipped
-// optional updates -- does not have these, and the DLL load then fails with
-// "Could not find module ... (or one of its dependencies)", which crash-loops
-// the app before it can render the traceback usefully (bugs, 2026-09-25: a
-// fresh VPS install died 5x in 30s on this exact error before auto-restart
-// gave up). The Windows 10 SDK does not ship it either -- only the
-// redistributable does. aka.ms/vs/17/release/vc_redist.x64.exe is Microsoft's
-// own stable, versionless redirect for the latest VC++ redist; used the same
-// way FetchPythonEmbed uses python.org/bootstrap.pypa.io below.
-function FetchAndInstallVCRedist(): Boolean;
+function Download(const Url, Dest: String): Boolean;
+begin
+  RunPowerShell('Invoke-WebRequest -Uri ''' + Url + ''' -OutFile ''' + Dest + ''' -UseBasicParsing');
+  Result := FileExists(Dest);
+end;
+
+// lightgbm's lib_lightgbm.dll links the MSVC runtime, which a bare Windows
+// image (a fresh VPS) lacks; the app then crash-looped at startup (bugs/066).
+// aka.ms/vs/17/release/vc_redist.x64.exe is Microsoft's stable redirect.
+// Exit codes 0 (installed), 1638 (newer present) and 3010 (reboot wanted, not
+// needed for the DLL to load) are all success.
+function InstallVCRedist(): Boolean;
 var
   ExePath: String;
   ResultCode: Integer;
 begin
-  ExePath := ExpandConstant('{app}\vc_redist.x64.exe');
-
-  WizardForm.StatusLabel.Caption := 'Downloading Visual C++ Redistributable...';
-  WizardForm.Update;
-  RunPowerShell(
-    'Invoke-WebRequest -Uri ''https://aka.ms/vs/17/release/vc_redist.x64.exe'' ' +
-    '-OutFile ''' + ExePath + ''' -UseBasicParsing'
-  );
-
-  if not FileExists(ExePath) then
-  begin
-    Result := False;
-    Exit;
-  end;
-
-  WizardForm.StatusLabel.Caption := 'Installing Visual C++ Redistributable...';
-  WizardForm.Update;
-  // /install /quiet /norestart: silent, no forced reboot. Exit codes 0 (fresh
-  // install), 1638 (equal/newer already present) and 3010 (installed, reboot
-  // wanted but not required for the DLL to load) all mean lightgbm's runtime
-  // deps are satisfied; anything else is a real failure.
+  ExePath := ExpandConstant('{tmp}\vc_redist.x64.exe');
+  Result := Download('https://aka.ms/vs/17/release/vc_redist.x64.exe', ExePath);
+  if not Result then Exit;
   Result := Exec(ExePath, '/install /quiet /norestart', '', SW_HIDE,
-                  ewWaitUntilTerminated, ResultCode);
-  if Result then
-    Result := (ResultCode = 0) or (ResultCode = 1638) or (ResultCode = 3010);
-
-  DeleteFile(ExePath);
+                 ewWaitUntilTerminated, ResultCode)
+            and ((ResultCode = 0) or (ResultCode = 1638) or (ResultCode = 3010));
 end;
 
-// Downloads the Python 3.11.9 embeddable runtime + get-pip.py fresh at
-// install time (2026-07-24 -- previously bundled via [Files], which meant
-// every builder needed to manually pre-stage installer\python_embed\ before
-// compiling; see the file header). Uses only PowerShell's Invoke-WebRequest/
-// Expand-Archive -- both ship with every Windows 10+ target this installer
-// already requires (MinVersion above), so no third-party download plugin is
-// needed. Returns True if both the runtime and get-pip.py end up in place.
-function FetchPythonEmbed(): Boolean;
+function EnsureGit(): Boolean;
 var
-  ZipPath, EmbedDir: String;
+  Archive: String;
+  ResultCode: Integer;
 begin
-  EmbedDir := ExpandConstant('{app}\python_embed');
-  ZipPath  := ExpandConstant('{app}\python_embed.zip');
-  ForceDirectories(EmbedDir);
-
-  WizardForm.StatusLabel.Caption := 'Downloading Python runtime...';
-  WizardForm.Update;
-  RunPowerShell(
-    'Invoke-WebRequest -Uri ''https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip'' ' +
-    '-OutFile ''' + ZipPath + ''' -UseBasicParsing'
-  );
-
-  if not FileExists(ZipPath) then
-  begin
-    Result := False;
-    Exit;
-  end;
-
-  WizardForm.StatusLabel.Caption := 'Extracting Python runtime...';
-  WizardForm.Update;
-  RunPowerShell(
-    'Expand-Archive -Path ''' + ZipPath + ''' -DestinationPath ''' + EmbedDir + ''' -Force'
-  );
-  DeleteFile(ZipPath);
-
-  WizardForm.StatusLabel.Caption := 'Downloading pip bootstrap...';
-  WizardForm.Update;
-  RunPowerShell(
-    'Invoke-WebRequest -Uri ''https://bootstrap.pypa.io/get-pip.py'' ' +
-    '-OutFile ''' + EmbedDir + '\get-pip.py'' -UseBasicParsing'
-  );
-
-  Result := FileExists(EmbedDir + '\python.exe') and FileExists(EmbedDir + '\get-pip.py');
+  Result := FileExists(GitExe());
+  if Result then Exit;
+  Archive := ExpandConstant('{tmp}\PortableGit.7z.exe');
+  if not Download('{#PortableGitUrl}', Archive) then Exit;
+  ForceDirectories(GitDir());
+  Exec(Archive, '-y -o"' + GitDir() + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := FileExists(GitExe());
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+function Git(const Args: String): Boolean;
+var
+  ResultCode: Integer;
 begin
-  if CurStep = ssPostInstall then
-  begin
-    // Must run before install_deps.py's pip install ([Run], below) -- lightgbm
-    // (a hard dependency, imported at app startup by the breakout/reversal
-    // engines) needs the MSVC runtime this installs to load its DLL. Warn but
-    // don't abort the whole install on failure: a network hiccup here
-    // shouldn't block someone who already has the redist from a prior VS/
-    // driver install, and the app tells the user plainly if lightgbm still
-    // can't load.
-    if not FetchAndInstallVCRedist() then
-      MsgBox(
-        'Could not install the Visual C++ Redistributable needed by one of ' +
-        'FOREX Trader''s dependencies (lightgbm).' + #13#10 + #13#10 +
-        'Setup will continue, but the app may fail to start with a ' +
-        '"lib_lightgbm.dll" error. If that happens, install the redistributable ' +
-        'manually from https://aka.ms/vs/17/release/vc_redist.x64.exe and try again.',
-        mbError, MB_OK
-      );
+  Result := Exec(GitExe(), Args, AppDir(), SW_HIDE, ewWaitUntilTerminated, ResultCode)
+            and (ResultCode = 0);
+end;
 
-    if not FetchPythonEmbed() then
+// The app, as a checkout of origin/main. Also turns an older copied install
+// (the pre-2.0 installer shipped files, no .git) into a checkout in place:
+// tracked files are replaced, the venv and anything untracked are kept.
+// --depth=1: the full history is ~45 MB and nothing on a client reads it;
+// later `git fetch`es from Settings > Update deepen it as needed.
+function FetchApp(): Boolean;
+begin
+  ForceDirectories(AppDir());
+  Result := DirExists(AppDir() + '\.git') or Git('init -q');
+  if not Result then Exit;
+  if not Git('remote set-url origin {#RepoUrl}') then
+    if not Git('remote add origin {#RepoUrl}') then begin Result := False; Exit; end;
+  Result := Git('fetch --depth=1 origin {#Branch}')
+            and Git('checkout -f -B {#Branch} --track origin/{#Branch}')
+            and FileExists(AppDir() + '\Setup & Start FOREX.bat');
+end;
+
+// Runs when the user presses Install, before anything is written. A failure
+// keeps the wizard on this page with the reason, so nothing is half-installed
+// and the user can retry once the connection is back.
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID <> wpReady) or Bootstrapped then Exit;
+
+  ProgressPage.Show;
+  try
+    ProgressPage.SetText('Installing the Visual C++ runtime...', '');
+    ProgressPage.SetProgress(1, 4);
+    if not InstallVCRedist() then
+      MsgBox('Could not install the Visual C++ Redistributable, which the app''s ' +
+        'LightGBM models need.' + #13#10 + #13#10 + 'Setup will continue. If the ' +
+        'app then fails to start with a "lib_lightgbm.dll" error, install it from ' +
+        'https://aka.ms/vs/17/release/vc_redist.x64.exe.', mbError, MB_OK);
+
+    ProgressPage.SetText('Getting Git...', '');
+    ProgressPage.SetProgress(2, 4);
+    if not EnsureGit() then
     begin
-      MsgBox(
-        'Could not download the Python runtime needed to finish setup.' + #13#10 + #13#10 +
-        'This requires an internet connection to python.org and bootstrap.pypa.io. ' +
-        'Check your connection and re-run this installer.',
-        mbError, MB_OK
-      );
+      MsgBox('Could not download Git from github.com, which setup uses to fetch ' +
+        'the app. Check the internet connection and press Install again.',
+        mbError, MB_OK);
+      Result := False;
       Exit;
     end;
 
-    // Patch embedded Python ._pth to allow full site-packages access
-    if FileExists(ExpandConstant('{app}\python_embed\python311._pth')) then
-      SaveStringToFile(
-        ExpandConstant('{app}\python_embed\python311._pth'),
-        'python311.zip' + #13#10 + '.' + #13#10 + #13#10 + 'import site' + #13#10,
-        False
-      );
+    ProgressPage.SetText('Downloading FOREX Trader from GitHub...', '{#RepoUrl}');
+    ProgressPage.SetProgress(3, 4);
+    if not FetchApp() then
+    begin
+      MsgBox('Could not download FOREX Trader from GitHub ({#RepoUrl}).' + #13#10 + #13#10 +
+        'Check the internet connection and press Install again.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
 
     // The first start after this install opens the dashboard even on a VPS,
     // where every other start skips it (run.py's _should_open_browser).
-    SaveStringToFile(ExpandConstant('{app}\open_browser_once'), '', False);
-
-    // Write version marker so smart-launch detects this version on next run
-    SaveStringToFile(
-      ExpandConstant('{app}\installed_version.txt'),
-      '{#AppVersion}',
-      False
-    );
+    SaveStringToFile(AppDir() + '\open_browser_once', '', False);
+    ProgressPage.SetProgress(4, 4);
+    Bootstrapped := True;
+  finally
+    ProgressPage.Hide;
   end;
-end;
-
-procedure DeinitializeSetup();
-begin
 end;

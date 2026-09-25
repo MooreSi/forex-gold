@@ -72,3 +72,11 @@ frontend/*.tsbuildinfo
 /docs/simon-handover/
 /docs/todo/
 /docs/reviews/
+
+# ── A Windows install is a checkout of this repo (installer/FOREX_Trader_Setup.iss) ──
+# These are the install's own files, never source.
+/unins*.exe
+/unins*.dat
+/python_embed/
+/installed_version.txt
+/open_browser_once

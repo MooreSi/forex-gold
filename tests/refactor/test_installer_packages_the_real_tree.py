@@ -94,13 +94,22 @@ def test_every_icon_path_exists(raw):
     assert _exists(resolved), f"installer references missing icon {raw!r} ({resolved})"
 
 
-def test_the_installer_ships_the_current_top_level_packages():
+def _tracked() -> set[str]:
+    """What a checkout installs. Since the 2026-09-25 bootstrapper the .exe
+    ships no files; the install is `git checkout origin/main`, so the files an
+    install has are exactly the files git tracks."""
+    import subprocess
+    out = subprocess.run(["git", "ls-files"], cwd=str(REPO), capture_output=True,
+                         text=True, check=True).stdout
+    return set(out.splitlines())
+
+
+def test_the_checkout_has_the_current_top_level_packages():
     """The restructure's whole point: backend/ and frontend/ are the app."""
-    sources = " ".join(_source_paths()).lower()
-    for required in ("backend", "frontend", "run.py"):
-        assert required.lower() in sources, (
-            f"installer does not ship {required} -- the app will not run"
-        )
+    tracked = _tracked()
+    for required in ("backend/src/app.py", "frontend/dist/index.html", "run.py",
+                     "Setup & Start FOREX.bat", "requirements.txt"):
+        assert required in tracked, f"{required} is not committed -- the app will not run"
 
 
 def test_the_installer_no_longer_references_the_deleted_tree():
@@ -117,9 +126,9 @@ def test_the_installer_no_longer_references_the_deleted_tree():
     )
 
 
-def test_the_installer_ships_version_and_changelog():
-    """update_panel reads both at runtime; shipping without them makes the
+def test_the_checkout_has_version_and_changelog():
+    """update_panel reads both at runtime; an install without them makes the
     in-app updater report nothing."""
-    sources = " ".join(_source_paths()).upper()
-    assert "VERSION" in sources
-    assert "CHANGELOG.MD" in sources
+    tracked = _tracked()
+    assert "VERSION" in tracked
+    assert "CHANGELOG.md" in tracked

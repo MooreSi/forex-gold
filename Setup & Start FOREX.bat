@@ -288,6 +288,10 @@ echo  Leave this window open while the app is running.
 echo  To stop the app, close this window or press Ctrl+C.
 echo.
 
+:: Tells the app it is supervised here, so a restart or an applied update
+:: exits with 42 (relaunch below) rather than spawning a hidden copy.
+set "FOREX_LAUNCHER=bat"
+
 :: First launch — open the browser automatically.
 set "_FAILSTREAK=0"
 for /f %%t in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "_LASTSTART=%%t"

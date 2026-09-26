@@ -434,3 +434,15 @@ all in `services/broker/ea_deploy.py` and its callers:
 Pinned by `tests/services/broker/test_ea_deploy.py` (`TestFindingEachTerminalsMetaEditor`,
 `TestInstallingWhenIdle`), `test_ea_installs_at_startup.py` and
 `tests/api/routers/test_ea_install.py`. **Not yet run on Windows.**
+
+**Verified on the owner's Windows VPS, 2026-09-26** (read-only, over WinRM):
+the Vantage build installs to `C:\Program Files\Vantage Markets MT5 Terminal`,
+its data folder's `origin.txt` names exactly that (UTF-16, BOM `FF FE`), and
+`metaeditor64.exe` is there -- which is why the old `C:\Program Files\MetaTrader
+5` lookup never found it. A compile of the v1.08 source in a scratch subfolder
+of the same Experts tree, with the argv `compile_ea` builds, produced the `.ex5`
+with "0 errors, 0 warnings" in ~7s -- and **MetaEditor exited 1 on that
+success**, which is why `compile_ea` judges by the `.ex5` landing, never by
+the exit code. The terminal's own `.ex5` was still the 2026-07-17 build: the
+startup install had never run there, because every start crashed first (the
+backfill below, platform domain).

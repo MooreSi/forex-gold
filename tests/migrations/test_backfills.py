@@ -136,3 +136,39 @@ def test_apply_schema_has_no_silent_excepts():
     src = inspect.getsource(db._apply_schema)
     assert "except Exception" not in src
     assert "pass" not in src
+
+
+def test_a_database_holding_both_names_still_starts(fresh_db):
+    """Reported 2026-09-26 on a Windows VPS: startup crash-looped on
+    `UNIQUE constraint failed: channel_performance.source`. That database had
+    a row under the old name AND one under the new, and the three tables keyed
+    by channel name cannot hold two 'Reversal Engine' rows. The rename now
+    skips a row whose new name is taken, and leaves it rather than deleting
+    anyone's channel stats: a leftover 'GD Copy Engine' row is a cosmetic
+    duplicate, and a refusal to start is nothing trading."""
+    with fresh_db.db() as conn:
+        for tbl, col in (("channel_performance", "source"),
+                         ("channel_parser_config", "channel_name"),
+                         ("channel_strategy_rec", "source")):
+            conn.execute(f"INSERT INTO {tbl} ({col}) VALUES ('Reversal Engine')")
+            conn.execute(f"INSERT INTO {tbl} ({col}) VALUES ('GD Copy Engine')")
+        conn.execute("UPDATE channel_performance SET net_pnl=42.0 WHERE source='Reversal Engine'")
+
+        backfills.run(conn)
+
+        assert conn.execute(
+            "SELECT net_pnl FROM channel_performance WHERE source='Reversal Engine'"
+        ).fetchone()[0] == 42.0, "the current row must be left as it was"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM channel_performance WHERE source='GD Copy Engine'"
+        ).fetchone()[0] == 1, "the old row is kept, not deleted"
+
+
+def test_the_rename_still_happens_where_nothing_is_in_the_way(fresh_db):
+    with fresh_db.db() as conn:
+        conn.execute("INSERT INTO channel_performance (source) VALUES ('GD Copy Engine')")
+
+        backfills.run(conn)
+
+        assert [r[0] for r in conn.execute("SELECT source FROM channel_performance")] \
+            == ["Reversal Engine"]

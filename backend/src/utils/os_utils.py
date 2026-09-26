@@ -364,6 +364,22 @@ def app_python(root) -> str:
     return str(venv_python) if venv_python.exists() else sys.executable
 
 
+# "Setup & Start FOREX.bat" relaunches run.py when it exits with this code, and
+# treats 0 as the user stopping the app. It sets FOREX_LAUNCHER=bat so the app
+# knows it is supervised.
+LAUNCHER_RESTART_EXIT_CODE = 42
+_requested_exit_code = 0
+
+
+def requested_exit_code() -> int:
+    """The code run.py exits with once the server has stopped."""
+    return _requested_exit_code
+
+
+def _under_the_launcher() -> bool:
+    return sys.platform == "win32" and os.environ.get("FOREX_LAUNCHER") == "bat"
+
+
 def restart_app(root) -> None:
     """Spawn a detached relaunch of run.py after a delay, then shut this
     process down -- the shared restart mechanism used by both the header
@@ -373,6 +389,15 @@ def restart_app(root) -> None:
     sense (a running NiceGUI server); this function performs the shutdown
     itself as its final step.
     """
+    global _requested_exit_code
+    if _under_the_launcher():
+        # The launcher relaunches on 42, in its own window with its crash
+        # protection. The detached relaunch below made it read 0 as "stopped"
+        # and left the app to a hidden copy (2026-09-26).
+        _requested_exit_code = LAUNCHER_RESTART_EXIT_CODE
+        shutdown_ui()
+        return
+
     from pathlib import Path
     root = Path(root)
     python = app_python(root)

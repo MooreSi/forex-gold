@@ -708,3 +708,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # 42 when a restart was asked for under "Setup & Start FOREX.bat", which
+    # relaunches on it; 0 otherwise (os_utils.restart_app).
+    from backend.src.utils.os_utils import requested_exit_code
+    sys.exit(requested_exit_code())

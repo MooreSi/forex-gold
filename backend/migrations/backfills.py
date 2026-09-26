@@ -84,9 +84,14 @@ def _rebrand_source_names(conn) -> None:
         ("vantage_pending_orders", "channel_name"),
         ("consolidated_trades", "tg_source"),
     ):
+        # OR IGNORE: three of these tables are keyed by the name, and a database
+        # holding BOTH names crash-looped startup on the unique key
+        # (2026-09-26). A row whose new name is taken keeps its old name --
+        # a cosmetic duplicate, never deleted data -- and everything else is
+        # renamed as before.
         execute_tolerant(
             conn,
-            f"UPDATE {tbl} SET {col}='Reversal Engine' WHERE {col}='GD Copy Engine'",
+            f"UPDATE OR IGNORE {tbl} SET {col}='Reversal Engine' WHERE {col}='GD Copy Engine'",
             f"rebrand_source_names:{tbl}.{col}",
         )
 

@@ -86,13 +86,24 @@ def _rebrand_source_names(conn) -> None:
     ):
         # OR IGNORE: three of these tables are keyed by the name, and a database
         # holding BOTH names crash-looped startup on the unique key
-        # (2026-09-26). A row whose new name is taken keeps its old name --
-        # a cosmetic duplicate, never deleted data -- and everything else is
-        # renamed as before.
+        # (2026-09-26). A row whose new name is taken is removed just below.
         execute_tolerant(
             conn,
             f"UPDATE OR IGNORE {tbl} SET {col}='Reversal Engine' WHERE {col}='GD Copy Engine'",
             f"rebrand_source_names:{tbl}.{col}",
+        )
+    # Where the rename was ignored, the old row is a stale copy of a channel's
+    # config beside the current one (it kept arriving over the Mac's channel-
+    # strategy sync). Owner, 2026-09-26: remove the duplicate. Only these
+    # three config tables; trade history above renames cleanly.
+    for tbl, col in (("channel_performance", "source"),
+                     ("channel_parser_config", "channel_name"),
+                     ("channel_strategy_rec", "source")):
+        execute_tolerant(
+            conn,
+            f"DELETE FROM {tbl} WHERE {col}='GD Copy Engine' AND EXISTS "
+            f"(SELECT 1 FROM {tbl} WHERE {col}='Reversal Engine')",
+            f"rebrand_source_names:drop_duplicate:{tbl}",
         )
 
 

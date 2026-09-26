@@ -46,9 +46,18 @@ class PendingStoreMixin:
     def _load_pending_channel_strategy() -> dict:
         try:
             raw = db_module.get_app_config("sync_pending_channel_strategy")
-            return json.loads(raw) if raw else {}
+            pending = json.loads(raw) if raw else {}
         except Exception:
             return {}
+        # A pre-rebrand entry, re-sent on every reconnect, kept recreating the
+        # duplicate row that crash-looped the VPS (2026-09-26). Dropped, not
+        # renamed: its stale strategy would overwrite Reversal Engine's.
+        if isinstance(pending, dict) and pending.pop("GD Copy Engine", None) is not None:
+            try:
+                db_module.set_app_config("sync_pending_channel_strategy", json.dumps(pending))
+            except Exception as e:
+                log.debug("[SyncClient] could not save the cleaned queue: %s", e)
+        return pending
 
     def _persist_pending_channel_strategy(self) -> None:
         try:

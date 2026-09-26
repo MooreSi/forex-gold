@@ -159,9 +159,16 @@ def test_a_database_holding_both_names_still_starts(fresh_db):
         assert conn.execute(
             "SELECT net_pnl FROM channel_performance WHERE source='Reversal Engine'"
         ).fetchone()[0] == 42.0, "the current row must be left as it was"
-        assert conn.execute(
-            "SELECT COUNT(*) FROM channel_performance WHERE source='GD Copy Engine'"
-        ).fetchone()[0] == 1, "the old row is kept, not deleted"
+        # Owner, later the same day: remove the duplicate. The old row is a
+        # stale copy of a channel's CONFIG (it came back over the Mac's
+        # channel-strategy sync); trade history lives elsewhere and renames
+        # cleanly, so the row whose name is current is the one that counts.
+        for tbl, col in (("channel_performance", "source"),
+                         ("channel_parser_config", "channel_name"),
+                         ("channel_strategy_rec", "source")):
+            assert conn.execute(
+                f"SELECT COUNT(*) FROM {tbl} WHERE {col}='GD Copy Engine'"
+            ).fetchone()[0] == 0, f"{tbl} still holds the old name"
 
 
 def test_the_rename_still_happens_where_nothing_is_in_the_way(fresh_db):

@@ -124,6 +124,10 @@ def _ensure_data_dirs():
 # overlapping on purpose -- the Windows path spawns the replacement and only
 # then exits -- so the replacement must be allowed to outwait its own parent.
 _SINGLE_INSTANCE_WAIT = 15.0
+# How long a restart's relaunch (os_utils.HANDOVER_FLAG) waits for the app it
+# replaces. That app finishes its in-flight requests before it lets go, and a
+# model call can take minutes; 15s left nothing running on 2026-09-26.
+_HANDOVER_WAIT = 300.0
 
 
 def _claim_single_instance() -> bool:
@@ -145,8 +149,10 @@ def _claim_single_instance() -> bool:
     quietly stopped guarding is the thing this codebase keeps being bitten by.
     """
     from backend.src.utils import single_instance
+    from backend.src.utils.os_utils import HANDOVER_FLAG
+    wait = _HANDOVER_WAIT if HANDOVER_FLAG in sys.argv else _SINGLE_INSTANCE_WAIT
     try:
-        single_instance.acquire(timeout=_SINGLE_INSTANCE_WAIT)
+        single_instance.acquire(timeout=wait)
         return True
     except single_instance.AlreadyRunning as exc:
         log.error(

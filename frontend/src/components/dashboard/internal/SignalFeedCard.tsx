@@ -3,9 +3,6 @@ import { formatPrice, formatSignedMoney } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 import { DashCard, Pill } from "./DashCard";
 
-/** How many rows fit in a card this size. The Trading tab has the rest. */
-const SHOWN = 6;
-
 /**
  * What a row is called, and the colour that carries it.
  *
@@ -89,15 +86,18 @@ export function SignalFeedCard({ signals }: { signals: Record<string, unknown>[]
           hint="Parsed Telegram signals and engine signals both land here."
         />
       ) : (
-        <ul className="space-y-1">
-          {signals.slice(0, SHOWN).map((s, i) => {
+        // Every row, scrolling inside the card: the list used to stop at six
+        // with no way further down it (owner, 2026-09-26). The height is about
+        // eight rows, so the card sits in the grid at the size it always had.
+        <ul className="max-h-64 space-y-1 overflow-y-auto pr-1">
+          {signals.map((s, i) => {
             const direction = text(s, "direction").toUpperCase();
             const status = text(s, "status").toLowerCase();
             const entry = price(s, "entry");
             const label = signalLabel(text(s, "outcome").toLowerCase(), status);
             // The figure behind the word, for the operator who wants to know
-            // how big a win it was. On the title rather than in the row: six
-            // of these in a narrow card is a wall of numbers, and the label
+            // how big a win it was. On the title rather than in the row: a
+            // column of these in a narrow card is a wall of numbers, and the label
             // is what the card is scanned for.
             const netPnl = price(s, "net_pnl");
             return (

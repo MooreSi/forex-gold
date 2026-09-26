@@ -55,6 +55,12 @@ Three things about it are load-bearing:
   only then exits. Refusing instantly makes the replacement lose the race with
   its own parent and leaves nothing running — the 2026-08-07 failure
   `_claim_port` exists for, one layer up.
+  **A restart's own relaunch waits `_HANDOVER_WAIT` (300s) instead**, flagged
+  by `os_utils.HANDOVER_FLAG` (`--handover`) on the command line. The POSIX
+  restart stops the old app gracefully, and uvicorn finishes in-flight requests
+  first: a DeepSeek analysis still being written held it ~20s on 2026-09-26,
+  the relaunch gave up at 15s, and nothing came back. An ordinary launch still
+  refuses after 15s. Pinned by `tests/utils/test_restart_handover.py`.
 - **It fails open.** A lock that cannot be taken at all (read-only or missing
   data directory) logs a warning and starts anyway. Refusing to boot is a worse
   failure than the overlap, and it is what every build before the lock did.

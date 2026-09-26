@@ -368,6 +368,13 @@ def app_python(root) -> str:
     return str(venv_python) if venv_python.exists() else sys.executable
 
 
+# Passed to the run.py a restart spawns, so it waits for the app it replaces.
+# The old app stops gracefully: uvicorn finishes in-flight requests first, and
+# a model call still being written held one for ~20s, longer than a fresh
+# launch waits for the lock. The relaunch gave up and nothing came back
+# (2026-09-26). run._claim_single_instance reads it.
+HANDOVER_FLAG = "--handover"
+
 # "Setup & Start FOREX.bat" relaunches run.py when it exits with this code, and
 # treats 0 as the user stopping the app. It sets FOREX_LAUNCHER=bat so the app
 # knows it is supervised.
@@ -416,7 +423,8 @@ def restart_app(root) -> None:
 
     from backend.src.config import USER_DATA_DIR
     log_path = USER_DATA_DIR / "data" / "restart.log"
-    cmd = delayed_relaunch_cmd(python, "run.py", delay_secs=5, extra_args=["--no-browser"])
+    cmd = delayed_relaunch_cmd(python, "run.py", delay_secs=5,
+                               extra_args=["--no-browser", HANDOVER_FLAG])
     with open_restart_log(log_path) as _restart_log:
         if sys.platform == "win32":
             # CREATE_BREAKAWAY_FROM_JOB is required, not optional: this app is

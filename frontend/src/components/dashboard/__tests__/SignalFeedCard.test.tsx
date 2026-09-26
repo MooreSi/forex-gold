@@ -117,3 +117,27 @@ describe("the money behind the label", () => {
     expect(pill("won").getAttribute("title")).toContain("+$25.30");
   });
 });
+
+describe("a feed longer than the card", () => {
+  // Owner, 2026-09-26: the card stopped at six rows and there was no way to
+  // read further down it. Every signal it is handed is now a row, and the
+  // list scrolls inside the card rather than stretching the dashboard grid.
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    ...base, id: String(i), source: `Source ${i}`, status: "closed", outcome: "won", net_pnl: 1,
+  }));
+
+  it("renders every signal, not only the first six", () => {
+    render(<SignalFeedCard signals={many} />);
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(20);
+    expect(screen.getByText("Source 19")).toBeInTheDocument();
+  });
+
+  it("scrolls the list inside a bounded height", () => {
+    render(<SignalFeedCard signals={many} />);
+
+    const list = screen.getByRole("list");
+    expect(list.className).toMatch(/overflow-y-auto/);
+    expect(list.className).toMatch(/max-h-/);
+  });
+});

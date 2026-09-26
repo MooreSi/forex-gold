@@ -39,7 +39,8 @@ async def _delayed_app_shutdown(delay_seconds: int) -> None:
         # whichever command triggered this, so ending this process is all
         # that's needed; it starts the next instance on its own.
         import os as _os
-        _os._exit(0)
+        from backend.src.utils.os_utils import requested_exit_code
+        _os._exit(requested_exit_code())
         return
     # Through os_utils rather than importing nicegui here: the backend must
     # stay runnable without a UI framework, and doing this in two places put
@@ -125,6 +126,13 @@ async def cmd_restart_app(args: list, bot_offset: int) -> str:
         # Persist the current offset NOW so the restarted process skips
         # this /restartapp update and doesn't trigger another restart.
         db_module.set_app_config("bot_update_offset", str(bot_offset))
+        from backend.src.utils.os_utils import ask_launcher_to_relaunch
+        if ask_launcher_to_relaunch():
+            # "Setup & Start FOREX.bat" relaunches on 42, in its own window.
+            # The hidden relaunch below made it read 0 as "stopped" (the
+            # owner's VPS, 2026-09-26).
+            asyncio.create_task(_delayed_app_shutdown(5))
+            return "Restarting app in 5 seconds — reconnect your browser shortly."
         with open_restart_log(log_path) as _f:
             subprocess.Popen(
                 delayed_relaunch_cmd(python, "run.py", delay_secs=6, extra_args=["--no-browser"]),

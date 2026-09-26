@@ -25,6 +25,7 @@ from backend.src.services.cluster.sync import tls_util
 from backend.src.services.cluster.sync._telemetry import TelemetryMixin
 from backend.src.services.cluster.sync._server_peer_data import ServerPeerDataMixin
 from backend.src.services.cluster.sync._expert_params_sync import ServerExpertParamsMixin
+from backend.src.services.cluster.sync._mt5_accounts_sync import ServerMt5AccountsMixin
 from backend.src.services.cluster.sync.synced_settings import SYNCED_SETTINGS_KEYS
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
@@ -41,6 +42,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_PROPOSE,
+    MSG_MT5_ACCOUNTS,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -53,7 +55,8 @@ log = logging.getLogger("sync")
 _SYNCED_SETTINGS_KEYS = SYNCED_SETTINGS_KEYS
 
 
-class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin):
+class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
+                 ServerMt5AccountsMixin):
     def __init__(self, main_engine=None, breakout_engine=None,
                  bounce_engine=None, re_engine=None):
         self._main_engine     = main_engine
@@ -221,6 +224,8 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin):
             await self._handle_channel_strategy_propose(ws, msg)
         elif t == MSG_TRADING_SCHEDULE_PROPOSE:
             await self._handle_trading_schedule_propose(ws, msg)
+        elif t == MSG_MT5_ACCOUNTS:
+            await self._handle_mt5_accounts(ws, msg)
         elif t == MSG_EXPERT_PARAMS_PROPOSE:
             await self._handle_expert_params_propose(ws, msg)
         elif t == MSG_STRATEGY_PARAMS_PROPOSE:

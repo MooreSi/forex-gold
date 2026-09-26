@@ -68,3 +68,71 @@ def test_run_py_exits_with_the_requested_code():
 def test_an_ordinary_run_still_exits_zero(monkeypatch):
     monkeypatch.setattr(os_utils, "_requested_exit_code", 0)
     assert os_utils.requested_exit_code() == 0
+
+
+# ── The other restart paths (2026-09-26) ─────────────────────────────────────
+# Found restarting the VPS through its Restart button: that button, Telegram's
+# /restartapp and the demo/live switch all go through
+# telegram/bot_infra.cmd_restart_app, which had its own copy of the relaunch.
+# Under the launcher it exited 0 ("FOREX Trader has stopped"), and its hidden
+# relaunch never ran: restart.log said "ERROR: Input redirection is not
+# supported" -- Windows' `timeout` refuses to run without a console, and the
+# relaunch was chained on it with &&.
+
+import asyncio  # noqa: E402
+
+
+def test_the_windows_relaunch_waits_without_timeout(monkeypatch):
+    monkeypatch.setattr(os_utils.sys, "platform", "win32")
+
+    cmd = os_utils.delayed_relaunch_cmd(r"C:\app\python.exe", "run.py", delay_secs=5)
+
+    assert "timeout" not in cmd
+    assert cmd[cmd.index("ping"):cmd.index("ping") + 4] == ["ping", "-n", "6", "127.0.0.1"]
+    assert cmd[-2:] == [r"C:\app\python.exe", "run.py"]
+
+
+def test_restartapp_under_the_launcher_asks_it_to_relaunch(windows_launch, monkeypatch):
+    from backend.src.services.telegram import bot_infra
+    spawned, _stopped = windows_launch
+    shutdowns = []
+    monkeypatch.setenv("FOREX_LAUNCHER", "bat")
+    monkeypatch.setattr(bot_infra.subprocess, "Popen", lambda *a, **k: spawned.append(a))
+    monkeypatch.setattr(bot_infra.db_module, "set_app_config", lambda *a: None)
+
+    async def _later(delay):
+        shutdowns.append(delay)
+
+    monkeypatch.setattr(bot_infra, "_delayed_app_shutdown", _later)
+
+    async def _go():
+        reply = await bot_infra.cmd_restart_app([], 0)
+        await asyncio.sleep(0)
+        return reply
+
+    reply = asyncio.run(_go())
+
+    assert spawned == []
+    assert os_utils.requested_exit_code() == 42
+    assert shutdowns and "Restarting" in reply
+
+
+def test_headless_under_the_launcher_exits_for_a_relaunch(windows_launch, monkeypatch):
+    from backend.src.services.telegram import bot_infra
+    exits = []
+    monkeypatch.setattr(os_utils, "_requested_exit_code", 42)
+    monkeypatch.setattr(bot_infra.db_module, "get_app_config", lambda k: "1")
+
+    def _exit(code):
+        exits.append(code)
+        raise SystemExit(code)
+
+    import os as _os
+    monkeypatch.setattr(_os, "_exit", _exit)
+
+    try:
+        asyncio.run(bot_infra._delayed_app_shutdown(0))
+    except SystemExit:
+        pass
+
+    assert exits == [42]

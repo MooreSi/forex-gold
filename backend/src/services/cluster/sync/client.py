@@ -21,6 +21,9 @@ from backend.src.services.cluster.sync import tls_util
 from backend.src.services.cluster.sync._pending_store import PendingStoreMixin
 from backend.src.services.cluster.sync._peer_data import PeerDataMixin
 from backend.src.services.cluster.sync._expert_params_sync import ClientExpertParamsMixin
+from backend.src.services.cluster.sync._mt5_accounts_sync import (
+    ClientMt5AccountsMixin, _alert as _alert_operator,
+)
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
@@ -36,6 +39,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_STATE,
+    MSG_MT5_ACCOUNTS_ACK,
     CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
@@ -59,15 +63,8 @@ _LEDGER_PULL_INTERVAL_S = 120
 _LIVENESS_PING_INTERVAL_S = 20
 
 
-async def _alert_operator(text: str) -> None:
-    from backend.src.services.telegram import alerts as telegram_alerts
-    try:
-        await telegram_alerts.send_message(text, event_type="sync_liveness")
-    except Exception as e:
-        log.warning("[SyncClient] could not send the alert: %s", e)
-
-
-class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin):
+class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
+                 ClientMt5AccountsMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
         self.last_error: str = ""
@@ -269,6 +266,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin):
             asyncio.create_task(self._ai_recovered_pull_loop())
             asyncio.create_task(self._liveness_ping_loop())
             asyncio.create_task(self.stand_down_peer_if_local())
+            asyncio.create_task(self.push_mt5_accounts())
 
             async for raw in ws:
                 if isinstance(raw, bytes):
@@ -337,6 +335,8 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin):
             if self._pending_trading_schedule == self.remote_trading_schedule:
                 self._pending_trading_schedule = None
                 self._persist_pending_trading_schedule()
+        elif t == MSG_MT5_ACCOUNTS_ACK:
+            await self._on_mt5_accounts_ack(msg)
         elif t == MSG_EXPERT_PARAMS_STATE:
             self._on_expert_params_state(msg.get("expert_params"))
         elif t == MSG_STRATEGY_PARAMS_STATE:

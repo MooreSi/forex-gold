@@ -34,6 +34,7 @@ from backend.src.api.deps import engine as engine_dep
 from backend.src.api.errors import Refusal
 from backend.src.controllers import remote_node_controller as node_ctl
 from backend.src.controllers import environment_controller as env_ctl
+from backend.src.controllers import sync_controller as sync_ctl
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,10 @@ async def set_environment(body: EnvironmentWrite, eng: Any = Depends(engine_dep)
         result = env_ctl.switch_environment(target)
     except ValueError as exc:
         raise Refusal(str(exc), status_code=400) from exc
+
+    # A paired VPS follows this machine's account (owner, 2026-09-26). Before
+    # the restart, because after it there is nothing left to send it.
+    await sync_ctl.push_mt5_accounts()
 
     # Last, and only once the switch is recorded: if this fails the app is
     # still correctly pointed and the operator can restart it themselves.

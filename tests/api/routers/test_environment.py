@@ -181,3 +181,40 @@ def test_switching_is_not_reachable_by_a_get(make_client, env):
     assert make_client().post("/api/settings/environment",
                               json={"environment": "live"}).status_code == 405
     assert env["switched"] == []
+
+
+# ── The VPS follows (owner, 2026-09-26) ───────────────────────────────────────
+
+@pytest.fixture
+def pushed(env, monkeypatch):
+    """The push of this machine's MT5 accounts to a paired VPS, recorded in the
+    same order list as the restart so "before the restart" can be asserted."""
+    order: list[str] = []
+    orig_restart = env_router.node_ctl.restart_app
+
+    async def _push():
+        order.append("push")
+
+    async def _restart(engine):
+        order.append("restart")
+        return await orig_restart(engine)
+
+    monkeypatch.setattr(env_router.sync_ctl, "push_mt5_accounts", _push)
+    monkeypatch.setattr(env_router.node_ctl, "restart_app", _restart)
+    return order
+
+
+def test_a_switch_is_sent_to_the_vps_before_this_app_restarts(make_client, env, pushed):
+    """After the restart there is nothing left to send it; the reconnect would
+    catch up, but only once this machine is back."""
+    make_client().put("/api/settings/environment", json={"environment": "live", "confirm": True})
+
+    assert pushed == ["push", "restart"]
+
+
+def test_a_refused_switch_sends_nothing(make_client, env, pushed):
+    env["switch_error"] = "No Live MT5 credentials are saved."
+
+    make_client().put("/api/settings/environment", json={"environment": "live", "confirm": True})
+
+    assert pushed == []

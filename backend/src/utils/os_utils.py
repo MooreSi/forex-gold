@@ -336,9 +336,13 @@ def delayed_relaunch_cmd(
     """
     extra = extra_args or []
     if sys.platform == "win32":
+        # ping, not `timeout`: the relaunch runs with no console, and
+        # `timeout` then exits at once with "Input redirection is not
+        # supported" -- which, chained with &&, meant the relaunch never ran
+        # (restart.log on the owner's VPS, 2026-09-26).
         return [
             "cmd", "/c",
-            "timeout", "/t", str(delay_secs), "/nobreak", ">nul",
+            "ping", "-n", str(delay_secs + 1), "127.0.0.1", ">nul",
             "&&", python, script, *extra,
         ]
     else:
@@ -380,6 +384,16 @@ def _under_the_launcher() -> bool:
     return sys.platform == "win32" and os.environ.get("FOREX_LAUNCHER") == "bat"
 
 
+def ask_launcher_to_relaunch() -> bool:
+    """Under the launcher, make this process exit with the code it relaunches
+    on, and say so. False anywhere else: the caller relaunches itself."""
+    global _requested_exit_code
+    if not _under_the_launcher():
+        return False
+    _requested_exit_code = LAUNCHER_RESTART_EXIT_CODE
+    return True
+
+
 def restart_app(root) -> None:
     """Spawn a detached relaunch of run.py after a delay, then shut this
     process down -- the shared restart mechanism used by both the header
@@ -389,12 +403,10 @@ def restart_app(root) -> None:
     sense (a running NiceGUI server); this function performs the shutdown
     itself as its final step.
     """
-    global _requested_exit_code
-    if _under_the_launcher():
+    if ask_launcher_to_relaunch():
         # The launcher relaunches on 42, in its own window with its crash
         # protection. The detached relaunch below made it read 0 as "stopped"
         # and left the app to a hidden copy (2026-09-26).
-        _requested_exit_code = LAUNCHER_RESTART_EXIT_CODE
         shutdown_ui()
         return
 

@@ -415,3 +415,18 @@ def test_the_mt5_settings_say_which_platform_this_is(make_client, config):
     import sys
 
     assert make_client().get("/api/settings/mt5").json()["platform"] == sys.platform
+
+
+def test_saved_mt5_credentials_are_sent_to_a_paired_vps(make_client, config, monkeypatch):
+    """Owner, 2026-09-26: the VPS keeps the same accounts as this machine."""
+    pushed = []
+
+    async def _push():
+        pushed.append(1)
+
+    monkeypatch.setattr(settings_router.sync_ctl, "push_mt5_accounts", _push)
+
+    make_client().put("/api/settings/mt5", json={
+        "environment": "demo", "login": "26004592", "password": "pw", "server": "VantageMarkets-Demo"})
+
+    assert pushed == [1]

@@ -18,6 +18,7 @@ from typing import Optional
 
 from backend.src.services.cluster import handover as _handover
 from backend.src.services.cluster.sync import client as _client
+from backend.src.services.cluster.sync import _mt5_accounts_sync as _accounts
 from backend.src.services.cluster.sync import remote_stats_facade as _facade
 from backend.src.services.cluster.sync import server as _server
 from backend.src.services.cluster.sync import tls_util as _tls
@@ -28,7 +29,7 @@ __all__ = [
     "link_state", "is_connected",
     "load_config", "configure", "start", "stop",
     "send_engine_control", "send_market_order", "request_model_snapshot",
-    "request_stand_down", "request_resume", "push_ai_config",
+    "request_stand_down", "request_resume", "push_ai_config", "push_mt5_accounts",
     "take_over_locally", "take_over_without_peer", "hand_back_to_remote",
     "HandoverRefused",
     "get_remote_open_position",
@@ -120,6 +121,11 @@ HandoverRefused = _handover.HandoverRefused
 
 async def take_over_locally(*args, **kwargs) -> dict:
     return await _handover.take_over_locally(*args, **kwargs)
+
+
+async def push_mt5_accounts() -> None:
+    """This machine's MT5 accounts and demo/live choice, to its VPS."""
+    return await _accounts.push_from_this_node()
 
 
 async def take_over_without_peer() -> dict:

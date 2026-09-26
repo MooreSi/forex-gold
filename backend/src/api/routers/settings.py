@@ -32,6 +32,7 @@ from backend.src.controllers import broker_controller as broker_ctl
 from backend.src.api.redaction import redacted as _redacted
 from backend.src.controllers import environment_controller as env_ctl
 from backend.src.controllers import settings_controller as settings_ctl
+from backend.src.controllers import sync_controller as sync_ctl
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +155,8 @@ async def save_mt5(body: Mt5Credentials) -> dict:
     # account nobody asked it to use.
     if environment == env_ctl.describe_environments()["current"]:
         settings_ctl.sync_bridge_credentials_file(environment)
+    # A paired VPS keeps the same accounts as this machine (owner, 2026-09-26).
+    await sync_ctl.push_mt5_accounts()
     return _mt5_view()
 
 

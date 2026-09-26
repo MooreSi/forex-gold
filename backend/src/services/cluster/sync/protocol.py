@@ -79,6 +79,13 @@ MSG_STRATEGY_PARAMS_STATE   = "strategy_params_state"    # VPS -> Mac: full conf
 MSG_EXPERT_PARAMS_PROPOSE = "expert_params_propose"  # Mac -> VPS
 MSG_EXPERT_PARAMS_STATE   = "expert_params_state"    # VPS -> Mac: full confirmed snapshot
 
+# MT5 accounts and the demo/live choice (owner, 2026-09-26): the Mac's
+# credentials for each account, and which one it is on, so the VPS trades the
+# same account. Credentials, so NOT part of the settings sync above, which
+# never carries them. Mac -> VPS only; the VPS answers with what it is on.
+MSG_MT5_ACCOUNTS     = "mt5_accounts"      # Mac -> VPS: {"accounts": {...}, "environment"}
+MSG_MT5_ACCOUNTS_ACK = "mt5_accounts_ack"  # VPS -> Mac: {"environment", "switched", "error"}
+
 # ── Trading mutual exclusion (Option A: block switch-back on open local positions) ──
 MSG_STAND_DOWN        = "stand_down"        # Mac -> VPS: taking over, stop opening new trades
 MSG_STAND_DOWN_ACK    = "stand_down_ack"    # VPS -> Mac: stood down, here is my open-position summary

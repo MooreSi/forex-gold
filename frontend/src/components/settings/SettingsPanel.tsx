@@ -6,6 +6,7 @@ import { AiTab } from "./tabs/AiTab";
 import { AppearanceTab } from "./tabs/AppearanceTab";
 import { ConnectionsTab } from "./tabs/ConnectionsTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
+import { LatencyTab } from "./tabs/LatencyTab";
 import { Mt5Tab } from "./tabs/Mt5Tab";
 import { NodeTab } from "./tabs/NodeTab";
 import { RemoteTab } from "./tabs/RemoteTab";
@@ -30,6 +31,7 @@ const TABS = [
   { id: "remote", label: "Remote node", Panel: RemoteTab },
   { id: "tunables", label: "Expert tunables", Panel: TunablesTab },
   { id: "diagnostics", label: "Diagnostics", Panel: DiagnosticsTab },
+  { id: "latency", label: "Latency", Panel: LatencyTab },
   { id: "access", label: "Access & licence", Panel: AccessTab },
   { id: "appearance", label: "Appearance", Panel: AppearanceTab },
 ];

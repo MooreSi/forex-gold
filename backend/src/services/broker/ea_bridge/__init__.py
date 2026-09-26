@@ -52,6 +52,7 @@ from backend.src.services.broker.ea_bridge._ids import (  # noqa: F401
 from backend.src.services.broker.ea_bridge._panel import PanelMixin
 from backend.src.services.broker.ea_bridge._events import EventsMixin
 from backend.src.services.broker.ea_bridge._restore import RestoreMixin
+from backend.src.services.broker.ea_bridge._link_probe import LinkProbeMixin
 # Re-exported: tests/core/test_ea_bridge_version_handshake.py reads _EA_SOURCE,
 # _EA_COMPILED_FMT and _expected_ea_version off the package.
 from backend.src.services.broker.ea_bridge._version import (  # noqa: F401
@@ -164,7 +165,7 @@ def listen_ports() -> list[int]:
     return [_PORT] + [p for p in _LEGACY_PORTS if p != _PORT]
 
 
-class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin):
+class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin, LinkProbeMixin):
     def __init__(self, engine):
         self._engine = engine
         # port -> listening server. Several, so an EA whose chart-persisted

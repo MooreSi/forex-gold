@@ -257,6 +257,12 @@ class _ListenerMixin:
                 _lt.mark(getattr(event.message, "id", None), "t2_queued")
             except asyncio.QueueFull:
                 self._add_error(f"Event queue full — dropped message slot {slot+1}")
+            # After the enqueue, so it costs the hot path nothing: Telegram's
+            # own post time and the channel, for Settings > Latency.
+            _date = getattr(event.message, "date", None)
+            if _date is not None:
+                _lt.mark_at(getattr(event.message, "id", None), "t0_posted", _date.timestamp())
+            _lt.tag(getattr(event.message, "id", None), label=self._group_names[slot])
         return _handle_new_message
 
     def _make_edit_handler(self, slot: int):

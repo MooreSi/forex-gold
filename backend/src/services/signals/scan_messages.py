@@ -477,6 +477,8 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                     trade_result = _exec_result["trade_result"]
                     skip_reason  = _exec_result["skip_reason"]
                     _gap_note    = _exec_result["gap_note"]
+                    if executed and trade_result:
+                        _lt_dec.mark(tg_id, "t8_ordered")
                     if _exec_result.get("followup_matched") or _exec_result.get("deferred_stood_down"):
                         new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
                                                      "source_label": source_label})

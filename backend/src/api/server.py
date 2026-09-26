@@ -41,6 +41,7 @@ from backend.src.api.routers import engines as engines_router
 from backend.src.api.routers import environment as environment_router
 from backend.src.api.routers import history as history_router
 from backend.src.api.routers import log_bundle as log_bundle_router
+from backend.src.api.routers import latency as latency_router
 from backend.src.api.routers import news as news_router
 from backend.src.api.routers import notifications as notifications_router
 from backend.src.api.routers import node as node_router
@@ -90,6 +91,7 @@ ROUTERS = (
     schedule_router.router,
     settings_router.router,
     log_bundle_router.router,
+    latency_router.router,
     templates_router.router,
     trading_router.router,
     trading_status_router.router,

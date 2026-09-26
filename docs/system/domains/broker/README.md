@@ -471,3 +471,15 @@ its own folder to `sys.path` because `mt5_native` loads it by file path.
 The MT5 tab's CrossOver/Wine section ("How the bridge runs") now shows only
 when `/api/settings/mt5` reports `platform: darwin`. Pinned by
 `tests/broker/test_mt5_terminal.py`.
+
+## The EA link can be timed now (2026-09-26)
+
+Python never sent the EA a `ping`, though the EA has always answered one with
+`pong`. `ea_bridge/_link_probe.py` (`EABridge.ping_ms`) sends one and times the
+pong; `_dispatch` hands `pong` to it. The round trip is the local socket plus
+the EA's 200 ms `OnTimer` poll, or longer while `OnTick` is busy managing
+trades: the same wait an order handed to the EA sits behind. No EA change was
+needed. Used by Settings > Latency; see the platform domain file. The MT5 log
+parser behind `tools/order_latency_report` moved to
+`services/diagnostics/broker_exec_log.py` so the dashboard reads the same
+numbers.

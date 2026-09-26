@@ -21,6 +21,7 @@ from backend.src.services.cluster.sync import tls_util
 from backend.src.services.cluster.sync._pending_store import PendingStoreMixin
 from backend.src.services.cluster.sync._peer_data import PeerDataMixin
 from backend.src.services.cluster.sync._expert_params_sync import ClientExpertParamsMixin
+from backend.src.services.cluster.sync._latency_sync import ClientLatencyMixin
 from backend.src.services.cluster.sync._mt5_accounts_sync import (
     ClientMt5AccountsMixin, _alert as _alert_operator,
 )
@@ -64,7 +65,7 @@ _LIVENESS_PING_INTERVAL_S = 20
 
 
 class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
-                 ClientMt5AccountsMixin):
+                 ClientMt5AccountsMixin, ClientLatencyMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
         self.last_error: str = ""
@@ -404,7 +405,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
                     log.warning("[SyncClient] ai-recovered snapshot: could not "
                                 "apply %s: %s", row.get("tg_message_id"), e)
         elif t == MSG_PONG:
-            pass
+            self._on_pong(msg)
         else:
             log.debug("[SyncClient] unhandled message type: %s", t)
 

@@ -110,6 +110,8 @@ class EventsMixin:
                     log.warning("[EA] recovered after a silence — %s", v.summary)
             _health.record(msg)
             await self._send({"type": "pong"})
+        elif t == "pong":  # answers Settings > Latency's probe (_link_probe)
+            self._on_pong()
         elif t == "panel_action":
             await self._on_panel_action(msg)
         elif t in ("trade_opened", "trade_open_failed",

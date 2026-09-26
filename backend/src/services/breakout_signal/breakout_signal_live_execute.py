@@ -14,6 +14,7 @@ import time
 
 from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 from backend.src.services.positions.momentum_exhaustion import check_momentum_exhaustion
+from backend.src.utils import latency_trace as _lt
 
 _log = logging.getLogger("breakout_signal")
 
@@ -128,6 +129,12 @@ class _LiveExecuteMixin:
             if sig_id:
                 bdb.update_live_exec_result(sig_id, None, None, "skipped:live_off")
             return
+
+        # Settings > Latency (docs/todo/006): stamps around this path, not in it.
+        _lt_key = f"bo:{sig_id}"
+        _lt.mark_at(_lt_key, "e1_created", sig.get("created_at"))
+        _lt.mark(_lt_key, "e2_exec_start")
+        _lt.tag(_lt_key, pipeline="engine", label=f"Breakout {signal_ref}")
 
         # Trading Schedule gate, Breakout Engine source (2026-07-24) -- each
         # of the 7x3 windows independently allows/blocks this engine rather
@@ -309,6 +316,7 @@ class _LiveExecuteMixin:
             )
             vantage_sig_id = main_sig["signal_id"]
             result = await self._main_engine.open_trade_from_signal(vantage_sig_id, tick=tick)
+            _lt.mark(_lt_key, "e3_ordered")
             mt5_ticket = result.get("mt5_ticket")
             _log.info(
                 "[BO-LiveExec] %s %s live trade opened: ticket=%s entry=%.2f",

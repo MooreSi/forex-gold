@@ -29,6 +29,7 @@ from backend.src.db import database as db_module
 from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 from backend.src.services.reversal_engine import level_detector as ld
 from backend.src.services.positions.momentum_exhaustion import check_momentum_exhaustion
+from backend.src.utils import latency_trace as _lt
 
 _log = logging.getLogger("reversal_engine")
 
@@ -65,6 +66,12 @@ class _LiveExecuteMixin:
                 # virtual signals when live execution is deliberately disabled.
                 re_db.update_live_exec(sig["id"], status="skipped:live_disabled")
                 return
+
+            # Settings > Latency (docs/todo/006). No creation stamp: a Reversal
+            # signal waits for price to reach its zone, which is market time.
+            _lt_key = f"re:{sig.get('id')}"
+            _lt.mark(_lt_key, "e2_exec_start")
+            _lt.tag(_lt_key, pipeline="engine", label=f"Reversal {sig.get('signal_ref', '')}")
 
             # Trading Schedule gate, Reversal Engine source (2026-07-24) --
             # this engine performs well overnight (Asia) but loses during
@@ -415,6 +422,8 @@ class _LiveExecuteMixin:
                     return
 
             trade = await self._main_eng.open_trade_from_signal(vantage_sig_id, tick=tick)
+            if trade:
+                _lt.mark(_lt_key, "e3_ordered")
             if trade:
                 re_db.update_live_exec(
                     sig["id"],

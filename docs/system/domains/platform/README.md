@@ -437,3 +437,45 @@ dashboard API answers in 1–60 ms and the bridge in 1–2 ms. What was slow:
 - Not changed: asyncio debug mode stays on (`loop_monitor.start`) for
   slow-callback attribution. It records a creation traceback for every task,
   which has a cost; the stack sampler may make it unnecessary.
+
+## Settings > Latency: where a signal's time goes (2026-09-26)
+
+Owner request: see if and where delays are hurting. Spec:
+`docs/todo/006-latency-checker.md`. Two checkers, each a list of hops:
+
+- **Telegram signal -> MT5**: Telegram post (msg.date) -> arrival -> queue ->
+  buffer -> scanner pick-up -> parse + decide -> order confirmed. Stamped by
+  `utils/latency_trace` (t0..t8), keyed by Telegram message id.
+- **Signal generator -> MT5**: Breakout `created_at` -> execution start ->
+  order confirmed; Reversal from execution start only (its creation-to-trigger
+  gap is price reaching the zone, i.e. market time, not delay). The polling
+  waits built into the engines (60 s analysis cycle, 5 s trigger check) are
+  stated beside it, read from the engines' own constants.
+
+**Run check** adds live, read-only probes: event-loop lag, DB worker round
+trip, bridge health, a fresh tick, the EA's ping->pong, one Telegram
+`help.getNearestDc`, and the broker's own execution times from the terminal
+logs (`services/diagnostics/broker_exec_log.py`, which
+`tools/order_latency_report` now imports). When paired, the Mac<->VPS round
+trip and the VPS's own report ride on the EXISTING ping/pong (`probe_id` in
+the ping; `sync/_latency_sync.py`). An older VPS answers a plain pong and
+the tab says to update it. The VPS stamps its half of every forwarded order
+(`fwd:<signal_id>`, pipeline `forwarded`).
+
+Things worth knowing:
+
+- **The stamps sit in the callers, never inside `open_trade`,
+  `open_trade_from_signal`, `EABridge.open_trade` or the close path.** So the
+  "order" hop is one number (gates, sizing, EA/bridge, broker fill, ack).
+  Splitting it needs stamps inside the order path: owner sign-off.
+- **The first stamp of a stage wins.** `scan_messages` re-reads the whole
+  buffer every pass, so `t6_scanning` used to be overwritten on every rescan,
+  which moved "pick-up" after the order and made "decide" negative.
+- The first hop (Telegram post -> arrival) is +/-1 s: Telegram stamps whole
+  seconds and this machine's clock is not Telegram's. Negative values clamp
+  to 0.
+- Traces are in memory (1000, oldest quarter dropped) and reset on restart.
+  Persisting them is an open decision in the spec.
+- First real reading, this Mac, 2026-09-26: VantageMarkets-Demo executed 742
+  orders in 7 days with a median of 0.22 s, p90 12.6 s, worst 84.9 s, 145
+  over 5 s. That is the broker, not this app, and it dwarfs every hop we own.

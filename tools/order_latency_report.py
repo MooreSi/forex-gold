@@ -17,85 +17,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
-from dataclasses import dataclass
 from pathlib import Path
 
-_DEFAULT_LOGS = (Path.home() / "Library/Application Support/CrossOver/Bottles"
-                 / "MetaTrader 5/drive_c/Program Files/MetaTrader 5/logs")
+# The parser lives in the service so Settings > Latency reads the same
+# numbers this prints (docs/todo/006).
+from backend.src.services.diagnostics.broker_exec_log import (  # noqa: F401
+    CROSSOVER_LOGS, Execution, parse_files, parse_lines, summarise,
+)
 
-_AUTH_RE = re.compile(r"authorized on (.+?) through")
-_DONE_RE = re.compile(r"\tTrades\t'\d+': (order|modify|close|position)\b.* done in ([0-9.]+) ms")
-
-
-@dataclass(frozen=True)
-class Execution:
-    server: str
-    kind: str
-    ms: float
-
-
-def parse_lines(lines, server: str = "unknown") -> list[Execution]:
-    """Every finished execution, credited to the server logged in at the time.
-
-    `server` is who was logged in when these lines began -- a session outlives
-    midnight, so the login is often in the previous day's file.
-    """
-    out: list[Execution] = []
-    for line in lines:
-        auth = _AUTH_RE.search(line)
-        if auth:
-            server = auth.group(1).strip()
-            continue
-        done = _DONE_RE.search(line)
-        if done:
-            out.append(Execution(server, done.group(1), float(done.group(2))))
-    return out
-
-
-def _last_login(lines, server: str) -> str:
-    for line in lines:
-        auth = _AUTH_RE.search(line)
-        if auth:
-            server = auth.group(1).strip()
-    return server
-
-
-def parse_files(paths) -> list[Execution]:
-    """In date order, carrying the logged-in server from one day to the next.
-
-    MetaTrader writes UTF-16; a file that is not is read as UTF-8.
-    """
-    rows: list[Execution] = []
-    server = "unknown"
-    for path in sorted(paths, key=lambda p: Path(p).name):
-        raw = Path(path).read_bytes()
-        try:
-            text = raw.decode("utf-16")
-        except UnicodeDecodeError:
-            text = raw.decode("utf-8", errors="replace")
-        lines = text.splitlines()
-        rows.extend(parse_lines(lines, server))
-        server = _last_login(lines, server)
-    return rows
-
-
-def _pct(sorted_ms: list[float], q: float) -> float:
-    return sorted_ms[min(len(sorted_ms) - 1, int(len(sorted_ms) * q))]
-
-
-def summarise(rows: list[Execution]) -> dict:
-    by_server: dict[str, list[float]] = {}
-    for r in rows:
-        by_server.setdefault(r.server, []).append(r.ms)
-    out = {}
-    for server, ms in by_server.items():
-        ms.sort()
-        out[server] = {
-            "n": len(ms), "median_ms": _pct(ms, 0.5), "p90_ms": _pct(ms, 0.9),
-            "max_ms": ms[-1], "over_5s": sum(1 for v in ms if v > 5000),
-        }
-    return out
+_DEFAULT_LOGS = Path.home() / CROSSOVER_LOGS
 
 
 def main(argv=None) -> None:

@@ -26,6 +26,8 @@ from backend.src.services.cluster.sync._telemetry import TelemetryMixin
 from backend.src.services.cluster.sync._server_peer_data import ServerPeerDataMixin
 from backend.src.services.cluster.sync._expert_params_sync import ServerExpertParamsMixin
 from backend.src.services.cluster.sync._mt5_accounts_sync import ServerMt5AccountsMixin
+from backend.src.services.cluster.sync import _latency_sync
+from backend.src.utils import latency_trace as _lt
 from backend.src.services.cluster.sync.synced_settings import SYNCED_SETTINGS_KEYS
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
@@ -217,7 +219,10 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
             # Carries the Mac's current UTC offset, so a link that stays up
             # across a clock change still follows it.
             self._apply_peer_clock_offset(msg)
-            await ws.send(json.dumps(make(MSG_PONG)))
+            await ws.send(json.dumps(make(MSG_PONG, **_latency_sync.echo(msg))))
+            # Settings > Latency: a ping with a probe_id also gets this node's
+            # own latency report, as a second pong (docs/todo/006).
+            _latency_sync.answer_probe(ws, msg, getattr(self, "_main_engine", None))
         elif t == MSG_SETTINGS_PROPOSE:
             await self._handle_settings_propose(ws, msg)
         elif t == MSG_CHANNEL_STRATEGY_PROPOSE:
@@ -369,9 +374,16 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                 strategy=msg.get("strategy"),
                 tg_source=msg.get("tg_source"),
             )
+            # Settings > Latency times this node's half of a forwarded order;
+            # the stamps sit around the call and change nothing it is given.
+            _fwd_key = f"fwd:{signal_id}"
+            _lt.mark(_fwd_key, "f1_received")
+            _lt.tag(_fwd_key, pipeline="forwarded",
+                    label=kwargs.get("tg_source") or kwargs.get("strategy") or "")
             from backend.src.services.cluster import sync_repo as _sync_repo
             _sync_repo.mirror_insert_signal_if_absent(signal_id, kwargs)
             result = await self._main_engine.open_trade(**kwargs)
+            _lt.mark(_fwd_key, "f2_ordered")
             await ws.send(json.dumps(make(MSG_SIGNAL_ORDER_ACK, result=result)))
             # This node is the one that actually placed the trade, so its own
             # _node_label() ("Remote") is accurate here — the Mac-side caller

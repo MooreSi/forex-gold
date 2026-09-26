@@ -121,7 +121,9 @@ async def cmd_restart_app(args: list, bot_offset: int) -> str:
             venv_python = root / ".venv" / "bin" / "python3"
         python = str(venv_python) if venv_python.exists() else sys.executable
         from backend.src.config import USER_DATA_DIR
-        from backend.src.utils.os_utils import delayed_relaunch_cmd, open_restart_log
+        from backend.src.utils.os_utils import (
+            HANDOVER_FLAG, delayed_relaunch_cmd, open_restart_log,
+        )
         log_path = USER_DATA_DIR / "data" / "restart.log"
         # Persist the current offset NOW so the restarted process skips
         # this /restartapp update and doesn't trigger another restart.
@@ -135,7 +137,8 @@ async def cmd_restart_app(args: list, bot_offset: int) -> str:
             return "Restarting app in 5 seconds — reconnect your browser shortly."
         with open_restart_log(log_path) as _f:
             subprocess.Popen(
-                delayed_relaunch_cmd(python, "run.py", delay_secs=6, extra_args=["--no-browser"]),
+                delayed_relaunch_cmd(python, "run.py", delay_secs=6,
+                                     extra_args=["--no-browser", HANDOVER_FLAG]),
                 cwd=str(root),
                 start_new_session=True,
                 stdin=subprocess.DEVNULL,

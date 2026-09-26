@@ -389,6 +389,20 @@ describe("expert tunables", () => {
   });
 });
 
+describe("latency", () => {
+  it("has its own tab with both checkers", async () => {
+    overrides["/api/settings/latency"] = {
+      paired: false, structural: [],
+      pipelines: { telegram: { hops: [], recent: [] }, engine: { hops: [], recent: [] } },
+    };
+    render(<SettingsPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Latency" }));
+
+    expect(await screen.findByTestId("checker-telegram")).toBeInTheDocument();
+    expect(screen.getByTestId("checker-engine")).toBeInTheDocument();
+  });
+});
+
 describe("diagnostics", () => {
   it("shows a tripped breaker and why", async () => {
     render(<SettingsPanel />);

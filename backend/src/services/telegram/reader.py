@@ -220,6 +220,23 @@ class TelegramReader(_AuthMixin, _ListenerMixin):
                 return self._group_names[s]
         return None
 
+    async def api_round_trip(self, timeout: float = 10.0) -> dict:
+        """Settings > Latency (docs/todo/006): one light request to Telegram
+        (help.getNearestDc), timed, plus which data centre the session is on.
+        Reads no messages and sends none. Never raises."""
+        if not self._client or self._auth_state != AUTH_CONNECTED:
+            return {"ok": False, "ms": None, "detail": "Telegram not connected"}
+        from telethon import functions
+        t0 = time.monotonic()
+        try:
+            nearest = await asyncio.wait_for(
+                self._client(functions.help.GetNearestDcRequest()), timeout)
+        except Exception as e:
+            return {"ok": False, "ms": None, "detail": f"{type(e).__name__}: {e}"}
+        return {"ok": True, "ms": round((time.monotonic() - t0) * 1000.0, 1), "detail": "",
+                "session_dc": getattr(nearest, "this_dc", None),
+                "nearest_dc": getattr(nearest, "nearest_dc", None)}
+
     async def get_dc_info(self) -> dict:
         """
         Step 1 diagnostic: return the session DC and the DC of each

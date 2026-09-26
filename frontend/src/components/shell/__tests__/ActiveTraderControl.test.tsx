@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActiveTraderControl } from "../ActiveTraderControl";
@@ -202,6 +202,50 @@ describe("what it reports", () => {
 
     await waitFor(() =>
       expect(screen.queryByText(/engines stop first/)).not.toBeInTheDocument());
+  });
+});
+
+describe("how long it stays (owner, 2026-09-26)", () => {
+  // It sits in the title bar. A success left there for good took the space
+  // for as long as the app ran; five seconds is enough to read it.
+  afterEach(() => vi.useRealTimers());
+
+  const handBack = async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderIt();
+    await userEvent.click(screen.getByRole("button", { name: /LOCAL/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Hand back" }));
+  };
+
+  it("a success goes after five seconds", async () => {
+    await handBack();
+    expect(await screen.findByRole("status")).toHaveTextContent("Handed back.");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("a success is still there just before five seconds", async () => {
+    await handBack();
+    await screen.findByRole("status");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("a refusal stays, because it may mean nothing is trading", async () => {
+    response = {
+      status: 409,
+      body: { error: { kind: "refusal", message: "The remote node did not acknowledge.", ref: null } },
+    };
+    await handBack();
+    await screen.findByRole("alert");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("did not acknowledge");
   });
 });
 

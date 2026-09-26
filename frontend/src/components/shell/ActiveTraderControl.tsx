@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
 import { Tooltip } from "@/components/shared/Tooltip";
+
+/**
+ * How long a successful switch's note stays in the title bar (owner,
+ * 2026-09-26). Left there for good it took the space for as long as the app
+ * ran. A refusal is not timed out: it can mean nothing is trading.
+ */
+export const OUTCOME_VISIBLE_MS = 5_000;
 
 interface ActiveTraderControlProps {
   activeTrader: string;
@@ -37,6 +44,12 @@ export function ActiveTraderControl(
   const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [vouched, setVouched] = useState(false);
+
+  useEffect(() => {
+    if (!outcome?.ok) return;
+    const id = setTimeout(() => setOutcome(null), OUTCOME_VISIBLE_MS);
+    return () => clearTimeout(id);
+  }, [outcome]);
   const isLocal = activeTrader === "local";
   const target = isLocal ? "remote_vps" : "local";
   // REMOTE with the VPS unreachable: the ordinary take-over needs the VPS to

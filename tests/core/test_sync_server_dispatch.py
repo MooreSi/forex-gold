@@ -31,6 +31,7 @@ ROUTES = [
     (P.MSG_CHANNEL_STRATEGY_PROPOSE, "_handle_channel_strategy_propose"),
     (P.MSG_TRADING_SCHEDULE_PROPOSE, "_handle_trading_schedule_propose"),
     (P.MSG_STRATEGY_PARAMS_PROPOSE, "_handle_strategy_params_propose"),
+    (P.MSG_EXPERT_PARAMS_PROPOSE, "_handle_expert_params_propose"),
     (P.MSG_STAND_DOWN, "_handle_stand_down"),
     (P.MSG_RESUME, "_handle_resume"),
     (P.MSG_TRADE_CLOSED, "_handle_trade_closed"),

@@ -73,6 +73,12 @@ MSG_TRADING_SCHEDULE_STATE   = "trading_schedule_state"    # VPS -> Mac: full co
 MSG_STRATEGY_PARAMS_PROPOSE = "strategy_params_propose"  # Mac -> VPS
 MSG_STRATEGY_PARAMS_STATE   = "strategy_params_state"    # VPS -> Mac: full confirmed snapshot
 
+# Expert Tunables (app_config "expert_params", risk/expert_params.py) -- same
+# full-snapshot shape as Strategy Parameters. Added 2026-09-25: the service
+# had been calling a propose method no client ever had since 2026-08-03.
+MSG_EXPERT_PARAMS_PROPOSE = "expert_params_propose"  # Mac -> VPS
+MSG_EXPERT_PARAMS_STATE   = "expert_params_state"    # VPS -> Mac: full confirmed snapshot
+
 # ── Trading mutual exclusion (Option A: block switch-back on open local positions) ──
 MSG_STAND_DOWN        = "stand_down"        # Mac -> VPS: taking over, stop opening new trades
 MSG_STAND_DOWN_ACK    = "stand_down_ack"    # VPS -> Mac: stood down, here is my open-position summary

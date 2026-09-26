@@ -20,6 +20,7 @@ from backend.src.db import database as db_module
 from backend.src.services.cluster.sync import tls_util
 from backend.src.services.cluster.sync._pending_store import PendingStoreMixin
 from backend.src.services.cluster.sync._peer_data import PeerDataMixin
+from backend.src.services.cluster.sync._expert_params_sync import ClientExpertParamsMixin
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
@@ -34,7 +35,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
-    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE,
+    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_STATE,
     CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
@@ -66,7 +67,7 @@ async def _alert_operator(text: str) -> None:
         log.warning("[SyncClient] could not send the alert: %s", e)
 
 
-class SyncClient(PendingStoreMixin, PeerDataMixin):
+class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
         self.last_error: str = ""
@@ -104,6 +105,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
         # dict, since _forward_strategy_params_over_sync always sends the
         # whole current snapshot.
         self._pending_strategy_params: Optional[dict] = self._load_pending_strategy_params()
+        self._init_expert_params_sync()
         self._ws = None
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -237,6 +239,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
             self._mirror_trading_schedule_locally(self.remote_trading_schedule)
             self.remote_strategy_params = hello_reply.get("strategy_params", {})
             self._mirror_strategy_params_locally(self.remote_strategy_params)
+            self._on_expert_params_state(hello_reply.get("expert_params"), connecting=True)
             log.info("[SyncClient] connected to VPS %s:%s", self._host, self._port)
 
             if self._pending_settings:
@@ -309,6 +312,12 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
                 self._persist_pending()
         elif t == MSG_SETTINGS_REJECTED:
             log.warning("[SyncClient] settings change rejected by VPS: %s", msg.get("reason"))
+            # Drop only keys the VPS named as never-applied; no list, keep all.
+            dropped = [k for k in msg.get("keys") or [] if k in self._pending_settings]
+            for k in dropped:
+                self._pending_settings.pop(k, None)
+            if dropped:
+                self._persist_pending()
         elif t == MSG_CHANNEL_STRATEGY_STATE:
             self.remote_channel_strategy = msg.get("channel_strategy", {})
             self._mirror_channel_strategy_locally(self.remote_channel_strategy)
@@ -328,6 +337,8 @@ class SyncClient(PendingStoreMixin, PeerDataMixin):
             if self._pending_trading_schedule == self.remote_trading_schedule:
                 self._pending_trading_schedule = None
                 self._persist_pending_trading_schedule()
+        elif t == MSG_EXPERT_PARAMS_STATE:
+            self._on_expert_params_state(msg.get("expert_params"))
         elif t == MSG_STRATEGY_PARAMS_STATE:
             self.remote_strategy_params = msg.get("strategy_params", {})
             self._mirror_strategy_params_locally(self.remote_strategy_params)

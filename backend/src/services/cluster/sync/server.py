@@ -24,6 +24,8 @@ from backend.src.db import database as db_module
 from backend.src.services.cluster.sync import tls_util
 from backend.src.services.cluster.sync._telemetry import TelemetryMixin
 from backend.src.services.cluster.sync._server_peer_data import ServerPeerDataMixin
+from backend.src.services.cluster.sync._expert_params_sync import ServerExpertParamsMixin
+from backend.src.services.cluster.sync.synced_settings import SYNCED_SETTINGS_KEYS
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
@@ -38,7 +40,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
-    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE,
+    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_PROPOSE,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -48,135 +50,10 @@ log = logging.getLogger("sync")
 # that are their only readers -- see the note there.
 
 
-_SYNCED_SETTINGS_KEYS = (
-    "risk_governor_enabled", "risk_per_trade_pct", "max_risk_per_trade_pct",
-    "max_lot_size", "max_daily_loss_pct", "max_total_drawdown_pct",
-    "cooldown_after_loss_min", "trade_strategy",
-    "session_asia_enabled", "session_london_enabled", "session_ny_enabled",
-    "accept_tg_signals", "auto_execute_signals", "exclude_high_risk",
-    # The Signal Decision Log (2026-09-18). Synced for the same reason its
-    # Parsing-page neighbours above are: left per-node, the Mac and the VPS
-    # would record different halves of one study and nothing would say so.
-    "tg_decision_log_enabled",
-    # The contradiction study (2026-09-21). Same reason, and one more: with
-    # it on, each node writes its own Telegram signals to its own signal
-    # bus, so a node where it is off would be judging contradictions
-    # against half the evidence.
-    "tg_contradiction_log_enabled",
-    "bo_live_execution", "bo_claude_eval_enabled", "kelly_sizing_enabled",
-    "max_open_trades",
-    # sg_claude_eval_enabled (Bounce Generator's own Claude-eval toggle) was
-    # missing here entirely — its Breakout Engine sibling (bo_claude_eval_enabled,
-    # above) was already synced, but this one wasn't, found investigating a
-    # sudden token-usage spike 2026-07-06 traced to both engines' Claude
-    # evaluation defaulting ON and running independently on each node.
-    "sg_claude_eval_enabled",
-    # Circuit breaker fields (settings.py's save_risk()) were never added
-    # here when that feature shipped, so every circuit-breaker change from
-    # either node was silently filtered out and rejected by the other side
-    # — not a timing issue, a deterministic naming gap.
-    "circuit_breaker_enabled", "circuit_breaker_losses", "circuit_breaker_cooldown_mins",
-    "profit_close_usd",
-    # circuit_breaker_active_until / circuit_breaker_consec_losses (the
-    # breaker's own runtime state, set by database.py's trip/reset logic
-    # rather than the Settings UI) were never added alongside the three
-    # circuit_breaker_* config fields above — same "no recognised settings
-    # keys in proposal" rejection on every reconnect, found 2026-07-11.
-    # Syncing this state (not just the policy) matters here specifically
-    # because a trip on the active node must still be honored if failover
-    # hands trading to the other node mid-cooldown.
-    "circuit_breaker_active_until", "circuit_breaker_consec_losses",
-    # Also missing (found investigating a "IME didn't fire" report 2026-07-06 —
-    # turned out not to be the actual cause that time, both nodes already
-    # agreed, but it's a real latent gap for the next time either side
-    # changes it without the other noticing).
-    "immediate_market_entry",
-    # EA bridge is per-node infrastructure (each node has its own attached
-    # MT5 terminal + EA), but the ON/OFF *policy* should be shared like every
-    # other risk toggle above — otherwise whichever node becomes active
-    # later silently reverts to Python-only management because this node's
-    # own DB never learned the setting was turned on elsewhere.
-    "ea_bridge_enabled",
-    # Same gap, found 2026-07-07: Dynamic Position Management was never
-    # added here either, so toggling it on one node silently never reached
-    # the other — whichever node takes over trading later would manage
-    # positions without DPM even though the user explicitly turned it on.
-    "dpm_enabled",
-    # Same gap again, found 2026-07-07: Reversal Engine's live-execution
-    # toggle was never added here, so every propose from either node was
-    # silently rejected outright ("no recognised settings keys in
-    # proposal") — the two nodes could show opposite ON/OFF states
-    # indefinitely with no error surfaced to the user.
-    "re_live_execution",
-    # Same gap again, found 2026-07-07: five more fields saved by the same
-    # Strategy panel save_strategy() call as trade_strategy/profit_close_usd/
-    # exclude_high_risk/kelly_sizing_enabled (all already synced above) were
-    # never added here, so the whole settings proposal was rejected outright
-    # ("no recognised settings keys in proposal") on every strategy-panel
-    # save — trail_stop_sl_pts, trailing_stop_distance and strategy_lot_size
-    # feed live SL/TP and lot-size math in engine.py, atr_collapse_threshold
-    # gates entries in breakout_signal/engine.py and test_signal/engine.py,
-    # and display_strategy_id is the display companion of trade_strategy
-    # (set together in engine.py's !strategy command) — a mismatch there
-    # leaves the picker on the other node highlighting the wrong strategy
-    # even when the executed trade_strategy itself is correct.
-    "trail_stop_sl_pts", "trailing_stop_distance", "strategy_lot_size",
-    "atr_collapse_threshold", "display_strategy_id",
-    # Trading > Global Parameters (2026-07-24) -- strategy_lot_size (above)
-    # moved here from Active Strategy; these three are new. Added up front
-    # this time rather than found later as a gap, per the recurring pattern
-    # every entry above this one already documents.
-    "strategy_lot_size_grid", "global_harvest_enabled", "global_harvest_threshold_usd",
-    "hour_blocklist_enabled",
-    # Per-trade sizing (docs/todo/risk/010). Whichever node trades must size
-    # the way the operator chose, whichever node they chose it on.
-    "global_sizing_override", "strategy_lot_size_parked",
-    # ORB/IVB Report's auto-execute toggle — whichever node ends up as the
-    # active trader is the one whose scheduler actually checks this flag, so
-    # toggling it from the other node's UI must reach it or the setting is
-    # silently a no-op on the node that matters.
-    "orb_auto_execute_enabled",
-    # Bounce Generator's live-execution toggle (its sibling toggles,
-    # bo_live_execution for Breakout and re_live_execution for Reversal Engine,
-    # were both already synced) — same deterministic naming gap as those
-    # two, found 2026-07-10 investigating a "no recognised settings keys
-    # in proposal" rejection on every Mac reconnect.
-    "sg_live_execution",
-    # ORB/IVB Report's lot size — same reasoning as orb_auto_execute_enabled
-    # above: whichever node executes (manually or via the scheduler) needs
-    # the value the user actually set, regardless of which node's UI they
-    # set it from.
-    "orb_lot_size",
-    # Centralized signal generation toggle — whichever node ends up the
-    # active trader must agree with the Mac on whether it should be
-    # analyzing at all (should_generate_signals_here() reads this locally on
-    # each node), so it needs to reach both sides like every other execution
-    # -affecting flag above, not just live on whichever node's UI set it.
-    "centralized_signal_gen_enabled",
-    # Trading > Strategy > Internal Engine Exposure (2026-07-28) -- added up
-    # front rather than found later as a gap, per the recurring pattern
-    # documented throughout this list. Whichever node is the active trader is
-    # the one whose internal engines actually consult this before executing,
-    # so it has to reach both sides like every other execution-affecting flag.
-    "internal_hedge_mode", "internal_net_exposure_max_lots",
-    # Signal Generator > Reversal > Learn From Pro Signals (2026-08-06) --
-    # added up front, same reasoning as the entries above. Whichever node
-    # runs the Reversal Engine is the one that reads this when scoring a
-    # signal, so a toggle set on the Mac has to reach the VPS or the engine
-    # there keeps scoring with pro_likeness pinned at its neutral.
-    "re_learn_from_ref_signals",
-    # Trading > Which signals are taken / Exposure -- the stale-release
-    # guards (2026-09-21). Same reasoning as every execution-affecting flag
-    # above, and it applies with particular force here: the pending watcher
-    # runs on whichever node is the active trader, so a guard switched on
-    # from the Mac that never reached the VPS would leave the backlog
-    # releasing exactly as it did on the day these were written.
-    "stale_better_fill_cap_enabled", "stale_better_fill_cap_pts",
-    "pending_momentum_gate_enabled", "burst_hedge_guard_enabled",
-)
+_SYNCED_SETTINGS_KEYS = SYNCED_SETTINGS_KEYS
 
 
-class SyncServer(TelemetryMixin, ServerPeerDataMixin):
+class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin):
     def __init__(self, main_engine=None, breakout_engine=None,
                  bounce_engine=None, re_engine=None):
         self._main_engine     = main_engine
@@ -287,6 +164,7 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
                 channel_strategy=self._channel_strategy_snapshot(),
                 trading_schedule=self._trading_schedule_snapshot(),
                 strategy_params=self._strategy_params_snapshot(),
+                expert_params=self._expert_params_snapshot(),
                 active_trader=db_module.get_active_trader(),
                 node_id=db_module.get_or_create_node_id(),
             )))
@@ -343,6 +221,8 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
             await self._handle_channel_strategy_propose(ws, msg)
         elif t == MSG_TRADING_SCHEDULE_PROPOSE:
             await self._handle_trading_schedule_propose(ws, msg)
+        elif t == MSG_EXPERT_PARAMS_PROPOSE:
+            await self._handle_expert_params_propose(ws, msg)
         elif t == MSG_STRATEGY_PARAMS_PROPOSE:
             await self._handle_strategy_params_propose(ws, msg)
         elif t == MSG_STAND_DOWN:
@@ -550,13 +430,21 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin):
         return {k: rs.get(k) for k in _SYNCED_SETTINGS_KEYS if k in rs}
 
     async def _handle_settings_propose(self, ws, msg: dict) -> None:
-        updates = {k: v for k, v in (msg.get("updates") or {}).items()
-                   if k in _SYNCED_SETTINGS_KEYS}
+        proposed = msg.get("updates") or {}
+        updates = {k: v for k, v in proposed.items() if k in _SYNCED_SETTINGS_KEYS}
+        # Named, so the Mac drops them from its queue instead of re-sending
+        # them on every reconnect for ever.
+        ignored = sorted(k for k in proposed if k not in _SYNCED_SETTINGS_KEYS)
         if not updates:
             await ws.send(json.dumps(make(
-                MSG_SETTINGS_REJECTED, reason="no recognised settings keys in proposal"
+                MSG_SETTINGS_REJECTED, reason="no recognised settings keys in proposal",
+                keys=ignored,
             )))
             return
+        if ignored:
+            await ws.send(json.dumps(make(
+                MSG_SETTINGS_REJECTED, reason="not synced between nodes", keys=ignored,
+            )))
         try:
             db_module.update_risk_settings(updates, _from_sync=True)
             log.info("[SyncServer] applied settings from Mac: %s", updates)

@@ -407,3 +407,11 @@ class TestAppAccess:
         make_client().put("/api/settings/access", json={"auto_login": True})
 
         assert ("app", ({auth_gate.SETTING_KEY: True},), {}) in config["writes"]
+
+
+def test_the_mt5_settings_say_which_platform_this_is(make_client, config):
+    """The MT5 tab shows its CrossOver/Wine section only on a Mac
+    (2026-09-26), and a save must not lose the answer."""
+    import sys
+
+    assert make_client().get("/api/settings/mt5").json()["platform"] == sys.platform

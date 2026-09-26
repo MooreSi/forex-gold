@@ -109,10 +109,17 @@ async def update_app_config(body: ConfigWrite) -> dict:
     return _redacted(settings_ctl.load_config())
 
 
+def _mt5_view() -> dict:
+    """The MT5 tab's data. `platform` because its CrossOver/Wine section only
+    means anything on a Mac (2026-09-26); every response carries it so a save
+    does not hide the section."""
+    return {**_redacted(settings_ctl.get_mt5_credentials() or {}), "platform": sys.platform}
+
+
 @router.get("/mt5")
 async def mt5() -> dict:
     """Which account is configured. **Never the password.**"""
-    return _redacted(settings_ctl.get_mt5_credentials() or {})
+    return _mt5_view()
 
 
 @router.put("/mt5")
@@ -147,7 +154,7 @@ async def save_mt5(body: Mt5Credentials) -> dict:
     # account nobody asked it to use.
     if environment == env_ctl.describe_environments()["current"]:
         settings_ctl.sync_bridge_credentials_file(environment)
-    return _redacted(settings_ctl.get_mt5_credentials() or {})
+    return _mt5_view()
 
 
 @router.put("/mt5/terminal-path")
@@ -164,7 +171,7 @@ async def save_terminal_path(body: TerminalPathWrite) -> dict:
         {f"{prefix}terminal_path": body.path.strip() or None})
     if environment == env_ctl.describe_environments()["current"]:
         settings_ctl.sync_bridge_credentials_file(environment)
-    return _redacted(settings_ctl.get_mt5_credentials() or {})
+    return _mt5_view()
 
 
 @router.get("/retention")

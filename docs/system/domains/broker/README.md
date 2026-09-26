@@ -446,3 +446,28 @@ success**, which is why `compile_ea` judges by the `.ex5` landing, never by
 the exit code. The terminal's own `.ex5` was still the 2026-07-17 build: the
 startup install had never run there, because every start crashed first (the
 backfill below, platform domain).
+
+## The Windows bridge finds and logs in to the terminal itself (2026-09-26)
+
+Reported: on the Windows VPS the EA showed connected and the bridge never did.
+Diagnosed on the VPS (Vantage demo) over WinRM:
+
+- Every attempt logged `mt5.initialize() failed: (1, 'Success')`. No terminal
+  path was saved, so the bridge only ever attached WITHOUT a path, which fails
+  for the Vantage build (`C:\Program Files\Vantage Markets MT5 Terminal`) --
+  while the Settings field promised "Blank means auto-detect" and nothing
+  detected anything.
+- With the path saved, the error became `(-6, 'Terminal: Authorization
+  failed')`: `initialize(path=...)` was called without the account, and that
+  terminal refuses the connection before `mt5.login()` is reached.
+
+`mt5_terminal.py` (repo root, standard library only because the macOS bridge
+runs it under Wine's Python) now owns the sequence: attach with no path first,
+exactly as before; else the saved path, or the one install named by the
+`origin.txt` files under `%APPDATA%\MetaQuotes\Terminal` (several installs is
+deliberately "not found": the wrong one would open a second terminal); and
+the account goes in that `initialize` call. `mt5_bridge.py` calls it, and adds
+its own folder to `sys.path` because `mt5_native` loads it by file path.
+The MT5 tab's CrossOver/Wine section ("How the bridge runs") now shows only
+when `/api/settings/mt5` reports `platform: darwin`. Pinned by
+`tests/broker/test_mt5_terminal.py`.

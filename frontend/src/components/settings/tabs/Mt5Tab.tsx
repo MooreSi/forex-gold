@@ -84,6 +84,9 @@ export function Mt5Tab() {
         )}
       </section>
 
+      {/* CrossOver and Wine exist only on a Mac; on Windows the bridge runs
+          inside the app and none of this applies (2026-09-26). */}
+      {mt5.data?.platform === "darwin" && (
       <section data-testid="bridge-process" className="rounded border border-line p-3">
         <h3 className="text-xs font-semibold text-ink-1">How the bridge runs</h3>
         <p className="mb-2 text-[11px] text-ink-3">
@@ -139,6 +142,7 @@ export function Mt5Tab() {
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

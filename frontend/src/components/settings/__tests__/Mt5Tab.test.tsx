@@ -16,6 +16,9 @@ import { Mt5Tab } from "../tabs/Mt5Tab";
 
 const BODIES: Record<string, unknown> = {
   "/api/settings/mt5": {
+    // The machine these tests describe is a Mac: the bridge section is
+    // macOS-only (2026-09-26).
+    platform: "darwin",
     login: "5203117", server: "Vantage-Demo", password_enc_set: true,
     terminal_path: "C:\\MT5\\terminal64.exe",
     live_login: "", live_server: "", live_password_enc_set: false,
@@ -82,5 +85,32 @@ describe("the Wine prefix and binary", () => {
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0][0]).toBe("/api/settings/app");
     expect(JSON.parse(writes()[0][1].body)).toEqual({ mt5_bottle_path: "~/.mt5_prefix" });
+  });
+});
+
+describe("the macOS bridge section (2026-09-26)", () => {
+  // "How the bridge runs" chooses between CrossOver and Wine, which exist only
+  // on a Mac. On Windows the bridge runs inside the app, and the section only
+  // offered settings that do nothing there.
+  const original = BODIES["/api/settings/mt5"];
+  afterEach(() => { BODIES["/api/settings/mt5"] = original; });
+
+  const renderOn = async (platform: string) => {
+    BODIES["/api/settings/mt5"] = { ...(original as object), platform };
+    render(<Mt5Tab />);
+    await screen.findAllByText(/terminal path/i);
+  };
+
+  it("is not shown on Windows", async () => {
+    await renderOn("win32");
+
+    expect(screen.queryByText("How the bridge runs")).toBeNull();
+    expect(screen.queryByLabelText("Backend")).toBeNull();
+  });
+
+  it("is shown on a Mac", async () => {
+    await renderOn("darwin");
+
+    expect(await screen.findByText("How the bridge runs")).toBeInTheDocument();
   });
 });

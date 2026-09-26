@@ -36,6 +36,12 @@ from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+# Loaded by file path in-process (mt5_native) and run as a script under Wine:
+# its own folder must be importable for the sibling below either way.
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mt5_terminal  # noqa: E402
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 PORT             = int(os.environ.get("MT5_BRIDGE_PORT", "9000"))
@@ -139,23 +145,15 @@ def _connect() -> bool:
         # call holds NativeMT5Bridge's own asyncio.Lock forever, freezing every
         # subsequent bridge-dependent operation in the whole app.
         with _mt5_call_lock:
-            # Always try to attach to the already-running MT5 terminal first (no path
-            # argument).  Passing path= when MT5 is already running causes the Python
-            # library to launch a *second* terminal window instead of reusing the
-            # existing one — only supply path= as a fallback when no instance is found.
-            if mt5.initialize(timeout=MT5_TIMEOUT_MS):
-                log.info("mt5.initialize() attached to existing MT5 instance")
-            else:
-                mt5.shutdown()   # reset internal state before retrying
-                if not terminal_path:
-                    _last_error = f"mt5.initialize() failed: {mt5.last_error()}"
-                    log.error(_last_error)
-                    return False
-                log.info("No running MT5 found; launching via path: %s", terminal_path)
-                if not mt5.initialize(path=terminal_path, timeout=MT5_TIMEOUT_MS):
-                    _last_error = f"mt5.initialize() failed: {mt5.last_error()}"
-                    log.error(_last_error)
-                    return False
+            # Attach first; else a saved or detected path, with the account in
+            # the same call (mt5_terminal.py, 2026-09-26).
+            ok, err = mt5_terminal.connect(
+                mt5, login=login, password=password, server=server,
+                terminal_path=terminal_path, timeout_ms=MT5_TIMEOUT_MS, log=log)
+            if not ok:
+                _last_error = err
+                log.error(_last_error)
+                return False
 
             # Brief pause — gives the terminal time to settle the IPC connection
             # before we attempt login, especially after a shutdown/initialize cycle.

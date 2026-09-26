@@ -5,6 +5,9 @@ import { SettingsPanel } from "../SettingsPanel";
 
 const BODIES: Record<string, unknown> = {
   "/api/settings/mt5": {
+    // The machine these tests describe is a Mac: the bridge section is
+    // macOS-only (2026-09-26).
+    platform: "darwin",
     login: "5203117", server: "Vantage-Demo", password_enc_set: true,
     live_login: "900123", live_server: "Vantage-Live", live_password_enc_set: false,
   },

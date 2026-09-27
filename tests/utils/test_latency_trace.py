@@ -22,7 +22,7 @@ def _clean():
 
 
 def _stamp(key, stage, mono, monkeypatch):
-    monkeypatch.setattr(lt.time, "monotonic", lambda: mono)
+    monkeypatch.setattr(lt.time, "perf_counter", lambda: mono)
     lt.mark(key, stage)
 
 
@@ -61,7 +61,7 @@ class TestWallClockStamps:
         """Telegram's post time is a wall-clock time. Two seconds before now
         on the wall must be two seconds before now on the monotonic clock."""
         monkeypatch.setattr(lt.time, "time", lambda: 1_000.0)
-        monkeypatch.setattr(lt.time, "monotonic", lambda: 50.0)
+        monkeypatch.setattr(lt.time, "perf_counter", lambda: 50.0)
         lt.mark_at("7", "t0_posted", 998.0)
         lt.mark("7", "t1_arrived")
 

@@ -57,7 +57,10 @@ def _entry(key: str) -> dict[str, float]:
 def mark(msg_id, stage: str) -> None:
     if not msg_id:
         return
-    _entry(str(msg_id)).setdefault(stage, time.monotonic())
+    # perf_counter, not monotonic: on Python 3.11 for Windows (the VPS)
+    # monotonic ticks every ~15.6 ms, so a short hop read 0.
+    # tests/utils/test_latency_clock_resolution.py
+    _entry(str(msg_id)).setdefault(stage, time.perf_counter())
 
 
 def mark_at(msg_id, stage: str, wall_ts: float) -> None:
@@ -65,7 +68,7 @@ def mark_at(msg_id, stage: str, wall_ts: float) -> None:
     an engine's stored created_at), placed on the monotonic line."""
     if not msg_id or wall_ts is None:
         return
-    mono = time.monotonic() - (time.time() - float(wall_ts))
+    mono = time.perf_counter() - (time.time() - float(wall_ts))
     _entry(str(msg_id)).setdefault(stage, mono)
 
 

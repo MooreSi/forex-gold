@@ -26,6 +26,7 @@ state says whether one is stored, never what it is.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import socket
 from typing import Any
@@ -297,3 +298,26 @@ async def model_snapshot(body: SnapshotWrite) -> dict:
     except Exception as exc:
         raise Refusal(f"The transfer failed: {exc}") from exc
     return {"direction": body.direction, "note": f"Model snapshot {body.direction} complete."}
+
+
+@router.post("/restart-vps")
+async def restart_vps() -> dict:
+    """Restart the paired VPS without logging in to it (owner, 2026-09-26).
+
+    It restarts the way /restartapp does. Nothing is closed, but the VPS
+    manages no position until it is back, which the page says before sending.
+    """
+    if not sync_ctl.is_connected():
+        raise Refusal("Not connected to the VPS.")
+    try:
+        reply = await sync_ctl.restart_peer()
+    except asyncio.TimeoutError as exc:
+        raise Refusal(
+            "The VPS did not answer. It may be on an older version that "
+            "cannot be restarted from here: update it once, or send "
+            "/restartapp to the Telegram bot.") from exc
+    except Exception as exc:
+        raise Refusal(f"Could not reach the VPS: {exc}") from exc
+    if not reply.get("ok"):
+        raise Refusal(reply.get("note") or "The VPS could not restart.")
+    return {"note": f"VPS: {reply.get('note') or 'restarting'}"}

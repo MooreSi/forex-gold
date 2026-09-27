@@ -100,6 +100,12 @@ MSG_RESUME_ACK        = "resume_ack"        # VPS -> Mac: resumed accepting new 
 MSG_ENGINE_CONTROL     = "engine_control"      # Mac -> VPS: {"engine": "reversal_engine", "action": "start"/"stop"/"run_now"}
 MSG_ENGINE_CONTROL_ACK = "engine_control_ack"  # VPS -> Mac: {"engine", "action", "is_running", "error"?}
 
+# Settings > Remote Node > Restart VPS (owner, 2026-09-26): restart the VPS
+# without logging in to it. The VPS restarts as /restartapp does
+# (sync/_restart_sync.py). An older VPS has no handler and never answers.
+MSG_RESTART_NODE     = "restart_node"      # Mac -> VPS
+MSG_RESTART_NODE_ACK = "restart_node_ack"  # VPS -> Mac: {"ok", "note"}
+
 # Same problem as engine control above, for the Trading tab's manual "Market
 # Order" button — clicking it while stood down previously just failed with
 # "Trading stood down", even though the user explicitly asked for a trade

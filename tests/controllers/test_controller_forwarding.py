@@ -73,6 +73,7 @@ KNOWN_COMPLEX = [
     "sync_controller.request_model_snapshot",
     "sync_controller.request_resume",
     "sync_controller.request_stand_down",
+    "sync_controller.restart_peer",
     "sync_controller.send_engine_control",
     "sync_controller.send_market_order",
     "sync_controller.server_start",

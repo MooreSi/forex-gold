@@ -374,9 +374,19 @@ Still open, and why each was left:
 - **Save credentials no longer pushes them to a running bridge**, and there
   is no "Test connection". NiceGUI called `bridge.send_credentials`; the port
   writes only the bridge file, which takes effect on the next bridge start.
-- **Nothing can restart, update or un-headless the VPS from the Mac.** The
-  sync protocol has no message for it. On a headless VPS the only remote
-  controls are Telegram (`/headless`, `/restartapp`) and RDP.
+- **The Mac can restart the VPS; it still cannot update or un-headless it.**
+  Settings > Remote node > **Restart VPS** (owner, 2026-09-26) sends
+  `MSG_RESTART_NODE`, and the VPS restarts exactly as `/restartapp` does,
+  through `TradingRuntime.restart_app` (bot offset persisted, launcher hand-back,
+  headless exit), then answers `MSG_RESTART_NODE_ACK {ok, note}`
+  (`sync/_restart_sync.py`, `POST /api/remote/restart-vps`). It closes
+  nothing; the confirmation counts the VPS's open positions from the heartbeat,
+  because none is managed until it is back. **An older VPS has no handler and
+  never answers**: the Mac times out after 10 s and says to update the VPS
+  once. Update and headless-off still go through Telegram
+  (`/headless`) or RDP. Pinned by `tests/core/test_restart_vps_over_sync.py`,
+  `tests/api/routers/test_remote_restart_vps.py` and
+  `RemoteRestartSection.test.tsx`.
 
 Queued for the owner as
 [043](../../../simon-handover/043-controlling-a-headless-vps-from-the-mac.md).

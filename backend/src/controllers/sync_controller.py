@@ -111,6 +111,10 @@ async def request_resume(timeout: float = 15.0) -> None:
     return await _client.get_instance().request_resume(timeout=timeout)
 
 
+async def restart_peer(timeout: float = 10.0) -> dict:
+    return await _client.get_instance().request_peer_restart(timeout=timeout)
+
+
 # ── Handing trading control over ─────────────────────────────────────────────
 # The ORDER inside these is the safety property -- exactly one node may execute
 # new trades against the shared account. It lives in services/cluster/handover.py,

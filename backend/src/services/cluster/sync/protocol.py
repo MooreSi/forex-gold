@@ -106,6 +106,13 @@ MSG_ENGINE_CONTROL_ACK = "engine_control_ack"  # VPS -> Mac: {"engine", "action"
 MSG_RESTART_NODE     = "restart_node"      # Mac -> VPS
 MSG_RESTART_NODE_ACK = "restart_node_ack"  # VPS -> Mac: {"ok", "note"}
 
+# Settings > Remote Node > Upgrade VPS (owner, 2026-09-27): the VPS updates as
+# its own Settings > Update does (sync/_update_sync.py). It acks at once; a
+# failure before the restart follows as MSG_UPDATE_NODE_RESULT.
+MSG_UPDATE_NODE        = "update_node"         # Mac -> VPS
+MSG_UPDATE_NODE_ACK    = "update_node_ack"     # VPS -> Mac: {"ok", "note"}
+MSG_UPDATE_NODE_RESULT = "update_node_result"  # VPS -> Mac: {"ok": False, "note"}
+
 # Same problem as engine control above, for the Trading tab's manual "Market
 # Order" button — clicking it while stood down previously just failed with
 # "Trading stood down", even though the user explicitly asked for a trade

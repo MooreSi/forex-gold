@@ -374,7 +374,7 @@ Still open, and why each was left:
 - **Save credentials no longer pushes them to a running bridge**, and there
   is no "Test connection". NiceGUI called `bridge.send_credentials`; the port
   writes only the bridge file, which takes effect on the next bridge start.
-- **The Mac can restart the VPS; it still cannot update or un-headless it.**
+- **The Mac can restart and upgrade the VPS; it still cannot un-headless it.** (Upgrade added 2026-09-27, below.)
   Settings > Remote node > **Restart VPS** (owner, 2026-09-26) sends
   `MSG_RESTART_NODE`, and the VPS restarts exactly as `/restartapp` does,
   through `TradingRuntime.restart_app` (bot offset persisted, launcher hand-back,
@@ -494,3 +494,23 @@ Things worth knowing:
 - First real reading, this Mac, 2026-09-26: VantageMarkets-Demo executed 742
   orders in 7 days with a median of 0.22 s, p90 12.6 s, worst 84.9 s, 145
   over 5 s. That is the broker, not this app, and it dwarfs every hop we own.
+
+## Upgrade VPS, and are both nodes on the same commit (2026-09-27)
+
+Settings > Remote node > **Upgrade VPS**, beside Restart VPS. The Mac sends
+`MSG_UPDATE_NODE`; the VPS runs `core_app_update.apply_update(restart=True)`,
+the same call as its own Settings > Update (fetch + force-checkout
+origin/main, pip, pycache sweep, EA deploy, restart). It acks AT ONCE
+(`MSG_UPDATE_NODE_ACK`) because the update takes minutes and ends in a
+restart that drops the link; a failure before the restart follows as
+`MSG_UPDATE_NODE_RESULT` and is shown on the tab as the last update's error.
+One at a time: a second request while one runs is refused
+(`sync/_update_sync.py`, `_updating`). An older VPS has no handler: the Mac
+times out after 10 s and says to update it once by other means.
+
+The status heartbeat now carries `commit` (full SHA) and `git_version`, so
+`GET /api/remote/versions` compares the two nodes. A VPS that sends no
+commit is **unknown, never "out of sync"**. Controllers:
+`vps_update_controller.py` (its own file: `sync_controller.py` sits at the
+200-line controller ceiling). Pinned by `tests/core/test_update_vps_over_sync.py`,
+`tests/api/routers/test_remote_update_vps.py` and `RemoteUpgradeSection.test.tsx`.

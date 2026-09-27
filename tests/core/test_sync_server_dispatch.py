@@ -34,6 +34,7 @@ ROUTES = [
     (P.MSG_EXPERT_PARAMS_PROPOSE, "_handle_expert_params_propose"),
     (P.MSG_MT5_ACCOUNTS, "_handle_mt5_accounts"),
     (P.MSG_RESTART_NODE, "_handle_restart_node"),
+    (P.MSG_UPDATE_NODE, "_handle_update_node"),
     (P.MSG_STAND_DOWN, "_handle_stand_down"),
     (P.MSG_RESUME, "_handle_resume"),
     (P.MSG_TRADE_CLOSED, "_handle_trade_closed"),

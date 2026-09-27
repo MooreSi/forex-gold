@@ -39,6 +39,7 @@ from backend.src.api.errors import Refusal
 from backend.src.controllers import engines_controller as engines_ctl
 from backend.src.controllers import remote_node_controller as node_ctl
 from backend.src.controllers import sync_controller as sync_ctl
+from backend.src.controllers import vps_update_controller as vps_ctl
 
 log = logging.getLogger(__name__)
 
@@ -321,3 +322,34 @@ async def restart_vps() -> dict:
     if not reply.get("ok"):
         raise Refusal(reply.get("note") or "The VPS could not restart.")
     return {"note": f"VPS: {reply.get('note') or 'restarting'}"}
+
+
+@router.post("/update-vps")
+async def update_vps() -> dict:
+    """Update the paired VPS to origin/main and restart it (owner, 2026-09-27).
+
+    It updates the way its own Settings > Update does. The VPS answers at
+    once; the update takes minutes and ends in a restart, so the link drops
+    and comes back on the new commit. A failure before the restart is shown
+    by GET /versions as `last_update`.
+    """
+    if not sync_ctl.is_connected():
+        raise Refusal("Not connected to the VPS.")
+    try:
+        reply = await vps_ctl.update_peer()
+    except asyncio.TimeoutError as exc:
+        raise Refusal(
+            "The VPS did not answer. It is probably on an older version that "
+            "cannot be updated from here: update it once by Telegram or on "
+            "the VPS itself.") from exc
+    except Exception as exc:
+        raise Refusal(f"Could not reach the VPS: {exc}") from exc
+    if not reply.get("ok"):
+        raise Refusal(reply.get("note") or "The VPS could not start an update.")
+    return {"note": f"VPS: {reply.get('note') or 'updating'}"}
+
+
+@router.get("/versions")
+async def versions() -> dict:
+    """Both nodes' commits and git versions, and whether they match."""
+    return vps_ctl.version_report()

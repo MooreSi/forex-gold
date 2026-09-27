@@ -21,6 +21,7 @@ import time
 from typing import Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.cluster.sync import _update_sync
 from backend.src.services.cluster.sync.protocol import (
     MSG_SIGNAL_GEN_STATS, MSG_STATUS_HEARTBEAT, TRADER_REMOTE_VPS, make,
 )
@@ -135,6 +136,7 @@ class TelemetryMixin:
             "active_trader": db_module.get_active_trader(),
             "ea_connected":  ea_connected,
             **_get_resource_usage(),
+            **_update_sync.heartbeat_fields(),   # commit + git version (2026-09-27)
         }
 
     async def _heartbeat_loop(self) -> None:

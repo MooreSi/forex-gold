@@ -85,6 +85,7 @@ KNOWN_COMPLEX = [
     "system_controller.releases",
     "telegram_controller.reader_is_configured",
     "trading_controller.validate_signal",
+    "vps_update_controller.update_peer",
 ]
 
 

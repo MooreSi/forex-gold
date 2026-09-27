@@ -7,6 +7,7 @@ import { formatMoney } from "@/components/shared/format";
 import { asObject } from "@/lib/asArray";
 import { RemotePeerHealthSection } from "../internal/RemotePeerHealthSection";
 import { RemoteRestartSection } from "../internal/RemoteRestartSection";
+import { RemoteUpgradeSection } from "../internal/RemoteUpgradeSection";
 import { RemoteServerSection, type ServerState } from "../internal/RemoteServerSection";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { SettingsToggle } from "../internal/SettingsToggle";
@@ -199,10 +200,16 @@ export function RemoteTab() {
           </div>
         )}
         {client.token_set && (
-          <RemoteRestartSection
-            connected={connected}
-            openPositions={Array.isArray(peer.open_positions) ? peer.open_positions.length : 0}
-          />
+          <div className="flex flex-wrap items-start gap-3">
+            <RemoteRestartSection
+              connected={connected}
+              openPositions={Array.isArray(peer.open_positions) ? peer.open_positions.length : 0}
+            />
+            <RemoteUpgradeSection
+              connected={connected}
+              openPositions={Array.isArray(peer.open_positions) ? peer.open_positions.length : 0}
+            />
+          </div>
         )}
       </section>
 

@@ -24,6 +24,7 @@ from backend.src.services.cluster.sync._expert_params_sync import ClientExpertPa
 from backend.src.services.cluster.sync._latency_sync import ClientLatencyMixin
 from backend.src.services.cluster.sync._mt5_accounts_sync import ClientMt5AccountsMixin, _alert as _alert_operator
 from backend.src.services.cluster.sync._restart_sync import ClientRestartMixin
+from backend.src.services.cluster.sync._update_sync import ClientUpdateMixin
 from backend.src.services.cluster.sync.protocol import (
     MSG_HELLO, MSG_WELCOME, MSG_REJECT, MSG_PING, MSG_PONG,
     MSG_STATUS_HEARTBEAT, MSG_SIGNAL_GEN_STATS, MSG_SETTINGS_PROPOSE, MSG_SETTINGS_STATE,
@@ -35,7 +36,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_ENGINE_CONTROL, MSG_ENGINE_CONTROL_ACK,
     MSG_MARKET_ORDER, MSG_MARKET_ORDER_ACK, MSG_SIGNAL_ORDER, MSG_SIGNAL_ORDER_ACK,
     MSG_SIGNAL_FOLLOWUP, MSG_SIGNAL_FOLLOWUP_ACK,
-    MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC, MSG_RESTART_NODE_ACK,
+    MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC, MSG_RESTART_NODE_ACK, MSG_UPDATE_NODE_ACK, MSG_UPDATE_NODE_RESULT,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_STATE,
@@ -64,7 +65,7 @@ _LIVENESS_PING_INTERVAL_S = 20
 
 
 class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
-                 ClientMt5AccountsMixin, ClientLatencyMixin, ClientRestartMixin):
+                 ClientMt5AccountsMixin, ClientLatencyMixin, ClientRestartMixin, ClientUpdateMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
         self.last_error: str = ""
@@ -398,6 +399,8 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
             self._on_pong(msg)
         elif t == MSG_RESTART_NODE_ACK:
             self._on_restart_ack(msg)
+        elif t in (MSG_UPDATE_NODE_ACK, MSG_UPDATE_NODE_RESULT):
+            (self._on_update_ack if t == MSG_UPDATE_NODE_ACK else self._on_update_result)(msg)
         else:
             log.debug("[SyncClient] unhandled message type: %s", t)
 

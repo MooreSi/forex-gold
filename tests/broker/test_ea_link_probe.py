@@ -39,7 +39,10 @@ async def test_a_pong_completes_the_round_trip():
     bridge = _healthy_bridge()
 
     async def _ea_answers():
-        await asyncio.sleep(0.01)
+        # time.sleep, not asyncio.sleep: on 3.11 Windows asyncio's timer runs
+        # on a ~15.6 ms clock and fires a 10 ms sleep at once, so the EA
+        # "answered" in 0.4 ms and the lower bound failed (CI, 2026-09-27).
+        time.sleep(0.01)
         await bridge._dispatch({"type": "pong"})
 
     asyncio.get_running_loop().create_task(_ea_answers())

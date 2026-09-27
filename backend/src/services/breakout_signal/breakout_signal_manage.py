@@ -128,6 +128,12 @@ class _ManagementMixin:
         except Exception:
             pass
 
+        try:
+            from backend.src.services.breakout_signal import tuning_ledger as _tl
+            _tl.evaluate()
+        except Exception as _te:
+            _log.warning("[BO-Tuning] evaluate failed: %s", _te)
+
         self._closed_count += 1
         if self._closed_count % 10 == 0:  # _BATCH_REVIEW_EVERY, mirrored from breakout_signal_learn.py
             import asyncio

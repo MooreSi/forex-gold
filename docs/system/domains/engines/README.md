@@ -427,3 +427,34 @@ after it. With no running loop (scripts, tests) it retrains inline as before.
 - The online SGD update and the pattern stats stay on the loop. They are
   milliseconds, and they mutate state `predict` and `record_level_touch` read
   there.
+
+## Breakout tuning experiment ledger (2026-09-27, docs/todo/007)
+
+`breakout_signal/tuning_ledger.py` (+ `tuning_ledger_repo.py`, table
+`bo_tuning_experiments` in `breakout_signal.db`). The batch review
+(`_run_batch_analysis`, every 10 closed signals) no longer calls
+`apply_adjustment` itself: it hands the model's adjustments to
+`tuning_ledger.handle_batch`, which is now the only route from the AI to a
+param. Pinned by `tests/breakout_signal/test_batch_review_uses_the_ledger.py`.
+
+- **Record mode (default, `bo_config.tuning_approval_required` = "0")** is
+  the old behaviour: every adjustment applied as it arrives, same function,
+  same clamps and locks, same "param→value" log string. Each is recorded with
+  the baseline (mean net $ of the last `MIN_SAMPLE` closed signals),
+  `concurrent` = how many params that batch changed, and after `MIN_SAMPLE`
+  closes a verdict (better / worse / same). **It never rolls back.**
+- **Approve mode ("1")**: adjustments become `proposed` and change nothing;
+  a new batch supersedes older proposals. One experiment runs at a time.
+  After `MIN_SAMPLE` closes: worse than baseline -> rolled back, else kept.
+  Net since applied <= -`FAILURE_USD` rolls back early. If the param no
+  longer holds the experiment's value, a human changed it: `abandoned`,
+  never rolled back over the edit.
+- Approval and rollback both go through `apply_adjustment`, so a
+  `tuner_locked` param can never be proposed, approved or rolled back.
+- `evaluate()` runs after every close in `_close_and_learn`, wrapped: a
+  ledger failure logs a warning and never breaks a close.
+- Provisional defaults, owner decisions: `MIN_SAMPLE` 30, `FAILURE_USD` 100
+  (virtual $1,000 account). "Not worse" keeps; there is no significance test,
+  and 30 signals is a noisy sample. Stated on the card.
+- UI: Signal Generator > Breakout, "Tuning experiments" card;
+  `/api/engines/breakout/tuning`.

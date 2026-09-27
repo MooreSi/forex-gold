@@ -152,6 +152,9 @@ def init(db_path: str) -> None:
         if col not in cols:
             get_db().run(f"ALTER TABLE bo_signals ADD COLUMN {col} {defn}")
 
+    from backend.src.services.breakout_signal import tuning_ledger_repo as _ledger
+    _ledger.create_schema()
+
     reconcile_balance_with_trades()
 
 

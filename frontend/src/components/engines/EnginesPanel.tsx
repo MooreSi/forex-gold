@@ -10,6 +10,7 @@ import { CapabilitiesSection } from "./internal/CapabilitiesSection";
 import { ControlTargetBanner } from "./internal/ControlTargetBanner";
 import { EngineCard } from "./internal/EngineCard";
 import { BreakoutSection } from "./internal/BreakoutSection";
+import { TuningExperimentsSection } from "./internal/TuningExperimentsSection";
 import { BenchmarkSection } from "./internal/BenchmarkSection";
 import { CrossAssetSection } from "./internal/CrossAssetSection";
 import { ModelSection } from "./internal/ModelSection";
@@ -85,6 +86,7 @@ export function EnginesPanel() {
                   called them: this tab showed the Reversal engine in detail
                   and said nothing about Breakout beyond a Start/Stop card. */}
               <BreakoutSection />
+              <div className="mt-4"><TuningExperimentsSection /></div>
             </Tabs.Content>
 
             <Tabs.Content value="reversal" className="space-y-4">

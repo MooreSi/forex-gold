@@ -15,6 +15,7 @@ from backend.src.services.ai import provider as ai_provider
 
 from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 from backend.src.services.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import tuning_ledger
 
 _log = logging.getLogger("breakout_signal")
 
@@ -131,18 +132,12 @@ class _LearnMixin:
             data = _json.loads(raw)
 
             adjustments = data.get("adjustments", [])
-            applied     = []
-            for adj in adjustments:
-                param  = adj.get("param", "")
-                value  = adj.get("new_value")
-                reason = adj.get("reason", "")
-                if param and value is not None:
-                    new_v = ap.apply_adjustment(param, float(value), reason)
-                    if new_v is not None:
-                        applied.append(f"{param}→{new_v:.4g}")
+            summary     = data.get("summary", "")
+            # The ledger applies them (record mode, as before) or holds them
+            # as proposals for the owner (approve mode) -- docs/todo/007.
+            applied     = tuning_ledger.handle_batch(adjustments, summary)
 
             applied_str = (", ".join(applied)) if applied else "no changes"
-            summary     = data.get("summary", "")
             _log.info(
                 "[BO-Engine] Batch analysis (%d trades): %s. %s",
                 len(recent), applied_str, summary[:120],

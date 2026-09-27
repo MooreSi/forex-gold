@@ -74,6 +74,8 @@ async def state() -> dict:
         # Guarded in the service, deliberately: the grid IS the screen, and
         # one of these being unavailable must not take it down with it.
         **schedule_ctl.screen_extras(),
+        # Per-channel daily loss cap card; None when unreadable.
+        "channel_loss_cap": await schedule_ctl.channel_loss_cap_state_async(),
     }
 
 

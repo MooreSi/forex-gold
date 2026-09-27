@@ -239,3 +239,42 @@ recomputed) and grid legs (the EA ignored it). No template on the live
 install had `risk_pct > 0` on either path when this landed.
 
 Needs a demo session before the override is switched on for the live account.
+
+## Per-channel daily loss cap (2026-09-27)
+
+`services/risk/channel_loss_cap.py`. Once a Telegram channel's net realised
+P&L today reaches minus its cap, new automated entries from that channel are
+refused until the day turns over; other channels keep trading and open
+positions are not touched. Off by default (`channel_daily_loss_cap` = 0);
+per-channel overrides live in `channel_daily_loss_caps` (JSON, canonical
+names, 0 exempts a channel). Edited on Trading > Schedule; the card's state
+rides `/api/schedule/state`, writes go to `PUT /api/channel-loss-cap`.
+
+Load-bearing properties, pinned by `tests/risk/test_channel_daily_loss_cap.py`:
+
+- **Enforced inside `check_trading_schedule`, first, ahead of the schedule's
+  master switch.** Every automated route that carries a channel already calls
+  that function with the channel's name, so one call covers them all. Turning
+  the windows off does not turn the cap off.
+- **Counted by CLOSE time, net, broker trades only** (`mt5_ticket IS NOT
+  NULL`), since midnight on the trading clock. The daily profit target counts
+  by OPEN time; the two predicates differ on purpose (a loss taken today was
+  lost today).
+- **Names are canonicalised on both sides**: a trade booked under
+  `Telegram Auto (X)` counts against `X`, and a gate called with either form
+  is the same channel.
+- **Engines are not channels**: Reversal, Breakout, Bounce and ORB are
+  skipped (`channels.performance.internal_engine_names()`).
+- **Failure direction**: an unreadable setting is off; an ARMED cap that
+  cannot read today's trades refuses the entry.
+- **Sync**: both keys ride the trading schedule snapshot; a snapshot without
+  them (an older peer) leaves them alone.
+
+Known limit: the P&L read is this node's own `vantage_simulated_trades`. On a
+Mac forwarding to the VPS under centralized signal generation, trades closed
+on the VPS are not in the Mac's table, so the Mac's gate under-counts. The
+governor's daily loss limit has the same limit.
+
+No "resume for today" button, unlike the daily profit target: raise or clear
+the channel's cap instead. Needs a demo session before a cap is set on the
+live account.

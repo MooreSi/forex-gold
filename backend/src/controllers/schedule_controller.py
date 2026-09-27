@@ -10,6 +10,7 @@ Forwards to backend.src.services.risk.schedule unchanged.
 """
 from __future__ import annotations
 
+from backend.src.services.risk import channel_loss_cap as _channel_cap
 from backend.src.services.risk import clock as _clock
 from backend.src.services.risk import schedule as _schedule
 from backend.src.services.risk import schedule_options as _options
@@ -22,7 +23,7 @@ __all__ = [
     "resume_past_daily_profit_target",
     "describe_trading_clock", "set_trading_clock_offset",
     "trading_markets", "set_trading_markets", "override_options", "channel_names",
-    "screen_extras",
+    "screen_extras", "channel_loss_cap_state_async",
 ]
 
 DAY_NAMES = _schedule.DAY_NAMES
@@ -121,3 +122,8 @@ def screen_extras() -> dict:
     guarded read -- so a piece that is unavailable costs itself and not the
     whole schedule screen."""
     return _options.screen_extras()
+
+
+async def channel_loss_cap_state_async(*args, **kwargs):
+    """The per-channel daily loss cap card on the schedule screen."""
+    return await _channel_cap.screen_state_async(*args, **kwargs)

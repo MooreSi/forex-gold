@@ -50,6 +50,7 @@ from backend.src.api.routers import remote as remote_router
 from backend.src.api.routers import orb as orb_router
 from backend.src.api.routers import orders as orders_router
 from backend.src.api.routers import schedule as schedule_router
+from backend.src.api.routers import channel_loss_cap as channel_loss_cap_router
 from backend.src.api.routers import setforget as setforget_router
 from backend.src.api.routers import setforget_auto as setforget_auto_router
 from backend.src.api.routers import settings as settings_router
@@ -89,6 +90,7 @@ ROUTERS = (
     parsing_router.router,
     remote_router.router,
     schedule_router.router,
+    channel_loss_cap_router.router,
     settings_router.router,
     log_bundle_router.router,
     latency_router.router,

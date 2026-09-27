@@ -3,6 +3,7 @@ import { api } from "@/api/client";
 import { usePoll } from "@/hooks/usePoll";
 import { asArray, asObject } from "@/lib/asArray";
 import type { HaltState, Trade } from "@/api/types";
+import type { ChannelLossCapState } from "../internal/ChannelLossCapCard";
 
 interface ScheduleState {
   schedule: Record<string, unknown>;
@@ -13,6 +14,7 @@ interface ScheduleState {
   markets: Record<string, unknown>;
   override_options: { value: string; label: string }[];
   channels: string[];
+  channel_loss_cap?: ChannelLossCapState | null;
 }
 
 interface TemplatesState {
@@ -123,6 +125,12 @@ export function useTradingController() {
     await schedule.refresh();
   }, [schedule]);
 
+  const setChannelLossCaps = useCallback(
+    async (defaultCap: number, overrides: Record<string, number>) => {
+      await api.put("/api/channel-loss-cap", { default_cap: defaultCap, overrides });
+      await schedule.refresh();
+    }, [schedule]);
+
   // ── EA templates ──────────────────────────────────────────────────────────
 
   const saveTemplate = useCallback(
@@ -173,7 +181,7 @@ export function useTradingController() {
       trades, halt, signals, disabledReason, refreshAll,
       schedule: schedule.data,
       setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
-      setMarket, setClockOffset,
+      setMarket, setClockOffset, setChannelLossCaps,
       templates: asArray<Record<string, unknown>>(templates.data?.templates),
       eaConnected: asObject(templates.data)["ea_connected"] === true,
       eaLastSeen: typeof templates.data?.ea_last_seen_secs === "number"
@@ -184,7 +192,7 @@ export function useTradingController() {
     }),
     [trades, halt, signals, disabledReason, refreshAll, schedule.data,
      setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
-     setMarket, setClockOffset,
+     setMarket, setClockOffset, setChannelLossCaps,
      templates.data, saveTemplate, deleteTemplate, renameTemplate,
      installBuiltin, refreshTemplates],
   );

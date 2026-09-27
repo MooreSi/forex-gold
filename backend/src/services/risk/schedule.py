@@ -88,6 +88,7 @@ from typing import Optional
 from backend.src.db.database import db, _schedule_coro
 from backend.src.db import database as db_module
 from backend.src.services.risk import repo as risk_repo
+from backend.src.services.risk import channel_loss_cap as _channel_cap
 
 log = logging.getLogger(__name__)
 
@@ -411,6 +412,7 @@ def trading_schedule_snapshot() -> dict:
         "schedule": get_trading_schedule(),
         "daily_target": get_daily_profit_target(),
         "daily_target_resumed_day": db_module.get_app_config(DAILY_TARGET_RESUMED_KEY) or "",
+        **_channel_cap.snapshot_fields(),
     }
 
 
@@ -430,6 +432,7 @@ def apply_trading_schedule_snapshot(snapshot: dict) -> None:
     if "daily_target_resumed_day" in snapshot:
         db_module.set_app_config(
             DAILY_TARGET_RESUMED_KEY, str(snapshot["daily_target_resumed_day"] or ""))
+    _channel_cap.apply_snapshot_fields(snapshot)
 
 
 def _forward_trading_schedule_over_sync() -> None:
@@ -620,10 +623,17 @@ def check_trading_schedule(
     ea_bridge.py x2, core_instant_entry.py) each pass their signal's own
     channel name, not the literal "telegram" default below (which only
     exists so a caller that can't determine a channel falls back to that
-    window's telegram_default_enabled rather than erroring)."""
+    window's telegram_default_enabled rather than erroring).
+
+    The per-channel daily loss cap (channel_loss_cap.py) is checked first,
+    ahead of the master switch: it is its own setting, and this is the one
+    function every automated route already calls with the channel's name."""
+    now = now or _clock.now()
+    cap_ok, cap_reason = _channel_cap.check(source, now)
+    if not cap_ok:
+        return False, cap_reason
     if not is_trading_schedule_enabled():
         return True, ""
-    now = now or _clock.now()
 
     # Cumulative daily target (2026-07-27) -- checked ahead of, and
     # independent of, the per-window schedule below: once the day's running

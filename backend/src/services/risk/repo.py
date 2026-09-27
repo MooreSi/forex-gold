@@ -86,3 +86,20 @@ def sum_closed_pnl_opened_between(window_start: float, window_end: float) -> flo
             (window_start, window_end),
         ).fetchone()
     return float(row[0] or 0.0)
+
+
+def closed_pnl_by_source_since(close_time_from: float) -> list[tuple[str, float]]:
+    """(tg_source, net_pnl) for every broker trade CLOSED since a timestamp.
+
+    Keyed on close time: a loss taken today counts today, whenever the trade
+    opened. Rows with no mt5_ticket are simulated and are not money, so they
+    are left out -- the same filter the channel scorecard applies.
+    """
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT COALESCE(tg_source, ''), COALESCE(net_pnl, 0) "
+            "FROM vantage_simulated_trades "
+            "WHERE status='closed' AND mt5_ticket IS NOT NULL AND close_time >= ?",
+            (close_time_from,),
+        ).fetchall()
+    return [(str(r[0]), float(r[1])) for r in rows]

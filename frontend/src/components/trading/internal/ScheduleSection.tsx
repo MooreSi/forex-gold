@@ -5,6 +5,7 @@ import { Tooltip } from "@/components/shared/Tooltip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney } from "@/components/shared/format";
 import { asArray, asObject } from "@/lib/asArray";
+import { ChannelLossCapCard, type ChannelLossCapState } from "./ChannelLossCapCard";
 import { ScheduleWindowRow, type OverrideChoice } from "./ScheduleWindowRow";
 import { TradingClockCard } from "./TradingClockCard";
 import { TradingMarketsCard } from "./TradingMarketsCard";
@@ -18,6 +19,7 @@ interface ScheduleState {
   markets?: Record<string, unknown>;
   override_options?: OverrideChoice[];
   channels?: string[];
+  channel_loss_cap?: ChannelLossCapState | null;
 }
 
 interface ScheduleSectionProps {
@@ -28,6 +30,7 @@ interface ScheduleSectionProps {
   onResumeToday: () => void;
   onSetMarket: (market: string, enabled: boolean) => void;
   onSetClockOffset: (minutes: number | null) => void;
+  onSetChannelLossCaps?: (defaultCap: number, overrides: Record<string, number>) => void;
 }
 
 // The service's own day keys. The grid is stored under these names and a
@@ -54,7 +57,7 @@ function blocks(schedule: Record<string, unknown>, day: string): Record<string, 
  */
 export function ScheduleSection({
   state, onSetEnabled, onSetSchedule, onSetTarget, onResumeToday,
-  onSetMarket, onSetClockOffset,
+  onSetMarket, onSetClockOffset, onSetChannelLossCaps,
 }: ScheduleSectionProps) {
   const setBlock = useCallback(
     (day: string, index: number, patch: Record<string, unknown>) => {
@@ -94,6 +97,9 @@ export function ScheduleSection({
     <div className="space-y-4">
       <TradingClockCard clock={state.clock} onSetOffset={onSetClockOffset} />
       <TradingMarketsCard markets={state.markets ?? {}} onSetMarket={onSetMarket} />
+      {onSetChannelLossCaps && (
+        <ChannelLossCapCard cap={state.channel_loss_cap} onSave={onSetChannelLossCaps} />
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-xs text-ink-2">

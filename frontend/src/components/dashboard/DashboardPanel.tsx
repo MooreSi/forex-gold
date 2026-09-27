@@ -6,6 +6,7 @@ import type { Candle } from "@/api/types";
 import { DASHBOARD_DAYS, useDashboardController } from "./hooks/useDashboardController";
 import { AiInsightsCard } from "./internal/AiInsightsCard";
 import { AutomationCard } from "./internal/AutomationCard";
+import { BrainCard } from "./internal/BrainCard";
 import { EquityCard } from "./internal/EquityCard";
 import { MarketChartCard } from "./internal/MarketChartCard";
 import { MarketIntelligenceCard } from "./internal/MarketIntelligenceCard";
@@ -51,6 +52,8 @@ export function DashboardPanel() {
           header={header}
           daily={asArray<Candle>(c.daily.data)}
         />
+
+        <BrainCard />
 
         <div className="grid gap-3 xl:grid-cols-3">
           <div className="space-y-3 xl:col-span-2">

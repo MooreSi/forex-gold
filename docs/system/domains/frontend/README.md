@@ -555,3 +555,14 @@ with a real `separator` that arrow keys move.
   side that the other does not follow fails on the side that did not move.
   If a third place ever needs this arithmetic, it joins the case file; it does
   not get its own copy of the rule.
+
+## The brain view (2026-09-27, docs/todo/008)
+
+Dashboard > Brain card (full-screen with its button; Esc closes). Read-only:
+`GET /api/brain` every 3 s, no write route and no control, both pinned by
+tests. `components/brain/`: `content/brainLayout.ts` holds the geometry and
+the wording as pure functions; `BrainGraph` animates pulses with
+requestAnimationFrame and honours prefers-reduced-motion. A pulse stops at
+the gate the BACKEND named (`services/brain/gates.classify`); the view never
+guesses one. The tab strip is pinned at 11 tabs by `AppShell.test.tsx`, which
+is why this is a card rather than a tab.

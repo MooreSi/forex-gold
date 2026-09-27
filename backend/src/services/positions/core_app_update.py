@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -683,6 +684,19 @@ async def link_checkout() -> dict:
     return {"linked": True, "sha": match, "reason": "linked"}
 
 
+_SWEEP_SKIP = {".git", ".venv", "venv", "node_modules", ".claude"}
+
+
+def _clear_pycache() -> None:
+    """The repo's own bytecode caches, not .venv's: a pull never stales those,
+    and a dir vanished under the walk there (test_app_update_pycache_sweep)."""
+    for root, dirs, _files in os.walk(_REPO_ROOT, onerror=lambda _e: None):
+        dirs[:] = [d for d in dirs if d not in _SWEEP_SKIP]
+        if "__pycache__" in dirs:
+            dirs.remove("__pycache__")
+            shutil.rmtree(Path(root) / "__pycache__", ignore_errors=True)
+
+
 async def apply_update(restart: bool = True) -> dict:
     """Bootstrap a git checkout if this install doesn't have one yet, then
     fetch + force-checkout to origin/<branch>, reinstall requirements.txt
@@ -757,10 +771,6 @@ async def apply_update(restart: bool = True) -> dict:
             timeout=180, check=False,
         )
 
-    def _clear_pycache() -> None:
-        for p in _REPO_ROOT.rglob("__pycache__"):
-            shutil.rmtree(p, ignore_errors=True)
-
     def _deploy_ea() -> None:
         """Push the EA the pull just brought into every MetaTrader terminal on
         this machine, so a remote user gets a new EA without touching
@@ -773,21 +783,17 @@ async def apply_update(restart: bool = True) -> dict:
         from backend.src.services.broker import ea_deploy
         ea_deploy.deploy_after_update()
 
-    try:
-        await asyncio.to_thread(_pip_install)
-        await asyncio.to_thread(_clear_pycache)
-        await asyncio.to_thread(_deploy_ea)
-    except Exception as e:
-        log.warning("[Update] pip install / cache clear step failed: %s", e)
-        # The pull already succeeded -- surface this as a soft warning, not
-        # a hard failure, since a stale dependency/cache issue is
-        # recoverable (Save & Restart again) whereas re-pulling isn't safe
-        # to retry blindly. Restarting below is that "Save & Restart" --
-        # automatic now instead of waiting on the caller to notice and click it.
-        if restart:
-            _restart()
-        return {"ok": True, "error": f"update pulled, but post-update step failed: {e}"}
-
+    # Each step on its own: a sweep failure once skipped the EA deploy (VPS,
+    # 2026-09-26). The pull already succeeded, so this is a soft warning: the
+    # restart below recovers a stale cache; re-pulling isn't safe to retry.
+    failed = []
+    for step in (_pip_install, _clear_pycache, _deploy_ea):
+        try:
+            await asyncio.to_thread(step)
+        except Exception as e:
+            log.warning("[Update] post-update step %s failed: %s", step.__name__, e)
+            failed.append(f"{step.__name__}: {e}")
     if restart:
         _restart()
-    return {"ok": True, "error": None}
+    return {"ok": True, "error": ("update pulled, but post-update step failed: "
+                                  + "; ".join(failed)) if failed else None}

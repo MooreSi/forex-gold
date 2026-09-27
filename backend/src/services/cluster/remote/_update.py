@@ -177,6 +177,8 @@ def _do_restart() -> None:
 
 # ── Update application ────────────────────────────────────────────────────────
 
+_applying = False   # an update is between fetch and restart
+
 async def _apply_git_update() -> None:
     """Handle MSG_GIT_UPDATE: run core_app_update.apply_update() (git fetch +
     force-checkout + pip install + pycache clear) and restart on success.
@@ -192,11 +194,22 @@ async def _apply_git_update() -> None:
     """
     from backend.src.services.positions import core_app_update
 
+    global _applying
+    # One at a time. Two MSG_GIT_UPDATEs 3 s apart (2026-09-26) ran two
+    # checkouts and pycache sweeps over the same tree at once.
+    # tests/remote/test_update_runs_once_at_a_time.py
+    if _applying:
+        log.info("[RemoteClient] Git update already in progress — ignoring repeat")
+        return
+    _applying = True
     log.info("[RemoteClient] Git update triggered by admin — applying")
-    # restart=False: this path runs its own restart sequence below (Windows
-    # icon refresh, then a hard process exit with the bat-loop's relaunch
-    # code) and must not be pre-empted by apply_update()'s own restart.
-    result = await core_app_update.apply_update(restart=False)
+    try:
+        # restart=False: this path runs its own restart sequence below (Windows
+        # icon refresh, then a hard process exit with the bat-loop's relaunch
+        # code) and must not be pre-empted by apply_update()'s own restart.
+        result = await core_app_update.apply_update(restart=False)
+    finally:
+        _applying = False
     if not result.get("ok"):
         log.error("[RemoteClient] Git update failed: %s", result.get("error"))
         return

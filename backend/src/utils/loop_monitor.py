@@ -159,23 +159,18 @@ async def _watchdog() -> None:
 
 def start() -> None:
     global _task
-    loop = asyncio.get_running_loop()
-    # _task_names() below only ever lists every task that currently exists
-    # on the loop — which is nearly identical on every single stall (the
-    # same ~40 background loops are always "pending") and never actually
-    # identifies which one is the blocking culprit. asyncio's own debug
-    # mode does that precisely: with slow_callback_duration set, it logs
-    # "Executing <Task ... coro=<X() running at file.py:LINE>> took Yms"
-    # via the stdlib 'asyncio' logger (which already flows into this app's
-    # log file), naming the actual offending coroutine and its exact
-    # suspend point instead of a static task-name dump.
-    loop.set_debug(True)
-    loop.slow_callback_duration = _WARN_THRESHOLD_S
+    # No loop.set_debug(True). It was here to make asyncio name the slow task,
+    # and it became the stall: debug mode stats a source file for every
+    # Handle and Task it creates, each stat gives up the GIL, and with a
+    # CPU-bound worker thread running the loop waits for it back every time.
+    # The nightly 22:00 stall (up to 4.4 s, 2026-09-26) was the loop stuck in
+    # linecache.checkcache while the Reversal Engine study swept on a thread.
+    # The sampler below names the blocking line without it.
+    # tests/utils/test_loop_monitor_leaves_debug_mode_off.py
     if _task is None or _task.done():
         _task = asyncio.create_task(_watchdog())
         _start_sampler()
-        log.info("[LoopMonitor] stall watchdog started (threshold=%dms, "
-                 "asyncio debug mode enabled for slow-callback attribution)",
+        log.info("[LoopMonitor] stall watchdog started (threshold=%dms)",
                   int(_WARN_THRESHOLD_S * 1000))
 
 

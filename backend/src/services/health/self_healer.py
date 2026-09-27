@@ -134,14 +134,16 @@ def _read_recent_log_lines(window_seconds: int) -> list[tuple[float, str]]:
 
 async def _send_heal_notification(condition: str, action: str) -> None:
     """Send Telegram alert + email to inform the user of a self-heal action."""
-    msg = (
-        f"Self-heal: {condition} detected.\n"
-        f"Action taken: {action}\n"
-        f"Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}"
-    )
-
     try:
         from backend.src.services.telegram import alerts as telegram_alerts
+        # Escaped: 'bridge_offline' opened a Markdown italic that never closed
+        # and Telegram 400'd it (tests/core/test_self_heal_alert_markup.py).
+        esc = telegram_alerts._md_esc
+        msg = (
+            f"Self-heal: {esc(condition)} detected.\n"
+            f"Action taken: {esc(action)}\n"
+            f"Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}"
+        )
         await telegram_alerts.send_message(msg)
     except Exception as e:
         _log.warning("[SelfHealer] Telegram notification failed: %s", e)

@@ -320,16 +320,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
         elif t == MSG_CHANNEL_STRATEGY_STATE:
             self.remote_channel_strategy = msg.get("channel_strategy", {})
             self._mirror_channel_strategy_locally(self.remote_channel_strategy)
-            changed = False
-            for source in list(self._pending_channel_strategy.keys()):
-                confirmed = self.remote_channel_strategy.get(source) or {}
-                pending = self._pending_channel_strategy.get(source) or {}
-                if (confirmed.get("strategy") == pending.get("strategy")
-                        and bool(confirmed.get("auto")) == bool(pending.get("auto"))):
-                    self._pending_channel_strategy.pop(source, None)
-                    changed = True
-            if changed:
-                self._persist_pending_channel_strategy()
+            self._settle_pending_channel_strategy(self.remote_channel_strategy)
         elif t == MSG_TRADING_SCHEDULE_STATE:
             self.remote_trading_schedule = msg.get("trading_schedule", {})
             self._mirror_trading_schedule_locally(self.remote_trading_schedule)

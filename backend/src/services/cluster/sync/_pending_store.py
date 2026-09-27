@@ -67,6 +67,29 @@ class PendingStoreMixin:
         except Exception as e:
             log.debug("[SyncClient] failed to persist pending channel strategy: %s", e)
 
+    def _settle_pending_channel_strategy(self, snapshot: dict) -> None:
+        """Clear what the VPS's snapshot confirms: both fields match. Also let
+        go of a channel the snapshot does not list at all -- the VPS builds it
+        from its own configured channels, so that entry could never be echoed
+        and was re-sent on every reconnect (2026-09-26: 'Gold Diggers 2.0',
+        a pre-rename name, and 'Gold Diggers Scalping', which the VPS has no
+        slot for). tests/core/test_pending_channel_strategy_the_vps_does_not_have.py"""
+        changed = False
+        for source in list(self._pending_channel_strategy.keys()):
+            pending = self._pending_channel_strategy.get(source) or {}
+            if source not in snapshot:
+                log.info("[SyncClient] VPS has no channel %r -- dropping its queued "
+                         "strategy change %s", source, pending)
+            else:
+                confirmed = snapshot.get(source) or {}
+                if (confirmed.get("strategy") != pending.get("strategy")
+                        or bool(confirmed.get("auto")) != bool(pending.get("auto"))):
+                    continue
+            self._pending_channel_strategy.pop(source, None)
+            changed = True
+        if changed:
+            self._persist_pending_channel_strategy()
+
     @staticmethod
     def _load_pending_trading_schedule() -> Optional[dict]:
         try:

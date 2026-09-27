@@ -304,24 +304,38 @@ async def _signal_engine_watchdog_loop() -> None:
     restart it. Runs every 5 minutes independently of each engine's own watchdog."""
     while True:
         await asyncio.sleep(300)
-        try:
-            from backend.src.services.breakout_signal import breakout_signal_repo as _bodb_wd
-            if _bodb_wd.get_config("bo_engine_enabled", "1") != "0":
-                bo = _breakout_engine_module.get_instance()
-                if bo and not bo.is_running:
-                    log.warning("[AppWatchdog] Breakout engine not running — auto-restarting")
-                    bo.start()
-        except Exception as _e:
-            log.debug("[AppWatchdog] Breakout health check error: %s", _e)
-        try:
-            from backend.src.services.reversal_engine import reversal_engine_repo as _re_repo_wd
-            if _re_repo_wd.get_config("re_user_stopped", "0") != "1":
-                re_eng = _re_engine_module.get_instance()
-                if re_eng and not re_eng.is_running:
-                    log.warning("[AppWatchdog] Reversal Engine not running — auto-restarting")
-                    re_eng.start()
-        except Exception as _e:
-            log.debug("[AppWatchdog] Reversal Engine health check error: %s", _e)
+        _signal_engine_watchdog_pass()
+
+
+def _signal_engine_watchdog_pass() -> None:
+    """One check. An engine the other node stood down (sync STAND_DOWN) is
+    down on purpose and is left alone until RESUME restarts it --
+    tests/runtime/test_app_watchdog_respects_stand_down.py."""
+    try:
+        stood_down = set(db_module.get_stood_down_engines())
+    except Exception as _e:
+        log.debug("[AppWatchdog] stood-down lookup failed: %s", _e)
+        stood_down = set()
+    try:
+        from backend.src.services.breakout_signal import breakout_signal_repo as _bodb_wd
+        if ("breakout" not in stood_down
+                and _bodb_wd.get_config("bo_engine_enabled", "1") != "0"):
+            bo = _breakout_engine_module.get_instance()
+            if bo and not bo.is_running:
+                log.warning("[AppWatchdog] Breakout engine not running — auto-restarting")
+                bo.start()
+    except Exception as _e:
+        log.debug("[AppWatchdog] Breakout health check error: %s", _e)
+    try:
+        from backend.src.services.reversal_engine import reversal_engine_repo as _re_repo_wd
+        if ("reversal_engine" not in stood_down
+                and _re_repo_wd.get_config("re_user_stopped", "0") != "1"):
+            re_eng = _re_engine_module.get_instance()
+            if re_eng and not re_eng.is_running:
+                log.warning("[AppWatchdog] Reversal Engine not running — auto-restarting")
+                re_eng.start()
+    except Exception as _e:
+        log.debug("[AppWatchdog] Reversal Engine health check error: %s", _e)
 
 
 def _remote_client_enabled(config) -> bool:

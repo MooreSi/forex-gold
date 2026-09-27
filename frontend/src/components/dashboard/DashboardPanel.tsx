@@ -8,6 +8,7 @@ import { AiInsightsCard } from "./internal/AiInsightsCard";
 import { AutomationCard } from "./internal/AutomationCard";
 import { BrainCard } from "./internal/BrainCard";
 import { EquityCard } from "./internal/EquityCard";
+import { FillCostCard } from "./internal/FillCostCard";
 import { MarketChartCard } from "./internal/MarketChartCard";
 import { MarketIntelligenceCard } from "./internal/MarketIntelligenceCard";
 import { OpenPositionsCard } from "./internal/OpenPositionsCard";
@@ -81,6 +82,7 @@ export function DashboardPanel() {
             <OpenPositionsCard trades={c.positions} />
             <SignalFeedCard signals={c.signals} />
             <RiskExecutionCard risk={c.risk.data ?? {}} header={header} />
+            <FillCostCard />
             <AiInsightsCard
               setforget={c.setforget.data}
               analysis={research.analysis}

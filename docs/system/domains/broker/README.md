@@ -483,3 +483,13 @@ needed. Used by Settings > Latency; see the platform domain file. The MT5 log
 parser behind `tools/order_latency_report` moved to
 `services/diagnostics/broker_exec_log.py` so the dashboard reads the same
 numbers.
+
+## The Dashboard's Fill cost card (2026-09-27)
+
+`broker/fill_cost_report.py` summarises `execution_quality` over 14 days for
+the Dashboard (`GET /api/fills/cost`): median / p75 / p90 round trip, median
+slippage and the share that went against us, median spread, cost as a share
+of the stop, and the six most-used strategies. Unmeasured fills are counted
+in `unmeasured`, never averaged in as free; an empty window is None, never 0.
+On the demo install at the time: 668 fills, median round trip 0.93 pts, p90
+2.23, 66% of fills slipped against us, spread 0.22.

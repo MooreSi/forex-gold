@@ -53,6 +53,7 @@ from backend.src.api.routers import schedule as schedule_router
 from backend.src.api.routers import channel_loss_cap as channel_loss_cap_router
 from backend.src.api.routers import tuning as tuning_router
 from backend.src.api.routers import brain as brain_router
+from backend.src.api.routers import fill_cost as fill_cost_router
 from backend.src.api.routers import setforget as setforget_router
 from backend.src.api.routers import setforget_auto as setforget_auto_router
 from backend.src.api.routers import settings as settings_router
@@ -95,6 +96,7 @@ ROUTERS = (
     channel_loss_cap_router.router,
     tuning_router.router,
     brain_router.router,
+    fill_cost_router.router,
     settings_router.router,
     log_bundle_router.router,
     latency_router.router,

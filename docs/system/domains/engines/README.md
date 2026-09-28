@@ -458,3 +458,20 @@ param. Pinned by `tests/breakout_signal/test_batch_review_uses_the_ledger.py`.
   and 30 signals is a noisy sample. Stated on the card.
 - UI: Signal Generator > Breakout, "Tuning experiments" card;
   `/api/engines/breakout/tuning`.
+
+## GEX snapshots are collected, not used (2026-09-27, docs/todo/009)
+
+`market/gex_collector.py` stores the GLD option chain once a weekday from
+22:00 London (research loop timer) into `gex_snapshots` / `gex_strikes` in
+reversal_engine.db, with GEX, flip, walls and their XAUUSD equivalents (gold
+spot from the Reversal engine's bridge). **Nothing that trades reads it**
+(the Dashboard's GEX card shows the latest snapshot through
+`market/gex_report.py` and GET `/api/gex/latest`, display only; a snapshot
+over 4 days old is flagged stale, weekday collection allowing a weekend
+gap). It exists
+to build the history yfinance cannot give. The sign convention (dealers long
+calls, short puts) is recorded on every row, and the raw per-strike chain is
+kept so it can be recomputed. Include every expiry within 60 days: capping at
+the first 8 (all dailies) flipped the sign of total GEX on the first live
+fetch. No node-role check of its own (the loop's one `is_remote_node` call is
+pinned); it runs only where the engine has a bridge.

@@ -41,6 +41,9 @@ from backend.src.services.breakout_signal.excursion_sweep import (
 from backend.src.services.reversal_engine.meta_label_schedule import (
     meta_label_refit_sweep as _meta_label_refit_sweep_impl,
 )
+from backend.src.services.market.gex_collector import (
+    gex_snapshot_sweep as _gex_snapshot_sweep_impl,
+)
 from backend.src.services.reversal_engine.xasset_sweep import (
     xasset_sweep as _xasset_sweep_impl,
 )
@@ -132,4 +135,12 @@ async def reversal_engine_research_loop(engine: Any, is_running: Callable[[], bo
             break
         except Exception as e:
             log.warning("_edge_model_refit_sweep error: %s", e)
+        # The GLD option chain, once a weekday after the US close: a GEX
+        # history to measure before anything acts on it. docs/todo/009.
+        try:
+            await _gex_snapshot_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_gex_snapshot_sweep error: %s", e)
         await asyncio.sleep(60)

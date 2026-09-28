@@ -37,6 +37,17 @@ export function formatSignedMoney(value: number | null | undefined, currency = "
   return `${sign}${currency}${grouped(value)}`;
 }
 
+/** A large dollar figure, compact and signed: -$1.50B, $820.00M, $4.20K. */
+export function formatCompactMoney(value: number | null | undefined, currency = "$"): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const sign = value < 0 ? "-" : "";
+  const a = Math.abs(value);
+  for (const [div, unit] of [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]] as const) {
+    if (a >= div) return `${sign}${currency}${(a / div).toFixed(2)}${unit}`;
+  }
+  return `${sign}${currency}${a.toFixed(2)}`;
+}
+
 export function formatPrice(value: number | null | undefined, dp = 2): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return value.toFixed(dp);

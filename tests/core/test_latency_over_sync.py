@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -101,7 +102,10 @@ def _mac(answer):
 class TestTheMacSide:
     async def test_the_round_trip_and_the_report_come_back(self):
         async def _new_vps(client, ping):
-            await asyncio.sleep(0.01)
+            # time.sleep, not asyncio.sleep: on 3.11 Windows asyncio's timer runs
+            # on a ~15.6 ms clock and can fire a 10 ms sleep at once (as in
+            # tests/broker/test_ea_link_probe.py), so the lower bound would fail.
+            time.sleep(0.01)
             await client._dispatch({"type": P.MSG_PONG, "probe_id": ping["probe_id"]})
             await client._dispatch({"type": P.MSG_PONG, "probe_id": ping["probe_id"],
                                     "latency": {"probes": {}}})

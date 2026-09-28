@@ -68,3 +68,69 @@ def test_an_ea_round_trip_is_measured_below_the_tick(coarse_monotonic):
 
     assert out["ok"] is True
     assert out["ms"] >= 5.0
+
+
+# The same defect in three more Settings > Latency timings (CI, 2026-09-27:
+# test_the_round_trip_and_the_report_come_back and
+# test_it_times_one_light_request both read 0.0 on Windows).
+
+def test_the_vps_round_trip_is_measured_below_the_tick(coarse_monotonic):
+    import json
+
+    from backend.src.services.cluster.sync import client as sc
+    from backend.src.services.cluster.sync import protocol as P
+
+    c = sc.SyncClient()
+    c.conn_state = sc.CONN_CONNECTED
+
+    class _Vps:
+        async def send(self, raw):
+            ping = json.loads(raw)
+
+            async def _answer():
+                time.sleep(0.01)    # not asyncio.sleep: its timer runs on the frozen clock
+                await c._dispatch({"type": P.MSG_PONG, "probe_id": ping["probe_id"]})
+                await c._dispatch({"type": P.MSG_PONG, "probe_id": ping["probe_id"],
+                                   "latency": {"probes": {}}})
+            asyncio.get_running_loop().create_task(_answer())
+
+    c._ws = _Vps()
+
+    out = asyncio.run(c.probe_peer(timeout=1.0))
+
+    assert out["ok"] is True
+    assert out["rtt_ms"] >= 5.0
+
+
+def test_the_telegram_round_trip_is_measured_below_the_tick(coarse_monotonic, tmp_path):
+    from backend.src.services.telegram.reader import AUTH_CONNECTED, TelegramReader
+
+    class _Nearest:
+        this_dc = 4
+        nearest_dc = 2
+
+    async def _client(request):
+        time.sleep(0.01)
+        return _Nearest()
+
+    r = TelegramReader({"sessions_dir": str(tmp_path)})
+    r._client = _client
+    r._auth_state = AUTH_CONNECTED
+
+    out = asyncio.run(r.api_round_trip())
+
+    assert out["ok"] is True
+    assert out["ms"] >= 5.0
+
+
+def test_a_diagnostics_probe_is_measured_below_the_tick(coarse_monotonic):
+    from backend.src.services.diagnostics import latency as dl
+
+    async def _db():
+        time.sleep(0.01)
+        return True
+
+    out = asyncio.run(dl._timed("db", _db, lambda v: (True, "")))
+
+    assert out["ok"] is True
+    assert out["ms"] >= 5.0

@@ -78,7 +78,7 @@ class ClientLatencyMixin:
         echoed, reported = loop.create_future(), loop.create_future()
         waiters = self.__dict__.setdefault("_latency_probes", {})
         waiters[pid] = (echoed, reported)
-        t0 = time.monotonic()
+        t0 = time.perf_counter()
         try:
             # No clock_offset_min: the server reads its absence as "not
             # reported", so a probe cannot move the VPS's trading clock.
@@ -108,4 +108,4 @@ class ClientLatencyMixin:
             if not reported.done():
                 reported.set_result(msg["latency"])
         elif not echoed.done():
-            echoed.set_result(time.monotonic())
+            echoed.set_result(time.perf_counter())

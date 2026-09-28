@@ -153,12 +153,12 @@ def _result(name: str, ok: bool, ms: Optional[float], detail: str = "", **extra)
 
 
 async def _timed(name: str, coro_fn, judge) -> dict:
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     try:
         value = await coro_fn()
     except Exception as e:
         return _result(name, False, None, f"{type(e).__name__}: {e}")
-    ms = (time.monotonic() - t0) * 1000.0
+    ms = (time.perf_counter() - t0) * 1000.0
     ok, detail = judge(value)
     return _result(name, ok, ms, detail)
 

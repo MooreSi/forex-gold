@@ -6,7 +6,7 @@ centre Telegram delivers our updates from.
 """
 from __future__ import annotations
 
-import asyncio
+import time
 
 import pytest
 
@@ -28,7 +28,9 @@ class _FakeClient:
 
     async def __call__(self, request):
         self.requests.append(type(request).__name__)
-        await asyncio.sleep(self.delay)
+        # time.sleep, not asyncio.sleep: on 3.11 Windows asyncio's timer runs
+        # on a ~15.6 ms clock and can fire a 10 ms sleep at once.
+        time.sleep(self.delay)
         if self.fail:
             raise self.fail
         return _Nearest()

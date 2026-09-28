@@ -355,7 +355,7 @@ class TestAgainstRealGit:
     def test_a_build_cache_the_installer_copied_does_not_stop_it_linking(
         self, origin, tmp_path, monkeypatch, git_exists,
     ):
-        """The v6.11 VPS install, 2026-09-25: still "Not linked". The .exe is
+        """The v0.611 VPS install, 2026-09-25: still "Not linked". The .exe is
         built from a developer's working tree, and the installer copied
         `frontend/tsconfig.tsbuildinfo` -- a TypeScript build cache git
         ignores, so no commit has it, so no commit matched. A Finder

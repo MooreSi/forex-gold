@@ -1,7 +1,7 @@
-## v6.11 — Windows install and VPS setup (2026-09-25)
+## v0.611 — Windows install and VPS setup (2026-09-25)
 
 The About screen carries the user-facing summary; this is the engineering
-record. Found installing v6.1 on a fresh Windows VPS.
+record. Found installing v0.61 on a fresh Windows VPS.
 
 **Installer**
 - Installs the Visual C++ Redistributable (x64) before the pip install:
@@ -24,7 +24,7 @@ record. Found installing v6.1 on a fresh Windows VPS.
   VPS" reverses it. On the VPS: addresses, NAT warning, firewall status, and
   what secures the link. `services/cluster/sync/reachability.py`.
 
-## v6.1 — Stall fixes and a quieter log (2026-09-25)
+## v0.61 — Stall fixes and a quieter log (2026-09-25)
 
 The About screen carries the user-facing summary; this is the engineering
 record. 4 commits since v0.6.

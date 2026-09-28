@@ -7,7 +7,7 @@
 
 RELEASES: list[tuple] = [
     (
-        "v6.11",
+        "v0.611",
         "Windows install and VPS setup",
         "blue",
         "",
@@ -32,7 +32,7 @@ RELEASES: list[tuple] = [
         ],
     ),
     (
-        "v6.1",
+        "v0.61",
         "Stall fixes and a quieter log",
         "blue",
         "",

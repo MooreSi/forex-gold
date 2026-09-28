@@ -10,7 +10,7 @@ launcher looks for it, checks out `main` from the repo the in-app updater
 pulls from, and runs "Setup & Start FOREX.bat", which installs Python,
 requirements.txt and starts the app. An app change never needs a new .exe,
 and every install is a git checkout from the start, so it never has to be
-matched to a commit (the thing that kept v6.11 "Not linked").
+matched to a commit (the thing that kept v0.611 "Not linked").
 
 Inno Setup is Windows-only and cannot run here; these read the script.
 """

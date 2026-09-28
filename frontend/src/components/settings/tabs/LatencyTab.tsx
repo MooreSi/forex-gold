@@ -1,15 +1,16 @@
-import { Button } from "@/components/shared/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LatencyCheckerSection } from "../internal/LatencyCheckerSection";
+import { LatencyOverview } from "../internal/LatencyOverview";
 import { useLatencyController } from "../hooks/useLatencyController";
 
 /**
  * Where the time goes between a signal and an MT5 fill (docs/todo/006).
  *
- * Two checkers, as asked for: a Telegram signal through parsing and the
- * EA/bridge to MT5, and the signal generator (the engines) to MT5. Each lists
- * its hops as measured on real signals since the app started, then the live
- * checks along its path, then -- when paired -- the VPS.
+ * The overview answers first; then two checkers, as asked for: a Telegram
+ * signal through parsing and the EA/bridge to MT5, and the signal generator
+ * (the engines) to MT5. Each draws its route, then its hops as measured on
+ * real signals since the app started, then the live checks along its path,
+ * then -- when paired -- the VPS.
  */
 export function LatencyTab() {
   const c = useLatencyController();
@@ -24,22 +25,15 @@ export function LatencyTab() {
   const vps = c.result?.vps;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button disabledReason={c.running ? "A check is already running." : null}
-          onClick={() => void c.runCheck()}>
-          {c.running ? "Checking…" : "Run check"}
-        </Button>
-        <span className="text-[11px] text-ink-3">
-          Times each connection now. Read-only: it places, changes and closes nothing.
-          Amber is slower than expected; red did not answer.
-        </span>
-        {c.error && <span className="text-[11px] text-loss">{c.error}</span>}
-      </div>
+    <div className="space-y-4">
+      <LatencyOverview pipelines={c.pipelines} result={c.result} paired={c.paired}
+        running={c.running} error={c.error} onRun={() => void c.runCheck()} />
 
       <LatencyCheckerSection
         id="telegram"
-        title="1. Telegram signal → parsing → EA/bridge → MT5"
+        index={1}
+        title="Telegram signal → parsing → EA/bridge → MT5"
+        path={["Telegram", "Parsing", "EA / bridge", "MT5"]}
         intro="From the channel's post to the order being confirmed."
         view={c.pipelines?.telegram}
         probes={probes}
@@ -52,8 +46,10 @@ export function LatencyTab() {
 
       <LatencyCheckerSection
         id="engine"
-        title="2. Signal generator → EA/bridge → MT5"
-        intro="Breakout and Reversal Engine signals, from the engine's decision to the order being confirmed."
+        index={2}
+        title="Signal generator → EA/bridge → MT5"
+        path={["Signal generator", "EA / bridge", "MT5"]}
+        intro="Breakout and Reversal Engine signals, from the engine's decision to the confirmed order."
         view={c.pipelines?.engine}
         waits={c.structural}
         probes={probes}

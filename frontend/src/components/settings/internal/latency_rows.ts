@@ -46,6 +46,10 @@ export interface Row {
   n: number | null;
   state: RowState;
   note: string;
+  /** "probe" is one reading taken now; "stats" is a spread over many signals. */
+  kind: "probe" | "stats";
+  /** Where the backend starts calling this slow, when it says. */
+  amber: number | null;
 }
 
 /** "—" for nothing, never "0 ms": an unmeasured hop is not a fast one. */
@@ -69,6 +73,8 @@ export function hopRows(view: PipelineView | undefined, prefix = ""): Row[] {
       n: measured ? h.stats.n ?? null : null,
       state: !measured ? "none" : h.slow ? "slow" : "ok",
       note: measured ? "" : "no signal has crossed this hop since the app started",
+      kind: "stats",
+      amber: h.amber_ms,
     };
   });
 }
@@ -95,6 +101,8 @@ export function probeRows(probes: Record<string, Probe> | undefined, keys: strin
       p50: p.ms, p90: null, max: null, n: null,
       state: !p.ok ? "fail" : p.ms != null && p.ms > p.amber_ms ? "slow" : "ok",
       note: p.ok ? dc : p.detail,
+      kind: "probe",
+      amber: p.amber_ms,
     };
   });
 }
@@ -106,6 +114,7 @@ export function brokerRows(broker: Broker | undefined, prefix = ""): Row[] {
       key: `${prefix}broker-none`, label: `${prefix}Broker execution (MT5 logs)`,
       detail: "", p50: null, p90: null, max: null, n: null, state: "none",
       note: "no MetaTrader terminal logs found on this machine",
+      kind: "stats", amber: null,
     }];
   }
   return Object.entries(broker.servers).map(([server, s]) => ({
@@ -115,6 +124,7 @@ export function brokerRows(broker: Broker | undefined, prefix = ""): Row[] {
     p50: s.median_ms, p90: s.p90_ms, max: s.max_ms, n: s.n,
     state: s.slow ? "slow" : "ok",
     note: s.over_5s ? `${s.over_5s} took over 5 s` : "",
+    kind: "stats", amber: null,
   }));
 }
 
@@ -125,5 +135,7 @@ export function vpsLinkRow(vps: VpsReport): Row {
     p50: vps.rtt_ms, p90: null, max: null, n: null,
     state: vps.rtt_ms == null ? "fail" : vps.rtt_ms > vps.amber_ms ? "slow" : "ok",
     note: vps.detail,
+    kind: "probe",
+    amber: vps.amber_ms,
   };
 }

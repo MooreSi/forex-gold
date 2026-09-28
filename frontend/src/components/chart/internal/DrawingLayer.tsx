@@ -109,7 +109,10 @@ export function DrawingLayer({ chart, series, isDisposed, times, tfSeconds, d }:
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement
         && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
-      if (typing) return;
+      // A dialog over the chart (an order from a selected position) owns
+      // its keys: Delete there must not delete the drawing behind it.
+      const inDialog = e.target instanceof HTMLElement && e.target.closest('[role="dialog"]');
+      if (typing || inDialog) return;
       if (e.key === "Escape") {
         cancel();
         d.setSelectedId(null);

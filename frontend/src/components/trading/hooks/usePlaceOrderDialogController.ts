@@ -5,6 +5,18 @@ import type { MarketOrderRequest } from "@/api/types";
 export type Direction = "BUY" | "SELL";
 type Step = "form" | "confirm" | "sending";
 
+/** What a position drawn on the chart fills in (2026-09-28). Lots are not in
+ *  it: they stay blank, so the risk settings size the order as they would a
+ *  typed one. */
+export interface MarketOrderPrefill {
+  direction: Direction;
+  stopLoss: number;
+  takeProfit: number;
+}
+
+/** A price as the form shows it: two places, no trailing zeros. */
+export const priceField = (n: number) => String(Math.round(n * 100) / 100);
+
 /**
  * The state behind the manual market order.
  *
@@ -18,12 +30,14 @@ type Step = "form" | "confirm" | "sending";
  *   through DPM. Substituting a number here would quietly take that decision
  *   away from the risk engine.
  */
-export function usePlaceOrderDialogController(onPlaced: () => void) {
+export function usePlaceOrderDialogController(
+  onPlaced: () => void, initial?: MarketOrderPrefill | null,
+) {
   const [step, setStep] = useState<Step>("form");
-  const [direction, setDirection] = useState<Direction>("BUY");
+  const [direction, setDirection] = useState<Direction>(initial?.direction ?? "BUY");
   const [lots, setLots] = useState("");
-  const [stopLoss, setStopLoss] = useState("");
-  const [takeProfit, setTakeProfit] = useState("");
+  const [stopLoss, setStopLoss] = useState(initial ? priceField(initial.stopLoss) : "");
+  const [takeProfit, setTakeProfit] = useState(initial ? priceField(initial.takeProfit) : "");
   const [refusal, setRefusal] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -83,7 +97,10 @@ export function usePlaceOrderDialogController(onPlaced: () => void) {
     const stop = request.stop_loss == null
       ? "a stop loss calculated by DPM"
       : `a stop loss at ${request.stop_loss.toFixed(2)}`;
-    return `${direction} XAUUSD, ${size}, with ${stop}.`;
+    const target = request.take_profit == null
+      ? ""
+      : ` and a take profit at ${request.take_profit.toFixed(2)}`;
+    return `${direction} XAUUSD, ${size}, with ${stop}${target}.`;
   }, [direction, request]);
 
   return {

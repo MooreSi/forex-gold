@@ -1,7 +1,9 @@
 import { TriangleAlert } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
-import { usePlaceLimitOrderController } from "./hooks/usePlaceLimitOrderController";
+import {
+  usePlaceLimitOrderController, type LimitOrderPrefill,
+} from "./hooks/usePlaceLimitOrderController";
 import { LimitOrderForm } from "./internal/LimitOrderForm";
 import type { LivePrice } from "./internal/limitPlaceholders";
 
@@ -12,6 +14,8 @@ interface PlaceLimitOrderDialogProps {
   disabledReason: string | null;
   /** The live price, for the form's example prices. Hints only. */
   price?: LivePrice | null;
+  /** Filled in from a position drawn on the chart; read when mounted. */
+  prefill?: LimitOrderPrefill | null;
 }
 
 /**
@@ -20,9 +24,9 @@ interface PlaceLimitOrderDialogProps {
  * on the confirmation.
  */
 export function PlaceLimitOrderDialog({
-  open, onOpenChange, onPlaced, disabledReason, price,
+  open, onOpenChange, onPlaced, disabledReason, price, prefill,
 }: PlaceLimitOrderDialogProps) {
-  const c = usePlaceLimitOrderController(onPlaced);
+  const c = usePlaceLimitOrderController(onPlaced, prefill);
 
   const close = (next: boolean) => {
     if (!next) c.reset();

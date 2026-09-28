@@ -33,6 +33,10 @@ export function ChartPanel() {
   const tv = view === "tradingview";
   const candles = asArray<Candle>(c.candles.data);
   const trades = asArray<Trade>(c.trades.data);
+  // A selected position drawing can become an order (2026-09-28). Only on the
+  // Broker chart: its prices are the broker's.
+  const selectedPosition = tv ? null : drawings.drawings.find(
+    (dr) => dr.id === drawings.selectedId && dr.kind === "position") ?? null;
 
   return (
     <SplitPane
@@ -97,7 +101,11 @@ export function ChartPanel() {
           {/* Above the positions, so a level drawn on the chart can become
               an order without leaving the tab (2026-09-28). */}
           <div className="flex shrink-0 justify-end gap-2">
-            <ChartOrderActions onPlaced={() => void c.trades.refresh()} tick={c.tick.data} />
+            <ChartOrderActions
+              onPlaced={() => void c.trades.refresh()}
+              tick={c.tick.data}
+              position={selectedPosition}
+            />
           </div>
           <PanelShell
             title="Open positions"

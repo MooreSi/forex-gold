@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  FIB_LEVELS, fibPrices, logicalToTime, timeToLogical,
+  FIB_LEVELS, fibPrices, logicalToTime, positionLevels, timeToLogical,
 } from "../internal/drawingGeometry";
 
 const TF = 300; // 5m
@@ -63,5 +63,35 @@ describe("fibPrices", () => {
 
   it("draws the usual seven levels", () => {
     expect(FIB_LEVELS).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
+  });
+});
+
+describe("positionLevels", () => {
+  // Entry, stop, target: the order the three clicks are made in.
+  const at = (price: number) => ({ time: TIMES[0], price });
+
+  it("is a BUY when the stop is under the entry and the target over it", () => {
+    expect(positionLevels([at(4150), at(4140), at(4170)])).toEqual({
+      direction: "BUY", entry: 4150, stop: 4140, target: 4170, risk: 10, reward: 20, rr: 2,
+    });
+  });
+
+  it("is a SELL when the stop is over the entry and the target under it", () => {
+    const p = positionLevels([at(4150), at(4155), at(4135)]);
+    expect(p?.direction).toBe("SELL");
+    expect(p?.rr).toBe(3);
+  });
+
+  it("is not a position when the stop and target are on the same side", () => {
+    // Which way would it trade? Guessing is how an order goes the wrong way.
+    expect(positionLevels([at(4150), at(4140), at(4145)])).toBeNull();
+  });
+
+  it("is not a position when the stop is at the entry", () => {
+    expect(positionLevels([at(4150), at(4150), at(4170)])).toBeNull();
+  });
+
+  it("is not a position until all three points exist", () => {
+    expect(positionLevels([at(4150), at(4140)])).toBeNull();
   });
 });

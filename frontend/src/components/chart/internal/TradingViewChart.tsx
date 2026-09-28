@@ -88,7 +88,6 @@ function ensureHost(): HTMLDivElement {
   if (host && host.isConnected) return host;
   host = document.createElement("div");
   host.dataset.testid = "tradingview-host";
-  host.className = "tradingview-widget-container";
   Object.assign(host.style, {
     position: "fixed", left: "0px", top: "0px", width: "0px", height: "0px",
     zIndex: String(HOST_Z), visibility: "hidden", pointerEvents: "none",
@@ -102,7 +101,16 @@ function ensureHost(): HTMLDivElement {
   script.src = TRADINGVIEW_SCRIPT;
   script.async = true;
   script.innerHTML = JSON.stringify(tradingViewConfig(currentTheme()));
-  host.append(widget, script);
+  // The script's own box. Once loaded, TradingView sets its container to
+  // width/height 100%; when the container was the host itself, that was 100%
+  // of the WINDOW (the host is position: fixed), and the chart covered the
+  // page until something re-applied our pixel sizes (owner, 2026-09-28).
+  const box = document.createElement("div");
+  box.className = "tradingview-widget-container";
+  box.style.height = "100%";
+  box.style.width = "100%";
+  box.append(widget, script);
+  host.append(box);
   document.body.append(host);
   return host;
 }

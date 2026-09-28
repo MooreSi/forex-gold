@@ -114,3 +114,30 @@ def test_a_literal_nan_price_is_never_stored(make_client, ctl):
                            headers={"content-type": "application/json"})
     assert r.status_code >= 400
     assert ctl == []
+
+
+POSITION = {"symbol": "XAUUSD", "kind": "position",
+            "points": [{"time": 1_790_600_000, "price": 4150.0},     # entry
+                       {"time": 1_790_603_600, "price": 4140.0},     # stop
+                       {"time": 1_790_603_600, "price": 4170.0}]}    # target
+
+
+def test_a_position_is_saved_with_its_entry_stop_and_target(make_client, ctl):
+    """The long/short position tool (2026-09-28): three prices, so the chart
+    can turn it into an order without anyone retyping them."""
+    r = make_client().post("/api/chart/drawings", json=POSITION)
+    assert r.status_code == 200
+    assert ctl == [("create", "XAUUSD", "position", POSITION["points"])]
+
+
+def test_a_position_without_its_target_is_refused(make_client, ctl):
+    r = make_client().post("/api/chart/drawings",
+                           json={**POSITION, "points": POSITION["points"][:2]})
+    assert r.status_code == 422
+    assert ctl == []
+
+
+def test_a_position_can_be_moved_with_all_three_of_its_points(make_client, ctl):
+    r = make_client().put("/api/chart/drawings/7", json={"points": POSITION["points"]})
+    assert r.status_code == 200
+    assert r.json()["points"] == POSITION["points"]

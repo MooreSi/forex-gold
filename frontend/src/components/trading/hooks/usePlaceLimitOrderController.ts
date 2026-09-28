@@ -1,8 +1,17 @@
 import { useCallback, useMemo, useState } from "react";
 import { api, ApiError } from "@/api/client";
+import { priceField } from "./usePlaceOrderDialogController";
 
 export type Direction = "BUY" | "SELL";
 type Step = "form" | "confirm" | "sending";
+
+/** A position drawn on the chart, resting at its entry (2026-09-28). */
+export interface LimitOrderPrefill {
+  direction: Direction;
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+}
 
 /**
  * A genuine resting limit order at the broker, not a watched price.
@@ -12,13 +21,17 @@ type Step = "form" | "confirm" | "sending";
  * would have made. The zone is the part that differs — a limit order has a
  * range rather than a price, and the confirmation says both edges.
  */
-export function usePlaceLimitOrderController(onPlaced: () => void) {
+export function usePlaceLimitOrderController(
+  onPlaced: () => void, initial?: LimitOrderPrefill | null,
+) {
+  const at = (n: number | undefined) => (n == null ? "" : priceField(n));
   const [step, setStep] = useState<Step>("form");
-  const [direction, setDirection] = useState<Direction>("BUY");
-  const [entryLow, setEntryLow] = useState("");
-  const [entryHigh, setEntryHigh] = useState("");
-  const [stopLoss, setStopLoss] = useState("");
-  const [targets, setTargets] = useState<string[]>(["", "", "", "", "", "", "", ""]);
+  const [direction, setDirection] = useState<Direction>(initial?.direction ?? "BUY");
+  const [entryLow, setEntryLow] = useState(at(initial?.entry));
+  const [entryHigh, setEntryHigh] = useState(at(initial?.entry));
+  const [stopLoss, setStopLoss] = useState(at(initial?.stopLoss));
+  const [targets, setTargets] = useState<string[]>(
+    [at(initial?.takeProfit), "", "", "", "", "", "", ""]);
   const [lots, setLots] = useState("");
   const [notes, setNotes] = useState("");
   const [refusal, setRefusal] = useState<string | null>(null);

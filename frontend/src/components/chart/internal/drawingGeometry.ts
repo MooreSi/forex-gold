@@ -9,7 +9,7 @@
  * future, or back past the oldest bar loaded).
  */
 
-export type DrawingKind = "trend" | "hline" | "rect" | "fib";
+export type DrawingKind = "trend" | "hline" | "rect" | "fib" | "position";
 
 export interface DrawingPoint {
   time: number;
@@ -23,9 +23,10 @@ export interface Drawing {
   points: DrawingPoint[];
 }
 
-/** How many clicks each tool takes. Mirrors the API's POINTS_PER_KIND. */
+/** How many clicks each tool takes. Mirrors the API's POINTS_PER_KIND.
+ *  A position is entry, then stop, then target. */
 export const POINTS_PER_KIND: Record<DrawingKind, number> = {
-  trend: 2, hline: 1, rect: 2, fib: 2,
+  trend: 2, hline: 1, rect: 2, fib: 2, position: 3,
 };
 
 export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
@@ -68,4 +69,40 @@ export function logicalToTime(times: number[], tf: number, l: number): number {
  *  end, 100% back at the start, the way TradingView draws them. */
 export function fibPrices(start: number, end: number): { level: number; price: number }[] {
   return FIB_LEVELS.map((level) => ({ level, price: end + (start - end) * level }));
+}
+
+export interface PositionLevels {
+  direction: "BUY" | "SELL";
+  entry: number;
+  stop: number;
+  target: number;
+  /** Price distance from entry to stop, and from entry to target. */
+  risk: number;
+  reward: number;
+  /** reward / risk, to two places. */
+  rr: number;
+}
+
+/**
+ * The trade a position drawing describes, or null when it describes none.
+ *
+ * One tool for both directions, as the side of the stop says which it is: a
+ * stop under the entry is a BUY. A target on the stop's side is not a trade
+ * in either direction, and null is the answer rather than a guess, because
+ * this is what an order is built from (2026-09-28).
+ */
+export function positionLevels(points: DrawingPoint[]): PositionLevels | null {
+  if (points.length < 3) return null;
+  const [entry, stop, target] = points.map((p) => p.price);
+  if (stop === entry) return null;
+  const direction = stop < entry ? "BUY" : "SELL";
+  const up = direction === "BUY" ? 1 : -1;
+  const risk = (entry - stop) * up;
+  const reward = (target - entry) * up;
+  if (reward <= 0) return null;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    direction, entry, stop, target,
+    risk: r2(risk), reward: r2(reward), rr: r2(reward / risk),
+  };
 }

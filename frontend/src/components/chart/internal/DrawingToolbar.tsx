@@ -1,4 +1,4 @@
-import { AlignJustify, Minus, MousePointer2, Slash, Square, Trash2 } from "lucide-react";
+import { AlignJustify, ArrowDownUp, Minus, MousePointer2, Slash, Square, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
@@ -10,6 +10,11 @@ const TOOLS: { tool: DrawingTool; label: string; help: string; Icon: LucideIcon 
   { tool: "hline", label: "Horizontal level", help: "Click once at the price.", Icon: Minus },
   { tool: "rect", label: "Rectangle", help: "Click one corner, then the opposite corner.", Icon: Square },
   { tool: "fib", label: "Fibonacci retracement", help: "Click the start of the swing, then its end.", Icon: AlignJustify },
+  {
+    tool: "position", label: "Position",
+    help: "Click the entry, then the stop, then the target. A stop under the entry is a long. Select it to turn it into an order.",
+    Icon: ArrowDownUp,
+  },
 ];
 
 /**

@@ -11,10 +11,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-DrawingKind = Literal["trend", "hline", "rect", "fib"]
+DrawingKind = Literal["trend", "hline", "rect", "fib", "position"]
 
-# A horizontal level is one price; everything else is two corners.
-POINTS_PER_KIND: dict[str, int] = {"trend": 2, "hline": 1, "rect": 2, "fib": 2}
+# A horizontal level is one price; a position is entry, stop and target, in
+# that order; everything else is two corners.
+POINTS_PER_KIND: dict[str, int] = {
+    "trend": 2, "hline": 1, "rect": 2, "fib": 2, "position": 3,
+}
 
 SYMBOL_PATTERN = r"^[A-Za-z0-9._#-]{1,32}$"
 
@@ -45,7 +48,7 @@ class DrawingIn(BaseModel):
 
 
 class DrawingMove(BaseModel):
-    points: list[Point] = Field(min_length=1, max_length=2)
+    points: list[Point] = Field(min_length=1, max_length=3)
 
 
 class DrawingOut(BaseModel):

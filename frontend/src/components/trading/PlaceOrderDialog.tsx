@@ -1,7 +1,9 @@
 import { TriangleAlert } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
-import { usePlaceOrderDialogController } from "./hooks/usePlaceOrderDialogController";
+import {
+  usePlaceOrderDialogController, type MarketOrderPrefill,
+} from "./hooks/usePlaceOrderDialogController";
 import { OrderForm } from "./internal/OrderForm";
 
 interface PlaceOrderDialogProps {
@@ -10,6 +12,9 @@ interface PlaceOrderDialogProps {
   onPlaced: () => void;
   /** Non-null when the backend says trading is not currently allowed. */
   disabledReason: string | null;
+  /** Filled in from a position drawn on the chart. Read when the dialog is
+   *  mounted; the caller mounts a fresh one per position. */
+  prefill?: MarketOrderPrefill | null;
 }
 
 /**
@@ -21,9 +26,9 @@ interface PlaceOrderDialogProps {
  * verbatim.
  */
 export function PlaceOrderDialog({
-  open, onOpenChange, onPlaced, disabledReason,
+  open, onOpenChange, onPlaced, disabledReason, prefill,
 }: PlaceOrderDialogProps) {
-  const c = usePlaceOrderDialogController(onPlaced);
+  const c = usePlaceOrderDialogController(onPlaced, prefill);
 
   const close = (next: boolean) => {
     if (!next) c.reset();

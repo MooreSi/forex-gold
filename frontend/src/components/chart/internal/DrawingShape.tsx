@@ -1,6 +1,7 @@
 import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { formatPrice } from "@/components/shared/format";
 import { fibPrices, type Drawing, type DrawingPoint } from "./drawingGeometry";
+import { PositionShape } from "./PositionShape";
 
 export type Project = (p: DrawingPoint) => { x: number; y: number } | null;
 
@@ -36,7 +37,9 @@ export function DrawingShape({
   const down = (e: ReactMouseEvent) => onBodyDown(e, drawing);
 
   let body: ReactElement;
-  if (drawing.kind === "hline") {
+  if (drawing.kind === "position") {
+    body = <PositionShape drawing={drawing} xy={xy} colour={colour} onDown={down} />;
+  } else if (drawing.kind === "hline") {
     body = (
       <g onMouseDown={down} style={{ cursor: "move" }}>
         <line x1={0} x2={width} y1={a.y} y2={a.y} {...HIT} />

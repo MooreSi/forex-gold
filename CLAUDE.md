@@ -193,8 +193,9 @@ Each of these cost real time in a past session:
   thread AND on the `to_db_thread` worker. `tests/conftest.py`'s `fresh_db`
   is the reference; local copies of it are where this keeps going wrong.
 - **The suite is ~7x slower on Windows CI than on macOS** — 28m48s against
-  239s, for the same 3,623 tests. Budget for it: the workflow's
-  `timeout-minutes` is 60, and every push to `main` costs a full run.
+  239s, for the same 3,623 tests (2026-08-27); 51m54s for 10,951 tests by
+  2026-09-28. Budget for it: the workflow's `timeout-minutes` is 90 (raised
+  from 60 when a run took 55m55s), and every push to `main` costs a full run.
 - **Repo-wide scripts must exclude** `.git`, `.venv`, `__pycache__`,
   `.claude/` (agent worktrees), `docs/todo/refactor/stage0/` (audit trail)
   and `docs/reviews/` (point-in-time snapshots).

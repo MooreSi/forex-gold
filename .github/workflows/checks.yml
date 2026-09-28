@@ -41,7 +41,12 @@ jobs:
     # If a run completes inside 60, the number it reports is the real cost and
     # this becomes a decision about optimising the suite. If it times out
     # again, something hangs and raising this further is the wrong answer.
-    timeout-minutes: 60
+    #
+    # 90 on 2026-09-28. Runs complete, they have just grown with the suite:
+    # 10,951 tests in 51m54s of pytest (36343576570), and 36410183811 took
+    # 55m55s against the 60. That is cost, not a hang, so the budget moves.
+    # A run that times out at 90 is still a hang until shown otherwise.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 

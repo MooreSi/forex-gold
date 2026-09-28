@@ -84,9 +84,13 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
         # live one: `check_for_update` runs `git fetch`, and this endpoint is
         # polled every five seconds. Only the two facts the badge renders --
         # whether there is one and how many commits it is -- travel here; the
-        # detail is fetched once, when the operator opens the popup.
+        # detail is fetched once, when the operator opens the popup. An
+        # install not linked to GitHub (`bootstrap`) counts: it matches none of
+        # origin's recent commits, so it is behind, and the popup's button is
+        # what links it. Without this it never heard of an update (2026-09-28).
         "update": {
-            "available": update_check.get("available") is True,
+            "available": (update_check.get("available") is True
+                          or update_check.get("bootstrap") is True),
             "commits": len(update_check.get("commits") or []),
             "remote_sha": str(update_check.get("remote_sha") or ""),
         },

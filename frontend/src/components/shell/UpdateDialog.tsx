@@ -33,6 +33,10 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const commits = check_?.commits ?? [];
   const summary = upd.status?.changes ?? [];
   const lines = summary.length > 0 ? summary : commits.map((c) => c.summary);
+  // The origin this checkout tracks, as the service reports it. Hardcoded, it
+  // named MooreSi/forex after the move to MooreSi/forex-gold.
+  const repoUrl = String(upd.status?.tracking?.repo_url ?? "");
+  const source = repoUrl ? repoUrl.replace(/^https?:\/\//, "") : "GitHub";
 
   return (
     <DialogShell
@@ -41,8 +45,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       title="Update available"
       description={
         commits.length > 0
-          ? `${commits.length} new commit${commits.length === 1 ? "" : "s"} from github.com/MooreSi/forex.`
-          : "An update is ready from github.com/MooreSi/forex."
+          ? `${commits.length} new commit${commits.length === 1 ? "" : "s"} from ${source}.`
+          : `An update is ready from ${source}.`
       }
       footer={
         <>
@@ -72,7 +76,13 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
         </ul>
       )}
 
-      {!upd.checking && lines.length === 0 && (
+      {/* Not linked to GitHub: there is no HEAD to count commits from, and
+          Update now is what links it. Say that, not "could not be read". */}
+      {!upd.checking && lines.length === 0 && check_?.bootstrap === true && (
+        <p className="text-xs text-ink-2">{String(check_.error ?? "")}</p>
+      )}
+
+      {!upd.checking && lines.length === 0 && check_?.bootstrap !== true && (
         <p className="text-xs text-ink-3">
           The commit list for this update could not be read.
         </p>

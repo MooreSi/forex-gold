@@ -133,3 +133,61 @@ describe("the popup", () => {
     expect(await screen.findByText(/git pull was refused/)).toBeInTheDocument();
   });
 });
+
+describe("the popup on an install that is not linked to GitHub", () => {
+  // The header shows the badge for these since 2026-09-28 (a v6.11 installer
+  // copy never heard of an update). There is no HEAD to count commits from,
+  // so the popup must say why instead of "the commit list could not be read",
+  // and still offer the update, which is what links it.
+  const NOT_LINKED = { available: true, commits: 0, remote_sha: "" };
+  beforeEach(() => {
+    statusBody = {
+      current: "0.5",
+      update: {
+        available: false, bootstrap: true,
+        error: "this install could not be matched to a commit on GitHub, so it is not linked yet.",
+      },
+      changes: [], changes_error: "",
+    };
+  });
+
+  it("says why there is no commit list", async () => {
+    render(<UpdateBadge update={NOT_LINKED} />);
+    await userEvent.click(screen.getByRole("button", { name: /update available/i }));
+
+    expect(await screen.findByText(/could not be matched to a commit/)).toBeInTheDocument();
+    expect(screen.queryByText(/commit list for this update could not be read/)).toBeNull();
+  });
+
+  it("still offers the update", async () => {
+    render(<UpdateBadge update={NOT_LINKED} />);
+    await userEvent.click(screen.getByRole("button", { name: /update available/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /update now/i }));
+
+    await waitFor(() => expect(posted).toEqual(["/api/node/update/apply"]));
+  });
+});
+
+describe("the popup names where the update comes from", () => {
+  // It said github.com/MooreSi/forex, hardcoded, after this checkout moved to
+  // MooreSi/forex-gold (2026-09-21). The origin the checkout tracks is the
+  // fact; the service already reports it.
+  it("names the repository this checkout tracks", async () => {
+    statusBody = {
+      ...statusBody,
+      tracking: { branch: "main", repo_url: "https://github.com/MooreSi/forex-gold" },
+    };
+    render(<UpdateBadge update={AVAILABLE} />);
+    await userEvent.click(screen.getByRole("button", { name: /update available/i }));
+
+    expect(await screen.findByText(/github\.com\/MooreSi\/forex-gold/)).toBeInTheDocument();
+  });
+
+  it("never names the old repository", async () => {
+    render(<UpdateBadge update={AVAILABLE} />);
+    await userEvent.click(screen.getByRole("button", { name: /update available/i }));
+    await screen.findByRole("button", { name: /update now/i });
+
+    expect(screen.queryByText(/MooreSi\/forex\b(?!-)/)).toBeNull();
+  });
+});

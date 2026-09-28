@@ -90,3 +90,35 @@ def test_a_check_that_could_not_run_shows_no_badge(make_client, header):
     body = make_client().get("/api/system/header").json()
 
     assert body["update"]["available"] is False
+
+
+def test_an_install_that_is_not_linked_to_github_shows_the_badge(make_client, header):
+    """Reported 2026-09-28: LAPTOP-255S7SSI, a v6.11 installer copy that never
+    linked, sat on "no git checkout" in the admin console with nothing on its
+    own screen. `check_for_update` answers such an install with
+    `available: False, bootstrap: True` -- it cannot count commits without a
+    HEAD -- so the badge never appeared, and the only way it would ever hear
+    of an update was an admin-console push. It could not be matched to any of
+    origin's recent commits, so it is not the latest, and Update to Latest is
+    one click away. That is an update the operator can act on."""
+    header["check"] = {
+        "available": False, "bootstrap": True,
+        "error": "this install could not be matched to a commit on GitHub",
+    }
+
+    body = make_client().get("/api/system/header").json()
+
+    assert body["update"]["available"] is True
+
+
+def test_an_install_with_no_git_at_all_shows_no_badge(make_client, header):
+    """No git, no bootstrap: nothing the operator can press would work, so
+    Settings > Update says to install git and the header stays quiet."""
+    header["check"] = {
+        "available": False, "bootstrap": False,
+        "error": "git is not installed on this machine",
+    }
+
+    body = make_client().get("/api/system/header").json()
+
+    assert body["update"]["available"] is False

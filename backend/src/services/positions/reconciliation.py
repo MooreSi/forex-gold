@@ -54,6 +54,10 @@ DB_ONLY_NO_EVIDENCE = "db_only_no_evidence"  # gone, and nothing explains it
 UNKNOWN_FILLED = "unknown_filled"            # a parked signal that did fill
 UNKNOWN_NOT_FILLED = "unknown_not_filled"    # a parked signal that did not
 MATCHED = "matched"
+# Open at the broker and in the PAIRED node's database, not this one's
+# (2026-09-28). With the VPS as active trader every trade is this shape on
+# the Mac, and calling it "lost -- nothing is managing it" was false.
+REMOTE_NODE = "remote_node"
 
 # Everything except MATCHED wants a human to look, at least while this is
 # report-only.
@@ -139,7 +143,8 @@ def _closing_deals(deals: Iterable[dict], ticket: Optional[int]) -> list:
 def diff_snapshots(broker_positions: Iterable[dict],
                    broker_deals: Iterable[dict],
                    db_open_trades: Iterable[dict],
-                   unknown_signals: Iterable[dict] = ()) -> ReconcileDiff:
+                   unknown_signals: Iterable[dict] = (),
+                   remote_open_trades: Iterable[dict] = ()) -> ReconcileDiff:
     """Compare what the broker has against what the database believes.
 
     No I/O and no bridge: hand it snapshots, get differences. Nothing is
@@ -197,9 +202,25 @@ def diff_snapshots(broker_positions: Iterable[dict],
             kind=DB_ONLY_NO_EVIDENCE, trade_id=trade_id, ticket=ticket,
             detail="open in the database, and the broker has no record of it"))
 
+    remote = list(remote_open_trades or [])
     for pos in positions:
         ticket = int(pos.get("ticket") or 0)
         if ticket in claimed_tickets:
+            continue
+        # The paired node's open trades, from its heartbeat. Matched the same
+        # two ways as this node's own rows: ticket, or the EA order comment
+        # for a placeholder that has none yet.
+        owner = next((r for r in remote
+                      if (ticket and int(r.get("mt5_ticket") or 0) == ticket)
+                      or _comment_matches(pos.get("comment"),
+                                          _id_prefixes(r.get("trade_id") or ""))),
+                     None)
+        if owner is not None:
+            entries.append(DiffEntry(
+                kind=REMOTE_NODE, trade_id=owner.get("trade_id"),
+                ticket=ticket or None,
+                entry_price=float(pos.get("open_price") or 0),
+                detail="open on the paired node, which manages it"))
             continue
         ours = _is_ours(pos.get("comment"))
         entries.append(DiffEntry(
@@ -337,6 +358,21 @@ def report_periodic(diff: ReconcileDiff) -> None:
 _REPORT_EVERY_CYCLES = 12
 
 
+def _paired_node_open_trades() -> list:
+    """The paired VPS's open trades, from the last sync heartbeat; [] on the
+    VPS itself, on an unpaired install, or when there is no heartbeat yet.
+    A stale or missing heartbeat can only make the report say MORE, never
+    hide a position: an unclaimed one is reported as before."""
+    try:
+        from backend.src.services.cluster.sync.client import get_instance
+        cli = get_instance()
+        if cli is None:
+            return []
+        return list((cli.remote_status or {}).get("open_positions") or [])
+    except Exception:
+        return []
+
+
 async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
     """Snapshot both sides, diff them, log any disagreement. Never raises.
 
@@ -379,6 +415,7 @@ async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
         log.debug("[reconcile] skipped — database read failed: %s", e)
         return None
 
-    diff = diff_snapshots(positions, deals, db_open, unknown)
+    diff = diff_snapshots(positions, deals, db_open, unknown,
+                          remote_open_trades=_paired_node_open_trades())
     report_periodic(diff)
     return diff

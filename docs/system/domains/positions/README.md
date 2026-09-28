@@ -42,6 +42,8 @@ shaped around "no behaviour change".
 
 ## Known things & gotchas
 
+- **Reconciliation on a paired Mac knows the VPS's trades (2026-09-28).** Both nodes read one MT5 account, and with the VPS as active trader every position lives only in the VPS's database, so the Mac's report-only pass logged each one as `broker_only_ours`, "we placed this and then lost its row — nothing is managing it", while the VPS was managing it (ticket 2103198838, hourly). `diff_snapshots` takes `remote_open_trades` (the sync heartbeat's `open_positions`, via `_paired_node_open_trades()`) and a broker position matching one, by ticket or EA order comment, is `REMOTE_NODE`: accounted for, not needing attention. A stale or missing heartbeat can only make the report say more, never hide a position. Still writes nothing. Pinned by `tests/positions/test_reconciliation_knows_the_paired_node.py`.
+
 - **A settings key that does not exist reads as None and fails silently.** `core_bot_panel` read `rs.get("ime_enabled")` in two places; the column is `immediate_market_entry`. `on = not bool(None)` is always True, so the Telegram panel could switch Immediate Market Entry ON and never OFF, and the System menu always displayed OFF. Found 2026-08-26, fixed 2026-08-27, pinned by `tests/core/test_bot_panel_actions.py`. This codebase has hit "IME cannot be turned off" before from a different cause (a backfill re-running every boot, see `tests/conftest.py`) -- when a control seems stuck on, suspect the read before the write.
 
 

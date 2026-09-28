@@ -501,3 +501,36 @@ describe("the forming candle", () => {
     }));
   });
 });
+
+/**
+ * "on the chart page it is now missing the open positions" (2026-09-28). The
+ * trade had been placed by the VPS ("Node: Remote"), so this machine's own
+ * database had no row for it and `/api/chart/trades` answered []. The Trading
+ * tab and the Dashboard showed it because they read `/api/trading/trades`,
+ * which adds what the broker holds that this machine has no record of. The
+ * chart now reads that same list.
+ */
+describe("the open positions", () => {
+  it("include a position the other node opened", async () => {
+    const remote = {
+      id: "vps-1", direction: "BUY", entry: 4151.03, lots: 0.03, sl: 4145.91,
+      tp: null, pnl: 4.2, mt5_ticket: 2103198838, remote: true,
+    };
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/chart/candles")) {
+        return { ok: true, status: 200, json: async () => CANDLES };
+      }
+      if (url.startsWith("/api/chart/overlays")) {
+        return { ok: true, status: 200, json: async () => overlaysBody };
+      }
+      if (url.startsWith("/api/trading/trades")) {
+        return { ok: true, status: 200, json: async () => [remote] };
+      }
+      // `/api/chart/trades`: this machine's database, which has no row.
+      return { ok: true, status: 200, json: async () => [] };
+    });
+    render(<ChartPanel />);
+
+    expect(await screen.findByText("2103198838")).toBeInTheDocument();
+  });
+});

@@ -56,9 +56,13 @@ export function useChartController() {
     1_000,
   );
 
+  // The Trading tab's list and key, not `/api/chart/trades`. That one is this
+  // machine's database alone, so a position the VPS opened ("Node: Remote")
+  // was missing from the chart while the Trading tab and the Dashboard showed
+  // it (2026-09-28). Same key as theirs, so no extra bridge reads.
   const trades = usePoll<Trade[]>(
-    "chart/trades",
-    useCallback(() => api.get<Trade[]>("/api/chart/trades"), []),
+    "trading/trades",
+    useCallback(() => api.get<Trade[]>("/api/trading/trades"), []),
     5_000,
   );
 

@@ -33,6 +33,7 @@ from backend.src.services.cluster.remote.protocol import (
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
     MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO, make,
 )
+from backend.src.services.cluster.remote import _broker_positions
 from backend.src.services.cluster.remote.tls import (
     client_ssl_context, peer_is_acceptable, SERVER_HOST, SERVER_PORT,
 )
@@ -366,16 +367,12 @@ def _get_resource_usage() -> dict:
         return {}
 
 
-def _build_status() -> dict:
+def _build_status(broker_positions: Optional[int] = None) -> dict:
+    """trades_open is the broker's own position count (None = unknown); see
+    _broker_positions for why it is not the database's open rows."""
     uptime = int(time.time() - _START_TIME)
-    trades_open = 0
     bridge_ok   = False
     is_native   = False
-    try:
-        from backend.src.db import database as _db
-        trades_open = _db.get_open_trade_count() or 0
-    except Exception:
-        pass
     try:
         # Native mode has no HTTP bridge to poll at all — checking port 9000
         # there always fails and misreports a healthy in-process connection
@@ -411,7 +408,7 @@ def _build_status() -> dict:
         commit_note=commit_note,
         git_version=_git_version(),
         uptime_s=uptime,
-        trades_open=trades_open,
+        trades_open=broker_positions,
         bridge_connected=bridge_ok,
         bridge_native=is_native,
         **_get_resource_usage(),
@@ -751,7 +748,8 @@ async def _connect_loop() -> None:
                     now = time.time()
                     if now - last_status > 60:
                         try:
-                            await ws.send(json.dumps(_build_status()))
+                            await ws.send(json.dumps(_build_status(
+                                await _broker_positions.broker_position_count())))
                         except Exception:
                             break
                         last_status = now

@@ -4,14 +4,23 @@ import {
   type IChartApi, type ISeriesApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, Overlays, Tick, Trade } from "@/api/types";
-import { chartColours, rgba, token, watchTheme } from "@/components/shared/chartTheme";
+import { chartColours, watchTheme } from "@/components/shared/chartTheme";
 import { rectsFor, type FvgRect } from "./internal/fvgGeometry";
+import { FvgOverlay } from "./internal/FvgOverlay";
+import { liveBar, type Bar } from "./internal/liveBar";
+import { DrawingLayer } from "./internal/DrawingLayer";
+import { DrawingToolbar } from "./internal/DrawingToolbar";
+import type { ChartDrawings } from "./hooks/useChartDrawings";
 
 interface CandleChartProps {
   candles: Candle[];
   overlays: Overlays | null;
   tick: Tick | null;
   trades: Trade[];
+  /** Seconds per bar. With it, each tick moves the forming candle. */
+  timeframeSeconds?: number;
+  /** The drawings and tools (docs/todo/011). Without them, no drawing layer. */
+  drawings?: ChartDrawings;
 }
 
 // The colours the NiceGUI chart used, kept so the two look like the same app.
@@ -19,27 +28,6 @@ interface CandleChartProps {
 // semantics the rest of the UI uses, which is why they are not chosen freely.
 const BULL = "#00cc88";
 const BEAR = "#ff4444";
-// A fair-value gap is an imbalance price left behind. Bullish gaps sit below
-// price and bearish above, so they take the same profit/loss meaning the rest
-// of the app uses -- through the THEME tokens, not fixed hex. #00cc88 at 13%
-// over a white panel is invisible, which is what the first version of this
-// overlay was in light mode: six correctly positioned zones nobody could see.
-function fvgColours() {
-  const profit = token("--color-profit", "#00cc88");
-  const loss = token("--color-loss", "#ff4444");
-  return {
-    fill: { bullish: rgba(profit, 0.18), bearish: rgba(loss, 0.18) },
-    edge: { bullish: rgba(profit, 0.55), bearish: rgba(loss, 0.55) },
-    // The label has to carry on its own over a 18%-opacity band, so it is far
-    // more opaque than the fill it sits on.
-    label: { bullish: rgba(profit, 0.95), bearish: rgba(loss, 0.95) },
-  };
-}
-
-/** Pixels in from the zone's left edge, so the text clears its own border. */
-const FVG_LABEL_INSET = 6;
-const FVG_LABEL_SIZE = 10;
-
 const EMA_COLOURS: Record<string, string> = {
   "9": "#ffd700",   // gold — fastest
   "21": "#ff9900",  // orange
@@ -51,11 +39,15 @@ const EMA_COLOURS: Record<string, string> = {
  * DOM, so this component creates the chart once and pushes data into it on
  * every change rather than re-rendering.
  */
-export function CandleChart({ candles, overlays, tick, trades }: CandleChartProps) {
+export function CandleChart({
+  candles, overlays, tick, trades, timeframeSeconds, drawings,
+}: CandleChartProps) {
   const holder = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const candleSeries = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const emaSeries = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  // The bar drawn last: the newest candle, then whatever the ticks made of it.
+  const lastBar = useRef<Bar | null>(null);
   const [fvgRects, setFvgRects] = useState<FvgRect[]>([]);
   // lightweight-charts disposes hard: every method on a removed chart, and on
   // its time scale, throws "Object is disposed". React runs effect cleanups in
@@ -65,6 +57,13 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
   // cleanup knows the object it holds is already gone.
   const disposed = useRef(false);
   const [themeTick, setThemeTick] = useState(0);
+  // The chart and series as state, not only refs, so the drawing layer
+  // renders once they exist and goes when they do.
+  const [apis, setApis] = useState<{
+    chart: IChartApi; series: ISeriesApi<"Candlestick">;
+  } | null>(null);
+  const isDisposed = useCallback(() => disposed.current, []);
+  const times = useMemo(() => candles.map((c) => c.ts), [candles]);
 
   // The document attribute rather than `useTheme()`. This component must be
   // mountable anywhere -- a chart that throws because a context is missing is
@@ -96,8 +95,10 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
       wickUpColor: BULL, wickDownColor: BEAR,
     });
     disposed.current = false;
+    setApis({ chart: c, series: candleSeries.current });
     return () => {
       disposed.current = true;
+      setApis(null);
       c.remove();
       chart.current = null;
       candleSeries.current = null;
@@ -128,13 +129,24 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
 
   useEffect(() => {
     if (!candleSeries.current) return;
-    candleSeries.current.setData(
-      candles.map((c) => ({
-        time: c.ts as UTCTimestamp,
-        open: c.open, high: c.high, low: c.low, close: c.close,
-      })),
-    );
+    const bars = candles.map((c) => ({
+      time: c.ts, open: c.open, high: c.high, low: c.low, close: c.close,
+    }));
+    candleSeries.current.setData(bars.map((b) => ({ ...b, time: b.time as UTCTimestamp })));
+    lastBar.current = bars[bars.length - 1] ?? null;
   }, [candles]);
+
+  // The forming candle, moved by each tick between candle refreshes. Defined
+  // after the effect above so a refresh's setData lands first.
+  useEffect(() => {
+    const series = candleSeries.current;
+    const prev = lastBar.current;
+    if (disposed.current || !series || !prev || !tick || !timeframeSeconds) return;
+    const next = liveBar(prev, tick, timeframeSeconds);
+    if (!next) return;
+    series.update({ ...next, time: next.time as UTCTimestamp });
+    lastBar.current = next;
+  }, [tick, candles, timeframeSeconds]);
 
   useEffect(() => {
     if (!chart.current || !overlays) return;
@@ -241,54 +253,18 @@ export function CandleChart({ candles, overlays, tick, trades }: CandleChartProp
     };
   }, [redrawFvgs, candles]);
 
-  // Recomputed with the theme, like the chart's own colours.
-  const fvgPaint = useMemo(() => fvgColours(), [themeTick]);
-
   return (
     <div ref={holder} data-testid="candle-chart" className="relative h-full w-full">
-      {fvgRects.length > 0 && (
-        <svg
-          data-testid="fvg-overlay"
-          // z-10, not just "after the canvas in the DOM". lightweight-charts
-          // gives its own canvases explicit z-index 1 and 2, so an overlay at
-          // `auto` is painted UNDER them: six correctly positioned zones,
-          // present in the DOM, invisible on screen. Found by inspecting the
-          // running app on 2026-09-19.
-          className="pointer-events-none absolute inset-0 z-10 h-full w-full"
-          aria-hidden
-        >
-          {fvgRects.map((r) => (
-            <g key={`${r.ts}-${r.y}`}>
-              <rect
-                data-testid={`fvg-${r.direction}-${r.ts}`}
-                x={r.x} y={r.y} width={r.width} height={r.height}
-                fill={fvgPaint.fill[r.direction as "bullish" | "bearish"]
-                  ?? "rgba(156,163,175,0.14)"}
-                stroke={fvgPaint.edge[r.direction as "bullish" | "bearish"]
-                  ?? "rgba(156,163,175,0.4)"}
-                strokeWidth="0.5"
-              />
-              {/* The band's colour alone does not say what the band IS. The
-                  label is drawn at the zone's own left edge and vertical
-                  centre, so a thin gap still gets named rather than silently
-                  losing its label. */}
-              <text
-                data-testid={`fvg-label-${r.direction}-${r.ts}`}
-                x={r.x + FVG_LABEL_INSET}
-                y={r.y + r.height / 2}
-                dominantBaseline="middle"
-                fontSize={FVG_LABEL_SIZE}
-                fontWeight="600"
-                letterSpacing="0.5"
-                fill={fvgPaint.label[r.direction as "bullish" | "bearish"]
-                  ?? "rgba(156,163,175,0.9)"}
-              >
-                FVG
-              </text>
-            </g>
-          ))}
-        </svg>
+      {drawings && apis && timeframeSeconds && (
+        <>
+          <DrawingToolbar d={drawings} />
+          <DrawingLayer
+            chart={apis.chart} series={apis.series} isDisposed={isDisposed}
+            times={times} tfSeconds={timeframeSeconds} d={drawings}
+          />
+        </>
       )}
+      <FvgOverlay rects={fvgRects} themeTick={themeTick} />
     </div>
   );
 }

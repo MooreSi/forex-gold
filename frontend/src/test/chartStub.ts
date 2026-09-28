@@ -44,6 +44,9 @@ export const visibleRanges: unknown[] = [];
  */
 export const touchedAfterRemove: string[] = [];
 
+/** Every bar any stubbed candle series was handed through `update()`. */
+export const barUpdates: unknown[] = [];
+
 export function chartStub() {
   return {
     ColorType: { Solid: "solid" },
@@ -63,20 +66,38 @@ export function chartStub() {
       return {
       addCandlestickSeries: () => ({
         setData: noted("setData", () => {}),
+        update: noted("update", (bar: unknown) => { barUpdates.push(bar); }),
         applyOptions: noted("applyOptions", () => {}),
         setMarkers: noted("setMarkers", () => {}),
         createPriceLine: noted("createPriceLine", () => ({})),
         removePriceLine: noted("removePriceLine", () => {}),
         priceToCoordinate: noted("priceToCoordinate", (price: number) => price),
+        // The inverse of the line above, for the drawing layer.
+        coordinateToPrice: noted("coordinateToPrice", (y: number) => y),
       }),
       addLineSeries: () => ({ setData: noted("setData", () => {}) }),
       applyOptions: () => {},
+      subscribeClick: alive(() => {}),
+      unsubscribeClick: alive(() => {}),
+      subscribeCrosshairMove: alive(() => {}),
+      unsubscribeCrosshairMove: alive(() => {}),
       priceScale: () => ({ applyOptions: () => {}, width: () => 60 }),
       timeScale: alive(() => ({
         getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
         timeToCoordinate: () => 120,
         subscribeVisibleTimeRangeChange: alive(() => {}),
         unsubscribeVisibleTimeRangeChange: alive(() => {}),
+        subscribeVisibleLogicalRangeChange: alive(() => {}),
+        unsubscribeVisibleLogicalRangeChange: alive(() => {}),
+        // Bar index <-> pixel: bar 0 at x=100, ten pixels a bar. Not the
+        // identity, so a test cannot pass by confusing the two.
+        //
+        // A FRACTIONAL index answers 0, as the real library does:
+        // `indexToCoordinate` returns 0 for anything `!isInteger` (v4.2.3,
+        // lightweight-charts.development.mjs). A drawing between two 1H bars
+        // was drawn at the chart's left edge on 2026-09-28 because of it.
+        logicalToCoordinate: (l: number) => (Number.isInteger(l) ? 100 + l * 10 : 0),
+        coordinateToLogical: (x: number) => (x - 100) / 10,
         // Recorded so a test can assert which bars a chart opens on.
         setVisibleLogicalRange: (r: unknown) => { visibleRanges.push(r); },
       })),

@@ -55,6 +55,7 @@ from backend.src.api.routers import tuning as tuning_router
 from backend.src.api.routers import brain as brain_router
 from backend.src.api.routers import fill_cost as fill_cost_router
 from backend.src.api.routers import gex as gex_router
+from backend.src.api.routers import chart_drawings as chart_drawings_router
 from backend.src.api.routers import setforget as setforget_router
 from backend.src.api.routers import setforget_auto as setforget_auto_router
 from backend.src.api.routers import settings as settings_router
@@ -84,6 +85,7 @@ ROUTERS = (
     ai_settings_router.router,
     backtest_router.router,
     chart_router.router,
+    chart_drawings_router.router,
     decision_log_router.router,
     engines_router.router,
     environment_router.router,

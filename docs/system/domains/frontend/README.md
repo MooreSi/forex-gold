@@ -566,3 +566,79 @@ requestAnimationFrame and honours prefers-reduced-motion. A pulse stops at
 the gate the BACKEND named (`services/brain/gates.classify`); the view never
 guesses one. The tab strip is pinned at 11 tabs by `AppShell.test.tsx`, which
 is why this is a card rather than a tab.
+
+## The TradingView view on the Chart tab (2026-09-28)
+
+Chart tab > Broker | TradingView toggle, remembered per browser under the
+`chart-view` localStorage key. The TradingView side is their free Advanced
+Chart widget (`chart/internal/TradingViewChart.tsx`): any instrument
+TradingView lists, full history, drawing tools. Asked for because the broker
+chart is one symbol, capped at 1000 candles by `/api/chart/candles`, and
+lightweight-charts has no drawing primitives.
+
+- **Its prices are TradingView's (OANDA:XAUUSD to start), not the broker's.**
+  The subtitle says so. It shows none of our trades or FVG zones.
+- **The widget reads its settings from its own script body** and replaces the
+  script with an iframe from tradingview-widget.com. Allowed keys are listed
+  in the embed script itself; read them there, not from memory. The theme is
+  one of them, so the widget is rebuilt on a theme change.
+- **`data-theme="auto"` is not a colour.** Resolve it the way `index.css`
+  does (light only under `prefers-color-scheme: light`). The first build read
+  anything but "light" as dark and put a black chart in a white panel.
+- **It paints 5-25 s after mount** in the running app. A blank panel right
+  after switching is the widget loading, not a failure.
+- **Drawings made in the widget cannot be saved** (owner, 2026-09-28). The
+  widget sends the page one message (`openChartInPopup`) and exposes no chart
+  state; tradingview.com sends `frame-ancestors 'none'`, so the full,
+  logged-in chart cannot be framed either. The header's "Open in TradingView"
+  link opens it in a new window, where a login keeps drawings.
+- **So the widget is never destroyed.** Built once per page, in a host at the
+  end of `<body>`, and laid over the chart slot (position: fixed, z-40, under
+  DialogShell's z-50) while the slot is on screen; hidden otherwise. Leaving
+  the Chart tab (AppShell unmounts tabs) or flipping to Broker keeps its
+  drawings; a page reload does not. Moving an iframe in the DOM reloads it,
+  which is why the host is positioned over the slot rather than moved into
+  it. Its theme is fixed when it is built: re-theming means rebuilding, and
+  rebuilding loses the drawings. Verified in the running app 2026-09-28.
+
+## Drawings on the Broker chart (2026-09-28, docs/todo/011)
+
+Trend line, horizontal level, rectangle, Fibonacci retracement; toolbar down
+the chart's left edge; click a drawing to select, drag its handles or body,
+Delete or the bin to remove, Escape to cancel. `chart/internal/DrawingLayer`
+(an SVG over the canvas, like the FVG layer), `DrawingShape`, `DrawingToolbar`,
+`drawingGeometry.ts` (pure), `hooks/useChartDrawings`. Stored by
+`/api/chart/drawings` in `chart_drawings` in reversal_engine.db (not
+per-environment). Pictures only: nothing that trades reads them.
+
+- **Anchors are (time, price), never pixels.** A time becomes a bar index
+  through the candles loaded, interpolated inside a gap and at the
+  timeframe's spacing past either end.
+- **lightweight-charts' `logicalToCoordinate` answers 0 for a fractional
+  index** (v4.2.3 `indexToCoordinate`: `!isInteger(index)` returns 0, no
+  error). A line drawn on 5m and viewed on 1H has fractional ends, and was
+  drawn at the chart's left edge. `DrawingLayer.project` interpolates between
+  the two whole bars; `chartStub` models the 0 so the test would catch it.
+  `coordinateToLogical` returns whole indexes, so clicks snap to a bar.
+- **The Broker chart's forming candle moves with the 1 s tick** (`liveBar.ts`),
+  from the BID, as MT5 builds bars. Candle and tick times are both broker
+  server time (3 h ahead of UTC on 2026-09-28), so they compare directly; the
+  time axis is server time, not UTC.
+- A test fake that hands back its own array lets component state and the
+  "server" share one object: a saved drawing appeared twice. Clone responses.
+
+## Market / Limit order on the Chart tab (2026-09-28)
+
+Two buttons above Open positions open the Trading tab's own
+`PlaceOrderDialog` and `PlaceLimitOrderDialog`: same form, same review and
+confirm, same backend refusal. The "may an order be placed now" answer was
+moved verbatim from `useTradingController` into
+`trading/hooks/useOrderGate.ts` so both tabs ask it the same way; the halt
+poll is shared by key. Nothing about how an order is built or sent changed.
+The limit form's example prices (greyed placeholders, never values) follow
+the live price since 2026-09-28 (`trading/internal/limitPlaceholders.ts`): a
+2-point zone next to price and a stop 9 beyond, below the bid for a BUY and
+above the ask for a SELL. They were fixed at 2430 / 2432 / 2421 until then.
+The dialog takes the price as a prop rather than polling it: its tests pin
+that nothing is fetched before an order is sent. The Chart tab passes its 1 s
+tick; the Trading tab passes the shell's header poll.

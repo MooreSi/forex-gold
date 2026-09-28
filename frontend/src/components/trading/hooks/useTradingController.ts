@@ -25,6 +25,38 @@ interface TemplatesState {
 }
 
 /**
+ * May a manual order be placed right now, and if not, why not.
+ *
+ * Exported on 2026-09-28 so the Chart tab's Market/Limit order buttons
+ * (through useOrderGate) ask the same question the same way. Two copies
+ * of this would drift, and a button that is enabled on one tab and not the
+ * other is worse than either answer.
+ *
+ * The answer comes from what the backend said. It is never a decision made
+ * here: the backend still refuses anything it will not place.
+ */
+export function orderDisabledReason(h: HaltState | null, error: Error | null): string | null {
+  if (!h) return error ? "Trading status is unknown — the app cannot reach the backend." : null;
+  if (h.reason) return h.reason;
+  if (h.market_closed) return "The market is closed for the week.";
+  const breaker = h.circuit_breaker;
+  // `is_active` is the authoritative field and always has been. This read
+  // `tripped`, a key the repo has never returned, so a tripped breaker left
+  // Execute ENABLED with no explanation: the backend refused the order and
+  // the operator found out by pressing the button.
+  if (breaker && breaker["is_active"] === true) {
+    const mins = Math.ceil(Number(breaker["remaining_secs"] ?? 0) / 60);
+    const losses = Number(breaker["consec_losses"] ?? 0);
+    return (
+      "The circuit breaker has tripped" +
+      (losses ? ` after ${losses} consecutive losing trades` : "") +
+      (mins > 0 ? `. Live trading resumes in about ${mins} min.` : ".")
+    );
+  }
+  return null;
+}
+
+/**
  * The Trading tab's reads, and the one question every control on it asks:
  * **may this act right now, and if not, why not?**
  *
@@ -64,27 +96,12 @@ export function useTradingController() {
     10_000,
   );
 
-  const disabledReason = useMemo<string | null>(() => {
-    const h = halt.data;
-    if (!h) return halt.error ? "Trading status is unknown — the app cannot reach the backend." : null;
-    if (h.reason) return h.reason;
-    if (h.market_closed) return "The market is closed for the week.";
-    const breaker = h.circuit_breaker;
-    // `is_active` is the authoritative field and always has been. This read
-    // `tripped`, a key the repo has never returned, so a tripped breaker left
-    // Execute ENABLED with no explanation: the backend refused the order and
-    // the operator found out by pressing the button.
-    if (breaker && breaker["is_active"] === true) {
-      const mins = Math.ceil(Number(breaker["remaining_secs"] ?? 0) / 60);
-      const losses = Number(breaker["consec_losses"] ?? 0);
-      return (
-        "The circuit breaker has tripped" +
-        (losses ? ` after ${losses} consecutive losing trades` : "") +
-        (mins > 0 ? `. Live trading resumes in about ${mins} min.` : ".")
-      );
-    }
-    return null;
-  }, [halt.data, halt.error]);
+  // The rule itself is `orderDisabledReason` above, shared with the Chart
+  // tab's order buttons through useOrderGate.
+  const disabledReason = useMemo(
+    () => orderDisabledReason(halt.data, halt.error),
+    [halt.data, halt.error],
+  );
 
   const refreshAll = useCallback(async () => {
     await Promise.all([trades.refresh(), halt.refresh(), signals.refresh()]);

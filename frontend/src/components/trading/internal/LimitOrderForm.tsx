@@ -1,6 +1,7 @@
 import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import type { usePlaceLimitOrderController } from "../hooks/usePlaceLimitOrderController";
+import { limitPlaceholders, type LivePrice } from "./limitPlaceholders";
 
 type Controller = ReturnType<typeof usePlaceLimitOrderController>;
 
@@ -30,7 +31,10 @@ function Field({
   );
 }
 
-export function LimitOrderForm({ controller: c }: { controller: Controller }) {
+export function LimitOrderForm({
+  controller: c, price,
+}: { controller: Controller; price?: LivePrice | null }) {
+  const eg = limitPlaceholders(c.direction, price);
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
@@ -52,15 +56,15 @@ export function LimitOrderForm({ controller: c }: { controller: Controller }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Entry zone low" value={c.entryLow} onChange={c.setEntryLow} placeholder="2430.00" />
-        <Field label="Entry zone high" value={c.entryHigh} onChange={c.setEntryHigh} placeholder="2432.00" />
+        <Field label="Entry zone low" value={c.entryLow} onChange={c.setEntryLow} placeholder={eg.entryLow} />
+        <Field label="Entry zone high" value={c.entryHigh} onChange={c.setEntryHigh} placeholder={eg.entryHigh} />
       </div>
 
       <Field
         label="Stop loss"
         value={c.stopLoss}
         onChange={c.setStopLoss}
-        placeholder="2421.00"
+        placeholder={eg.stopLoss}
         hint="Required. A resting order with no stop can fill and run unattended."
       />
       <Field

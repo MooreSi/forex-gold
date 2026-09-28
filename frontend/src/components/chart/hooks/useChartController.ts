@@ -6,13 +6,17 @@ import type { Candle, Overlays, Tick, Trade } from "@/api/types";
 export const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"] as const;
 export type Timeframe = (typeof TIMEFRAMES)[number];
 
+/** Seconds per bar, for moving the forming bar with the tick. */
+export const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
+  "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1H": 3600, "4H": 14_400, "1D": 86_400,
+};
+
 /**
  * All of the Chart tab's state and fetching, in one place, so `ChartPanel`
  * stays composition.
  *
- * Three polls, deliberately, at the cadences the NiceGUI page used and for the
- * same reasons: the tick moves every second, candles and their overlays move
- * once a bar, and open trades change only when something happens. One interval
+ * Three polls, deliberately: the tick moves every second, candles and their
+ * overlays move once a bar, and open trades change only when something happens. One interval
  * for all three would either hammer the bridge for candles or show a price
  * that lags ten seconds behind the market.
  *
@@ -46,7 +50,10 @@ export function useChartController() {
   const tick = usePoll<Tick | null>(
     "chart/tick",
     useCallback(() => api.get<Tick | null>("/api/chart/tick"), []),
-    3_000,
+    // Every second since 2026-09-28 ("as close to real time as possible"): the
+    // tick also moves the forming candle. Cheap: the server caches the tick
+    // for 1 s (TICK_CACHE_TTL) and the engine already reads it that often.
+    1_000,
   );
 
   const trades = usePoll<Trade[]>(

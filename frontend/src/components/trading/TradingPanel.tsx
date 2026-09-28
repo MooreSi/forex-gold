@@ -4,6 +4,7 @@ import { Plus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { useTradingController } from "./hooks/useTradingController";
+import { useHeaderState } from "@/hooks/useHeaderState";
 import { ActiveTradesSection } from "./internal/ActiveTradesSection";
 import { SignalsSection } from "./internal/SignalsSection";
 import { PlaceLimitOrderDialog } from "./PlaceLimitOrderDialog";
@@ -33,6 +34,8 @@ const SUB_TABS = [
  *  open), and nothing else. */
 export function TradingPanel() {
   const c = useTradingController();
+  // The shell's own header poll, for the limit form's example prices.
+  const header = useHeaderState();
   const [placing, setPlacing] = useState(false);
   const [placingLimit, setPlacingLimit] = useState(false);
 
@@ -150,6 +153,7 @@ export function TradingPanel() {
         onOpenChange={setPlacingLimit}
         onPlaced={() => void c.refreshAll()}
         disabledReason={c.disabledReason}
+        price={header.data?.tick}
       />
     </PanelShell>
   );

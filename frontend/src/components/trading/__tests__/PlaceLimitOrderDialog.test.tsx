@@ -176,3 +176,30 @@ describe("when the backend refuses", () => {
     );
   });
 });
+
+describe("example prices", () => {
+  it("follow the live price when one is given", () => {
+    open({ price: { bid: 4150.4, ask: 4150.61 } });
+    expect(screen.getByLabelText("Entry zone low").getAttribute("placeholder")).toBe("4148.00");
+    expect(screen.getByLabelText("Stop loss").getAttribute("placeholder")).toBe("4139.00");
+  });
+
+  it("move to the other side of price for a SELL", async () => {
+    open({ price: { bid: 4150.4, ask: 4150.61 } });
+    await userEvent.click(screen.getByRole("button", { name: "SELL" }));
+    expect(screen.getByLabelText("Entry zone low").getAttribute("placeholder")).toBe("4151.00");
+    expect(screen.getByLabelText("Stop loss").getAttribute("placeholder")).toBe("4162.00");
+  });
+
+  it("are never the 2430 example from when gold traded there", () => {
+    open();
+    expect(screen.getByLabelText("Entry zone low").getAttribute("placeholder")).not.toBe("2430.00");
+  });
+
+  it("are only hints: nothing is sent and Review stays unavailable", () => {
+    open({ price: { bid: 4150.4, ask: 4150.61 } });
+    expect(screen.getByLabelText("Entry zone low")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /review/i })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

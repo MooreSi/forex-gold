@@ -3,12 +3,15 @@ import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
 import { usePlaceLimitOrderController } from "./hooks/usePlaceLimitOrderController";
 import { LimitOrderForm } from "./internal/LimitOrderForm";
+import type { LivePrice } from "./internal/limitPlaceholders";
 
 interface PlaceLimitOrderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPlaced: () => void;
   disabledReason: string | null;
+  /** The live price, for the form's example prices. Hints only. */
+  price?: LivePrice | null;
 }
 
 /**
@@ -17,7 +20,7 @@ interface PlaceLimitOrderDialogProps {
  * on the confirmation.
  */
 export function PlaceLimitOrderDialog({
-  open, onOpenChange, onPlaced, disabledReason,
+  open, onOpenChange, onPlaced, disabledReason, price,
 }: PlaceLimitOrderDialogProps) {
   const c = usePlaceLimitOrderController(onPlaced);
 
@@ -62,7 +65,7 @@ export function PlaceLimitOrderDialog({
       }
     >
       {c.step === "form" ? (
-        <LimitOrderForm controller={c} />
+        <LimitOrderForm controller={c} price={price} />
       ) : (
         <div className="space-y-3">
           <p data-testid="limit-order-summary" className="text-sm text-ink-1">

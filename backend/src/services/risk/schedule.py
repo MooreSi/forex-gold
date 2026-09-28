@@ -441,6 +441,16 @@ def _forward_trading_schedule_over_sync() -> None:
     sync isn't configured -- both get_instance() calls return None until
     sync.server.init()/sync.client.get_instance() have actually been used.
     Mirrors core_db_risk_settings._forward_settings_over_sync() exactly."""
+    # The VPS end first: see cluster/sync/role.py for why.
+    try:
+        from backend.src.services.cluster.sync.role import listening_server
+        srv = listening_server()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_trading_schedule())
+            return
+    except Exception as exc:
+        log.debug("[Sync] trading schedule forward (server) failed: %s", exc)
+
     try:
         from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
@@ -449,14 +459,6 @@ def _forward_trading_schedule_over_sync() -> None:
             return
     except Exception as e:
         log.debug("[Sync] trading schedule forward (client) failed: %s", e)
-
-    try:
-        from backend.src.services.cluster.sync import server as _sync_srv_mod
-        srv = _sync_srv_mod.get_instance()
-        if srv is not None:
-            _schedule_coro(srv.broadcast_trading_schedule())
-    except Exception as e:
-        log.debug("[Sync] trading schedule forward (server) failed: %s", e)
 
 
 def _resolve_source_gate(block: dict, source: str) -> tuple[bool, Optional[str]]:

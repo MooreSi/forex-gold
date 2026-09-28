@@ -190,7 +190,8 @@ def trading_pause_status() -> dict:
     tripped breaker reached no screen but Settings > Diagnostics.
 
     Display only. `governor.is_trading_paused()` and the breaker check inside
-    `open_trade` remain the enforcement, and both fail closed.
+    `open_trade` remain the enforcement, and both fail closed. On a Mac
+    trading through the VPS it is the VPS's halt (2026-09-28).
     """
-    from backend.src.services.risk import pause_status as _pause
-    return _pause.summary()
+    from backend.src.services.risk import trading_status as _status
+    return _status.header_pause()

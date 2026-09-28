@@ -75,11 +75,27 @@ def _get_resource_usage() -> dict:
 # terminal_path, etc.) can never leak across the wire even by accident.
 
 
+async def _trading_status() -> Optional[dict]:
+    """This node's header badge, for the Mac to show as the VPS's.
+
+    Without it the Mac's badge read the Mac's own database and said "Trading
+    Active" while the breaker held every entry here (2026-09-28). None when it
+    cannot be read: the Mac then says it does not know, and the heartbeat still
+    goes out.
+    """
+    try:
+        from backend.src.services.risk import trading_status
+        return await db_module.to_db_thread(trading_status.badge)
+    except Exception as e:
+        log.debug("[SyncServer] trading status unreadable: %s", e)
+        return None
+
+
 class TelemetryMixin:
     async def _status_payload(self) -> dict:
         eng = self._main_engine
         if eng is None:
-            return {"ts": time.time()}
+            return {"ts": time.time(), "trading_status": await _trading_status()}
         try:
             positions = eng.get_open_trades()
         except Exception:
@@ -135,6 +151,7 @@ class TelemetryMixin:
             },
             "active_trader": db_module.get_active_trader(),
             "ea_connected":  ea_connected,
+            "trading_status": await _trading_status(),
             **_get_resource_usage(),
             **_update_sync.heartbeat_fields(),   # commit + git version (2026-09-27)
         }

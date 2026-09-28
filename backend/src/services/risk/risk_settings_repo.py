@@ -124,6 +124,16 @@ def _forward_settings_over_sync(updates: dict) -> None:
     role this process has. No-op (and near-zero cost) if sync isn't
     configured — both get_instance() calls return None until sync.server
     .init()/sync.client.get_instance() have actually been used."""
+    # The VPS end first: see cluster/sync/role.py for why.
+    try:
+        from backend.src.services.cluster.sync.role import listening_server
+        srv = listening_server()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_settings())
+            return
+    except Exception as exc:
+        log.debug("[Sync] settings forward (server) failed: %s", exc)
+
     try:
         from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
@@ -137,14 +147,6 @@ def _forward_settings_over_sync(updates: dict) -> None:
             return
     except Exception as e:
         log.debug("[Sync] settings forward (client) failed: %s", e)
-
-    try:
-        from backend.src.services.cluster.sync import server as _sync_srv_mod
-        srv = _sync_srv_mod.get_instance()
-        if srv is not None:
-            _schedule_coro(srv.broadcast_settings())
-    except Exception as e:
-        log.debug("[Sync] settings forward (server) failed: %s", e)
 
 
 def is_session_allowed(rs: Optional[dict] = None) -> tuple[bool, str]:

@@ -650,6 +650,16 @@ def get_all_channel_strategy_overrides() -> dict[str, dict]:
 def _forward_channel_strategy_over_sync(source: str, strategy: str | None, auto: bool) -> None:
     """Send a locally-made channel-strategy change to the paired node,
     whichever role this process has. No-op if sync isn't configured."""
+    # The VPS end first: see cluster/sync/role.py for why.
+    try:
+        from backend.src.services.cluster.sync.role import listening_server
+        srv = listening_server()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_channel_strategy())
+            return
+    except Exception as exc:
+        log.debug("[Sync] channel strategy forward (server) failed: %s", exc)
+
     try:
         from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
@@ -658,14 +668,6 @@ def _forward_channel_strategy_over_sync(source: str, strategy: str | None, auto:
             return
     except Exception as e:
         log.debug("[Sync] channel strategy forward (client) failed: %s", e)
-
-    try:
-        from backend.src.services.cluster.sync import server as _sync_srv_mod
-        srv = _sync_srv_mod.get_instance()
-        if srv is not None:
-            _schedule_coro(srv.broadcast_channel_strategy())
-    except Exception as e:
-        log.debug("[Sync] channel strategy forward (server) failed: %s", e)
 
 
 def get_channel_strategy_rec(source: str) -> dict:

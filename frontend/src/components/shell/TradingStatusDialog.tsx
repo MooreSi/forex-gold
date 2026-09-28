@@ -12,6 +12,10 @@ export interface TradingStatus {
   until: number | null;
   resume_ts: number | null;
   can_resume: boolean;
+  /** "vps" when this node hands its orders to the VPS and the badge is the
+   *  VPS's status. Pause and Resume here would write THIS node's database,
+   *  which is not the one placing orders, so the dialog offers neither. */
+  node?: "vps";
 }
 
 interface TradingStatusDialogProps {
@@ -84,6 +88,25 @@ export function TradingStatusDialog({
       return;
     }
     void submit(() => api.post("/api/trading/pause", { hours: Number(hours) || 4 }));
+  }
+
+  if (status.node === "vps") {
+    return (
+      <DialogShell open={open} onOpenChange={onOpenChange} title="VPS trading status">
+        <div data-testid="trading-status-dialog" className="space-y-3 text-xs text-ink-2">
+          <p className="font-semibold text-ink-1">{status.label}</p>
+          {status.detail && <p>{status.detail}</p>}
+          <p data-testid="trading-status-vps-note" className="text-ink-3">
+            The VPS is the active trader, so this is its status. Pause or
+            resume it on the VPS: from this node either would change only
+            this node's settings, which place no orders.
+          </p>
+          <div className="flex justify-end pt-1">
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
+          </div>
+        </div>
+      </DialogShell>
+    );
   }
 
   return (

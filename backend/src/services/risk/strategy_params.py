@@ -244,6 +244,16 @@ def _forward_strategy_params_over_sync() -> None:
     as Trading Schedule, avoiding a race between two near-simultaneous
     edits to different strategies. No-op (and near-zero cost) if sync
     isn't configured."""
+    # The VPS end first: see cluster/sync/role.py for why.
+    try:
+        from backend.src.services.cluster.sync.role import listening_server
+        srv = listening_server()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_strategy_params())
+            return
+    except Exception as exc:
+        log.debug("[Sync] strategy params forward (server) failed: %s", exc)
+
     try:
         from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
@@ -252,14 +262,6 @@ def _forward_strategy_params_over_sync() -> None:
             return
     except Exception as exc:
         log.debug("[Sync] strategy params forward (client) failed: %s", exc)
-
-    try:
-        from backend.src.services.cluster.sync import server as _sync_srv_mod
-        srv = _sync_srv_mod.get_instance()
-        if srv is not None:
-            _schedule_coro(srv.broadcast_strategy_params())
-    except Exception as exc:
-        log.debug("[Sync] strategy params forward (server) failed: %s", exc)
 
 
 def reset_strategy_params(strategy: str) -> dict:

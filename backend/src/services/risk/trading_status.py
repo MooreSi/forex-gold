@@ -31,6 +31,15 @@ There is a fifth, `unknown`, for when the breaker itself cannot be read. It
 exists because the alternative is reporting an all-clear on no evidence, and
 that is the one failure this badge must never make.
 
+**On a node that hands its orders to the VPS, the badge is the VPS's.** The
+test is `open_trade`'s own: a paired host and the switch on REMOTE. The VPS
+sends its badge in every heartbeat and the Mac shows it, labelled "VPS: ".
+Until 2026-09-28 the Mac showed its own database, so a breaker tripped on the
+VPS left the Mac's header reading "Trading Active" (reported live). With the
+link down, or a VPS too old to send one, the answer is `unknown`, never the
+Mac's own state. `can_resume` is false there: a Pause or Resume pressed on the
+Mac acts on the Mac's database, and the Mac is not placing the orders.
+
 Nothing here places an order, closes one, or reaches a broker.
 """
 from __future__ import annotations
@@ -82,6 +91,62 @@ def _halt_reason() -> str:
     return str(pause_status.summary().get("reason") or "")
 
 
+def _paired_vps_view() -> dict | None:
+    """None when this node places its own orders. Otherwise the link's view
+    of the VPS: whether it is up, and the badge the VPS last sent.
+
+    The same test `open_trade` makes before forwarding an order to the VPS,
+    so the badge and the order path cannot disagree about who is trading.
+    """
+    from backend.src.services.risk.app_config_repo import get_app_config
+    from backend.src.services.cluster.sync import client as sync_client
+    from backend.src.services.cluster.sync.protocol import TRADER_REMOTE_VPS
+    from backend.src.services.cluster.sync_repo import get_active_trader
+    if not (get_app_config("sync_remote_host") or ""):
+        return None
+    if get_active_trader() != TRADER_REMOTE_VPS:
+        return None
+    cli = sync_client.get_instance()
+    connected = cli.conn_state == "connected"
+    status = (cli.remote_status or {}) if connected else {}
+    return {"connected": connected, "badge": status.get("trading_status")}
+
+
+def _unknown(label: str, detail: str) -> dict:
+    return {"state": "unknown", "label": label, "detail": detail,
+            "until": None, "resume_ts": None, "can_resume": False}
+
+
+def _as_the_vps_reports_it(view: dict) -> dict:
+    if not view["connected"]:
+        return {**_unknown(
+            "VPS Status Unknown",
+            "The VPS is the active trader and this node cannot reach it, so "
+            "this cannot confirm whether it is trading.",
+        ), "node": "vps"}
+    remote = view["badge"]
+    if not isinstance(remote, dict) or not remote.get("state"):
+        return {**_unknown(
+            "VPS Status Unknown",
+            "The VPS has not reported its trading status. It sends it from "
+            "this version on; update it if this persists.",
+        ), "node": "vps"}
+    label = str(remote.get("label") or "")
+    until = remote.get("until")
+    if remote.get("state") == "halted" and until:
+        # The VPS wrote the time in ITS time zone; the operator reads this one.
+        label = f"Trading Paused until {_until_text(float(until))}"
+    return {
+        "state": str(remote["state"]),
+        "label": f"VPS: {label}",
+        "detail": str(remote.get("detail") or ""),
+        "until": until,
+        "resume_ts": remote.get("resume_ts"),
+        "can_resume": False,
+        "node": "vps",
+    }
+
+
 def _until_text(ts: float) -> str:
     try:
         return datetime.fromtimestamp(ts).strftime("%d %b %H:%M")
@@ -108,6 +173,16 @@ def badge() -> dict:
     false for a news blackout, which lifts itself, so the UI does not offer a
     button that would do nothing.
     """
+    try:
+        view = _paired_vps_view()
+    except Exception as exc:
+        # Not knowing who trades is not evidence that this node is clear.
+        log.warning("[TradingStatus] could not tell which node trades: %s", exc)
+        return _unknown("Trading Status Unknown",
+                        "Could not tell whether this node or the VPS is trading.")
+    if view is not None:
+        return _as_the_vps_reports_it(view)
+
     try:
         breaker = _breaker_state()
     except Exception as exc:
@@ -182,6 +257,31 @@ def badge() -> dict:
         "detail": "Nothing is holding automated entries.",
         "until": None, "resume_ts": None, "can_resume": False,
     }
+
+
+def header_pause() -> dict:
+    """`pause_status.summary()`'s shape, from the node placing the orders.
+
+    Behind `trading_controller.trading_pause_status`, so it feeds the header
+    payload's `pause` (the Dashboard's "Trading is halted" line) and
+    `/api/trading/halt` (why the order buttons are disabled). On a Mac that
+    hands its orders to the VPS, the VPS's badge decides it (`source` "VPS"):
+    that is where a forwarded order would be refused. Display only: nothing
+    that enforces a halt reads this.
+    """
+    from backend.src.services.risk import pause_status
+    try:
+        view = _paired_vps_view()
+    except Exception as exc:
+        log.debug("[TradingStatus] could not tell which node trades: %s", exc)
+        view = None
+    if view is None:
+        return pause_status.summary()
+    b = _as_the_vps_reports_it(view)
+    if b["state"] != "halted":
+        return {"paused": False, "reason": "", "until": None, "source": ""}
+    return {"paused": True, "reason": b["detail"], "until": b["until"],
+            "source": "VPS"}
 
 
 def resume_all() -> dict:

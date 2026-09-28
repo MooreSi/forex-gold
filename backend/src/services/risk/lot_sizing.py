@@ -124,6 +124,30 @@ def template_lot(rs: Mapping, template: Mapping, entry: float, stop_loss: float,
     return SizedLot(min(anchor, max_lot(rs)), True, "template lots")
 
 
+def sizing_basis(rs: Mapping, template: Mapping | None) -> str:
+    """How a trade on these settings is sized, in words; "" for fixed lots.
+
+    Display only (the trade-open alert, 2026-09-28): the trade row does not
+    record how its lot was chosen, so the alert describes it from the same
+    rules `template_lot` applies, read here beside it so the two cannot
+    drift. Never used to size anything.
+    """
+    if template is None:
+        return "" if global_fixed_lot(rs) > 0 else f"{global_risk_pct(rs):g}% of balance"
+    legs = template_leg_count(template)
+    if override_on(rs):
+        if global_fixed_lot(rs) > 0:
+            return ""
+        total = global_risk_pct(rs)
+        split = f" ({total / legs:g}% per leg x {legs})" if legs > 1 else ""
+        return f"{total:g}% of balance{split}"
+    tpl_risk = _num(template, "risk_pct")
+    if tpl_risk <= 0:
+        return ""
+    per_leg = f" per leg x {legs}" if legs > 1 else ""
+    return f"{tpl_risk:g}% of balance{per_leg}"
+
+
 def template_sizes_its_own_legs(rs: Mapping, template: Mapping) -> bool:
     """Does the EA stage this template's legs at the template's own
     lot_anchor / lot_pending?

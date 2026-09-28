@@ -13,6 +13,7 @@ from backend.src.config import is_debug as _is_debug
 from backend.src.db import database as db_module
 from backend.src.services.analytics import labels as _labels
 from backend.src.services.broker.ea_templates import TEMPLATE_OVERRIDE_PREFIX as _TEMPLATE_OVERRIDE_PREFIX
+from backend.src.services.telegram import _open_details
 from backend.src.utils.models import STRATEGY_NAMES, STRATEGY_SCALE_OUT
 
 log = logging.getLogger(__name__)
@@ -295,8 +296,12 @@ def fmt_trade_open(trade: dict, tick, commentary: dict) -> str:
         if entry else
         f"Entry: pending — legs staged across {trade.get('entry_low')}–{trade.get('entry_high')}",
         f"Lot: {trade.get('lot_size')}",
-        f"SL: {trade.get('stop_loss')}",
     ]
+    _risk = _open_details.risk_line(trade)
+    if _risk:
+        lines.append(_risk)
+    lines.append(f"SL: {trade.get('stop_loss')}")
+    tp_block = tp_block or _open_details.template_tp_lines(trade)
     if tp_block:
         lines.append(tp_block)
     if spread_line:

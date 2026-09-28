@@ -58,6 +58,7 @@ browser  →  frontend/dist (React)  →  HTTP/JSON  →  backend/src/api/
 - **A settings field must re-sync after every save, not only when the value changes (2026-09-18).** "The backend rejected your number" and "the backend agreed with what was stored" both leave the value where it was, so a field keyed on the value alone keeps the rejected input on screen: typing 99 into a risk field the service clamps to 2 left "99" in the box. `useSettingsResource` exposes a `version` counter for this.
 - **Guard the array boundary between the typed client and the untyped wire (2026-09-18).** A response that is an object where a list was expected makes `.map` throw *inside render*, and React tears down the whole tree — one wrong endpoint blanks the entire dashboard rather than one panel. `frontend/src/lib/asArray.ts` is that boundary — and `asObject` beside it, because a MISSING object field throws the same way (`Object.keys(undefined)`), which the shell test found by answering `{}` for every endpoint: exactly what a half-deployed backend looks like from the browser.
 - **`/api/chart/trades` answers `pnl: null`; `/api/trading/trades` carries the running profit (2026-09-22).** The chart's payload exists to place markers. A positions list built on it shows an em dash for every position's P&L -- honest, and needlessly so, since the broker's number is one endpoint away. The Dashboard reads the chart's copy for the chart and the trading copy for the positions card, and `DashboardPanel.test.tsx` stubs them with DIFFERENT values so the two cannot be swapped back silently.
+- **The Chart tab reads `/api/trading/trades` too, since 2026-09-28 (reported live: "on the chart page it is now missing the open positions").** `/api/chart/trades` is `engine.get_open_trades()`, this machine's database only. A trade the VPS placed ("Node: Remote") has no row on the Mac, so the chart's positions table and markers were empty while the Trading tab and the Dashboard, which read the merged view (`engine_reads.open_positions_view`: the app's rows plus whatever the broker holds that it has no record of), showed it. `useChartController` now polls the `trading/trades` key, the same key and URL the Dashboard and Trading tab use, so `usePoll` makes one request for all three and the bridge sees no extra reads. The Dashboard's `chartTrades` and `positions` are therefore the same list; `DashboardPanel.test.tsx` still stubs `/api/chart/trades` differently, which now only proves the positions card never reads it. Pinned by `ChartPanel.test.tsx` > "the open positions".
 - **`usePoll` gives a shared key the SHORTEST interval any live subscriber asked for (2026-09-23).** It used to fix the interval when the entry was CREATED and ignore every later subscriber's, so the cadence of a shared key depended on which tab had been opened first: the Dashboard asking for a 3s refresh of the open positions got 5s if Trading had been visited before it, and Trading silently got 3s if it had not. Neither was visible anywhere. It falls back when the fast subscriber leaves, deliberately -- `/api/trading/trades` reaches the MT5 bridge uncached, and one visit to a fast screen must not leave an endpoint polled harder than anybody is asking for it.
 - **`vantage_signals.status` does not say whether a signal WORKED (2026-09-23).** "closed" is the same word for one that took 300 dollars and one that gave back 300 -- 532 of the owner's 608 rows. The outcome lives in the trades the signal produced (`vantage_simulated_trades.signal_id`, `net_pnl`), and `services/signals/outcomes.py` is the one place that turns them into a word, attached to the existing `get_signals` read so the Dashboard's feed and the Trading tab's Signals table cannot disagree. Break-even is its own answer, an open trade has none, and the OUTCOME beats the status where both exist -- three signals in the owner's database are `cancelled` with a winning trade against them.
 - **A theme token reaches `getComputedStyle` as the MINIFIER spelled it, not as it was authored (2026-09-22).** `--color-profit` is written `#00cc88` and shipped as `#0c8`; `#059669` cannot be shortened and ships as six digits. `chartTheme.rgba()` accepted six digits only and returned anything else unchanged -- which for a canvas means fully OPAQUE -- so every fair-value gap and every ORB session band was a translucent tint in light mode and a solid block painted over the candles in dark mode, from the same token. It now expands the 3- and 4-digit shorthand and drops an 8-digit token's own alpha in favour of the caller's. `chartTheme.test.ts` pins all four spellings. The general lesson: never length-check a CSS value you did not write.
@@ -80,6 +81,15 @@ happening right now" without moving between the other ten.
 box, no engine switch: every card names the tab that owns what it shows. A
 control on a summary screen is one misclick from something that costs money,
 and the tabs that own those controls confirm first.
+
+**Layout is rows, and card grids follow the card (2026-09-28).** The grid is
+12 columns in explicit rows whose cards share a height, so the screen ends
+level; two free-running columns left the right one trailing ~1,000px below
+the left. Reading rows inside a card use container queries (`DashCard`'s body
+is an `@container`, grids switch at `@md:`), never viewport breakpoints: at a
+1024px window the old `sm:grid-cols-4` put four readings into a 310px Risk &
+execution card and truncated every label. Risk & execution takes the widest
+slot of its row and scrolls rather than spilling if it ever overflows.
 
 **It opens no poll key of its own** (`dashboard/hooks/useDashboardController.ts`).
 Every read is the key the owning tab already uses -- the shell's 5s header, the
@@ -609,7 +619,9 @@ Delete or the bin to remove, Escape to cancel. `chart/internal/DrawingLayer`
 (an SVG over the canvas, like the FVG layer), `DrawingShape`, `DrawingToolbar`,
 `drawingGeometry.ts` (pure), `hooks/useChartDrawings`. Stored by
 `/api/chart/drawings` in `chart_drawings` in reversal_engine.db (not
-per-environment). Pictures only: nothing that trades reads them.
+per-environment). Pictures only: nothing that trades reads them, except
+that a selected Position fills an order form (below), which still needs
+the user's review and confirmation.
 
 - **Anchors are (time, price), never pixels.** A time becomes a bar index
   through the candles loaded, interpolated inside a gap and at the
@@ -642,3 +654,36 @@ above the ask for a SELL. They were fixed at 2430 / 2432 / 2421 until then.
 The dialog takes the price as a prop rather than polling it: its tests pin
 that nothing is fetched before an order is sent. The Chart tab passes its 1 s
 tick; the Trading tab passes the shell's header poll.
+
+### Position drawing to order (2026-09-28)
+
+Owner: "once a forecasting position is placed on the chart ... convert this
+to an order instead of having to manually enter the details". TradingView's
+long/short tool cannot do it: its drawings live in the widget's cross-origin
+iframe, which exposes no state (above). TradingView's licensed Charting
+Library can read drawings, but it is a licence application, a self-hosted
+bundle and a datafeed of our own; not pursued.
+
+So the Broker chart has a Position tool (kind `position`, 3 points: entry,
+stop, target, clicked in that order). One tool for both directions: a stop
+under the entry is a LONG. `drawingGeometry.positionLevels` returns null when
+the stop and target are on the same side, and the shape then says "Not a
+trade" rather than guessing a direction. Its prices are the broker's, which
+is the point of drawing it here rather than on TradingView.
+
+With a Position selected, "Market from position" and "Limit from position"
+appear beside Market / Limit order. They mount a fresh dialog with the
+direction, stop and target (and for a limit, both zone edges at the entry)
+filled in; lots stay blank so the risk settings size it. They send nothing:
+the review step and "Place this BUY" still stand. A market order fills at
+the current price, not at the drawn entry. The market summary now names the
+take profit when there is one.
+
+- **The drawing stays selected while its dialog is open**, and DrawingLayer
+  deletes the selected drawing on Delete / Backspace. Keys from inside a
+  `role="dialog"` are now ignored by the layer.
+- The backend schema (`api/schemas/chart_drawings.py`) accepts `position`
+  and a move of up to 3 points. A running server started before that change
+  answers 422 "Not saved" until it is restarted.
+- Pinned by `chart/__tests__/ChartPositionOrder.test.tsx`,
+  `drawingGeometry.test.ts` and `tests/api/routers/test_chart_drawings.py`.

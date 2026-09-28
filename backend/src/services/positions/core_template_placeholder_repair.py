@@ -77,7 +77,11 @@ def _expiry_for(row: dict) -> int:
     """Which expiry applies to this placeholder.
 
     The short one only when this node can see the template AND it is single
-    mode with no pendings. A grid, a template that cannot be read, or a row
+    mode. `pendings` is not consulted: the EA reads it only in
+    HandleOpenTemplateGrid, which runs only for tpl_mode "grid", and it
+    defaults to 1 on every new template -- requiring 0 kept default-made
+    single templates on the 24h expiry (found live on the VPS, 2026-09-28).
+    A grid, a template that cannot be read, or a row
     that is not a template at all keeps the long expiry: a resting leg that
     was about to fill must never be written off because its mode was unknown.
     """
@@ -87,8 +91,7 @@ def _expiry_for(row: dict) -> int:
         if ea_templates.is_template_override(strategy):
             tpl = ea_templates.get_ea_template(
                 ea_templates.template_name_from_override(strategy))
-            if (tpl is not None and tpl.get("mode") == "single"
-                    and not int(tpl.get("pendings") or 0)):
+            if tpl is not None and tpl.get("mode") == "single":
                 return placeholder_single_no_fill_expiry_secs()
     except Exception as e:
         log.debug("[TemplateRepair] template mode unreadable for %s: %s",

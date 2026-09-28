@@ -48,20 +48,57 @@ def heartbeat_fields() -> dict:
     return {"commit": commit or "", "git_version": git_version or ""}
 
 
+# The commit this process is running: the checkout as it was on the first
+# heartbeat after boot. `heartbeat_fields()["commit"]` is read from disk on
+# every beat, so a VPS that pulled and never restarted reported the new commit
+# while running the old code, and the Mac said "in sync" (2026-09-28).
+_running_commit: Optional[str] = None
+
+
+def running_commit() -> str:
+    """The commit read on the first heartbeat, kept for the life of the
+    process. "" if it could not be read; that is not cached, so a git hiccup
+    on the first beat does not blank it for good."""
+    global _running_commit
+    if _running_commit:
+        return _running_commit
+    try:
+        sha = core_app_update.get_local_commit_sha(short=False) or ""
+    except Exception as e:
+        log.debug("[Sync] running commit unreadable: %s", e)
+        return ""
+    if sha:
+        _running_commit = sha
+    return sha
+
+
 def _local() -> dict:
     return heartbeat_fields()
 
 
 def version_report(remote_status: dict) -> dict:
-    """{local, remote, in_sync}. `remote` is None and `in_sync` None when the
-    VPS has not told us its commit (no link, or an older VPS)."""
+    """{local, remote, in_sync, restart_pending}. `remote` is None and
+    `in_sync` None when the VPS has not told us its commit (no link, or an
+    older VPS).
+
+    The VPS's commit is the one it is RUNNING when it says so
+    (`running_commit`), so a VPS that pulled and never restarted is not in
+    sync -- and Upgrade VPS, which pulls and restarts, is what fixes it.
+    `restart_pending` is True in exactly that case, None from a VPS that does
+    not send `running_commit`."""
     local = _local()
-    remote_commit = (remote_status or {}).get("commit")
+    status = remote_status or {}
+    checked_out = status.get("commit")
+    running = status.get("running_commit")
+    remote_commit = running or checked_out
     if not remote_commit:
-        return {"local": local, "remote": None, "in_sync": None}
-    remote = {"commit": remote_commit, "git_version": remote_status.get("git_version") or ""}
+        return {"local": local, "remote": None, "in_sync": None, "restart_pending": None}
+    remote = {"commit": remote_commit, "git_version": status.get("git_version") or ""}
     in_sync: Optional[bool] = (local["commit"] == remote_commit) if local["commit"] else None
-    return {"local": local, "remote": remote, "in_sync": in_sync}
+    restart_pending: Optional[bool] = (
+        (running != checked_out) if (running and checked_out) else None)
+    return {"local": local, "remote": remote, "in_sync": in_sync,
+            "restart_pending": restart_pending}
 
 
 class ClientUpdateMixin:

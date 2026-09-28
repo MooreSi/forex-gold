@@ -125,3 +125,16 @@ def test_the_short_expiry_follows_the_tunable(templates):
         assert _run() == 1
     finally:
         ep.set_params({"placeholder_single_no_fill_expiry_s": 300})
+
+
+def test_a_single_template_saved_with_the_default_pendings_is_still_single(fresh_db):
+    """`pendings` defaults to 1 on a new template, and in single mode nothing
+    reads it: the EA reads tpl_pendings only inside HandleOpenTemplateGrid,
+    which runs only when tpl_mode == "grid" (ForexTraderBridge.mq5). Requiring
+    pendings == 0 as well kept every single-mode template made with the default
+    on the 24h expiry -- the two VPS placeholders were still open hours after
+    the 5-minute rule shipped."""
+    ea_templates.save_ea_template(SINGLE, {"mode": "single", "anchors": 1, "pendings": 1})
+    _insert(SINGLE, age_s=repair.placeholder_single_no_fill_expiry_secs() + 60)
+    assert _run() == 1
+    assert tuple(_status()) == ("closed", "no_fill_expired")

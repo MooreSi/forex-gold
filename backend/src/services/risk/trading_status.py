@@ -128,8 +128,10 @@ def _as_the_vps_reports_it(view: dict) -> dict:
     if not isinstance(remote, dict) or not remote.get("state"):
         return {**_unknown(
             "VPS Status Unknown",
-            "The VPS has not reported its trading status. It sends it from "
-            "this version on; update it if this persists.",
+            "The VPS has not reported its trading status, so it is running "
+            "older code. If it is already on this version, it pulled the "
+            "update without restarting: restart it (Settings > Remote). "
+            "Otherwise update it.",
         ), "node": "vps"}
     label = str(remote.get("label") or "")
     until = remote.get("until")

@@ -154,6 +154,9 @@ class TelemetryMixin:
             "trading_status": await _trading_status(),
             **_get_resource_usage(),
             **_update_sync.heartbeat_fields(),   # commit + git version (2026-09-27)
+            # The commit this process booted on, which `commit` (read from
+            # disk) is not once an update has pulled without a restart.
+            "running_commit": _update_sync.running_commit(),
         }
 
     async def _heartbeat_loop(self) -> None:

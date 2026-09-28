@@ -102,12 +102,11 @@ export function AppHeader() {
         <PowerControl />
         {/* Only on the licence-issuer machine, and only when the console
             actually mounted -- useAdminConsole probes the route rather than
-            reading a flag, so the button cannot appear pointing at a 404. */}
+            reading a flag, so the button cannot appear pointing at a 404.
+            Same tab: the console links back to "/" (owner, 2026-09-28). */}
         {adminConsole.available ? (
           <a
             href="/admin/"
-            target="_blank"
-            rel="noreferrer"
             aria-label="Licence admin"
             title={
               adminConsole.canSign

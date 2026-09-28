@@ -313,3 +313,25 @@ describe("pausing and resuming, from the one control", () => {
     expect(writes()[0][0]).toBe("/api/trading/resume-all");
   });
 });
+
+describe("the licence admin button", () => {
+  /**
+   * Owner, 2026-09-28: the console should be reached and left in the same
+   * tab. It opened in a new one, and the console had no way back, so every
+   * visit left a stray tab. The console now carries a Dashboard link to "/".
+   */
+  it("opens the console in this tab, not a new one", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+      ok: true, status: 200,
+      json: async () =>
+        String(url).includes("/api/admin/status")
+          ? { available: true, can_sign: true }
+          : String(url).includes("status-badge") ? badge : body,
+    })));
+    renderHeader();
+
+    const link = await screen.findByRole("link", { name: "Licence admin" });
+    expect(link).toHaveAttribute("href", "/admin/");
+    expect(link).not.toHaveAttribute("target");
+  });
+});

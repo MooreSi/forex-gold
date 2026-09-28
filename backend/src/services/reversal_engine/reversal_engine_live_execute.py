@@ -578,6 +578,44 @@ class _LiveExecuteMixin:
         price = entry_high if direction == "BUY" else entry_low
 
         tps = {n: float(sig_row[f"tp{n}"]) for n in range(1, 9) if sig_row.get(f"tp{n}") is not None}
+
+        # A single-mode EA Template runs on the template's own rules here too
+        # (2026-09-28, live ticket 2103677613). This order went out with the
+        # RE signal's 8-level ladder -- four TPs below a BUY's fill -- a
+        # 103-pip stop against the template's 50, and no template on the
+        # wire, so the EA ran none of its partials, breakeven or trail. Same
+        # treatment as the Limit Runner path (limit-orders/020): stop and
+        # ladder measured from the RESTING price, where a limit fills, and
+        # the lot sized from that stop. Grid templates never get here (see
+        # the hand-back above).
+        _template = None
+        from backend.src.services.broker import ea_templates as _et
+        if _et.is_template_override(strategy):
+            _template = _et.get_ea_template(_et.template_name_from_override(strategy))
+        if _template is not None:
+            from backend.src.services.trading import template_levels as _tl
+            from backend.src.services.trading.open_trade import resolve_template_tps
+            from backend.src.services.trading.close_trade import get_trading_balance
+            from backend.src.services.trading.fees_sizing import suggest_lot_size
+            _tpl_tps, _, _ = resolve_template_tps(
+                _template, direction, _tl.PriceRef(price),
+                [tps.get(n) for n in range(1, 9)], "Reversal Engine")
+            if _tpl_tps:
+                tps = {int(k): float(v) for k, v in _tpl_tps.items()}
+            _tpl_sl = _tl.template_sl_at(_template, direction, price)
+            if _tpl_sl is not None:
+                stop_loss = _tpl_sl
+            # Same default resolve_open_trade_params used for this signal.
+            _rs = await db_module.to_db_thread(db_module.get_risk_settings)
+            _balance = await get_trading_balance(self._bridge, 1000.0)
+            lot_size = lot_sizing.template_lot(
+                _rs, _template, price, stop_loss, _balance, suggest_lot_size).lot
+            try:
+                lot_sizing.refuse_unplaceable(lot_size, _rs)
+            except lot_sizing.UnplaceableLot as exc:
+                re_db.update_live_exec(sig["id"], status=f"limit_order_skip:{exc}")
+                return True
+
         if strategy in _EA_LADDER_PCTS and tps:
             _table = _EA_LADDER_PCTS[strategy]
             pcts = _table.get(len(tps), _table[max(_table)])
@@ -604,6 +642,7 @@ class _LiveExecuteMixin:
             ack = await _ea.place_pending_order(
                 trade_id, direction, price, lot_size, stop_loss, tps, pcts, be_at_pos, strategy,
                 expire_minutes=60.0, close_full_on_last=True, trail_mode=trail_mode,
+                template=_template,
             )
         except Exception as exc:
             re_db.restore_vantage_signal_pending(vantage_sig_id)

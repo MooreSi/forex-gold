@@ -48,7 +48,7 @@ export function BrainCard() {
         </Button>
       )}
       footnote="Every entry decision the app records, and the gate that made it. Read-only.">
-      <div className="p-3">{view(false)}</div>
+      {view(false)}
     </DashCard>
   );
 }

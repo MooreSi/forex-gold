@@ -84,8 +84,8 @@ export function useDashboardController() {
   // The open positions, from the TRADING tab's key rather than the chart's.
   // `/api/chart/trades` exists to draw markers and answers `pnl: null` for
   // every row; `/api/trading/trades` carries the broker's running profit and
-  // the `untracked` flag. The chart card still reads the chart's copy, which
-  // is what it is for.
+  // the `untracked` flag. Since 2026-09-28 the chart reads this same key too,
+  // so the two are one request.
   const positions = usePoll<Trade[]>(
     "trading/trades",
     useCallback(() => api.get<Trade[]>("/api/trading/trades"), []),
@@ -157,7 +157,7 @@ export function useDashboardController() {
     signals: asArray<Record<string, unknown>>(signals.data),
     engines: asArray<EnginesState["engines"][number]>(engines.data?.engines),
     markets: asObject(schedule.data?.markets),
-    /** For the chart's markers. No running profit on these rows. */
+    /** For the chart's markers. The same list as `positions`, one request. */
     chartTrades: asArray<Trade>(chart.trades.data),
     /** For the positions card. These carry the broker's P&L. */
     positions: asArray<Trade>(positions.data),

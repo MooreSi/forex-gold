@@ -70,7 +70,7 @@ export function EquityCard({ poll, days }: {
               vectorEffect="non-scaling-stroke"
             />
           </svg>
-          <dl className="mt-2 grid grid-cols-4 gap-x-3">
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 @md:grid-cols-4">
             <Reading label="Realised" value={formatMoney(net)} tone={pnlColour(net)} />
             <Reading label="Best" value={formatMoney(data.curve?.peak ?? null)} />
             <Reading label="Worst DD"

@@ -52,19 +52,21 @@ export function FillCostView({ report }: { report: FillCostReport | null | undef
   }
   const groups = asArray<FillCostGroup>(report.by_strategy);
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Figure label="Round trip (median)" value={pts(report.median_cost_pts)}
-          hint={`p75 ${pts(report.p75_cost_pts)}, p90 ${pts(report.p90_cost_pts)}`} />
-        <Figure label="Slippage (median)" value={pts(report.median_slippage_pts)} />
-        <Figure label="Slipped against us" value={pct(report.adverse_share)}
-          hint={`In our favour: ${pct(report.favourable_share)}`} />
-        <Figure label="Spread (median)" value={pts(report.median_spread_pts)} />
+    <div className="gap-6 space-y-2 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] lg:space-y-0">
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Figure label="Round trip (median)" value={pts(report.median_cost_pts)}
+            hint={`p75 ${pts(report.p75_cost_pts)}, p90 ${pts(report.p90_cost_pts)}`} />
+          <Figure label="Slippage (median)" value={pts(report.median_slippage_pts)} />
+          <Figure label="Slipped against us" value={pct(report.adverse_share)}
+            hint={`In our favour: ${pct(report.favourable_share)}`} />
+          <Figure label="Spread (median)" value={pts(report.median_spread_pts)} />
+        </div>
+        <p data-testid="fill-cost-summary" className="text-[11px] text-ink-3">
+          p90 round trip {pts(report.p90_cost_pts)} · median {pct(report.median_cost_r)} of the stop ·{" "}
+          {report.n} fills{report.unmeasured ? `, ${report.unmeasured} not measurable` : ""}
+        </p>
       </div>
-      <p data-testid="fill-cost-summary" className="text-[11px] text-ink-3">
-        p90 round trip {pts(report.p90_cost_pts)} · median {pct(report.median_cost_r)} of the stop ·{" "}
-        {report.n} fills{report.unmeasured ? `, ${report.unmeasured} not measurable` : ""}
-      </p>
       {groups.length > 0 && (
         <table className="w-full text-[11px]">
           <thead>
@@ -83,7 +85,17 @@ export function FillCostView({ report }: { report: FillCostReport | null | undef
                 </td>
                 <td className="num py-0.5 text-ink-2">{g.n}</td>
                 <td className="num py-0.5 text-ink-2">{pts(g.median_cost_pts)}</td>
-                <td className="num py-0.5 text-ink-2">{pct(g.adverse_share)}</td>
+                <td className="py-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="num w-9 text-ink-2">{pct(g.adverse_share)}</span>
+                    {g.adverse_share != null && (
+                      <span aria-hidden className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-3">
+                        <span className={g.adverse_share > 0.5 ? "block h-full bg-warning" : "block h-full bg-profit"}
+                          style={{ width: `${Math.round(g.adverse_share * 100)}%` }} />
+                      </span>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -102,11 +114,9 @@ export function FillCostCard() {
   return (
     <DashCard title="Fill cost" icon="activity" badge="14 days"
       footnote="Measured per closed trade against the price asked for. Positive slippage is against us.">
-      <div className="p-3">
-        {poll.error && !poll.data
-          ? <p className="text-xs text-loss">Could not read fill costs.</p>
-          : <FillCostView report={poll.data} />}
-      </div>
+      {poll.error && !poll.data
+        ? <p className="text-xs text-loss">Could not read fill costs.</p>
+        : <FillCostView report={poll.data} />}
     </DashCard>
   );
 }

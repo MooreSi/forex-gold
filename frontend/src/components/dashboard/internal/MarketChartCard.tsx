@@ -41,7 +41,7 @@ export function MarketChartCard({
     <DashCard
       title="XAUUSD"
       icon="candlestick"
-      className="min-h-[22rem]"
+      className="min-h-[24rem]"
       actions={
         <div className="flex items-center gap-0.5 rounded bg-surface-2 p-0.5">
           {TIMEFRAMES.map((tf) => (
@@ -63,7 +63,10 @@ export function MarketChartCard({
       }
       footnote="Open positions are drawn on the chart. The Chart tab has the full toolbar."
     >
-      <div className="h-[18rem]">
+      {/* Absolutely filled so the chart grows with the row beside it
+          instead of leaving a gap under a fixed-height canvas. */}
+      <div className="relative min-h-[18rem] flex-1">
+        <div className="absolute inset-0">
         {candles.length === 0 ? (
           <EmptyState
             title={error ? "Could not load candles" : "Waiting for candles"}
@@ -74,6 +77,7 @@ export function MarketChartCard({
         ) : (
           <CandleChart candles={candles} overlays={overlays} tick={tick} trades={trades} />
         )}
+        </div>
       </div>
     </DashCard>
   );

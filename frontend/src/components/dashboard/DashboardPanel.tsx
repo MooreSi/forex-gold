@@ -48,50 +48,74 @@ export function DashboardPanel() {
         ? `live · updated ${formatClock(updatedAt / 1000)}`
         : "waiting for the first read"}
     >
-      <div className="space-y-3">
-        <PriceHeroCard
-          tick={header?.tick ?? null}
-          header={header}
-          daily={asArray<Candle>(c.daily.data)}
-        />
+      {/* Rows, not two free-running columns: each row's cards share a
+          height, so the screen ends level instead of one column trailing a
+          long way below the other. Read top to bottom it goes price, what
+          is open, how it has gone, why the app did what it did, context. */}
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+        <div className="xl:col-span-12">
+          <PriceHeroCard
+            tick={header?.tick ?? null}
+            header={header}
+            daily={asArray<Candle>(c.daily.data)}
+          />
+        </div>
 
-        <BrainCard />
-
-        <div className="grid gap-3 xl:grid-cols-3">
-          <div className="space-y-3 xl:col-span-2">
-            <MarketChartCard
-              candles={asArray<Candle>(c.chart.candles.data)}
-              overlays={c.chart.overlays.data}
-              tick={header?.tick ?? null}
-              trades={c.chartTrades}
-              timeframe={c.chart.timeframe}
-              onTimeframe={c.chart.setTimeframe}
-              error={c.chart.candles.error}
-            />
-            <div className="grid gap-3 md:grid-cols-2">
-              <PerformanceCard performance={c.performance} days={DASHBOARD_DAYS} />
-              <EquityCard poll={c.closed} days={DASHBOARD_DAYS} />
-            </div>
-            <MarketIntelligenceCard
-              setforget={c.setforget.data}
-              news={c.news.data}
-              markets={c.markets}
-            />
-          </div>
-
-          <div className="space-y-3">
-            <OpenPositionsCard trades={c.positions} />
+        <div className="xl:col-span-8">
+          <MarketChartCard
+            candles={asArray<Candle>(c.chart.candles.data)}
+            overlays={c.chart.overlays.data}
+            tick={header?.tick ?? null}
+            trades={c.chartTrades}
+            timeframe={c.chart.timeframe}
+            onTimeframe={c.chart.setTimeframe}
+            error={c.chart.candles.error}
+          />
+        </div>
+        <div className="flex flex-col gap-3 xl:col-span-4">
+          <div><OpenPositionsCard trades={c.positions} /></div>
+          <div><AutomationCard engines={c.engines} /></div>
+          <div className="flex-1">
             <SignalFeedCard signals={c.signals} />
-            <RiskExecutionCard risk={c.risk.data ?? {}} header={header} />
-            <FillCostCard />
-            <GexCard />
-            <AiInsightsCard
-              setforget={c.setforget.data}
-              analysis={research.analysis}
-              savedAt={research.savedAt}
-            />
-            <AutomationCard engines={c.engines} />
           </div>
+        </div>
+
+        {/* Risk & execution gets the widest slot: four limits and three
+            connection states do not fit a third of a laptop screen. */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:col-span-12 xl:grid-cols-12">
+          <div className="xl:col-span-4">
+            <PerformanceCard performance={c.performance} days={DASHBOARD_DAYS} />
+          </div>
+          <div className="xl:col-span-3">
+            <EquityCard poll={c.closed} days={DASHBOARD_DAYS} />
+          </div>
+          <div className="md:col-span-2 xl:col-span-5">
+            <RiskExecutionCard risk={c.risk.data ?? {}} header={header} />
+          </div>
+        </div>
+
+        <div className="xl:col-span-12">
+          <BrainCard />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:col-span-12 xl:grid-cols-3">
+          <MarketIntelligenceCard
+            setforget={c.setforget.data}
+            news={c.news.data}
+            markets={c.markets}
+          />
+          <AiInsightsCard
+            setforget={c.setforget.data}
+            analysis={research.analysis}
+            savedAt={research.savedAt}
+          />
+          <div className="md:col-span-2 xl:col-span-1">
+            <GexCard />
+          </div>
+        </div>
+
+        <div className="xl:col-span-12">
+          <FillCostCard />
         </div>
       </div>
     </PanelShell>

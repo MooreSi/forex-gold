@@ -1,5 +1,4 @@
 import type { Trade } from "@/api/types";
-import { EmptyState } from "@/components/shared/EmptyState";
 import {
   formatLots, formatPrice, formatSignedMoney, pnlColour,
 } from "@/components/shared/format";
@@ -43,20 +42,19 @@ export function OpenPositionsCard({ trades }: { trades: Trade[] }) {
           {formatSignedMoney(total)}
         </span>
       ) : null}
-      footnote="Running profit is the broker's own figure. Close a position from the Trading tab."
+      footnote="Broker's running profit. Close from the Trading tab."
     >
       {trades.length === 0 ? (
-        <EmptyState
-          title="Nothing open"
-          hint="Positions opened by an engine, a channel or by hand appear here."
-        />
+        // One line, not a centred empty panel: this card sits above the
+        // engines and the feed and should cost as little height as it can.
+        <p className="py-1 text-[11px] text-ink-3">Nothing open.</p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="max-h-36 space-y-1 overflow-y-auto pr-1">
           {trades.slice(0, SHOWN).map((t, i) => (
             <li
               key={String(t.id ?? t.mt5_ticket ?? i)}
               className="flex items-center justify-between gap-2 rounded bg-surface-2
-                         px-2 py-1.5"
+                         px-2 py-1"
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className={cn(

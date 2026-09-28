@@ -50,58 +50,62 @@ export function RiskExecutionCard({ risk, header }: RiskExecutionCardProps) {
           </Pill>}
       footnote="Stored limits, as the engines read them. Change them on the Trading tab's Risk section."
     >
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
-        <Reading
-          label="Risk / trade"
-          value={formatPercent(num(risk, "risk_per_trade_pct"))}
-          hint="Percentage of the account risked on each entry."
-        />
-        <Reading
-          label="Daily loss cap"
-          value={formatPercent(num(risk, "max_daily_loss_pct"))}
-          hint="Measured from the day's opening balance."
-        />
-        <Reading
-          label="Max open"
-          value={num(risk, "max_open_trades") ?? "—"}
-          hint="New entries are refused once this many positions are open."
-        />
-        <Reading
-          label="Max lot"
-          value={num(risk, "max_lot_size") ?? "—"}
-          hint="A hard ceiling applied after sizing, whatever the risk maths asks for."
-        />
-      </dl>
+      {/* Scrolls rather than spilling past the card if a long halt reason or
+          a narrow column ever makes it overflow (owner, 2026-09-28). */}
+      <div className="max-h-72 min-w-0 overflow-auto">
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2 @md:grid-cols-4">
+          <Reading
+            label="Risk / trade"
+            value={formatPercent(num(risk, "risk_per_trade_pct"))}
+            hint="Percentage of the account risked on each entry."
+          />
+          <Reading
+            label="Daily loss cap"
+            value={formatPercent(num(risk, "max_daily_loss_pct"))}
+            hint="Measured from the day's opening balance."
+          />
+          <Reading
+            label="Max open"
+            value={num(risk, "max_open_trades") ?? "—"}
+            hint="New entries are refused once this many positions are open."
+          />
+          <Reading
+            label="Max lot"
+            value={num(risk, "max_lot_size") ?? "—"}
+            hint="A hard ceiling applied after sizing, whatever the risk maths asks for."
+          />
+        </dl>
 
-      <div className="mt-2.5 space-y-1 border-t border-line/70 pt-2 text-[11px]">
-        {halted && (
-          <p
-            data-testid="dash-halt"
-            className="flex items-center gap-1.5 rounded border border-loss/40
-                       bg-loss/10 px-2 py-1 text-loss"
-          >
-            <TriangleAlert size={12} className="shrink-0" aria-hidden />
-            <span className="min-w-0">
-              Trading is halted{pause?.reason ? `: ${pause.reason}` : ""}
-              {pause?.source ? ` (${pause.source})` : ""}
-            </span>
-          </p>
-        )}
-        <State
-          ok={connected}
-          label="MT5 bridge"
-          value={connected ? "connected" : "not answering"}
-        />
-        <State
-          ok={ea ? !ea.stale : false}
-          label="Expert Advisor"
-          value={ea ? ea.text : "no report"}
-        />
-        <State
-          ok
-          label="Trading on"
-          value={header?.active_trader ?? "—"}
-        />
+        <div className="mt-2.5 space-y-1 border-t border-line/70 pt-2 text-[11px]">
+          {halted && (
+            <p
+              data-testid="dash-halt"
+              className="flex items-center gap-1.5 rounded border border-loss/40
+                         bg-loss/10 px-2 py-1 text-loss"
+            >
+              <TriangleAlert size={12} className="shrink-0" aria-hidden />
+              <span className="min-w-0">
+                Trading is halted{pause?.reason ? `: ${pause.reason}` : ""}
+                {pause?.source ? ` (${pause.source})` : ""}
+              </span>
+            </p>
+          )}
+          <State
+            ok={connected}
+            label="MT5 bridge"
+            value={connected ? "connected" : "not answering"}
+          />
+          <State
+            ok={ea ? !ea.stale : false}
+            label="Expert Advisor"
+            value={ea ? ea.text : "no report"}
+          />
+          <State
+            ok
+            label="Trading on"
+            value={header?.active_trader ?? "—"}
+          />
+        </div>
       </div>
     </DashCard>
   );

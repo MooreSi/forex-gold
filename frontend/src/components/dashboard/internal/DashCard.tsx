@@ -7,7 +7,9 @@ interface DashCardProps {
   /** A name from `shared/icons.ts`. An unknown name renders no icon rather
    *  than a stand-in that would mean something else. */
   icon?: string;
-  /** Small, dim, right of the title. A state or a window, not a sentence. */
+  /** Small, dim, right of the title. A state or a window, not a sentence.
+   *  A plain string is drawn as a neutral Pill, so every card's badge
+   *  matches instead of some rendering as loose text at title size. */
   badge?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
@@ -37,7 +39,7 @@ export function DashCard({
   return (
     <section
       className={cn(
-        "flex min-w-0 flex-col rounded-lg border border-line bg-surface-1",
+        "flex h-full min-w-0 flex-col rounded-lg border border-line bg-surface-1",
         "shadow-[0_1px_2px_rgba(0,0,0,0.18)]",
         className,
       )}
@@ -55,11 +57,13 @@ export function DashCard({
             </span>
           )}
           <h3 className="truncate text-xs font-semibold text-ink-1">{title}</h3>
-          {badge}
+          {typeof badge === "string" ? <Pill>{badge}</Pill> : badge}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
       </header>
-      <div className="min-w-0 flex-1 px-3 py-2.5">{children}</div>
+      {/* A size container: a card's grids follow the CARD's width, not the
+          window's, so a reading row never truncates in a narrow column. */}
+      <div className="@container flex min-w-0 flex-1 flex-col px-3 py-2.5">{children}</div>
       {footnote && (
         <p className="border-t border-line/70 px-3 py-1.5 text-[10px] text-ink-3">
           {footnote}

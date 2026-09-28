@@ -46,7 +46,7 @@ export function PerformanceCard({ performance, days }: {
             {formatSignedMoney(pnl)}
           </p>
           <p className="mb-2 text-[10px] text-ink-3">net profit and loss</p>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 @md:grid-cols-4">
             <Reading label="Closed" value={num(performance, "closed_trades") ?? "—"} />
             <Reading label="Win rate"
               value={formatPercent(num(performance, "win_rate_pct"))} />

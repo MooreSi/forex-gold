@@ -104,11 +104,9 @@ export function GexCard() {
   return (
     <DashCard title="GEX (GLD options)" icon="target" badge="daily · display only"
       footnote="Assumes dealers are long calls and short puts. GLD is a small slice of gold options. Nothing trades on this.">
-      <div className="p-3">
-        {poll.error && !poll.data
-          ? <p className="text-xs text-loss">Could not read GEX.</p>
-          : <GexView report={poll.data} />}
-      </div>
+      {poll.error && !poll.data
+        ? <p className="text-xs text-loss">Could not read GEX.</p>
+        : <GexView report={poll.data} />}
     </DashCard>
   );
 }

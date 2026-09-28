@@ -514,3 +514,20 @@ commit is **unknown, never "out of sync"**. Controllers:
 `vps_update_controller.py` (its own file: `sync_controller.py` sits at the
 200-line controller ceiling). Pinned by `tests/core/test_update_vps_over_sync.py`,
 `tests/api/routers/test_remote_update_vps.py` and `RemoteUpgradeSection.test.tsx`.
+
+## "VPS unknown" while connected: an older build, now said so (2026-09-28)
+
+The Remote tab read "VPS unknown ... (not connected, or an older version)"
+while the VPS was connected and trading. It ran bcd8c92, from before e613be5
+put `commit` in the heartbeat; the admin channel's record
+(`remote/allowed_tokens.json`, `commit_sha`) had the real commit. A connected
+VPS without a commit and no link need different fixes, so
+`_update_sync.current_version_report()` now returns `remote_reason`
+(`reported` / `older_build` / `not_connected`) and the line names the fix:
+update the VPS once from the admin console or its own Settings > Update, after
+which Upgrade VPS works from the Mac. **Nothing updates a VPS on its own**:
+"Setup & Start FOREX.bat" never pulls, so a reboot comes back on the same
+commit. The Upgrade button's timeout text said "update it once by Telegram";
+there is no Telegram update command, and it now names the two real routes.
+Pinned by `tests/core/test_version_report_says_why_unknown.py` and
+`VersionLineReason.test.tsx`.

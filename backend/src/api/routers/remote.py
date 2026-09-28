@@ -340,8 +340,8 @@ async def update_vps() -> dict:
     except asyncio.TimeoutError as exc:
         raise Refusal(
             "The VPS did not answer. It is probably on an older version that "
-            "cannot be updated from here: update it once by Telegram or on "
-            "the VPS itself.") from exc
+            "cannot be updated from here: update it once from the admin "
+            "console or its own Settings > Update.") from exc
     except Exception as exc:
         raise Refusal(f"Could not reach the VPS: {exc}") from exc
     if not reply.get("ok"):

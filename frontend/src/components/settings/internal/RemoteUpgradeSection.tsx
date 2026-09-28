@@ -12,6 +12,21 @@ export interface VersionReport {
   remote: NodeVersion | null;
   in_sync: boolean | null;
   last_update: { ok: boolean; note: string } | null;
+  /** Why `remote` is missing: "older_build", "not_connected" or "reported".
+   *  Absent from a backend older than 2026-09-28. */
+  remote_reason?: string;
+}
+
+/** What to say when the VPS's commit is unknown. The two causes need
+ *  different fixes, so they are named separately (2026-09-28). */
+function unknownRemote(reason: string | undefined): string {
+  if (reason === "older_build") {
+    return "The VPS is connected but runs an older version that does not report its commit. "
+      + "Update it once from the admin console or its own Settings > Update; "
+      + "after that Upgrade VPS works from here.";
+  }
+  if (reason === "not_connected") return "Not connected to the VPS, so its commit is unknown.";
+  return "The VPS has not reported its commit (not connected, or an older version).";
 }
 
 function short(sha: string | undefined): string {
@@ -44,7 +59,7 @@ export function VersionLine({ report }: { report: VersionReport | null | undefin
         {inSync === false && "Not in sync: the nodes run different commits."}
         {inSync === null && (remote
           ? "This machine's commit is unreadable, so sync is unknown."
-          : "The VPS has not reported its commit (not connected, or an older version).")}
+          : unknownRemote(report.remote_reason))}
       </p>
       {report.last_update && !report.last_update.ok && (
         <p role="alert" className="text-loss">Last VPS update failed: {report.last_update.note}</p>

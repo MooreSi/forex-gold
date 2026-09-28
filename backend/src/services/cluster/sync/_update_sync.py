@@ -125,5 +125,15 @@ def current_version_report() -> dict:
     cli = _client.get_instance()
     connected = cli is not None and getattr(cli, "conn_state", None) == CONN_CONNECTED
     status = (getattr(cli, "remote_status", None) or {}) if connected else {}
-    return {**version_report(status),
+    report = version_report(status)
+    # Why the VPS's commit is missing, when it is: a connected VPS whose
+    # heartbeat has no commit runs a build from before e613be5 and must be
+    # updated once by other means; no link is a different fix (2026-09-28).
+    if not connected:
+        reason = "not_connected"
+    elif report.get("remote") and report["remote"].get("commit"):
+        reason = "reported"
+    else:
+        reason = "older_build"
+    return {**report, "remote_reason": reason,
             "last_update": getattr(cli, "last_update_result", None) if cli else None}

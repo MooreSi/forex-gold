@@ -29,6 +29,7 @@ from backend.src.services.cluster.sync._mt5_accounts_sync import ServerMt5Accoun
 from backend.src.services.cluster.sync._restart_sync import ServerRestartMixin
 from backend.src.services.cluster.sync._update_sync import ServerUpdateMixin
 from backend.src.services.cluster.sync import _latency_sync
+from backend.src.services.broker import autotrading_guard
 from backend.src.utils import latency_trace as _lt
 from backend.src.services.cluster.sync.synced_settings import SYNCED_SETTINGS_KEYS
 from backend.src.services.cluster.sync.protocol import (
@@ -338,6 +339,7 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
             await ws.send(json.dumps(make(MSG_MARKET_ORDER_ACK, result=result)))
         except Exception as e:
             log.warning("[SyncServer] market_order failed: %s", e)
+            autotrading_guard.note_order_rejection(str(e))
             await ws.send(json.dumps(make(MSG_MARKET_ORDER_ACK, error=str(e))))
 
     async def _handle_signal_order(self, ws, msg: dict) -> None:
@@ -411,6 +413,7 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                 log.warning("[SyncServer] failed to schedule commentary for forwarded trade: %s", e)
         except Exception as e:
             log.warning("[SyncServer] signal_order failed: %s", e)
+            autotrading_guard.note_order_rejection(str(e))
             await ws.send(json.dumps(make(MSG_SIGNAL_ORDER_ACK, error=str(e))))
 
     async def _handle_signal_followup(self, ws, msg: dict) -> None:

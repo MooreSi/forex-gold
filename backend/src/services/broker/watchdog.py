@@ -34,6 +34,7 @@ import time
 from time import monotonic
 from typing import Any, Callable, Awaitable, Optional
 
+from backend.src.services.broker import autotrading_guard
 from backend.src.services.telegram import alerts as telegram_alerts
 
 log = logging.getLogger(__name__)
@@ -86,6 +87,11 @@ async def bridge_watchdog_check(
                     f"MT5 bridge reconnected and healthy. {at_msg}"
                 )
             )
+        else:
+            # Connected from the start is not a reconnect, so the branch above
+            # never saw AutoTrading off after a VPS reboot (2026-09-28).
+            now = now_monotonic if now_monotonic is not None else monotonic()
+            await autotrading_guard.check_while_connected(bridge, health, state, now)
         return CHECK_INTERVAL
 
     state["consecutive_fails"] += 1

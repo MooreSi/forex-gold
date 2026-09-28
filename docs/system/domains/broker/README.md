@@ -493,3 +493,30 @@ of the stop, and the six most-used strategies. Unmeasured fills are counted
 in `unmeasured`, never averaged in as free; an empty window is None, never 0.
 On the demo install at the time: 668 fills, median round trip 0.93 pts, p90
 2.23, 66% of fills slipped against us, spread 0.22.
+
+## After a VPS reboot, MT5 came back with AutoTrading off (2026-09-28)
+
+The owner's VPS went offline at 20:14 on 2026-09-27 and was restarted from the
+provider's panel. From the first order after it returned (01:19) until
+somebody switched AutoTrading on (between 08:24 and 08:43), **every order the
+Mac forwarded was rejected by MT5** with "AutoTrading is disabled": 21 Reversal
+Engine executions and 3 pending Telegram signals abandoned after 3 attempts
+each. The rejections reached the Mac only as log warnings.
+
+**Why the watchdog missed it:** it re-enabled AutoTrading only on a
+disconnected -> connected transition, and a bridge that is connected from its
+first check (180 s after start) never makes one.
+
+**Fixed the same day (owner: "make it auto-enable AutoTrading and alert"):**
+`broker/autotrading_guard.py`. On every healthy watchdog check,
+`trade_allowed: False` -> `enable_autotrading` (at most every 300 s; it reads
+`trade_allowed` before each click, so a terminal already on is never toggled
+off) and one Telegram alert per episode saying whether it worked.
+`trade_allowed: None` (terminal could not be asked) is never acted on. The
+VPS's forwarded-order handlers (`_handle_signal_order`,
+`_handle_market_order`) pass MT5's rejection to `note_order_rejection`, which
+alerts at most every 600 s. It runs on every node, so a Mac's own MT5 is kept
+on too. Nothing changes what an order does; a rejected order is still
+rejected. Pinned by `tests/broker/test_autotrading_guard.py`. **Not yet seen
+switching a real terminal back on**: the click itself is the existing
+`_try_enable_autotrading`, used by `/restartbridge` and the reconnect path.

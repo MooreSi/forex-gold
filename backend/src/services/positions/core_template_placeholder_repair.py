@@ -65,6 +65,37 @@ def placeholder_no_fill_expiry_secs() -> int:
     return expert_params.get("placeholder_no_fill_expiry_s")
 
 
+def placeholder_single_no_fill_expiry_secs() -> int:
+    """The same, for a single-mode template (owner, 2026-09-28): one market
+    order and no resting legs, so minutes rather than a day. Settings >
+    Expert Tunables."""
+    from backend.src.services.risk import expert_params
+    return expert_params.get("placeholder_single_no_fill_expiry_s")
+
+
+def _expiry_for(row: dict) -> int:
+    """Which expiry applies to this placeholder.
+
+    The short one only when this node can see the template AND it is single
+    mode with no pendings. A grid, a template that cannot be read, or a row
+    that is not a template at all keeps the long expiry: a resting leg that
+    was about to fill must never be written off because its mode was unknown.
+    """
+    try:
+        from backend.src.services.broker import ea_templates
+        strategy = row.get("strategy") or ""
+        if ea_templates.is_template_override(strategy):
+            tpl = ea_templates.get_ea_template(
+                ea_templates.template_name_from_override(strategy))
+            if (tpl is not None and tpl.get("mode") == "single"
+                    and not int(tpl.get("pendings") or 0)):
+                return placeholder_single_no_fill_expiry_secs()
+    except Exception as e:
+        log.debug("[TemplateRepair] template mode unreadable for %s: %s",
+                  str(row.get("trade_id"))[:8], e)
+    return placeholder_no_fill_expiry_secs()
+
+
 async def repair_template_placeholders(bridge: Any) -> int:
     """Adopt or close every open $0-entry placeholder row whose broker leg can
     be identified. Returns how many rows were repaired. Never raises."""
@@ -151,7 +182,7 @@ async def _expire_never_filled(row: dict, bridge: Any) -> bool:
 
     trade_id = row["trade_id"]
     age_s = time.time() - float(row.get("open_time") or 0)
-    if age_s < placeholder_no_fill_expiry_secs():
+    if age_s < _expiry_for(row):
         return False
 
     try:
@@ -171,11 +202,17 @@ async def _expire_never_filled(row: dict, bridge: Any) -> bool:
     asyncio.create_task(telegram_alerts.send_message(
         f"EA Template placeholder written off — {row['direction']} "
         f"{row.get('tg_source', '')} never filled and the broker has no record "
-        f"of it after {age_s / 3600.0:.0f}h. No position was ever opened and "
+        f"of it after {_age_text(age_s)}. No position was ever opened and "
         f"there is no P&L. It was holding one of your open-trade slots.",
         trade_id, "template_placeholder_no_fill_expired",
     ))
     return True
+
+
+def _age_text(age_s: float) -> str:
+    """"7m" or "26h": the single-mode expiry is minutes, and "0h" says
+    nothing."""
+    return f"{age_s / 60.0:.0f}m" if age_s < 3600 else f"{age_s / 3600.0:.0f}h"
 
 
 async def _adopt_live_position(row: dict, pos: dict) -> bool:

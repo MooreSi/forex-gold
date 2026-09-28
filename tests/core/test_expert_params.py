@@ -67,6 +67,9 @@ EXPECTED_DEFAULTS = {
     "max_signal_age_s":        240,    # scan_staleness._MAX_SIGNAL_AGE_SECS
     "duplicate_window_s":      900,    # scan_parse_classify._RECENT_DUP_WINDOW
     "placeholder_no_fill_expiry_s": 86400,
+    # New 2026-09-28, owner's decision rather than a replaced constant: a
+    # single-mode template placeholder expires in minutes, not a day.
+    "placeholder_single_no_fill_expiry_s": 300,
     "mt5_sync_miss_threshold": 2,      # runtime.MT5_SYNC_MISS_THRESHOLD
 }
 

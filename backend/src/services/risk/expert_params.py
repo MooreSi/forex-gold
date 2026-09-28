@@ -161,6 +161,21 @@ EXPERT_PARAMS: list[ExpertParam] = [
              "'too old to see'.",
     ),
     ExpertParam(
+        key="placeholder_single_no_fill_expiry_s",
+        label="Unfilled placeholder expiry (single-mode template)",
+        default=300, min=120, max=86400, unit="s",
+        domain="Broker reconciliation", integer=True,
+        desc="The same write-off for a SINGLE-mode EA Template, which opens "
+             "one market order and stages no resting legs -- so once the "
+             "broker has no position and no deal for it, nothing can still "
+             "be coming. Grid templates keep the longer expiry above. Owner "
+             "decision 2026-09-28, after two dead placeholders held two of "
+             "three trade slots on the VPS for hours. Set too low, a fill "
+             "event that is merely slow is written off before it lands (the "
+             "EA's own ack can take up to 60s); too high, a dead row blocks "
+             "new trades for that long.",
+    ),
+    ExpertParam(
         key="mt5_sync_miss_threshold", label="Broker-close miss threshold",
         default=2, min=1, max=20, unit="cycles", domain="Broker reconciliation",
         integer=True,
@@ -344,6 +359,16 @@ def _forward_over_sync() -> None:
     """Send the full snapshot to the paired node, whichever role this
     process has. No-op and near-zero cost when sync is not configured.
     Mirrors strategy_params._forward_strategy_params_over_sync."""
+    # The VPS end first: see cluster/sync/role.py for why.
+    try:
+        from backend.src.services.cluster.sync.role import listening_server
+        srv = listening_server()
+        if srv is not None:
+            _schedule_coro(srv.broadcast_expert_params())
+            return
+    except Exception as exc:
+        log.debug("[Sync] expert params forward (server) failed: %s", exc)
+
     try:
         from backend.src.services.cluster.sync import client as _sync_cli_mod
         cli = _sync_cli_mod.get_instance()
@@ -352,11 +377,3 @@ def _forward_over_sync() -> None:
             return
     except Exception as exc:
         log.debug("[Sync] expert params forward (client) failed: %s", exc)
-
-    try:
-        from backend.src.services.cluster.sync import server as _sync_srv_mod
-        srv = _sync_srv_mod.get_instance()
-        if srv is not None and hasattr(srv, "broadcast_expert_params"):
-            _schedule_coro(srv.broadcast_expert_params())
-    except Exception as exc:
-        log.debug("[Sync] expert params forward (server) failed: %s", exc)

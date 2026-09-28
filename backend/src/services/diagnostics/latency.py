@@ -153,21 +153,23 @@ def _result(name: str, ok: bool, ms: Optional[float], detail: str = "", **extra)
 
 
 async def _timed(name: str, coro_fn, judge) -> dict:
-    t0 = time.monotonic()
+    # perf_counter: Windows' 3.11 monotonic ticks every ~15.6 ms and read
+    # a 10 ms round trip as 0 (tests/utils/test_latency_clock_resolution.py).
+    t0 = time.perf_counter()
     try:
         value = await coro_fn()
     except Exception as e:
         return _result(name, False, None, f"{type(e).__name__}: {e}")
-    ms = (time.monotonic() - t0) * 1000.0
+    ms = (time.perf_counter() - t0) * 1000.0
     ok, detail = judge(value)
     return _result(name, ok, ms, detail)
 
 
 async def _loop_lag() -> dict:
     """How late a 50 ms timer fires: time the event loop spent busy elsewhere."""
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     await asyncio.sleep(0.05)
-    return _result("loop", True, max(0.0, (time.monotonic() - t0) * 1000.0 - 50.0))
+    return _result("loop", True, max(0.0, (time.perf_counter() - t0) * 1000.0 - 50.0))
 
 
 async def run_probes(engine: Any, reader: Any) -> dict:

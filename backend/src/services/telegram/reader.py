@@ -227,13 +227,15 @@ class TelegramReader(_AuthMixin, _ListenerMixin):
         if not self._client or self._auth_state != AUTH_CONNECTED:
             return {"ok": False, "ms": None, "detail": "Telegram not connected"}
         from telethon import functions
-        t0 = time.monotonic()
+        # perf_counter: Windows' 3.11 monotonic ticks every ~15.6 ms and read
+        # a 10 ms round trip as 0 (tests/utils/test_latency_clock_resolution.py).
+        t0 = time.perf_counter()
         try:
             nearest = await asyncio.wait_for(
                 self._client(functions.help.GetNearestDcRequest()), timeout)
         except Exception as e:
             return {"ok": False, "ms": None, "detail": f"{type(e).__name__}: {e}"}
-        return {"ok": True, "ms": round((time.monotonic() - t0) * 1000.0, 1), "detail": "",
+        return {"ok": True, "ms": round((time.perf_counter() - t0) * 1000.0, 1), "detail": "",
                 "session_dc": getattr(nearest, "this_dc", None),
                 "nearest_dc": getattr(nearest, "nearest_dc", None)}
 

@@ -426,3 +426,24 @@ class TestPlacingAMarketOrder:
             await rc.place_market_order(engine, direction="BUY")
 
         assert "no stop loss" in str(exc.value)
+
+    async def test_a_broker_or_vps_rejection_is_a_refusal_with_its_reason(self, node):
+        """`open_trade` reports a rejection from MT5, the EA or a forwarding VPS
+        as RuntimeError. Unconverted, the dashboard showed "The server hit an
+        unexpected error" for "Max open trades reached (3)" (2026-09-28)."""
+        engine = _Runtime(raises=RuntimeError(
+            "VPS rejected forwarded trade: Max open trades reached (3)"))
+
+        with pytest.raises(rc.RemoteControlFailed) as exc:
+            await rc.place_market_order(engine, direction="BUY", stop_loss=2400.0)
+
+        assert "Max open trades reached (3)" in str(exc.value)
+
+    async def test_a_send_with_no_answer_is_not_reported_as_a_refusal(self, node):
+        """A lost broker response may have filled. Calling it a refusal would
+        tell the operator nothing was placed when a position may be open."""
+        from backend.src.services.trading.send_dedup import SendOutcomeUnknown
+        engine = _Runtime(raises=SendOutcomeUnknown("broker gave no usable answer"))
+
+        with pytest.raises(SendOutcomeUnknown):
+            await rc.place_market_order(engine, direction="BUY", stop_loss=2400.0)

@@ -45,6 +45,7 @@ from backend.src.services.cluster.sync import client as _client
 from backend.src.services.cluster.sync import remote_stats_facade as _facade
 from backend.src.services.engines import registry as _engines
 from backend.src.services.risk import settings as _risk
+from backend.src.services.trading.send_dedup import SendOutcomeUnknown
 
 log = logging.getLogger(__name__)
 
@@ -179,9 +180,21 @@ async def place_market_order(engine: Any, **order: Any) -> dict:
     A local ValueError is the engine saying no with a reason the operator needs
     to read -- "DPM is disabled and no stop loss was given" -- so it is left to
     propagate rather than wrapped.
+
+    A local RuntimeError is a rejection from MT5, the EA or the VPS that
+    centralized generation forwards to ("Max open trades reached (3)"). It is
+    a refusal too, so it becomes one; unconverted it reached the dashboard as
+    "The server hit an unexpected error" (2026-09-28). SendOutcomeUnknown is
+    the exception: the order may have filled, so it is not called a refusal.
     """
     if not is_remote_active():
-        result = await engine.open_manual_market_order(**order)
+        try:
+            result = await engine.open_manual_market_order(**order)
+        except SendOutcomeUnknown:
+            raise
+        except RuntimeError as exc:
+            log.warning("[remote_control] market order rejected: %s", exc)
+            raise RemoteControlFailed(str(exc)) from exc
         return {**(result or {}), "where": "local"}
 
     try:

@@ -90,7 +90,10 @@ async def place_limit_order(
             lot_size=body.lot_size,
             notes=body.notes,
         )
-    except ValueError as exc:
+    # The EA's rejection (RuntimeError) and a missing EA (ConnectionError) are
+    # the limit path's refusals. TimeoutError is neither and stays a 500: the
+    # EA may have placed the order before its ack was lost.
+    except (ValueError, RuntimeError, ConnectionError) as exc:
         raise _refuse(exc) from exc
 
 

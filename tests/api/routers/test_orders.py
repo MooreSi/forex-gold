@@ -182,6 +182,25 @@ def test_a_refusal_reaches_the_client_verbatim(make_client, sentinel_engine):
     )
 
 
+@pytest.mark.parametrize("exc", [
+    RuntimeError("Limit order rejected by EA — Invalid price"),
+    ConnectionError("Limit order requires a connected, healthy EA bridge"),
+])
+def test_a_limit_order_the_ea_turns_down_is_a_refusal_with_its_reason(
+    exc, make_client, sentinel_engine,
+):
+    """The limit path reports an EA rejection as RuntimeError and a missing EA
+    as ConnectionError. Both are answers for the user, not internal errors."""
+    sentinel_engine.raises = exc
+    r = make_client().post("/api/trading/orders/limit", json={
+        "direction": "BUY", "entry_low": 2400.0, "entry_high": 2400.0,
+        "stop_loss": 2390.0, "tp1": 2420.0,
+    })
+    assert r.status_code == 409
+    assert r.json()["error"]["kind"] == "refusal"
+    assert r.json()["error"]["message"] == str(exc)
+
+
 def test_an_unexpected_error_does_not_leak_its_text_to_the_client(
     make_client, sentinel_engine,
 ):

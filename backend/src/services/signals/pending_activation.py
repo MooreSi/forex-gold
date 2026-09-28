@@ -296,10 +296,10 @@ async def try_activate_pending_signals(
         return False
 
     open_trades = get_open_trades()
-    # Plus whatever is resting at the broker or already in flight -- a
-    # resting order holds a slot (owner, 2026-09-04). Seeded once here and
-    # incremented per open below, same as before.
-    open_count  = len(open_trades) + _slots.count_slots_not_yet_open()
+    # Plus opens already in flight. Resting orders hold no slot (owner,
+    # 2026-09-28; see signal_state_repo). Seeded once here and incremented
+    # per open below, same as before.
+    open_count  = len(open_trades) + _slots.count_opens_in_flight()
     max_trades  = int(rs.get("max_open_trades", 1))
     current_strategy = rs.get("trade_strategy", STRATEGY_SCALE_OUT)
     # Directions actually released by THIS pass, for the burst hedge guard.

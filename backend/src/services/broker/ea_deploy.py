@@ -342,7 +342,7 @@ def reload_decision(*, ea_version_ok: Optional[bool], slots_in_use: int,
                       there was nothing to compare against (a packaged install
                       ships the .ex5 without the .mq5) -- unknown is not
                       evidence, and never triggers a restart.
-      slots_in_use    signal_state_repo.count_trade_slots_used: open
+      slots_in_use    signal_state_repo.count_book_at_stake: open
                       positions, orders resting at the broker, opens in
                       flight. Anything above zero defers -- a newer EA is
                       worth two minutes of nothing only when there is nothing

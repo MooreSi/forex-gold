@@ -335,9 +335,9 @@ async def process_instant_entry(
             return
 
     open_trades  = get_open_trades()
-    # Plus whatever is resting at the broker or already in flight -- a
-    # resting order holds a slot (owner, 2026-09-04).
-    open_count   = len(open_trades) + _slots.count_slots_not_yet_open()
+    # Plus opens already in flight. Resting orders hold no slot (owner,
+    # 2026-09-28; see signal_state_repo).
+    open_count   = len(open_trades) + _slots.count_opens_in_flight()
     max_trades   = int(rs.get("max_open_trades", 1))
     if open_count >= max_trades:
         log.info("[IME] Instant %s — max_trades (%d) reached, skipped", direction, max_trades)

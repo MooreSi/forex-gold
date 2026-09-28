@@ -185,6 +185,20 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
             #
             # OUTSIDE the open-trades block above on purpose: the case this
             # exists for is a resting order with nothing open yet.
+            # Max Open Trades counts live trades only (owner, 2026-09-28), so
+            # while the book is full every resting order must be off it, or
+            # one fills into a fourth live trade. Every cycle, not on the 60s
+            # timer below: a limit order can fill inside a minute.
+            try:
+                from backend.src.services.broker import ea_bridge as _ea_cap_mod
+                from backend.src.services.trading import (
+                    resting_revalidation as _rr_cap,
+                )
+                _cap_ea = _ea_cap_mod.get_instance()
+                if _cap_ea is not None:
+                    await _rr_cap.enforce_max_open_trades(_cap_ea, rs, tick=tick)
+            except Exception:
+                log.debug("Max-open-trades guard failed", exc_info=True)
             _now_rest = time.time()
             if _now_rest - ctx.state.last_resting_sweep > 60.0:
                 ctx.state.last_resting_sweep = _now_rest

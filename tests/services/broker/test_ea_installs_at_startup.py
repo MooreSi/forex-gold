@@ -9,6 +9,11 @@ rules). What is pinned here is the hand-over: the open-trade count is read on
 the event loop's own thread -- the database connection is per thread -- and a
 count that cannot be read installs nothing.
 
+The count is `count_book_at_stake` since 2026-09-28: resting orders stopped
+holding a trade slot, but an order resting at the broker is still something a
+restart would blind, so the install still waits for it. Mock target moved;
+the assertions are unchanged.
+
 Nothing here reaches MT5, a broker or MetaEditor.
 """
 from __future__ import annotations
@@ -22,7 +27,7 @@ from backend.src.services.trading import signal_state_repo
 
 def test_it_passes_the_open_trade_count_to_the_installer(monkeypatch):
     seen = []
-    monkeypatch.setattr(signal_state_repo, "count_trade_slots_used", lambda: 0)
+    monkeypatch.setattr(signal_state_repo, "count_book_at_stake", lambda: 0)
     monkeypatch.setattr(ea_deploy, "install_when_idle",
                         lambda slots: seen.append(slots()) or {"installed": True})
 
@@ -37,7 +42,7 @@ def test_a_count_that_cannot_be_read_installs_nothing(monkeypatch):
     def _boom():
         raise RuntimeError("db not ready")
 
-    monkeypatch.setattr(signal_state_repo, "count_trade_slots_used", _boom)
+    monkeypatch.setattr(signal_state_repo, "count_book_at_stake", _boom)
     monkeypatch.setattr(ea_deploy, "install_when_idle",
                         lambda slots: called.append(1) or {"installed": True})
 

@@ -408,7 +408,7 @@ async def _install_ea_at_startup() -> None:
     from backend.src.services.broker import ea_deploy
     from backend.src.services.trading import signal_state_repo
     try:
-        in_use = signal_state_repo.count_trade_slots_used()
+        in_use = signal_state_repo.count_book_at_stake()
     except Exception as e:
         log.info("[startup] EA not installed: could not check for open trades (%s)", e)
         return

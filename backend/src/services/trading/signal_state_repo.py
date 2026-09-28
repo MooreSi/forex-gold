@@ -32,65 +32,74 @@ log = logging.getLogger(__name__)
 # UPDATE's WHERE works because SQLite serialises writers, so the second claim
 # genuinely sees the first has already taken the slot.
 #
-# ── What counts as a used slot (2026-09-04) ──────────────────────────────────
-# One trade slot is held from the moment an order exists until the position it
-# becomes is closed -- whether or not it has filled yet. The owner settled that
-# on 2026-09-04, after a cap of 3 produced more than 3: "whether it is a resting
-# order or a market order the EA should manage the max number of allowable
-# trades as set within the gui". It answers the question
-# reversal_engine_repo.claim_vantage_signal_activation had been carrying since
-# 2026-08-30.
+# ── What counts as a used slot (owner, 2026-09-28) ───────────────────────────
+# A slot is a trade that is live, or is about to be: an open position, or a
+# market open in flight. A resting order holds NONE, working or withdrawn.
+# The owner's words: "max number of trades means maximum number of executed
+# trades that are live on mt5 on the active node, excluding limit orders, a
+# limit order cannot execute if there are already 3 live trades". One app
+# trade is one slot however many legs it has at MT5.
 #
-# Before it, a resting order consumed no slot at EITHER end: not when placed
-# (the Reversal Engine's claim has no cap in its WHERE; the Limit Runner path
-# creates its signal already 'pending' beside a 'working' order, which nothing
-# counted) and not when it filled (broker/repo.apply_pending_fill INSERTs an
-# `open` row directly, and the only market-order backstop lives in open_trade,
-# which that path never calls). N resting orders became N open trades over any
-# cap, with the cap never consulted.
+# This REVERSES the 2026-09-04 rule ("whether it is a resting order or a
+# market order the EA should manage the max number of allowable trades"),
+# under which a resting order held a slot from placement. What that rule
+# protected against -- N resting orders filling into N positions over the
+# cap, because apply_pending_fill inserts an open row with no cap check --
+# is now the job of resting_revalidation.enforce_max_open_trades: MT5 cannot
+# make a limit order conditional on a position count, so while the book is
+# full every resting order is withdrawn from the broker, and re-armed when a
+# slot frees. Not counting resting orders is only safe because that exists.
 #
-# The three terms are exclusive, and the NOT EXISTS is what keeps them so: the
-# Reversal Engine's pending path leaves its signal 'activating' while its own
-# order is already 'working' (it reaches 'active' only at fill, inside
-# apply_pending_fill), so counting both would charge that one order two slots
-# and halve the cap for that path alone.
+# An open row the app has not matched to a fill yet (an EA Template
+# placeholder, ticket 0) still counts: it may be a market order filling now.
 #
-# Split in two, and composed below, so the call sites that already hold their
-# own open-trades list add the missing half rather than re-deriving the whole
-# rule. Two spellings of "how full is the book" is how a gate and the message
-# beside it drift apart.
+# The in-flight term excludes a claim whose own order is resting ('working'
+# or 'withdrawn'): the Reversal Engine's pending path leaves its signal
+# 'activating' until the fill, and that is a resting order, not an open in
+# flight. Before 2026-09-28 the guard looked at 'working' only, which made a
+# withdrawn order's claim count as a slot.
+#
+# Split in two so the pre-check call sites that already hold their own
+# open-trades list add the missing half (count_opens_in_flight) rather than
+# re-deriving the whole rule. Two spellings of "how full is the book" is how
+# a gate and the message beside it drift apart.
 _OPEN_SLOTS_SQL = """
         (SELECT COUNT(*) FROM vantage_simulated_trades WHERE status='open')
 """
-_NOT_YET_OPEN_SLOTS_SQL = """
-        (SELECT COUNT(*) FROM vantage_pending_orders  WHERE status='working'
-             AND signal_id IS NOT ?)
-      + (SELECT COUNT(*) FROM vantage_signals s WHERE s.status='activating'
+_IN_FLIGHT_SLOTS_SQL = """
+        (SELECT COUNT(*) FROM vantage_signals s WHERE s.status='activating'
              AND s.signal_id IS NOT ?
              AND NOT EXISTS (SELECT 1 FROM vantage_pending_orders p
                               WHERE p.signal_id = s.signal_id
-                                AND p.status='working'))
+                                AND p.status IN ('working','withdrawn')))
 """
-_SLOTS_IN_USE_SQL = f"{_OPEN_SLOTS_SQL} + {_NOT_YET_OPEN_SLOTS_SQL}"
+_SLOTS_IN_USE_SQL = f"{_OPEN_SLOTS_SQL} + {_IN_FLIGHT_SLOTS_SQL}"
+
+# Not a slot count: whether anything is at the broker at all. A resting order
+# is at stake -- an EA restart forgets it until the next hello restores it --
+# even though it holds no slot. See count_book_at_stake.
+_RESTING_SQL = """
+        (SELECT COUNT(*) FROM vantage_pending_orders WHERE status='working')
+"""
+_AT_STAKE_SQL = f"{_OPEN_SLOTS_SQL} + {_RESTING_SQL} + {_IN_FLIGHT_SLOTS_SQL}"
 
 # `IS NOT ?` rather than `<> ?` so a NULL exclusion (the usual case -- count
 # everything) still matches every row: `signal_id <> NULL` is NULL, never true,
-# and would silently count nothing at all. Both halves of the not-yet-open
-# count take the same parameter, once each.
-_NO_EXCLUSION: tuple = (None, None)
+# and would silently count nothing at all.
+_NO_EXCLUSION: tuple = (None,)
 
 
 def _exclusion(signal_id) -> tuple:
-    """Params for _NOT_YET_OPEN_SLOTS_SQL: drop this signal's own slot.
+    """Params for _IN_FLIGHT_SLOTS_SQL: drop this signal's own claim.
 
     open_trade runs AFTER the claim that reserved its slot, for the same
     signal -- so counting in-flight claims without excluding the caller's own
     refuses every trade the normal path tries ("max open trades reached (1)"
-    with one claim, its own, in flight). Only the not-yet-open half is
+    with one claim, its own, in flight). Only the in-flight half is
     excluded: an OPEN row on the same signal is a position that exists, and
     dropping it would let one signal hold two slots.
     """
-    return (signal_id, signal_id) if signal_id is not None else _NO_EXCLUSION
+    return (signal_id,) if signal_id is not None else _NO_EXCLUSION
 
 # The claim needs no exclusion: the signal it is claiming is still 'pending' or
 # 'active' when this runs, so it cannot yet be holding a slot of its own.
@@ -113,13 +122,14 @@ def _max_open_trades(conn) -> int:
 
 
 def count_trade_slots_used(conn=None, exclude_signal_id=None) -> int:
-    """Trade slots currently held, against the GUI's Max Open Trades.
+    """Trade slots currently held, against the GUI's Max Open Trades: open
+    positions plus market opens in flight. Resting orders hold none (owner,
+    2026-09-28).
 
     The same arithmetic the claim gates on, exposed for the paths that check
-    the cap outside a claim -- open_trade's backstop and the pre-checks that
-    turn "no slot" into a skip reason. One number, one definition: a gate and
-    a message that disagree is how "max reached" ends up on screen beside an
-    empty Active Trades tab.
+    the cap outside a claim -- open_trade's backstop, the resting-order guard
+    and the pre-checks that turn "no slot" into a skip reason. One number,
+    one definition.
 
     Pass `conn` to count on a connection that already holds a transaction.
     """
@@ -130,29 +140,50 @@ def count_trade_slots_used(conn=None, exclude_signal_id=None) -> int:
         return int(_conn.execute(f"SELECT {_SLOTS_IN_USE_SQL}", params).fetchone()[0])
 
 
-def count_slots_not_yet_open(conn=None, exclude_signal_id=None) -> int:
-    """The half of count_trade_slots_used that has no open row yet: orders
-    resting at the broker, plus opens in flight.
+def count_opens_in_flight(conn=None, exclude_signal_id=None) -> int:
+    """The half of count_trade_slots_used that has no open row yet: market
+    opens claimed and being sent.
 
     For the pre-check call sites that already hold their own open-trades list
     (the scan path is handed one by its caller, and IME/pending-activation each
     read one for other reasons) -- they add this to the length of that list
-    rather than counting the book a second way.
+    rather than counting the book a second way. Until 2026-09-28 this also
+    counted resting orders, as `count_slots_not_yet_open`.
     """
     params = _exclusion(exclude_signal_id)
     if conn is not None:
-        return int(conn.execute(f"SELECT {_NOT_YET_OPEN_SLOTS_SQL}", params).fetchone()[0])
+        return int(conn.execute(f"SELECT {_IN_FLIGHT_SLOTS_SQL}", params).fetchone()[0])
     with db() as _conn:
-        return int(_conn.execute(f"SELECT {_NOT_YET_OPEN_SLOTS_SQL}", params).fetchone()[0])
+        return int(_conn.execute(f"SELECT {_IN_FLIGHT_SLOTS_SQL}", params).fetchone()[0])
+
+
+def count_book_at_stake() -> int:
+    """Open positions + orders resting at the broker + opens in flight.
+
+    NOT the cap. This answers "is anything at the broker that a restart would
+    blind?", for the EA install at startup and the stale-EA reload, which
+    defer while it is above zero. It was count_trade_slots_used until resting
+    orders stopped holding a slot (2026-09-28); a resting order is still at
+    stake.
+    """
+    with db() as _conn:
+        return int(_conn.execute(f"SELECT {_AT_STAKE_SQL}", (None,)).fetchone()[0])
+
+
+def slots_used_and_cap() -> tuple[int, int]:
+    """(slots in use, Max Open Trades), read on one connection so the two
+    cannot come from different moments. For the resting-order guard."""
+    with db() as _conn:
+        return count_trade_slots_used(_conn), _max_open_trades(_conn)
 
 
 def describe_trade_slots(conn=None) -> str:
     """Where the slots have gone, for a message a human reads.
 
-    The three kinds are named separately because a slot held by a RESTING
-    order is the confusing one: nothing shows in Active Trades, so "max open
-    trades reached" on its own reads as a bug rather than as the cap doing its
-    job. Same breakdown as count_trade_slots_used sums.
+    Resting orders are named although they hold no slot (owner, 2026-09-28):
+    while the book is full they are withdrawn from the broker, and a message
+    that did not mention them would leave "why did my limit not fill?"
+    unanswered. The two counted kinds are what count_trade_slots_used sums.
     """
     def _counts(c):
         open_now = c.execute(
@@ -164,7 +195,8 @@ def describe_trade_slots(conn=None) -> str:
         claiming = c.execute(
             "SELECT COUNT(*) FROM vantage_signals s WHERE s.status='activating' "
             "AND NOT EXISTS (SELECT 1 FROM vantage_pending_orders p "
-            "WHERE p.signal_id = s.signal_id AND p.status='working')"
+            "WHERE p.signal_id = s.signal_id "
+            "AND p.status IN ('working','withdrawn'))"
         ).fetchone()[0]
         return open_now, resting, claiming
 
@@ -173,8 +205,8 @@ def describe_trade_slots(conn=None) -> str:
     else:
         with db() as _conn:
             open_now, resting, claiming = _counts(_conn)
-    return (f"{open_now} open, {resting} resting at the broker, "
-            f"{claiming} being opened right now")
+    return (f"{open_now} open, {claiming} being opened right now "
+            f"({resting} resting at the broker, not counted)")
 
 
 def claim_signal_activation(signal_id: str) -> int:

@@ -320,10 +320,10 @@ async def _execute_auto_signal(
     # Makes no bridge call while the toggle is off.
     _bias_reason = _gov.htf_bias_blocks(
         parsed.get("direction", ""), await _gov.current_htf_bias(bridge, rs), rs)
-    # Resting orders hold slots too (owner, 2026-09-04) -- the caller's list
-    # only knows about positions, so the rest of the book is added here from
-    # the one definition in signal_state_repo.
-    open_count = len(get_open_trades_fn()) + _slots.count_slots_not_yet_open()
+    # The caller's list only knows about positions, so opens in flight are
+    # added here from the one definition in signal_state_repo. Resting orders
+    # hold no slot (owner, 2026-09-28).
+    open_count = len(get_open_trades_fn()) + _slots.count_opens_in_flight()
     max_trades = int(rs.get("max_open_trades", 1))
     if not sess_ok:
         pass  # skip_reason already set by the caller

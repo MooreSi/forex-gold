@@ -392,14 +392,13 @@ async def open_trade(
     # the trade row) rather than in the callers, so it's checked against
     # whichever node's table is about to receive the INSERT.
     rs = await db_module.to_db_thread(db_module.get_risk_settings)
-    # Slots, not open rows. A resting order holds one from placement until the
-    # position it becomes is closed (owner, 2026-09-04) -- counting only open
-    # rows here let a market order in on top of a book already full of resting
-    # ones. See signal_state_repo._SLOTS_IN_USE_SQL for the definition and why
-    # the three terms cannot double-count.
+    # Slots: open positions plus market opens in flight. A resting order
+    # holds none (owner, 2026-09-28) -- while the book is full, resting orders
+    # are withdrawn from the broker instead (resting_revalidation.
+    # enforce_max_open_trades). See signal_state_repo._SLOTS_IN_USE_SQL.
     # Excluding this signal's own claim: the scheduler claims the slot and
     # THEN calls here, so counting it would refuse every trade the normal
-    # path makes (pinned by tests/trading/test_resting_orders_consume_a_slot).
+    # path makes (pinned by tests/trading/test_max_trades_counts_live_trades).
     open_count = signal_state_repo.count_trade_slots_used(
         exclude_signal_id=signal_id)
     if open_count >= int(rs.get("max_open_trades", 1)):

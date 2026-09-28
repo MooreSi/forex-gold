@@ -338,8 +338,8 @@ def _slots_in_use() -> int:
     "is anything at risk" has one definition in this codebase rather than a
     second one written for this guard.
     """
-    from backend.src.services.trading.signal_state_repo import count_trade_slots_used
-    return count_trade_slots_used()
+    from backend.src.services.trading.signal_state_repo import count_book_at_stake
+    return count_book_at_stake()
 
 
 async def _maybe_reload_stale_ea(

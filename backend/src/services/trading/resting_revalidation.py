@@ -369,14 +369,25 @@ async def revalidate_resting_orders(
         log.debug("[Resting] could not read resting orders: %s", exc)
         return 0
 
+    # Asked once per sweep. None (unreadable) re-arms nothing and withdraws
+    # nothing on the cap's account: unknown is not "full", and not "free".
+    book = await _book() if rows else None
     withdrawn = 0
     for row in rows or []:
         try:
             status = str(row.get("status") or "working")
             if status == "withdrawn":
+                # The cap is one of the gates now (owner, 2026-09-28): an order
+                # the guard took off a full book stays off until a slot frees,
+                # or this sweep would put it back every minute.
+                if book is None or _is_full(book):
+                    continue
                 await _rearm(ea, _broker_repo, row, rs, bias, tick, dpm_candles)
                 continue
-            reason = _refusal_for(row, rs, bias, tick, dpm_candles)
+            if book is not None and _is_full(book):
+                reason = _cap_reason(book)
+            else:
+                reason = _refusal_for(row, rs, bias, tick, dpm_candles)
             if not reason:
                 continue
             if await _withdraw(ea, _broker_repo, row, reason):
@@ -386,3 +397,132 @@ async def revalidate_resting_orders(
             # case -- must not abandon the rest of the sweep.
             log.warning("[Resting] could not revalidate %s: %s", row.get("trade_id"), exc)
     return withdrawn
+
+
+# ── Max Open Trades (owner, 2026-09-28) ─────────────────────────────────────
+#
+# "max number of trades means maximum number of executed trades that are live
+#  on mt5 on the active node, excluding limit orders, a limit order cannot
+#  execute if there are already 3 live trades"
+#
+# A resting order holds no slot (signal_state_repo). But MT5 fills a limit
+# order with no round trip to Python, and cannot make one conditional on a
+# position count, so the only way to keep one from becoming the fourth live
+# trade is to have it off the book while three are live. The owner chose
+# withdraw-and-re-arm over cancelling: the setup survives a full book and
+# comes back, on its original clock, when a slot frees.
+#
+# Per monitor cycle (1-5s), not on the 60s sweep: a resting order can fill in
+# a minute. What is left is the residual the owner has been told about: an
+# order can still fill in the seconds between the book filling and the next
+# cycle. That is announced, never closed -- closing a position is not this
+# module's business.
+
+# The per-cycle re-arm (only used while both revalidation toggles are off, so
+# the 60s sweep is not running) is held to the sweep's own cadence: a re-arm
+# the broker refuses must not reach the EA every few seconds.
+_REARM_EVERY_S = 60.0
+_last_rearm_at = 0.0
+
+# The last over-cap count announced, so an excursion is announced once and a
+# new one (a further fill, or a later one) is announced again.
+_last_over_announced: Optional[int] = None
+
+
+async def _book() -> Optional[tuple]:
+    """(slots in use, Max Open Trades), or None when it cannot be read."""
+    from backend.src.db import database as _db
+    from backend.src.services.trading import signal_state_repo as _ssr
+    try:
+        return await _db.to_db_thread(_ssr.slots_used_and_cap)
+    except Exception as exc:
+        log.debug("[Resting] slot count unreadable: %s", exc)
+        return None
+
+
+def _is_full(book: tuple) -> bool:
+    used, cap = book
+    return used >= cap
+
+
+def _cap_reason(book: tuple) -> str:
+    used, cap = book
+    return f"Max open trades reached ({used} of {cap} live)"
+
+
+async def _announce_over_cap(book: tuple) -> None:
+    global _last_over_announced
+    used, cap = book
+    if used <= cap:
+        _last_over_announced = None
+        return
+    if _last_over_announced == used:
+        return
+    _last_over_announced = used
+    log.warning("[Resting] %d trades live against Max Open Trades %d — a resting "
+                "order filled before it could be withdrawn", used, cap)
+    try:
+        await _alerts().send_message(
+            f"Max Open Trades exceeded: {used} trades live, the limit is {cap}. "
+            f"A resting order filled before it could be taken off the book. "
+            f"Nothing has been closed; no new trade opens until the count is "
+            f"back under the limit.",
+            None, "max_open_trades_exceeded")
+    except Exception as exc:
+        log.warning("[Resting] could not announce the over-cap count: %s", exc)
+
+
+async def enforce_max_open_trades(ea, rs: dict, tick: Any = None,
+                                  fetch: Optional[Callable[[], list]] = None) -> int:
+    """While the book is full, take every resting order off it; while it has
+    room and the 60s sweep is switched off, put withdrawn ones back.
+
+    Returns how many were withdrawn. Never raises. Cancels and re-places
+    resting orders only; it never opens or closes a position.
+    """
+    global _last_rearm_at
+    try:
+        book = await _book()
+        if book is None:
+            return 0
+        await _announce_over_cap(book)
+        full = _is_full(book)
+        sweep_off = not (bool(rs.get("htf_bias_gate_enabled", 0))
+                         or bool(rs.get("resting_revalidation_enabled", 1)))
+        now = time.time()
+        rearm_due = sweep_off and not full and now - _last_rearm_at >= _REARM_EVERY_S
+        if not full and not rearm_due:
+            return 0
+        from backend.src.services.broker import repo as _broker_repo
+        if fetch is None:
+            from backend.src.db import database as _db
+            rows = await _db.to_db_thread(_broker_repo.fetch_revalidatable_pending_orders)
+        else:
+            rows = fetch()
+    except Exception as exc:
+        log.debug("[Resting] max-open-trades guard skipped: %s", exc)
+        return 0
+
+    withdrawn = 0
+    if full:
+        reason = _cap_reason(book)
+        for row in rows or []:
+            if str(row.get("status") or "working") != "working":
+                continue
+            try:
+                if await _withdraw(ea, _broker_repo, row, reason):
+                    withdrawn += 1
+            except Exception as exc:
+                log.warning("[Resting] could not withdraw %s at the cap: %s",
+                            row.get("trade_id"), exc)
+        return withdrawn
+
+    _last_rearm_at = now
+    for row in rows or []:
+        if str(row.get("status") or "") != "withdrawn":
+            continue
+        try:
+            await _rearm(ea, _broker_repo, row, rs, None, tick, None)
+        except Exception as exc:
+            log.warning("[Resting] could not re-arm %s: %s", row.get("trade_id"), exc)
+    return 0

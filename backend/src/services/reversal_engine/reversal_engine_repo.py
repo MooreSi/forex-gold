@@ -571,8 +571,10 @@ def claim_vantage_signal_activation(signal_id) -> int:
     decision for the owner. The owner's answer: "whether it is a resting order
     or a market order the EA should manage the max number of allowable trades
     as set within the gui". So the cap applies here too, using the one
-    definition in signal_state_repo -- a resting order holds a slot from
-    placement until the position it becomes is closed.
+    definition in signal_state_repo. Revised 2026-09-28: a resting order no
+    longer holds a slot; the cap counts live trades and opens in flight, and
+    resting orders are withdrawn from the broker while the book is full
+    (resting_revalidation.enforce_max_open_trades).
 
     The cap is inside the UPDATE's own WHERE for the same reason the canonical
     claim keeps it there: SQLite serialises writers, so two engines claiming at

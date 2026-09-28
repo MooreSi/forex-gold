@@ -107,6 +107,9 @@ class TestTheProtectiveLimitsAreEnforced:
         tests/trading/test_resting_orders_consume_a_slot.py). Same gate, same
         assertion, same negative control below; only the name of the function
         being faked changed. It takes exclude_signal_id, hence **kw.
+        (2026-09-28: resting orders no longer hold a slot and that file is
+        gone; see tests/trading/test_max_trades_counts_live_trades.py. The
+        function faked here is still the one open_trade consults.)
         """
         from backend.src.services.trading import signal_state_repo
         monkeypatch.setattr(signal_state_repo, "count_trade_slots_used",

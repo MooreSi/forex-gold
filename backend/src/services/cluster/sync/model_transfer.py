@@ -28,6 +28,8 @@ _MODEL_GLOBS = (
     "bo_ml_*.joblib",
     "ml_signal_*.joblib",
     "re_ml_*.pkl",
+    # Trend PA (2026-09-29): an exact name, not a glob, as its engine loads it.
+    "trend_pa_model.pkl",
 )
 
 

@@ -144,3 +144,19 @@ class TestUnpackRejectsTraversal:
         assert written == ["re_ml_online.pkl"]
         assert (dest / "re_ml_online.pkl").read_bytes() == b"good-model"
         assert not (tmp_path / "evil.pkl").exists()
+
+
+class TestTheTrendPaModelTravelsToo:
+    """Owner, 2026-09-29: "upload the models to the VPS ... add the trend pa
+    model too". The engines now generate on the VPS when it trades, and a
+    snapshot without Trend PA's model left that engine on whatever the VPS
+    had. Its own directory, so the exact-set test above is unchanged."""
+
+    def test_it_is_packaged(self, tmp_path):
+        from backend.src.services.cluster.sync import model_transfer as mt
+        (tmp_path / "trend_pa_model.pkl").write_bytes(b"trend-model")
+        (tmp_path / "trend_pa.db").write_bytes(b"a database, not a model")
+
+        _zip, names = mt.package_models(tmp_path)
+
+        assert names == ["trend_pa_model.pkl"]

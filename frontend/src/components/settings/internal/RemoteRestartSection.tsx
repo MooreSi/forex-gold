@@ -3,6 +3,12 @@ import { RotateCw } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Notice } from "@/components/shared/Notice";
+import { useNoteUntilPeerReturns } from "../hooks/useNoteUntilPeerReturns";
+
+// The fallback for a VPS that never drops the link; a restart takes about a
+// minute, so this is well past it.
+const NOTE_TTL_MS = 5 * 60_000;
 
 /**
  * Restart the VPS from here, so nobody has to log in to it (owner,
@@ -18,7 +24,7 @@ export function RemoteRestartSection({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const { note, setNote, clear } = useNoteUntilPeerReturns(connected);
 
   async function restart() {
     setBusy(true);
@@ -44,7 +50,9 @@ export function RemoteRestartSection({
       >
         <RotateCw size={13} /> Restart VPS
       </Button>
-      {note && <p role="status" className="mt-1 text-[11px] text-profit">{note}</p>}
+      {note && (
+        <div className="mt-1"><Notice ttlMs={NOTE_TTL_MS} onDismiss={clear}>{note}</Notice></div>
+      )}
 
       <DialogShell open={open} onOpenChange={setOpen} title="Restart the VPS">
         <div className="space-y-3 text-xs text-ink-2">

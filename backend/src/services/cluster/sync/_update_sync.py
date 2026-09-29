@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import subprocess
 from typing import Optional
 
 from backend.src.services.cluster.sync.protocol import (
@@ -76,8 +77,24 @@ def _local() -> dict:
     return heartbeat_fields()
 
 
-def version_report(remote_status: dict) -> dict:
-    """{local, remote, in_sync, restart_pending}. `remote` is None and
+def _origin_commit() -> str:
+    """The commit this checkout last saw on origin/main (no fetch), or "".
+    Upgrade VPS pulls origin/main, so when this machine runs commits it has
+    not pushed, the VPS can only ever land here (2026-09-29)."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", f"origin/{core_app_update._BRANCH}"],
+            cwd=str(core_app_update._REPO_ROOT), capture_output=True, text=True, timeout=5,
+        )
+    except Exception as e:
+        log.debug("[Sync] origin commit unreadable: %s", e)
+        return ""
+    sha = proc.stdout.strip() if proc.returncode == 0 else ""
+    return sha if core_app_update._is_sha(sha) else ""
+
+
+def version_report(remote_status: dict, origin_commit: str = "") -> dict:
+    """{local, remote, in_sync, restart_pending, origin_commit}. `remote` is None and
     `in_sync` None when the VPS has not told us its commit (no link, or an
     older VPS).
 
@@ -85,20 +102,23 @@ def version_report(remote_status: dict) -> dict:
     (`running_commit`), so a VPS that pulled and never restarted is not in
     sync -- and Upgrade VPS, which pulls and restarts, is what fixes it.
     `restart_pending` is True in exactly that case, None from a VPS that does
-    not send `running_commit`."""
+    not send `running_commit`. `origin_commit` is what Upgrade VPS would
+    pull, so the screen can tell "the VPS is behind" from "this machine has
+    commits nobody pushed"."""
     local = _local()
     status = remote_status or {}
     checked_out = status.get("commit")
     running = status.get("running_commit")
     remote_commit = running or checked_out
     if not remote_commit:
-        return {"local": local, "remote": None, "in_sync": None, "restart_pending": None}
+        return {"local": local, "remote": None, "in_sync": None, "restart_pending": None,
+                "origin_commit": origin_commit}
     remote = {"commit": remote_commit, "git_version": status.get("git_version") or ""}
     in_sync: Optional[bool] = (local["commit"] == remote_commit) if local["commit"] else None
     restart_pending: Optional[bool] = (
         (running != checked_out) if (running and checked_out) else None)
     return {"local": local, "remote": remote, "in_sync": in_sync,
-            "restart_pending": restart_pending}
+            "restart_pending": restart_pending, "origin_commit": origin_commit}
 
 
 class ClientUpdateMixin:
@@ -162,7 +182,7 @@ def current_version_report() -> dict:
     cli = _client.get_instance()
     connected = cli is not None and getattr(cli, "conn_state", None) == CONN_CONNECTED
     status = (getattr(cli, "remote_status", None) or {}) if connected else {}
-    report = version_report(status)
+    report = version_report(status, origin_commit=_origin_commit())
     # Why the VPS's commit is missing, when it is: a connected VPS whose
     # heartbeat has no commit runs a build from before e613be5 and must be
     # updated once by other means; no link is a different fix (2026-09-28).

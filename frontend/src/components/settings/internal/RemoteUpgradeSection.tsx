@@ -3,7 +3,13 @@ import { ArrowUpCircle } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Notice } from "@/components/shared/Notice";
 import { usePoll } from "@/hooks/usePoll";
+import { useNoteUntilPeerReturns } from "../hooks/useNoteUntilPeerReturns";
+
+// The fallback for a VPS that never drops the link. An upgrade reinstalls
+// requirements before it restarts, so this allows for a slow one.
+const NOTE_TTL_MS = 15 * 60_000;
 
 interface NodeVersion { commit: string; git_version: string }
 
@@ -15,6 +21,11 @@ export interface VersionReport {
   /** Why `remote` is missing: "older_build", "not_connected" or "reported".
    *  Absent from a backend older than 2026-09-28. */
   remote_reason?: string;
+  /** The VPS pulled but still runs the old code. Absent before 2026-09-28. */
+  restart_pending?: boolean | null;
+  /** What this machine last saw on origin/main, which is what Upgrade VPS
+   *  pulls. "" or absent when unknown (2026-09-29). */
+  origin_commit?: string;
 }
 
 /** What to say when the VPS's commit is unknown. The two causes need
@@ -27,6 +38,27 @@ function unknownRemote(reason: string | undefined): string {
   }
   if (reason === "not_connected") return "Not connected to the VPS, so its commit is unknown.";
   return "The VPS has not reported its commit (not connected, or an older version).";
+}
+
+/** Why the nodes differ. Upgrade VPS pulls origin/main, so when the VPS
+ *  already runs that and this machine does not, only a push closes the gap;
+ *  the plain wording read as "the upgrade did not take" (2026-09-29). */
+function outOfSync(report: VersionReport, remoteCommit: string | undefined): string {
+  if (report.restart_pending === true) {
+    return "Not in sync: the VPS has pulled new code but not restarted. Restart VPS to run it.";
+  }
+  const origin = report.origin_commit;
+  if (origin && remoteCommit === origin && report.local.commit !== origin) {
+    return "Not in sync: the VPS runs the latest commit on GitHub; this machine has "
+      + "commits that are not pushed yet. Push them, then Upgrade VPS.";
+  }
+  if (origin && remoteCommit !== origin && report.local.commit === origin) {
+    return "Not in sync: the VPS is behind GitHub. Upgrade VPS to bring it up to date.";
+  }
+  if (origin && remoteCommit !== origin) {
+    return "Not in sync: the nodes run different commits. Upgrade VPS brings the VPS to GitHub's latest.";
+  }
+  return "Not in sync: the nodes run different commits.";
 }
 
 function short(sha: string | undefined): string {
@@ -56,7 +88,7 @@ export function VersionLine({ report }: { report: VersionReport | null | undefin
       <p data-testid="remote-sync-state"
         className={inSync === true ? "text-profit" : inSync === false ? "text-warning" : "text-ink-3"}>
         {inSync === true && "In sync: both nodes run the same commit."}
-        {inSync === false && "Not in sync: the nodes run different commits."}
+        {inSync === false && outOfSync(report, remote?.commit)}
         {inSync === null && (remote
           ? "This machine's commit is unreadable, so sync is unknown."
           : unknownRemote(report.remote_reason))}
@@ -85,7 +117,7 @@ export function RemoteUpgradeSection({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const { note, setNote, clear } = useNoteUntilPeerReturns(connected);
 
   async function upgrade() {
     setBusy(true);
@@ -111,7 +143,7 @@ export function RemoteUpgradeSection({
       >
         <ArrowUpCircle size={13} /> Upgrade VPS
       </Button>
-      {note && <p role="status" className="text-[11px] text-profit">{note}</p>}
+      {note && <Notice ttlMs={NOTE_TTL_MS} onDismiss={clear}>{note}</Notice>}
       <VersionLine report={versions.data} />
 
       <DialogShell open={open} onOpenChange={setOpen} title="Upgrade the VPS">

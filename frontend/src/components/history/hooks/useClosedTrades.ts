@@ -59,6 +59,10 @@ export function useClosedTrades(days: number) {
   return usePoll<ClosedTrades>(
     `history/trades/${days}`,
     useCallback(() => api.get<ClosedTrades>(`/api/history/trades?days=${days}`), [days]),
-    60_000,
+    // 15s, as the NiceGUI table refreshed. It was 60s, and a trade that had
+    // just closed took up to a minute to appear (owner, 2026-09-29: "really
+    // slow to update"). The read is ~60ms and polls only while a tab that
+    // shows it is open and the page is visible.
+    15_000,
   );
 }

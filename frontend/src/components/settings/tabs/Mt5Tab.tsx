@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 import { SettingsField } from "../internal/SettingsField";
 import { SettingsToggle } from "../internal/SettingsToggle";
+import { BridgeRestartSection } from "../internal/BridgeRestartSection";
 
 interface Account { prefix: string; title: string; blurb: string }
 
@@ -83,6 +84,8 @@ export function Mt5Tab() {
           />
         )}
       </section>
+
+      <BridgeRestartSection platform={String(mt5.data?.platform ?? "")} />
 
       {/* CrossOver and Wine exist only on a Mac; on Windows the bridge runs
           inside the app and none of this applies (2026-09-26). */}

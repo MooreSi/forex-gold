@@ -319,6 +319,23 @@ class NativeMT5Bridge:
             return None
         return list(rows) if rows is not None else None
 
+    async def get_orders(self) -> Optional[list[dict]]:
+        """The orders MT5 still holds (bug 070); None when it cannot say.
+        Same reader as the HTTP bridge's /orders, handed this module's own
+        MetaTrader5 handle, under the same lock as every other call."""
+        mod = self._mod
+        if mod is None:
+            return None
+        try:
+            import mt5_orders
+            async with self._lock:
+                rows = await asyncio.wait_for(asyncio.to_thread(
+                    mt5_orders.read, mod.mt5, mod.SYMBOL, mod._ensure_connected),
+                    timeout=20.0)
+        except Exception:
+            return None
+        return list(rows) if rows is not None else None
+
     # ── Orders ────────────────────────────────────────────────────────────────
 
     async def place_order(self, direction: str, lots: float,

@@ -17,7 +17,7 @@ import time
 from typing import Callable, Optional
 
 from backend.src.db import database as db_module
-from backend.src.services.cluster.sync import tls_util, _ea_templates_sync, _remote_close_sync
+from backend.src.services.cluster.sync import tls_util, _ea_templates_sync, _channel_setup_sync, _remote_close_sync, _remote_resume_sync
 from backend.src.services.cluster.sync._pending_store import PendingStoreMixin
 from backend.src.services.cluster.sync._peer_data import PeerDataMixin
 from backend.src.services.cluster.sync._expert_params_sync import ClientExpertParamsMixin
@@ -38,11 +38,10 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_MARKET_ORDER, MSG_MARKET_ORDER_ACK, MSG_SIGNAL_ORDER, MSG_SIGNAL_ORDER_ACK,
     MSG_SIGNAL_FOLLOWUP, MSG_SIGNAL_FOLLOWUP_ACK,
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC, MSG_RESTART_NODE_ACK, MSG_UPDATE_NODE_ACK, MSG_UPDATE_NODE_RESULT,
-    MSG_WRITE_OFF_UNCONFIRMED_ACK, MSG_CLOSE_TRADE_ACK,
+    MSG_WRITE_OFF_UNCONFIRMED_ACK, MSG_CLOSE_TRADE_ACK, MSG_RESUME_TRADING_ACK, MSG_CHANNEL_SETUP_ACK,
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
-    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_STATE,
-    MSG_MT5_ACCOUNTS_ACK,
+    MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_STATE, MSG_MT5_ACCOUNTS_ACK,
     CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
@@ -68,7 +67,7 @@ _LIVENESS_PING_INTERVAL_S = 20
 
 class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin, ClientMt5AccountsMixin,
                  ClientLatencyMixin, ClientRestartMixin, ClientUpdateMixin, ClientWriteOffMixin,
-                 _ea_templates_sync.ClientEaTemplatesMixin, _remote_close_sync.ClientRemoteCloseMixin):
+                 _ea_templates_sync.ClientEaTemplatesMixin, _channel_setup_sync.ClientChannelSetupMixin, _remote_close_sync.ClientRemoteCloseMixin, _remote_resume_sync.ClientRemoteResumeMixin):
     def __init__(self):
         self.conn_state: str = CONN_DISCONNECTED
         self.last_error: str = ""
@@ -272,6 +271,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin, Clie
             asyncio.create_task(self.stand_down_peer_if_local())
             asyncio.create_task(self.push_mt5_accounts())
             asyncio.create_task(self._ea_templates_sync_loop())
+            asyncio.create_task(self._channel_setup_sync_loop())
 
             async for raw in ws:
                 if isinstance(raw, bytes):
@@ -403,8 +403,8 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin, Clie
             self._on_pong(msg)
         elif t == MSG_RESTART_NODE_ACK:
             self._on_restart_ack(msg)
-        elif t in (MSG_WRITE_OFF_UNCONFIRMED_ACK, MSG_CLOSE_TRADE_ACK):
-            (self._on_write_off_ack if t == MSG_WRITE_OFF_UNCONFIRMED_ACK else self._on_close_trade_ack)(msg)
+        elif t in (MSG_WRITE_OFF_UNCONFIRMED_ACK, MSG_CLOSE_TRADE_ACK, MSG_RESUME_TRADING_ACK, MSG_CHANNEL_SETUP_ACK):
+            {MSG_WRITE_OFF_UNCONFIRMED_ACK: self._on_write_off_ack, MSG_CLOSE_TRADE_ACK: self._on_close_trade_ack, MSG_RESUME_TRADING_ACK: self._on_resume_trading_ack, MSG_CHANNEL_SETUP_ACK: self._on_channel_setup_ack}[t](msg)
         elif t in (MSG_UPDATE_NODE_ACK, MSG_UPDATE_NODE_RESULT):
             (self._on_update_ack if t == MSG_UPDATE_NODE_ACK else self._on_update_result)(msg)
         else:

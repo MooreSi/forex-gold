@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from backend.src.services.cluster import node as _node
+from backend.src.services.cluster.sync import _channel_setup_sync as _channel_setup
 from backend.src.services.cluster.sync import reachability as _reach
 from backend.src.services.health import power as _power
 from backend.src.services.risk import app_config as _config
@@ -68,3 +69,8 @@ async def stop_app(engine) -> str:
     schedules the stop so the reply reaches the browser first.
     """
     return await _power.stop_app(engine)
+
+
+def channel_setup_result() -> dict:
+    """The VPS's last answer to this Mac's Telegram channel set-up, {} before one."""
+    return _channel_setup.last_result()

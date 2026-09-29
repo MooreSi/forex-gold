@@ -59,6 +59,8 @@ email + Telegram notification config.
 - `scheduler.py`'s ORB time gate uses `Europe/London` while the daily/weekly gate uses bare server-local `datetime.now()` — recorded as pre-existing and preserved.
 - `signal_extractor.extract_signal()` runs only after a deterministic parser fails, and only yields a trade with model confidence AND complete real price levels.
 
+- **The Analysis trade table's Spread and Cost come from `trade_spread_cache`, and only `analytics/entry_spread.py` writes it (2026-09-29).** The NiceGUI History page looked up each uncached ticket's entry tick on refresh; the React port kept the read and dropped the write, so every trade from 2026-09-21 showed no spread and a zero cost (306 of 750 rows in the 30-day window). Restored inside `trade_table.closed_trades`, through the facade's existing `get_ticks_range` (first tick in the minute from the entry, which is what the bridge's `/tick_at` returns) rather than a new `get_tick_at` facade method. At most 40 lookups per read, newest first, so a cold cache fills over a few polls instead of stalling one. The table polls every 15s (was 60s, "really slow to update"). Pinned by `tests/services/analytics/test_entry_spread_backfill.py`.
+
 ## Open questions
 
 - The scheduler London-vs-server-local timezone inconsistency is preserved, not resolved.

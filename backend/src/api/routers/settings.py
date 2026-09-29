@@ -23,12 +23,16 @@ import sys
 
 import logging
 
-from fastapi import APIRouter
+from typing import Any
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.src.api import auth as auth_gate
 from backend.src.api.errors import Refusal
+from backend.src.api.deps import engine as engine_dep
 from backend.src.controllers import broker_controller as broker_ctl
+from backend.src.controllers import bridge_controller as bridge_ctl
 from backend.src.api.redaction import redacted as _redacted
 from backend.src.controllers import environment_controller as env_ctl
 from backend.src.controllers import settings_controller as settings_ctl
@@ -176,6 +180,13 @@ async def save_terminal_path(body: TerminalPathWrite) -> dict:
         settings_ctl.sync_bridge_credentials_file(environment)
     return _mt5_view()
 
+
+
+@router.post("/mt5/restart-bridge")
+async def restart_bridge(eng: Any = Depends(engine_dep)) -> dict:
+    """Restart the MT5 bridge and wait for it to reconnect (2026-09-29).
+    On a Mac this closes and reopens MetaTrader with it; the page confirms."""
+    return await bridge_ctl.restart_bridge(eng)
 
 @router.get("/retention")
 async def retention() -> dict:

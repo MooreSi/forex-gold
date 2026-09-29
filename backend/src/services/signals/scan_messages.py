@@ -46,6 +46,9 @@ from backend.src.services.trading.instant_entry import process_instant_entry as 
 from backend.src.services.signals.scan_staleness import record_staleness_or_new as _record_staleness_or_new_impl
 from backend.src.services.signals.scan_staleness import resolve_strategy_and_skip_reason as _resolve_strategy_and_skip_reason_impl
 from backend.src.services.signals import tg_repo as _tg_repo
+from backend.src.services.signals import standby_record as _standby
+from backend.src.services.signals.standby_record import STATUS_STANDBY  # noqa: F401
+from backend.src.services.cluster import node_roles as _node_roles
 from backend.src.services.signals.parser import check_sl_adjustment_rules
 from backend.src.db import database as db_module
 from backend.src.services.signals.parser import parse_gd2_instant_entry
@@ -128,13 +131,9 @@ class ScanCtx:
 
 
 async def scan_messages(ctx: ScanCtx) -> list[dict]:
-    # Centralized signal generation (Settings > Remote Node): once this
-    # VPS is the active trader and generation has moved to the Mac, skip
-    # parsing/creating GD2/the reference channel/Format-AB signals entirely here rather
-    # than just letting a later open_trade() gate discard the work —
-    # this is what actually saves the CPU, not just the execution.
-    if not await db_module.to_db_thread(db_module.should_generate_signals_here):
-        return []
+    # Telegram is traded by the node that trades (docs/todo/010, owner
+    # 2026-09-29), whatever centralized_signal_gen_enabled says: that switch
+    # now covers the engines only. The other node records for display, below.
     if ctx.tg_reader is None:
         return []
     msgs = ctx.tg_reader.get_buffer_messages(limit=100)
@@ -158,6 +157,9 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                 "'Telegram Signals' toggle)", len(msgs),
             )
         return []
+
+    if not await db_module.to_db_thread(_node_roles.is_active_trader_node):
+        return await db_module.to_db_thread(_standby.record, ctx.tg_reader, msgs, slot_groups, rs)
 
     auto_execute = bool(rs.get("auto_execute_signals", 0))
     new_signals: list[dict] = []

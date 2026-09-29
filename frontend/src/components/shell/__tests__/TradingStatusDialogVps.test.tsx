@@ -5,7 +5,7 @@
  * Resume: both write the Mac's database, and the Mac is not placing orders,
  * so either button would report success and change nothing that trades.
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TradingStatusDialog } from "../TradingStatusDialog";
 import type { TradingStatus } from "../TradingStatusDialog";
@@ -42,6 +42,34 @@ it("offers neither Pause nor Resume from this node", () => {
 
 it("does the same when the VPS reports all clear", () => {
   show({ ...VPS_HALTED, state: "ok", label: "VPS: Trading Active", detail: "", until: null });
+
+  expect(screen.queryByRole("button", { name: /pause now/i })).toBeNull();
+});
+
+/**
+ * Owner, 2026-09-29: "i should have a resume trading button on the popup as
+ * if it was local". The Resume goes to the VPS (its own route), never to this
+ * node's `/resume-all`, and only when the VPS says a Resume would change
+ * something.
+ */
+it("offers Resume when the VPS says it can, and sends it to the VPS", async () => {
+  const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ cleared: ["circuit_breaker"] }) }));
+  vi.stubGlobal("fetch", fetchMock);
+  const onChanged = vi.fn();
+  render(
+    <TradingStatusDialog open onOpenChange={() => {}} status={{ ...VPS_HALTED, can_resume_on_vps: true }} onChanged={onChanged} />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /resume trading/i }));
+
+  await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  const urls = fetchMock.mock.calls.map((c) => String((c as unknown[])[0]));
+  expect(urls).toContain("/api/trading/remote/resume-all");
+  expect(urls).not.toContain("/api/trading/resume-all");
+});
+
+it("still offers no Pause for the VPS", () => {
+  show({ ...VPS_HALTED, can_resume_on_vps: true });
 
   expect(screen.queryByRole("button", { name: /pause now/i })).toBeNull();
 });

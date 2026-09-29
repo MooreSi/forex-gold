@@ -207,6 +207,13 @@ class FakeMT5Bridge:
             for p in self._positions.values()
         ]
 
+    async def get_orders(self) -> list[dict]:
+        """The fake fills every order at once, so it never holds one."""
+        injected = self._pop_injected("get_orders")
+        if injected is not None:
+            return injected  # type: ignore[return-value]
+        return []
+
     # ── Orders ────────────────────────────────────────────────────────────
 
     def _record_deal(self, *, position_id: int, entry: int, deal_type: int,

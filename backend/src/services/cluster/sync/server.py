@@ -29,7 +29,9 @@ from backend.src.services.cluster.sync._mt5_accounts_sync import ServerMt5Accoun
 from backend.src.services.cluster.sync._restart_sync import ServerRestartMixin
 from backend.src.services.cluster.sync._writeoff_sync import ServerWriteOffMixin
 from backend.src.services.cluster.sync._ea_templates_sync import ServerEaTemplatesMixin
+from backend.src.services.cluster.sync._channel_setup_sync import ServerChannelSetupMixin
 from backend.src.services.cluster.sync._remote_close_sync import ServerRemoteCloseMixin
+from backend.src.services.cluster.sync._remote_resume_sync import ServerRemoteResumeMixin
 from backend.src.services.cluster.sync._update_sync import ServerUpdateMixin
 from backend.src.services.cluster.sync import _latency_sync
 from backend.src.services.broker import autotrading_guard
@@ -50,8 +52,8 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_PROPOSE,
-    MSG_MT5_ACCOUNTS, MSG_EA_TEMPLATES, MSG_RESTART_NODE, MSG_UPDATE_NODE, MSG_WRITE_OFF_UNCONFIRMED,
-    MSG_CLOSE_TRADE,
+    MSG_MT5_ACCOUNTS, MSG_EA_TEMPLATES, MSG_CHANNEL_SETUP, MSG_RESTART_NODE, MSG_UPDATE_NODE, MSG_WRITE_OFF_UNCONFIRMED,
+    MSG_CLOSE_TRADE, MSG_RESUME_TRADING,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -69,7 +71,8 @@ _ENGINE_ALIASES = {"reversal": "reversal_engine"}
 
 class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                  ServerMt5AccountsMixin, ServerRestartMixin, ServerUpdateMixin,
-                 ServerWriteOffMixin, ServerEaTemplatesMixin, ServerRemoteCloseMixin):
+                 ServerWriteOffMixin, ServerEaTemplatesMixin, ServerRemoteCloseMixin,
+                 ServerRemoteResumeMixin, ServerChannelSetupMixin):
     def __init__(self, main_engine=None, breakout_engine=None,
                  bounce_engine=None, re_engine=None):
         self._main_engine     = main_engine
@@ -244,12 +247,16 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
             await self._handle_mt5_accounts(ws, msg)
         elif t == MSG_EA_TEMPLATES:
             await self._handle_ea_templates(ws, msg)
+        elif t == MSG_CHANNEL_SETUP:
+            await self._handle_channel_setup(ws, msg)
         elif t == MSG_RESTART_NODE:
             await self._handle_restart_node(ws, msg)
         elif t == MSG_WRITE_OFF_UNCONFIRMED:
             await self._handle_write_off_unconfirmed(ws, msg)
         elif t == MSG_CLOSE_TRADE:
             await self._handle_close_trade(ws, msg)
+        elif t == MSG_RESUME_TRADING:
+            await self._handle_resume_trading(ws, msg)
         elif t == MSG_UPDATE_NODE:
             await self._handle_update_node(ws, msg)
         elif t == MSG_EXPERT_PARAMS_PROPOSE:

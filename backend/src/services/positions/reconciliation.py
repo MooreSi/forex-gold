@@ -58,6 +58,10 @@ MATCHED = "matched"
 # (2026-09-28). With the VPS as active trader every trade is this shape on
 # the Mac, and calling it "lost -- nothing is managing it" was false.
 REMOTE_NODE = "remote_node"
+# Bug 070 (2026-09-29): MT5 still holds an order for it -- a market order sent
+# and not yet answered ("started"), or a resting leg. It may yet fill, so it is
+# neither "did not fill" nor "no evidence".
+IN_FLIGHT = "in_flight"
 
 # Everything except MATCHED wants a human to look, at least while this is
 # report-only.
@@ -69,7 +73,7 @@ _DEAL_DAYS = 1
 # exposure and the risk limits, which is exactly why the report must show it.
 _ATTENTION_KINDS = frozenset({
     BROKER_ONLY_OURS, BROKER_ONLY_MANUAL, DB_ONLY_CLOSED, DB_ONLY_NO_EVIDENCE,
-    UNKNOWN_FILLED, UNKNOWN_NOT_FILLED,
+    UNKNOWN_FILLED, UNKNOWN_NOT_FILLED, IN_FLIGHT,
 })
 
 
@@ -140,18 +144,27 @@ def _closing_deals(deals: Iterable[dict], ticket: Optional[int]) -> list:
             and int(d.get("entry", 0) or 0) != 0]
 
 
+def _order_for(orders: list, prefixes: tuple[str, ...]) -> Optional[dict]:
+    return next((o for o in orders if _comment_matches(o.get("comment"), prefixes)), None)
+
+
 def diff_snapshots(broker_positions: Iterable[dict],
                    broker_deals: Iterable[dict],
                    db_open_trades: Iterable[dict],
                    unknown_signals: Iterable[dict] = (),
-                   remote_open_trades: Iterable[dict] = ()) -> ReconcileDiff:
+                   remote_open_trades: Iterable[dict] = (),
+                   broker_orders: Optional[Iterable[dict]] = ()) -> ReconcileDiff:
     """Compare what the broker has against what the database believes.
 
     No I/O and no bridge: hand it snapshots, get differences. Nothing is
     repaired here -- that is the caller's decision and, for now, nobody's.
+
+    `broker_orders` is MT5's order list; None means it could not be read,
+    which is not the same as an empty one (bug 070).
     """
     positions = list(broker_positions or [])
     deals = list(broker_deals or [])
+    orders = None if broker_orders is None else list(broker_orders)
     # Closed and cancelled rows are history, not a reconciliation target.
     db_rows = [t for t in (db_open_trades or []) if t.get("status") == "open"]
 
@@ -195,6 +208,14 @@ def diff_snapshots(broker_positions: Iterable[dict],
                 detail=f"closed at the broker across {len(closers)} deal(s)"))
             continue
 
+        pending = _order_for(orders or [], prefixes) if not ticket else None
+        if pending is not None:
+            entries.append(DiffEntry(
+                kind=IN_FLIGHT, trade_id=trade_id,
+                ticket=int(pending.get("ticket") or 0) or None,
+                detail="MT5 still holds its order — sent, not yet answered or filled"))
+            continue
+
         # No position and no closing deal. NOT proof it closed -- equally
         # consistent with a broker read that failed -- so it is flagged and
         # left open rather than booked shut on a guess.
@@ -235,16 +256,36 @@ def diff_snapshots(broker_positions: Iterable[dict],
 
     for sig in (unknown_signals or []):
         trade_id = sig.get("trade_id") or ""
+        signal_id = sig.get("signal_id")
         prefixes = _id_prefixes(trade_id)
         filled = (
             any(_comment_matches(p.get("comment"), prefixes) for p in positions)
             or any(_comment_matches(d.get("comment"), prefixes) for d in deals)
         )
+        pending = None if filled else _order_for(orders or [], prefixes)
+        # A signal this node forwarded to the paired node and got no answer
+        # for: the paired node's row for the same signal is the answer.
+        owner = None if (filled or pending) else next(
+            (r for r in remote if signal_id and r.get("signal_id") == signal_id), None)
+        if pending is not None:
+            kind, ticket = IN_FLIGHT, int(pending.get("ticket") or 0) or None
+            detail = "MT5 still holds its order — sent, not yet answered or filled"
+        elif owner is not None:
+            kind, ticket = REMOTE_NODE, int(owner.get("mt5_ticket") or 0) or None
+            detail = "the paired node recorded this trade and manages it"
+        elif filled:
+            kind, ticket = UNKNOWN_FILLED, None
+            detail = "the broker has this trade — the send did fill"
+        elif orders is None:
+            kind, ticket = UNKNOWN_NOT_FILLED, None
+            detail = ("no position or deal, and MT5's order list could not be "
+                      "read — it may still be in flight")
+        else:
+            kind, ticket = UNKNOWN_NOT_FILLED, None
+            detail = "the broker has no trace — the send did not fill"
         entries.append(DiffEntry(
-            kind=UNKNOWN_FILLED if filled else UNKNOWN_NOT_FILLED,
-            trade_id=trade_id or None, signal_id=sig.get("signal_id"),
-            detail=("the broker has this trade — the send did fill" if filled
-                    else "the broker has no trace — the send did not fill")))
+            kind=kind, trade_id=trade_id or None, signal_id=signal_id,
+            ticket=ticket, detail=detail))
 
     return ReconcileDiff(entries=entries)
 
@@ -257,7 +298,8 @@ def _report_text(diff: ReconcileDiff) -> str:
 
     lines = ["Reconciliation found differences:"]
     for kind in (BROKER_ONLY_OURS, BROKER_ONLY_MANUAL, DB_ONLY_CLOSED,
-                 DB_ONLY_NO_EVIDENCE, UNKNOWN_FILLED, UNKNOWN_NOT_FILLED):
+                 DB_ONLY_NO_EVIDENCE, UNKNOWN_FILLED, UNKNOWN_NOT_FILLED,
+                 IN_FLIGHT):
         found = diff.of_kind(kind)
         if not found:
             continue
@@ -376,7 +418,7 @@ def _paired_node_open_trades() -> list:
 async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
     """Snapshot both sides, diff them, log any disagreement. Never raises.
 
-    Read-only throughout: `get_positions` / `get_deal_history` at the broker,
+    Read-only throughout: `get_positions` / `get_deal_history` / `get_orders` at the broker,
     plain SELECTs in the database. A failure to read either side means the
     comparison is meaningless, so it reports nothing rather than inventing a
     difference from half a picture -- an empty broker read would otherwise
@@ -394,6 +436,9 @@ async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
             log.debug("[reconcile] skipped — the broker returned no position list")
             return None
         deals = await bridge.get_deal_history(_DEAL_DAYS) or []
+        # None stays None: an unread order list is not an empty one.
+        orders = (await bridge.get_orders()
+                  if hasattr(bridge, "get_orders") else [])
     except Exception as e:
         log.debug("[reconcile] skipped — broker read failed: %s", e)
         return None
@@ -416,6 +461,7 @@ async def collect_and_report(bridge: Any) -> Optional[ReconcileDiff]:
         return None
 
     diff = diff_snapshots(positions, deals, db_open, unknown,
-                          remote_open_trades=_paired_node_open_trades())
+                          remote_open_trades=_paired_node_open_trades(),
+                          broker_orders=orders)
     report_periodic(diff)
     return diff

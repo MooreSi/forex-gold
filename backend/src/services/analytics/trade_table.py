@@ -30,6 +30,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from backend.src.services.analytics import entry_spread as _entry_spread
 from backend.src.services.analytics import equity_curve as _curve
 from backend.src.services.analytics import formatting as _formatting
 from backend.src.services.analytics import labels as _labels
@@ -165,6 +166,17 @@ async def closed_trades(engine: Any, days: int) -> dict:
             log.debug("[trade_table] comment attribution unavailable: %s", exc)
 
     spreads = _spreads.get_cached_spreads(list(by_position.keys()))
+    # Entry spreads this cache has never seen, looked up and kept for good.
+    # Nothing else writes the cache; without this, Spread and Cost stay blank
+    # for every new trade (entry_spread says why).
+    needs = []
+    for ticket, pos_deals in by_position.items():
+        opened = next((d for d in pos_deals if d.get("entry") == _ENTRY_IN), None)
+        if (spreads.get(ticket) is None and opened and opened.get("time")
+                and any(d.get("entry") in _ENTRY_OUT for d in pos_deals)):
+            needs.append((ticket, float(opened["time"]), float(opened.get("volume", 0))))
+    if needs:
+        spreads.update(await _entry_spread.fill(engine, needs))
     fee_rate = await _fees.platform_fee_rate()
     now = time.time()
 

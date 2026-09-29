@@ -14,11 +14,13 @@ function loadTone(percent: number): string {
  *
  * A fixed list rather than whatever the heartbeat carries: a VPS on an older
  * build still reports `bounce`, whose code was deleted on 2026-09-14, and the
- * owner asked for it to be gone from this page (2026-09-28).
+ * owner asked for it to be gone from this page (2026-09-28). Trend PA added
+ * 2026-09-29: the heartbeat carried it from the day it shipped, the list did not.
  */
 const ENGINES: { id: string; label: string }[] = [
   { id: "breakout", label: "Breakout" },
   { id: "reversal_engine", label: "Reversal engine" },
+  { id: "trend_pa", label: "Trend PA" },
 ];
 
 /**

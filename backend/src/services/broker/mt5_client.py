@@ -389,6 +389,21 @@ class MT5BridgeClient:
             return None
         return None
 
+    async def get_orders(self) -> Optional[list[dict]]:
+        """The orders MT5 still holds, including a market order it has sent
+        and not heard back about (bug 070). None when it cannot say -- which
+        includes a bridge started before /orders existed (404): that is
+        "could not look", not "nothing there"."""
+        if not self._url:
+            return None
+        try:
+            r = await self._request("get", f"{self._url}/orders", timeout=4.0)
+            if r.status_code == 200:
+                return r.json().get("orders", [])
+        except Exception:
+            return None
+        return None
+
     # ── Orders ────────────────────────────────────────────────────────────────
 
     async def place_order(self, direction: str, lots: float,

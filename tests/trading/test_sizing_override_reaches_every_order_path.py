@@ -143,12 +143,16 @@ class TestTheQueuedPath:
     def test_override_on_risk_is_the_total_for_a_grid(self, fresh_db):
         # entry ~2400, SL 2390: 10pt. 2% of 10000 = $200 over 2 legs = $100
         # a leg = 0.10 lots a leg.
+        # sl_pips 0: the signal's 10pt stop is the one placed, so it sizes the
+        # lot. A template's own stop sizes it otherwise -- that is pinned in
+        # tests/risk/test_template_trade_sized_from_the_stop_it_places.py
+        # (owner, 2026-09-29).
         self._tpl_channel({"mode": "grid", "anchors": 1, "pendings": 1,
-                           "lot_anchor": 0.05, "risk_pct": 0})
+                           "lot_anchor": 0.05, "risk_pct": 0, "sl_pips": 0})
         assert self._resolve(_OVERRIDE_RISK) == 0.10
 
     def test_a_single_leg_template_takes_the_whole_percentage(self, fresh_db):
-        self._tpl_channel({"mode": "single", "lot_anchor": 0.05, "risk_pct": 0})
+        self._tpl_channel({"mode": "single", "lot_anchor": 0.05, "risk_pct": 0, "sl_pips": 0})
         assert self._resolve(_OVERRIDE_RISK) == 0.20
 
     def test_an_engine_supplied_lot_is_resized_when_the_override_is_on(self, fresh_db):

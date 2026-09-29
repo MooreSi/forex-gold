@@ -240,6 +240,21 @@ install had `risk_pct > 0` on either path when this landed.
 
 Needs a demo session before the override is switched on for the live account.
 
+**A template trade is sized from the stop it is sent with (2026-09-29).** The
+queued path (`resolve_open_trade_params`: every engine, and a Telegram signal
+that arrives out of its zone) sized a template trade from the SIGNAL's stop,
+then replaced that stop with the template's `sl_pips` stop before the order.
+At Risk 2% on "30 TP1 SL50 and Trail" the owner saw 0.02 to 0.07 lots; a
+2-point channel stop behind a 5-point template stop put ~5% at risk. It now
+passes `template_sl_at(template, dir, tick)` to `lot_sizing.template_lot`,
+like instant entry and the Reversal Engine's limit orders already did;
+`sl_pips = 0` keeps the signal's stop for both. The immediate Telegram path
+(`scan_auto_execute`) sends a single-leg template trade with the SIGNAL's stop
+and sizes from it, so its lots vary with the channel's stop but its risk is
+the configured %; whether that path should place the template's stop instead
+is an open question for the owner. Pinned by
+`tests/risk/test_template_trade_sized_from_the_stop_it_places.py`.
+
 ## Per-channel daily loss cap (2026-09-27)
 
 `services/risk/channel_loss_cap.py`. Once a Telegram channel's net realised

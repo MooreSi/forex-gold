@@ -83,7 +83,7 @@ allowed to call.
 - **Every risk setting syncs except a named per-node list (owner, 2026-09-25).** `_SYNCED_SETTINGS_KEYS` (now in `services/cluster/sync/synced_settings.py`, re-exported by `server.py`) had been grown one found gap at a time and was missing ~65 of ~118 columns; the Mac had 38 changes queued that the VPS silently dropped (setforget_lot_size, the give-back guard, every `lk_*` parsing switch, the HTF/entry-trigger/meta-label gates). The list is now complete and `PER_NODE_SETTINGS` holds the exceptions with reasons (only `trading_clock_offset_min`). It stays an explicit list because it is also the gate between a network proposal and SQL column names. `tests/core/test_sync_covers_every_setting.py` fails on any column in neither list, so the next new setting cannot be forgotten. The VPS now names the keys it will not apply (`MSG_SETTINGS_REJECTED.keys`) and the Mac drops exactly those from its queue; a reject without a list (older VPS, database error) keeps the queue. **Both nodes need this version**: an older VPS still drops the new keys. When the VPS runs it, the Mac's queued changes apply on the next reconnect, and the Mac then mirrors the VPS's values for every synced key it has no pending change for.
 - **Expert Tunables now sync (2026-09-25).** `expert_params._forward_over_sync()` had called `propose_expert_params` since 2026-08-03 behind a `hasattr` guard, and no client or server ever had it, so tunables never left the node they were set on. `sync/_expert_params_sync.py` adds both halves in the Strategy Parameters shape (`MSG_EXPERT_PARAMS_PROPOSE` / `_STATE`, full snapshot, pending persisted as `sync_pending_expert_params`, carried in the welcome). Pinned by `tests/core/test_expert_params_sync.py`.
 - **Still not synced, found 2026-09-25:** (1) ~~VPS-originated changes never reach the Mac.~~ Fixed 2026-09-28, see the next entry. (2) ~~A channel strategy of `template:<name>` names a template the VPS may not have.~~ EA templates sync Mac -> VPS since 2026-09-29, see "EA templates reach the VPS". The strategy-parameter preset library (`strategy_param_templates`) is still per-node.
-- **The VPS reported the commit it had checked out, not the one it was running (2026-09-28, reported live).** The sync heartbeat's `commit` is `get_local_commit_sha()`, read from disk on every beat, so a VPS that pulled 949a7228 and never restarted reported 949a7228 while running the morning's code. The Mac's Remote tab said "in sync", and the badge said "VPS Status Unknown ... update it if this persists" about a VPS that was already updated: its old code sent no `trading_status`. The heartbeat now also carries `running_commit` (`_update_sync.running_commit()`, read on the first beat and kept for the life of the process; an unreadable first read is not cached), and `version_report` compares against it when present. A pulled-but-unrestarted VPS is therefore "not in sync", `restart_pending` is True, and Upgrade VPS (pull, then restart) is what clears it. A VPS that sends no `running_commit` is compared on `commit` as before. The unknown-status message now names a restart. Both nodes need this version before the check can see it. Why the VPS did not restart after its update is not known: its logs cannot be read from the Mac. Pinned by `tests/core/test_vps_reports_the_commit_it_runs.py`.
+- **The VPS reported the commit it had checked out, not the one it was running (2026-09-28, reported live).** The sync heartbeat's `commit` is `get_local_commit_sha()`, read from disk on every beat, so a VPS that pulled 949a7228 and never restarted reported 949a7228 while running the morning's code. The Mac's Remote tab said "in sync", and the badge said "VPS Status Unknown ... update it if this persists" about a VPS that was already updated: its old code sent no `trading_status`. The heartbeat now also carries `running_commit` (`_update_sync.running_commit()`, read on the first beat and kept for the life of the process; an unreadable first read is not cached), and `version_report` compares against it when present. A pulled-but-unrestarted VPS is therefore "not in sync", `restart_pending` is True, and Upgrade VPS (pull, then restart) is what clears it. A VPS that sends no `running_commit` is compared on `commit` as before. The unknown-status message now names a restart. Both nodes need this version before the check can see it. Why the VPS did not restart after its update was not known then: see the 2026-09-29 headless entry below. Pinned by `tests/core/test_vps_reports_the_commit_it_runs.py`.
 - **A circuit breaker tripped on the VPS and the Mac's header said "Trading Active" (2026-09-28, reported live).** Two faults. (1) The badge (`risk/trading_status.badge`) read only the Mac's own database, and on REMOTE the Mac places no orders. (2) VPS-originated changes never reached the Mac: every `_forward_*_over_sync` asked `client.get_instance()` first, which never returns None, so on the VPS a breaker trip (a synced risk setting, `circuit_breaker_active_until`) was queued on a client that never connects. Now: the five forwarders ask `cluster/sync/role.listening_server()` first (a LISTENING server only, so a Mac that once pressed "Make this node a VPS" and stopped it still proposes); the VPS heartbeat carries `trading_status` (its own badge, read on the DB thread, null if unreadable); and on a node that hands its orders to the VPS (`open_trade`'s own test: `sync_remote_host` set and active trader REMOTE) the badge is the VPS's, labelled "VPS: ", with the pause time re-written in this node's clock. Link down or a VPS that sends no status is `unknown`, never the Mac's own state. `trading_controller.trading_pause_status` (header `pause`, the Dashboard's halt line, `/api/trading/halt`'s reason) follows the same rule, `source` "VPS". The dialog offers no Pause or Resume in that mode: both write the Mac's database, and a forwarded order goes out before the Mac's own pause check in `open_trade`. With the breaker now mirrored, the Mac's Settings > Diagnostics shows it and its reset proposes the cleared state to the VPS. **Both nodes need this version.** Not yet through a demo session. Pinned by `tests/risk/test_trading_status_on_a_paired_mac.py`, `tests/core/test_vps_edits_reach_the_mac.py` and `TradingStatusDialogVps.test.tsx`.
 - **A paired Mac could be trapped on REMOTE with nothing trading; it can now take over without the VPS (owner's decision, 2026-09-25).** The VPS became unreachable; the header's LOCAL/REMOTE button is disabled while the link is down, and `take_over_locally` rightly refuses a paired peer it cannot reach (it may still be trading). So the Mac, view-only, could not be made to trade at all. The owner chose, from three options, an explicit forced take-over: `handover.take_over_without_peer()` (`PUT /api/node/active-trader` with `without_peer: true`), offered by the header ONLY when this node is REMOTE and the link is down, behind a checkbox confirming the VPS is off or its MT5 is closed. It is refused while the link is up, never a fallback inside `take_over_locally`, and there is no forced hand-back. The guarantee that closes the gap: **whenever this node is LOCAL and the sync link connects, `SyncClient.stand_down_peer_if_local()` stands the VPS down first**, alerting on Telegram if it will not. On the VPS, a repeated STAND_DOWN now merges into `stood_down_engines` instead of overwriting it with an empty list, or a later RESUME would restart nothing. **Residual risk, accepted by the owner:** a VPS that is running but unreachable (network cut, not powered off) trades alongside the Mac until it reconnects. Pinned by `test_handover.py::TestTakingOverWithoutThePeer`, `test_sync_client_stands_down_the_vps_on_reconnect.py` and `test_node.py`. **Not yet through a demo session.**
 - **An update on Windows "just stopped" instead of restarting (2026-09-26, reported live).** `os_utils.restart_app` spawned a hidden, detached relaunch and exited 0, and `Setup & Start FOREX.bat` reads 0 as the user stopping the app: its window said "FOREX Trader has stopped", and the only way back was a copy with no window, no crash protection and its output in `restart.log`. Now the bat sets `FOREX_LAUNCHER=bat`, and a restart under it spawns nothing: it stops the server gracefully, `run.py` exits with `LAUNCHER_RESTART_EXIT_CODE` (42), and the bat relaunches in its own window with its five-crashes guard. Any other launch keeps the detached relaunch. The admin console's update path (`cluster/remote/_update._do_restart`) already exited 42 and still also spawns a detached copy; the single-instance lock settles that race. Pinned by `tests/utils/test_restart_under_the_launcher.py`.
@@ -536,6 +536,37 @@ there is no Telegram update command, and it now names the two real routes.
 Pinned by `tests/core/test_version_report_says_why_unknown.py` and
 `VersionLineReason.test.tsx`.
 
+## Upgrade VPS on a headless VPS never restarted; "not in sync" now says why (2026-09-29)
+
+**A headless node pulled and kept running the old code.** Upgrade VPS ends in
+`os_utils.restart_app`, which spawns the relaunch (or asks the launcher for
+exit 42) and then stops the process with `shutdown_ui()`. Headless mode
+registered no stopper, so that was a no-op: the process kept running and the
+relaunch met the single-instance lock. `/restartapp` (and so Restart VPS)
+never had the gap, because `bot_infra._delayed_app_shutdown` calls `os._exit`
+itself in headless mode. This is the likeliest answer to the 2026-09-28 "why
+did the VPS not restart after its update" above. `run._run_headless` now
+registers `_stop_headless_on_request`, which ends its wait (thread-safe), so
+the normal shutdown runs and run.py exits with the requested code. Pinned by
+`tests/test_headless_stops_for_an_upgrade.py`. It takes effect on the VPS only
+after one restart onto a build that has it: until then, Upgrade VPS then
+Restart VPS.
+
+**"Not in sync" read as "the upgrade did not take" when the Mac was ahead.**
+Upgrade VPS pulls origin/main. On 2026-09-29 the Mac ran two unpushed commits,
+the VPS was on origin/main (`restart_pending` false: it had restarted), and
+the tab still said "the nodes run different commits". `version_report` now
+carries `origin_commit` (this checkout's last-fetched `origin/main`, no
+fetch), and the line says which side is behind: push first, Upgrade VPS, or
+Restart VPS for a pulled-but-not-restarted VPS. Pinned by
+`tests/core/test_version_report_names_unpushed_commits.py` and
+`VersionLinePushFirst.test.tsx`.
+
+**The Restart/Upgrade notes never cleared.** They now clear once the link has
+dropped and come back (`settings/hooks/useNoteUntilPeerReturns`), with
+`Notice`'s timeout and dismiss button as the fallback. Pinned by
+`RemoteNotesClearWhenBack.test.tsx`.
+
 ## A stand-down must not persist an engine as user-stopped (2026-09-28)
 
 Found on the owner's VPS over WinRM. At 2026-09-25 23:19 a STAND_DOWN called
@@ -624,3 +655,55 @@ a demo session.**
   2026-09-25 completion of `SYNCED_SETTINGS_KEYS`. With the owner's approval
   (2026-09-29) it now says a saved switch is sent to the remote node, and
   `EnginesPanel.test.tsx` pins that instead.
+
+## Telegram and the engines run on the node that trades (2026-09-29)
+
+Owner: when the VPS is active it reads and parses Telegram itself, because it
+is nearer the broker; the Mac only edits the settings. Spec:
+`docs/todo/010-telegram-parses-on-the-active-node.md`.
+
+- **Telegram follows the active trader, whatever `centralized_signal_gen_enabled`
+  says.** `scan_messages` no longer reads `should_generate_signals_here()`; it
+  asks `node_roles.is_active_trader_node()`. The other node runs
+  `signals/standby_record.py`: pure parsers, one `vantage_tg_signals` row with
+  status `standby`, no order, no alert, no AI call, no CLOSE ALL/RISK FREE/SL
+  adjustment, no edit handling. A separate path, not flags through the
+  pipeline, because nearly every step of that pipeline can act. The row also
+  stops a backlog firing on hand-over: the promoted node's dedup probe sees it.
+- **The engines were generating nowhere with centralized mode off.** Breakout,
+  Reversal and Trend PA each returned at `is_remote_node()` on the VPS
+  unconditionally, and the Mac's orders were refused by open_trade's stand-down
+  gate. All three now ask `node_roles.engines_generate_here()`: the active VPS
+  when centralized is off, the Mac (forwarding) when it is on, the Mac in Local
+  mode. Exactly one node answers True in every mode (pinned). It fails CLOSED.
+  The research timers (`is_remote_node()` in research, study_schedule,
+  excursion_sweep, meta_label_schedule) are unchanged and still Mac-only, so
+  **models trained on the Mac reach the VPS only through the manual model
+  snapshot upload.**
+- **Channel set-up now reaches the VPS**: `sync/_channel_setup_sync.py`
+  (`MSG_CHANNEL_SETUP`, answered with `MSG_CHANNEL_SETUP_ACK`). Slot channels,
+  `channel_parser_config` and the Logic Keywords lexicons, sent like the EA
+  templates (connect, change by digest, every 10 min). The VPS writes what
+  differs, selects and starts a slot's listener when its channel differs or
+  has stopped, and never clears a slot or removes a config the Mac did not
+  send (a Mac never logged in to Telegram sends no slots). One bad part refuses
+  the whole payload. The answer shows on Settings > Remote node.
+- **Two more trading switches ride the same message (2026-09-29, after
+  ticket 2108608418 traded from a channel switched off on the Mac):** channel
+  pauses set by hand (`channel_performance` rows with `manual_override = 1`;
+  a scorecard auto-pause is not sent, each node pauses from its own results)
+  and the news blackout (four `config.yaml` keys, so the settings sync never
+  carried it; validated against `news_calendar._IMPACT_SETS` and its 0-240
+  minute clamp, written with `save_to_yaml`). A Mac that omits a part leaves
+  it alone, and the ack names only the parts sent, so an older Mac or VPS
+  still interoperates. Pinned by
+  `tests/core/test_channel_setup_sync_pauses_and_news.py`.
+- **Still per node after that audit:** `trade_pause_until` (the bot's /pause,
+  owner undecided whether it should cover both nodes), the strategy-parameter
+  preset library, and `vantage_fee_settings`.
+- `client.py` is at the 800-line ceiling: the new loop cost one line, offset by
+  folding one import line. `test_ea_templates_sync` pins the literal
+  `self._ea_templates_sync_loop()` call in `_connect_once`, so the loops are
+  started there side by side, not through a helper.
+- **Not yet through a demo session.** Nothing here has run against the
+  owner's VPS.

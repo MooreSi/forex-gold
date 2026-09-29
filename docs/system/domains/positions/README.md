@@ -63,9 +63,12 @@ shaped around "no behaviour change".
 - A running P&L is `profit + swap`, matching MT5's own Profit column. A figure here that disagrees with the terminal is worse than no figure.
 - An unreachable bridge costs this view its P&L column and its untracked rows, never the table. The app's own record is still worth showing when the broker cannot be reached.
 
+- **An order in flight is not "no trace" (bug 070, 2026-09-29).** Placeholder repair (automatic and the owner's write-off) keeps a placeholder while MT5 still holds an order whose comment carries its prefix, or while the order list cannot be read. The 300 s single-mode expiry had written off rows whose market order was still "started" at the broker. On the VPS that day three were written off about 4.5 minutes after their ack timed out (trades 5e27a35a, 994337a0, cc09528b), then filled as #2107562994, #2107566543 and #2107570648, which nothing managed. Reconciliation reports such a row or parked signal as `in_flight`, says "could not be read" rather than "did not fill" when the order list is unreadable, and calls a parked signal the paired node recorded (matched by `signal_id`, now in the heartbeat) `remote_node`. It still writes nothing. Pinned by `tests/core/test_an_order_in_flight_is_not_written_off.py` and `tests/positions/test_reconciliation_sees_orders_in_flight.py`.
+- **An adopted placeholder goes to the EA at once.** `_adopt_live_position` sends `restore_trade` to a healthy EA when the row is EA-managed and now carries that ticket. Before, the EA learned of it only at its next `hello`, and Python skips EA-managed rows while the EA is healthy, so nothing managed the position in between. The EA ignores a ticket it already manages. Pinned by `tests/core/test_adopted_placeholder_goes_to_the_ea.py`.
+
 ## Open questions
 
-- None currently flagged.
+- **A placeholder written off before its order filled is never re-adopted.** Bug 070's guard stops new write-offs while MT5 holds the order, but a row already closed at $0 (`no_fill_expired`) whose position turns up later stays closed, and the position is reported `broker_only_ours` with nothing managing it. Reopening a closed row touches the close path (`record_close` wrote it), so it needs the owner's sign-off and a demo session.
 
 ## A position the other node opened is not a stranger's (2026-09-23)
 

@@ -6,9 +6,13 @@ a distinct screen element. It forwards to one service and does nothing else.
 """
 from __future__ import annotations
 
+from backend.src.services.cluster import remote_control as _remote
 from backend.src.services.risk import trading_status as _status
 
-__all__ = ["trading_status_badge", "resume_trading_all"]
+__all__ = ["trading_status_badge", "resume_trading_all", "resume_trading_on_vps",
+           "RemoteControlFailed"]
+
+RemoteControlFailed = _remote.RemoteControlFailed
 
 
 def trading_status_badge() -> dict:
@@ -30,3 +34,12 @@ def resume_trading_all() -> dict:
     neither would be a button that visibly does nothing.
     """
     return _status.resume_all()
+
+
+async def resume_trading_on_vps() -> dict:
+    """The same Resume, run by the VPS against its own holds.
+
+    For a badge that reports the VPS. Never falls back to this node: its
+    holds guard no orders.
+    """
+    return await _remote.resume_trading_on_peer()

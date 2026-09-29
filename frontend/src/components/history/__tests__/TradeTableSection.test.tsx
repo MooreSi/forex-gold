@@ -177,3 +177,24 @@ describe("TradeTableSection", () => {
     expect(await screen.findByText("No trades closed in this window")).toBeInTheDocument();
   });
 });
+
+/**
+ * Owner, 2026-09-29: the trades section "is really slow to update". It polled
+ * every 60 seconds, so a trade that had just closed could take a minute to
+ * appear; the NiceGUI table refreshed every 15. The backend answers in well
+ * under a second, so the cadence was the whole delay.
+ */
+describe("TradeTableSection refresh", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("shows a trade that closed since the last read within 15 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<TradeTableSection days={30} />);
+    await screen.findByTestId("trade-501234");
+
+    body = { rows: [row({ ticket: 777001 }), row()], error: null };
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(await screen.findByTestId("trade-777001")).toBeInTheDocument();
+  });
+});

@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { formatMoney } from "@/components/shared/format";
 import { asObject } from "@/lib/asArray";
 import { RemotePeerHealthSection } from "../internal/RemotePeerHealthSection";
+import { RemoteChannelSetupLine } from "../internal/RemoteChannelSetupLine";
 import { RemoteRestartSection } from "../internal/RemoteRestartSection";
 import { RemoteUpgradeSection } from "../internal/RemoteUpgradeSection";
 import { RemoteServerSection, type ServerState } from "../internal/RemoteServerSection";
@@ -18,6 +19,7 @@ interface RemoteState {
     host: string; port: number; token_set: boolean;
     conn_state: string; last_error: string;
     remote_status: Record<string, unknown>;
+    channel_setup?: Record<string, unknown>;
   };
   headless: boolean;
   centralized_signal_gen: boolean;
@@ -225,6 +227,7 @@ export function RemoteTab() {
               )}
               {" · active trader "}{String(peer.active_trader ?? "?")}
             </p>
+            <RemoteChannelSetupLine result={asObject(client.channel_setup)} />
             <RemotePeerHealthSection peer={peer} busy={busy} act={act} />
           </div>
         )}
@@ -248,7 +251,7 @@ export function RemoteTab() {
           <SettingsToggle
             label="Generate signals on this node only"
             checked={Boolean(data.centralized_signal_gen)}
-            hint="With this on and the VPS trading, the VPS stops analysing and parsing entirely and only executes what this machine forwards. If this machine goes offline it alerts and waits — it does not fall back to generating its own."
+            hint="Covers the Signal Generator engines only. With this on and the VPS trading, the engines run on this machine and forward their orders to the VPS; with it off they run on the VPS. Telegram signals are always read and traded by whichever node is trading. If this machine goes offline with this on, the VPS alerts and waits — it does not fall back to generating its own."
             onChange={(on) => void act(() =>
               api.put("/api/remote/centralized-signals", { enabled: on }))}
           />

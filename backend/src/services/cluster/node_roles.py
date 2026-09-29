@@ -83,3 +83,37 @@ def is_bot_command_authority() -> bool:
         return db_module.get_active_trader() == TRADER_LOCAL
     except Exception:
         return True  # fail open rather than silently killing bot control
+
+
+def engines_generate_here() -> bool:
+    """Whether the Signal Generator engines (Breakout, Reversal, Trend PA)
+    analyse on THIS node. docs/todo/010, owner 2026-09-29.
+
+    They run on the node that trades, so the order leaves from the machine
+    nearest the broker. The one exception is `centralized_signal_gen_enabled`,
+    which keeps them on the Mac while the VPS trades and forwards each order
+    (MSG_SIGNAL_ORDER). Exactly one node of a pair answers True in every mode;
+    tests/core/test_active_node_parses_telegram.py pins the table.
+
+    Before this, each engine returned at `is_remote_node()` unconditionally, so
+    with centralized generation off the VPS never generated, and the Mac's
+    orders were all refused by open_trade's stand-down gate: nothing traded.
+
+    Fails CLOSED, unlike the two gates above. Those gate credits and bot
+    polling; this one decides whether a second node places orders for the
+    same setup, and `is_remote_node()` failed closed too.
+    """
+    try:
+        from backend.src.services.cluster.sync.protocol import TRADER_REMOTE_VPS
+        centralized = bool(db_module.get_risk_settings().get("centralized_signal_gen_enabled"))
+        vps_trades = db_module.get_active_trader() == TRADER_REMOTE_VPS
+        if db_module.get_app_config("sync_server_enabled") == "1":
+            return vps_trades and not centralized
+        from backend.src.services.cluster.sync.client import SyncClient
+        host, _port, _token = SyncClient.load_config()
+        if host and vps_trades:
+            return centralized
+        return True
+    except Exception as e:
+        log.warning("[node_roles] cannot tell whether the engines generate here, so they do not: %s", e)
+        return False

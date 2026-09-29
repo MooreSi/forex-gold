@@ -116,6 +116,9 @@ class TelemetryMixin:
                 triggered = []
             row = {
                 "trade_id":       p.get("trade_id"),
+                # Lets the Mac match a signal it forwarded and got no answer
+                # for to the row this node made of it (bug 070).
+                "signal_id":      p.get("signal_id"),
                 "direction":      p.get("direction"),
                 "entry_price":    p.get("entry_price"),
                 "strategy":       p.get("strategy"),
@@ -203,8 +206,9 @@ class TelemetryMixin:
                 msg = (
                     f"*Centralized signal generation: Mac unreachable*\n"
                     f"No message from the Mac in {int(gap)}s — it is the only "
-                    f"source of new signals right now and this VPS is not "
-                    f"falling back to generating its own. Check the Mac node "
+                    f"source of engine signals right now and this VPS is not "
+                    f"falling back to generating its own (Telegram trading "
+                    f"carries on here). Check the Mac node "
                     f"(Settings > Remote Node) as soon as possible."
                 )
                 from backend.src.services.telegram import alerts as telegram_alerts

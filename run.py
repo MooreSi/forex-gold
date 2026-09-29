@@ -345,6 +345,15 @@ def _migrate_config_yaml() -> None:
         log.warning("Could not migrate config.yaml: %s", exc)
 
 
+def _stop_headless_on_request(stop_event, loop) -> None:
+    """Let `os_utils.shutdown_ui()` end a headless run. Without it an update
+    (`restart_app`) found no server to stop and the process kept running the
+    old code after pulling the new (2026-09-29). Thread-safe: apply_update's
+    steps run in worker threads."""
+    from backend.src.utils.os_utils import register_ui_stopper
+    register_ui_stopper(lambda: loop.call_soon_threadsafe(stop_event.set))
+
+
 def _run_headless() -> None:
     """Run the trading engine, Telegram reader, MT5 bridge client, and sync
     server/client with no web UI at all — no NiceGUI, no uvicorn ASGI server,
@@ -368,6 +377,7 @@ def _run_headless() -> None:
 
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
+        _stop_headless_on_request(stop_event, loop)
         # SIGTERM/SIGINT handlers aren't supported on Windows' default
         # ProactorEventLoop (raises NotImplementedError) — Ctrl+C there is
         # already delivered as a normal KeyboardInterrupt, which propagates

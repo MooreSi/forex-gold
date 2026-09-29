@@ -99,6 +99,32 @@ def _expiry_for(row: dict) -> int:
     return placeholder_no_fill_expiry_secs()
 
 
+async def _orders_held(bridge: Any) -> Optional[list]:
+    """The orders MT5 still holds, or None when that cannot be read.
+
+    Bug 070 (2026-09-29): a market order MT5 has sent and the broker has not
+    answered ("started", for minutes while Vantage-Demo timed requests out) is
+    neither a position nor a deal. Without this read a placeholder waiting for
+    it looked exactly like one that never existed, and was written off while
+    its order could still fill -- a fill with no row, managed by nothing.
+
+    A bridge with no get_orders at all is one with no order concept (the test
+    doubles written before this existed): it answers [] so their behaviour is
+    unchanged. Every real bridge has it, and its None is kept as None.
+    """
+    reader = getattr(bridge, "get_orders", None)
+    if reader is None:
+        return []
+    try:
+        return await reader()
+    except Exception:
+        return None
+
+
+def _holds_order(orders: list, prefix: str) -> bool:
+    return any(str(o.get("comment") or "").startswith(prefix) for o in orders)
+
+
 async def repair_template_placeholders(bridge: Any) -> int:
     """Adopt or close every open $0-entry placeholder row whose broker leg can
     be identified. Returns how many rows were repaired. Never raises."""
@@ -113,6 +139,7 @@ async def repair_template_placeholders(bridge: Any) -> int:
         if positions is None:
             return 0
         deals = await bridge.get_deal_history(7) or []
+        orders = await _orders_held(bridge)
     except Exception as e:
         log.debug("[TemplateRepair] pre-checks failed: %s", e)
         return 0
@@ -157,6 +184,14 @@ async def repair_template_placeholders(bridge: Any) -> int:
                 # declines to act on ("unknown, don't touch"). Polling by age
                 # is the only thing left that can tell "never existed" from
                 # "still resting".
+                #
+                # Unless MT5 still holds an order for it, or cannot say (bug
+                # 070): then something may still be coming, whatever its age.
+                if orders is None or _holds_order(orders, prefix):
+                    log.debug("[TemplateRepair] %s kept: %s", trade_id[:8],
+                              "order list unreadable" if orders is None
+                              else "MT5 still holds its order")
+                    continue
                 if await _expire_never_filled(row, bridge):
                     repaired += 1
                 continue
@@ -189,11 +224,16 @@ async def write_off_unconfirmed(bridge: Any) -> dict:
             return result
         positions = await bridge.get_positions()
         deals = await bridge.get_deal_history(7)
+        orders = await _orders_held(bridge)
     except Exception as e:
         result["error"] = f"The broker could not be read ({e}). Nothing was written off."
         return result
     if positions is None or deals is None:
         result["error"] = "The broker could not be read. Nothing was written off."
+        return result
+    if orders is None:
+        result["error"] = ("MetaTrader's order list could not be read, so an order still "
+                           "on its way cannot be ruled out. Nothing was written off.")
         return result
 
     min_age = placeholder_single_no_fill_expiry_secs()
@@ -211,6 +251,11 @@ async def write_off_unconfirmed(bridge: Any) -> dict:
             if any(str(d.get("comment") or "").startswith(prefix) for d in deals):
                 result["kept"].append({"trade_id": trade_id,
                                        "reason": "the broker has a deal for it"})
+                continue
+            if _holds_order(orders, prefix):
+                result["kept"].append({"trade_id": trade_id,
+                                       "reason": "MT5 still holds its order: sent and not yet "
+                                                 "answered by the broker, so it may still fill"})
                 continue
             if await _expire_never_filled(row, bridge, expiry_s=min_age):
                 result["written_off"].append(trade_id)
@@ -295,7 +340,41 @@ async def _adopt_live_position(row: dict, pos: dict) -> bool:
         "this node",
         trade_id[:8], ticket, entry, lots, pos.get("comment"),
     )
+    await _hand_to_ea(trade_id, ticket)
     return True
+
+
+async def _hand_to_ea(trade_id: str, ticket: int) -> None:
+    """Give an adopted position to the EA now, not at its next reconnect.
+
+    Bug 070: when the EA's own market order timed out at the broker it
+    reported the open as failed and forgot the trade. A later fill adopted
+    here became an EA-managed row the EA knew nothing about, and Python skips
+    EA-managed rows while the EA is healthy -- so nothing managed it until the
+    EA's next hello ran _restore_open_trades.
+
+    This is that same restore_trade, sent sooner. The EA ignores a ticket it
+    already manages and reports one that has closed. Only when the row now
+    carries THIS ticket (a fill event may have landed first and the guarded
+    UPDATE skipped) and is EA-managed; an unhealthy EA is left to
+    reclaim_ea_managed_trade. A failed send is logged, never raised: the
+    adoption itself has already happened and must stand.
+    """
+    try:
+        from backend.src.services.broker import ea_bridge
+        ea = ea_bridge.get_instance()
+        if ea is None or not ea.is_ea_healthy():
+            return
+        row = await db_module.to_db_thread(trade_repo.get_trade, trade_id)
+        if (not row or row.get("managed_by") != "ea"
+                or int(row.get("mt5_ticket") or 0) != int(ticket)):
+            return
+        await ea.restore_trade(row)
+        log.info("[TemplateRepair] handed adopted trade=%s ticket=%s to the EA",
+                 trade_id[:8], ticket)
+    except Exception as e:
+        log.warning("[TemplateRepair] could not hand trade=%s to the EA: %s — "
+                    "its next reconnect will", trade_id[:8], e)
 
 
 async def _close_from_deals(row: dict, open_deal: dict, deals: list,

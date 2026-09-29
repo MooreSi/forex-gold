@@ -194,3 +194,57 @@ async def start_bridge_process(bridge, using_native_bridge: bool) -> bool:
     except Exception as _e:
         log.warning("Bridge watchdog: failed to start bridge subprocess: %s", _e)
         return False
+
+
+# ── The Settings > MT5 button (2026-09-29) ───────────────────────────────────
+#
+# Same restart as the watchdog and /restart_bridge (start_bridge_process
+# above, reached through the runtime). What differs is how the result is
+# judged: by the bridge's own health read, which answers wherever the bridge
+# lives. bot_infra.cmd_restart_bridge waits for port 9000, which this Mac's
+# bridge is not on (9010) and the in-process Windows bridge has no port at all.
+
+_RESTART_POLL_S = 3.0
+_RESTART_POLLS = 15        # 45 s: Wine takes 15-30 s to bring MT5 back
+_restart_lock = asyncio.Lock()
+
+
+async def restart_and_wait(eng) -> dict:
+    """Restart the bridge and wait for it to reconnect to MT5.
+
+    `eng` is the runtime: its start_bridge_process restarts, its
+    get_bridge_health judges. Returns {"ok", "message"}; never raises. A second
+    press while one runs restarts nothing: on the Mac each restart kills the
+    MetaTrader session the previous one is bringing up.
+    """
+    if _restart_lock.locked():
+        return {"ok": False, "message": "A bridge restart is already running."}
+    async with _restart_lock:
+        try:
+            launched = await eng.start_bridge_process()
+        except Exception as e:
+            log.warning("Bridge restart (Settings): launch raised: %s", e)
+            launched = False
+        if not launched:
+            return {"ok": False, "message": "The bridge could not be started, so nothing "
+                                            "was restarted. The app log says why."}
+        last: dict = {}
+        for _ in range(_RESTART_POLLS):
+            await asyncio.sleep(_RESTART_POLL_S)
+            try:
+                last = await eng.get_bridge_health() or {}
+            except Exception:
+                last = {}
+            if last.get("connected"):
+                break
+        if not last.get("connected"):
+            return {"ok": False, "message": (
+                f"The bridge was restarted but MT5 is not connected after "
+                f"{int(_RESTART_POLLS * _RESTART_POLL_S)} s. It keeps retrying on its "
+                f"own; watch the header's bridge badge.")}
+        log.info("Bridge restart (Settings): connected")
+        if last.get("trade_allowed") is False:
+            return {"ok": True, "message": "Bridge restarted and connected, but Algo Trading "
+                                           "is OFF in MT5. Turn on the Algo Trading button "
+                                           "in the terminal."}
+        return {"ok": True, "message": "Bridge restarted and connected to MT5."}

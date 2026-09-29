@@ -123,6 +123,9 @@ def init(bridge) -> "ReversalEngine":
     return _instance
 
 
+NOT_GENERATING_HERE = "Not generating on this node: signals come from the node that trades"
+
+
 class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
     def __init__(self, bridge):
         self._bridge    = bridge
@@ -206,17 +209,14 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
     async def _run_cycle(self) -> None:
         self._last_cycle_ts = time.time()
 
-        # Centralized signal generation (Settings > Remote Node): once this
-        # VPS is the active trader and generation has moved to the Mac, skip
-        # the whole analysis cycle rather than running it and having its
-        # eventual open_trade() call just get forwarded/rejected -- this is
-        # what actually saves the CPU on the VPS.
+        # The engines analyse on the node that trades, or on the Mac when
+        # centralized generation is on (node_roles.engines_generate_here,
+        # docs/todo/010). Skipping the whole cycle, not just the order, is
+        # what saves the CPU on the node that is not generating.
         from backend.src.db import database as _db_module
-        if await _db_module.to_db_thread(_db_module.is_remote_node):
-            self._status_msg = "Remote/VPS node — signal generation is local-node-only"
-            return
-        if not await _db_module.to_db_thread(_db_module.should_generate_signals_here):
-            self._status_msg = "Centralized mode: generation runs on the local node"
+        from backend.src.services.cluster import node_roles as _node_roles
+        if not await _db_module.to_db_thread(_node_roles.engines_generate_here):
+            self._status_msg = NOT_GENERATING_HERE
             return
 
         now_utc = datetime.now(timezone.utc)

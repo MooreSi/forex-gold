@@ -55,10 +55,10 @@ def init(bridge, data_dir: Path) -> "TrendPAEngine":
 
 
 async def _generates_here() -> bool:
+    """Same gate as Breakout and Reversal: node_roles.engines_generate_here."""
     from backend.src.db import database as db_module
-    if await db_module.to_db_thread(db_module.is_remote_node):
-        return False
-    return bool(await db_module.to_db_thread(db_module.should_generate_signals_here))
+    from backend.src.services.cluster import node_roles
+    return bool(await db_module.to_db_thread(node_roles.engines_generate_here))
 
 
 def _live_settings() -> dict:

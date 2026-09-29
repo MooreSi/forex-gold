@@ -90,6 +90,9 @@ def init(bridge: "MT5BridgeClient") -> "BreakoutEngine":
 _H4_CANDLES = H4_BIAS_MIN_CANDLES + 8
 
 
+NOT_GENERATING_HERE = "Not generating on this node: signals come from the node that trades"
+
+
 class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _LearnMixin):
     def __init__(self, bridge: "MT5BridgeClient"):
         self._bridge = bridge
@@ -207,12 +210,12 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         state used by the velocity monitor."""
         self.last_cycle_at = time.time()
 
+        # On the node that trades, or the Mac when centralized
+        # (node_roles.engines_generate_here, docs/todo/010).
         from backend.src.db import database as _db_module
-        if await _db_module.to_db_thread(_db_module.is_remote_node):
-            self.status_detail = "Remote/VPS node — signal generation is local-node-only"
-            return
-        if not await _db_module.to_db_thread(_db_module.should_generate_signals_here):
-            self.status_detail = "Centralized mode: generation runs on the local node"
+        from backend.src.services.cluster import node_roles as _node_roles
+        if not await _db_module.to_db_thread(_node_roles.engines_generate_here):
+            self.status_detail = NOT_GENERATING_HERE
             return
 
         log_entry: dict = {"ts": time.time()}

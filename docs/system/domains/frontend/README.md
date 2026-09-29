@@ -446,6 +446,13 @@ That is now the first thing to check when a panel "shows nothing".
   second opinion computed here. A news blackout has no Resume (it lifts
   itself) but still offers the pause form, because a blackout is no reason to
   lose the ability to stop trading by hand.
+  **With the VPS as the active trader** the badge is the VPS's, `can_resume` is
+  false (a Resume here would clear the Mac's holds, which guard no orders) and
+  `can_resume_on_vps` carries the VPS's own `can_resume`. The dialog then offers
+  Resume and sends it to `POST /api/trading/remote/resume-all`, which asks the
+  VPS to run its own `resume_all()` over the sync link (`MSG_RESUME_TRADING`,
+  `sync/_remote_resume_sync.py`; owner, 2026-09-29). Never a local fallback.
+  Pause is still VPS-only. Both nodes need the version that has the message.
 
 ## Hover help
 

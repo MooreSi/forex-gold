@@ -7,6 +7,64 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.612",
+        "The VPS trades Telegram itself",
+        "blue",
+        "",
+        [
+            "When the VPS is the active node it now reads, parses and trades "
+            "the Telegram signals itself, nearest the broker, instead of "
+            "waiting for the Mac. The Mac still sets the parsing and risk "
+            "settings, and keeps showing the signals for display only: no "
+            "trades, no alerts.",
+            "The Signal Generator engines (Breakout, Reversal, Trend PA) run "
+            "on whichever node is trading. With centralized generation off "
+            "they had stopped generating anywhere; that switch now covers the "
+            "engines only.",
+            "The Mac's Telegram channels, per-channel parser settings and "
+            "Logic Keywords reach the VPS on connect and on every change, "
+            "like the EA templates. Settings > Remote node shows whether the "
+            "VPS took them, and names any channel it could not listen to. "
+            "A channel paused by hand and the news blackout go with them.",
+            "A paused channel no longer fires instant entries (it only "
+            "stopped full signals before).",
+            "Risk % sizing on an EA template: a queued or engine trade is "
+            "now sized from the template's own stop, the one the order is "
+            "sent with. It was sized from the signal's stop, so one Risk % "
+            "gave anything from 0.02 to 0.07 lots and put roughly 1% to 5% "
+            "at risk.",
+            "Pairing: every setting except the per-machine ones syncs between "
+            "the nodes, the VPS follows the Mac's MT5 accounts and demo/live "
+            "choice, and EA templates sync to the VPS (an order naming a "
+            "missing template is refused). Restart, upgrade and resume "
+            "trading on the VPS, close a VPS position and start its engines "
+            "from the Mac, and see whether both nodes run the same commit, "
+            "and why not.",
+            "The Mac can take over trading when the paired VPS cannot be "
+            "reached, and a headless VPS now restarts properly after an "
+            "upgrade.",
+            "New Trend PA engine, a daily profit goal, and a per-channel "
+            "daily loss cap (off by default). The Bounce engine is gone from "
+            "every channel list.",
+            "Orders: Max Open Trades counts only live trades, open trades are "
+            "counted from the broker, an EA, MT5 or VPS rejection is reported "
+            "as a refusal, and a placeholder whose order MT5 still holds is "
+            "no longer written off. MT5 AutoTrading is switched back on (with "
+            "an alert) when found off.",
+            "Dashboard: the brain (a live map of every entry decision), fill "
+            "costs, a daily GLD GEX snapshot, a Chart tab with drawings, a "
+            "TradingView view, order buttons and a position tool, a Compound "
+            "Calculator, and the Analysis Spread and Cost columns filled "
+            "again.",
+            "Settings: a Latency view showing where a signal's time goes, hop "
+            "by hop; a Restart bridge button on the MT5 tab; AI tuning "
+            "changes recorded as experiments that need owner approval.",
+            "Windows: the installer fetches the app from GitHub, the latest "
+            "EA is installed at startup, the bridge finds and logs in to the "
+            "MT5 terminal, and a startup crash-loop is fixed.",
+        ],
+    ),
+    (
         "v0.611",
         "Windows install and VPS setup",
         "blue",

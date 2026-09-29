@@ -39,6 +39,8 @@ VPS left the Mac's header reading "Trading Active" (reported live). With the
 link down, or a VPS too old to send one, the answer is `unknown`, never the
 Mac's own state. `can_resume` is false there: a Pause or Resume pressed on the
 Mac acts on the Mac's database, and the Mac is not placing the orders.
+`can_resume_on_vps` carries the VPS's own `can_resume` instead, and the
+dialog's Resume then goes to the VPS (owner, 2026-09-29).
 
 Nothing here places an order, closes one, or reaches a broker.
 """
@@ -145,6 +147,11 @@ def _as_the_vps_reports_it(view: dict) -> dict:
         "until": until,
         "resume_ts": remote.get("resume_ts"),
         "can_resume": False,
+        # The VPS's own answer to "would a Resume change anything". Separate
+        # from `can_resume`, which is about THIS node's Resume: that one would
+        # clear the Mac's holds, which guard no orders. This one is sent to
+        # the VPS (`remote_control.resume_trading_on_peer`).
+        "can_resume_on_vps": bool(remote.get("can_resume")),
         "node": "vps",
     }
 

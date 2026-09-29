@@ -233,6 +233,14 @@ async def process_instant_entry(
         _dl(False, str(_ime_sched_reason))
         return
 
+    # Channel paused (scorecard or by hand) -- the full signal path refuses it
+    # in resolve_open_trade_params(), which this path never calls, so a paused
+    # channel still fired instant entries until 2026-09-29.
+    if db_module.get_channel_lot_mult(channel_name)[1]:
+        log.info("[IME] Instant %s blocked — channel %s is paused", direction, channel_name)
+        _dl(False, f"channel {channel_name} is paused")
+        return
+
     # News blackout (Trading > News) — needs its own copy here for the same
     # reason the schedule gate above does: this path never calls
     # resolve_open_trade_params(), where the shared gate lives. IME is the

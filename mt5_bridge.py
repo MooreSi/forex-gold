@@ -41,6 +41,7 @@ from urllib.parse import parse_qs, urlparse
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mt5_terminal  # noqa: E402
+import mt5_orders  # noqa: E402
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1239,12 +1240,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
             else:
                 self._send_error(f"No account data. Connected={_connected}. {_last_error}")
 
-        elif path == "/positions":
-            pos = _get_positions()
-            if pos is not None:
-                self._send_json({"positions": pos})
+        elif path in ("/positions", "/orders"):   # /orders: read-only, see mt5_orders.py
+            rows = _get_positions() if path == "/positions" else mt5_orders.read(mt5, SYMBOL, _ensure_connected)
+            if rows is not None:
+                self._send_json({path[1:]: rows})
             else:
-                self._send_error(f"No position data. Connected={_connected}. {_last_error}")
+                self._send_error(f"No {path[1:]} data. Connected={_connected}. {_last_error}")
 
         elif path == "/history":
             days  = int(params.get("days",  ["7"])[0])

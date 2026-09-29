@@ -91,6 +91,12 @@ MSG_MT5_ACCOUNTS_ACK = "mt5_accounts_ack"  # VPS -> Mac: {"environment", "switch
 # writes what differs. Mac -> VPS only, no ack; an older VPS ignores it.
 MSG_EA_TEMPLATES = "ea_templates"  # Mac -> VPS: {"templates": [{name, ...fields}]}
 
+# Telegram channel set-up (owner, 2026-09-29): the slot channels, per-channel
+# parser config and Logic Keywords lexicons, sent like the EA templates
+# (sync/_channel_setup_sync.py). The VPS writes what differs and answers.
+MSG_CHANNEL_SETUP     = "channel_setup"      # Mac -> VPS: {"parser_configs", "lexicons", "slots", "channel_pauses", "news_blackout"}
+MSG_CHANNEL_SETUP_ACK = "channel_setup_ack"  # VPS -> Mac: {"parser_configs","lexicons","slots": written, "errors"} (+ "channel_pauses", "news_blackout" when sent)
+
 # ── Trading mutual exclusion (Option A: block switch-back on open local positions) ──
 MSG_STAND_DOWN        = "stand_down"        # Mac -> VPS: taking over, stop opening new trades
 MSG_STAND_DOWN_ACK    = "stand_down_ack"    # VPS -> Mac: stood down, here is my open-position summary
@@ -136,6 +142,12 @@ MSG_MARKET_ORDER_ACK = "market_order_ack"  # VPS -> Mac: {"result": {...}} or {"
 # record (sync/_remote_close_sync.py). req_id pairs each ack with its request.
 MSG_CLOSE_TRADE     = "close_trade"      # Mac -> VPS: {"req_id","trade_id","reason"}
 MSG_CLOSE_TRADE_ACK = "close_trade_ack"  # VPS -> Mac: {"req_id","result"} or {"req_id","error"}
+
+# Resume trading on the VPS from the Mac's header badge (owner, 2026-09-29):
+# the VPS runs its own trading_status.resume_all() (sync/_remote_resume_sync.py).
+# Not MSG_RESUME, which hands the trader role back. An older VPS never answers.
+MSG_RESUME_TRADING     = "resume_trading"      # Mac -> VPS: {"req_id"}
+MSG_RESUME_TRADING_ACK = "resume_trading_ack"  # VPS -> Mac: {"req_id","result"} or {"req_id","error"}
 
 # Centralized signal generation (Settings > Remote Node > "Generate signals on
 # this node only") — a fully-resolved trade decision from one of the Mac's own

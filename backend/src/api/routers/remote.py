@@ -115,6 +115,8 @@ async def state() -> dict:
             # Only meaningful while connected; the browser shows it as the
             # peer's own numbers rather than this machine's.
             "remote_status": link["remote_status"] if link["conn_state"] == "connected" else {},
+            # What the VPS did with this Mac's channel set-up (docs/todo/010).
+            "channel_setup": node_ctl.channel_setup_result() if link["conn_state"] == "connected" else {},
         },
         "headless": _flag(HEADLESS),
         "centralized_signal_gen": bool(
@@ -262,23 +264,23 @@ async def set_headless(body: Toggle, eng: Any = Depends(engine_dep)) -> dict:
 
 @router.put("/centralized-signals")
 async def set_centralized(body: Toggle) -> dict:
-    """Generate signals on this node only and forward them to the trader.
+    """Run the Signal Generator engines on this node and forward their orders.
 
-    The note is not decoration. With this on, a VPS that loses contact with
-    this machine stops receiving signals and does not start generating its
-    own — it alerts and waits. An operator who turns this on and then closes
-    the laptop has stopped trading without meaning to.
+    Engines only since 2026-09-29 (docs/todo/010): Telegram is always read
+    and traded by the node that trades. The note is not decoration. With this
+    on, a VPS that loses contact with this machine gets no engine signals and
+    does not start generating its own — it alerts and waits.
     """
     node_ctl.update_risk_settings(
         {"centralized_signal_gen_enabled": 1 if body.enabled else 0})
     return {
         "centralized_signal_gen": body.enabled,
         "note": (
-            "This machine is now the only source of new signals. If it goes "
+            "This machine is now the only source of engine signals. If it goes "
             "offline the remote node will alert and wait — it does not fall "
-            "back to generating its own."
+            "back to generating its own. Telegram is still traded there."
             if body.enabled else
-            "Each node generates its own signals again."
+            "The engines on the trading node generate their own signals again."
         ),
     }
 

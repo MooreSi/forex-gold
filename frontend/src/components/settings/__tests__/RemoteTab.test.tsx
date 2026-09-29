@@ -158,6 +158,26 @@ describe("the remote node's engines", () => {
     expect(JSON.parse(String(post![1]!.body))).toEqual({ engine: "breakout", running: false });
   });
 
+  /**
+   * 2026-09-29, owner: "i need the option in remote node to run the new trend
+   * signal generator on the vps like the other engines". The VPS heartbeat
+   * already carried `trend_pa` (running); the page's fixed list dropped it.
+   */
+  it("shows the Trend PA engine and stops it on the VPS", async () => {
+    responses = [{ ...STATE, client: { ...STATE.client, remote_status: {
+      ...STATE.client.remote_status,
+      engines: { breakout: true, reversal_engine: false, trend_pa: true } } } }];
+    render(<RemoteTab />);
+
+    expect(await screen.findByTestId("remote-engines")).toHaveTextContent(/trend pa on/i);
+    const button = screen.getByRole("button", { name: "Stop Trend PA" });
+    await act(async () => { button.click(); });
+
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
+    const post = calls.find(([url]) => url === "/api/engines/running");
+    expect(JSON.parse(String(post![1]!.body))).toEqual({ engine: "trend_pa", running: false });
+  });
+
   it("offers no buttons while this machine is the trader", async () => {
     responses = [{ ...withBounce, client: { ...withBounce.client, remote_status: {
       ...withBounce.client.remote_status, active_trader: "local" } } }];

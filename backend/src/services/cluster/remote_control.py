@@ -53,7 +53,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     "is_remote_active", "is_centralized_remote_mode", "where",
     "effective_settings", "engines_running", "set_engine_running", "set_ai_eval",
-    "place_market_order", "close_on_peer", "send_engine_action", "AI_EVAL_KEYS",
+    "place_market_order", "close_on_peer", "resume_trading_on_peer", "send_engine_action", "AI_EVAL_KEYS",
     "RemoteControlFailed",
 ]
 
@@ -262,6 +262,37 @@ async def close_on_peer(trade_id: str, reason: str) -> dict:
         log.warning("[remote_control] close of %s did not reach the peer: %s", trade_id, exc)
         raise RemoteControlFailed(
             f"The remote node could not be reached ({exc}). Nothing was closed."
+        ) from exc
+    if (ack or {}).get("error"):
+        raise RemoteControlFailed(f"The remote node refused: {ack['error']}")
+    return {**((ack or {}).get("result") or {}), "where": "remote"}
+
+
+async def resume_trading_on_peer() -> dict:
+    """Lift the remote node's trading holds, on the remote node.
+
+    The header's Resume, for a badge that reports the VPS: its breaker, pause
+    and daily target are in its own database, so the peer runs its own
+    `trading_status.resume_all()` (sync/_remote_resume_sync.py). **No
+    fallback**: this node's holds guard no orders, so clearing them here
+    would report success and change nothing that trades.
+
+    Unreachable: nothing was sent, so nothing resumed. Refused: the peer's
+    reason. No answer: it may have resumed; the badge will say.
+    """
+    try:
+        ack = await _client.get_instance().request_peer_resume_trading()
+    except asyncio.TimeoutError as exc:
+        log.warning("[remote_control] resume: no answer from the peer")
+        raise RemoteControlFailed(
+            "The remote node did not answer in time. It may have resumed: "
+            "the status badge will show it within a few seconds. If it never "
+            "does, the remote node may be running older code."
+        ) from exc
+    except Exception as exc:
+        log.warning("[remote_control] resume did not reach the peer: %s", exc)
+        raise RemoteControlFailed(
+            f"The remote node could not be reached ({exc}). Nothing was resumed."
         ) from exc
     if (ack or {}).get("error"):
         raise RemoteControlFailed(f"The remote node refused: {ack['error']}")

@@ -521,3 +521,48 @@ on too. Nothing changes what an order does; a rejected order is still
 rejected. Pinned by `tests/broker/test_autotrading_guard.py`. **Not yet seen
 switching a real terminal back on**: the click itself is the existing
 `_try_enable_autotrading`, used by `/restartbridge` and the reconnect path.
+
+## An order MT5 has sent but not heard back about (2026-09-29)
+
+Demo account 26004592: Vantage-Demo stopped answering trade requests, and
+the Trade tab showed market BUYs in state **started** with volume `0.02 / 0`
+and "market" where a price would be. That is an order MT5 has checked and
+sent, with no accept, fill or reject from the server yet. MT5 waits 3 minutes
+on each request (`[Request timeout]` in the terminal log, at exact 3-minute
+spacing) and queues the next one behind it. The EA's `trade.Buy` blocks for
+the same 3 minutes, then reports `trade_open_failed` and forgets the trade,
+even though the order can still fill afterwards. Every EA "link lost" on the
+VPS that day was the EA blocked in one of these sends: the link dropped about
+10 s after each send and came back 165-181 s later.
+
+Such an order is neither a position nor a deal, so until then every broker
+read the app made said "no trace". `mt5_orders.py` (stdlib-only sibling of
+`mt5_bridge.py`, like `mt5_terminal.py`) reads the terminal's order list:
+`/orders` on the HTTP bridge, `get_orders()` on `MT5BridgeClient`,
+`NativeMT5Bridge` and `FakeMT5Bridge`. `None` means it could not be read. A
+bridge process started before `/orders` existed answers 404, which the client
+also returns as `None`: **restart the Mac's MT5 bridge after updating**, or
+placeholders stop auto-expiring (they are kept, not lost). The state is
+passed through as MT5's number rather than interpreted. Callers only ask
+whether MT5 still holds an order for a trade. **Still unmeasured:** that
+`orders_get()` returns an order in the started state. The Trade tab listing
+it is the evidence. Check on demo. Pinned by
+`tests/broker/test_bridges_list_orders.py`.
+
+### Restarting the bridge from Settings > MT5 (2026-09-29)
+
+Settings > MT5 > Restart bridge runs the same `start_bridge_process` as the
+watchdog and Telegram's `/restart_bridge`. On a Mac that tears down the whole
+Wine session, so the MT5 terminal and the EA restart too. That's why the
+button asks first. Windows with the in-process bridge only reconnects, and a
+changed `mt5_bridge.py` loads there on the next app restart. The button judges
+success by `get_bridge_health()` (`bridge_process.restart_and_wait`, 45 s,
+one restart at a time).
+
+**Known wrong, left alone:** `bot_infra.cmd_restart_bridge` waits for port
+**9000**. The Mac's bridge is on 9010 and the in-process bridge has no port,
+so `/restart_bridge` reports "port 9000 not bound after 36s" even when the
+restart worked. `tests/core/test_bot_commands_infra_surface.py` pins that
+wording, so fixing it needs the owner's say. Pinned for the button by
+`tests/services/broker/test_restart_bridge_from_settings.py` and
+`BridgeRestartSection.test.tsx`.

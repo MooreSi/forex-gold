@@ -1,3 +1,61 @@
+## v0.612 — The VPS trades Telegram itself (2026-09-29)
+
+The About screen carries the user-facing summary; this is the engineering
+record. 57 commits since v0.611, plus this release's own change.
+
+**Telegram and engines on the active node** (docs/todo/010)
+- `scan_messages` asks `node_roles.is_active_trader_node()` instead of
+  `should_generate_signals_here()`. The standby node runs
+  `signals/standby_record.py`: pure parsers, one row with status `standby`, no
+  order, alert, AI call or keyword trigger.
+- Breakout, Reversal and Trend PA ask `node_roles.engines_generate_here()`
+  instead of returning at `is_remote_node()`; exactly one node answers True in
+  every mode, and it fails closed. The research timers stay Mac-only.
+- `sync/_channel_setup_sync.py`: `MSG_CHANNEL_SETUP` (slots, parser config,
+  lexicons, Mac -> VPS) answered by `MSG_CHANNEL_SETUP_ACK`, shown on
+  Settings > Remote node. Never clears a VPS slot the Mac did not send.
+- The same message carries the Mac's hand-set channel pauses
+  (`channel_performance` rows with `manual_override = 1`) and the news
+  blackout (four config.yaml keys, validated against the calendar's own
+  clamp and impact sets). An older Mac that sends neither changes neither;
+  the ack names only the parts sent.
+- Instant entry refuses a paused channel (`get_channel_lot_mult`), which only
+  `resolve_open_trade_params` did before.
+- Not yet run through a demo session.
+
+**Sizing** (owner, 2026-09-29)
+- `resolve_open_trade_params` sizes a template trade from the template's own
+  stop (`template_sl_at` at the tick), the stop the order is sent with, not
+  the signal's. One Risk % had given 0.02 to 0.07 lots and about 1% to 5% at
+  risk. Instant entry and the Reversal Engine's limit orders already did
+  this. `sl_pips = 0` still sizes from the signal's stop.
+- Two queued-path override tests now set `sl_pips = 0` (owner-approved): they
+  pin the per-leg split, not which stop is used.
+
+**Since v0.611 (committed)**
+- Pairing: full settings sync, MT5 accounts and demo/live follow the Mac, EA
+  template sync and missing-template refusal, remote restart/upgrade/resume/
+  close/engine start, commit report with the reason nodes differ, forced
+  take-over without the peer, VPS settings and trading status to the Mac.
+- Trading: Trend PA engine, daily profit goal, per-channel daily loss cap (off
+  by default), Max Open Trades on live trades only, broker-counted open
+  trades, rejections as refusals, placeholder write-off rules, AutoTrading
+  re-enabled with an alert, 30 s minimum EA template ack wait.
+- Dashboard: brain view, fill costs, GLD GEX, chart drawings/TradingView/order
+  buttons/position tool, Compound Calculator, latency view.
+- Windows: bootstrapper installer, EA install at startup, bridge terminal
+  discovery and login, restart under the launcher, perf_counter timings, CI
+  timeout 90 min.
+
+**Uncommitted work from other sessions, shipped here (bug 070 and follow-ups)**
+- Every bridge lists the orders MT5 still holds; reconciliation and the
+  placeholder repair tell "in flight" from "did not fill"; an adopted
+  placeholder is handed to the EA at once.
+- Resume the VPS's trading from the Mac's header; Restart bridge on
+  Settings > MT5; the Analysis spread cache is written again; a headless node
+  stops for an upgrade; the version line says when this machine has unpushed
+  commits.
+
 ## v0.611 — Windows install and VPS setup (2026-09-25)
 
 The About screen carries the user-facing summary; this is the engineering

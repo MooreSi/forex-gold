@@ -499,8 +499,17 @@ async def resolve_open_trade_params(
         # path (docs/todo/risk/010).
         balance   = await get_trading_balance(bridge, starting_balance)
         entry_mid = (float(sig["entry_low"]) + float(sig["entry_high"])) / 2
+        # Sized from the stop the order is sent with. A template's own stop
+        # replaces the signal's below, and sizing from the signal's put a
+        # 2-point channel stop on 2.5x the lot behind a 5-point template stop
+        # (owner, 2026-09-29: 0.02 to 0.07 lots at one Risk %). Same rule as
+        # instant entry and the Reversal Engine's limit orders.
+        _size_ref = tick.ask if _dir == "BUY" else tick.bid
+        _size_sl = _template_sl_at(_template, _dir, _size_ref, dpm_candles)
+        if _size_sl is None:
+            _size_ref, _size_sl = entry_mid, float(sig["stop_loss"])
         lot_size  = lot_sizing.template_lot(
-            rs, _template, entry_mid, float(sig["stop_loss"]), balance, suggest_lot_size).lot
+            rs, _template, _size_ref, _size_sl, balance, suggest_lot_size).lot
         # A 0 here used to fall through to risk % below, so this route traded
         # a signal the immediate route sent to MT5 as 0 lots. Both refuse now.
         lot_sizing.refuse_unplaceable(lot_size, rs)

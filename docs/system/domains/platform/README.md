@@ -589,6 +589,7 @@ them once.
 - **Engine settings do reach the VPS.** Every Signal Generator switch is a
   risk-settings column and is proposed to the peer on write; the VPS logged
   "applied settings from Mac: {'htf_bias_asian_exempt': 0}" at 20:44. The
-  Signal Generator banner's "no route between nodes" is stale since the
-  2026-09-25 completion of `SYNCED_SETTINGS_KEYS`; its wording is pinned by
-  `EnginesPanel.test.tsx` and is left for the owner to approve changing.
+  Signal Generator banner said "no route between nodes", stale since the
+  2026-09-25 completion of `SYNCED_SETTINGS_KEYS`. With the owner's approval
+  (2026-09-29) it now says a saved switch is sent to the remote node, and
+  `EnginesPanel.test.tsx` pins that instead.

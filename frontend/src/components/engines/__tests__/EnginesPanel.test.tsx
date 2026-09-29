@@ -260,14 +260,19 @@ describe("which machine these controls drive", () => {
     expect(banner).toHaveTextContent(/not on this machine/);
   });
 
-  it("warns that a tunable other than the AI switch cannot travel", async () => {
-    // The sync protocol carries exactly one risk setting. Saving any other
-    // switch in Remote mode writes a row the trading node never reads.
+  it("says a saved switch is sent to the remote node", async () => {
+    // Changed 2026-09-29, owner-approved. This test used to require "no
+    // route between nodes", true on 2026-09-18 when only the AI switch
+    // synced. Since 2026-09-25 every risk-settings column is synced or named
+    // per-node (test_sync_covers_every_setting.py), every switch on this
+    // panel is one, and the VPS logged "applied settings from Mac" for one on
+    // 2026-09-28. The old wording told the owner his changes were lost.
     body = state({ control_target: "remote" });
     render(<EnginesPanel />);
 
-    expect(await screen.findByTestId("control-target"))
-      .toHaveTextContent(/no route between nodes/);
+    const banner = await screen.findByTestId("control-target");
+    expect(banner).toHaveTextContent(/sent to the remote node/);
+    expect(banner).not.toHaveTextContent(/no route between nodes/);
   });
 
   it("distinguishes centralized generation from plain remote", async () => {

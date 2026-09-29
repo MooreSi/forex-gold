@@ -258,8 +258,8 @@ async def update_settings(body: TunableUpdate) -> dict:
     the paired node, and every column is in `SYNCED_SETTINGS_KEYS` or named
     per-node (tests/core/test_sync_covers_every_setting.py). Seen live on
     2026-09-28: "[SyncServer] applied settings from Mac:
-    {'htf_bias_asian_exempt': 0}". The panel's banner still says otherwise;
-    its wording is pinned by EnginesPanel.test.tsx and awaits the owner.
+    {'htf_bias_asian_exempt': 0}". The panel's banner says so (owner,
+    2026-09-29).
     """
     engines_ctl.update_risk_settings(dict(body.model_dump()))
     return engines_ctl.effective_settings(

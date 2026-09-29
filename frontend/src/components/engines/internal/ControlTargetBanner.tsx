@@ -32,9 +32,8 @@ export function ControlTargetBanner({ target }: { target: string }) {
       {remote ? (
         <span>
           The remote node is trading, so these controls act on <strong>it</strong>,
-          not on this machine. Its settings are what is shown below. Tunables
-          other than the AI switch have no route between nodes and would only
-          change this machine's copy.
+          not on this machine. Its settings are what is shown below, and a
+          switch you save here is sent to the remote node too.
         </span>
       ) : (
         <span>

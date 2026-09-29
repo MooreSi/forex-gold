@@ -19,6 +19,14 @@ its panel on 2026-09-02, was stopped on 2026-09-13 and was deleted on
 position 1 of 3 in `engines_controller._ENGINE_SERVICES`, bound to `None`,
 because the sync protocol binds engines by that fixed order.
 
+It stayed on Trading > Strategy (and the Telegram panel's channel picker, and
+the channel-strategy sync snapshot) until 2026-09-29, because
+`channels/repo._FIXED_ENGINE_CHANNELS` still seeded "Bounce Engine" into every
+channel list. It now lives in `_RETIRED_ENGINE_CHANNELS`: listed nowhere a
+channel can be picked, still counted by `internal_engine_names()` so a
+historical Bounce trade is never mistaken for a Telegram channel's. Pinned by
+`tests/core/test_bounce_is_off_the_strategy_page.py`.
+
 Each owns an isolated SQLite database, its own adaptive parameters, and its
 own ML model, with no cross-training. A separate backtest package replays
 recorded candles against the live strategy management rules.

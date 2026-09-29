@@ -152,4 +152,4 @@ def get_telegram_channel_names() -> list[str]:
 def internal_engine_names() -> tuple[str, ...]:
     """Canonical names of the app's own signal generators -- sources that are
     not Telegram channels, for gates that apply to channels only."""
-    return tuple(_repo._FIXED_ENGINE_CHANNELS)
+    return tuple(_repo._FIXED_ENGINE_CHANNELS + _repo._RETIRED_ENGINE_CHANNELS)

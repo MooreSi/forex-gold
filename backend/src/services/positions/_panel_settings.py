@@ -289,7 +289,7 @@ def tp_ladder_screen(slug: str, which: str) -> Screen:
     note = (
         "_Telegram signals take these levels from the message. The pips in "
         "brackets still apply to internal signals (Reversal, Breakout, "
-        "Bounce, ORB), which have no message._"
+        "ORB), which have no message._"
         if from_tg else
         "_Pips are measured from the fill; % is how much of the position "
         "closes at that level._"

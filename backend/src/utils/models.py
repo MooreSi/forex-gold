@@ -432,7 +432,7 @@ STRATEGY_DESCRIPTIONS = {
         "**Problem this fixes:** Reversal Runner's fixed 4x/20pt SL widening was validated "
         "against Gold Diggers VIP's own signal shape (tiny ~4-5pt stated SL, real target "
         "~25-30pt out at TP8) — there the widened stop is a small fraction of the reachable "
-        "reward. Applied to a shorter-ladder signal (e.g. a 3-TP Breakout/Bounce signal with "
+        "reward. Applied to a shorter-ladder signal (e.g. a 3-TP Breakout signal with "
         "an 8pt stated SL and a ~15pt final target) the same formula widens the SL to 20pt — "
         "*wider than the maximum possible win* — which is a structurally losing trade "
         "regardless of win rate.\n\n"

@@ -495,10 +495,12 @@ CANONICAL_CHANNELS: dict[str, str] = {
 # genuinely fixed, unlike the Telegram-driven channels below.
 _FIXED_ENGINE_CHANNELS = [
     "Reversal Engine",
-    "Bounce Engine",
     "Breakout Engine",
     "ORB/IVB Report",
 ]
+
+# Code gone, trades still in the ledger: never listed, still internal (2026-09-29).
+_RETIRED_ENGINE_CHANNELS = ["Bounce Engine"]
 
 
 _TG_AUTO_OPEN = "telegram auto ("
@@ -534,7 +536,8 @@ def get_telegram_channel_names() -> list[str]:
     the fixed internal engines -- i.e. actual Telegram channels only, for
     UIs/gates that need to enumerate them separately from Reversal Engine /
     Breakout Engine (which already have their own dedicated toggles)."""
-    return [c for c in _dynamic_channel_bucket_order() if c not in _FIXED_ENGINE_CHANNELS]
+    return [c for c in _dynamic_channel_bucket_order()
+            if c not in _FIXED_ENGINE_CHANNELS + _RETIRED_ENGINE_CHANNELS]
 
 
 def _dynamic_channel_bucket_order() -> list[str]:
@@ -565,7 +568,7 @@ def _dynamic_channel_bucket_order() -> list[str]:
             ).fetchall()
         for (name,) in rows:
             canon = _canonical(name)
-            if canon not in order:
+            if canon not in order and canon not in _RETIRED_ENGINE_CHANNELS:
                 order.append(canon)
     except Exception:
         pass
@@ -780,9 +783,6 @@ def get_all_channel_strategy_settings() -> list:
         b["net_pnl"] = round(b["net_pnl"] + float(r[6] or 0), 2)
 
     return [buckets[ch] for ch in order]
-
-    # (unreachable fallback)
-    return []
 
 
 def set_channel_paused(source: str, paused: bool) -> None:

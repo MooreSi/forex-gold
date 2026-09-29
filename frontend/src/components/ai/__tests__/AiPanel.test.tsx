@@ -187,6 +187,50 @@ describe("the answer is summarised, not printed", () => {
   });
 });
 
+describe("how the answer looks", () => {
+  // Owner, 2026-09-29: "ensure the top two boxes/tables are the same height to
+  // keep it consistent. also on the page use some nice images/graphics".
+  beforeEach(() => {
+    stored = { billable: false, analysis: ANALYSIS, saved_at: "2026-09-20T09:30:00Z" };
+  });
+
+  it("stretches the two headline cards to one height", async () => {
+    // jsdom does no layout, so what is checked is the arrangement that makes
+    // the heights equal: both cards in one stretched row, each filling its cell.
+    render(<AiPanel />);
+    const sentiment = await screen.findByTestId("sentiment-card");
+    const target = screen.getByTestId("price-target");
+
+    const row = screen.getByTestId("headline-row");
+    expect(row).toHaveClass("items-stretch");
+    for (const card of [sentiment, target]) {
+      expect(row).toContainElement(card);
+      expect(card).toHaveClass("h-full");
+    }
+  });
+
+  it("draws the sentiment as a gauge that names the call", async () => {
+    render(<AiPanel />);
+
+    expect(await screen.findByRole("img", { name: /bullish, 72% confidence/i }))
+      .toBeInTheDocument();
+  });
+
+  it("draws the day's range with one marker per level it lists", async () => {
+    render(<AiPanel />);
+
+    const ladder = await screen.findByRole("img", { name: /range \$2,638.50 to \$2,672.25/i });
+    expect(ladder.querySelectorAll("[data-level='support']")).toHaveLength(2);
+    expect(ladder.querySelectorAll("[data-level='resistance']")).toHaveLength(2);
+  });
+
+  it("gives the page a banner naming the market", async () => {
+    render(<AiPanel />);
+
+    expect(await screen.findByTestId("research-hero")).toHaveTextContent(/XAUUSD/);
+  });
+});
+
 describe("an answer with holes in it", () => {
   it("renders what there is rather than nothing", async () => {
     // A provider that returns half a schema must not blank the tab.

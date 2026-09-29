@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { useMarketResearch } from "./hooks/useMarketResearch";
 import { PriceTargetSection } from "./internal/PriceTargetSection";
+import { ResearchHero } from "./internal/ResearchHero";
 import { ResearchNarrativeSection } from "./internal/ResearchNarrativeSection";
 import { SentimentSection } from "./internal/SentimentSection";
 
@@ -72,7 +73,11 @@ export function AiPanel() {
         )
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-stretch gap-3">
+          <ResearchHero analysis={r.analysis} savedAt={describeSavedAt(r.savedAt)} />
+
+          {/* One row, stretched: the two cards are always the same height
+              (owner, 2026-09-29), whichever has more to say. */}
+          <div data-testid="headline-row" className="flex flex-wrap items-stretch gap-3">
             <div className="min-w-56 flex-1">
               <SentimentSection analysis={r.analysis} />
             </div>

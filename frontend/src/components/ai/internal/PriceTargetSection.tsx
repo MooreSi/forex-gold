@@ -1,5 +1,7 @@
 import { formatMoney } from "@/components/shared/format";
+import { Target } from "lucide-react";
 import type { MarketAnalysis } from "../hooks/useMarketResearch";
+import { RangeLadder } from "./RangeLadder";
 
 function Levels({ label, values, tone }: {
   label: string; values: number[]; tone: string;
@@ -33,12 +35,23 @@ export function PriceTargetSection({ analysis }: { analysis: MarketAnalysis }) {
   return (
     <div
       data-testid="price-target"
-      className="rounded-lg border border-line bg-surface-2 p-4"
+      className="relative h-full overflow-hidden rounded-lg border border-line bg-surface-2 p-4"
     >
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-gradient-to-br
+                   from-accent/8 via-transparent to-transparent"
+      />
+      <Target
+        aria-hidden
+        size={120}
+        strokeWidth={1}
+        className="pointer-events-none absolute -right-4 -bottom-6 text-accent opacity-[0.07]"
+      />
+      <h3 className="relative text-[10px] font-semibold uppercase tracking-wider text-ink-3">
         Today&apos;s price target
       </h3>
-      <div className="mt-1.5 flex flex-wrap items-end gap-3">
+      <div className="relative mt-1.5 flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-0">
           <span className="text-[10px] text-ink-3">LOW</span>
           <span className="num text-xl font-bold text-loss">{formatMoney(low)}</span>
@@ -54,10 +67,18 @@ export function PriceTargetSection({ analysis }: { analysis: MarketAnalysis }) {
           </span>
         )}
       </div>
+      <div className="relative mt-1">
+        <RangeLadder
+          low={low}
+          high={high}
+          supports={supports.slice(0, 3)}
+          resistances={resistances.slice(0, 3)}
+        />
+      </div>
       {(supports.length > 0 || resistances.length > 0) && (
         <div
           data-testid="levels"
-          className="mt-2 grid grid-cols-2 gap-2 border-t border-line pt-2"
+          className="relative mt-1 grid grid-cols-2 gap-2 border-t border-line pt-2"
         >
           <Levels label="Support" values={supports} tone="text-profit" />
           <Levels label="Resistance" values={resistances} tone="text-loss" />

@@ -193,8 +193,10 @@ def test_template_channel_gets_the_full_grid(template_channel):
 
 
 def test_builtin_strategy_channel_gets_the_slim_screen(fresh_db):
-    db.set_channel_strategy_override("Bounce Engine", "conservative")
-    chan = next(c for c in panel.channel_list() if c["name"] == "Bounce Engine")
+    # Bounce Engine was the example until 2026-09-29, when it left every
+    # channel list (test_bounce_is_off_the_strategy_page.py).
+    db.set_channel_strategy_override("Breakout Engine", "conservative")
+    chan = next(c for c in panel.channel_list() if c["name"] == "Breakout Engine")
     screen = panel.channel_settings_screen(chan["slug"])
     labels = [b["text"] for b in _all_buttons(screen)]
     # No template means no grid fields to show -- and the screen says why
@@ -206,8 +208,8 @@ def test_builtin_strategy_channel_gets_the_slim_screen(fresh_db):
 
 def test_binding_a_template_switches_the_channel_to_the_full_grid(fresh_db):
     et.save_ea_template("Panel Grid", {"mode": "grid"})
-    db.set_channel_strategy_override("Bounce Engine", "conservative")
-    chan = next(c for c in panel.channel_list() if c["name"] == "Bounce Engine")
+    db.set_channel_strategy_override("Breakout Engine", "conservative")
+    chan = next(c for c in panel.channel_list() if c["name"] == "Breakout Engine")
     _run(panel.handle_callback(f"p|sset|{chan['slug']}|t:Panel Grid", None))
     labels = [b["text"] for b in _all_buttons(
         panel.channel_settings_screen(chan["slug"]))]

@@ -1,5 +1,6 @@
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import type { MarketAnalysis } from "../hooks/useMarketResearch";
+import { SentimentGauge } from "./SentimentGauge";
 
 /** How the three sentiments look. Profit/loss colours, as everywhere else. */
 const TONES: Record<string, { text: string; edge: string; Icon: typeof TrendingUp }> = {
@@ -23,26 +24,43 @@ export function SentimentSection({ analysis }: { analysis: MarketAnalysis }) {
   const bar = pct >= 65 ? "bg-profit" : pct >= 40 ? "bg-warning" : "bg-loss";
 
   return (
-    <div className={`rounded-lg border p-4 ${tone.edge}`}>
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-        Market sentiment
-      </h3>
-      <div className="mt-1.5 flex items-center gap-2">
-        <tone.Icon size={24} className={tone.text} />
-        <span data-testid="sentiment" className={`text-2xl font-bold ${tone.text}`}>
-          {sentiment.toUpperCase()}
-        </span>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <span data-testid="confidence" className="num shrink-0 text-[11px] text-ink-3">
-          Confidence: {pct}%
-        </span>
-        <div className="h-2 flex-1 rounded-full bg-surface-3">
-          <div className={`h-2 rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+    <div
+      data-testid="sentiment-card"
+      className={`relative h-full overflow-hidden rounded-lg border p-4 ${tone.edge}`}
+    >
+      {/* A large faint echo of the call's icon. Decorative only. */}
+      <tone.Icon
+        aria-hidden
+        size={120}
+        strokeWidth={1}
+        className={`pointer-events-none absolute -right-4 -bottom-6 opacity-[0.07] ${tone.text}`}
+      />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+            Market sentiment
+          </h3>
+          <div className="mt-1.5 flex items-center gap-2">
+            <tone.Icon size={24} className={tone.text} />
+            <span data-testid="sentiment" className={`text-2xl font-bold ${tone.text}`}>
+              {sentiment.toUpperCase()}
+            </span>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span data-testid="confidence" className="num shrink-0 text-[11px] text-ink-3">
+              Confidence: {pct}%
+            </span>
+            <div className="h-2 flex-1 rounded-full bg-surface-3">
+              <div className={`h-2 rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+            </div>
+          </div>
         </div>
+        <SentimentGauge sentiment={sentiment} pct={pct} />
       </div>
       {analysis.today_bias && (
-        <p className="mt-2 text-xs italic text-ink-2">{analysis.today_bias}</p>
+        <p className="relative mt-3 text-xs italic leading-relaxed text-ink-2">
+          {analysis.today_bias}
+        </p>
       )}
     </div>
   );

@@ -16,6 +16,7 @@ import { CrossAssetSection } from "./internal/CrossAssetSection";
 import { ModelSection } from "./internal/ModelSection";
 import { LearningChartSection } from "./internal/LearningChartSection";
 import { ShadowSection } from "./internal/ShadowSection";
+import { TrendPaSection } from "./internal/TrendPaSection";
 
 // Reversal first, and the one the page opens on. Owner, 2026-09-21: "this is
 // the main one" -- it is the engine that trades, and the one whose model,
@@ -23,6 +24,8 @@ import { ShadowSection } from "./internal/ShadowSection";
 const SUB_TABS = [
   { id: "reversal", label: "Reversal engine" },
   { id: "breakout", label: "Breakout engine" },
+  // 2026-09-29, docs/todo/012: trend-following price action.
+  { id: "trend_pa", label: "Trend PA engine" },
 ];
 
 export function EnginesPanel() {
@@ -40,7 +43,7 @@ export function EnginesPanel() {
         <div className="space-y-4">
           <ControlTargetBanner target={String(c.state.data.control_target ?? "local")} />
 
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {c.engines.map((e) => (
               <EngineCard
                 key={e.id}
@@ -87,6 +90,13 @@ export function EnginesPanel() {
                   and said nothing about Breakout beyond a Start/Stop card. */}
               <BreakoutSection />
               <div className="mt-4"><TuningExperimentsSection /></div>
+            </Tabs.Content>
+
+            <Tabs.Content value="trend_pa">
+              <TrendPaSection
+                settings={asObject(c.state.data.settings)}
+                onSaveSetting={(key, value) => void c.saveSetting(key, value)}
+              />
             </Tabs.Content>
 
             <Tabs.Content value="reversal" className="space-y-4">

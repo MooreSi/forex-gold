@@ -53,7 +53,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "is_remote_active", "is_centralized_remote_mode", "where",
     "effective_settings", "engines_running", "set_engine_running", "set_ai_eval",
-    "place_market_order", "close_on_peer", "AI_EVAL_KEYS", "RemoteControlFailed",
+    "place_market_order", "close_on_peer", "send_engine_action", "AI_EVAL_KEYS",
+    "RemoteControlFailed",
 ]
 
 # The only two settings the sync protocol can carry. `set_ai_eval` is the one
@@ -265,6 +266,12 @@ async def close_on_peer(trade_id: str, reason: str) -> dict:
     if (ack or {}).get("error"):
         raise RemoteControlFailed(f"The remote node refused: {ack['error']}")
     return {**((ack or {}).get("result") or {}), "where": "remote"}
+
+
+async def send_engine_action(engine: str, action: str) -> dict:
+    """Ask the peer's engine to do something other than start or stop -- the
+    Trend PA backtest. The peer acks at once and runs it after."""
+    return await _send(engine, action)
 
 
 async def _send(engine: str, action: str, **kwargs: Any) -> dict:

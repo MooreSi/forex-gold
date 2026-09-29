@@ -2,7 +2,7 @@
 
 **Living file — update when this domain teaches you something.**
 Covers: `backend/src/services/breakout_signal/`, `reversal_engine/`,
-`backtest/`.
+`trend_pa/`, `backtest/`.
 
 ## What it is
 
@@ -485,3 +485,64 @@ kept so it can be recomputed. Include every expiry within 60 days: capping at
 the first 8 (all dailies) flipped the sign of total GEX on the first live
 fetch. No node-role check of its own (the loop's one `is_remote_node` call is
 pinned); it runs only where the engine has a bridge.
+
+
+## Trend PA (2026-09-29, docs/todo/012)
+
+The owner's "simpler" engine: H4 swing structure plus an EMA50 filter for the
+trend, London and New York only (08:00-21:00 UTC, nothing after 19:00 Friday),
+a pullback to an H1 swing level (a broken swing high counts as a floor), a
+closed M15 engulfing or pin bar, stop beyond the pullback, target 2R.
+`services/trend_pa/`: `strategy.py` (pure, closed candles only), `outcome.py`,
+`stats.py`, `backtest.py`, `ml.py`, `repo.py` (`trend_pa.db`), `service.py`,
+`live_execute.py` (the one real-money surface), `panel_data.py`.
+
+- **It is reached by NAME, not position.** `registry.ENGINE_NAMES` and
+  `all_instances()` are still exactly (breakout, bounce, reversal), pinned by
+  `test_handover.test_the_binding_order_is_fixed`; Trend PA sits in
+  `_NAMED_SERVICES` and `ALL_NAMES`. The sync server finds it through
+  `registry.instance("trend_pa")` in `_sub_engines`, so it is in the
+  heartbeat, Start/Stop, stand-down and resume, with no change a paired node
+  on an older build can see. `running()` lists it only once built.
+- **The stats mirror is one dict**: `signal_gen_stats["trend_pa"]` is
+  `panel_data.local_report()`, and in Remote mode `panel_data.report()` returns
+  the VPS's copy. The backtest button in Remote mode is `engine_control`
+  action `"backtest"`, which the VPS acks BEFORE running (a three-year replay
+  outlasts the Mac's 10s ack wait).
+- **Generation follows the other engines' node rule**: never on the VPS
+  (`is_remote_node`), never on a node centralized generation moved away from.
+  Live orders reach the VPS the same way Breakout's do, through
+  `open_trade`'s forwarding.
+- **The bridge stamps bars in broker time.** At 09:32 UTC the newest M15 bar
+  read 12:30. `backtest.BROKER_OFFSET_S` is the 10,800 the rest of the code
+  uses; the live cycle uses the wall clock for the session and drops the
+  forming bar from every timeframe.
+- **Equal swing highs used to count twice.** `strategy.swings` gives a tie to
+  the first bar (strictly beyond the left, level-or-beyond the right).
+  Without that, a clean staircase whose peak bar shared a high with the next
+  bar compared its last two swings as equal and read "no trend".
+- **First measurement (2026-09-29, 533 replayed trades, Nov 2023 - Sep 2026,
+  $0.30 a trade):** win rate 35.3% against a 33.3% break-even, +0.054R a
+  trade, profit factor 1.08, worst drawdown 28R, t about 0.9 -- not
+  distinguishable from zero. Split at 2025-06-01: -0.025R before, +0.126R
+  after (the gold trend). A 24-point grid of rr / EMA / chase / tolerance on
+  the first half found nothing significant (best t = +0.56 in sample); every
+  variant did somewhat better out of sample, which is the regime, not the
+  settings. The defaults stay the owner's 1:2.
+- **The model has no edge on that data**: logistic regression on the 14
+  setup features scored AUC 0.49-0.53 out of sample, so `ml.Model` stays
+  UNARMED (needs n >= 60 AND time-ordered holdout AUC >= 0.55) and vetoes
+  nothing. Same finding as the Reversal engine's.
+- **The live path refuses until a strategy is chosen** for "Trend PA Engine"
+  (Trading > Strategy, or a schedule window). Several strategies replace the
+  signal's own stop and target, and the 1:2 is the whole strategy, so the
+  global default is not assumed. **Not yet run against a demo account.**
+- **It is a schedule source of its own**, `trend_pa_engine` in
+  `risk/schedule.ENGINE_SOURCE_KEYS`, with `trend_pa_engine_override` beside
+  it (owner, 2026-09-29). A window saved before it existed reads it as
+  allowed with no override: the pre-2026-08-03 shared `strategy_override`
+  is deliberately NOT migrated into it, as it was for Reversal and Breakout,
+  because it predates this engine. The key is also in
+  `template_rename._WINDOW_OVERRIDE_KEYS`, `core_auto_template`'s Auto-source
+  sweep and `channel_loss_cap._NOT_A_CHANNEL`; a fourth engine needs all
+  four.

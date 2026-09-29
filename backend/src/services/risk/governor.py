@@ -514,6 +514,10 @@ def rearm_risk_guards() -> None:
     with db_module.db():
         rearm_giveback_guard()
         db_module.set_app_config("daily_loss_baseline_ts", str(time.time()))
+        # The daily goal too (risk/daily_goal.BASELINE_KEY; spelled out here
+        # because that module imports this one). Without it, a Resume after
+        # the goal is re-halted on the next sweep: the day is already past it.
+        db_module.set_app_config("daily_goal_baseline_ts", str(time.time()))
 
 
 def rearm_giveback_guard() -> None:

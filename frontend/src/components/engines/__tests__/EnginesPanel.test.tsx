@@ -323,7 +323,9 @@ describe("the two engines have a tab each", () => {
     await screen.findByRole("tab", { name: /Reversal engine/ });
 
     const names = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(names).toEqual(["Reversal engine", "Breakout engine"]);
+    // CHANGED 2026-09-29: a third tab, Trend PA, which the owner asked for
+    // (docs/todo/012). Reversal still first and Breakout still second.
+    expect(names).toEqual(["Reversal engine", "Breakout engine", "Trend PA engine"]);
   });
 
   it("keeps the Breakout detail off the Reversal tab", async () => {

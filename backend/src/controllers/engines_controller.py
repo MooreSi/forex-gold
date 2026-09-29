@@ -20,7 +20,7 @@ from backend.src.services.risk import settings as _risk
 __all__ = [
     "get_risk_settings", "get_risk_settings_async",
     "update_risk_settings", "get_engine", "canonical_name", "engines_running", "sub_engines",
-    "ENGINE_NAMES", "IMPLEMENTED_NAMES", "control_target", "effective_settings",
+    "ENGINE_NAMES", "ALL_NAMES", "IMPLEMENTED_NAMES", "SHOWN_NAMES", "control_target", "effective_settings",
     "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",
     "RemoteControlFailed", "place_market_order", "close_on_peer",
 ]
@@ -51,6 +51,10 @@ ENGINE_NAMES = _engines.ENGINE_NAMES
 # Not the same list: ENGINE_NAMES is the sync protocol's positional order and
 # still holds Bounce's empty slot. See services/engines/registry.py.
 IMPLEMENTED_NAMES = _engines.IMPLEMENTED_NAMES
+# Every addressable name: the wire three plus engines reached by name only.
+ALL_NAMES = _engines.ALL_NAMES
+# What the tab shows: IMPLEMENTED_NAMES plus the by-name engines.
+SHOWN_NAMES = _engines.SHOWN_NAMES
 
 
 def get_engine(name: str) -> Any:

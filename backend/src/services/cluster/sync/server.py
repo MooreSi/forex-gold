@@ -307,6 +307,13 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                     eng.stop()
                 elif action == "run_now":
                     await eng._run_cycle()
+                elif action == "backtest":
+                    # Trend PA's replay reads years of candles and outlasts
+                    # the Mac's 10s ack wait, so it runs on after the ack.
+                    if not callable(getattr(eng, "run_backtest", None)):
+                        error = f"backtest not supported for {engine_name}"
+                    else:
+                        asyncio.ensure_future(eng.run_backtest())
                 elif action == "set_ai_eval":
                     # Bounce/Breakout AI-review toggle — a risk_settings flag,
                     # not an engine lifecycle action, but routed through this
@@ -585,9 +592,13 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
         # No "bounce": its code was deleted on 2026-09-14 and its slot is
         # always None, but listing it put "Bounce off" in every heartbeat and
         # on the Mac's Remote Node page.
+        from backend.src.services.engines import registry as _engines
         return {
             "breakout": self._breakout_engine,
             "reversal_engine":  self._re_engine,
+            # By name from the registry, not a constructor argument: the
+            # constructor's positional engines are the wire contract.
+            "trend_pa": _engines.instance("trend_pa"),
         }
 
     async def _handle_stand_down(self, ws) -> None:

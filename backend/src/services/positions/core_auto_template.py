@@ -211,7 +211,8 @@ def auto_enabled_sources() -> list[str]:
                     if (cfg.get("strategy_override") or "") == "auto":
                         out.add(name)
                 for key, label in (("reversal_engine_override", "Reversal Engine"),
-                                   ("breakout_engine_override", "Breakout Engine")):
+                                   ("breakout_engine_override", "Breakout Engine"),
+                                   ("trend_pa_engine_override", "Trend PA Engine")):
                     if (b.get(key) or "") == "auto":
                         out.add(label)
     except Exception:

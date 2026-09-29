@@ -99,6 +99,7 @@ def trade_source_label(tg_source: str) -> str:
 # contain one of these words.
 INTERNAL_ENGINE_SOURCES = frozenset({
     "Reversal Engine", "Breakout Engine", "Signal Generator", "Bounce Generator",
+    "Trend PA Engine",
 })
 # The ORB/IVB report names its own run, so it is matched by prefix.
 _INTERNAL_PREFIXES = ("ORB/IVB Report",)

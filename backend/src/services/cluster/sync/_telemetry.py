@@ -287,6 +287,15 @@ class TelemetryMixin:
             log.debug("[SyncServer] reversal_engine stats snapshot failed: %s", e)
             return {}
 
+    @staticmethod
+    def _trend_pa_stats() -> dict:
+        try:
+            from backend.src.services.trend_pa import panel_data as _tpa_panel
+            return _tpa_panel.local_report()
+        except Exception as e:
+            log.debug("[SyncServer] trend_pa stats snapshot failed: %s", e)
+            return {}
+
     async def _signal_gen_stats_payload(self) -> dict:
         return {
             "breakout": await asyncio.to_thread(self._breakout_stats),
@@ -297,6 +306,7 @@ class TelemetryMixin:
             # already sent whenever the engine was unavailable.
             "bounce":   {},
             "reversal_engine":  await asyncio.to_thread(self._reversal_engine_stats),
+            "trend_pa": await asyncio.to_thread(self._trend_pa_stats),
         }
 
     async def _signal_gen_stats_loop(self) -> None:

@@ -4,6 +4,7 @@ import { useSettingsResource } from "@/components/settings/hooks/useSettingsReso
 import { SettingsField } from "@/components/settings/internal/SettingsField";
 import { SettingsToggle } from "@/components/settings/internal/SettingsToggle";
 import { RISK_GROUPS, type RiskField } from "../content/risk";
+import { DailyGoalSection } from "./DailyGoalSection";
 import { PerTradeSizingSection } from "./PerTradeSizingSection";
 
 /**
@@ -130,8 +131,14 @@ export function RiskSection() {
             </div>
           )}
           <div className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {group.fields.filter((f) => !f.sizing).map(field)}
+            {group.fields.filter((f) => !f.sizing && !f.goal).map(field)}
           </div>
+          {group.fields.some((f) => f.goal) && (
+            <div className="mt-3">
+              <DailyGoalSection data={data} version={risk.version}
+                save={(body) => risk.save(body)} />
+            </div>
+          )}
         </section>
       ))}
 

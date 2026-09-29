@@ -173,4 +173,8 @@ SYNCED_SETTINGS_KEYS = (
     "re_ai_tuning_enabled", "htf_bias_asian_exempt", "re_cme_context_enabled",
     "setforget_lot_size", "tg_event_tier_gate_enabled", "re_xasset_features_enabled",
     "re_require_proven_edge",
+    # Risk > Stopping for the day > Daily goal, and the Trend PA engine's
+    # live switch (2026-09-29, migration 55). The goal must hold on whichever
+    # node is trading, so it travels like every other daily limit.
+    "daily_goal_enabled", "daily_goal_mode", "daily_goal_value", "tpa_live_execution",
 )

@@ -195,15 +195,18 @@ describe("a window's channels panel", () => {
     render(<ScheduleSection {...props} />);
 
     // 2 channels + 2 engines, all on.
-    expect(screen.getAllByText(/Channels \(4\/4\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Channels \(5\/5\)/).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText(/GoldSignals in monday window 1/))
       .not.toBeInTheDocument();
   });
 
+  // CHANGED 2026-09-29: the counts in this block were out of 4 (two
+  // channels, two engines). The owner asked for the Trend PA engine to have
+  // its own window toggle too, so a window now has five sources.
   it("lists every channel and both engines", async () => {
     render(<ScheduleSection {...props} />);
 
-    await userEvent.click(screen.getAllByText(/Channels \(4\/4\)/)[0]);
+    await userEvent.click(screen.getAllByText(/Channels \(5\/5\)/)[0]);
 
     expect(screen.getByLabelText("GoldSignals in monday window 1")).toBeChecked();
     expect(screen.getByLabelText("GD2 in monday window 1")).toBeChecked();
@@ -213,7 +216,7 @@ describe("a window's channels panel", () => {
 
   it("blocks one channel without touching the others", async () => {
     render(<ScheduleSection {...props} />);
-    await userEvent.click(screen.getAllByText(/Channels \(4\/4\)/)[0]);
+    await userEvent.click(screen.getAllByText(/Channels \(5\/5\)/)[0]);
 
     await userEvent.click(screen.getByLabelText("GoldSignals in monday window 1"));
 
@@ -224,7 +227,7 @@ describe("a window's channels panel", () => {
 
   it("forces one channel onto a template for this window only", async () => {
     render(<ScheduleSection {...props} />);
-    await userEvent.click(screen.getAllByText(/Channels \(4\/4\)/)[0]);
+    await userEvent.click(screen.getAllByText(/Channels \(5\/5\)/)[0]);
 
     await userEvent.selectOptions(
       screen.getByLabelText("GoldSignals override in monday window 1"),
@@ -239,7 +242,7 @@ describe("a window's channels panel", () => {
     // The whole reason engines have separate override fields: Reversal and
     // Breakout can run different strategies inside the same window.
     render(<ScheduleSection {...props} />);
-    await userEvent.click(screen.getAllByText(/Channels \(4\/4\)/)[0]);
+    await userEvent.click(screen.getAllByText(/Channels \(5\/5\)/)[0]);
 
     await userEvent.selectOptions(
       screen.getByLabelText("Reversal Engine override in monday window 1"),
@@ -261,7 +264,7 @@ describe("a window's channels panel", () => {
     });
     render(<ScheduleSection {...props} />);
 
-    expect(screen.getAllByText(/Channels \(3\/4\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Channels \(4\/5\)/).length).toBeGreaterThan(0);
   });
 });
 

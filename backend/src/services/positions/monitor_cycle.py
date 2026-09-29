@@ -33,6 +33,7 @@ import asyncio
 import re
 import time
 
+from backend.src.services.risk import daily_goal as _daily_goal
 from backend.src.utils.models import STRATEGY_ADAPTIVE_RUNNER
 from backend.src.utils.models import STRATEGY_ADAPTIVE_RUNNER_2
 from backend.src.utils.models import STRATEGY_BE_RUNNER
@@ -113,6 +114,8 @@ class MonitorState:
     # per 5s cycle would re-ask a question that cannot have changed.
     last_resting_sweep: float = 0.0
     dpm_dxy_candles: list = field(default_factory=list)
+    # Risk > Daily goal's own throttle (risk/daily_goal.py).
+    daily_goal: Any = field(default_factory=lambda: _daily_goal.SweepState())
 
 
 @dataclass
@@ -170,6 +173,12 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                         log.debug("Orphan reconcile failed", exc_info=True)
             rs = await db_module.to_db_thread(db_module.get_risk_settings)
             profit_close_usd = float(rs.get("profit_close_usd", 0.0) or 0.0)
+
+            # Risk > Daily goal: stop new entries once today's profit is
+            # secured. Here and not in record_close, which is frozen; outside
+            # the open-trades block because the goal is usually reached by
+            # the close of the last one. Throttled and never raises.
+            await _daily_goal.sweep(ctx.state.daily_goal, ctx.bridge, rs)
 
             # Withdraw resting orders the higher-timeframe bias has turned
             # against (reversal-engine/050). Cancels only; never touches an

@@ -29,6 +29,8 @@ export interface RiskField {
   /** Drawn by PerTradeSizingSection, not the generic grid: these three are one
    *  either/or choice plus the switch that applies it to EA templates. */
   sizing?: boolean;
+  /** Drawn by DailyGoalSection: a switch, a %/$ choice and one slider. */
+  goal?: boolean;
 }
 
 export interface RiskGroup {
@@ -72,7 +74,7 @@ export const RISK_GROUPS: RiskGroup[] = [
   {
     title: "Stopping for the day",
     blurb:
-      "Both of the first two measure from the day's OPENING balance. The give-back guard is the one that can see a day which goes well and then does not.",
+      "Both of the first two measure from the day's OPENING balance. The give-back guard is the one that can see a day which goes well and then does not. The daily goal stops the day once its profit is secured.",
     fields: [
       {
         key: "max_daily_loss_pct", label: "Max daily loss (%)", kind: "number",
@@ -97,6 +99,12 @@ export const RISK_GROUPS: RiskGroup[] = [
         hint: "How much of the day's peak profit may be handed back before trading stops.",
         dependsOn: { key: "giveback_guard_enabled", label: "the give-back guard" },
       },
+      {
+        key: "daily_goal_enabled", kind: "toggle", goal: true,
+        label: "Stop for the day once the goal is secured",
+      },
+      { key: "daily_goal_mode", label: "Goal in", kind: "choice", goal: true },
+      { key: "daily_goal_value", label: "Daily goal", kind: "number", goal: true },
     ],
   },
   {

@@ -105,10 +105,13 @@ _PRE_WINDOW4_BLOCKS_PER_DAY = 3  # schedules saved before the 4th window existed
 # window can run a different strategy per channel. ENGINE_SOURCE_KEYS keeps
 # the two internal engines' simple single-toggle behaviour unchanged --
 # neither has a live Telegram identity to split by.
-ENGINE_SOURCE_KEYS = ("reversal_engine", "breakout_engine")
+# trend_pa_engine: 2026-09-29, the owner asked for the Trend PA engine to have
+# its own window toggle like the other two (docs/todo/012).
+ENGINE_SOURCE_KEYS = ("reversal_engine", "breakout_engine", "trend_pa_engine")
 SOURCE_KEYS = ENGINE_SOURCE_KEYS  # back-compat alias -- "telegram" no longer applies here
 _SOURCE_LABELS = {
     "reversal_engine": "Reversal Engine", "breakout_engine": "Breakout Engine",
+    "trend_pa_engine": "Trend PA Engine",
 }
 
 
@@ -133,6 +136,7 @@ def _default_block() -> dict:
         "strategy_override": "",
         "reversal_engine_override": "",
         "breakout_engine_override": "",
+        "trend_pa_engine_override": "",
         "telegram_channels": {},
         "telegram_default_enabled": True,
         **{k: True for k in ENGINE_SOURCE_KEYS},
@@ -187,6 +191,11 @@ def get_trading_schedule() -> dict:
                 block["reversal_engine_override"], block["breakout_engine_override"] = (
                     _migrate_engine_overrides(b)
                 )
+                # Its own field only. The pre-2026-08-03 shared override that
+                # _migrate_engine_overrides carries forward predates Trend PA,
+                # and inheriting it would choose this engine's strategy for it.
+                block["trend_pa_engine_override"] = str(
+                    b.get("trend_pa_engine_override", "") or "")
             merged.append(block)
         schedule[day] = merged
     return schedule
@@ -521,6 +530,7 @@ def schedule_source_key(source: str) -> str:
     return (
         "reversal_engine" if source == "Reversal Engine" else
         "breakout_engine" if source == "Breakout Engine" else
+        "trend_pa_engine" if source == "Trend PA Engine" else
         source
     )
 

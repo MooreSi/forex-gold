@@ -25,6 +25,7 @@ from backend.src.services.telegram.reader import TelegramReader
 
 import backend.src.services.breakout_signal.breakout_signal_service as _breakout_engine_module
 import backend.src.services.reversal_engine.reversal_engine_service as _re_engine_module
+import backend.src.services.trend_pa.service as _tpa_engine_module
 import backend.src.services.cluster.remote.client as _remote_client
 import backend.src.services.cluster.remote.server as _remote_server
 from backend.src.services.cluster.remote.auth import password_is_set
@@ -336,6 +337,16 @@ def _signal_engine_watchdog_pass() -> None:
                 re_eng.start()
     except Exception as _e:
         log.debug("[AppWatchdog] Reversal Engine health check error: %s", _e)
+    try:
+        from backend.src.services.trend_pa import repo as _tpa_repo_wd
+        if ("trend_pa" not in stood_down
+                and _tpa_repo_wd.get_config("user_stopped", "0") != "1"):
+            tpa = _tpa_engine_module.get_instance()
+            if tpa and not tpa.is_running:
+                log.warning("[AppWatchdog] Trend PA engine not running — auto-restarting")
+                tpa.start()
+    except Exception as _e:
+        log.debug("[AppWatchdog] Trend PA health check error: %s", _e)
 
 
 def _remote_client_enabled(config) -> bool:
@@ -474,6 +485,10 @@ async def startup() -> None:
     # breakout_signal_service.init() initializes its own repo DB internally.
     from backend.src.config import DATA_DIR as _DATA_DIR
     _breakout_engine_module.init(_engine._bridge)
+    # Trend PA (docs/todo/012): its own trend_pa.db and model file, beside
+    # the breakout engine's in the same data folder.
+    from backend.src.config import USER_DATA_DIR as _UDD
+    _tpa_engine_module.init(_engine._bridge, _UDD / "data")
 
     # Initialise Reversal Engine DB (completely isolated from other engines).
     # 2026-07-23 rebrand (was "GD Copy Engine" / gd_copy_signal.db) -- an
@@ -580,6 +595,18 @@ async def startup() -> None:
             log.info("[startup] Reversal Engine auto-started")
         else:
             log.info("[startup] Reversal Engine skipped (user manually stopped)")
+
+    # Auto-start Trend PA unless the owner stopped it. It only paper-trades
+    # until tpa_live_execution is switched on.
+    from backend.src.services.trend_pa import repo as _tpa_repo2
+    tpa_eng = _tpa_engine_module.get_instance()
+    if tpa_eng:
+        tpa_eng.set_main_engine(_engine)
+        if _tpa_repo2.get_config("user_stopped", "0") != "1":
+            tpa_eng.start()
+            log.info("[startup] Trend PA engine auto-started")
+        else:
+            log.info("[startup] Trend PA engine skipped (user manually stopped)")
 
     # Local/Remote sync — resume whichever role was last configured so a
     # headless VPS reboot (nobody present to click the settings toggle) still

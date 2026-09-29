@@ -34,14 +34,14 @@ router = APIRouter(prefix="/api/engines", tags=["engines"])
 # tab cannot disagree with the rest of the app about which engines exist. A
 # name with no label here falls back to its id, which reads as an oversight
 # rather than hiding the engine.
-_LABELS = {"breakout": "Breakout", "reversal": "Reversal"}
+_LABELS = {"breakout": "Breakout", "reversal": "Reversal", "trend_pa": "Trend PA"}
 # IMPLEMENTED_NAMES, not ENGINE_NAMES. The latter is the sync protocol's
 # positional order and still carries Bounce's empty slot, because dropping the
 # name would shift Reversal into its place on the wire. The SCREEN must not
 # show it: its code was deleted on 2026-09-14, so a card with a Start button
 # is a control that cannot work. Owner's request, 2026-09-19.
 ENGINE_LABELS = {name: _LABELS.get(name, name)
-                 for name in engines_ctl.IMPLEMENTED_NAMES}
+                 for name in engines_ctl.SHOWN_NAMES}
 
 
 # How much of the virtual ledger the panel gets. Bounded here rather than by
@@ -95,9 +95,9 @@ def _known_or_refuse(name: str) -> None:
     # protocol carries, and a paired node on an older build may still have
     # Bounce. Validating against the screen would make an engine the peer
     # genuinely runs unaddressable from here.
-    if name not in engines_ctl.ENGINE_NAMES:
+    if name not in engines_ctl.ALL_NAMES:
         raise Refusal(f"Unknown engine {name!r}. "
-                      f"Known: {', '.join(engines_ctl.ENGINE_NAMES)}.",
+                      f"Known: {', '.join(engines_ctl.ALL_NAMES)}.",
                       status_code=400)
 
 

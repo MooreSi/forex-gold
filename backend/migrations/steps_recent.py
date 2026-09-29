@@ -253,4 +253,18 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN global_sizing_override INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN strategy_lot_size_parked REAL NOT NULL DEFAULT 0",
     ]),
+
+    # A daily profit goal on Risk > Stopping for the day (2026-09-29,
+    # docs/todo/risk/020). Once today's realised P&L reaches it, new entries
+    # stop for the rest of the broker day; open trades run on. `pct` is of the
+    # day's opening balance, so it compounds. Off by default.
+    #
+    # And the Trend PA engine's own live switch (docs/todo/012). Off: the
+    # engine only paper-trades until the owner turns it on, on demo first.
+    (55, "Daily profit goal (off) and the Trend PA engine's live switch (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN daily_goal_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN daily_goal_mode TEXT NOT NULL DEFAULT 'pct'",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN daily_goal_value REAL NOT NULL DEFAULT 1.0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN tpa_live_execution INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

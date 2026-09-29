@@ -48,7 +48,7 @@ DEFAULT_KEY = "channel_daily_loss_cap"
 OVERRIDES_KEY = "channel_daily_loss_caps"
 
 # Keys the schedule gate is called with that name no channel.
-_NOT_A_CHANNEL = {"", "telegram", "reversal_engine", "breakout_engine"}
+_NOT_A_CHANNEL = {"", "telegram", "reversal_engine", "breakout_engine", "trend_pa_engine"}
 
 
 def _canonical(source: str) -> str:

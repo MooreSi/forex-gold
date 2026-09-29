@@ -39,6 +39,7 @@ _WINDOW_OVERRIDE_KEYS = (
     "strategy_override",
     "reversal_engine_override",
     "breakout_engine_override",
+    "trend_pa_engine_override",
 )
 
 

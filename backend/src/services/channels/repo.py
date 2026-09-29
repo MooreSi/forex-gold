@@ -495,7 +495,7 @@ CANONICAL_CHANNELS: dict[str, str] = {
 # genuinely fixed, unlike the Telegram-driven channels below.
 _FIXED_ENGINE_CHANNELS = [
     "Reversal Engine",
-    "Breakout Engine",
+    "Breakout Engine", "Trend PA Engine",   # Trend PA: docs/todo/012
     "ORB/IVB Report",
 ]
 

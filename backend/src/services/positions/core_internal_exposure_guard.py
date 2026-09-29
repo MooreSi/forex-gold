@@ -60,7 +60,7 @@ MODE_LABELS = {
 # generating engine.
 _INTERNAL_SOURCES = (
     "Reversal Engine", "GD Copy Engine", "Gold Diggers VIP Copy",
-    "Breakout Engine",
+    "Breakout Engine", "Trend PA Engine",
     "Bounce Engine", "Bounce Generator", "Signal Generator",
 )
 

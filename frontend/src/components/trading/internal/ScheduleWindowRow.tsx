@@ -19,6 +19,7 @@ interface ScheduleWindowRowProps {
 const ENGINES: { key: string; label: string }[] = [
   { key: "reversal_engine", label: "Reversal Engine" },
   { key: "breakout_engine", label: "Breakout Engine" },
+  { key: "trend_pa_engine", label: "Trend PA Engine" },
 ];
 
 function channelCfg(block: Record<string, unknown>, name: string) {

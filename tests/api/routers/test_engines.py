@@ -134,8 +134,11 @@ def test_the_tab_lists_all_three_engines_by_the_name_the_operator_uses(make_clie
     # code was deleted on 2026-09-14, so its card carried a Start button that
     # could not work. It is still in ENGINE_NAMES and still addressable -- see
     # test_bounce_is_still_addressable_even_though_it_is_not_shown.
-    assert [r["id"] for r in rows] == ["breakout", "reversal"]
-    assert [r["label"] for r in rows] == ["Breakout", "Reversal"]
+    #
+    # CHANGED 2026-09-29: the owner asked for a fourth engine, Trend PA
+    # (docs/todo/012). It is appended after the positional three.
+    assert [r["id"] for r in rows] == ["breakout", "reversal", "trend_pa"]
+    assert [r["label"] for r in rows] == ["Breakout", "Reversal", "Trend PA"]
 
 
 def test_an_engine_that_is_not_built_reads_differently_from_one_that_is_stopped(

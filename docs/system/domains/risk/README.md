@@ -278,3 +278,34 @@ governor's daily loss limit has the same limit.
 No "resume for today" button, unlike the daily profit target: raise or clear
 the channel's cap instead. Needs a demo session before a cap is set on the
 live account.
+
+## The daily goal (2026-09-29)
+
+Risk > Stopping for the day > Daily goal (`risk/daily_goal.py`,
+`docs/todo/risk/020`). Once realised P&L since the broker day opened reaches
+the goal, the same `trade_pause_until` + `risk_halt_reason` pair the other
+daily halts write is set until the next broker day. Open trades run on; only
+new entries stop. Owner's choices, 2026-09-29: realised P&L only, new entries
+only, every source.
+
+- **`%` is of the day's OPENING balance** (live balance minus today's
+  realised), so the same percentage asks for more as the account grows. That
+  is the compounding the owner asked for. `$` is a fixed amount.
+- **It is evaluated by the position monitor cycle, not in `record_close`.**
+  The daily-loss and give-back halts run inside `record_close`; that function
+  is frozen, so this one could not join them. The sweep runs every cycle,
+  throttled to `SWEEP_EVERY_S` (5s), outside the open-trades block (the goal
+  is usually reached by closing the LAST open trade). **So an entry that
+  arrives in the seconds between the close that reaches the goal and the next
+  sweep can still open.** Closing that window means reshaping the close path.
+- Resume restarts its window: `rearm_risk_guards` writes
+  `daily_goal_baseline_ts` beside the other two baselines. The key is spelled
+  out in `governor.py` because `daily_goal` imports `governor`.
+- **There are now two daily profit targets.** Trading > Schedule's
+  `trading_schedule_daily_target` is dollars only, applies only while the
+  trading schedule is on, and refuses at the entry gate rather than pausing.
+  They do not interact; whichever is reached first stops the day. The owner
+  keeps both on purpose (2026-09-29: "they are slightly different").
+- Three columns, migration 55, all in `SYNCED_SETTINGS_KEYS`, so the VPS
+  holds the same goal. `daily_goal_enabled` is in `_PROTECTIVE_KEYS`, so a
+  change to it is logged with its origin.

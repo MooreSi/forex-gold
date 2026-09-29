@@ -21,9 +21,10 @@ from typing import Any
 
 from backend.src.services.breakout_signal import breakout_signal_service as _bo_svc
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
+from backend.src.services.trend_pa import service as _tpa_svc
 
 __all__ = [
-    "ENGINE_NAMES", "IMPLEMENTED_NAMES", "canonical", "instance", "all_instances",
+    "ENGINE_NAMES", "ALL_NAMES", "IMPLEMENTED_NAMES", "SHOWN_NAMES", "canonical", "instance", "all_instances",
     "running", "start_stopped", "stop_running",
 ]
 
@@ -34,6 +35,24 @@ _ENGINE_SERVICES: dict[str, Any] = {
 }
 
 ENGINE_NAMES = tuple(_ENGINE_SERVICES)
+
+# Engines added since, reached by NAME only -- never through `all_instances()`
+# or ENGINE_NAMES, which are the positional wire contract above. The sync
+# server finds these through `instance()`, so a paired node on an older build
+# sees nothing shift. Trend PA: 2026-09-29, docs/todo/012.
+_NAMED_SERVICES: dict[str, Any] = {
+    "trend_pa": _tpa_svc,
+}
+
+
+def _all_services() -> dict:
+    """Both tables, read when called -- not merged once at import, so the one
+    table stays the one table even when a test swaps `_ENGINE_SERVICES`."""
+    return {**_ENGINE_SERVICES, **_NAMED_SERVICES}
+
+
+# Every name a control may address: the wire three plus the named ones.
+ALL_NAMES = tuple(_all_services())
 
 # What this build can actually RUN, which is not the same list.
 #
@@ -48,6 +67,13 @@ ENGINE_NAMES = tuple(_ENGINE_SERVICES)
 # is what this module was created to stop.
 IMPLEMENTED_NAMES = tuple(
     name for name, svc in _ENGINE_SERVICES.items() if svc is not None
+)
+
+# What the Signal Generator tab shows: the wire engines this build runs, then
+# the by-name ones. Separate from IMPLEMENTED_NAMES, which is pinned as a
+# subset of the wire order (tests/services/engines/test_registry_implemented).
+SHOWN_NAMES = IMPLEMENTED_NAMES + tuple(
+    name for name, svc in _NAMED_SERVICES.items() if svc is not None
 )
 
 # Other names an engine arrives under. The sync server's `_sub_engines`, and
@@ -75,7 +101,7 @@ def _of(svc) -> Any:
 
 def instance(name: str) -> Any:
     """The named engine's live instance."""
-    return _of(_ENGINE_SERVICES[name])
+    return _of(_all_services()[name])
 
 
 def all_instances() -> tuple:
@@ -84,14 +110,21 @@ def all_instances() -> tuple:
 
 
 def running() -> dict:
-    return {
-        name: bool(getattr(_of(svc), "is_running", False))
-        for name, svc in _ENGINE_SERVICES.items()
-    }
+    """Every wire-order engine, built or not (Bounce's empty slot included,
+    as it always was), plus each by-name engine that has been built. An
+    unbuilt by-name engine has no slot to report; the screen reads its absence
+    as "not running", which is what it is."""
+    out = {name: bool(getattr(_of(svc), "is_running", False))
+           for name, svc in _ENGINE_SERVICES.items()}
+    for name, svc in _NAMED_SERVICES.items():
+        eng = _of(svc)
+        if eng is not None:
+            out[name] = bool(getattr(eng, "is_running", False))
+    return out
 
 
 def start_stopped() -> None:
-    for name, svc in _ENGINE_SERVICES.items():
+    for name, svc in _all_services().items():
         if name in _NOT_BULK_STARTED:
             continue
         eng = _of(svc)
@@ -100,7 +133,7 @@ def start_stopped() -> None:
 
 
 def stop_running() -> None:
-    for svc in _ENGINE_SERVICES.values():
+    for svc in _all_services().values():
         eng = _of(svc)
         if eng is not None and getattr(eng, "is_running", False):
             eng.stop()

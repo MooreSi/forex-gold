@@ -2,7 +2,8 @@ import { useMemo, useState, type MouseEvent } from "react";
 import { formatMoney } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 import type { Projection } from "./compoundMath";
-import { buildBalanceChart, H, W } from "./compoundGeometry";
+import { useElementWidth } from "../hooks/useElementWidth";
+import { BALANCE_BOX, buildBalanceChart } from "./compoundGeometry";
 
 /**
  * The balance, trading day by trading day, three ways: at the goal, at half
@@ -29,6 +30,7 @@ export function CompoundBalanceSection({
   onLogScale: (on: boolean) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [frame, width] = useElementWidth<HTMLDivElement>();
 
   const paid = useMemo(() => {
     const out: number[] = [];
@@ -46,8 +48,9 @@ export function CompoundBalanceSection({
 
   const chart = useMemo(() => buildBalanceChart(
     { goal: projection.balances, half: half.balances, paid },
-    projection.monthEnds, logScale,
-  ), [projection, half, paid, logScale]);
+    projection.monthEnds, logScale, { w: width ?? BALANCE_BOX.w, h: BALANCE_BOX.h },
+  ), [projection, half, paid, logScale, width]);
+  const { w: W, h: H } = chart.box;
 
   const day = hover ?? projection.tradingDays;
   const onMove = (e: MouseEvent<SVGSVGElement>) => {
@@ -92,11 +95,14 @@ export function CompoundBalanceSection({
         <span>Paid in <span className="text-ink-2">{formatMoney(paid[day])}</span></span>
       </div>
 
+      <div ref={frame} className="w-full">
       <svg
         viewBox={`0 0 ${W} ${H}`}
+        width={W}
+        height={H}
         role="img"
         aria-label="Projected balance by trading day"
-        className="h-auto w-full cursor-crosshair rounded border border-line bg-surface-2"
+        className="block w-full cursor-crosshair rounded border border-line bg-surface-2"
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
@@ -145,6 +151,7 @@ export function CompoundBalanceSection({
           </g>
         )}
       </svg>
+      </div>
     </div>
   );
 }

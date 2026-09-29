@@ -1,14 +1,11 @@
-import { useMemo } from "react";
 import {
   formatCompactMoney, formatMoney, formatPercent,
 } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 import type { Period, Projection } from "./compoundMath";
-import { buildBars, H, M, W } from "./compoundGeometry";
 
 /**
- * Profit per week or per month: a bar each, then the table the bars are drawn
- * from.
+ * The table the profit charts are drawn from, a row per month or per week.
  *
  * "Taken out" and "Paid in" appear only when there is some. Two columns of
  * $0.00 on every row are noise that pushes the columns that matter off a
@@ -28,12 +25,11 @@ export function CompoundBreakdownSection({ projection, capital, view, onView }: 
   const noun = view === "months" ? "Month" : "Week";
   const showOut = projection.totalWithdrawn > 0;
   const showIn = projection.totalDeposited > 0;
-  const chart = useMemo(() => buildBars(rows.map((r) => r.gain), noun), [rows, noun]);
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] uppercase tracking-wide text-ink-3">Profit per {noun.toLowerCase()}</p>
+        <p className="text-[11px] uppercase tracking-wide text-ink-3">{noun} by {noun.toLowerCase()}</p>
         <div className="flex gap-1">
           {(["months", "weeks"] as const).map((v) => (
             <button
@@ -52,29 +48,6 @@ export function CompoundBreakdownSection({ projection, capital, view, onView }: 
         </div>
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Projected profit per ${noun.toLowerCase()}`}
-        className="h-auto w-full rounded border border-line bg-surface-2">
-        <defs>
-          <linearGradient id="cc-bar" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-profit)" stopOpacity="0.95" />
-            <stop offset="100%" stopColor="var(--color-profit)" stopOpacity="0.35" />
-          </linearGradient>
-        </defs>
-        {chart.yTicks.map((t) => (
-          <g key={t.value}>
-            <line x1={M.left} y1={t.y} x2={W - M.right} y2={t.y} stroke="currentColor"
-              strokeDasharray={t.value === 0 ? undefined : "3 3"}
-              className={t.value === 0 ? "text-ink-3/50" : "text-line"} />
-            <text x={W - M.right + 6} y={t.y + 3} className="fill-ink-3 text-[10px]">{t.label}</text>
-          </g>
-        ))}
-        {chart.bars.map((b) => (
-          <rect key={b.label} x={b.x} y={b.y} width={b.w} height={Math.max(b.h, 0.5)} rx="1.5"
-            fill="url(#cc-bar)" className="transition-opacity hover:opacity-70">
-            <title>{`${b.label}: ${formatMoney(b.value)}`}</title>
-          </rect>
-        ))}
-      </svg>
 
       <div className="max-h-80 overflow-auto rounded border border-line">
         <table className="w-full text-[11px]">

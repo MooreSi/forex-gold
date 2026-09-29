@@ -17,10 +17,19 @@ import { niceTicks, tickLabel } from "./equityGeometry";
  * "the same percentage every day".
  */
 
-/** Drawing box, in the SVG's own units. */
-export const W = 1000;
-export const H = 280;
-export const M = { top: 14, right: 64, bottom: 26, left: 10 };
+/**
+ * Each chart is drawn at its MEASURED width and a fixed height in pixels, so
+ * one SVG unit is one pixel. Scaling a fixed viewBox to the width instead made
+ * the charts 300px tall on a wide screen with axis labels to match, and the
+ * owner asked for them smaller (2026-09-29). These are the sizes used before
+ * the first measurement, and under jsdom, which measures nothing.
+ */
+export interface Box { w: number; h: number }
+export const BALANCE_BOX: Box = { w: 1000, h: 200 };
+export const BAR_BOX: Box = { w: 500, h: 170 };
+
+const M = { top: 14, right: 64, bottom: 26, left: 10 };
+const BAR_M = { top: 12, right: 58, bottom: 12, left: 6 };
 
 export interface Pt { x: number; y: number }
 export interface YTick { value: number; y: number; label: string }
@@ -37,6 +46,7 @@ export interface BalanceChart {
   /** The trading day under an x position, for the hover readout. */
   dayAt: (x: number) => number;
   plot: { left: number; right: number; top: number; bottom: number };
+  box: Box;
 }
 
 /** An axis label: whole dollars while it fits, `$13.29M` once it does not. */
@@ -71,8 +81,9 @@ function pathOf(points: Pt[]): string {
 }
 
 export function buildBalanceChart(
-  series: BalanceSeries, monthEnds: number[], log: boolean,
+  series: BalanceSeries, monthEnds: number[], log: boolean, box: Box = BALANCE_BOX,
 ): BalanceChart {
+  const { w: W, h: H } = box;
   const all = [...series.goal, ...series.half, ...series.paid];
   const n = series.goal.length;
   const hi = Math.max(...all);
@@ -106,7 +117,9 @@ export function buildBalanceChart(
     .map((p) => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const goalArea = `${pathOf(points.goal)} ${paidBack} Z`;
 
-  const step = Math.max(1, Math.ceil(monthEnds.length / 8));
+  // About one label per 90px, so a narrow chart does not crowd them.
+  const fits = Math.max(2, Math.floor(plotW / 90));
+  const step = Math.max(1, Math.ceil(monthEnds.length / fits));
   const xTicks = monthEnds
     .map((day, i) => ({ day, m: i + 1 }))
     .filter(({ m }) => m % step === 0 || m === monthEnds.length)
@@ -122,24 +135,35 @@ export function buildBalanceChart(
     dayAt: (px: number) => Math.max(0, Math.min(n - 1,
       Math.round(((px - M.left) / plotW) * (n - 1)))),
     plot: { left: M.left, right: W - M.right, top: M.top, bottom: H - M.bottom },
+    box,
   };
 }
 
 export interface Bar { x: number; y: number; w: number; h: number; value: number; label: string }
 
+export interface Bars {
+  bars: Bar[];
+  yTicks: YTick[];
+  plot: { left: number; right: number };
+  box: Box;
+}
+
 /** One bar per period, for the profit-per-week or per-month chart. */
-export function buildBars(values: number[], prefix: string): { bars: Bar[]; yTicks: YTick[] } {
+export function buildBars(values: number[], prefix: string, box: Box = BAR_BOX): Bars {
+  const { w: BAR_W, h: BAR_H } = box;
   const hi = Math.max(0, ...values);
   const ticks = niceTicks(0, hi);
   const top = Math.max(hi, ...ticks) || 1;
-  const plotW = W - M.left - M.right;
-  const plotH = H - M.top - M.bottom;
+  const plotW = BAR_W - BAR_M.left - BAR_M.right;
+  const plotH = BAR_H - BAR_M.top - BAR_M.bottom;
   const slot = plotW / Math.max(values.length, 1);
   const w = Math.max(1, slot * 0.72);
-  const y = (v: number) => M.top + ((top - v) / top) * plotH;
+  const y = (v: number) => BAR_M.top + ((top - v) / top) * plotH;
   return {
+    plot: { left: BAR_M.left, right: BAR_W - BAR_M.right },
+    box,
     bars: values.map((v, i) => ({
-      x: M.left + i * slot + (slot - w) / 2,
+      x: BAR_M.left + i * slot + (slot - w) / 2,
       y: y(Math.max(v, 0)),
       w,
       h: Math.abs(y(v) - y(0)),

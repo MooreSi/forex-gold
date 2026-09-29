@@ -5,6 +5,7 @@ import { useCompoundCalculator } from "../hooks/useCompoundCalculator";
 import { CompoundBalanceSection } from "./CompoundBalanceSection";
 import { CompoundBreakdownSection } from "./CompoundBreakdownSection";
 import { CompoundInputsForm } from "./CompoundInputsForm";
+import { CompoundProfitBarsSection } from "./CompoundProfitBarsSection";
 
 /**
  * The Compound Calculator: what a daily goal becomes if it is hit every
@@ -102,6 +103,11 @@ export function CompoundCalculatorSection({ balance }: { balance: number | null 
             logScale={c.logScale}
             onLogScale={c.setLogScale}
           />
+
+          <div data-testid="cc-bars" className="grid gap-3 md:grid-cols-2">
+            <CompoundProfitBarsSection periods={p.months} noun="Month" />
+            <CompoundProfitBarsSection periods={p.weeks} noun="Week" />
+          </div>
 
           <CompoundBreakdownSection projection={p} capital={c.inputs.capital}
             view={c.view} onView={c.setView} />

@@ -176,6 +176,18 @@ describe("the chart", () => {
     expect(screen.getByTestId("cc-line-paid")).toBeInTheDocument();
   });
 
+  it("shows profit per month and per week side by side, not one or the other", () => {
+    // Owner, 2026-09-29: both at once, each half the width.
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    const month = screen.getByRole("img", { name: "Projected profit per month" });
+    const week = screen.getByRole("img", { name: "Projected profit per week" });
+    expect(month.querySelectorAll("rect")).toHaveLength(12);
+    expect(week.querySelectorAll("rect")).toHaveLength(52);
+    expect(month.closest("[data-testid=cc-bars]"))
+      .toBe(week.closest("[data-testid=cc-bars]"));
+  });
+
   it("switches to a log scale, so a hockey stick can be read", async () => {
     render(<CompoundCalculatorSection balance={1000} />);
     const linear = screen.getByTestId("cc-line-goal").getAttribute("d");

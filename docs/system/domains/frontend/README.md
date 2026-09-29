@@ -710,3 +710,10 @@ take profit when there is one.
   that only goes up is the best case by construction.
 - Arithmetic in `history/internal/compoundMath.ts` and `compoundGeometry.ts`,
   each with its own test file.
+- **The charts are drawn at their measured width and a fixed pixel height**
+  (balance 200px, profit bars 170px; `hooks/useElementWidth.ts`), so one SVG
+  unit is one pixel and axis text stays 10px at any width. The first version
+  scaled a fixed viewBox to the width, which made the charts ~300px tall with
+  oversized labels on a wide screen and unreadable ones on a phone. Profit per
+  month and per week sit side by side (owner, 2026-09-29); the Monthly /
+  Weekly switch is on the table only.

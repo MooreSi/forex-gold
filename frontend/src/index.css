@@ -171,3 +171,37 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/* A range slider in the app's own colours. The filled part of the track is
+   the accent up to the thumb; `--fill` is set inline by the component, as a
+   percentage, because a native range input cannot colour its own progress in
+   every engine. */
+.range {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  width: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%),
+    var(--color-surface-3) var(--fill, 0%));
+  cursor: pointer;
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: var(--color-surface-0);
+  border: 2px solid var(--color-accent);
+}
+.range::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: var(--color-surface-0);
+  border: 2px solid var(--color-accent);
+}
+.range:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}

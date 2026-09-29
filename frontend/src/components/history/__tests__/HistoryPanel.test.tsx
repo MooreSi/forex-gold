@@ -25,6 +25,11 @@ function state(over: Partial<HistoryState> = {}): HistoryState {
   };
 }
 
+const NO_TRADES = {
+  rows: [], error: null,
+  curve: { points: [], net: 0, peak: 0, max_drawdown: 0, trades: 0 },
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 let body: HistoryState;
 
@@ -35,6 +40,10 @@ beforeEach(() => {
     if (init?.method && init.method !== "GET") {
       return { ok: true, status: 200, json: async () => ({}) };
     }
+    // The page opens on Trades, so every render also asks for the trades.
+    if (String(_url).startsWith("/api/history/trades")) {
+      return { ok: true, status: 200, json: async () => NO_TRADES };
+    }
     return { ok: true, status: 200, json: async () => body };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -44,16 +53,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const openHeatmap = async () =>
+  userEvent.click(await screen.findByRole("tab", { name: "When it trades" }));
+
 const gets = () => fetchMock.mock.calls.filter((c) => !c[1]?.method || c[1].method === "GET");
 const writes = () => fetchMock.mock.calls.filter((c) => c[1]?.method && c[1].method !== "GET");
 
 describe("the order of the sub-tabs", () => {
   /**
    * Owner, 2026-09-21: the per-trade list is what this page is opened for,
-   * so it reads first -- before the equity curve. The page still OPENS on
-   * the heatmap ("When it trades"), which is a separate decision: listing
-   * Trades first costs nothing because Radix only mounts a tab's content
-   * once it is selected, and that tab carries a request of its own.
+   * so it reads first -- before the equity curve.
+   *
+   * Owner, 2026-09-29: and it is what the page OPENS on. Until then it
+   * opened on the heatmap ("When it trades"), to spare the trades request on
+   * every visit; the owner would rather pay that request than click past the
+   * heatmap every time.
    */
   it("puts Trades first, ahead of the equity curve", async () => {
     render(<HistoryPanel />);
@@ -63,29 +77,30 @@ describe("the order of the sub-tabs", () => {
     expect(names.slice(0, 2)).toEqual(["Trades", "Equity curve"]);
   });
 
-  it("still opens on the heatmap, not on Trades", async () => {
-    // Trades costs a request of its own. Listing it first must not start
-    // spending one on every visit to the page.
+  it("opens on Trades, not on the heatmap", async () => {
     render(<HistoryPanel />);
     await screen.findByText("+$412.19");
 
-    expect(screen.getByRole("tab", { name: "When it trades" }))
-      .toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Trades" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "When it trades" }))
       .toHaveAttribute("aria-selected", "false");
   });
 });
 
 describe("how often it asks", () => {
-  it("renders every panel from ONE request", async () => {
+  it("renders every aggregate panel from ONE request", async () => {
     // bugs/030: three panels each polling the bridge produced 388 round-trips
     // in 25 seconds. One consolidated read is the fix, and this is what keeps
-    // it that way.
+    // it that way. The only other read is the Trades tab the page opens on.
     render(<HistoryPanel />);
     await screen.findByText("+$412.19");
+    await waitFor(() => expect(gets()).toHaveLength(2));
 
-    expect(gets()).toHaveLength(1);
-    expect(gets()[0][0]).toBe("/api/history/state?days=30");
+    expect(gets().map((c) => c[0]).sort()).toEqual([
+      "/api/history/state?days=30",
+      "/api/history/trades?days=30",
+    ]);
   });
 
   it("asks again for a different window, not for the same one", async () => {
@@ -123,6 +138,7 @@ describe("the headline numbers", () => {
     body = state({ performance: {} });
     render(<HistoryPanel />);
     await screen.findByText("No broker data for this window");
+    await openHeatmap();
 
     expect(screen.getByTestId("cell-0-13")).toBeInTheDocument();
   });
@@ -131,6 +147,7 @@ describe("the headline numbers", () => {
 describe("the heatmap", () => {
   it("places an hour on its weekday and hour", async () => {
     render(<HistoryPanel />);
+    await openHeatmap();
 
     const cell = await screen.findByTestId("cell-0-13");
     expect(cell).toHaveAttribute("title", expect.stringContaining("Mon 13:00 UTC"));
@@ -140,6 +157,7 @@ describe("the heatmap", () => {
 
   it("says how many trades an hour is measured from", async () => {
     render(<HistoryPanel />);
+    await openHeatmap();
 
     expect(await screen.findByTestId("cell-4-9")).toHaveAttribute(
       "title", expect.stringContaining("2 trades"),
@@ -149,6 +167,7 @@ describe("the heatmap", () => {
   it("leaves an hour with no trades blank rather than green", async () => {
     // No data and break-even are different answers.
     render(<HistoryPanel />);
+    await openHeatmap();
     await screen.findByTestId("cell-0-13");
 
     expect(screen.queryByTestId("cell-2-4")).toBeNull();
@@ -156,6 +175,7 @@ describe("the heatmap", () => {
 
   it("says the grid is in UTC", async () => {
     render(<HistoryPanel />);
+    await openHeatmap();
 
     expect(await screen.findByText(/UTC\./)).toBeInTheDocument();
   });
@@ -233,13 +253,18 @@ describe("ladder reach", () => {
 });
 
 describe("the trades tab", () => {
-  it("costs nothing until it is opened", async () => {
+  it("asks for the default window's trades as the page opens", async () => {
     // A row per trade over ten years is what forced the old WebSocket buffer
-    // from 1MB to 10MB. It is not on the default tab, so it is not fetched.
+    // from 1MB to 10MB. It is the default tab now (owner, 2026-09-29), so it
+    // is fetched -- for the selected window only, not for every window.
     render(<HistoryPanel />);
     await screen.findByText("+$412.19");
 
-    expect(gets().some((c) => String(c[0]).includes("/api/history/trades"))).toBe(false);
+    await waitFor(() => {
+      expect(gets().some((c) => c[0] === "/api/history/trades?days=30")).toBe(true);
+    });
+    expect(gets().filter((c) => String(c[0]).includes("/api/history/trades")))
+      .toHaveLength(1);
   });
 
   it("asks for the trades of the window that is selected", async () => {
@@ -252,5 +277,36 @@ describe("the trades tab", () => {
     await waitFor(() => {
       expect(gets().some((c) => c[0] === "/api/history/trades?days=365")).toBe(true);
     });
+  });
+});
+
+describe("the compound calculator tab", () => {
+  it("is listed last, after the AI trade analysis", async () => {
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+
+    const names = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(names[names.length - 1]).toBe("Compound calculator");
+  });
+
+  it("asks the server for nothing: it is arithmetic on what is typed", async () => {
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+    await waitFor(() => expect(gets()).toHaveLength(2));
+
+    await userEvent.click(screen.getByRole("tab", { name: "Compound calculator" }));
+
+    expect(await screen.findByLabelText("Starting capital")).toBeInTheDocument();
+    expect(gets()).toHaveLength(2);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("starts from the account balance", async () => {
+    render(<HistoryPanel />);
+    await screen.findByText("+$412.19");
+
+    await userEvent.click(screen.getByRole("tab", { name: "Compound calculator" }));
+
+    expect(await screen.findByLabelText("Starting capital")).toHaveValue(10250.44);
   });
 });

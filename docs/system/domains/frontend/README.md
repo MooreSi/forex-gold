@@ -687,3 +687,26 @@ take profit when there is one.
   answers 422 "Not saved" until it is restarted.
 - Pinned by `chart/__tests__/ChartPositionOrder.test.tsx`,
   `drawingGeometry.test.ts` and `tests/api/routers/test_chart_drawings.py`.
+
+## Analysis tab: opens on Trades, and a Compound Calculator (2026-09-29)
+
+- **The Analysis tab opens on Trades**, not the heatmap (owner, 2026-09-29).
+  The heatmap default existed to spare the `/api/history/trades` request on
+  every visit; the owner would rather pay that request than click past the
+  heatmap each time. It is one request, for the selected window only.
+  Pinned in `history/__tests__/HistoryPanel.test.tsx`.
+- **Compound calculator** is the last sub-tab. A planning tool, not an
+  analysis: pure arithmetic on what is typed, no request, nothing stored on
+  the server. Inputs are slider + box pairs; the box is authoritative and may
+  go past either end of the slider. Everything but the capital is remembered
+  in this browser's `localStorage` (`analysis.compound-calculator`); the
+  capital starts from the broker balance.
+- **What a month is:** 52/12 weeks, so month `m` ends on trading day
+  `round(m x days-per-week x 52/12)`. Five-day months alternate 22 and 21
+  days, which is why the monthly % alternates (24.47% / 23.24% at 1% a day).
+  That is the model, not a bug.
+- It always draws the same plan at **half the goal** beside it, and says it
+  assumes no losing days, spread, commission, swap or tax. Keep both: a line
+  that only goes up is the best case by construction.
+- Arithmetic in `history/internal/compoundMath.ts` and `compoundGeometry.ts`,
+  each with its own test file.

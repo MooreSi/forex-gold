@@ -15,13 +15,13 @@ import { DpmSection } from "./internal/DpmSection";
 import { EquityCurveSection } from "./internal/EquityCurveSection";
 import { TradeAnalysisPanel } from "@/components/ai/TradeAnalysisPanel";
 import { TradeTableSection } from "./internal/TradeTableSection";
+import { CompoundCalculatorSection } from "./internal/CompoundCalculatorSection";
 
 const SUB_TABS = [
-  // First, and still not the default: the tab opens on the heatmap, which
-  // HistoryPanel.test.tsx pins. Radix mounts a tab's content when it is
-  // selected, so listing this one first costs nothing until it is asked for
-  // -- it is a row per trade and a request of its own. Owner, 2026-09-21:
-  // the per-trade list is what the page is opened for, so it reads first.
+  // First, and the tab the page opens on. Owner, 2026-09-21: the per-trade
+  // list is what the page is opened for, so it reads first; owner,
+  // 2026-09-29: so it is the default too, rather than the heatmap. That costs
+  // the trades request on every visit, for the selected window only.
   { id: "trades", label: "Trades" },
   { id: "equity", label: "Equity curve" },
   { id: "calendar", label: "Calendar" },
@@ -34,7 +34,16 @@ const SUB_TABS = [
   // the AI Analysis tab instead, which left the tab named for the market
   // research showing something else entirely.
   { id: "ai", label: "AI trade analysis" },
+  // A planning tool, not an analysis of anything that happened: arithmetic
+  // on what is typed, no request. Last, so it never reads as a result.
+  { id: "compound", label: "Compound calculator" },
 ];
+
+/** The broker's balance, for the calculator to start from; null without one. */
+function accountBalance(performance: unknown): number | null {
+  const raw = asObject(performance).balance;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
 
 export function HistoryPanel() {
   const c = useHistoryController();
@@ -80,7 +89,7 @@ export function HistoryPanel() {
       ) : (
         <div className="space-y-4">
           <PerformanceSection performance={asObject(c.state.data.performance)} />
-          <Tabs.Root defaultValue="hours" className="flex min-h-0 flex-1 flex-col">
+          <Tabs.Root defaultValue="trades" className="flex min-h-0 flex-1 flex-col">
             <Tabs.List className="mb-3 flex gap-1 border-b border-line">
               {SUB_TABS.map((t) => (
                 <Tabs.Trigger
@@ -130,6 +139,9 @@ export function HistoryPanel() {
                   trade and the rest of the tab is aggregates. A window nobody
                   is looking at should not be paying for it. */}
               <TradeTableSection days={c.days} />
+            </Tabs.Content>
+            <Tabs.Content value="compound">
+              <CompoundCalculatorSection balance={accountBalance(c.state.data.performance)} />
             </Tabs.Content>
           </Tabs.Root>
         </div>

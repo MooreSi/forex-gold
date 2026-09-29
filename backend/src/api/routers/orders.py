@@ -109,6 +109,20 @@ async def close_trade(
         raise _refuse(exc) from exc
 
 
+@router.post("/remote/trades/{trade_id}/close")
+async def close_remote_trade(trade_id: str, body: CloseRequest) -> dict:
+    """Close a position the remote node opened (owner, 2026-09-29).
+
+    `trade_id` is the REMOTE node's id, from the positions row's
+    `remote_trade_id`. The peer runs its own frozen `close_trade` with these
+    two arguments, unchanged; this node's engine is never asked.
+    """
+    try:
+        return await engines_ctl.close_on_peer(trade_id, body.reason)
+    except engines_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc)) from exc
+
+
 @router.post("/trades/{trade_id}/partial-close")
 async def partial_close_trade(
     trade_id: str, body: PartialCloseRequest, eng: Any = Depends(engine_dep),

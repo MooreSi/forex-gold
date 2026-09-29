@@ -83,6 +83,34 @@ def _log_protective_changes(before: dict, updates: dict, from_sync: bool) -> Non
         log.debug("[RiskSettings] could not record the change: %s", e)
 
 
+# The settings the EA holds in memory and learns only from push_global_config().
+_EA_GLOBAL_KEYS = frozenset({"global_harvest_enabled", "global_harvest_threshold_usd"})
+
+
+def _push_global_config_if_changed(before: dict, updates: dict) -> None:
+    """Tell the running EA when Global Harvest moved.
+
+    Here rather than at a caller because every change passes through this
+    function: a local save, the VPS applying a Mac's proposal, and the Mac
+    mirroring the VPS. The React port dropped the push the NiceGUI card made
+    after a save, and the VPS's apply path never made one, so until
+    2026-09-29 the EA only learned a new value when it next reconnected.
+    Unchanged values are skipped because the Mac mirrors the VPS's whole
+    snapshot on every broadcast. Never raises: the setting is already saved,
+    and the EA's next "hello" pushes it regardless.
+    """
+    try:
+        if not any(k in _EA_GLOBAL_KEYS and str(before.get(k)) != str(v)
+                   for k, v in updates.items()):
+            return
+        from backend.src.services.broker import ea_bridge
+        ea = ea_bridge.get_instance()
+        if ea is not None:
+            _schedule_coro(ea.push_global_config())
+    except Exception as e:
+        log.debug("[RiskSettings] could not push global config to the EA: %s", e)
+
+
 def update_risk_settings(updates: dict, _from_sync: bool = False) -> dict:
     """Update risk settings and, for a normal (non-sync-originated) edit,
     forward the change over the Local/Remote sync channel if one is active.
@@ -109,6 +137,7 @@ def update_risk_settings(updates: dict, _from_sync: bool = False) -> dict:
     _database_module._rs_cache_ts = 0.0
     result = get_risk_settings()
     _log_protective_changes(_before, updates, _from_sync)
+    _push_global_config_if_changed(_before, updates)
 
     if not _from_sync and not _applying_sync_settings:
         _applying_sync_settings = True

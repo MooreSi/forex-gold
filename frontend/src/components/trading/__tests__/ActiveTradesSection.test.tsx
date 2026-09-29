@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActiveTradesSection } from "../internal/ActiveTradesSection";
 import type { Trade } from "@/api/types";
 
@@ -171,5 +172,79 @@ describe("a position the remote node opened", () => {
       .getByRole("button", { name: "Close" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", expect.stringContaining("remote node"));
+  });
+});
+
+describe("closing a position the remote node opened", () => {
+  // Owner, 2026-09-29: "i should still be able to close the button on the
+  // local node it should send the command to the vps". The row carries the
+  // VPS's own trade id; the close goes to the VPS, never to this node's close.
+  const remote = (over: Partial<Trade> = {}) => trade({
+    id: undefined, mt5_ticket: 222, untracked: true, remote: true,
+    remote_trade_id: "vps-7", source_label: "Remote node: GoldSignals", ...over,
+  });
+
+  let posts: { url: string; body: unknown }[] = [];
+  let reply: { ok: boolean; status: number; body: unknown } = {
+    ok: true, status: 200, body: { where: "remote" },
+  };
+  const stubFetch = () => {
+    posts = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      posts.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) });
+      return { ok: reply.ok, status: reply.status, json: async () => reply.body };
+    }));
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    reply = { ok: true, status: 200, body: { where: "remote" } };
+  });
+
+  it("can be closed, even while this node is stood down", () => {
+    // This node's halt reason is about opening here. On a stood-down node it
+    // is exactly "the VPS is trading" -- the case this button exists for.
+    render_([remote()], "Trading stood down -- the VPS is the active trader");
+
+    const button = within(screen.getByTestId("position-row-remote"))
+      .getByRole("button", { name: "Close" });
+    expect(button).toBeEnabled();
+  });
+
+  it("asks the remote node to close it, by the remote node's id", async () => {
+    stubFetch();
+    render_([remote()]);
+
+    await userEvent.click(within(screen.getByTestId("position-row-remote"))
+      .getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(/remote node/i);
+    await userEvent.click(screen.getByRole("button", { name: "Close it" }));
+
+    await waitFor(() => expect(posts.map((p) => p.url))
+      .toEqual(["/api/trading/remote/trades/vps-7/close"]));
+  });
+
+  it("shows the remote node's refusal in its own words", async () => {
+    stubFetch();
+    reply = { ok: false, status: 409, body: {
+      error: { kind: "refusal", message: "The remote node refused: Trade vps-7 is not open" },
+    } };
+    render_([remote()]);
+
+    await userEvent.click(within(screen.getByTestId("position-row-remote"))
+      .getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close it" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Trade vps-7 is not open");
+  });
+
+  it("a local position still closes through this node, not the remote one", async () => {
+    stubFetch();
+    render_([trade({ id: "t-1" })]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close it" }));
+
+    await waitFor(() => expect(posts.map((p) => p.url))
+      .toEqual(["/api/trading/trades/t-1/close"]));
   });
 });

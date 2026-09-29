@@ -86,6 +86,11 @@ MSG_EXPERT_PARAMS_STATE   = "expert_params_state"    # VPS -> Mac: full confirme
 MSG_MT5_ACCOUNTS     = "mt5_accounts"      # Mac -> VPS: {"accounts": {...}, "environment"}
 MSG_MT5_ACCOUNTS_ACK = "mt5_accounts_ack"  # VPS -> Mac: {"environment", "switched", "error"}
 
+# EA templates (owner, 2026-09-29): the Mac's whole template library, sent on
+# connect, on any change and every 10 min (sync/_ea_templates_sync.py). The VPS
+# writes what differs. Mac -> VPS only, no ack; an older VPS ignores it.
+MSG_EA_TEMPLATES = "ea_templates"  # Mac -> VPS: {"templates": [{name, ...fields}]}
+
 # ── Trading mutual exclusion (Option A: block switch-back on open local positions) ──
 MSG_STAND_DOWN        = "stand_down"        # Mac -> VPS: taking over, stop opening new trades
 MSG_STAND_DOWN_ACK    = "stand_down_ack"    # VPS -> Mac: stood down, here is my open-position summary
@@ -125,6 +130,12 @@ MSG_UPDATE_NODE_RESULT = "update_node_result"  # VPS -> Mac: {"ok": False, "note
 # right now. Routes the request to the VPS's own open_manual_market_order().
 MSG_MARKET_ORDER     = "market_order"      # Mac -> VPS: {"direction","stop_loss","lot_size","strategy"}
 MSG_MARKET_ORDER_ACK = "market_order_ack"  # VPS -> Mac: {"result": {...}} or {"error": "..."}
+
+# Close, the other half (owner, 2026-09-29): a position the VPS opened is closed
+# from the Mac by asking the VPS to run its own close_trade against its own
+# record (sync/_remote_close_sync.py). req_id pairs each ack with its request.
+MSG_CLOSE_TRADE     = "close_trade"      # Mac -> VPS: {"req_id","trade_id","reason"}
+MSG_CLOSE_TRADE_ACK = "close_trade_ack"  # VPS -> Mac: {"req_id","result"} or {"req_id","error"}
 
 # Centralized signal generation (Settings > Remote Node > "Generate signals on
 # this node only") — a fully-resolved trade decision from one of the Mac's own

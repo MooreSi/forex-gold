@@ -256,3 +256,38 @@ def test_an_unauthenticated_order_request_is_rejected(
                                     json={"direction": "BUY"})
     assert r.status_code == 401
     assert sentinel_engine.calls == [], "an unauthenticated request reached the engine"
+
+
+# ── closing a position the remote node opened (owner, 2026-09-29) ────────────
+
+def test_a_remote_close_is_forwarded_to_the_peer_never_closed_here(
+    make_client, sentinel_engine, monkeypatch,
+):
+    """The record is on the VPS. This node's engine must not be asked to close
+    anything: it holds no such trade, and a close against the wrong record is
+    the one outcome worse than no close."""
+    calls = []
+
+    async def _close_on_peer(trade_id, reason):
+        calls.append((trade_id, reason))
+        return {"trade_id": trade_id, "where": "remote"}
+    monkeypatch.setattr(orders_router.engines_ctl, "close_on_peer", _close_on_peer)
+
+    r = make_client().post("/api/trading/remote/trades/T-7/close", json={})
+
+    assert r.status_code == 200
+    assert r.json()["where"] == "remote"
+    assert calls == [("T-7", "manual_close")]
+    assert [c for c in sentinel_engine.calls if c[0] == "close_trade"] == []
+
+
+def test_a_remote_refusal_reaches_the_operator(make_client, monkeypatch):
+    async def _refused(trade_id, reason):
+        raise orders_router.engines_ctl.RemoteControlFailed(
+            "The remote node refused: Trade T-7 is not open")
+    monkeypatch.setattr(orders_router.engines_ctl, "close_on_peer", _refused)
+
+    r = make_client().post("/api/trading/remote/trades/T-7/close", json={})
+
+    assert r.status_code == 409
+    assert "Trade T-7 is not open" in r.text

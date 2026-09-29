@@ -21,16 +21,30 @@ const UNTRACKED_REASON =
   + "Close it in MetaTrader 5.";
 
 /**
- * Why a position the paired node opened has no Close button here.
+ * What a position the paired node opened is.
  *
  * Both nodes trade one MT5 account, so everything the remote node opens is
  * open at the broker with no record on this machine. That is not a stranger's
- * position: the remote node holds its record and is managing it.
+ * position: the remote node holds its record and is managing it. Since
+ * 2026-09-29 Close sends the request there (owner: "it should send the command
+ * to the vps"), so the remote node closes it against its own record.
  */
 const REMOTE_REASON =
-  "The remote node opened this position and is managing it, so the record to "
-  + "close it against is on that machine, not this one. Take over trading from "
-  + "the header, or close it on the remote node.";
+  "The remote node opened this position and is managing it. Close asks the "
+  + "remote node to close it.";
+
+/** Why a remote row with no remote id still has no Close button. */
+const REMOTE_NO_ID_REASON =
+  "The remote node opened this position, but its heartbeat did not say which "
+  + "of its trades this is, so there is nothing to ask it to close. Close it on "
+  + "the remote node.";
+
+/** Where a Close goes: this node's own close, or a request to the remote node. */
+function closeUrl(t: Trade): string {
+  return t.remote === true
+    ? `/api/trading/remote/trades/${encodeURIComponent(String(t.remote_trade_id))}/close`
+    : `/api/trading/trades/${String(t.id)}/close`;
+}
 
 /**
  * Open positions, and the control that closes one.
@@ -68,7 +82,7 @@ export function ActiveTradesSection({
     setBusy(true);
     setRefusal(null);
     try {
-      await api.post(`/api/trading/trades/${String(closing.id)}/close`, {});
+      await api.post(closeUrl(closing), {});
       setClosing(null);
       onChanged();
     } catch (e) {
@@ -131,7 +145,12 @@ export function ActiveTradesSection({
             const pnl = typeof t["pnl"] === "number" ? (t["pnl"] as number) : null;
             const remote = t.remote === true;
             const untracked = t.untracked === true && !remote;
-            const noClose = remote ? REMOTE_REASON : untracked ? UNTRACKED_REASON : null;
+            // A remote row is closed BY the remote node, so this node's own
+            // halt reason (on a stood-down node: "the VPS is trading") is not
+            // a reason to refuse it. The remote node decides.
+            const noClose = remote
+              ? (t.remote_trade_id ? null : REMOTE_NO_ID_REASON)
+              : untracked ? UNTRACKED_REASON : disabledReason;
             return (
               <tr
                 key={String(t.id ?? t.mt5_ticket ?? i)}
@@ -183,7 +202,7 @@ export function ActiveTradesSection({
                   <Button
                     variant="danger"
                     onClick={() => { setRefusal(null); setClosing(t); }}
-                    disabledReason={noClose ?? disabledReason}
+                    disabledReason={noClose}
                   >
                     Close
                   </Button>
@@ -214,7 +233,10 @@ export function ActiveTradesSection({
           opened at {formatPrice(closing?.entry)}.
         </p>
         <p className="mt-2 text-xs text-ink-3">
-          This closes the position at the current market price.
+          {closing?.remote === true
+            ? "The remote node opened this position. This asks the remote node to "
+              + "close it at the current market price, against its own record."
+            : "This closes the position at the current market price."}
         </p>
         {refusal && (
           <p role="alert" className="mt-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">

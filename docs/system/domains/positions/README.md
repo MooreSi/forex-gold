@@ -77,3 +77,20 @@ up to 3 s old), and the row keeps `untracked: True` and no `trade_id`: the
 VPS holds the record. The default lookup reads the client only if one
 already exists. `get_instance()` would build one on an install that was
 never paired.
+
+### Closing it (2026-09-29)
+
+Close on a `remote` row sends `remote_trade_id` (the VPS's own id, from the
+heartbeat) to `POST /api/trading/remote/trades/{id}/close`, which goes
+`engines_controller.close_on_peer` -> `remote_control.close_on_peer` ->
+`MSG_CLOSE_TRADE` (`sync/_remote_close_sync.py`). The VPS runs its own
+`close_trade(trade_id, reason)` with the two positionals the local route
+passes; the close path itself is untouched. Never a local fallback. Three
+outcomes worded apart: unreachable ("Nothing was closed"), refused (the VPS's
+words), no answer within 30 s ("It may have closed" -- never "nothing
+closed", which would invite a second close). A remote row ignores this node's
+halt reason: on a stood-down node that reason is "the VPS is trading". A
+remote row with no `remote_trade_id` stays unclosable. Pinned by
+`tests/core/test_remote_close_over_sync.py`, `tests/api/routers/test_orders.py`
+and `ActiveTradesSection.test.tsx`. Needs a demo session before it is trusted
+live: owner, 2026-09-29.

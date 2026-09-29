@@ -205,6 +205,17 @@ nothing. The close is the same `record_close(trade_id, 0.0,
 "no_fill_expired")`. It cannot see pending orders (the bridge has no such
 read), so the button asks the operator to check MT5 first.
 
+## A template this node does not have refuses the order (2026-09-29)
+
+`open_trade` used to send a `template:<name>` order to the EA with no template
+when the lookup returned None. On the VPS, whose template table was empty, that
+was every template trade for a day: no TP ladder, no partial closes. Now
+`broker/template_presence.missing_template_reason` refuses it next to the
+stale-EA gate, before the EA is asked, and a library that cannot be read
+refuses too. The VPS now receives the Mac's templates over the sync link; see
+the platform domain, "EA templates reach the VPS". Pinned by
+`tests/trading/test_missing_template_refuses_the_order.py`.
+
 ## A template open waits at least 30 s for the EA's ack (owner, 2026-09-29)
 
 `trading/template_ack.ack_timeout`: 10 s + 5 s per leg (at most 60 s), and

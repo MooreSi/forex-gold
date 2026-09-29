@@ -68,6 +68,10 @@ export interface Trade {
    * stranger's position either -- `services/positions/live_view.py` decides.
    */
   remote?: boolean;
+  /** The PAIRED node's id for a `remote` row, from its heartbeat. Closing
+   *  sends this to that node, which closes against its own record. Absent
+   *  when the heartbeat did not carry one; such a row cannot be closed here. */
+  remote_trade_id?: string | null;
   [key: string]: unknown;
 }
 

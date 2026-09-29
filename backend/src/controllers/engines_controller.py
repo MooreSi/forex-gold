@@ -22,7 +22,7 @@ __all__ = [
     "update_risk_settings", "get_engine", "canonical_name", "engines_running", "sub_engines",
     "ENGINE_NAMES", "IMPLEMENTED_NAMES", "control_target", "effective_settings",
     "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",
-    "RemoteControlFailed", "place_market_order",
+    "RemoteControlFailed", "place_market_order", "close_on_peer",
 ]
 
 
@@ -105,3 +105,8 @@ async def set_ai_eval(*args, **kwargs) -> dict:
 async def place_market_order(*args, **kwargs) -> dict:
     """Place a market order on whichever node is actually trading."""
     return await _remote.place_market_order(*args, **kwargs)
+
+
+async def close_on_peer(trade_id: str, reason: str) -> dict:
+    """Close a position the remote node opened, on the remote node."""
+    return await _remote.close_on_peer(trade_id, reason)

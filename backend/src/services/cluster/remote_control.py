@@ -38,6 +38,7 @@ generate signals again, which is the same authority the panel has always had.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -52,7 +53,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     "is_remote_active", "is_centralized_remote_mode", "where",
     "effective_settings", "engines_running", "set_engine_running", "set_ai_eval",
-    "place_market_order", "AI_EVAL_KEYS", "RemoteControlFailed",
+    "place_market_order", "close_on_peer", "AI_EVAL_KEYS", "RemoteControlFailed",
 ]
 
 # The only two settings the sync protocol can carry. `set_ai_eval` is the one
@@ -229,6 +230,37 @@ async def place_market_order(engine: Any, **order: Any) -> dict:
         log.warning("[remote_control] market order did not reach the peer: %s", exc)
         raise RemoteControlFailed(
             f"The remote node could not be reached ({exc}). Nothing was placed."
+        ) from exc
+    if (ack or {}).get("error"):
+        raise RemoteControlFailed(f"The remote node refused: {ack['error']}")
+    return {**((ack or {}).get("result") or {}), "where": "remote"}
+
+
+async def close_on_peer(trade_id: str, reason: str) -> dict:
+    """Close a position the remote node opened, on the remote node.
+
+    Its record is in the peer's database, so the peer runs its own
+    `close_trade(trade_id, reason)` (sync/_remote_close_sync.py). **No
+    fallback**: this node holds no record to close against.
+
+    Three outcomes, worded apart. Unreachable: nothing was sent, so nothing
+    closed. Refused: the peer's own reason. No answer: the request went out
+    and the peer may have closed it -- saying "nothing closed" there would
+    invite a second close of a position that is already gone.
+    """
+    try:
+        ack = await _client.get_instance().request_peer_close(
+            trade_id=trade_id, reason=reason)
+    except asyncio.TimeoutError as exc:
+        log.warning("[remote_control] close of %s: no answer from the peer", trade_id)
+        raise RemoteControlFailed(
+            "The remote node did not answer in time. It may have closed the "
+            "position: check the positions table before trying again."
+        ) from exc
+    except Exception as exc:
+        log.warning("[remote_control] close of %s did not reach the peer: %s", trade_id, exc)
+        raise RemoteControlFailed(
+            f"The remote node could not be reached ({exc}). Nothing was closed."
         ) from exc
     if (ack or {}).get("error"):
         raise RemoteControlFailed(f"The remote node refused: {ack['error']}")

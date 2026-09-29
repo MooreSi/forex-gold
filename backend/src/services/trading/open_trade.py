@@ -34,7 +34,7 @@ from backend.src.services.trading.send_dedup import (
     _FallbackDecision, _bridge_order_comment, _resolve_fallback_send,
     SendOutcomeUnknown,
 )
-from backend.src.services.broker import ea_templates as ea_templates
+from backend.src.services.broker import ea_templates as ea_templates, template_presence
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
 from backend.src.services.risk import lot_sizing
 from backend.src.services.risk.governor import is_trading_paused, price_in_entry_range
@@ -490,7 +490,9 @@ async def open_trade(
             # Refused rather than rerouted: there is no Python fallback for a
             # template, which is the same reason the branch below raises when
             # no EA is reachable at all.
-            _stale_block = _ea_mod.template_blocked_by_stale_build(_ea, strategy)
+            # A missing template is refused the same way (owner, 2026-09-29).
+            _stale_block = (_ea_mod.template_blocked_by_stale_build(_ea, strategy)
+                            or template_presence.missing_template_reason(strategy))
             if _stale_block:
                 raise RuntimeError(_stale_block)
             if _ea is not None and _ea.is_ea_healthy() and _ea.is_strategy_portable(strategy):

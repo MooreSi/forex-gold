@@ -204,3 +204,14 @@ single-mode expiry (5 min) is kept, and an unreadable broker writes off
 nothing. The close is the same `record_close(trade_id, 0.0,
 "no_fill_expired")`. It cannot see pending orders (the bridge has no such
 read), so the button asks the operator to check MT5 first.
+
+## A template open waits at least 30 s for the EA's ack (owner, 2026-09-29)
+
+`trading/template_ack.ack_timeout`: 10 s + 5 s per leg (at most 60 s), and
+never under `TEMPLATE_ACK_MIN_S` (30 s) for a `template:` strategy. Five VPS
+acks "timed out after 5s" between 08:12 and 09:09 on 2026-09-29, all for a
+template the VPS could not read (hence the bare 5 s), and all five had been
+placed: the repair pass adopted each placeholder onto a real ticket. A
+built-in strategy keeps 5 s, because its timeout falls back to Python. The
+wait is only as long as the EA is slow; an ack that arrives in 1 s returns in
+1 s. Pinned by `tests/core/test_template_ack_waits_at_least_30s.py`.

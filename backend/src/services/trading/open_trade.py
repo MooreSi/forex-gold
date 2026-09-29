@@ -29,6 +29,7 @@ from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.trading import signal_state_repo
 from backend.src.services.trading import template_levels
+from backend.src.services.trading.template_ack import TEMPLATE_ACK_MIN_S
 from backend.src.services.trading.send_dedup import (
     _FallbackDecision, _bridge_order_comment, _resolve_fallback_send,
     SendOutcomeUnknown,
@@ -610,17 +611,16 @@ async def open_trade(
                             "(price %.2f) — market entry per always-fire policy",
                             direction, entry_low, entry_high, _px,
                         )
-                # A template's ack is only sent once the EA has staged EVERY
-                # leg (HandleOpenTemplateGrid's closing SendJson), and each
-                # leg is its own synchronous broker round trip -- so the flat
-                # 5s default is a function of leg count, not a constant. It
-                # was exceeded live on 2026-07-30 with 1 anchor + 3 pendings,
-                # which is what set off the runaway described below.
+                # A template acks after staging every leg, one broker round
+                # trip each: 10s + 5s a leg (a flat 5s set off the 2026-07-30
+                # runaway below), and never under TEMPLATE_ACK_MIN_S.
                 _ack_timeout = 5.0
                 if _ea_template is not None:
                     _legs = (int(_ea_template.get("anchors", 0) or 0)
                              + int(_ea_template.get("pendings", 0) or 0))
                     _ack_timeout = min(60.0, 10.0 + 5.0 * max(1, _legs))
+                if _is_template:
+                    _ack_timeout = max(TEMPLATE_ACK_MIN_S, _ack_timeout)
                 _ea_attempted = True
                 try:
                     ea_ack = await _ea.open_trade(

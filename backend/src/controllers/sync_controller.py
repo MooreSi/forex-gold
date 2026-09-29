@@ -19,6 +19,7 @@ from typing import Optional
 from backend.src.services.cluster import handover as _handover
 from backend.src.services.cluster.sync import client as _client
 from backend.src.services.cluster.sync import _mt5_accounts_sync as _accounts
+from backend.src.services.cluster.sync import _writeoff_sync as _writeoff
 from backend.src.services.cluster.sync import remote_stats_facade as _facade
 from backend.src.services.cluster.sync import server as _server
 from backend.src.services.cluster.sync import tls_util as _tls
@@ -33,6 +34,7 @@ __all__ = [
     "take_over_locally", "take_over_without_peer", "hand_back_to_remote",
     "HandoverRefused",
     "get_remote_open_position",
+    "write_off_peer_unconfirmed",
     "make_stats_facades",
     "cert_fingerprint", "server_start", "server_stop", "server_is_running",
 ]
@@ -113,6 +115,11 @@ async def request_resume(timeout: float = 15.0) -> None:
 
 async def restart_peer(timeout: float = 10.0) -> dict:
     return await _client.get_instance().request_peer_restart(timeout=timeout)
+
+
+async def write_off_peer_unconfirmed(timeout: float = 20.0) -> dict:
+    """Ask the VPS to write off placeholders its broker has no record of."""
+    return await _writeoff.request_peer_write_off(timeout=timeout)
 
 
 # ── Handing trading control over ─────────────────────────────────────────────

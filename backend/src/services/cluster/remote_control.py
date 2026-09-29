@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "is_remote_active", "is_centralized_remote_mode", "where",
-    "effective_settings", "set_engine_running", "set_ai_eval",
+    "effective_settings", "engines_running", "set_engine_running", "set_ai_eval",
     "place_market_order", "AI_EVAL_KEYS", "RemoteControlFailed",
 ]
 
@@ -109,6 +109,32 @@ def effective_settings(local: dict) -> dict:
         log.debug("[remote_control] no remote settings snapshot: %s", exc)
         return dict(local or {})
     return {**(local or {}), **remote}
+
+
+# The heartbeat's name for an engine, where it is not the registry's.
+_HEARTBEAT_NAMES = {"reversal": "reversal_engine"}
+
+
+def engines_running(local: Optional[dict] = None) -> dict:
+    """Which engines run on the node a control would reach. `local` defaults
+    to this node's own registry.
+
+    In Remote mode that is the peer's heartbeat. The local instances there are
+    stood down, and reporting them said "Reversal running" while the VPS's
+    was off (2026-09-28). An engine the heartbeat does not mention is off.
+    """
+    if local is None:
+        local = _engines.running()
+    if where() != "remote":
+        return dict(local)
+    try:
+        status = _client.get_instance().remote_status or {}
+    except Exception as exc:                      # pragma: no cover - defensive
+        log.debug("[remote_control] no peer heartbeat: %s", exc)
+        status = {}
+    peer = status.get("engines") or {}
+    return {name: bool(peer.get(_HEARTBEAT_NAMES.get(name, name), False))
+            for name in local}
 
 
 def _current(key: str, local: dict, default: int = 1) -> bool:

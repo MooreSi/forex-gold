@@ -27,6 +27,7 @@ from backend.src.services.cluster.sync._server_peer_data import ServerPeerDataMi
 from backend.src.services.cluster.sync._expert_params_sync import ServerExpertParamsMixin
 from backend.src.services.cluster.sync._mt5_accounts_sync import ServerMt5AccountsMixin
 from backend.src.services.cluster.sync._restart_sync import ServerRestartMixin
+from backend.src.services.cluster.sync._writeoff_sync import ServerWriteOffMixin
 from backend.src.services.cluster.sync._update_sync import ServerUpdateMixin
 from backend.src.services.cluster.sync import _latency_sync
 from backend.src.services.broker import autotrading_guard
@@ -47,7 +48,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_PROPOSE,
-    MSG_MT5_ACCOUNTS, MSG_RESTART_NODE, MSG_UPDATE_NODE,
+    MSG_MT5_ACCOUNTS, MSG_RESTART_NODE, MSG_UPDATE_NODE, MSG_WRITE_OFF_UNCONFIRMED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -59,9 +60,13 @@ log = logging.getLogger("sync")
 
 _SYNCED_SETTINGS_KEYS = SYNCED_SETTINGS_KEYS
 
+# engine registry name -> `_sub_engines` name, where they differ.
+_ENGINE_ALIASES = {"reversal": "reversal_engine"}
+
 
 class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
-                 ServerMt5AccountsMixin, ServerRestartMixin, ServerUpdateMixin):
+                 ServerMt5AccountsMixin, ServerRestartMixin, ServerUpdateMixin,
+                 ServerWriteOffMixin):
     def __init__(self, main_engine=None, breakout_engine=None,
                  bounce_engine=None, re_engine=None):
         self._main_engine     = main_engine
@@ -236,6 +241,8 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
             await self._handle_mt5_accounts(ws, msg)
         elif t == MSG_RESTART_NODE:
             await self._handle_restart_node(ws, msg)
+        elif t == MSG_WRITE_OFF_UNCONFIRMED:
+            await self._handle_write_off_unconfirmed(ws, msg)
         elif t == MSG_UPDATE_NODE:
             await self._handle_update_node(ws, msg)
         elif t == MSG_EXPERT_PARAMS_PROPOSE:
@@ -278,7 +285,10 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
         instance, which does nothing useful while looking like it worked."""
         engine_name = msg.get("engine", "")
         action      = msg.get("action", "")
-        eng = self._sub_engines().get(engine_name)
+        # The Mac's registry calls it "reversal"; this table says
+        # "reversal_engine". Unmapped, every Mac Start/Stop for it was
+        # "unknown engine" (2026-09-28).
+        eng = self._sub_engines().get(_ENGINE_ALIASES.get(engine_name, engine_name))
         error = None
         if eng is None:
             error = f"unknown engine: {engine_name}"
@@ -565,9 +575,11 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
     # ── Stand-down / resume ──────────────────────────────────────────────────
 
     def _sub_engines(self) -> dict:
+        # No "bounce": its code was deleted on 2026-09-14 and its slot is
+        # always None, but listing it put "Bounce off" in every heartbeat and
+        # on the Mac's Remote Node page.
         return {
             "breakout": self._breakout_engine,
-            "bounce":   self._bounce_engine,
             "reversal_engine":  self._re_engine,
         }
 
@@ -575,7 +587,14 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
         stopped = []
         for name, eng in self._sub_engines().items():
             if eng is not None and getattr(eng, "is_running", False):
-                eng.stop()
+                # Never persist: a stand-down is the node's decision, not a
+                # user's "off". The RE's default persist=True wrote
+                # re_user_stopped=1 on 2026-09-25 and the VPS ran without it
+                # for three days (test_stand_down_does_not_persist_...).
+                try:
+                    eng.stop(persist=False)
+                except TypeError:
+                    eng.stop()
                 stopped.append(name)
         # A repeat (the Mac stands the VPS down on every reconnect while it is
         # LOCAL) must not forget what the first one stopped, or RESUME would

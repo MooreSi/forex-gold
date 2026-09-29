@@ -94,6 +94,13 @@ export function RemoteTab() {
   }
 
   const connected = client.conn_state === "connected";
+  // A row with no broker ticket is an EA Template placeholder whose open was
+  // never confirmed. Counting it as a position said "3" on 2026-09-28 while
+  // MT5 held one; it still takes a trade slot, so it is shown, not hidden.
+  const positions = Array.isArray(peer.open_positions)
+    ? (peer.open_positions as { mt5_ticket?: unknown }[]) : [];
+  const live = positions.filter((p) => Number(p?.mt5_ticket ?? 0) > 0).length;
+  const unconfirmed = positions.length - live;
 
   return (
     <div className="space-y-4">
@@ -192,11 +199,33 @@ export function RemoteTab() {
               VPS balance {formatMoney(Number(peer.balance ?? 0))}
               {" · equity "}{formatMoney(Number(peer.equity ?? 0))}
             </p>
-            <p className="text-ink-3">
-              Open positions {Array.isArray(peer.open_positions) ? peer.open_positions.length : 0}
+            <p data-testid="remote-open-positions" className="text-ink-3">
+              Open positions {live}
+              {unconfirmed > 0 && (
+                <span className="text-warning">
+                  {` (+${unconfirmed} unconfirmed: in the VPS database, no broker ticket) `}
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      // The VPS writes off only rows its broker has no
+                      // position and no deal for; a pending order is the one
+                      // thing it cannot see, so the operator is asked.
+                      if (!window.confirm(
+                        `Write off ${unconfirmed} unconfirmed row(s) on the VPS? ` +
+                        "Only rows the broker has no position or deal for are " +
+                        "closed, at $0. Check MT5 has no pending order for them first.",
+                      )) return;
+                      void act(() => api.post("/api/remote/write-off-unconfirmed", {}));
+                    }}
+                  >
+                    Write off
+                  </Button>
+                </span>
+              )}
               {" · active trader "}{String(peer.active_trader ?? "?")}
             </p>
-            <RemotePeerHealthSection peer={peer} />
+            <RemotePeerHealthSection peer={peer} busy={busy} act={act} />
           </div>
         )}
         {client.token_set && (

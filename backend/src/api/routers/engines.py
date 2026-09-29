@@ -231,18 +231,20 @@ async def set_running(body: EngineAction) -> dict:
     controller routes the command to whichever node is actually trading; the
     response says which, so the panel can too.
     """
-    _known_or_refuse(body.engine)
+    # Settings > Remote Node sends the heartbeat's name, "reversal_engine".
+    name = engines_ctl.canonical_name(body.engine)
+    _known_or_refuse(name)
 
     # "Not built here" is only a reason to refuse when the command was going to
     # be applied here. In Remote mode the engine that matters is the peer's.
     if (engines_ctl.control_target() != "remote"
-            and engines_ctl.get_engine(body.engine) is None):
+            and engines_ctl.get_engine(name) is None):
         raise Refusal(
-            f"The {_label(body.engine)} engine is not built on this "
+            f"The {_label(name)} engine is not built on this "
             "install, so there is nothing to start.",
         )
     try:
-        return await engines_ctl.set_engine_running(body.engine, body.running)
+        return await engines_ctl.set_engine_running(name, body.running)
     except engines_ctl.RemoteControlFailed as exc:
         raise Refusal(str(exc)) from exc
 
@@ -251,12 +253,13 @@ async def set_running(body: EngineAction) -> dict:
 async def update_settings(body: TunableUpdate) -> dict:
     """Write engine tunables. Partial, one key at a time, as the switches save.
 
-    **Local only, and that is a limit rather than a choice.** The sync protocol
-    carries exactly one risk setting between nodes — the AI-evaluation flag,
-    which has its own endpoint below. Everything else has no remote route, so
-    in Remote mode these write a row the trading node will not read. The
-    dashboard says so rather than pretending otherwise; `control_target` on
-    `/state` is what it says it with.
+    **These reach the VPS.** Every switch here is a `vantage_risk_settings`
+    column, `risk_settings_repo.update_risk_settings` proposes each write to
+    the paired node, and every column is in `SYNCED_SETTINGS_KEYS` or named
+    per-node (tests/core/test_sync_covers_every_setting.py). Seen live on
+    2026-09-28: "[SyncServer] applied settings from Mac:
+    {'htf_bias_asian_exempt': 0}". The panel's banner still says otherwise;
+    its wording is pinned by EnginesPanel.test.tsx and awaits the owner.
     """
     engines_ctl.update_risk_settings(dict(body.model_dump()))
     return engines_ctl.effective_settings(

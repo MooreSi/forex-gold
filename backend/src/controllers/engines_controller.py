@@ -19,7 +19,7 @@ from backend.src.services.risk import settings as _risk
 
 __all__ = [
     "get_risk_settings", "get_risk_settings_async",
-    "update_risk_settings", "get_engine", "engines_running", "sub_engines",
+    "update_risk_settings", "get_engine", "canonical_name", "engines_running", "sub_engines",
     "ENGINE_NAMES", "IMPLEMENTED_NAMES", "control_target", "effective_settings",
     "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",
     "RemoteControlFailed", "place_market_order",
@@ -59,8 +59,14 @@ def get_engine(name: str) -> Any:
     return _engines.instance(name)
 
 
+def canonical_name(name: str) -> str:
+    """The registry's name for an engine the heartbeat names differently."""
+    return _engines.canonical(name)
+
+
 def engines_running() -> dict:
-    return _engines.running()
+    """On the node a control reaches: the peer's heartbeat in Remote mode."""
+    return _remote.engines_running()
 
 
 def sub_engines() -> tuple:

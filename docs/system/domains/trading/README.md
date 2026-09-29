@@ -163,3 +163,44 @@ well.
   placed under, and the Analysis tab's attribution is built from them.
   A rename deliberately does not touch them. Pinned by
   `tests/core/test_ea_template_rename.py::TestWhatMustNotMove`.
+
+## The EA opens nothing on a stood-down node; an unanswered limit is unknown (2026-09-28)
+
+Found on the owner's demo account. The Mac was stood down (VPS trading) and
+still placed a real BUY LIMIT: the Limit Runner calls
+`EABridge.place_pending_order` directly and never passes through
+`open_trade()`, where the stand-down gate lived. Entry Realignment reaches
+`EABridge.open_trade` the same way. tg_id=31099 filled at 18:06 as ticket
+2104195879 and ran to TP with neither node tracking it.
+
+- **The gate is now on the funnel**: `ea_bridge/_trader_role.py`
+  `refuse_unless_active_trader()`, called first in `EABridge.open_trade` and
+  `place_pending_order`. It raises `StoodDownError` (message says "stood
+  down", so callers' existing deferral handling applies) and fails open on
+  error, as `node_roles` promises. Close, modify and restore are not gated.
+  Pinned by `tests/trading/test_ea_orders_need_the_trader_role.py`.
+- **A limit send that timed out is `unknown`, not failed.** That same order
+  was reported "Limit order failed —" (a timeout has no message) while the EA
+  had placed it. The Limit Runner now writes the usual rows with both the
+  order and the signal as `unknown`: a late `pending_order_filled` finds the
+  trade_id (`fetch_pending_order` reads any status), and nothing re-sends it
+  (restore and re-arm read `working`/`withdrawn`, the zone watcher `pending`).
+  A send that demonstrably never left is still a failure. Pinned by
+  `tests/trading/test_limit_order_unanswered_is_unknown.py`.
+- **Not yet covered:** the manual limit order, the Reversal Engine's LIMIT
+  ORDER path and resting re-arm still treat a timeout as failure; the
+  realigned market open still does too.
+
+## Writing off unconfirmed placeholders on request (2026-09-28)
+
+Settings > Remote Node > "Write off" asks the VPS to run
+`core_template_placeholder_repair.write_off_unconfirmed`. It is the automatic
+no-fill write-off without the template-mode question: the two 09:36/09:39
+"30 TP1 SL50 and Trail" rows sat on the 24 h expiry because the VPS could not
+read that template as single mode, and held two slots all day while its
+reconciler said "the broker has no record of it". Evidence checks are kept: a
+live leg is adopted, a row with any broker deal is kept, a row under the
+single-mode expiry (5 min) is kept, and an unreadable broker writes off
+nothing. The close is the same `record_close(trade_id, 0.0,
+"no_fill_expired")`. It cannot see pending orders (the bridge has no such
+read), so the button asks the operator to check MT5 first.

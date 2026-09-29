@@ -153,10 +153,13 @@ class TelemetryMixin:
             "ea_connected":  ea_connected,
             "trading_status": await _trading_status(),
             **_get_resource_usage(),
-            **_update_sync.heartbeat_fields(),   # commit + git version (2026-09-27)
+            # commit + git version (2026-09-27). Both shell out to git, so on
+            # a worker thread: on the loop, one beat stalled the VPS 4.9 s
+            # (2026-09-28, test_heartbeat_reads_git_off_the_loop.py).
+            **(await asyncio.to_thread(_update_sync.heartbeat_fields)),
             # The commit this process booted on, which `commit` (read from
             # disk) is not once an update has pulled without a restart.
-            "running_commit": _update_sync.running_commit(),
+            "running_commit": await asyncio.to_thread(_update_sync.running_commit),
         }
 
     async def _heartbeat_loop(self) -> None:

@@ -324,6 +324,31 @@ async def restart_vps() -> dict:
     return {"note": f"VPS: {reply.get('note') or 'restarting'}"}
 
 
+@router.post("/write-off-unconfirmed")
+async def write_off_unconfirmed() -> dict:
+    """Write off the VPS's placeholders its broker has no record of (owner,
+    2026-09-28: "these are blocking 2 available slots").
+
+    The VPS decides, against its own broker: a live leg is adopted, a row
+    with a broker deal or under five minutes old is kept, and an unreadable
+    broker writes off nothing. No order is sent or closed at the broker.
+    """
+    if not sync_ctl.is_connected():
+        raise Refusal("Not connected to the VPS.")
+    try:
+        reply = await sync_ctl.write_off_peer_unconfirmed()
+    except asyncio.TimeoutError as exc:
+        raise Refusal(
+            "The VPS did not answer. It is probably on an older version: "
+            "update it (Upgrade VPS) and try again.") from exc
+    except Exception as exc:
+        raise Refusal(f"Could not reach the VPS: {exc}") from exc
+    if reply.get("error"):
+        raise Refusal(str(reply["error"]))
+    return {"note": vps_ctl.describe_write_off(reply),
+            "written_off": reply.get("written_off") or []}
+
+
 @router.post("/update-vps")
 async def update_vps() -> dict:
     """Update the paired VPS to origin/main and restart it (owner, 2026-09-27).

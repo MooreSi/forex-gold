@@ -167,7 +167,67 @@ async def repair_template_placeholders(bridge: Any) -> int:
     return repaired
 
 
-async def _expire_never_filled(row: dict, bridge: Any) -> bool:
+async def write_off_unconfirmed(bridge: Any) -> dict:
+    """The owner's "write these off now" (2026-09-28), for placeholders the
+    broker has never heard of.
+
+    The automatic pass above waits 24h unless it can read the template as
+    single mode; a template renamed, deleted or never synced to this node
+    gets the 24h, and its rows hold trade slots all day. This skips the MODE
+    question and keeps every EVIDENCE check: a live leg is adopted, an
+    opening deal is left for the repair pass, a row younger than the
+    single-mode expiry is left alone, and an unreadable broker writes off
+    nothing. Same close as the automatic one.
+
+    Returns {"written_off": [trade_id], "kept": [{"trade_id", "reason"}],
+    "error": str|None}. Never raises.
+    """
+    result: dict = {"written_off": [], "kept": [], "error": None}
+    try:
+        rows = await db_module.to_db_thread(repair_repo.fetch_template_placeholders)
+        if not rows:
+            return result
+        positions = await bridge.get_positions()
+        deals = await bridge.get_deal_history(7)
+    except Exception as e:
+        result["error"] = f"The broker could not be read ({e}). Nothing was written off."
+        return result
+    if positions is None or deals is None:
+        result["error"] = "The broker could not be read. Nothing was written off."
+        return result
+
+    min_age = placeholder_single_no_fill_expiry_secs()
+    for row in rows:
+        trade_id = row["trade_id"]
+        prefix = _comment_prefix(trade_id)
+        try:
+            live = next((p for p in positions
+                         if str(p.get("comment") or "").startswith(prefix)), None)
+            if live is not None:
+                await _adopt_live_position(row, live)
+                result["kept"].append({"trade_id": trade_id,
+                                       "reason": "open at the broker; adopted"})
+                continue
+            if any(str(d.get("comment") or "").startswith(prefix) for d in deals):
+                result["kept"].append({"trade_id": trade_id,
+                                       "reason": "the broker has a deal for it"})
+                continue
+            if await _expire_never_filled(row, bridge, expiry_s=min_age):
+                result["written_off"].append(trade_id)
+            else:
+                result["kept"].append({"trade_id": trade_id,
+                                       "reason": "too new; its order may still be on its way"})
+        except Exception as e:
+            log.warning("[TemplateRepair] write-off of %s failed: %s", trade_id[:8], e)
+            result["kept"].append({"trade_id": trade_id, "reason": str(e)})
+    if result["written_off"]:
+        log.warning("[TemplateRepair] owner wrote off %d unconfirmed placeholder(s): %s",
+                    len(result["written_off"]), [t[:8] for t in result["written_off"]])
+    return result
+
+
+async def _expire_never_filled(row: dict, bridge: Any,
+                               expiry_s: Optional[int] = None) -> bool:
     """Write off a placeholder the broker has no record of, once it is old
     enough that nothing can still be coming.
 
@@ -185,7 +245,7 @@ async def _expire_never_filled(row: dict, bridge: Any) -> bool:
 
     trade_id = row["trade_id"]
     age_s = time.time() - float(row.get("open_time") or 0)
-    if age_s < _expiry_for(row):
+    if age_s < (_expiry_for(row) if expiry_s is None else expiry_s):
         return False
 
     try:

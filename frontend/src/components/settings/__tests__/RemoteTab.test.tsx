@@ -107,3 +107,134 @@ describe("reconnecting", () => {
     expect(screen.queryByText(/re-enter it/i)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * 2026-09-28, owner: "need a button to turn on/off the breakout and reversal
+ * engine on the remote node page, also it still has bounce mentioned". The
+ * VPS's Reversal Engine had been off for three days (a stand-down persisted
+ * it as user-stopped) and this page was the only place that showed it, with
+ * nothing to press.
+ */
+describe("the remote node's engines", () => {
+  const withBounce = {
+    ...STATE,
+    client: { ...STATE.client, remote_status: {
+      ...STATE.client.remote_status,
+      engines: { breakout: true, bounce: false, reversal_engine: false },
+    } },
+  };
+
+  it("never mentions Bounce, even from a VPS that still reports it", async () => {
+    responses = [withBounce];
+    render(<RemoteTab />);
+
+    const engines = await screen.findByTestId("remote-engines");
+    expect(engines).not.toHaveTextContent(/bounce/i);
+    expect(screen.queryByRole("button", { name: /bounce/i })).not.toBeInTheDocument();
+  });
+
+  it("starts a stopped engine on the VPS", async () => {
+    responses = [withBounce];
+    render(<RemoteTab />);
+
+    const button = await screen.findByRole("button", { name: "Start Reversal engine" });
+    await act(async () => { button.click(); });
+
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
+    const post = calls.find(([url]) => url === "/api/engines/running");
+    expect(post).toBeDefined();
+    expect(JSON.parse(String(post![1]!.body))).toEqual({ engine: "reversal_engine", running: true });
+  });
+
+  it("stops a running engine on the VPS", async () => {
+    responses = [withBounce];
+    render(<RemoteTab />);
+
+    const button = await screen.findByRole("button", { name: "Stop Breakout" });
+    await act(async () => { button.click(); });
+
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
+    const post = calls.find(([url]) => url === "/api/engines/running");
+    expect(JSON.parse(String(post![1]!.body))).toEqual({ engine: "breakout", running: false });
+  });
+
+  it("offers no buttons while this machine is the trader", async () => {
+    responses = [{ ...withBounce, client: { ...withBounce.client, remote_status: {
+      ...withBounce.client.remote_status, active_trader: "local" } } }];
+    render(<RemoteTab />);
+
+    await screen.findByTestId("remote-engines");
+    expect(screen.queryByRole("button", { name: /^(start|stop) /i })).not.toBeInTheDocument();
+  });
+});
+
+describe("the remote node's open positions", () => {
+  it("counts only positions the broker has, and names the rest", async () => {
+    responses = [{ ...STATE, client: { ...STATE.client, remote_status: {
+      ...STATE.client.remote_status,
+      open_positions: [
+        { trade_id: "f85f0bd3", mt5_ticket: 2103965158 },
+        { trade_id: "1f5801a6", mt5_ticket: 0 },
+        { trade_id: "3041d252", mt5_ticket: 0 },
+      ],
+    } } }];
+    render(<RemoteTab />);
+
+    const line = await screen.findByTestId("remote-open-positions");
+    expect(line).toHaveTextContent("Open positions 1");
+    expect(line).toHaveTextContent(/2 unconfirmed/i);
+  });
+});
+
+/**
+ * 2026-09-28, owner: "need to remove the (+2 unconfirmed ...) - these are
+ * blocking 2 available slots". The VPS decides what goes, against its own
+ * broker; this asks, after a confirmation, and shows its answer.
+ */
+describe("writing off the unconfirmed rows", () => {
+  const withGhosts = { ...STATE, client: { ...STATE.client, remote_status: {
+    ...STATE.client.remote_status,
+    open_positions: [
+      { trade_id: "1f5801a6", mt5_ticket: 0 },
+      { trade_id: "3041d252", mt5_ticket: 0 },
+    ],
+  } } };
+
+  function posts(url: string) {
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
+    return calls.filter(([u, init]) => u === url && init?.method === "POST");
+  }
+
+  it("asks the VPS once the operator confirms", async () => {
+    responses = [withGhosts];
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<RemoteTab />);
+
+    const button = await screen.findByRole("button", { name: /write off/i });
+    await act(async () => { button.click(); });
+
+    expect(posts("/api/remote/write-off-unconfirmed")).toHaveLength(1);
+  });
+
+  it("sends nothing when the operator cancels", async () => {
+    responses = [withGhosts];
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    render(<RemoteTab />);
+
+    const button = await screen.findByRole("button", { name: /write off/i });
+    await act(async () => { button.click(); });
+
+    expect(posts("/api/remote/write-off-unconfirmed")).toHaveLength(0);
+  });
+
+  it("is not offered when every position has a ticket", async () => {
+    responses = [{ ...STATE, client: { ...STATE.client, remote_status: {
+      ...STATE.client.remote_status,
+      open_positions: [{ trade_id: "f85f0bd3", mt5_ticket: 2103965158 }],
+    } } }];
+    render(<RemoteTab />);
+
+    await screen.findByTestId("remote-open-positions");
+    expect(screen.queryByRole("button", { name: /write off/i })).not.toBeInTheDocument();
+  });
+});

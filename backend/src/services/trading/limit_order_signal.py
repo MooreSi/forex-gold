@@ -50,6 +50,7 @@ distances rather than losing the trade outright.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -60,6 +61,7 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from backend.src.db import database as db_module
+from backend.src.services.broker.ea_bridge import StoodDownError
 from backend.src.services.trading import trade_repo
 from backend.src.services.positions.core_closed_market_queue import queue_closed_market_limit, should_queue
 from backend.src.services.risk.strategy_params import get_strategy_params
@@ -390,6 +392,23 @@ async def handle_limit_order_signal(
             # layer down, and it would be invisible.
             template=_template,
         )
+    except StoodDownError as exc:
+        log.info("[LimitRunner] tg_id=%s deferred to active node: %s", tg_id, exc)
+        return {"skip_reason": f"Deferred to active node — {exc}"}
+    except asyncio.TimeoutError:
+        # Sent, and no answer: the EA may well have placed it (tg_id=31099,
+        # 2026-09-28, filled and ran to TP with no row). Unknown, not failed
+        # -- see _record_unanswered_limit.
+        _record_unanswered_limit(
+            trade_id, tg_id, channel_name, source_label, direction, price, lot,
+            stop_loss, tps, pcts, be_at_pos, tp_open, entry_low, entry_high,
+            manage_strategy,
+        )
+        return {"skip_reason": (
+            f"Limit order unconfirmed — the EA did not answer, so it may be resting "
+            f"at the broker. Recorded (not re-sent); a fill will be picked up "
+            f"and managed. {direction} {lot:g} lots @ {price:.2f}."
+        )}
     except Exception as exc:
         log.warning("[LimitRunner] place_pending_order failed for tg_id=%s: %s", tg_id, exc)
         return {"skip_reason": f"Limit order failed — {exc}"}
@@ -425,6 +444,37 @@ async def handle_limit_order_signal(
     }
 
 
+def _record_unanswered_limit(trade_id, tg_id, channel_name, source_label, direction,
+                             price, lot, stop_loss, tps, pcts, be_at_pos, tp_open,
+                             entry_low, entry_high, manage_strategy) -> None:
+    """Record a limit order whose send got no answer, as UNKNOWN.
+
+    docs/system/rules/20-trading-safety.md: a broker that could not be asked
+    has not said no. The same rows a placement writes, with both statuses
+    'unknown', so:
+      * a late pending_order_filled finds its trade_id (fetch_pending_order
+        reads any status) and becomes a managed trade;
+      * nothing re-sends it -- EA restore and resting re-arm read only
+        'working'/'withdrawn', and the zone watcher only 'pending' signals.
+    """
+    now = time.time()
+    signal_id = str(uuid.uuid4())[:16]
+    trade_repo.insert_pending_order_signal(
+        signal_id, f"Telegram Auto ({source_label})", direction,
+        entry_low, entry_high, stop_loss, tps, lot,
+        f"send outcome unknown: limit @ {price:.2f} sent to the EA, no answer",
+        now, ("pending", tg_id),
+        (trade_id, signal_id, tg_id, channel_name, direction, price, stop_loss,
+         json.dumps(tps), json.dumps(pcts), be_at_pos, int(tp_open), lot, None,
+         "unknown", now, manage_strategy),
+        signal_status="unknown",
+    )
+    log.warning(
+        "[LimitRunner] no answer from the EA for tg_id=%s trade=%s %s %.2f lots @ %.2f "
+        "-- recorded as unknown, not re-sent", tg_id, trade_id, direction, lot, price,
+    )
+
+
 def _strategy_label(strategy: str) -> str:
     from backend.src.utils.models import STRATEGY_NAMES
     return STRATEGY_NAMES.get(strategy, strategy)
@@ -457,6 +507,9 @@ async def _open_realigned_market_order(
             strategy=manage_strategy, pcts=pcts, be_at_pos=be_at_pos,
             trail_mode=trail_mode,
         )
+    except StoodDownError as exc:
+        log.info("[LimitRunner] tg_id=%s realignment deferred to active node: %s", tg_id, exc)
+        return {"skip_reason": f"Deferred to active node — {exc}"}
     except Exception as exc:
         log.warning("[LimitRunner] realigned open_trade failed for tg_id=%s: %s", tg_id, exc)
         return {"skip_reason": f"Entry realignment failed — {exc}"}

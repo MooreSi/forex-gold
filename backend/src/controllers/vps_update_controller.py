@@ -4,9 +4,10 @@ backend.src.services.cluster.sync._update_sync and the sync client unchanged."""
 from __future__ import annotations
 
 from backend.src.services.cluster.sync import _update_sync
+from backend.src.services.cluster.sync import _writeoff_sync as _writeoff
 from backend.src.services.cluster.sync import client as _client
 
-__all__ = ["update_peer", "version_report"]
+__all__ = ["update_peer", "version_report", "describe_write_off"]
 
 
 async def update_peer(timeout: float = 10.0) -> dict:
@@ -17,3 +18,8 @@ async def update_peer(timeout: float = 10.0) -> dict:
 def version_report() -> dict:
     """Both nodes' commits and git versions, and whether they match."""
     return _update_sync.current_version_report()
+
+
+def describe_write_off(result: dict) -> str:
+    """The operator's line for the VPS's answer to a write-off request."""
+    return _writeoff.describe(result)

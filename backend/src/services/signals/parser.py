@@ -158,8 +158,11 @@ def _parse_gd2_plain_tps(text: str) -> dict[int, float]:
 # Instant entry — "XAUUSD Buy Now" / "XAU Sell Now" / "XAU USD BUY NOW"
 # optionally followed by a limit price, e.g. "XAUUSD Buy Now 4293"
 # without SL/TP details; covered by Immediate Market Buy/Sell feature.
+# The price must start with a digit and end on one: `[\d.,]+` matched the
+# full stop in "XAUUSD BUY NOW." and float('.') raised on every rescan
+# (117 tracebacks on the VPS, 2026-09-28).
 _INSTANT_RE = re.compile(
-    r'\b(?:XAUUSD|XAU\s*USD|XAU)\s+(BUY|SELL)\s+NOW\b(?:[\s@,]*([\d.,]+))?',
+    r'\b(?:XAUUSD|XAU\s*USD|XAU)\s+(BUY|SELL)\s+NOW\b(?:[\s@,]*(\d+(?:[.,]\d+)*))?',
     re.IGNORECASE,
 )
 

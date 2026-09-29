@@ -535,3 +535,60 @@ commit. The Upgrade button's timeout text said "update it once by Telegram";
 there is no Telegram update command, and it now names the two real routes.
 Pinned by `tests/core/test_version_report_says_why_unknown.py` and
 `VersionLineReason.test.tsx`.
+
+## A stand-down must not persist an engine as user-stopped (2026-09-28)
+
+Found on the owner's VPS over WinRM. At 2026-09-25 23:19 a STAND_DOWN called
+the Reversal Engine's `stop()`, whose default `persist=True` writes
+`re_user_stopped=1`. The next RESUME restarted nothing, and every start since
+logged "Reversal Engine skipped (user manually stopped)": three days with the
+engine off and no one had chosen it. `_handle_stand_down` now calls
+`stop(persist=False)` (falling back to `stop()` for engines without the
+argument). A VPS already in that state needs the engine started once: the
+Remote Node page now has Start/Stop per engine, routed through
+`/api/engines/running`. Bounce is gone from the heartbeat (`_sub_engines`) and
+from that page. Breakout's start/stop still persists nothing
+(`bo_engine_enabled` is read at startup, never written).
+
+**Reaching the VPS.** WinRM over HTTPS on 5986 with client-certificate auth
+(`~/Documents/FOREX.nosync/.claude_winrm`, CN=forex-mac-admin); SSH on 22
+takes no key from this Mac. pywinrm is not a project dependency: use a
+scratch venv. The app runs from `C:\Users\Administrator\AppData\Local\FOREX
+Trader` and its database is the per-account
+`%APPDATA%\ForexTrader\data\forex_trader_demo_26004592.db`.
+
+**The VPS has no EA templates** (2026-09-28): `ea_trade_templates` is empty in
+both of its databases, and templates are not synced, yet its channels and the
+Reversal Engine trade `template:30 TP1 SL50 and Trail`. Rows opened that way
+carry no TP levels, so a restore after an EA reconnect re-adopts the position
+with no ladder. Ticket 2103965158 ran from 4122.29 past every template TP
+untouched. Open question for the owner: sync templates to the VPS, or copy
+them once.
+
+## Engine names, QuickEdit and the heartbeat's git call (2026-09-28, evening)
+
+- **One engine, two names.** The registry, `/api/engines/*` and
+  `remote_control` call it `reversal`; the sync server's `_sub_engines`, and
+  so the VPS heartbeat, call it `reversal_engine`. Nothing mapped them, so the
+  VPS's Reversal engine could not be started from the Mac at all: the Remote
+  tab posted `reversal_engine` (400 "Unknown engine") and the Signal Generator
+  tab's `reversal` reached the VPS as "unknown engine: reversal". Now
+  `registry.canonical()` maps the heartbeat name at the API, the sync server
+  maps `reversal` via `_ENGINE_ALIASES`, and `/api/engines/state` reports the
+  peer's heartbeat in Remote mode (`remote_control.engines_running`) instead
+  of this node's stood-down copies. A near-miss name is still refused.
+- **Windows QuickEdit freezes the app.** Selecting text in a console window
+  suspends every write to it; the console log handler runs on the event-loop
+  thread, so the loop stops. Two VPS stalls of 13.7 s and 15.5 s were both
+  sampled inside logging `emit` and each dropped the EA link. `run.main()`
+  turns QuickEdit off (`utils/win_console.py`); Edit > Mark still selects.
+  Likely cause, not proven: nothing records a selection.
+- **The heartbeat read git on the loop.** `heartbeat_fields()` and
+  `running_commit()` run `git rev-parse` every 3 s beat; one spawn stalled the
+  VPS 4.9 s after boot. Both now run in `asyncio.to_thread`.
+- **Engine settings do reach the VPS.** Every Signal Generator switch is a
+  risk-settings column and is proposed to the peer on write; the VPS logged
+  "applied settings from Mac: {'htf_bias_asian_exempt': 0}" at 20:44. The
+  Signal Generator banner's "no route between nodes" is stale since the
+  2026-09-25 completion of `SYNCED_SETTINGS_KEYS`; its wording is pinned by
+  `EnginesPanel.test.tsx` and is left for the owner to approve changing.

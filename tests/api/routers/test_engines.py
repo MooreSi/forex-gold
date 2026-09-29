@@ -499,3 +499,26 @@ def test_a_missing_reversal_edge_read_does_not_take_the_report_down(
 
     assert body["edge"] == {}
     assert body["realised"] == {"net_pnl": 88.4}
+
+
+# ── The heartbeat's name for the Reversal engine (2026-09-28) ────────────────
+# Settings > Remote Node renders its Start/Stop from the VPS heartbeat, which
+# calls the engine "reversal_engine". This route knew only "reversal" and
+# refused it with a 400, so pressing Start there did nothing the owner could
+# see.
+
+def test_the_heartbeat_name_starts_the_reversal_engine(make_client, engines):
+    r = make_client().post("/api/engines/running",
+                           json={"engine": "reversal_engine", "running": True})
+
+    assert r.status_code == 200
+    assert engines["instances"]["reversal"].calls == ["start"]
+    assert engines["instances"]["breakout"].calls == []
+
+
+def test_a_near_miss_of_the_heartbeat_name_is_still_refused(make_client, engines):
+    r = make_client().post("/api/engines/running",
+                           json={"engine": "reversal_engines", "running": True})
+
+    assert r.status_code == 400
+    assert engines["instances"]["reversal"].calls == []

@@ -530,7 +530,7 @@ def set_tg_followup_applied(tg_id, signal_id) -> None:
 def insert_pending_order_signal(signal_id: str, source_name: str, direction: str,
                                 entry_low, entry_high, stop_loss,
                                 tps: dict, lot, notes: str, now: float,
-                                tg_update, pending_row: tuple) -> None:
+                                tg_update, pending_row: tuple, signal_status: str = "pending") -> None:
     """A pending-order placement: signal row + optional tg flip + the
     vantage_pending_orders row, atomically. `tg_update` is (status, tg_id) or
     None; `pending_row` is the full 16-value tuple for the orders table."""
@@ -543,7 +543,7 @@ def insert_pending_order_signal(signal_id: str, source_name: str, direction: str
             (signal_id, source_name, direction, entry_low, entry_high,
              stop_loss, tps.get(1), tps.get(2), tps.get(3), tps.get(4), tps.get(5),
              tps.get(6), tps.get(7), tps.get(8), lot, notes,
-             "pending", now),
+             signal_status, now),
         )
         if tg_update is not None:
             tg_status, tg_id = tg_update

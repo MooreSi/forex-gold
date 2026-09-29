@@ -53,6 +53,9 @@ from backend.src.services.broker.ea_bridge._panel import PanelMixin
 from backend.src.services.broker.ea_bridge._events import EventsMixin
 from backend.src.services.broker.ea_bridge._restore import RestoreMixin
 from backend.src.services.broker.ea_bridge._link_probe import LinkProbeMixin
+from backend.src.services.broker.ea_bridge._trader_role import (  # noqa: F401
+    StoodDownError, refuse_unless_active_trader,
+)
 # Re-exported: tests/core/test_ea_bridge_version_handshake.py reads _EA_SOURCE,
 # _EA_COMPILED_FMT and _expected_ea_version off the package.
 from backend.src.services.broker.ea_bridge._version import (  # noqa: F401
@@ -388,6 +391,7 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin, LinkProbeMix
         management natively, no recompile needed when a template's values
         change. None for every other (built-in) strategy.
         """
+        refuse_unless_active_trader()
         if not self.is_ea_healthy():
             raise ConnectionError("EA not connected/healthy")
         msg = {
@@ -519,6 +523,7 @@ class EABridge(PanelMixin, EventsMixin, RestoreMixin, VersionMixin, LinkProbeMix
         reused by more than just Limit Runner (e.g. Reversal Engine's LIMIT
         ORDER toggle can resolve to any strategy, including AR2).
         """
+        refuse_unless_active_trader()
         if not self.is_ea_healthy():
             raise ConnectionError("EA not connected/healthy")
         msg = {

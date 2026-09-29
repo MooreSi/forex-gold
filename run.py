@@ -490,6 +490,10 @@ def main():
     # First thing, before anything else here can log: everything below this
     # point expects the console and file handlers to already be attached.
     setup_logging()
+    # Windows: a text selection in the console would otherwise pause every log
+    # write, and with it the event loop (2026-09-28, two 14 s VPS stalls).
+    from backend.src.utils.win_console import disable_quick_edit
+    disable_quick_edit()
 
     import argparse
     _ap = argparse.ArgumentParser(add_help=False)

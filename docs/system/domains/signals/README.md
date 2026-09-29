@@ -101,6 +101,13 @@ or closes an order**. Bridge use here is read-only (`get_tick`).
 - **The first gate came off the shadow bench on 2026-09-21 (Stage 2).** `capability_gates.tg_event_tier_blocks` now refuses a Telegram entry inside a scheduled-event window, on BOTH order paths — the fifth gate `instant_entry.py` has to keep its own copy of, because it never calls `resolve_open_trade_params`. It has **its own** switch, `tg_event_tier_gate_enabled`, and not the existing `event_tier_gate_enabled` that the Reversal Engine's live path reads: one switch arming two engines destroys the attribution the whole staged plan exists for. The tier windows stay in `event_tiers.Config` — one definition, two independent decisions about who honours it. Off by default, migration 50, and the full reasoning (including why `confirmed entry`, which has the only positive P&L in the shadow record, is NOT the one to promote) is in [docs/todo/signal-validation/020](../../../todo/signal-validation/020-stage-2-the-event-tier-gate.md).
 - **A promoted gate stops being a challenger.** Once `tg_event_tier_gate_enabled` is on, the `event tier` shadow variant and the live champion agree by construction, because the live path is now doing what the variant was recording. That is the report working, not a bug in it.
 - **Off must read nothing, and the order matters.** The switch is checked before the calendar, not after. `news_calendar.get_events` can reach the network, and a gate that reads first is indistinguishable from one that is on, on any trace of the order path — which is the only way anybody can say afterwards what was actually running.
+- **A price group must start with a digit (2026-09-28).** `_INSTANT_RE`
+  captured `[\d.,]+`, which matches the full stop in "XAUUSD BUY NOW.", and
+  `float('.')` raised. A message that raises in `scan_messages` is skipped
+  before its dedup row is written, so it is re-parsed about once a second
+  while it stays in the reader's window: 117 tracebacks for one message on
+  the VPS. Now `\d+(?:[.,]\d+)*`. Any regex whose group feeds `_f()` has the
+  same hazard.
 
 ## Open questions
 

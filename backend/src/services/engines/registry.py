@@ -23,7 +23,7 @@ from backend.src.services.breakout_signal import breakout_signal_service as _bo_
 from backend.src.services.reversal_engine import reversal_engine_service as _re_svc
 
 __all__ = [
-    "ENGINE_NAMES", "IMPLEMENTED_NAMES", "instance", "all_instances",
+    "ENGINE_NAMES", "IMPLEMENTED_NAMES", "canonical", "instance", "all_instances",
     "running", "start_stopped", "stop_running",
 ]
 
@@ -49,6 +49,17 @@ ENGINE_NAMES = tuple(_ENGINE_SERVICES)
 IMPLEMENTED_NAMES = tuple(
     name for name, svc in _ENGINE_SERVICES.items() if svc is not None
 )
+
+# Other names an engine arrives under. The sync server's `_sub_engines`, and
+# so the VPS heartbeat Settings > Remote Node draws its buttons from, calls the
+# Reversal engine "reversal_engine" (2026-09-28).
+_ALIASES = {"reversal_engine": "reversal"}
+
+
+def canonical(name: str) -> str:
+    """The registry's name for `name`; unknown names come back unchanged."""
+    return _ALIASES.get(name, name)
+
 
 # Belt and braces: the slot is empty, so the loop would skip it anyway. The
 # exclusion keeps the safety property asserted rather than incidental — the day

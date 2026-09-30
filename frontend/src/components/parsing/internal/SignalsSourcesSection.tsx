@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Button } from "@/components/shared/Button";
 import { Tooltip } from "@/components/shared/Tooltip";
+import { cn } from "@/lib/cn";
 
 interface SignalsSourcesSectionProps {
   settings: Record<string, unknown>;
@@ -17,6 +19,8 @@ interface Source {
   /** What an install that has never touched this does. */
   defaultOn: boolean;
   help: string;
+  /** Set when turning it ON must be confirmed first. Turning off never asks. */
+  confirmOn?: string;
 }
 
 /**
@@ -31,13 +35,8 @@ interface Source {
  * Wording transcribed from `frontend/pages/trading/_signals_card.py` rather
  * than rewritten: each of these sentences is the difference between "learning
  * mode" and "this opens positions", and a paraphrase is how somebody turns the
- * wrong one on.
- *
- * They write this node's own settings row. The AI-evaluation switches beside
- * them route to whichever node is trading (`/api/engines/ai-eval`), because the
- * sync protocol carries those and carries nothing else — so in Remote mode
- * these three change what THIS machine would do, which is not the machine
- * placing the trades. The banner says so rather than leaving it to be guessed.
+ * wrong one on. Trend PA (2026-09-30) takes its words and its confirm-before-on
+ * from its own switch on the Engines tab, so the two places cannot disagree.
  */
 const SOURCES: Source[] = [
   {
@@ -77,6 +76,20 @@ const SOURCES: Source[] = [
       "generate signals before they arrive on Telegram. Use Signal Generator > " +
       "Reversal Engine to view signals and correlation stats.",
   },
+  {
+    key: "tpa_live_execution",
+    title: "Trend PA Engine",
+    blurb: "Place real orders from the trend-following engine",
+    onLabel: "TPA LIVE ON",
+    offLabel: "TPA LIVE OFF",
+    defaultOn: false,
+    help:
+      "Lets this engine send its signals to the account as real orders. Off by " +
+      "default. Test on the demo account first. Orders are refused until a " +
+      "strategy is chosen for \"Trend PA Engine\" on Trading > Strategy, and " +
+      "every account limit (daily loss, daily goal, max open trades) still applies.",
+    confirmOn: "This engine will open real positions on the account.",
+  },
 ];
 
 function isOn(settings: Record<string, unknown>, s: Source): boolean {
@@ -87,52 +100,81 @@ function isOn(settings: Record<string, unknown>, s: Source): boolean {
 export function SignalsSourcesSection(
   { settings, onSave, controlTarget = "local" }: SignalsSourcesSectionProps,
 ) {
+  const [asking, setAsking] = useState<string | null>(null);
+
+  const press = (s: Source, on: boolean) => {
+    if (!on && s.confirmOn) {
+      setAsking(s.key);
+      return;
+    }
+    onSave(s.key, on ? 0 : 1);
+  };
+
   return (
-    <section data-testid="signal-sources" className="rounded border border-line p-3">
-      <h3 className="text-xs font-semibold text-ink-1">Signals</h3>
-      <p className="mb-3 text-[11px] text-ink-3">
-        Which sources may open real positions. Off means the source still runs
-        and still records what it would have done — it just does not trade.
-      </p>
+    <section data-testid="signal-sources" className="rounded-lg border border-line bg-surface-1 p-3">
+      <header className="mb-2.5 flex flex-wrap items-center gap-2">
+        <span className="rounded bg-profit/15 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-profit">
+          LIVE TRADING
+        </span>
+        <span className="text-[11px] text-ink-3">
+          Which sources may open real positions. Off means the source still runs
+          and still records what it would have done — it just does not trade.
+        </span>
+      </header>
 
       {controlTarget === "remote" && (
         <p className="mb-3 rounded border border-remote/40 bg-remote/10 px-2 py-1.5 text-[11px] text-remote">
-          The remote node is the active trader. These three set what{" "}
+          The remote node is the active trader. These switches set what{" "}
           <strong>this machine</strong> would do; they do not travel between
           nodes, so set them on whichever machine is trading.
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {SOURCES.map((s) => {
           const on = isOn(settings, s);
           return (
             <div
               key={s.key}
               data-testid={`source-${s.key}`}
-              className="flex flex-col rounded border border-line bg-surface-2 p-2.5"
+              className={cn(
+                "flex flex-col rounded-md border bg-surface-2 p-3 transition-colors",
+                on ? "border-profit/40" : "border-line",
+              )}
             >
-              <Tooltip label={s.help}>
-                <span className="cursor-help text-xs font-semibold text-ink-1">
-                  {s.title}
-                </span>
-              </Tooltip>
-              <span className="mt-0.5 text-[11px] leading-snug text-ink-3">
-                {s.blurb}
-              </span>
-              <div className="mt-2">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={cn("size-2 rounded-full", on ? "bg-profit" : "bg-ink-3/60")}
+                />
+                <Tooltip label={s.help}>
+                  <span className="cursor-help text-xs font-semibold text-ink-1">{s.title}</span>
+                </Tooltip>
+              </div>
+              <span className="mt-1 flex-1 text-[11px] leading-snug text-ink-3">{s.blurb}</span>
+              <div className="mt-2.5">
                 <Button
-                  variant="ghost"
+                  variant={on ? "success" : "primary"}
                   aria-pressed={on}
-                  onClick={() => onSave(s.key, on ? 0 : 1)}
+                  onClick={() => press(s, on)}
                   title={s.help}
                   tooltip={s.help}
+                  className="w-full justify-center"
                 >
-                  <span className={on ? "text-profit" : "text-ink-3"}>
-                    {on ? s.onLabel : s.offLabel}
-                  </span>
+                  {on ? s.onLabel : s.offLabel}
                 </Button>
               </div>
+              {asking === s.key && s.confirmOn && (
+                <div role="alertdialog" aria-label={`Turn on ${s.title}`} className="mt-2 space-y-1.5">
+                  <p className="text-[11px] text-warning">{s.confirmOn}</p>
+                  <div className="flex gap-1.5">
+                    <Button variant="danger" onClick={() => { setAsking(null); onSave(s.key, 1); }}>
+                      Yes, place real orders
+                    </Button>
+                    <Button variant="ghost" onClick={() => setAsking(null)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

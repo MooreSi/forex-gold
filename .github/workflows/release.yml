@@ -1,0 +1,38 @@
+name: release
+
+# Publishes the GitHub release for the app version in
+# backend/src/utils/version_history.py (its first entry is the current
+# version). Bump the version, push to main, and the release appears with the
+# CHANGELOG.md section as its notes. Idempotent: an existing release is left
+# alone, so pushes that do not change the version do nothing.
+#
+# It is not a gate and does not wait for checks.yml. It runs when the version
+# file, the changelog or this file changes, or by hand from the Actions tab.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/src/utils/version_history.py
+      - CHANGELOG.md
+      - tools/publish_release.py
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Publish the release for the current version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python -m tools.publish_release "${{ github.sha }}"

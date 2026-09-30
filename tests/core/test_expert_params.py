@@ -71,6 +71,11 @@ EXPECTED_DEFAULTS = {
     # single-mode template placeholder expires in minutes, not a day.
     "placeholder_single_no_fill_expiry_s": 300,
     "mt5_sync_miss_threshold": 2,      # runtime.MT5_SYNC_MISS_THRESHOLD
+    # New 2026-10-01 with the strategy replays. Each default is the
+    # behaviour that shipped before it, so an upgrade trades the same.
+    "orb_ny_mode":             0,      # the London ORB auto-execute
+    "tpa_session_start_utc":   8,      # trend_pa.strategy session_start_utc
+    "tpa_session_end_utc":     21,     # trend_pa.strategy session_end_utc
 }
 
 

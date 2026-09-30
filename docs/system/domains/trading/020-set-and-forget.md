@@ -581,3 +581,46 @@ the zone" is never reported as a fault in the model's levels, and `review`
 re-measures the distance from the model's entry through `_measure`, the same
 helper `propose` uses. Pinned by `TestTheModelsLevelsKeepTheRulesStage` in
 `tests/services/setforget/test_analysis.py`.
+
+## Replayed over three years, and the trigger's forming bar (2026-10-01)
+
+Owner: "not provided any setups ... fix it so it has a chance of working".
+Replayed with the production functions -- `analysis.evidence_from` (split out
+of `gather` for exactly this), `propose`, `setup.invalidations` -- at every
+30m close from 2023-10 to 2026-09 on the bridge's own D1/H4/M30, the forming
+D1/H4 bar rebuilt from the 30m bars, first-touch stop/target on M30, $0.30 a
+trade, one trade at a time, no AI:
+
+| Rule | Trades | Won | Avg R |
+|---|---|---|---|
+| Auto as shipped (longs at any demand zone) | 45 | 20% | -0.19 |
+| Faithful (Weekly = Daily, both directions) | 19 | 16% | -0.28 |
+| Daily bias decides the direction | 36 | 14% | -0.27 |
+| Shorts only | 59 | 10% | -0.62 |
+| Longs, 1:2 floor dropped, target capped at 3R | 188 | 64% | +0.02 |
+
+About 150 variants were tried (direction rule x target cap x the 1:2 floor x
+entry session). **None is consistently positive year on year**; the few
+positive cells are small and flip sign between years, which is what mining
+150 cells produces by chance. The levels this method trades carry no
+measurable edge on gold in this implementation. That agrees with Revelio
+Trading's mechanical rebuild (above), which also struggled out of sample.
+
+So nothing in the rules was re-tuned to manufacture a result. The silence is
+mostly the method: two to three triggered setups a month, and in the last
+week of September the AI (correctly, by the rules) declined longs against a
+bearish Weekly/Daily/4H -- Auto is long-only by the owner's 2026-09-24 choice
+while gold fell. Whether the AI's judgement adds the edge the rules lack is
+the demo experiment Auto was built to be; the rules alone lose.
+
+**One real defect fixed.** `gather` handed the 30m trigger the bridge's
+series with the FORMING bar last, and `structure.shift_of_structure` read that
+bar's "close" -- the current price -- as a close through the swing. An
+intrabar spike could trigger Auto and the bar then close back under the
+level. `gather` now passes the closed bars only, the rule
+`patterns.confirmation` has always followed. Pinned by
+`tests/services/setforget/test_trigger_closed_bars.py`, whose first test is
+the control showing the forming bar alone WAS a trigger.
+
+Not changed, still open: Auto scans (and can bill the AI) at weekends on a
+closed market's last candles.

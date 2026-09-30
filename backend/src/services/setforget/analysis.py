@@ -108,6 +108,20 @@ async def gather(engine: Any) -> dict:
     entry = await engine.get_candles(ENTRY_TIMEFRAME, ENTRY_COUNT) or []
     trigger_candles = await engine.get_candles(
         TRIGGER_TIMEFRAME, TRIGGER_COUNT) or []
+    # The newest 30m bar is still forming; its "close" is the current price.
+    # The trigger is a CLOSE through a swing, so it reads closed bars only
+    # (2026-10-01) -- the same rule `patterns.confirmation` has always kept.
+    return evidence_from(daily, entry, trigger_candles[:-1])
+
+
+def evidence_from(daily: list[dict], entry: list[dict],
+                  trigger_candles: list[dict]) -> dict:
+    """`gather` without the bridge: the same evidence from candle lists.
+
+    Split out 2026-10-01 so a replay can hand over the bars that had closed by
+    a past moment and get exactly the evidence the live read would have had --
+    one implementation, not a second copy in a script that could drift.
+    """
     weekly = resample.to_weekly(daily)
 
     price = float(entry[-1]["close"]) if entry else None

@@ -524,7 +524,8 @@ closed M15 engulfing or pin bar, stop beyond the pullback, target 2R.
   the first bar (strictly beyond the left, level-or-beyond the right).
   Without that, a clean staircase whose peak bar shared a high with the next
   bar compared its last two swings as equal and read "no trend".
-- **First measurement (2026-09-29, 533 replayed trades, Nov 2023 - Sep 2026,
+- **First measurement -- MADE ON THE WRONG CLOCK, see 2026-10-01 below
+  (2026-09-29, 533 replayed trades, Nov 2023 - Sep 2026,
   $0.30 a trade):** win rate 35.3% against a 33.3% break-even, +0.054R a
   trade, profit factor 1.08, worst drawdown 28R, t about 0.9 -- not
   distinguishable from zero. Split at 2025-06-01: -0.025R before, +0.126R
@@ -561,3 +562,36 @@ closed M15 engulfing or pin bar, stop beyond the pullback, target 2R.
   `template_rename._WINDOW_OVERRIDE_KEYS`, `core_auto_template`'s Auto-source
   sweep and `channel_loss_cap._NOT_A_CHANNEL`; a fourth engine needs all
   four.
+
+### Trend PA, corrected and re-measured (2026-10-01)
+
+Owner: "has also not found a single setup ... could be a defect or the ml
+engine". Not the model: it is unarmed (AUC under 0.55) and vetoes nothing.
+Live on 29-30 Sep every cycle said "no clear H4 trend", and that was true --
+the replay over the same days agrees (gold fell ~$170 on 28 Sep without
+printing a lower high, so the last two H4 swings read as an expanding range).
+Adding a break-of-structure trend rule was tried and made results worse
+(-0.031R over 863 trades), so it was not kept. What was wrong:
+
+- **The replay read true-UTC bars as broker time.** `run_backtest` fetches
+  through `/candles_range`, which answers in UTC (`mt5_bridge._get_candles_range`
+  converts), and `bt.run` then subtracted `BROKER_OFFSET_S`. The "08:00-21:00"
+  replay traded 11:00-24:00 UTC. `bt.run(offset_s=0)` from the engine now; the
+  default stays for callers with broker-stamped bars.
+- **Measured right, the strategy as specified has no edge:** 640 trades,
+  -0.004R, max drawdown 48R. By session: entries 12:00-20:00 UTC made +0.125R
+  (401 trades, 41% at 2R, t 1.7, 2024 +0.09 / 2025 +0.14 / 2026 +0.16, max
+  drawdown 17.8R, ~2.8 a week); 12-17, 12-18, 13-17 all agree. The London
+  morning is what took it to zero -- the same split the ORB replay found.
+- **The session is two Expert Tunables**, `tpa_session_start_utc` and
+  `tpa_session_end_utc`, defaults 8 and 21 (what shipped). `service.session_params`
+  feeds both the live cycle and the replay. A stored replay is tagged
+  `backtest_version` (bar clock + session) and redone on the next start when it
+  no longer matches, so the panel stops showing numbers from the wrong clock.
+- **The live de-dupe assumed +3h.** `close_at` subtracted `BROKER_OFFSET_S`;
+  from the broker's DST change (+2h, late October) each signal would have
+  blocked the next hour of bars. `service.broker_offset` reads the offset off
+  the forming M15 bar, which opened under one bar ago.
+
+Pinned by `tests/trend_pa/test_sessions_and_clock.py`.
+

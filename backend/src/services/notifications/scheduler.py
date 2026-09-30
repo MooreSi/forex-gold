@@ -27,7 +27,7 @@ import asyncio
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,7 @@ from backend.src.services.notifications import repo as notifications_repo
 from backend.src.services.ai import claude_ai as claude_ai
 from backend.src.services.notifications import email_service
 from backend.src.services.broker.mt5_performance import compute_mt5_performance
+from backend.src.services.analytics import orb_ny
 from backend.src.services.analytics.orb_report import build_orb_report
 from backend.src.services.trading.orb_execute import orb_auto_execute
 
@@ -99,7 +100,7 @@ async def _run_orb_section(bridge: Any, cfg: dict, is_active_trader_node: bool,
             (uk_now.hour == 8 and uk_now.minute >= 15)
             or (8 < uk_now.hour < _ORB_AUTO_EXEC_END_HOUR)
         )
-        if orb_auto_on and _in_auto_window \
+        if orb_auto_on and _in_auto_window and not _orb_ny_mode() \
                 and db_module.get_app_config("orb_auto_execute_last") != uk_date_str:
             if report is None:
                 report = await build_orb_report(bridge)
@@ -108,6 +109,50 @@ async def _run_orb_section(bridge: Any, cfg: dict, is_active_trader_node: bool,
                 db_module.set_app_config("orb_auto_execute_last", uk_date_str)
     except Exception as e:
         log.warning("ORB report scheduling error: %s", e)
+
+
+def _orb_ny_mode() -> bool:
+    """Expert Tunable `orb_ny_mode`: the New York ORB replaces the London
+    report's auto-execute. Read per call, never at import."""
+    from backend.src.services.risk import expert_params
+    return bool(expert_params.get("orb_ny_mode"))
+
+
+async def _run_orb_ny_auto(bridge: Any, is_active_trader_node: bool) -> None:
+    """The New York ORB's auto-execute, once a minute (2026-10-01).
+
+    Outside the email section on purpose: that section returns early on a
+    node with no email provider, so the London auto-execute never traded
+    there at all. At most one decision a New York day: a signal is handed to
+    `orb_auto_execute` and a "done" report (skipped, missed, no breakout)
+    ends the day; either sets `orb_auto_execute_last`, the key the London
+    path uses, so switching modes mid-day cannot trade twice.
+    """
+    rs = await db_module.to_db_thread(db_module.get_risk_settings)
+    if not rs.get("orb_auto_execute_enabled"):
+        return
+    now_ts = time.time()
+    now_utc = datetime.fromtimestamp(now_ts, timezone.utc)
+    day = now_utc.astimezone(orb_ny.NY).strftime("%Y-%m-%d")
+    if db_module.get_app_config("orb_auto_execute_last") == day:
+        return
+    opened = orb_ny.open_utc(now_utc)
+    start = opened + orb_ny.OR_MINUTES * 60
+    end = start + orb_ny.ENTRY_WINDOW_MINUTES * 60 + orb_ny.FRESH_S
+    if not (start <= now_ts <= end):
+        return
+    try:
+        report = await orb_ny.build_report(bridge, now_ts)
+        if not report:
+            return
+        if report.get("phase") == "signal":
+            await orb_auto_execute(report, bridge, is_active_trader_node)
+            db_module.set_app_config("orb_auto_execute_last", day)
+        elif report.get("phase") == "done":
+            log.info("[ORB NY] no trade today: %s", report.get("position_note"))
+            db_module.set_app_config("orb_auto_execute_last", day)
+    except Exception as e:
+        log.warning("ORB NY auto-execute error: %s", e)
 
 
 async def _run_daily_section(bridge: Any, cfg: dict, cfg_obj: Any,
@@ -170,6 +215,9 @@ async def _run_weekly_section(cfg: dict, is_active_trader_node: bool,
 async def email_scheduler_sweep(bridge: Any, cfg_obj: Any, is_active_trader_node: bool,
                                  uk_now: Optional[datetime] = None,
                                  local_now: Optional[datetime] = None) -> None:
+    if _orb_ny_mode():
+        await _run_orb_ny_auto(bridge, is_active_trader_node)
+
     cfg = db_module.get_email_config()
     # Any one of these makes send_email() able to deliver — checking
     # smtp_host alone here (as before) silently skipped this entire

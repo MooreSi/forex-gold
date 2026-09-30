@@ -61,6 +61,31 @@ async def _generates_here() -> bool:
     return bool(await db_module.to_db_thread(node_roles.engines_generate_here))
 
 
+def session_params() -> dict:
+    """The entry session, from Expert Tunables (2026-10-01). Defaults are the
+    shipped 08:00-21:00 UTC; the corrected replay found 12:00-20:00 is where
+    this strategy makes its money. Read every cycle, never at import."""
+    from backend.src.services.risk import expert_params
+    return {"session_start_utc": int(expert_params.get("tpa_session_start_utc")),
+            "session_end_utc": int(expert_params.get("tpa_session_end_utc"))}
+
+
+def backtest_version() -> str:
+    """What a stored replay measured. When this changes the replay is redone
+    on the next start, so the panel never shows the numbers of a strategy
+    that is no longer the one running."""
+    p = session_params()
+    return f"utc-bars:{p['session_start_utc']}-{p['session_end_utc']}"
+
+
+def broker_offset(forming_ts: float, now: float) -> int:
+    """How far the broker's bar stamps run ahead of UTC, read off the bar
+    still forming (opened less than one bar ago), to the hour. Replaces a
+    fixed +3h that the broker's own DST change (+2h from late October)
+    would have made wrong."""
+    return int(round((float(forming_ts) - now) / 3600.0)) * 3600
+
+
 def _live_settings() -> dict:
     from backend.src.db import database as db_module
     return db_module.get_risk_settings()
@@ -104,7 +129,9 @@ class TrendPAEngine:
                        asyncio.ensure_future(self._loop(self._check_outcomes, OUTCOME_S))]
         # A fresh install has no evidence at all; the replay gives the panel
         # something honest to show on day one and the model rows to learn from.
-        if not repo.closed_signals(origin="backtest"):
+        # A replay of a different session, or from before the UTC fix, is not
+        # evidence about this strategy and is redone.
+        if self.backtest_stale():
             self._tasks.append(asyncio.ensure_future(self.run_backtest()))
         log.info("[TPA] started")
 
@@ -119,6 +146,11 @@ class TrendPAEngine:
                 t.cancel()
         self._tasks = []
         log.info("[TPA] stopped (persist=%s)", persist)
+
+    def backtest_stale(self) -> bool:
+        if not repo.closed_signals(origin="backtest"):
+            return True
+        return repo.get_config("backtest_version") != backtest_version()
 
     async def _loop(self, fn, every: float) -> None:
         while self.is_running:
@@ -139,19 +171,22 @@ class TrendPAEngine:
         if not self.generating_here:
             self.status_detail = "Generation runs on the local node only"
             return
-        bars = {}
+        bars, forming = {}, {}
         for tf, n in CANDLES.items():
             got = await self._bridge.get_candles(tf, n)
             if not got or len(got) < 2:
                 self.status_detail = "No market data"
                 return
             bars[tf] = got[:-1]          # the newest bar is still forming
+            forming[tf] = got[-1]
         bar_ts = bars["M15"][-1]["ts"]
         new_bar = bar_ts != self._last_bar_ts
         self._last_bar_ts = bar_ts
 
         self.last_evaluated_at = time.time()
-        setup = st.evaluate(bars["H4"], bars["H1"], bars["M15"], datetime.now(timezone.utc))
+        now = time.time()
+        setup = st.evaluate(bars["H4"], bars["H1"], bars["M15"],
+                            datetime.fromtimestamp(now, timezone.utc), session_params())
         if isinstance(setup, str):
             self.status_detail = setup
             if new_bar:
@@ -160,7 +195,7 @@ class TrendPAEngine:
         if repo.open_signals():
             self.status_detail = "setup found; one trade already open"
             return
-        close_at = float(bar_ts) + bt.M15_S - bt.BROKER_OFFSET_S
+        close_at = float(bar_ts) + bt.M15_S - broker_offset(forming["M15"]["ts"], now)
         if (repo.last_signal_time(setup.direction) or 0) >= close_at:
             return                        # this bar has already been traded
         await self._open(setup, created_at=max(time.time(), close_at))
@@ -250,8 +285,11 @@ class TrendPAEngine:
             m15 = await self._range("M15", start, now, 30 * 86400)
             if not m15:
                 return {"error": "the bridge returned no history"}
-            trades = await asyncio.to_thread(bt.run, h4, h1, m15)
+            # `_range` reads /candles_range, which answers in true UTC.
+            trades = await asyncio.to_thread(
+                lambda: bt.run(h4, h1, m15, params=session_params(), offset_s=0))
             repo.replace_backtest(trades)
+            repo.set_config("backtest_version", backtest_version())
             await asyncio.to_thread(self.refit)
             summary = ss.summarize(trades, rr=st.DEFAULTS["rr"])
             repo.set_config("backtest_at", str(time.time()))

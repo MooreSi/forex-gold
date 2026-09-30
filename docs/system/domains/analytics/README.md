@@ -20,7 +20,8 @@ email + Telegram notification config.
 - `services/analytics/ticket_maps.py` — per-ticket lookups merging the cross-node ledger with local rows
 - `services/analytics/labels.py`, `formatting.py` — display names, broker-timestamp/duration formatting
 - `services/analytics/edge_stats.py` — per-engine edge stats read live from each engine's own DB via `mode=ro` URIs
-- `services/analytics/orb_report.py` — ORB/IVB range detection, volume profile, backtested target multiple
+- `services/analytics/orb_report.py` — the London ORB/IVB report: Asian range as the confirmation filter, the first 15 minutes of London as the traded range (the volume profile went in the 2026-08-01 rebuild)
+- `services/analytics/orb_ny.py` — the New York ORB (2026-10-01): the decision `orb_auto_execute` acts on when Expert Tunable `orb_ny_mode` is 1
 - `services/analytics/reporting.py`, `ai_analysis.py`, `signal_lab_repo.py` — performance computation, the AI Trade Analysis page's cross-DB gathers, read-only access to `test_signal.db`
 - `services/ai/provider.py` — unified `complete()` over Anthropic/DeepSeek, selected by `cfg["ai_provider"]`
 - `services/ai/claude_ai.py` — per-use-case prompts, JSON schemas and fallback dicts
@@ -61,6 +62,48 @@ email + Telegram notification config.
 - `signal_extractor.extract_signal()` runs only after a deterministic parser fails, and only yields a trade with model confidence AND complete real price levels.
 
 - **The Analysis trade table's Spread and Cost come from `trade_spread_cache`, and only `analytics/entry_spread.py` writes it (2026-09-29).** The NiceGUI History page looked up each uncached ticket's entry tick on refresh; the React port kept the read and dropped the write, so every trade from 2026-09-21 showed no spread and a zero cost (306 of 750 rows in the 30-day window). Restored inside `trade_table.closed_trades`, through the facade's existing `get_ticks_range` (first tick in the minute from the entry, which is what the bridge's `/tick_at` returns) rather than a new `get_tick_at` facade method. At most 40 lookups per read, newest first, so a cold cache fills over a few polls instead of stalling one. The table polls every 15s (was 60s, "really slow to update"). Pinned by `tests/services/analytics/test_entry_spread_backfill.py`.
+
+## The ORB's auto-execute, measured (2026-10-01)
+
+Owner: ORB "maybe one or two" setups. Replayed on the bridge's own gold
+candles (M5 Oct 2025 - Sep 2026, M15 Dec 2023 - Sep 2026; scripts not kept,
+the numbers are here):
+
+- **The London report could not take its own trade.** It confirms a
+  direction only once price clears the whole Asian range, and puts the target
+  one 15-minute-range height past that range's edge. By then price is usually
+  past the target, so `orb_auto_execute` skips the day as stale -- and the
+  scheduler marks the day done anyway. Live log, 10-30 Sep: 7 stale skips,
+  3 broker errors (each also burned the day), 3 fills. The fills entered at
+  the market with the edge-anchored target: 2026-09-11 bought 4362.35, stop
+  4353.01, target 4362.47 (9.34 risked for 0.12).
+- **London breakouts on gold do not pay.** Every London variant (15/30/60-min
+  range, midpoint or far-side stop, 1-3R) lost or broke even; 60-min with a
+  midpoint stop lost 0.16-0.24R a trade in every year.
+- **New York with the H4 trend does.** Split by H4 close vs EMA50, breakouts
+  with it won and breakouts against it lost, in every variant, both data sets.
+  `orb_ny.py` replayed through its own `evaluate`, minute by minute: M5 96
+  trades, 45% at 2R, +0.34R a trade, every quarter positive; M15 (coarser, 2.8
+  years) 183 trades, +0.15R, 2024 -0.07R. About two trades a week. Median
+  risk about $21 at gold 4,100-4,400.
+- **Auto-execute sat behind the email check.** `email_scheduler_sweep` returns
+  before the ORB section on a node with no email provider, so such a node never
+  auto-traded ORB. The New York path runs before that check.
+
+`orb_ny_mode` defaults to 0 (golden rule 3), which leaves the London path
+byte-identical -- the scheduler and report characterization tests pin it. At 1
+the London report is email-only and `_run_orb_ny_auto` decides once a minute
+between 10:00 and 11:40 New York: a signal goes to the unchanged
+`orb_auto_execute`, a skipped or missed day is logged as `[ORB NY] no trade
+today: ...`, and both set `orb_auto_execute_last`, the same key, so a mode
+switch mid-day cannot trade twice. An attempted order that errors still ends
+the day: a ReadTimeout is an unknown outcome and a retry could double-fill.
+
+**`/candles_range` stamps drift in a quiet market.** The bridge converts to UTC
+with `tick.time - time.time()`, unrounded, so when the last tick is stale the
+stamps come back seconds late (D1/M30 fetched at 21:57 UTC came back 13-47 s
+off). `orb_ny.build_report` rounds to the minute. The bridge itself is not
+changed here; it runs on the VPS.
 
 ## Open questions
 

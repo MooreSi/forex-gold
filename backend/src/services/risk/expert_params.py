@@ -183,6 +183,36 @@ EXPERT_PARAMS: list[ExpertParam] = [
              "absent from MT5 before the app treats the trade as closed. "
              "1 makes a single dropped request look like a close.",
     ),
+
+    # ── Strategy sessions (2026-10-01) ───────────────────────────────────
+    # From replays of each engine over the bridge's own gold history; the
+    # numbers are in docs/system/domains/engines/README.md. Each default is
+    # what shipped before, so nothing moves until the owner moves it.
+    ExpertParam(
+        key="orb_ny_mode", label="ORB auto-execute: New York open", default=0,
+        min=0, max=1, unit="0/1", domain="Strategy sessions", integer=True,
+        desc="1 trades the New York opening-range breakout (09:30-10:00 ET "
+             "range, first M5 close beyond it, with the H4 EMA50 trend only, "
+             "stop at the far side, target 2R) instead of the London report. "
+             "Replayed: London lost or broke even in every variant; New York "
+             "with the trend made +0.14R to +0.34R a trade. 0 keeps the "
+             "London report's auto-execute exactly as it was.",
+    ),
+    ExpertParam(
+        key="tpa_session_start_utc", label="Trend PA session start",
+        default=8, min=0, max=23, unit="h UTC", domain="Strategy sessions",
+        integer=True,
+        desc="The first UTC hour Trend PA may enter. Replayed with corrected "
+             "timestamps, entries from 08:00 to 12:00 lost and entries from "
+             "12:00 made money in every year; 12 trades New York only.",
+    ),
+    ExpertParam(
+        key="tpa_session_end_utc", label="Trend PA session end",
+        default=21, min=1, max=24, unit="h UTC", domain="Strategy sessions",
+        integer=True,
+        desc="Trend PA takes no entry from this UTC hour on. 20 with a 12 "
+             "start is the replayed New York session.",
+    ),
 ]
 
 _SPECS: dict[str, ExpertParam] = {p.key: p for p in EXPERT_PARAMS}

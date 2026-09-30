@@ -46,8 +46,14 @@ def _closed_upto(bars: list, closes: list, now: float, n: int) -> list:
 
 def run(h4: list, h1: list, m15: list, params: Optional[dict] = None,
         cost: float = DEFAULT_COST, max_hold_s: float = DEFAULT_MAX_HOLD_S,
-        reasons: Optional[dict] = None) -> list:
-    """Every trade the strategy would have taken, oldest first."""
+        reasons: Optional[dict] = None, offset_s: int = BROKER_OFFSET_S) -> list:
+    """Every trade the strategy would have taken, oldest first.
+
+    `offset_s` is how far the bars' stamps run ahead of UTC. The engine's own
+    replay passes 0: it reads `/candles_range`, which answers in true UTC.
+    Until 2026-10-01 it passed nothing, so every session decision in the
+    replay was made three hours late (tests/trend_pa/test_sessions_and_clock.py).
+    """
     p = {**st.DEFAULTS, **(params or {})}
     h4_close = [float(b["ts"]) + H4_S for b in h4]
     h1_close = [float(b["ts"]) + H1_S for b in h1]
@@ -63,7 +69,7 @@ def run(h4: list, h1: list, m15: list, params: Optional[dict] = None,
         w15 = m15[max(0, i + 1 - _WINDOW["m15"]):i + 1]
         if not w4 or not w1:
             continue
-        setup = st.evaluate(w4, w1, w15, st.broker_ts_to_utc(now, BROKER_OFFSET_S), p)
+        setup = st.evaluate(w4, w1, w15, st.broker_ts_to_utc(now, offset_s), p)
         if isinstance(setup, str):
             if reasons is not None:
                 key = reason_key(setup)

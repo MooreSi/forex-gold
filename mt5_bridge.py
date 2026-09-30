@@ -42,6 +42,7 @@ if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mt5_terminal  # noqa: E402
 import mt5_orders  # noqa: E402
+import mt5_ticks  # noqa: E402
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -531,34 +532,14 @@ _MAX_TICKS_RANGE_SEC = 86_400
 def _get_ticks_range(from_ts: float, to_ts: float,
                      symbol: str = SYMBOL) -> list[dict] | None:
     """Fetch every tick between two Unix (true UTC) timestamps, bounded to
-    one day.
-
-    Unlike _get_candles_range, this uses mt5.copy_ticks_range() directly: the
-    documented copy_rates_range() bug is a NAIVE-datetime interpretation
-    problem, and tz-aware UTC datetimes were confirmed correct against the
-    live terminal by the 2026-09-03 probe. If that stops being true, this
-    needs the same offset correction _get_candles_range applies.
+    one day, stamped in true UTC. mt5_ticks.py says why the terminal's
+    server-time convention has to be corrected here (2026-09-30).
 
     last/volume/flags pass through (2026-09-11) -- COPY_TICKS_ALL already asks
     for them; services/market/order_flow.py probes whether this feed has them.
     """
-    if not _ensure_connected():
-        return None
-    if to_ts - from_ts > _MAX_TICKS_RANGE_SEC:
-        return None
-    try:
-        start = datetime.fromtimestamp(float(from_ts), tz=timezone.utc)
-        end   = datetime.fromtimestamp(float(to_ts), tz=timezone.utc)
-        ticks = mt5.copy_ticks_range(symbol, start, end, mt5.COPY_TICKS_ALL)
-        if ticks is None:
-            return None
-        return [
-            {"time": float(t["time"]), "bid": float(t["bid"]), "ask": float(t["ask"]), "last": float(t["last"]), "volume": float(t["volume"]), "flags": int(t["flags"])}
-            for t in ticks
-        ]
-    except Exception as e:
-        log.warning("_get_ticks_range error: %s", e)
-        return None
+    return mt5_ticks.read_range(mt5, symbol, from_ts, to_ts,
+                                _ensure_connected, _MAX_TICKS_RANGE_SEC)
 
 
 def _get_candles_for_symbol(symbol: str, timeframe: str, count: int) -> list[dict] | None:

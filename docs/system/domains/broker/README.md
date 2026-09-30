@@ -61,6 +61,7 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 
 ## Known things & gotchas
 
+- **Every MT5 time-range read speaks server time, ticks included (2026-09-30).** `copy_ticks_range` reads the datetimes it is given as the terminal's server time and stamps its ticks the same way, exactly like `copy_rates_range`; the tz-aware UTC datetimes the 2026-09-03 probe trusted do not change that. On the VPS (UTC+3) every tick read before this date came from three hours before the window asked for. The probe compared stamps with the request, which agree in either convention -- **check a time-range read by PRICE against the live quote, never by its own stamps.** `mt5_ticks.py` now shifts both ways by a measured offset (live quote stamp minus the clock, trusted only near a whole half hour). Consumers of the old reads: excursion backfill, `research_lab`, `ai_tuner` spread evidence, `entry_spread`, the backtest tick path. None is on the order path. Bars still come through `_get_candles_range`'s own correction, which trusts any quote age and is wrong while the market is shut. docs/todo/reversal-engine/250.
 - **Bumping `EA_VERSION` is a live change to a running account, not a source
   edit (2026-09-12).** The moment the repo's `.mq5` declares a version the
   chart's `.ex5` does not, three things happen on the owner's machine without

@@ -43,6 +43,13 @@
       "loc": 194,
       "class": "unwired-tool",
       "reason": "Phase 1 of docs/todo/004: recomputes utils/regime.py's per-hour and per-level buckets over a live window and reports where the frozen constants and the data now disagree. Pure; the DB read is in tools/regime_drift_report.py, which is its caller and is not an app entrypoint. Unwired on purpose -- acting on what it reports is phase 2 and waits on the owner's answer to 004 section 4A, because a gate that widens can open trading hours that are shut today. Pinned by tests/analytics/test_regime_drift.py."
+    },
+    {
+      "module": "backend.src.services.reversal_engine.own_template_label",
+      "file": "backend/src/services/reversal_engine/own_template_label.py",
+      "loc": 96,
+      "class": "unwired-tool",
+      "reason": "docs/todo/reversal-engine/250 step 2: replays a Reversal signal through the EA template it traded under (backtest/template_simulator) or refuses with a reason. Pure; its caller is tools/re_measurement_audit.py, which is not an app entrypoint. Unwired on purpose -- feeding it to tpl_label_sweep would change what edge_model learns and so what the demo gate passes, which waits on the owner (docs/simon-handover/046). Pinned by tests/reversal_engine/test_own_template_label.py."
     }
   ]
 }

@@ -118,11 +118,19 @@ def swings(candles: list, n: int = 2) -> tuple[list, list]:
     return highs, lows
 
 
+def _slope(a: float, b: float, tol: float) -> str:
+    return "rising" if b - a > tol else "falling" if a - b > tol else "level"
+
+
 def trend(h4: list, p: dict) -> tuple[str, dict]:
-    """("up" | "down" | "none", facts). Structure first, EMA second."""
+    """("up" | "down" | "none", facts). Structure first, EMA second.
+
+    When there is no trend, `facts["why"]` says what the strategy saw, so a
+    refusal can be checked against the chart."""
     highs, lows = swings(h4, p["pivot_n"])
     facts: dict = {}
     if len(highs) < 2 or len(lows) < 2 or not h4:
+        facts["why"] = f"{len(highs)} swing highs and {len(lows)} swing lows in {len(h4)} bars"
         return "none", facts
     (_, h1), (_, h2) = highs[-2], highs[-1]
     (_, l1), (_, l2) = lows[-2], lows[-1]
@@ -136,11 +144,16 @@ def trend(h4: list, p: dict) -> tuple[str, dict]:
     elif h2 < h1 and l2 < l1 and close < h2:
         direction = "down"
     else:
+        facts["why"] = (f"highs {_slope(h1, h2, 0)} {h1:.1f} to {h2:.1f}, "
+                        f"lows {_slope(l1, l2, 0)} {l1:.1f} to {l2:.1f}, close {close:.1f}")
         return "none", facts
     if p["require_ema"]:
         if e is None:
+            facts["why"] = f"{len(h4)} bars is too few for the EMA{p['ema_period']}"
             return "none", facts
         if (direction == "up") != (close > e):
+            facts["why"] = (f"{direction}trend structure but the close {close:.1f} is on the wrong "
+                            f"side of the EMA{p['ema_period']} {e:.1f}")
             return "none", facts
     return direction, facts
 
@@ -214,7 +227,7 @@ def evaluate(h4: list, h1: list, m15: list, now_utc: datetime,
 
     t, tf = trend(h4, p)
     if t == "none":
-        return "no clear H4 trend"
+        return f"no clear H4 trend ({tf['why']})" if tf.get("why") else "no clear H4 trend"
     direction = "BUY" if t == "up" else "SELL"
 
     cur, prev = m15[-1], m15[-2]

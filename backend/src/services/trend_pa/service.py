@@ -75,6 +75,13 @@ class TrendPAEngine:
         self.status = "stopped"
         self.status_detail = ""
         self.last_cycle_at: Optional[float] = None
+        # The panel's proof of life. `generating_here` is None until the first
+        # cycle, then whether this node analyses at all (the other one does
+        # when it is False); `last_evaluated_at` is when the strategy last
+        # looked at real candles, so a healthy node that finds no setup can be
+        # told apart from a stalled one.
+        self.generating_here: Optional[bool] = None
+        self.last_evaluated_at: Optional[float] = None
         self.backtest_running = False
         self._main_engine = None
         self._tasks: list = []
@@ -128,7 +135,8 @@ class TrendPAEngine:
 
     async def _run_cycle(self) -> None:
         self.last_cycle_at = time.time()
-        if not await _generates_here():
+        self.generating_here = await _generates_here()
+        if not self.generating_here:
             self.status_detail = "Generation runs on the local node only"
             return
         bars = {}
@@ -142,6 +150,7 @@ class TrendPAEngine:
         new_bar = bar_ts != self._last_bar_ts
         self._last_bar_ts = bar_ts
 
+        self.last_evaluated_at = time.time()
         setup = st.evaluate(bars["H4"], bars["H1"], bars["M15"], datetime.now(timezone.utc))
         if isinstance(setup, str):
             self.status_detail = setup

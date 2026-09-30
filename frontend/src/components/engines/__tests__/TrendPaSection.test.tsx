@@ -89,6 +89,63 @@ describe("the evidence", () => {
   });
 });
 
+describe("the liveness line", () => {
+  const now = () => Date.now() / 1000;
+  const alive = (over: Record<string, unknown> = {}) => {
+    body.generating_here = true;
+    body.last_cycle_at = now() - 20;
+    body.last_evaluated_at = now() - 20;
+    body.generated_at = now() - 2;
+    Object.assign(body, over);
+  };
+
+  it("says where it is analysing and how long ago it last looked", async () => {
+    body.where = "remote";
+    alive({ last_evaluated_at: now() - 150 });
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    const line = await screen.findByTestId("tpa-alive");
+    expect(line).toHaveTextContent(/analysing on the vps/i);
+    expect(line).toHaveTextContent(/last checked 2 min ago/i);
+  });
+
+  it("says this machine when the report is local", async () => {
+    alive();
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    expect(await screen.findByTestId("tpa-alive")).toHaveTextContent(/analysing on this machine/i);
+  });
+
+  it("calls a long silence a stall, not a quiet market", async () => {
+    alive({ last_evaluated_at: now() - 900 });
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    expect(await screen.findByTestId("tpa-alive")).toHaveTextContent(/not analysing.*15 min ago/i);
+  });
+
+  it("says when this node is running but the other one does the analysing", async () => {
+    alive({ generating_here: false, last_evaluated_at: null });
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    expect(await screen.findByTestId("tpa-alive")).toHaveTextContent(/not analysing on this machine/i);
+  });
+
+  it("says when the engine is stopped", async () => {
+    alive({ running: false });
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    expect(await screen.findByTestId("tpa-alive")).toHaveTextContent(/stopped/i);
+  });
+
+  it("says when the VPS report itself has gone stale", async () => {
+    body.where = "remote";
+    alive({ generated_at: now() - 600, last_evaluated_at: now() - 610 });
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    expect(await screen.findByTestId("tpa-alive")).toHaveTextContent(/report is 10 min old/i);
+  });
+
+  it("an older node that reports nothing of this says nothing rather than guessing", async () => {
+    render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);
+    await screen.findByTestId("tpa-where");
+    expect(screen.queryByTestId("tpa-alive")).toBeNull();
+  });
+});
+
 describe("the backtest button", () => {
   it("starts a replay with a POST", async () => {
     render(<TrendPaSection settings={{}} onSaveSetting={vi.fn()} />);

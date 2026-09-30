@@ -202,6 +202,24 @@ describe("the price it leads with", () => {
   });
 });
 
+describe("Today's Goal", () => {
+  it("shows the goal over what is achieved when the daily goal is on", async () => {
+    headerBody = header({ daily_goal: { goal_usd: 200, achieved_usd: 75.5 } });
+    render(<DashboardPanel />);
+
+    const goal = await screen.findByTestId("dash-goal");
+    expect(goal).toHaveTextContent("Today's Goal");
+    expect(goal).toHaveTextContent("$200.00 / $75.50");
+  });
+
+  it("is absent when the daily goal is off", async () => {
+    render(<DashboardPanel />);
+
+    await screen.findByTestId("dash-price");
+    expect(screen.queryByTestId("dash-goal")).toBeNull();
+  });
+});
+
 describe("what a visit costs", () => {
   it("never asks a model for anything", async () => {
     // The dashboard is the tab left open all day. Every AI figure on it is

@@ -28,6 +28,10 @@ def header(monkeypatch, sentinel_engine):
     }
     monkeypatch.setattr(system_router.trading_ctl, "trading_pause_status",
                         lambda: state["pause"])
+    async def _goal(engine, balance, day):
+        return state.get("daily_goal")
+
+    monkeypatch.setattr(system_router.goal_ctl, "daily_goal_progress", _goal)
     monkeypatch.setattr(system_router.settings_ctl, "get_active_trader",
                         lambda: state["active_trader"])
     monkeypatch.setattr(system_router.sync_ctl, "is_connected",
@@ -118,3 +122,17 @@ def test_the_header_places_nothing(make_client, header, sentinel_engine):
 
     assert [c for c in sentinel_engine.calls
             if c[0] in ("open_manual_market_order", "close_trade")] == []
+
+
+class TestTheDailyGoal:
+    def test_it_is_carried_when_there_is_one(self, make_client, header):
+        header["daily_goal"] = {"goal_usd": 200.0, "achieved_usd": 75.5}
+
+        body = make_client().get("/api/system/header").json()
+
+        assert body["daily_goal"] == {"goal_usd": 200.0, "achieved_usd": 75.5}
+
+    def test_it_is_null_when_the_goal_is_off(self, make_client, header):
+        body = make_client().get("/api/system/header").json()
+
+        assert body["daily_goal"] is None

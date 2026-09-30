@@ -236,3 +236,79 @@ def test_the_monitor_cycle_sweeps_the_goal_with_nothing_open(fresh_db, monkeypat
     state, got_bridge, _ = seen[0]
     assert got_bridge is bridge
     assert state is ctx.state.daily_goal, "the throttle must outlive one cycle"
+
+
+# ── the dashboard's "Today's Goal" figure ────────────────────────────────────
+
+def test_progress_is_none_when_the_goal_is_off(fresh_db):
+    _closes([60])
+    assert dg.progress(_rs("usd", 100.0, enabled=0), balance=None) is None
+
+
+def test_progress_reports_a_dollar_goal_and_todays_realised(fresh_db):
+    _closes([60, -10])
+    assert dg.progress(_rs("usd", 100.0), balance=None) == {
+        "goal_usd": 100.0, "achieved_usd": 50.0}
+
+
+def test_progress_turns_a_percent_goal_into_dollars(fresh_db):
+    _closes([200])
+    got = dg.progress(_rs("pct", 2.0), balance=10_200.0)
+    assert got == {"goal_usd": 200.0, "achieved_usd": 200.0}
+
+
+def test_progress_is_none_when_a_percent_goal_cannot_be_priced(fresh_db):
+    """No balance: showing a guessed dollar goal would be worse than none."""
+    _closes([200])
+    assert dg.progress(_rs("pct", 2.0), balance=None) is None
+
+
+def test_progress_uses_the_broker_figure_when_given_not_the_local_table(fresh_db):
+    """The local table is empty here, as on the day the Calendar said +$2.51
+    and the goal said $0.00. A supplied MT5 figure wins."""
+    got = dg.progress(_rs("usd", 33.03), balance=None, realised=2.51)
+    assert got == {"goal_usd": 33.03, "achieved_usd": 2.51}
+
+
+def test_a_percent_goal_opens_from_the_broker_realised(fresh_db):
+    got = dg.progress(_rs("pct", 2.0), balance=10_200.0, realised=200.0)
+    assert got == {"goal_usd": 200.0, "achieved_usd": 200.0}
+
+
+# ── header_progress: the header poll's version, on MT5's figure ──────────────
+
+def _stub_realised(monkeypatch, rs, value=None, boom=False):
+    calls = []
+    monkeypatch.setattr(dg._risk, "get", lambda: rs)
+
+    async def fake(engine, day):
+        calls.append(day)
+        if boom:
+            raise RuntimeError("bridge down")
+        return value
+
+    monkeypatch.setattr(dg._todays, "for_today", fake)
+    return calls
+
+
+def test_header_progress_does_not_ask_mt5_when_the_goal_is_off(monkeypatch):
+    calls = _stub_realised(monkeypatch, _rs("usd", 100.0, enabled=0), 5.0)
+    got = asyncio.run(dg.header_progress(None, None, "d"))
+    assert got is None
+    assert calls == []
+
+
+def test_header_progress_uses_the_mt5_figure(monkeypatch):
+    _stub_realised(monkeypatch, _rs("usd", 33.03), 2.51)
+    got = asyncio.run(dg.header_progress(None, None, "d"))
+    assert got == {"goal_usd": 33.03, "achieved_usd": 2.51}
+
+
+def test_header_progress_is_none_when_mt5_cannot_answer(monkeypatch):
+    _stub_realised(monkeypatch, _rs("usd", 33.03), None)
+    assert asyncio.run(dg.header_progress(None, None, "d")) is None
+
+
+def test_header_progress_never_raises(monkeypatch):
+    _stub_realised(monkeypatch, _rs("usd", 33.03), boom=True)
+    assert asyncio.run(dg.header_progress(None, None, "d")) is None

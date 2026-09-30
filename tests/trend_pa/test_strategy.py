@@ -282,3 +282,40 @@ def test_of_two_levels_touched_the_nearest_is_the_one_traded(monkeypatch):
                                                         (2001.0, "swing_low")])
     s = st.evaluate(*happy(), TUESDAY_10)
     assert s.level == pytest.approx(2001.0) and s.level_kind == "swing_low"
+
+
+# ── why there is no trend ────────────────────────────────────────────────────
+
+def test_a_lower_high_is_named_in_the_refusal():
+    """A refusal that only says "no clear H4 trend" cannot be checked against
+    the chart; the reason carries what the strategy saw. The bare phrase stays
+    the prefix, because backtest.reason_key groups refusals on it."""
+    bars = h4_up()
+    highs, lows = st.swings(bars, 2)
+    _, last_h = highs[-2]
+    trough_i, _ = lows[-2]
+    kept = bars[:trough_i + 1]
+    p = kept[-1]["close"]
+    bars = kept + _path([p] + [p + 6, last_h - 2.4, last_h - 6, last_h - 10, last_h - 7, last_h - 5])
+    t, facts = st.trend(bars, st.DEFAULTS)
+    assert t == "none"
+    assert "highs falling" in facts["why"] and "lows rising" in facts["why"]
+
+
+def test_an_ema_veto_is_named_in_the_refusal(monkeypatch):
+    monkeypatch.setattr(st, "ema", lambda values, period: 10_000.0)
+    t, facts = st.trend(h4_up(), st.DEFAULTS)
+    assert t == "none" and "EMA50" in facts["why"]
+
+
+def test_too_few_swings_is_named_in_the_refusal():
+    flat = [_bar(2000, 2000.1) for _ in range(120)]
+    t, facts = st.trend(flat, st.DEFAULTS)
+    assert t == "none" and "swing" in facts["why"]
+
+
+def test_evaluate_puts_the_why_in_brackets_after_the_grouping_phrase():
+    h4, h1, m15 = happy()
+    flat = [_bar(2000, 2000.1) for _ in range(len(h4))]
+    reason = st.evaluate(flat, h1, m15, TUESDAY_10)
+    assert reason.startswith("no clear H4 trend (") and reason.endswith(")")

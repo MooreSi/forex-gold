@@ -94,6 +94,8 @@ export interface HeaderState {
    * possible wrong answer, so the header shows nothing instead.
    */
   lifetime_pnl: number | null;
+  /** Null unless the daily goal is switched on in the risk settings. */
+  daily_goal?: { goal_usd: number; achieved_usd: number } | null;
   active_trader: string | null;
   /**
    * Both halts at once, not just the risk governor's. The circuit breaker

@@ -539,6 +539,18 @@ closed M15 engulfing or pin bar, stop beyond the pullback, target 2R.
   (Trading > Strategy, or a schedule window). Several strategies replace the
   signal's own stop and target, and the 1:2 is the whole strategy, so the
   global default is not assumed. **Not yet run against a demo account.**
+- **Silence is checkable (2026-09-29).** No signal means either a quiet market
+  or a dead engine, and the panel now says which: `local_report` carries
+  `generating_here`, `last_cycle_at` and `last_evaluated_at`, and the panel's
+  first line reads "Analysing on the VPS. Last checked 2 min ago." or a stall
+  warning after 3 minutes. `evaluate()` also puts what it saw after the
+  grouping phrase, "no clear H4 trend (highs rising 4570.1 to 4581.3, lows
+  falling ...)"; `backtest.reason_key` cuts at " (" so refusals still count
+  together. The replay's own rhythm is the yardstick: a trade every 0.84 days
+  at the median, but 75 of 532 gaps were 5 days or longer, longest 15.7.
+  The Mac's `trend_pa.db` is NOT the record while the VPS trades: the panel
+  reads the VPS's copy (`where: remote`), and the Mac's own engine idles
+  ("Generation runs on the local node only").
 - **It is a schedule source of its own**, `trend_pa_engine` in
   `risk/schedule.ENGINE_SOURCE_KEYS`, with `trend_pa_engine_override` beside
   it (owner, 2026-09-29). A window saved before it existed reads it as

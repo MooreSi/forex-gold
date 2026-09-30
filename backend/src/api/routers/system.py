@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 
 from backend.src.api.deps import engine as engine_dep
 from backend.src.controllers import broker_controller as broker_ctl
+from backend.src.controllers import goal_controller as goal_ctl
 from backend.src.controllers import history_controller as history_ctl
 from backend.src.controllers import settings_controller as settings_ctl
 from backend.src.controllers import system_controller as system_ctl
@@ -57,6 +58,10 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
     lifetime = await history_ctl.account_lifetime_pnl(
         eng, float((account or {}).get("equity") or 0.0),
     ) if account else None
+    # MT5's realised today (what the Calendar shows), only fetched when the goal is on.
+    goal = await goal_ctl.daily_goal_progress(
+        eng, float((account or {}).get("balance") or 0.0) or None,
+        system_ctl.local_today()) if account else None
     ea_ok, scope = broker_ctl.get_effective_ea_status()
     stale, stale_detail = broker_ctl.ea_build_status()
     colour, text, tooltip = broker_ctl.ea_badge_state(ea_ok, stale, scope, stale_detail)
@@ -66,6 +71,8 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
         "bridge": health,
         "tick": tick.to_dict() if tick else None,
         "lifetime_pnl": lifetime,
+        # Only present when Risk > Daily goal is switched on.
+        "daily_goal": goal,
         "active_trader": settings_ctl.get_active_trader(),
         # BOTH halts, not just the governor's. The circuit breaker writes a
         # different key, so a tripped breaker used to be invisible everywhere

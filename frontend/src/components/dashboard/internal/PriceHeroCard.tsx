@@ -29,6 +29,7 @@ export function PriceHeroCard({ tick, header, daily }: PriceHeroCardProps) {
   const equity = typeof account["equity"] === "number" ? account["equity"] : null;
   const balance = typeof account["balance"] === "number" ? account["balance"] : null;
   const lifetime = header?.lifetime_pnl ?? null;
+  const goal = header?.daily_goal ?? null;
   const stale = tick == null;
 
   return (
@@ -106,7 +107,18 @@ export function PriceHeroCard({ tick, header, daily }: PriceHeroCardProps) {
           </p>
         </div>
 
-        <dl className="relative grid grid-cols-3 gap-x-5 gap-y-1 text-right">
+        <dl className={cn("relative grid gap-x-5 gap-y-1 text-right",
+                          goal ? "grid-cols-4" : "grid-cols-3")}>
+          {goal && (
+            <div data-testid="dash-goal"
+                 title="Realised profit today against the daily goal set in Risk settings.">
+              <dt className="text-[9px] uppercase tracking-wider text-ink-3">Today&apos;s Goal</dt>
+              <dd className="num text-sm font-semibold text-ink-1">
+                {formatMoney(goal.goal_usd)} / <span className={pnlColour(goal.achieved_usd)}>
+                  {formatMoney(goal.achieved_usd)}</span>
+              </dd>
+            </div>
+          )}
           <Figure label="Equity" value={formatMoney(equity)} />
           <Figure label="Balance" value={formatMoney(balance)} />
           <Figure

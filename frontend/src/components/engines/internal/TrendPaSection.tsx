@@ -28,6 +28,36 @@ interface Props {
 }
 
 const LIVE_KEY = "tpa_live_execution";
+/** The engine looks every minute; this long without a look is a stall. */
+const STALL_S = 180;
+
+const ago = (s: number): string =>
+  s < 90 ? `${Math.max(0, Math.round(s))}s` : `${Math.round(s / 60)} min`;
+
+/**
+ * Whether the engine is alive, from the report alone. A quiet market and a
+ * dead engine both mean "no signal"; this tells them apart. Null when the
+ * node sent none of the fields (an older build), because a guess here would
+ * read as fact.
+ */
+function liveness(d: Record<string, unknown>, remote: boolean, nowS: number):
+  { text: string; ok: boolean } | null {
+  if (d["generating_here"] === undefined) return null;
+  const where = remote ? "the VPS" : "this machine";
+  const reportAge = remote && typeof d["generated_at"] === "number" ? nowS - (d["generated_at"] as number) : 0;
+  const stale = reportAge > STALL_S ? ` The VPS report is ${ago(reportAge)} old.` : "";
+  if (!d["running"]) return { text: `Stopped on ${where}.${stale}`, ok: false };
+  if (d["generating_here"] === false)
+    return { text: `Running, but not analysing on ${where}: the other node does that.${stale}`, ok: true };
+  const at = d["last_evaluated_at"];
+  if (typeof at !== "number") return { text: `Running on ${where}, no analysis yet.${stale}`, ok: false };
+  // Both stamps are the reporting node's own clock, so compare them to each other.
+  const ref = typeof d["generated_at"] === "number" ? (d["generated_at"] as number) : nowS;
+  const gap = ref - at;
+  if (gap > STALL_S)
+    return { text: `Not analysing: last checked ${ago(gap)} ago on ${where}.${stale}`, ok: false };
+  return { text: `Analysing on ${where}. Last checked ${ago(gap)} ago.${stale}`, ok: !stale };
+}
 
 export function TrendPaSection({ settings, onSaveSetting }: Props) {
   const poll = usePoll<Record<string, unknown>>(
@@ -60,6 +90,7 @@ export function TrendPaSection({ settings, onSaveSetting }: Props) {
   const running = Boolean(d["backtest_running"]);
   const remote = d["where"] === "remote";
   const btAt = d["backtest_at"] as number | null;
+  const alive = liveness(d, remote, Date.now() / 1000);
 
   const toggleLive = () => {
     if (live) onSaveSetting(LIVE_KEY, 0);
@@ -81,6 +112,11 @@ export function TrendPaSection({ settings, onSaveSetting }: Props) {
           {running ? "Backtest running…" : "Run the backtest"}
         </Button>
       </div>
+      {alive && (
+        <p data-testid="tpa-alive" className={cn("text-[11px]", alive.ok ? "text-profit" : "text-warning")}>
+          {alive.text}
+        </p>
+      )}
       {note && <p role="status" className="text-[11px] text-ink-2">{note}</p>}
 
       <p className="text-[11px] text-ink-3">

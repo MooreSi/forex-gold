@@ -35,11 +35,13 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.src.db import database as db_module
+from backend.src.services.analytics import todays_realised as _todays
 from backend.src.services.risk import governor as _gov
+from backend.src.services.risk import settings as _risk
 
 log = logging.getLogger(__name__)
 
-__all__ = ["sweep", "SweepState"]
+__all__ = ["sweep", "SweepState", "progress", "header_progress"]
 
 # How often the monitor cycle may evaluate the goal. The cycle itself runs
 # every 1-5s; the goal reads the day's closes and, in % mode, the account
@@ -88,6 +90,43 @@ def check_daily_goal(rs: dict, balance: Optional[float]) -> Optional[str]:
     else:
         of = f"${goal:.2f} ({float(rs['daily_goal_value']):g}% of the day's opening balance)"
     return f"Daily goal secured: +${realised:.2f} today vs a goal of {of}"
+
+
+def progress(rs: dict, balance: Optional[float],
+             realised: Optional[float] = None) -> Optional[dict]:
+    """The dashboard's "Today's Goal": the goal and today's realised, in dollars.
+
+    None when the goal is switched off, or is a percentage and the balance is
+    unknown (a guessed dollar goal is worse than none). Same window as the
+    halt, so the figure and the stop agree. `realised` is the broker's figure
+    (MT5, the same one the Calendar shows); without it the local table is used.
+    """
+    if realised is None:
+        realised, _peak = _gov.day_pnl_and_peak(_window_start())
+    goal = _goal_usd(rs, realised, balance)
+    if goal is None:
+        return None
+    return {"goal_usd": round(goal, 2), "achieved_usd": round(realised, 2)}
+
+
+async def header_progress(engine: Any, balance: Optional[float],
+                          day: Any) -> Optional[dict]:
+    """`progress` for the header poll, on MT5's realised figure.
+
+    None when the goal is off (MT5 is not asked), when MT5 cannot answer (a
+    local-table $0.00 would be a wrong answer), or on any failure: a display
+    figure on a 5s poll must never take the header down.
+    """
+    try:
+        rs = _risk.get()
+        if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
+            return None
+        realised = await _todays.for_today(engine, day)
+        if realised is None:
+            return None
+        return progress(rs, balance, realised)
+    except Exception:
+        return None
 
 
 def apply_daily_goal(rs: dict, balance: Optional[float]) -> bool:

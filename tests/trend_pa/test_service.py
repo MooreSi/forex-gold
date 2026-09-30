@@ -157,6 +157,34 @@ def test_an_armed_model_scores_the_signal(eng, monkeypatch):
     assert repo.open_signals()[0]["ml_prob"] == pytest.approx(0.61)
 
 
+def test_the_engine_says_whether_it_generates_here_and_when_it_last_looked(eng, monkeypatch):
+    assert eng.generating_here is None and eng.last_evaluated_at is None
+    monkeypatch.setattr(service.st, "evaluate", lambda *a, **k: "no clear H4 trend")
+    run(eng._run_cycle())
+    assert eng.generating_here is True
+    assert eng.last_evaluated_at is not None
+
+    async def _false():
+        return False
+    eng.last_evaluated_at = None
+    monkeypatch.setattr(service, "_generates_here", _false)
+    run(eng._run_cycle())
+    assert eng.generating_here is False
+    assert eng.last_evaluated_at is None, "a node that does not generate has not looked"
+    assert eng.last_cycle_at is not None
+
+
+def test_the_panel_report_carries_that(eng, monkeypatch):
+    from backend.src.services.trend_pa import panel_data
+    monkeypatch.setattr(service, "_instance", eng)
+    monkeypatch.setattr(service.st, "evaluate", lambda *a, **k: "no clear H4 trend")
+    run(eng._run_cycle())
+    r = panel_data.local_report()
+    assert r["generating_here"] is True
+    assert r["last_evaluated_at"] == eng.last_evaluated_at
+    assert r["last_cycle_at"] == eng.last_cycle_at
+
+
 # ── outcomes ─────────────────────────────────────────────────────────────────
 
 def _open_one(eng, monkeypatch):

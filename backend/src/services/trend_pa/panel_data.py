@@ -40,6 +40,9 @@ def local_report() -> dict:
     return {
         "running": bool(getattr(eng, "is_running", False)),
         "status": getattr(eng, "status_detail", "") if eng is not None else "",
+        "generating_here": getattr(eng, "generating_here", None),
+        "last_cycle_at": getattr(eng, "last_cycle_at", None),
+        "last_evaluated_at": getattr(eng, "last_evaluated_at", None),
         "live": ss.summarize(repo.closed_signals(origin="live"), rr=rr),
         "backtest": ss.summarize(repo.closed_signals(origin="backtest"), rr=rr),
         "backtest_at": float(backtest_at) if backtest_at else None,

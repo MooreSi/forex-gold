@@ -68,9 +68,13 @@ export function OpenPositionsCard({ trades }: { trades: Trade[] }) {
                 <span className="num text-[10px] text-ink-3">
                   {formatLots(t.lots)} lots
                 </span>
-                <span className="truncate text-[10px] text-ink-3">
-                  {t.remote ? "remote node"
-                    : t.untracked ? "untracked" : (t.tg_source ? String(t.tg_source) : "")}
+                {/* The source first, wherever it was opened: with the VPS
+                    trading, "remote node" on every row hid which channel or
+                    engine opened it. The heartbeat carries the VPS's source. */}
+                <span className="truncate text-[10px] text-ink-3"
+                      title={t.remote ? "Opened by the remote node" : undefined}>
+                  {t.tg_source ? String(t.tg_source)
+                    : t.remote ? "remote node" : t.untracked ? "untracked" : ""}
                 </span>
               </span>
               <span className={cn("num shrink-0 text-xs font-semibold",

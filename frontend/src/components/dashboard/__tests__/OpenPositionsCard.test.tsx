@@ -18,6 +18,16 @@ describe("the open-positions card", () => {
     expect(screen.queryByText("untracked")).not.toBeInTheDocument();
   });
 
+  it("names the source of a remote node's position, as it does a local one", () => {
+    // Owner, 2026-09-30: with the VPS trading, every row read "remote node"
+    // and the channel that opened it was nowhere on the dashboard.
+    render(<OpenPositionsCard trades={[
+      { ...base, remote: true, tg_source: "Gold Diggers VIP" }]} />);
+
+    expect(screen.getByText("Gold Diggers VIP")).toBeInTheDocument();
+    expect(screen.queryByText("remote node")).not.toBeInTheDocument();
+  });
+
   it("still calls a stranger's position untracked", () => {
     render(<OpenPositionsCard trades={[{ ...base, remote: false }]} />);
 

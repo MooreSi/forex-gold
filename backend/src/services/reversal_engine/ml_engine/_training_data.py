@@ -49,6 +49,12 @@ def _realised_r(row: dict) -> Optional[float]:
     fraction actually closed rather than the full planned target, it charges
     spread/commission/slippage, and it lets a loss exceed -1.0R when the stop
     fills past sl_dist (which on real rows it routinely does)."""
+    # An executed close stores the BROKER's profit, at the real lot and under
+    # the template's stop, not sl_dist at the 0.1 virtual lot this divides by.
+    # The row carries neither the lot nor the initial stop, so it is left out
+    # rather than read on the wrong scale (reversal-engine/250, 2026-09-30).
+    if row.get("live_exec_status") == "executed":
+        return None
     try:
         risk = float(row.get("sl_dist") or 0.0) * _DOLLARS_PER_POINT
         if risk <= 0:

@@ -735,11 +735,13 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
     @staticmethod
     def _calc_atr(candles: list[dict], period: int = 14) -> float:
-        """Simple ATR from candle high/low."""
+        """Simple ATR over the LAST `period` bars (candles arrive oldest
+        first). Until 2026-09-30 this read the first `period`, which on the
+        cycle's 80 M15 bars was 17-20 hours old. reversal-engine/250."""
         if not candles or len(candles) < 2:
             return 8.0
         trs = []
-        for i in range(1, min(period + 1, len(candles))):
+        for i in range(max(1, len(candles) - period), len(candles)):
             h = float(candles[i].get("high", candles[i].get("h", 0)) or 0)
             l = float(candles[i].get("low",  candles[i].get("l", 0)) or 0)
             pc = float(candles[i-1].get("close", candles[i-1].get("c", 0)) or 0)

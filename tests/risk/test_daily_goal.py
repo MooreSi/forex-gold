@@ -312,3 +312,122 @@ def test_header_progress_is_none_when_mt5_cannot_answer(monkeypatch):
 def test_header_progress_never_raises(monkeypatch):
     _stub_realised(monkeypatch, _rs("usd", 33.03), boom=True)
     assert asyncio.run(dg.header_progress(None, None, "d")) is None
+
+
+# ── open trades: the goal is secured only once they have all closed ──────────
+#
+# Owner, 2026-09-30: the VPS halted on "+$34.31 vs $32.33" with trades still
+# open; they closed at a loss and the day finished under the goal, halted.
+# Reached-with-trades-open is now a HOLD (no new entries) that becomes the
+# day's halt only when flat and still at the goal, and lifts when the closes
+# took the day back under it. Nothing here reaches a broker.
+
+class _PosBridge(_Bridge):
+    def __init__(self, balance, positions):
+        super().__init__(balance)
+        self.positions = positions
+
+    async def get_positions(self):
+        return None if self.positions is None else [{"ticket": i} for i in range(self.positions)]
+
+
+def _sweep(bridge, rs, now=1_000.0):
+    asyncio.run(dg.sweep(dg.SweepState(), bridge, rs, now=now))
+
+
+def test_reached_with_trades_open_holds_new_entries_but_is_not_secured(fresh_db):
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 2), _rs("usd", 100.0))
+    assert rg.is_trading_paused(), "no new entries while the goal is only on paper"
+    assert "waiting for 2 open trades" in rg.halt_reason()
+    assert not rg.halt_reason().startswith("Daily goal secured")
+
+
+def test_reached_with_nothing_open_is_secured_for_the_day(fresh_db):
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 0), _rs("usd", 100.0))
+    assert rg.halt_reason().startswith("Daily goal secured")
+    assert float(db.get_app_config("trade_pause_until")) == pytest.approx(
+        rg.rg_day_start_ts() + 86400.0)
+
+
+def test_the_hold_becomes_the_days_halt_when_the_last_trade_closes_above(fresh_db):
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
+    _closes([-20], at=time.time() + 1)
+    _sweep(_PosBridge(10_130.0, 0), _rs("usd", 100.0), now=2_000.0)
+    assert rg.is_trading_paused()
+    assert rg.halt_reason().startswith("Daily goal secured")
+
+
+def test_the_hold_lifts_when_the_closes_took_the_day_under_the_goal(fresh_db):
+    """The owner's case: reached on paper, lost it back, keeps trading."""
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
+    _closes([-80], at=time.time() + 1)
+    _sweep(_PosBridge(10_070.0, 0), _rs("usd", 100.0), now=2_000.0)
+    assert not rg.is_trading_paused()
+
+
+def test_the_hold_stays_while_trades_are_still_open_under_the_goal(fresh_db):
+    """Under the goal again, but not flat yet: wait for the rest."""
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 2), _rs("usd", 100.0))
+    _closes([-80], at=time.time() + 1)
+    _sweep(_PosBridge(10_070.0, 1), _rs("usd", 100.0), now=2_000.0)
+    assert rg.is_trading_paused()
+
+
+def test_an_unknown_position_count_never_secures_or_lifts(fresh_db):
+    """MT5 could not say what is open: hold, do not guess either way."""
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, None), _rs("usd", 100.0))
+    assert rg.is_trading_paused()
+    assert not rg.halt_reason().startswith("Daily goal secured")
+    _closes([-80], at=time.time() + 1)
+    _sweep(_PosBridge(10_070.0, None), _rs("usd", 100.0), now=2_000.0)
+    assert rg.is_trading_paused()
+
+
+def test_lifting_the_hold_runs_the_daily_loss_limit_it_was_masking(fresh_db):
+    """While the hold is in force the close-time guards see "already paused"
+    and write nothing. Lifting must not skip a limit the closes breached."""
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
+    _closes([-500], at=time.time() + 1)
+    rs = {**db.get_risk_settings(), **_rs("usd", 100.0), "max_daily_loss_pct": 3.0}
+    _sweep(_PosBridge(9_650.0, 0), rs, now=2_000.0)
+    assert rg.is_trading_paused()
+    assert rg.halt_reason().startswith("Daily loss")
+
+
+def test_lifting_needs_the_balance(fresh_db):
+    """No balance, no daily-loss check, so no lift: fail closed."""
+    class _NoAcct(_PosBridge):
+        async def get_account(self):
+            return None
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
+    _closes([-80], at=time.time() + 1)
+    _sweep(_NoAcct(0.0, 0), _rs("usd", 100.0), now=2_000.0)
+    assert rg.is_trading_paused()
+
+
+def test_a_hold_never_lifts_another_guards_halt(fresh_db):
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
+    with db.db():
+        db.set_app_config("risk_halt_reason", "Give-back guard: handed back 50%")
+    _closes([-80], at=time.time() + 1)
+    _sweep(_PosBridge(10_070.0, 0), _rs("usd", 100.0), now=2_000.0)
+    assert rg.is_trading_paused()
+    assert rg.halt_reason().startswith("Give-back")
+
+
+def test_a_manual_resume_during_the_hold_is_respected(fresh_db):
+    from backend.src.services.risk import manual_pause
+    _closes([150])
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
+    manual_pause.resume()
+    _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0), now=2_000.0)
+    assert not rg.is_trading_paused(), "the window restarted at the Resume"

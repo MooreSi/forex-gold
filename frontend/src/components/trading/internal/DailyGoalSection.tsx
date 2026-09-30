@@ -60,7 +60,7 @@ export function DailyGoalSection({ data, version, save }: DailyGoalSectionProps)
       <div data-testid="risk-daily_goal_enabled">
         <SettingsToggle
           label="Stop for the day once the goal is secured"
-          hint="Counts realised profit since the broker day opened. Open trades are left to run; only new entries stop. Resume starts a fresh goal from that moment."
+          hint="Counts realised profit since the broker day opened. Open trades are left to run; only new entries stop. The goal is secured once they have all closed: if their losses take the day back under it, trading resumes. Resume starts a fresh goal from that moment."
           checked={enabled}
           onChange={(v) => void save({ daily_goal_enabled: v ? 1 : 0 })}
         />

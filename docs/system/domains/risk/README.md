@@ -303,6 +303,17 @@ daily halts write is set until the next broker day. Open trades run on; only
 new entries stop. Owner's choices, 2026-09-29: realised P&L only, new entries
 only, every source.
 
+- **Reached with trades open is a HOLD, not the day's halt (2026-09-30).**
+  The VPS halted on "+$34.31 vs $32.33" with trades open; they closed at a
+  loss and the day ended under the goal, still halted. Now: reached and MT5
+  reports positions open (any position on the account; unknown counts as
+  open) writes "Daily goal reached (...), waiting for N open trades to close",
+  which blocks new entries like any halt. Flat and still at the goal: the
+  normal "Daily goal secured" halt. Flat and under it: `lift_hold` clears the
+  pause, but first re-runs the governor, give-back and daily-loss checks the
+  way `close_trade` does, because while the hold stood those guards saw
+  "already paused" and wrote nothing. Lifting needs a live balance and only
+  ever lifts a reason starting "Daily goal reached", never another guard's.
 - **`%` is of the day's OPENING balance** (live balance minus today's
   realised), so the same percentage asks for more as the account grows. That
   is the compounding the owner asked for. `$` is a fixed amount.

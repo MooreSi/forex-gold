@@ -3,7 +3,10 @@
 Risk > Stopping for the day > Daily goal (owner, 2026-09-29,
 docs/todo/risk/020). Once realised P&L since the start of the broker day
 reaches the goal, trading stops until the next broker day. Open trades are
-left alone; only NEW entries stop.
+left alone; only NEW entries stop. With trades still open the goal is only
+HELD, not secured: it becomes the day's halt when the last one closes with the
+day still at the goal, and lifts when their losses took it back under (owner,
+2026-09-30; `apply_daily_goal`, `lift_hold`).
 
 `pct` is a percentage of the day's OPENING balance -- the balance now minus
 what the day has realised -- so the same 2% asks for more dollars as the
@@ -129,21 +132,91 @@ async def header_progress(engine: Any, balance: Optional[float],
         return None
 
 
-def apply_daily_goal(rs: dict, balance: Optional[float]) -> bool:
-    """Halt until the next broker day if the goal is reached. True if it did.
+HOLD_PREFIX = "Daily goal reached"
 
-    Leaves an existing halt alone: whichever guard stopped the day first is
-    the one the operator needs to read.
-    """
-    reason = check_daily_goal(rs, balance)
-    if not reason or _gov.is_trading_paused():
-        return False
+
+def _write_halt(reason: str) -> None:
     until = _gov.rg_day_start_ts() + 86400.0
     with db_module.db():
         db_module.set_app_config("trade_pause_until", str(until))
         db_module.set_app_config("risk_halt_reason", reason)
-    log.warning("[RG] %s — new entries stopped until the next broker day", reason)
+
+
+def _holding() -> bool:
+    """Is the halt in force this goal's own hold (not another guard's)?"""
+    return _gov.is_trading_paused() and _gov.halt_reason().startswith(HOLD_PREFIX)
+
+
+def apply_daily_goal(rs: dict, balance: Optional[float],
+                     open_positions: Optional[int] = 0) -> bool:
+    """Stop new entries once the goal is reached. True if it wrote a halt.
+
+    The goal is SECURED (halt until the next broker day) only when nothing is
+    open. Reached with trades still open, it is a HOLD: no new entries, the
+    same pause pair with a "waiting" reason. Owner, 2026-09-30: open trades
+    that close at a loss can take the day back under the goal, and then it
+    should trade on. So the hold becomes the day's halt when the last trade
+    closes with the day still at the goal, and lifts (see `lift_hold`) when it
+    is not. `open_positions` None means MT5 could not say: hold, never secure.
+
+    Leaves another guard's halt alone: whichever guard stopped the day first
+    is the one the operator needs to read.
+    """
+    reason = check_daily_goal(rs, balance)
+    if not reason:
+        return False
+    if _gov.is_trading_paused() and not _holding():
+        return False
+    if open_positions == 0:
+        _write_halt(reason)
+        log.warning("[RG] %s — new entries stopped until the next broker day", reason)
+        return True
+    waiting = ("open trades" if open_positions is None
+               else f"{open_positions} open trade{'s' if open_positions != 1 else ''}")
+    hold = f"{HOLD_PREFIX} ({reason.split(': ', 1)[-1]}), waiting for {waiting} to close"
+    if _gov.halt_reason() != hold:
+        _write_halt(hold)
+        log.warning("[RG] %s — no new entries until they do", hold)
     return True
+
+
+def lift_hold(rs: dict, balance: Optional[float],
+              open_positions: Optional[int]) -> bool:
+    """The trades the hold waited for closed and took the day under the goal:
+    lift it. True if lifted.
+
+    Only when flat and known flat, only this goal's own hold, and only with a
+    balance: while the hold stood, the close-time daily-loss and give-back
+    guards saw "already paused" and wrote nothing, so they are re-run here
+    exactly as `close_trade` runs them, and the first to fire takes over.
+    """
+    if open_positions != 0 or balance is None or not _holding():
+        return False
+    if check_daily_goal(rs, balance):
+        return False
+    with db_module.db():
+        db_module.set_app_config("trade_pause_until", "0")
+        db_module.set_app_config("risk_halt_reason", "")
+        if bool(rs.get("risk_governor_enabled", 0)):
+            _gov.rg_apply_halts_on_close(rs, balance)
+        _gov.apply_giveback_guard_on_close(rs)
+        _gov.apply_daily_loss_halt_on_close(rs, balance)
+    if _gov.is_trading_paused():
+        log.warning("[RG] daily goal hold replaced: %s", _gov.halt_reason())
+    else:
+        log.warning("[RG] open trades closed under the daily goal — trading resumes")
+    return True
+
+
+async def _open_positions(bridge: Any) -> Optional[int]:
+    get = getattr(bridge, "get_positions", None)
+    if get is None:
+        return None
+    try:
+        positions = await get()
+    except Exception:
+        return None
+    return None if positions is None else len(positions)
 
 
 @dataclass
@@ -162,10 +235,17 @@ async def sweep(state: SweepState, bridge: Any, rs: dict,
     try:
         if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
             return
+        holding = await db_module.to_db_thread(_holding)
         balance = None
-        if str(rs.get("daily_goal_mode") or "pct") != "usd":
+        if holding or str(rs.get("daily_goal_mode") or "pct") != "usd":
             acc = await bridge.get_account()
             balance = float((acc or {}).get("balance") or 0) or None
-        await db_module.to_db_thread(apply_daily_goal, rs, balance)
+        # All positions on the account, from MT5: the broker is the record of
+        # what is open, and counting a manual one only holds for longer.
+        open_positions = await _open_positions(bridge)
+        if await db_module.to_db_thread(apply_daily_goal, rs, balance, open_positions):
+            return
+        if holding:
+            await db_module.to_db_thread(lift_hold, rs, balance, open_positions)
     except Exception as e:
         log.debug("[DailyGoal] sweep failed: %s", e)

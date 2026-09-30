@@ -34,6 +34,7 @@ import re
 import time
 
 from backend.src.services.risk import daily_goal as _daily_goal
+from backend.src.services.positions import goal_breakeven as _goal_be
 from backend.src.utils.models import STRATEGY_ADAPTIVE_RUNNER
 from backend.src.utils.models import STRATEGY_ADAPTIVE_RUNNER_2
 from backend.src.utils.models import STRATEGY_BE_RUNNER
@@ -116,6 +117,7 @@ class MonitorState:
     dpm_dxy_candles: list = field(default_factory=list)
     # Risk > Daily goal's own throttle (risk/daily_goal.py).
     daily_goal: Any = field(default_factory=lambda: _daily_goal.SweepState())
+    goal_be: Any = field(default_factory=lambda: _goal_be.SweepState())
 
 
 @dataclass
@@ -179,6 +181,9 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
             # the open-trades block because the goal is usually reached by
             # the close of the last one. Throttled and never raises.
             await _daily_goal.sweep(ctx.state.daily_goal, ctx.bridge, rs)
+            # ...and, when ticked, move open trades to breakeven so they
+            # cannot take the day back under it (positions/goal_breakeven.py).
+            await _goal_be.sweep(ctx.state.goal_be, ctx.bridge, rs, ctx.get_open_trades)
 
             # Withdraw resting orders the higher-timeframe bias has turned
             # against (reversal-engine/050). Cancels only; never touches an

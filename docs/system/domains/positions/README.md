@@ -23,6 +23,7 @@ shaped around "no behaviour change".
 - `services/positions/monitor_loop.py` — the computational blocks: `check_sl`, `reconcile_sl_hit`, `check_profit_close_target`, `reclaim_ea_managed_trade`
 - `services/positions/tp_tracking.py` — TP/SL trigger detection plus `TPCache` (2.5s triggered-TP cache, log throttles)
 - `services/positions/tp_ladder.py` / `tp_ladder_loop.py` — shared TP-ladder walk and the sub-second (0.25s) fast poll that solely owns TP-crossing detection for ladder strategies when DPM is off
+- `services/positions/goal_breakeven.py` — Risk > Daily goal's breakeven tickbox: once the day's goal stands, moves every open position's stop to entry plus costs (see the risk domain file)
 - `services/positions/safety_net.py` — periodic sweep moving SL to breakeven when the live loop missed it (1800s per-trade alert cooldown)
 - `services/positions/max_tp.py` — post-close "highest TP actually reached" checker (read-only candles + DB writes)
 - `services/positions/handle_*.py` — the per-strategy tick handlers (be_runner, conservative, conservative_trial, no_sl_scale/Trend Ratchet, orb_fixed, protected_scale, scale_out, scalp_runner, trail_stop)

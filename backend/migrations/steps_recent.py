@@ -267,4 +267,11 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN daily_goal_value REAL NOT NULL DEFAULT 1.0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN tpa_live_execution INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Risk > Daily goal > "Move stops to breakeven once the goal is reached"
+    # (owner, 2026-09-30; positions/goal_breakeven.py). Off by default: it
+    # moves live stops, so nothing changes on upgrade until it is ticked.
+    (56, "Daily goal: move open trades to breakeven once reached (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN daily_goal_protect_be INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

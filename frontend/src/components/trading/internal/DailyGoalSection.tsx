@@ -41,6 +41,7 @@ const describe = (mode: Mode, value: number) =>
  */
 export function DailyGoalSection({ data, version, save }: DailyGoalSectionProps) {
   const enabled = Boolean(num(data.daily_goal_enabled));
+  const protectBe = Boolean(num(data.daily_goal_protect_be));
   const mode: Mode = data.daily_goal_mode === "usd" ? "usd" : "pct";
   const stored = num(data.daily_goal_value);
   const range = RANGE[mode];
@@ -89,6 +90,18 @@ export function DailyGoalSection({ data, version, save }: DailyGoalSectionProps)
               </button>
             ))}
           </div>
+          <Tooltip label="Once the goal is reached, each open trade's stop moves to entry plus costs as soon as price gives it room, so open trades cannot take the day back under the goal.">
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+              <input
+                type="checkbox"
+                data-testid="risk-daily_goal_protect_be"
+                checked={protectBe}
+                onChange={(e) => void save({ daily_goal_protect_be: e.target.checked ? 1 : 0 })}
+                className="accent-accent"
+              />
+              Move stops to breakeven once reached
+            </label>
+          </Tooltip>
         </div>
 
         <div data-testid="risk-daily_goal_value" className="grid items-center gap-3 sm:grid-cols-[1fr_8rem]">

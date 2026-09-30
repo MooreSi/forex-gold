@@ -73,4 +73,23 @@ describe("daily goal", () => {
       expect(screen.getByTestId(`risk-${key}`)).toBeInTheDocument();
     }
   });
+
+  it("has a breakeven tickbox beside the mode toggle, off by default", () => {
+    renderWith(base);
+    expect(screen.getByLabelText("Move stops to breakeven once reached")).not.toBeChecked();
+  });
+
+  it("ticking it writes the 0/1 the column holds (migration 56)", async () => {
+    const save = renderWith(base);
+    await userEvent.click(screen.getByLabelText("Move stops to breakeven once reached"));
+    expect(save).toHaveBeenCalledWith({ daily_goal_protect_be: 1 });
+  });
+
+  it("shows it ticked when stored on, and unticking writes 0", async () => {
+    const save = renderWith({ ...base, daily_goal_protect_be: 1 });
+    const box = screen.getByLabelText("Move stops to breakeven once reached");
+    expect(box).toBeChecked();
+    await userEvent.click(box);
+    expect(save).toHaveBeenCalledWith({ daily_goal_protect_be: 0 });
+  });
 });

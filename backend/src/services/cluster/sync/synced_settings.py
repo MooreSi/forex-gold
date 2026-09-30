@@ -177,4 +177,6 @@ SYNCED_SETTINGS_KEYS = (
     # live switch (2026-09-29, migration 55). The goal must hold on whichever
     # node is trading, so it travels like every other daily limit.
     "daily_goal_enabled", "daily_goal_mode", "daily_goal_value", "tpa_live_execution",
+    # Its breakeven tickbox (migration 56): it acts on whichever node trades.
+    "daily_goal_protect_be",
 )

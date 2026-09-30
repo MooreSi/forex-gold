@@ -104,6 +104,10 @@ export const RISK_GROUPS: RiskGroup[] = [
         label: "Stop for the day once the goal is secured",
       },
       { key: "daily_goal_mode", label: "Goal in", kind: "choice", goal: true },
+      {
+        key: "daily_goal_protect_be", kind: "toggle", goal: true,
+        label: "Move stops to breakeven once reached",
+      },
       { key: "daily_goal_value", label: "Daily goal", kind: "number", goal: true },
     ],
   },

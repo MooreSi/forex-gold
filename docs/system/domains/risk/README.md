@@ -335,3 +335,18 @@ only, every source.
 - Three columns, migration 55, all in `SYNCED_SETTINGS_KEYS`, so the VPS
   holds the same goal. `daily_goal_enabled` is in `_PROTECTIVE_KEYS`, so a
   change to it is logged with its origin.
+- **"Move stops to breakeven once reached" (2026-09-30, migration 56,
+  `daily_goal_protect_be`, off by default).** A tickbox beside "Goal in".
+  While the goal stands (`daily_goal.goal_standing`: reached, or its hold
+  still waiting), `positions/goal_breakeven.py` moves every open position's
+  stop to entry plus the safety net's cost estimate (spread, slippage,
+  commission; not swap). Owner's choices: entry plus costs, and a trade in
+  loss is moved later, once price gives it room, never closed. It only
+  tightens, waits for `MIN_GAP` ($1) beyond breakeven because the bridge
+  clamps a stop inside the stops level and a clamped stop can land looser,
+  runs on the active trader node only, records the local stop only after the
+  broker accepted, and retries a rejection after 60s. EA-managed trades are
+  modified at the broker directly: the EA's `MoveSl` re-reads the live stop
+  and only tightens, so it does not undo it. Synced and in `_PROTECTIVE_KEYS`.
+  **The trigger is the same local-table judgement as the halt**, not the MT5
+  figure the dashboard shows. **Not yet run on a demo account.**

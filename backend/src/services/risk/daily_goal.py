@@ -44,7 +44,7 @@ from backend.src.services.risk import settings as _risk
 
 log = logging.getLogger(__name__)
 
-__all__ = ["sweep", "SweepState", "progress", "header_progress"]
+__all__ = ["sweep", "SweepState", "progress", "header_progress", "goal_standing"]
 
 # How often the monitor cycle may evaluate the goal. The cycle itself runs
 # every 1-5s; the goal reads the day's closes and, in % mode, the account
@@ -178,6 +178,18 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
         _write_halt(hold)
         log.warning("[RG] %s — no new entries until they do", hold)
     return True
+
+
+def goal_standing(rs: dict, balance: Optional[float]) -> bool:
+    """Is today's goal reached, or its hold still waiting on open trades?
+
+    What `positions/goal_breakeven` protects. The hold counts even after a
+    loss took the day back under the goal: the trades it waits for are the
+    ones still able to take it further under.
+    """
+    if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
+        return False
+    return _holding() or check_daily_goal(rs, balance) is not None
 
 
 def lift_hold(rs: dict, balance: Optional[float],

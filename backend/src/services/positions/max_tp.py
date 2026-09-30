@@ -64,7 +64,41 @@ def _has_tp_ladder(t: dict) -> bool:
     )
 
 
+def fill_realised_r() -> int:
+    """Give this node's own ledger rows their realised R, and send them on.
+
+    The Trades page's R column for a trade the OTHER node opened comes from
+    the ledger, which only had the frozen close_trade's close-time plan ratio
+    (see sync_repo's `r_realised` note). This node holds the figure for its
+    own trades -- net P&L over the initial risk, the same number its own
+    Trades page shows -- so it writes it into its own row and pushes the row;
+    the other node also picks it up on its periodic ledger pull. A trade with
+    no risk figure stays blank. Returns how many rows it filled.
+
+    Reads and ledger writes only: no order is placed, closed or modified.
+    """
+    from backend.src.services.cluster import sync_repo
+    from backend.src.services.cluster.sync.ledger import push_trade_closed
+
+    backlog = sync_repo.own_rows_missing_realised_r(sync_repo.get_or_create_node_id())
+    if not backlog:
+        return 0
+    realised = db_module.get_rr_map_by_ticket()
+    filled = 0
+    for row in backlog:
+        r = realised.get(str(row["mt5_ticket"]))
+        if r is None:
+            continue
+        push_trade_closed({**row, "r_realised": round(float(r), 4)})
+        filled += 1
+    return filled
+
+
 async def max_tp_checker_sweep(bridge: Any) -> None:
+    try:
+        fill_realised_r()
+    except Exception as e:                       # noqa: BLE001
+        log.debug("fill_realised_r failed: %s", e)
     cutoff = time.time() - 1800  # 30 minutes ago
     pending = db_module.get_trades_pending_max_tp(cutoff)
     for t in pending:

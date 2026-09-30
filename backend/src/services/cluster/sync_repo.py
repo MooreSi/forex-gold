@@ -82,6 +82,13 @@ def _ensure_sync_tables() -> None:
         for col, defn in [
             ("max_tp_hit", "TEXT"),
             ("rr",         "REAL"),
+            # Realised R, filled by the node that owns the trade
+            # (positions/max_tp.fill_realised_r, 2026-09-30). `rr` above is
+            # the frozen close_trade's |tp1-entry|/|entry-stop| from the stop
+            # AT CLOSE: never negative, and it explodes once a breakeven or
+            # trail has moved the stop next to entry. The Trades page shows
+            # this column, not that one.
+            ("r_realised", "REAL"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE consolidated_trades ADD COLUMN {col} {defn}")
@@ -121,20 +128,21 @@ def record_consolidated_trade(node_id: str, trade: dict) -> None:
             """INSERT INTO consolidated_trades
                (node_id, trade_id, engine, direction, strategy, open_time,
                 close_time, pnl_dollars, outcome, received_at, tg_source, mt5_ticket,
-                max_tp_hit, rr)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                max_tp_hit, rr, r_realised)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(node_id, trade_id) DO UPDATE SET
                  close_time=excluded.close_time, pnl_dollars=excluded.pnl_dollars,
                  outcome=excluded.outcome, received_at=excluded.received_at,
                  tg_source=excluded.tg_source, mt5_ticket=excluded.mt5_ticket,
                  max_tp_hit=COALESCE(excluded.max_tp_hit, consolidated_trades.max_tp_hit),
-                 rr=COALESCE(excluded.rr, consolidated_trades.rr)""",
+                 rr=COALESCE(excluded.rr, consolidated_trades.rr),
+                 r_realised=COALESCE(excluded.r_realised, consolidated_trades.r_realised)""",
             (node_id, trade["trade_id"], trade.get("engine", ""),
              trade.get("direction", ""), trade.get("strategy", ""),
              trade.get("open_time"), trade.get("close_time"),
              trade.get("pnl_dollars"), trade.get("outcome"), time.time(),
              trade.get("tg_source"), trade.get("mt5_ticket"),
-             trade.get("max_tp_hit"), trade.get("rr")),
+             trade.get("max_tp_hit"), trade.get("rr"), trade.get("r_realised")),
         )
 
 
@@ -167,12 +175,17 @@ def get_consolidated_extra_maps() -> tuple[dict[str, str], dict[str, float]]:
     consolidated ledger — same cross-node fallback purpose as
     get_consolidated_ticket_maps(), split out separately since these two
     columns were added later and populate at different times (rr at close,
-    max_tp_hit 30+ min after)."""
+    max_tp_hit 30+ min after).
+
+    The rr is `r_realised` wherever the owning node has filled it, and the
+    close-time `rr` only until then (2026-09-30): see the `r_realised` note
+    in _ensure_sync_tables for why the two differ."""
     _ensure_sync_tables()
     with db() as conn:
         rows = conn.execute(
-            "SELECT mt5_ticket, max_tp_hit, rr FROM consolidated_trades "
-            "WHERE mt5_ticket IS NOT NULL AND (max_tp_hit IS NOT NULL OR rr IS NOT NULL)"
+            "SELECT mt5_ticket, max_tp_hit, COALESCE(r_realised, rr) FROM consolidated_trades "
+            "WHERE mt5_ticket IS NOT NULL "
+            "AND (max_tp_hit IS NOT NULL OR r_realised IS NOT NULL OR rr IS NOT NULL)"
         ).fetchall()
     max_tp_map, rr_map = {}, {}
     for mt5_ticket, max_tp_hit, rr in rows:
@@ -199,6 +212,18 @@ def get_consolidated_trade(node_id: str, trade_id: str) -> dict | None:
             (node_id, trade_id),
         ).fetchone()
     return dict(row) if row is not None else None
+
+
+def own_rows_missing_realised_r(node_id: str) -> list[dict]:
+    """This node's own ledger rows that name a ticket and have no realised R
+    yet: the backlog `positions/max_tp.fill_realised_r` works through."""
+    _ensure_sync_tables()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM consolidated_trades WHERE node_id=? "
+            "AND mt5_ticket IS NOT NULL AND r_realised IS NULL", (node_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_consolidated_trades(days: int = 0) -> list[dict]:

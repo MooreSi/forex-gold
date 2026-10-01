@@ -193,3 +193,41 @@ class TestMounting:
         assert admin_console.install(app) is True
         body = TestClient(app).get("/api/admin/status").json()
         assert "can_sign" in body and "licence_count" in body
+
+
+class TestTheBundleIsNotCachedStale:
+    """`index.html` must never come from the browser's cache.
+
+    The console's JS and CSS are content-hashed and safe to cache forever.
+    `index.html` is the file that NAMES those hashes, so a browser holding an
+    old copy loads an old console against a current API indefinitely, with
+    nothing on screen saying so.
+
+    2026-10-01: the console had been rebuilt and this app was already
+    serving the new version over the API -- confirmed by calling it -- while
+    the operator's browser kept rendering the previous one, because it had
+    cached the index naming the old bundle. The console looked broken and
+    nothing was.
+    """
+
+    def test_index_html_is_no_store(self, fake_console):
+        from fastapi.testclient import TestClient
+        app = FastAPI()
+        assert admin_console.install(app) is True
+        response = TestClient(app).get("/admin/")
+        assert response.status_code == 200
+        assert "no-store" in response.headers.get("cache-control", "")
+
+    def test_the_hashed_assets_are_still_cacheable(self, fake_console):
+        """The other half: marking everything no-store would refetch the
+        whole bundle on every load for no reason."""
+        from fastapi.testclient import TestClient
+        assets = fake_console / "web" / "dist" / "assets"
+        assets.mkdir(parents=True, exist_ok=True)
+        (assets / "index-abc123.js").write_text("console.log(1)\n", encoding="utf-8")
+
+        app = FastAPI()
+        assert admin_console.install(app) is True
+        response = TestClient(app).get("/admin/assets/index-abc123.js")
+        assert response.status_code == 200
+        assert "no-store" not in (response.headers.get("cache-control") or "")

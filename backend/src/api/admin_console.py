@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from starlette.staticfiles import StaticFiles
+
 log = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -182,8 +184,6 @@ def install(app: Any) -> bool:
     auth gate, because it sits under `/api`), and the compiled bundle at
     `/admin`.
     """
-    from starlette.staticfiles import StaticFiles
-
     module = load()
     if module is None:
         return False
@@ -198,7 +198,32 @@ def install(app: Any) -> bool:
         return False
 
     app.include_router(module.router)
-    app.mount("/admin", StaticFiles(directory=str(bundle), html=True),
+    app.mount("/admin", _NoStoreIndex(directory=str(bundle), html=True),
               name="admin-console")
     log.info("[Admin] Licence console mounted at /admin")
     return True
+
+
+class _NoStoreIndex(StaticFiles):
+    """StaticFiles that refuses to let the browser cache `index.html`.
+
+    The console's JS and CSS are content-hashed, so those are safe to cache
+    forever. `index.html` is not: it is the thing that NAMES the current
+    hashes, and a browser holding yesterday's copy loads yesterday's console
+    against today's API, forever, with nothing on screen saying so.
+
+    That is not hypothetical. On 2026-10-01 the console had been rebuilt and
+    this app was already serving the new version over the API -- verified by
+    calling it directly -- while the operator's browser kept rendering the
+    previous one, because it had cached the index that named the old bundle.
+    The console looked broken; nothing was.
+
+    Only `index.html` is marked no-store, so the expensive assets still come
+    from cache and only ~500 bytes are refetched per load.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any):   # noqa: ANN201
+        response = super().file_response(*args, **kwargs)
+        if getattr(response, "media_type", "") == "text/html":
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response

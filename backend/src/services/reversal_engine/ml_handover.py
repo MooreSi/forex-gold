@@ -104,6 +104,18 @@ def hand_over(data_dir) -> tuple:
         online_path = data_dir / "re_ml_online.pkl"
         batch = joblib.load(batch_path) if batch_path.exists() else None
         online = joblib.load(online_path) if online_path.exists() else None
-        return batch, online, getattr(batch, "n_features_in_", None)
+        return batch, online, model_width(batch, online)
     except Exception:
         return None, None, None
+
+
+def model_width(batch, online) -> Optional[int]:
+    """How many features the fitted models expect: the batch model's, else
+    the online one's, else None. Read off the model so no table of past
+    feature counts is needed, and so a handover with only an online model
+    still truncates."""
+    for m in (batch, online):
+        w = getattr(m, "n_features_in_", None)
+        if w:
+            return int(w)
+    return None

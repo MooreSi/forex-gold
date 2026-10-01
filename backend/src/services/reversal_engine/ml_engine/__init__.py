@@ -10,7 +10,6 @@ Uses LightGBMRegressor + SGDRegressor; predicts R-multiple (positive = profitabl
 """
 from __future__ import annotations
 
-import json
 import logging
 import math
 import time
@@ -141,6 +140,16 @@ def _load_all() -> None:
             _model_batch = joblib.load(batch_path)
         if online_path.exists():
             _model_online = joblib.load(online_path)
+        # A save during a handover stamps the meta with THIS version while the
+        # models are still the old width, and the width itself is not saved.
+        # Read it off the models, or a restart mid-handover feeds them a wider
+        # vector, both raise, predict() returns None and the gate fails open.
+        _w = _ho.model_width(_model_batch, _model_online)
+        if _w is not None and _w < len(FEATURE_NAMES):
+            _ho.set_legacy_width(_w)
+            _log.warning("[RE-ML] stored models are %d wide, schema is %d -- "
+                         "still handing over until the next retrain",
+                         _w, len(FEATURE_NAMES))
         _log.info("[RE-ML] loaded — labeled=%d", _labeled_count)
     except Exception as exc:
         _log.debug("[RE-ML] load error: %s", exc)
@@ -214,11 +223,37 @@ def _pro_features(signal_data: dict) -> list[float]:
             float(f.get("pro_profile_ready") or 0.0)]
 
 
+def _num(signal_data: dict, key: str, default: float) -> float:
+    """`signal_data[key]` as a float, or `default` when it is absent or None.
+
+    Not `x or default`: that swaps a real 0.0 for the default, and for
+    regime_score, news_proximity_norm, fvg_dist_norm and minutes-since-REF the
+    zero is the most informative reading (ranging, event imminent, at the gap,
+    just posted). Measured 2026-10-01: 1,525 stored signals had ADX < 14 and
+    not one stored vector carried regime_score 0.0.
+    """
+    v = signal_data.get(key)
+    return default if v is None else float(v)
+
+
+def _distance_pts(signal_data: dict) -> float:
+    """Points from price to the level. Only the both-known-and-equal case
+    changed (it read 5 points): a missing price still reads as it always
+    did, which is far away, and 5 when both are missing."""
+    if signal_data.get("distance_pts") is not None:
+        return float(signal_data["distance_pts"])
+    price = float(signal_data.get("price_at_signal") or 0)
+    level = float(signal_data.get("level_price") or 0)
+    if price and level:
+        return abs(price - level)
+    return abs(price - level) or 5.0
+
+
 def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optional[list[float]]:
     """Extract feature vector from a signal dict (len(FEATURE_NAMES) elements)."""
     try:
         level_type  = signal_data.get("level_type", "")
-        level_score = float(signal_data.get("level_score", 0.5) or 0.5)
+        level_score = _num(signal_data, "level_score", 0.5)
         htf_bias    = signal_data.get("htf_bias", "neutral")
         direction   = signal_data.get("direction", "BUY")
         session     = signal_data.get("session", "off")
@@ -226,9 +261,7 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
         atr         = float(signal_data.get("atr", 8) or 8)
         rr_tp1      = float(signal_data.get("rr_tp1", 0.75) or 0.75)
         created_at  = float(signal_data.get("created_at", time.time()) or time.time())
-        distance    = float(signal_data.get("distance_pts",
-                            abs(float(signal_data.get("price_at_signal", 0) or 0)
-                                - float(signal_data.get("level_price", 0) or 0))) or 5)
+        distance    = _distance_pts(signal_data)
 
         hour = time.gmtime(created_at).tm_hour
 
@@ -258,8 +291,8 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
         # Populated by engine.py once per cycle from vantage_tg_signals; default
         # to a neutral/unfavourable prior (4h since last signal, 0 today) so
         # signals built without this context don't get an artificial boost.
-        mins_since_ref = float(signal_data.get("minutes_since_last_ref", 240) or 240)
-        ref_today      = float(signal_data.get("ref_signals_today", 0) or 0)
+        mins_since_ref = _num(signal_data, "minutes_since_last_ref", 240.0)
+        ref_today      = _num(signal_data, "ref_signals_today", 0.0)
         mins_since_norm = min(mins_since_ref / 240.0, 1.0)
         ref_today_norm  = min(ref_today / 10.0, 1.0)
 
@@ -282,21 +315,21 @@ def extract_features(signal_data: dict, recent_win_rate: float = 0.5) -> Optiona
             min(rr_tp1, 5.0),
             mins_since_norm,
             ref_today_norm,
-            float(signal_data.get("news_proximity_norm") or 1.0),   # news_proximity_norm
-            float(signal_data.get("regime_score")        or 0.5),   # regime_score
-            float(signal_data.get("equity_drawdown_pct") or 0.0),   # equity_drawdown_pct
-            float(signal_data.get("concurrent_agreement")or 0.0),   # concurrent_agreement
-            float(signal_data.get("ref_discipline_score") or 0.5),  # ref_discipline_score
-            float(signal_data.get("ref_aggression_score") or 0.5),  # ref_aggression_score
+            _num(signal_data, "news_proximity_norm", 1.0),
+            _num(signal_data, "regime_score", 0.5),
+            _num(signal_data, "equity_drawdown_pct", 0.0),
+            _num(signal_data, "concurrent_agreement", 0.0),
+            _num(signal_data, "ref_discipline_score", 0.5),
+            _num(signal_data, "ref_aggression_score", 0.5),
             # FVG context. Supplied by the caller (reversal_engine_service
             # builds it from ict_patterns.fvg_context on the M15 candles it
             # already has). Absent -> the documented "no gap found"
             # neutrals, so a signal generated without FVG context is never
             # mistaken for one sitting in a fresh gap.
-            float(signal_data.get("fvg_confluence") or 0.0),
-            float(signal_data.get("fvg_dist_norm", 5.0) or 5.0),
-            float(signal_data.get("fvg_fresh", 0.5) if signal_data.get("fvg_fresh") is not None else 0.5),
-            float(signal_data.get("fvg_size_norm") or 0.0),
+            _num(signal_data, "fvg_confluence", 0.0),
+            _num(signal_data, "fvg_dist_norm", 5.0),
+            _num(signal_data, "fvg_fresh", 0.5),
+            _num(signal_data, "fvg_size_norm", 0.0),
             # Reference-channel structure. Computed here rather than by the
             # caller so every path gets it automatically, and so a missing
             # profile degrades to the documented neutrals.
@@ -338,7 +371,7 @@ def ref_match_rate_for_type(level_type: str) -> Optional[float]:
 # `ml_engine._realised_r`.
 from ._training_data import (  # noqa: E402
     _VIRTUAL_LOT, _DOLLARS_PER_POINT, _R_LABEL_CLAMP,
-    _realised_r, _get_training_data, _labeled_count_from_db,
+    _realised_r, _get_training_data, _labeled_count_from_db, stored_vector,
 )
 
 
@@ -380,10 +413,15 @@ def _fit_batch(X: list, y: list) -> tuple:
 
 def _install_batch(model, backend: str, n: int, mean_r: float) -> None:
     """Swap a FITTED model in, in one assignment, and record the retrain."""
-    global _model_batch, _labeled_count
+    global _model_batch, _labeled_count, _model_online
     _model_batch = model
     _labeled_count = n
     _ho.end()
+    # The handover ends for both models or neither. An online model left at
+    # the old width raises on every predict and partial_fit, silently, for
+    # good; record_outcome starts a fresh one.
+    if _ho.model_width(None, _model_online) not in (None, _ho.model_width(model, None)):
+        _model_online = None
     _train_history.append({"ts": time.time(), "n": n, "mean_r": mean_r, "backend": backend})
     _save_all()
     _log.info("[RE-ML] retrained — n=%d backend=%s", n, backend)
@@ -512,15 +550,11 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     if ref_level_type and sig.get("correlation_confirmed"):
         record_ref_signal(ref_level_type, was_win=(outcome == "win"))
 
-    feats_json = sig.get("ml_features_json")
-    if not feats_json:
+    # The same reader the batch training set uses: padded to the schema and
+    # repaired, rather than skipping every row stored under an older width.
+    feats = stored_vector(sig)
+    if feats is None:
         return
-    try:
-        feats = json.loads(feats_json)
-    except Exception:
-        return
-    if len(feats) != len(FEATURE_NAMES):
-        return  # stored under an older feature set — dimensions won't line up
 
     label = _realised_r(sig)
     if label is None:
@@ -545,8 +579,10 @@ def record_outcome(signal_id: int, outcome: str) -> None:
             loss="huber", epsilon=0.1, random_state=42
         )
     # Check if saved model is an old classifier and reset it
-    if hasattr(_model_online, "classes_"):
-        _log.info("[RE-ML] Online model is old classifier — resetting to SGDRegressor")
+    if hasattr(_model_online, "classes_") or _ho.model_width(
+            None, _model_online) not in (None, len(feats)):
+        _log.info("[RE-ML] Online model is an old classifier or the wrong width "
+                  "— resetting to SGDRegressor")
         from sklearn.linear_model import SGDRegressor
         _model_online = SGDRegressor(
             loss="huber", epsilon=0.1, random_state=42

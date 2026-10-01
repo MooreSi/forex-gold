@@ -72,28 +72,12 @@ def _get_training_data():
     try:
         from backend.src.services.reversal_engine import reversal_engine_repo as re_db
         rows = re_db.get_ml_training_data()
+        # Oldest first: _fit_batch weights row i by its position, and the
+        # query has no ORDER BY to promise that.
+        rows = sorted(rows, key=lambda r: r.get("id") or 0)
         X, y = [], []
         for r in rows:
-            feats = r.get("ml_features_json")
-            if not feats:
-                continue
-            try:
-                f = json.loads(feats)
-            except Exception:
-                continue
-            # Older rows were labeled under a previous _version with fewer
-            # features. Discarding them (the pre-v6 behaviour) meant every
-            # feature addition silently threw the entire training history
-            # away -- at v6 that would have been all 752 labeled signals,
-            # leaving the model with nothing until months of new ones
-            # accumulated. Pad them with the documented neutral for each
-            # missing feature instead, which is truthful: those rows really
-            # do have no FVG context recorded. Only right-padding is valid,
-            # and only because features are append-only (see
-            # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
-            # from a newer build and still can't be interpreted, so it is
-            # still skipped.
-            f = pad_to_schema(f)
+            f = stored_vector(r)
             if f is None:
                 continue
             outcome = r.get("outcome", "")
@@ -108,6 +92,69 @@ def _get_training_data():
     except Exception as exc:
         _log.debug("[RE-ML] training data error: %s", exc)
         return [], []
+
+
+def stored_vector(row: dict) -> Optional[list]:
+    """A closed signal's stored feature vector, as the model should read it:
+    right-padded to the current schema, and with the zero-substitution
+    repaired where the row's own columns can say what the value really was.
+    None when there is no vector or it cannot be interpreted.
+
+    Shared by the batch training set and the online learner, so both read an
+    old row the same way.
+    """
+    feats = row.get("ml_features_json")
+    if not feats:
+        return None
+    try:
+        f = json.loads(feats)
+    except Exception:
+        return None
+    # Older rows were labeled under a previous _version with fewer
+    # features. Discarding them (the pre-v6 behaviour) meant every
+    # feature addition silently threw the entire training history
+    # away -- at v6 that would have been all 752 labeled signals,
+    # leaving the model with nothing until months of new ones
+    # accumulated. Pad them with the documented neutral for each
+    # missing feature instead, which is truthful: those rows really
+    # do have no FVG context recorded. Only right-padding is valid,
+    # and only because features are append-only (see
+    # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
+    # from a newer build and still can't be interpreted, so it is
+    # still skipped.
+    f = pad_to_schema(f)
+    if f is None:
+        return None
+    return _repair_zero_substitution(f, row)
+
+
+_I_REGIME = FEATURE_NAMES.index("regime_score")
+_I_DIST = FEATURE_NAMES.index("distance_norm")
+
+
+def _repair_zero_substitution(f: list, row: dict) -> list:
+    """Undo `x or default` where the row can prove the real value was zero.
+
+    Until 2026-10-01 extract_features read regime_score as `x or 0.5` and the
+    level distance as `x or 5`, so a ranging market (ADX < 14, regime 0.0) was
+    stored as 0.5 and a signal sitting on its level as 5 points away. Both are
+    recomputable from columns the same row holds, so they are corrected here
+    rather than left as 7,000 rows that contradict every new one. Only an
+    exact match on the substituted value is touched; anything else is left.
+    The other substitutions (news 0 -> 1.0, FVG distance 0 -> 5.0, minutes
+    since REF 0 -> 240) cannot be recovered from the row and stay as stored.
+    """
+    adx, atr = row.get("adx"), row.get("atr")
+    if f[_I_REGIME] == 0.5 and adx is not None:
+        from backend.src.db import database as _cdb
+        if _cdb.get_regime_score(float(adx), float(atr or 5)) == 0.0:
+            f[_I_REGIME] = 0.0
+    price, level = row.get("price_at_signal"), row.get("level_price")
+    if price and level and float(price) == float(level):
+        atr_used = float(atr or 8)
+        if f[_I_DIST] == min(5.0 / max(atr_used, 1.0), 5.0):
+            f[_I_DIST] = 0.0
+    return f
 
 
 def _labeled_count_from_db() -> int:

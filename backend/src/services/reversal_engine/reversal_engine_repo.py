@@ -302,7 +302,7 @@ def store_ml_prob(sig_id: int, prob: float) -> None:
     get_db().run("UPDATE re_signals SET ml_prob=? WHERE id=?", prob, sig_id)
 
 
-def store_ml_prob_at_fill(sig_id: int, prob: float, htf_bias: str) -> None:
+def store_ml_prob_at_fill(sig_id: int, prob: Optional[float], htf_bias: str) -> None:
     """Fresh ML re-score + bias, recomputed at fill time -- kept separate
     from ml_prob/htf_bias (creation-time) so both remain visible."""
     get_db().run(
@@ -618,8 +618,8 @@ def insert_vantage_pending_order(row: tuple) -> None:
 def fetch_ml_outcome_rows() -> list:
     """Completed, ML-scored RE signals -- the calibration-report corpus."""
     return get_db().all(
-        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1, sl_dist, net_pnl_dollars "
-        "FROM re_signals "
+        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1, sl_dist, net_pnl_dollars, "
+        "live_exec_status FROM re_signals "  # _realised_r leaves executed rows out
         "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
         "ORDER BY id"
     )

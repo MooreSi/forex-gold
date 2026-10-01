@@ -191,7 +191,7 @@ class _LiveExecuteMixin:
                     if _bias_block or (not _asian_exempt and (
                             (fresh_htf == "bullish" and direction == "SELL" and level_score < 0.75)
                             or (fresh_htf == "bearish" and direction == "BUY" and level_score < 0.75))):
-                        re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
+                        re_db.store_ml_prob_at_fill(sig["id"], fresh_prob, fresh_htf)
                         re_db.update_live_exec(sig["id"], status="bias_skipped")
                         # bugs/038: say WHICH of the two rules refused. The
                         # owner's trend gate never looks at level_score, so
@@ -219,7 +219,7 @@ class _LiveExecuteMixin:
                     _mx_ok, _mx_reason = check_momentum_exhaustion(
                         direction, m15_candles or h1_candles, fresh_atr)
                     if not _mx_ok:
-                        re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
+                        re_db.store_ml_prob_at_fill(sig["id"], fresh_prob, fresh_htf)
                         re_db.update_live_exec(sig["id"], status="momentum_skipped")
                         _log.info(
                             "[RE-Engine] momentum re-check blocked live exec %s -- %s",
@@ -283,6 +283,22 @@ class _LiveExecuteMixin:
                         fresh_sig.update(await re_macro.get_cycle_context())
                     except Exception:
                         pass
+                    # FVG context. Not a re_signals column either, so without
+                    # this all four FVG features (and pro_fvg_delta and
+                    # pro_likeness, which read them) fell back to "no gap" here
+                    # (2026-10-01). Measured again against the fresh candles,
+                    # exactly as creation measures it; a failure leaves the
+                    # same "no gap" neutrals creation would.
+                    try:
+                        from backend.src.services.reversal_engine.ict_patterns import fvg_context
+                        fresh_sig.update(fvg_context(
+                            m15_candles or h1_candles,
+                            float(sig.get("level_price") or 0),
+                            direction,
+                            fresh_atr,
+                        ))
+                    except Exception:
+                        pass
 
                     from backend.src.services.reversal_engine import ml_engine as re_ml
                     win_rate = re_db.get_recent_win_rate(20)
@@ -292,7 +308,7 @@ class _LiveExecuteMixin:
                         _fp = re_ml.predict(fresh_feats)
                         if _fp is not None:
                             fresh_prob = _fp
-                    re_db.store_ml_prob_at_fill(sig["id"], fresh_prob or 0.0, fresh_htf)
+                    re_db.store_ml_prob_at_fill(sig["id"], fresh_prob, fresh_htf)
             except Exception as _refresh_exc:
                 _log.warning(
                     "[RE-Engine] fill-time re-evaluation failed for %s, falling back to "

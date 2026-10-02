@@ -19,3 +19,13 @@ def test_the_card_reads_in_one_call(make_client, monkeypatch):
 
 def test_it_has_no_write_routes():
     assert {m for r in gex_router.router.routes for m in r.methods} == {"GET"}
+
+
+def test_an_unreachable_trading_node_is_a_503_with_its_reason(make_client, monkeypatch):
+    async def _report():
+        raise gex_router.gex_ctl.RemoteControlFailed("The trading node could not be reached (x).")
+
+    monkeypatch.setattr(gex_router.gex_ctl, "report_async", _report)
+    resp = make_client().get("/api/gex/latest")
+    assert resp.status_code == 503
+    assert "could not be reached" in resp.text

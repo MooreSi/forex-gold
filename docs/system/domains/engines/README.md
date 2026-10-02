@@ -490,6 +490,15 @@ fetch. No node-role check of its own (the loop's one `is_remote_node` call is
 pinned); it runs only where the engine has a bridge.
 
 
+**The card follows the node that trades (2026-10-02).** The snapshot is read
+through `cluster/peer_reports.py`: with the VPS trading, the Mac asks the VPS
+for its latest snapshot (`MSG_PEER_REPORT`) instead of its own. The collector
+still writes where the Reversal engine has a bridge, so under centralized
+signal generation (engines on the Mac, VPS trading) the VPS may hold no
+snapshot and the card says "No GEX snapshot yet". That is the trading node's
+true state, not a bug to paper over with the Mac's copy. Details in the broker
+domain's Fill cost section.
+
 ## Trend PA (2026-09-29, docs/todo/012)
 
 The owner's "simpler" engine: H4 swing structure plus an EMA50 filter for the

@@ -496,6 +496,21 @@ in `unmeasured`, never averaged in as free; an empty window is None, never 0.
 On the demo install at the time: 668 fills, median round trip 0.93 pts, p90
 2.23, 66% of fills slipped against us, spread 0.22.
 
+### The card follows the node that trades (2026-10-02)
+
+`execution_quality` is in the trader's own database, so on the Mac with the VPS
+trading the card used to show the Mac's fills. `cluster/peer_reports.py`
+now routes it (and the GEX card): `trader_is_peer()` (a VPS host is configured,
+no sync server runs here, `active_trader` is the VPS) sends the Mac's request
+as `MSG_PEER_REPORT` and the VPS answers from its own database
+(`sync/_peer_report_sync.py`). The answer carries `node: "remote"|"local"` and
+the card badge says which. **No fallback to the Mac's own data**: a VPS that is
+trading and unreachable returns HTTP 503 with the reason, because showing the
+Mac's fills there is the misreport this fixes. The VPS looks the name up in the
+fixed `REPORTS` table and checks the arguments; an older VPS never answers and
+the card says it may be running older code. Pinned by
+tests/core/test_peer_report_over_sync.py.
+
 ## After a VPS reboot, MT5 came back with AutoTrading off (2026-09-28)
 
 The owner's VPS went offline at 20:14 on 2026-09-27 and was restarted from the

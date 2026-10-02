@@ -28,3 +28,13 @@ def test_the_window_is_bounded(make_client, monkeypatch):
 
 def test_it_has_no_write_routes():
     assert {m for r in fill_router.router.routes for m in r.methods} == {"GET"}
+
+
+def test_an_unreachable_trading_node_is_a_503_with_its_reason(make_client, monkeypatch):
+    async def _report(days):
+        raise fill_router.fill_ctl.RemoteControlFailed("The trading node could not be reached (x).")
+
+    monkeypatch.setattr(fill_router.fill_ctl, "report_async", _report)
+    resp = make_client().get("/api/fills/cost")
+    assert resp.status_code == 503
+    assert "could not be reached" in resp.text

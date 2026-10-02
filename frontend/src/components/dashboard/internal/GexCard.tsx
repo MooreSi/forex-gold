@@ -3,6 +3,7 @@ import { api } from "@/api/client";
 import { usePoll } from "@/hooks/usePoll";
 import { formatCompactMoney, formatPrice } from "@/components/shared/format";
 import { DashCard } from "./DashCard";
+import { nodeBadge, nodeReadError, type ReportNode } from "./nodeLabel";
 
 export interface GexSnapshot {
   asof_date: string;
@@ -25,6 +26,8 @@ export interface GexSnapshot {
 }
 
 export interface GexReport {
+  /** The node the snapshot came from: the one that trades. */
+  node?: ReportNode;
   snapshot: GexSnapshot | null;
   n_snapshots: number;
   target_snapshots: number;
@@ -102,10 +105,10 @@ export function GexCard() {
     300_000,
   );
   return (
-    <DashCard title="GEX (GLD options)" icon="target" badge="daily · display only"
+    <DashCard title="GEX (GLD options)" icon="target" badge={nodeBadge("daily · display only", poll.data?.node)}
       footnote="Assumes dealers are long calls and short puts. GLD is a small slice of gold options. Nothing trades on this.">
       {poll.error && !poll.data
-        ? <p className="text-xs text-loss">Could not read GEX.</p>
+        ? <p className="text-xs text-loss">{nodeReadError("GEX", poll.error)}</p>
         : <GexView report={poll.data} />}
     </DashCard>
   );

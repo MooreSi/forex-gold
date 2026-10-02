@@ -149,6 +149,13 @@ MSG_CLOSE_TRADE_ACK = "close_trade_ack"  # VPS -> Mac: {"req_id","result"} or {"
 MSG_RESUME_TRADING     = "resume_trading"      # Mac -> VPS: {"req_id"}
 MSG_RESUME_TRADING_ACK = "resume_trading_ack"  # VPS -> Mac: {"req_id","result"} or {"req_id","error"}
 
+# Read-only reports for the Dashboard from the node that trades (owner,
+# 2026-10-02): Fill cost and GEX live in the trader's own database, so the
+# Mac asks the VPS for the same report instead of reading its own
+# (sync/_peer_report_sync.py). `name` is looked up in a fixed table on the VPS.
+MSG_PEER_REPORT     = "peer_report"      # Mac -> VPS: {"req_id","name","args"}
+MSG_PEER_REPORT_ACK = "peer_report_ack"  # VPS -> Mac: {"req_id","result"} or {"req_id","error"}
+
 # Centralized signal generation (Settings > Remote Node > "Generate signals on
 # this node only") — a fully-resolved trade decision from one of the Mac's own
 # generators (Breakout/TestSignal/REopy/GD2-GD-VIP), forwarded to the VPS for

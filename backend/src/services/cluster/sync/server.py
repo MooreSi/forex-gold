@@ -32,6 +32,7 @@ from backend.src.services.cluster.sync._ea_templates_sync import ServerEaTemplat
 from backend.src.services.cluster.sync._channel_setup_sync import ServerChannelSetupMixin
 from backend.src.services.cluster.sync._remote_close_sync import ServerRemoteCloseMixin
 from backend.src.services.cluster.sync._remote_resume_sync import ServerRemoteResumeMixin
+from backend.src.services.cluster.sync._peer_report_sync import ServerPeerReportMixin
 from backend.src.services.cluster.sync._update_sync import ServerUpdateMixin
 from backend.src.services.cluster.sync import _latency_sync
 from backend.src.services.broker import autotrading_guard
@@ -53,7 +54,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_PROPOSE,
     MSG_MT5_ACCOUNTS, MSG_EA_TEMPLATES, MSG_CHANNEL_SETUP, MSG_RESTART_NODE, MSG_UPDATE_NODE, MSG_WRITE_OFF_UNCONFIRMED,
-    MSG_CLOSE_TRADE, MSG_RESUME_TRADING,
+    MSG_CLOSE_TRADE, MSG_RESUME_TRADING, MSG_PEER_REPORT,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 
@@ -72,7 +73,7 @@ _ENGINE_ALIASES = {"reversal": "reversal_engine"}
 class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                  ServerMt5AccountsMixin, ServerRestartMixin, ServerUpdateMixin,
                  ServerWriteOffMixin, ServerEaTemplatesMixin, ServerRemoteCloseMixin,
-                 ServerRemoteResumeMixin, ServerChannelSetupMixin):
+                 ServerRemoteResumeMixin, ServerChannelSetupMixin, ServerPeerReportMixin):
     def __init__(self, main_engine=None, breakout_engine=None,
                  bounce_engine=None, re_engine=None):
         self._main_engine     = main_engine
@@ -257,6 +258,8 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
             await self._handle_close_trade(ws, msg)
         elif t == MSG_RESUME_TRADING:
             await self._handle_resume_trading(ws, msg)
+        elif t == MSG_PEER_REPORT:
+            await self._handle_peer_report(ws, msg)
         elif t == MSG_UPDATE_NODE:
             await self._handle_update_node(ws, msg)
         elif t == MSG_EXPERT_PARAMS_PROPOSE:

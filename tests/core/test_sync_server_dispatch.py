@@ -53,6 +53,7 @@ ROUTES = [
     (P.MSG_MARKET_ORDER, "_handle_market_order"),
     (P.MSG_SIGNAL_ORDER, "_handle_signal_order"),
     (P.MSG_SIGNAL_FOLLOWUP, "_handle_signal_followup"),
+    (P.MSG_PEER_REPORT, "_handle_peer_report"),
 ]
 HANDLERS = [h for _t, h in ROUTES]
 IDS = [t for t, _h in ROUTES]

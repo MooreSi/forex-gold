@@ -3,6 +3,7 @@ import { api } from "@/api/client";
 import { usePoll } from "@/hooks/usePoll";
 import { asArray } from "@/lib/asArray";
 import { DashCard } from "./DashCard";
+import { nodeBadge, nodeReadError, type ReportNode } from "./nodeLabel";
 
 export interface FillCostGroup {
   strategy?: string;
@@ -19,6 +20,8 @@ export interface FillCostGroup {
 
 export interface FillCostReport extends FillCostGroup {
   days: number;
+  /** The node the figures came from: the one that trades. */
+  node?: ReportNode;
   unmeasured: number;
   by_strategy: FillCostGroup[];
 }
@@ -112,10 +115,10 @@ export function FillCostCard() {
     60_000,
   );
   return (
-    <DashCard title="Fill cost" icon="activity" badge="14 days"
+    <DashCard title="Fill cost" icon="activity" badge={nodeBadge("14 days", poll.data?.node)}
       footnote="Measured per closed trade against the price asked for. Positive slippage is against us.">
       {poll.error && !poll.data
-        ? <p className="text-xs text-loss">Could not read fill costs.</p>
+        ? <p className="text-xs text-loss">{nodeReadError("fill costs", poll.error)}</p>
         : <FillCostView report={poll.data} />}
     </DashCard>
   );

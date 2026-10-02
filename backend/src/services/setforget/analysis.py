@@ -207,11 +207,16 @@ def score(evidence: dict, candidate: Optional[dict]) -> dict:
     With no candidate the checklist is still scored, for BUY: the items and
     their reasons are the useful part of a "no setup" page, and an empty panel
     beside "no setup" reads as a broken feature rather than a waiting one.
+
+    An ARMED candidate's zone is not "at" anything: until 2026-10-02 it was
+    scored as "Price is at a supply zone" with price 143 points below it, two
+    points of a "high" grade for a level not yet reached.
     """
+    arrived = (candidate or {}).get("stage") in ("waiting", "triggered")
     return confluence.score({
         **evidence,
         "direction": (candidate or {}).get("direction", "BUY"),
-        "at_zone": (candidate or {}).get("zone"),
+        "at_zone": (candidate or {}).get("zone") if arrived else None,
     })
 
 
@@ -272,6 +277,51 @@ def propose(evidence: dict,
                       f"no setup — this is a wait, not a failure.")
 
     return _build(evidence, "BUY" if weekly == "bullish" else "SELL", price)
+
+
+_STAGE_RANK = {"armed": 0, "waiting": 1, "triggered": 2}
+
+
+def scan(evidence: dict) -> tuple[Optional[dict], str, Optional[dict]]:
+    """Both sides' candidates, the better one first: `(best, why, other)`.
+
+    Owner, 2026-10-02: the page "only ever shows a sell which it never
+    reaches"; it should look for both a buy and a sell. `propose` alone builds
+    the Weekly/Daily side only, so in a falling market it offered a SELL armed
+    143 points above price while the demand 57 points below triggered twice
+    that week unseen -- and Auto, wired to longs, found only counter-trend
+    trades the AI then declined. Each side here is `propose(direction=...)`, so
+    every rule but the bias gate still applies to it; the bias decides ties.
+
+    Ranked by: placeable now, then the furthest stage, then (once price is AT
+    a zone) the higher-timeframe side, then the nearer entry. Between two armed
+    plans the one price reaches first is the one worth watching, whichever way
+    it points. `why` is "" when there is a best; otherwise both sides' reasons.
+    """
+    if evidence.get("price") is None:
+        return None, propose(evidence)[1], None
+    weekly, daily = evidence.get("weekly_bias"), evidence.get("daily_bias")
+    bias_side = {"bullish": "BUY", "bearish": "SELL"}.get(weekly) \
+        if weekly == daily else None
+
+    built, reasons = [], []
+    for direction in ("BUY", "SELL"):
+        candidate, why = propose(evidence, direction=direction)
+        if candidate is None:
+            reasons.append(f"No {'long' if direction == 'BUY' else 'short'}: {why}")
+        else:
+            built.append(candidate)
+    if not built:
+        return None, " ".join(reasons), None
+
+    def rank(c: dict) -> tuple:
+        stage = _STAGE_RANK.get(c.get("stage"), 0)
+        return (not setup.invalidations(c), stage,
+                stage > 0 and c["direction"] == bias_side,
+                -float(c.get("distance") or 0.0))
+
+    built.sort(key=rank, reverse=True)
+    return built[0], "", (built[1] if len(built) > 1 else None)
 
 
 def _build(evidence: dict, direction: str,
@@ -490,12 +540,13 @@ async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:
     is money for nothing, and the reason is already on screen.
     """
     evidence = await gather(engine)
-    candidate, why = propose(evidence)
+    candidate, why, other = scan(evidence)
     result = {
         "generated_at": time.time(),
         "price": evidence["price"],
         "evidence": public_evidence(evidence),
         "candidate": candidate,
+        "other_side": other,
         "no_setup_reason": why,
         "confluence": score(evidence, candidate),
         "ai": None,

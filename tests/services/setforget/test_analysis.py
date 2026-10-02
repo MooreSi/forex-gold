@@ -229,7 +229,7 @@ class TestEvaluate:
         monkeypatch.setattr(analysis._ai, "is_configured", lambda cfg: True)
         monkeypatch.setattr(analysis._ai, "complete",
                             lambda *a, **k: called.append(a))
-        monkeypatch.setattr(analysis, "propose", lambda ev: (None, "no setup"))
+        monkeypatch.setattr(analysis, "scan", lambda ev: (None, "no setup", None))
 
         result = await analysis.evaluate(engine, {"ai_provider": "claude"})
 
@@ -251,10 +251,10 @@ class TestEvaluate:
         async def _complete(cfg, system, prompt, max_tokens, timeout=30):
             return reply
         monkeypatch.setattr(analysis._ai, "complete", _complete)
-        monkeypatch.setattr(analysis, "propose", lambda ev: (
+        monkeypatch.setattr(analysis, "scan", lambda ev: (
             {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
              "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
-             "reward": 55.0, "rr": 4.23}, ""))
+             "reward": 55.0, "rr": 4.23}, "", None))
 
         result = await analysis.evaluate(engine, {"ai_provider": "claude"})
 
@@ -279,10 +279,10 @@ class TestEvaluate:
         async def _complete(cfg, system, prompt, max_tokens, timeout=30):
             return json.dumps({"verdict": "skip", "reasoning": "Too far."})
         monkeypatch.setattr(analysis._ai, "complete", _complete)
-        monkeypatch.setattr(analysis, "propose", lambda ev: (
+        monkeypatch.setattr(analysis, "scan", lambda ev: (
             {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
              "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
-             "reward": 55.0, "rr": 4.23}, ""))
+             "reward": 55.0, "rr": 4.23}, "", None))
 
         result = await analysis.evaluate(engine, {
             "ai_provider": "deepseek",
@@ -311,7 +311,7 @@ class TestEvaluate:
         original = {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
                     "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
                     "reward": 55.0, "rr": 4.23}
-        monkeypatch.setattr(analysis, "propose", lambda ev: (dict(original), ""))
+        monkeypatch.setattr(analysis, "scan", lambda ev: (dict(original), "", None))
 
         result = await analysis.evaluate(engine, {"ai_provider": "claude"})
 
@@ -332,10 +332,10 @@ class TestEvaluate:
         async def _complete(cfg, system, prompt, max_tokens, timeout=30):
             return json.dumps({"verdict": "skip", "reasoning": "News in an hour."})
         monkeypatch.setattr(analysis._ai, "complete", _complete)
-        monkeypatch.setattr(analysis, "propose", lambda ev: (
+        monkeypatch.setattr(analysis, "scan", lambda ev: (
             {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
              "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
-             "reward": 55.0, "rr": 4.23}, ""))
+             "reward": 55.0, "rr": 4.23}, "", None))
 
         result = await analysis.evaluate(engine, {"ai_provider": "claude"})
 
@@ -350,10 +350,10 @@ class TestEvaluate:
         async def _complete(cfg, system, prompt, max_tokens, timeout=30):
             return "I'm afraid I can't help with that."
         monkeypatch.setattr(analysis._ai, "complete", _complete)
-        monkeypatch.setattr(analysis, "propose", lambda ev: (
+        monkeypatch.setattr(analysis, "scan", lambda ev: (
             {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
              "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
-             "reward": 55.0, "rr": 4.23}, ""))
+             "reward": 55.0, "rr": 4.23}, "", None))
 
         result = await analysis.evaluate(engine, {"ai_provider": "claude"})
 
@@ -368,10 +368,10 @@ class TestEvaluate:
         async def _complete(cfg, system, prompt, max_tokens, timeout=30):
             raise RuntimeError("upstream 529")
         monkeypatch.setattr(analysis._ai, "complete", _complete)
-        monkeypatch.setattr(analysis, "propose", lambda ev: (
+        monkeypatch.setattr(analysis, "scan", lambda ev: (
             {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
              "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
-             "reward": 55.0, "rr": 4.23}, ""))
+             "reward": 55.0, "rr": 4.23}, "", None))
 
         result = await analysis.evaluate(engine, {"ai_provider": "claude"})
 
@@ -407,13 +407,13 @@ class TestTheModelsLevelsKeepTheRulesStage:
                 "verdict": "adjust", "entry": 1984.0, "stop_loss": 1970.0,
                 "take_profit": 2040.0, "reasoning": "Tighter entry."})
         monkeypatch.setattr(analysis._ai, "complete", _complete)
-        monkeypatch.setattr(analysis, "propose", lambda ev: (
+        monkeypatch.setattr(analysis, "scan", lambda ev: (
             {"direction": "BUY", "entry": 1985.0, "stop_loss": 1972.0,
              "take_profit": 2040.0, "order_type": "limit", "risk": 13.0,
              "reward": 55.0, "rr": 4.23, "stage": stage, "trigger": None,
              "zone": _zone("demand", 1975.0, 1985.0),
              "target_zone": _zone("supply", 2040.0, 2050.0),
-             "distance": 15.0, "distance_days": 0.5}, ""))
+             "distance": 15.0, "distance_days": 0.5}, "", None))
         return await analysis.evaluate(engine, {"ai_provider": "claude"})
 
     @pytest.mark.asyncio

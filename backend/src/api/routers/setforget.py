@@ -118,7 +118,7 @@ async def state(eng: Any = Depends(engine_dep)) -> dict:
         log.warning("[setforget] could not read the chart: %s", exc)
         raise Refusal(f"Could not read the chart: {exc}") from exc
 
-    candidate, why = sf_ctl.propose(evidence)
+    candidate, why, other = sf_ctl.scan(evidence)
     settings = sf_ctl.get_risk_settings() or {}
     balance = await _balance(eng)
     cfg = settings_ctl.load_config()
@@ -134,6 +134,9 @@ async def state(eng: Any = Depends(engine_dep)) -> dict:
         # sixty seconds -- shipped it to the browser.
         "evidence": sf_ctl.public_evidence(evidence),
         "candidate": candidate,
+        # The side not shown, so the page can say what else it is watching
+        # (both directions since 2026-10-02). Null when only one side exists.
+        "other_side": other,
         "no_setup_reason": why,
         "confluence": sf_ctl.score(evidence, candidate),
         # The free read applies the rules too. `propose` builds the best

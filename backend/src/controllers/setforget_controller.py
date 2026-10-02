@@ -19,7 +19,7 @@ from backend.src.services.setforget import analysis as _analysis
 from backend.src.services.setforget import setup as _setup
 
 __all__ = [
-    "read_chart", "public_evidence", "propose", "evaluate", "score",
+    "read_chart", "public_evidence", "scan", "evaluate", "score",
     "invalidations",
     "lot_from_risk", "money_at_risk", "money_at_target",
     "get_risk_settings", "update_risk_settings",
@@ -42,9 +42,9 @@ def public_evidence(evidence: dict) -> dict:
     return _analysis.public_evidence(evidence)
 
 
-def propose(evidence: dict) -> tuple[Optional[dict], str]:
-    """The candidate the rules produce, or None and why there is none."""
-    return _analysis.propose(evidence)
+def scan(evidence: dict) -> tuple[Optional[dict], str, Optional[dict]]:
+    """Both sides' candidates: the better one, why there is none, the other."""
+    return _analysis.scan(evidence)
 
 
 async def evaluate(engine: Any, cfg: dict, timeout: int = 60) -> dict:

@@ -10,6 +10,7 @@ import { ExecuteSetupDialog } from "./internal/ExecuteSetupDialog";
 import { IndicatorStrip } from "./internal/IndicatorStrip";
 import { LotSizeSection } from "./internal/LotSizeSection";
 import { NoSetupSection } from "./internal/NoSetupSection";
+import { OtherSideSection } from "./internal/OtherSideSection";
 import { ReviewSection } from "./internal/ReviewSection";
 import { SetupChart } from "./internal/SetupChart";
 import { SetupSummarySection } from "./internal/SetupSummarySection";
@@ -161,6 +162,8 @@ export function SetForgetPanel() {
           ) : (
             <NoSetupSection reason={data.no_setup_reason} evidence={data.evidence} />
           )}
+
+          <OtherSideSection candidate={data.other_side ?? null} />
 
           {data.ai && <ReviewSection review={data.ai} />}
 

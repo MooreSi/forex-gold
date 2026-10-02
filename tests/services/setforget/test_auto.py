@@ -71,16 +71,18 @@ def world(monkeypatch):
         return {"price": 4300.0, "atr": 10.0, "weekly_bias": "bearish",
                 "daily_bias": "bearish"}
 
-    def propose(evidence, direction=None):
-        assert direction == "BUY", "Auto looks for longs only"
-        return state["candidate"], state["why"]
+    # Was a `propose` stub asserting direction == "BUY" -- the 2026-09-24
+    # longs-only rule, reversed by the owner 2026-10-02. Auto now takes the
+    # scan's best side; test_both_directions.py holds it to placing a short.
+    def scan(evidence):
+        return state["candidate"], state["why"], None
 
     async def review(evidence, candidate, cfg, timeout=60):
         return {"ai": state["ai"], "candidate": state["revised"] or candidate,
                 "billed": True}
 
     monkeypatch.setattr(auto._analysis, "gather", gather)
-    monkeypatch.setattr(auto._analysis, "propose", propose)
+    monkeypatch.setattr(auto._analysis, "scan", scan)
     monkeypatch.setattr(auto._analysis, "review", review)
     monkeypatch.setattr(auto._ai, "is_configured", lambda cfg: state["configured"])
     monkeypatch.setattr(auto, "is_enabled", lambda: state["enabled"])

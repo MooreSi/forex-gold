@@ -60,6 +60,7 @@ def sf(monkeypatch):
         },
         "candidate": _candidate(),
         "why": "",
+        "other": None,
         "settings": {"setforget_lot_size": 0.0, "risk_per_trade_pct": 1.0},
         "writes": [],
         "cfg": {"ai_provider": "claude", "claude_model": "a-model"},
@@ -83,7 +84,8 @@ def sf(monkeypatch):
             "generated_at": 1.0, "price": state["evidence"]["price"],
             "evidence": {k: v for k, v in state["evidence"].items()
                          if not k.endswith("candles")},
-            "candidate": state["candidate"], "no_setup_reason": state["why"],
+            "candidate": state["candidate"], "other_side": state["other"],
+            "no_setup_reason": state["why"],
             "confluence": {"items": [], "score": 7, "max": 9, "pct": 77.8,
                            "grade": "high"},
             "ai": state["ai"], "billed": True, "invalidations": [],
@@ -91,8 +93,9 @@ def sf(monkeypatch):
 
     monkeypatch.setattr(sf_router.sf_ctl, "read_chart", _read)
     monkeypatch.setattr(sf_router.sf_ctl, "evaluate", _evaluate)
-    monkeypatch.setattr(sf_router.sf_ctl, "propose",
-                        lambda ev: (state["candidate"], state["why"]))
+    monkeypatch.setattr(sf_router.sf_ctl, "scan",
+                        lambda ev: (state["candidate"], state["why"],
+                                    state["other"]))
     monkeypatch.setattr(sf_router.sf_ctl, "score",
                         lambda ev, candidate: {"items": [], "score": 7, "max": 9,
                                                "pct": 77.8, "grade": "high"})
@@ -155,6 +158,17 @@ class TestTheFreeRead:
         assert body["confluence"]["max"] == 9
         assert body["billed"] is False
         assert body["ai"] is None
+
+    def test_it_carries_the_other_side_it_is_watching(self, make_client, sf):
+        """Both directions since 2026-10-02: the page shows the better side
+        as the candidate and names the other, so a SELL armed far above price
+        no longer hides a BUY the market is sitting on."""
+        sf["other"] = _candidate(direction="SELL", entry=2040.0, stage="armed")
+
+        body = make_client().get("/api/trading/setforget").json()
+
+        assert body["candidate"]["direction"] == "BUY"
+        assert body["other_side"]["direction"] == "SELL"
 
     def test_it_does_not_ship_a_second_copy_of_the_candles(self, make_client, sf):
         """The browser draws the chart from /api/chart at the window it is

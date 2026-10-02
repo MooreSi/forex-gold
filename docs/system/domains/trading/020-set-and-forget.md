@@ -14,8 +14,9 @@ configured AI review that proposal, and hands it to the operator to place.
 
 **One part of it is an engine now: "Auto" (2026-09-24).** Everything else on
 the page waits for a person. Auto, when switched on, scans every 15 minutes
-for a LONG and places it when the rules and the AI agree -- demo account
-only. See "Auto" below. With Auto off, nothing here runs unattended.
+for a setup in EITHER direction (long-only until 2026-10-02) and places it
+when the rules and the AI agree -- demo account only. See "Auto" and "Both
+directions" below. With Auto off, nothing here runs unattended.
 
 ## Where the code lives
 
@@ -624,3 +625,59 @@ the control showing the forming bar alone WAS a trigger.
 
 Not changed, still open: Auto scans (and can bill the AI) at weekends on a
 closed market's last candles.
+
+## Both directions (2026-10-02)
+
+Owner, with a screenshot: "set & forget never finds a setup ... it only ever
+shows a sell on the screen which it never reaches, it should be looking for
+both buy and sell". Live read that morning: Weekly and Daily bearish, price
+4187.51, a SELL armed at the 4330.48 supply 143 points up, and the 4102.85 -
+4129.89 demand 57 points down that price had held twice that week.
+
+**Two defects, one shape.** `propose` with no direction builds only the
+Weekly = Daily side, so the page never showed the BUY. Replaying the page's
+rules at every 30m close 22 Sep - 2 Oct, that BUY TRIGGERED (placeable) on 30
+Sep 23:00, 1 Oct 03:30 and 1 Oct 13:00. Auto was the mirror: `DIRECTION =
+"BUY"` hard-wired, so in a falling market every long it found was
+counter-trend and the AI declined all four it was shown (app log, 1 Oct 01:17
+and 11:11, 2 Oct 01:42 and 01:57: "a long here fights the higher-timeframe
+bias"), while the with-trend SELLs that triggered on 22, 23 and 25 Sep were
+never looked at.
+
+**Fix:** `analysis.scan(evidence) -> (best, why, other)` builds each side with
+`propose(direction=...)`, so every rule but the bias gate applies to each, and
+ranks them: placeable now, then the furthest stage, then (once price is AT a
+zone) the Weekly/Daily side, then the nearer entry. Between two armed plans the
+one price reaches first wins whichever way it points. The page's free read,
+Evaluate and Auto all use it; the page shows the loser as "Also watching"
+(`OtherSideSection.tsx`). `propose`'s own contract, bias gate included, is
+unchanged and still pinned by `TestPropose`. The AI prompt is unchanged: it
+still holds a proposal to the Weekly/Daily rule, so it will mostly approve the
+with-trend side and decline the other -- the owner's 2026-09-24 "the AI
+decides", now with both sides in front of it.
+
+**Also fixed: the checklist claimed arrival.** `score` passed the candidate's
+zone as `at_zone` whatever its stage, so the armed SELL scored "Price is at a
+supply zone 4330.48-4353.30" -- 2 of the 7 points on a "high" grade -- with
+price 143 points below. An armed candidate now scores it as not at a zone.
+
+Pinned by `tests/services/setforget/test_both_directions.py`, whose first test
+is the control: `propose` alone on the live read still gives the distant SELL.
+
+**What it does NOT do: 1-2 trades a day.** Same replay over 9 Sep - 2 Oct
+(first-touch stop/target on M30, one trade at a time, $0.30 cost, no AI):
+
+| Rule | Trades | Won | Net R |
+|---|---|---|---|
+| Auto as it was (BUY only) | 6 | 1 | -4.5 (last one open at +0.5) |
+| SELL only | 7 | 1 | -1.8 (last one open at +4.3) |
+| Weekly = Daily side only | 7 | 1 | -1.8 |
+| Both, as `scan` ranks them | 6 | 1 | -2.7 (last one open at +2.4) |
+
+About one placeable trigger every two to three days with both sides, most of
+them stopped out at -1R by the 0.25 x ATR buffer. Three weeks is too short to
+say anything about edge, and it agrees with the three-year replay above: the
+rules alone lose, and whether the AI's veto adds an edge is what the demo run
+is for. The guide's own cadence is "1-2 trades per week (at most)". Nothing
+was re-tuned to manufacture frequency.
+

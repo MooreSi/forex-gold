@@ -5,7 +5,8 @@ import { useSetForgetAuto } from "../hooks/useSetForgetAuto";
 
 /**
  * The "Auto" button and its last scan. On, the backend reviews the market
- * with the AI every 15 minutes for a LONG and places it when the rules and the
+ * with the AI every 15 minutes for a setup either way (long-only until
+ * 2026-10-02) and places it when the rules and the
  * AI agree -- demo account only, at most two a day, one open at a time. Those
  * refusals are server-side (`services/setforget/auto.py`); this switch is all
  * the page holds.
@@ -20,10 +21,10 @@ export function AutoToggle() {
       onClick={() => void a.toggle()}
       disabled={a.busy}
       tooltip={on
-        ? "Auto is ON: every 15 minutes the AI reviews gold for a long setup "
+        ? "Auto is ON: every 15 minutes the AI reviews gold for a buy or sell setup "
           + "and places it (demo account only, max 2 a day). Click to stop."
-        : "Turn on to have the AI review gold every 15 minutes and place a long "
-          + "setup when there is one (demo account only, max 2 a day)."}
+        : "Turn on to have the AI review gold every 15 minutes and place a buy "
+          + "or sell setup when there is one (demo account only, max 2 a day)."}
     >
       <Bot size={12} />
       {on ? "Auto: ON" : "Auto"}
@@ -42,7 +43,7 @@ export function AutoStatusLine() {
   return (
     <p role="status" className="rounded-md border border-line bg-surface-2/60
                                 px-3 py-2 text-[11px] text-ink-2">
-      Auto is on, scanning for a long every {Math.round(s.interval_s / 60)} min.
+      Auto is on, scanning for a buy or sell every {Math.round(s.interval_s / 60)} min.
       {s.last_run
         ? ` Last scan ${formatClock(s.last_run)}: ${s.reason}`
         : " First scan within a minute."}

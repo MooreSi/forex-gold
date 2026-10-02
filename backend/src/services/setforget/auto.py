@@ -6,6 +6,13 @@ choices that day: buy at any validated demand zone whatever the
 higher-timeframe bias, with the AI deciding; at most two Auto trades a day;
 one Auto position open at a time.
 
+**Both directions since 2026-10-02** (owner: "it should be looking for both
+buy and sell"). Long-only in a falling market meant every long it found was
+counter-trend, and the AI declined all four it was shown on 1-2 Oct, while
+the with-trend shorts that triggered on 22, 23 and 25 Sep were never looked
+at. It now takes `analysis.scan`'s best side -- the page's own ranking -- and
+the AI still decides.
+
 Everything else on the Set & Forget page waits for a person. This does not,
 so most of this file is refusals, checked cheapest first:
 
@@ -14,7 +21,7 @@ so most of this file is refusals, checked cheapest first:
    demo session first (CLAUDE.md, docs/system/rules/20-trading-safety.md).
 3. Two Auto trades already today, or one still open -> refused.
 4. No AI configured -> refused, because the AI is what decides.
-5. The rules produce no long, or it has not TRIGGERED on the 30m, or it breaks
+5. The rules produce no setup either way, or it has not TRIGGERED on the 30m, or it breaks
    a rule (`setup.invalidations`) -> no trade, with the rules' own reason.
 6. The AI does not say "take" ("adjust" counts when its levels pass the rules
    again -- `analysis.review` rebuilds and re-validates them).
@@ -56,7 +63,6 @@ MAX_OPEN = 1
 # sent. Above the page's own risk setting on purpose: the 0.01-lot floor means
 # a small account cannot size every stop down to it. A ceiling, not a target.
 MAX_RISK_PCT = 5.0
-DIRECTION = "BUY"
 STRATEGY = "set_and_forget"
 SOURCE_NAME = "Set & Forget Auto"
 _MIN_LOT = 0.01
@@ -141,7 +147,7 @@ async def tick(engine: Any, cfg: dict, now: Optional[float] = None) -> dict:
     except Exception as exc:
         return _record("failed", f"Could not read the chart: {exc}", now)
 
-    candidate, why = _analysis.propose(evidence, direction=DIRECTION)
+    candidate, why, _ = _analysis.scan(evidence)
     if candidate is None:
         return _record("no_setup", why, now)
     broken = _setup.invalidations(candidate)
@@ -159,7 +165,7 @@ async def tick(engine: Any, cfg: dict, now: Optional[float] = None) -> dict:
     chosen = reviewed.get("candidate") or candidate
     if chosen.get("order_type", "market") != "market":
         return _record("ai_declined", f"The AI moved the entry to "
-                       f"{chosen['entry']:.2f}, away from price. Auto buys at "
+                       f"{chosen['entry']:.2f}, away from price. Auto trades at "
                        f"the market, so those levels do not describe the "
                        f"trade it would place.", now, trade=chosen, ai=ai)
     broken = _setup.invalidations(chosen)
@@ -180,14 +186,16 @@ async def tick(engine: Any, cfg: dict, now: Optional[float] = None) -> dict:
 
     try:
         placed = await engine.open_manual_market_order(
-            direction=DIRECTION, stop_loss=chosen["stop_loss"], lot_size=lot,
+            direction=chosen["direction"], stop_loss=chosen["stop_loss"],
+            lot_size=lot,
             strategy=STRATEGY, take_profit=chosen["take_profit"],
             source_name=SOURCE_NAME,
         )
     except Exception as exc:
         return _record("failed", f"The order was not placed: {exc}", now,
                        trade=chosen, ai=ai)
-    return _record("placed", f"Bought {lot} lots, stop {chosen['stop_loss']:.2f}, "
+    verb = "Bought" if chosen["direction"] == "BUY" else "Sold"
+    return _record("placed", f"{verb} {lot} lots, stop {chosen['stop_loss']:.2f}, "
                    f"target {chosen['take_profit']:.2f}.", now,
                    trade={**chosen, "lot": lot, "order": placed}, ai=ai)
 

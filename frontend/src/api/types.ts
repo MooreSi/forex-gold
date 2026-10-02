@@ -383,6 +383,11 @@ export interface SetForgetState {
   price: number | null;
   evidence: SetForgetEvidence;
   candidate: SetForgetCandidate | null;
+  /**
+   * The direction not shown as `candidate` (both sides are built since
+   * 2026-10-02). Null when only one side could be built.
+   */
+  other_side?: SetForgetCandidate | null;
   /** Which rule refused, when there is no candidate. */
   no_setup_reason: string;
   confluence: Confluence;

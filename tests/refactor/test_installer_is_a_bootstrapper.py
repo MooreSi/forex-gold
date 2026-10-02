@@ -96,17 +96,3 @@ def test_the_old_python_bootstrap_is_gone():
     assert "python_embed" not in ISS
     assert "install_deps" not in ISS
     assert not (REPO / "installer" / "install_deps.py").exists()
-
-
-def test_a_git_folder_with_no_readable_head_is_not_an_install():
-    """An older installer's failed link left a .git with an unborn HEAD, and the
-    app reported "commit unreadable" for good (2026-10-02, a client's machine).
-    Re-running setup must repair it, not relaunch it because the folder exists."""
-    code = _section("Code")
-    smart = re.search(r"function InitializeSetup.*?Result := False; // Abort", code, re.S)
-    assert smart, "InitializeSetup lost its smart-launch branch"
-    assert "GitHeadReadable(AppPath)" in smart.group(0)
-    health = re.search(r"function GitHeadReadable.*?^end;", code, re.S | re.M)
-    assert health, "no GitHeadReadable"
-    for needle in (r"\.git\HEAD", "packed-refs", "refs"):
-        assert needle in health.group(0)

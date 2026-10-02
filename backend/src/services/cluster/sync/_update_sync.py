@@ -83,7 +83,7 @@ def _origin_commit() -> str:
     not pushed, the VPS can only ever land here (2026-09-29)."""
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", f"origin/{core_app_update._BRANCH}"],
+            [core_app_update._git_exe() or "git", "rev-parse", f"origin/{core_app_update._BRANCH}"],
             cwd=str(core_app_update._REPO_ROOT), capture_output=True, text=True, timeout=5,
         )
     except Exception as e:

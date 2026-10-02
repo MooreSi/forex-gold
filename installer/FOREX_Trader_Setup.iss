@@ -155,9 +155,40 @@ begin
       '', RegValue);
 end;
 
+// A .git whose HEAD points at nothing is not an install. An older installer's
+// failed link left one (unborn HEAD) and the app then reported "commit
+// unreadable" for good; treating the folder's mere existence as "installed"
+// made re-running this setup just relaunch it. HEAD must name a branch whose
+// ref exists (loose or packed), or be a bare commit.
+function GitHeadReadable(const AppPath: String): Boolean;
+var
+  Head, Packed: AnsiString;
+  Ref: String;
+begin
+  Result := False;
+  if not LoadStringFromFile(AppPath + '\.git\HEAD', Head) then Exit;
+  Head := Trim(Head);
+  if Pos('ref:', Head) <> 1 then
+  begin
+    Result := Length(Head) >= 40;
+    Exit;
+  end;
+  Ref := Trim(Copy(Head, 5, Length(Head)));
+  StringChangeEx(Ref, '/', '\', True);
+  if FileExists(AppPath + '\.git\' + Ref) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  StringChangeEx(Ref, '\', '/', True);
+  if LoadStringFromFile(AppPath + '\.git\packed-refs', Packed) then
+    Result := Pos(' ' + Ref, Packed) > 0;
+end;
+
 // Smart launch: a machine that already has the app as a git checkout with a
 // venv is simply started. Updates reach it through Settings > Update (git
 // pull), not through this .exe, so there is nothing for a re-run to install.
+// A .git with no readable HEAD does not count: FetchApp() repairs it in place.
 // To reinstall from scratch, uninstall first.
 function InitializeSetup(): Boolean;
 var
@@ -167,7 +198,7 @@ begin
   Result := True;
   AppPath := ExpandConstant('{localappdata}\FOREX Trader');
 
-  if DirExists(AppPath + '\.git') and
+  if DirExists(AppPath + '\.git') and GitHeadReadable(AppPath) and
      FileExists(AppPath + '\Setup & Start FOREX.bat') and
      FileExists(AppPath + '\.venv\Scripts\python.exe') then
   begin

@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Optional
 from backend.src.services.ai import provider as ai_provider
+from backend.src.services.positions.core_git_exe import git_exe as _git_exe
 from backend.src.utils.os_utils import repo_root as _repo_root
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ _GITHUB_REPO_URL = "https://github.com/MooreSi/forex-gold"
 async def _run_git(*args: str, timeout: float = 30.0) -> tuple[int, str, str]:
     def _sync() -> tuple[int, str, str]:
         proc = subprocess.run(
-            ["git", *args], cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=timeout,
+            [_git_exe() or "git", *args], cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=timeout,
         )
         return proc.returncode, proc.stdout, proc.stderr
     return await asyncio.to_thread(_sync)
@@ -150,7 +151,7 @@ def get_commit_report(short: bool = True) -> tuple[str, str]:
     if not (_REPO_ROOT / ".git").exists():
         return "", COMMIT_NO_CHECKOUT
     try:
-        args = ["git", "rev-parse", "--short", "HEAD"] if short else ["git", "rev-parse", "HEAD"]
+        args = [_git_exe() or "git", "rev-parse", *(["--short"] if short else []), "HEAD"]
         proc = subprocess.run(
             args, cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=5,
         )
@@ -191,7 +192,7 @@ def get_git_version() -> str:
     _GIT_VERSION = ""
     try:
         proc = subprocess.run(
-            ["git", "--version"], capture_output=True, text=True, timeout=5,
+            [_git_exe() or "git", "--version"], capture_output=True, text=True, timeout=5,
         )
     except Exception as e:
         log.debug("[Update] git --version could not run: %s", e)
@@ -231,7 +232,7 @@ async def check_for_update() -> dict:
         # 2026-09-06 both cases came back as a bare "not a git checkout" and
         # the Update page rendered "Check failed" with no button at all, so
         # the bootstrap was unreachable from the machine that needed it.
-        if not shutil.which("git"):
+        if not _git_exe():
             return {"available": False, "bootstrap": False, "error": (
                 "git is not installed on this machine, so this install cannot "
                 "update itself. macOS: run 'xcode-select --install'. Windows: "
@@ -607,11 +608,11 @@ async def link_checkout() -> dict:
     modifies the working tree: the caller runs it on every startup.
     """
     if (_REPO_ROOT / ".git").exists():
-        if not _is_abandoned_link() or not shutil.which("git"):
+        if not _is_abandoned_link() or not _git_exe():
             return {"linked": False, "sha": "", "reason": "already-linked"}
         log.info("[Update] removing a half-built .git from an earlier link attempt")
         _discard_new_git_dir()
-    if not shutil.which("git"):
+    if not _git_exe():
         return {"linked": False, "sha": "", "reason": "no-git"}
 
     def _give_up(reason: str) -> dict:
@@ -737,7 +738,7 @@ async def apply_update(restart: bool = True) -> dict:
     Returns {"ok": bool, "error": str|None}.
     """
     if not (_REPO_ROOT / ".git").exists():
-        if not shutil.which("git"):
+        if not _git_exe():
             return {"ok": False, "error": "git not found on PATH — cannot bootstrap a checkout"}
         rc, out, err = await _run_git("init")
         if rc != 0:

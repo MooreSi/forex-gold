@@ -34,11 +34,11 @@ export function DialogShell({
         <Dialog.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-50 w-[min(92vw,34rem)] -translate-x-1/2 -translate-y-1/2",
-            "rounded-lg border border-line bg-surface-2 shadow-2xl",
+            "flex max-h-[90vh] flex-col rounded-lg border border-line bg-surface-2 shadow-2xl",
             className,
           )}
         >
-          <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-3">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-3">
             <div>
               <Dialog.Title className="text-sm font-semibold text-ink-1">{title}</Dialog.Title>
               {description && (
@@ -54,9 +54,9 @@ export function DialogShell({
               <X size={16} />
             </Dialog.Close>
           </div>
-          <div className="px-5 py-4">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
           {footer && (
-            <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>
+            <div className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>
           )}
         </Dialog.Content>
       </Dialog.Portal>

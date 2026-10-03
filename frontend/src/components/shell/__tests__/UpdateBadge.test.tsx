@@ -112,6 +112,22 @@ describe("the popup", () => {
     expect(apply).not.toBeDisabled();
   });
 
+  it("scrolls a long change list inside the popup, with Update now outside the scroller", async () => {
+    // A long list pushed the footer off the screen with no way to scroll to
+    // it, so the update could not be started. jsdom has no layout, so pin the
+    // structure: the list sits inside an overflow-y-auto region and the
+    // button does not.
+    statusBody = { ...statusBody, changes: Array.from({ length: 80 }, (_, i) => `Change ${i}`) };
+    render(<UpdateBadge update={AVAILABLE} />);
+    await userEvent.click(screen.getByRole("button", { name: /update available/i }));
+
+    const list = await screen.findByTestId("update-changes");
+    const apply = await screen.findByRole("button", { name: /update now/i });
+    const scroller = list.closest(".overflow-y-auto");
+    expect(scroller).not.toBeNull();
+    expect(scroller!.contains(apply)).toBe(false);
+  });
+
   it("applies the update through the endpoint that applies it", async () => {
     // POST /api/node/update does not exist -- the route is /update/apply.
     // The Settings button posted to the former and silently did nothing.

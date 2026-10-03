@@ -597,11 +597,7 @@ async def startup() -> None:
                     host = "0.0.0.0"
                 port = int(db_module.get_app_config("sync_server_port") or 8765)
                 srv = _sync_srv_mod.init(
-                    main_engine=_engine, breakout_engine=bo_eng,
-                    # bounce_engine stays in the signature and stays None:
-                    # the engine was deleted 2026-09-14 but a paired node on
-                    # the old build still names the slot (bugs/046).
-                    bounce_engine=None, re_engine=re_eng,
+                    main_engine=_engine, breakout_engine=bo_eng, re_engine=re_eng,
                 )
                 await srv.start(host, port, token)
                 log.info("[startup] Sync server auto-started on port %d", port)

@@ -1,6 +1,6 @@
 """The engine lifecycle surface (restructure phase1/010).
 
-The panels and the app shell used to import the three engine service
+The panels and the app shell used to import the engine service
 singletons directly and loop over them choosing lifecycle — the exact
 "page decides" failure the controller's docstring documents. These named
 operations move that decision out of the caller.
@@ -54,11 +54,10 @@ def _fake_world(monkeypatch, running: dict):
 
 
 def test_start_all_starts_only_stopped_engines(monkeypatch):
-    engines = _fake_world(monkeypatch, {"breakout": False, "bounce": True, "reversal": False})
+    engines = _fake_world(monkeypatch, {"breakout": False, "reversal": True})
     reg.start_stopped()
     assert engines["breakout"].start_calls == 1
-    assert engines["reversal"].start_calls == 1
-    assert engines["bounce"].start_calls == 0  # already running — guard held
+    assert engines["reversal"].start_calls == 0  # already running — guard held
 
 
 def test_the_fake_records_a_start_it_should_not_have_had(monkeypatch):
@@ -69,33 +68,33 @@ def test_the_fake_records_a_start_it_should_not_have_had(monkeypatch):
 
 
 def test_stop_all_stops_only_running_engines(monkeypatch):
-    engines = _fake_world(monkeypatch, {"breakout": True, "bounce": False, "reversal": True})
+    engines = _fake_world(monkeypatch, {"breakout": True, "reversal": False})
     reg.stop_running()
     assert engines["breakout"].stop_calls == 1
-    assert engines["reversal"].stop_calls == 1
-    assert engines["bounce"].stop_calls == 0
+    assert engines["reversal"].stop_calls == 0
 
 
 def test_engines_running_reports_each_by_name(monkeypatch):
-    _fake_world(monkeypatch, {"breakout": True, "bounce": False, "reversal": False})
-    assert ec.engines_running() == {"breakout": True, "bounce": False, "reversal": False}
+    _fake_world(monkeypatch, {"breakout": True, "reversal": False})
+    assert ec.engines_running() == {"breakout": True, "reversal": False}
 
 
 def test_get_engine_is_a_named_accessor(monkeypatch):
-    engines = _fake_world(monkeypatch, {"breakout": False, "bounce": False, "reversal": False})
+    engines = _fake_world(monkeypatch, {"breakout": False, "reversal": False})
     assert ec.get_engine("breakout") is engines["breakout"]
 
 
-def test_sub_engines_returns_the_fixed_bo_bc_gd_order(monkeypatch):
-    """The mode toggle and the sync server bind (breakout, bounce, reversal)
-    in exactly this order — reordering silently swaps which engine the VPS
-    manages under each name."""
-    engines = _fake_world(monkeypatch, {"breakout": False, "bounce": False, "reversal": False})
-    assert ec.sub_engines() == (engines["breakout"], engines["bounce"], engines["reversal"])
+def test_sub_engines_returns_breakout_then_reversal(monkeypatch):
+    """api/routers/remote.py unpacks (breakout, reversal) and hands them to
+    server_start by keyword -- reordering here would swap which engine the
+    sync server manages under each name. (Bounce's empty slot sat between
+    them until 2026-09-28.)"""
+    engines = _fake_world(monkeypatch, {"breakout": False, "reversal": False})
+    assert ec.sub_engines() == (engines["breakout"], engines["reversal"])
 
 
-def test_the_real_service_mapping_names_the_three_engines():
-    assert set(reg._ENGINE_SERVICES) == {"breakout", "bounce", "reversal"}
+def test_the_real_service_mapping_names_the_two_engines():
+    assert set(reg._ENGINE_SERVICES) == {"breakout", "reversal"}
 
 
 def test_the_controller_and_the_registry_cannot_disagree():

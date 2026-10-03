@@ -256,11 +256,10 @@ file needs the owner's sign-off and a demo session, the same as the close path.
 ## One table of which engines exist (2026-09-18)
 
 `backend/src/services/engines/registry.py`. `engines_controller` held it and
-`services/cluster/handover.py` grew a second copy, which is how the empty
-`bounce` slot gets re-introduced in one of them and not the other. The slot's
-NAME stays although its code went on 2026-09-14, because `server_start` binds
-(breakout, bounce, reversal) positionally and a paired node on an older build
-would otherwise see Reversal shift into Bounce's place.
+`services/cluster/handover.py` grew a second copy, which is how a stale entry
+gets re-introduced in one of them and not the other. Bounce's empty slot was
+removed on 2026-09-28: the "positional binding" kept for it never crossed the
+wire (see `docs/system/domains/engines/README.md`).
 
 
 ## Catching up with `MooreSi/forex` (2026-09-18)

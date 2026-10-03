@@ -266,8 +266,8 @@ class TelemetryMixin:
                 "active_levels":        re_db.get_active_levels(),
                 "open_signals":         re_db.get_open_signals(),
                 "all_signals":          re_db.get_all_signals(limit=60),
-                # These four were missing here (unlike the breakout/bounce
-                # snapshots above, which already included their equivalents) —
+                # These four were missing here (unlike the breakout
+                # snapshot above, which already included their equivalents) —
                 # the panel/facade side (remote_stats_facade.py's _DbFacade/
                 # _MlFacade) already expected these exact keys, so under Remote
                 # mode the Reversal Engine panel's Performance Analytics and "Is it
@@ -286,13 +286,10 @@ class TelemetryMixin:
 
     async def _signal_gen_stats_payload(self) -> dict:
         return {
+            # No "bounce" (deleted 2026-09-14). Every build reads this payload
+            # with .get(key, {}), so a peer that still asks for it gets the
+            # same empty dict this node used to send.
             "breakout": await asyncio.to_thread(self._breakout_stats),
-            # The Bounce engine's code was deleted on 2026-09-14 (bugs/046).
-            # The KEY stays: a paired node on the old build indexes this
-            # payload by name, and a missing key is a KeyError in its panel
-            # rather than an empty panel. An empty dict is what its snapshot
-            # already sent whenever the engine was unavailable.
-            "bounce":   {},
             "reversal_engine":  await asyncio.to_thread(self._reversal_engine_stats),
         }
 

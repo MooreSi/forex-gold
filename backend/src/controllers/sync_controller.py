@@ -168,8 +168,7 @@ def cert_fingerprint() -> str:
 
 
 async def server_start(host: str, port: int, token: str, *, main_engine=None,
-                       breakout_engine=None, bounce_engine=None,
-                       re_engine=None) -> None:
+                       breakout_engine=None, re_engine=None) -> None:
     """Build the sync server and start listening.
 
     init() and start() are one operation from the page's point of view, and
@@ -178,7 +177,7 @@ async def server_start(host: str, port: int, token: str, *, main_engine=None,
     Local/Remote toggle.
     """
     srv = _server.init(main_engine=main_engine, breakout_engine=breakout_engine,
-                       bounce_engine=bounce_engine, re_engine=re_engine)
+                       re_engine=re_engine)
     await srv.start(host, int(port), token)
 
 

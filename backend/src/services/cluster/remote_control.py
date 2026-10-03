@@ -59,8 +59,7 @@ __all__ = [
 # risk-settings flag `_handle_engine_control` understands; everything else has
 # no remote route at all, which is why `effective_settings` shows the peer's
 # values but no other switch offers to write them.
-AI_EVAL_KEYS = {"breakout": "bo_claude_eval_enabled",
-                "bounce": "sg_claude_eval_enabled"}
+AI_EVAL_KEYS = {"breakout": "bo_claude_eval_enabled"}
 
 
 class RemoteControlFailed(Exception):

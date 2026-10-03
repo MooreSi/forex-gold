@@ -5,7 +5,7 @@ be placed with nobody watching — so the two assertions that matter are about
 what the tab is allowed to start, and what it is never allowed to call.
 
 * **Named, not bulk.** The registry's bulk start exists for the app's own
-  startup and deliberately skips Bounce. A UI button wired to it would start
+  startup and the Local/Remote handover. A UI button wired to it would start
   engines the operator did not ask for.
 * **Never the blocking fit.** A five-second RandomForest train started from a
   UI handler freezes the event loop, the EA socket reader and the monitor loop
@@ -38,7 +38,7 @@ class _Engine:
 @pytest.fixture
 def engines(monkeypatch):
     state = {
-        "instances": {"breakout": _Engine(), "bounce": None, "reversal": _Engine()},
+        "instances": {"breakout": _Engine(), "reversal": _Engine()},
         "target": "local",
         "settings": {"re_min_adx": 22},
         "pro_model": {"trained": True, "samples": 412},
@@ -73,11 +73,13 @@ def engines(monkeypatch):
             self._engine = engine
 
         def get_instance(self):
-            return self._engine
+            return self._engine()
 
+    # A lambda rather than the engine itself: a test that sets an instance to
+    # None ("never built") after this fixture runs must be seen by the router.
     monkeypatch.setattr(_registry, "_ENGINE_SERVICES", {
-        name: (None if engine is None else _Svc(engine))
-        for name, engine in state["instances"].items()
+        name: _Svc(lambda n=name: state["instances"].get(n))
+        for name in state["instances"]
     })
     # Local by default: the remote-routing cases are in
     # tests/services/cluster/test_remote_control.py and in the class below.
@@ -132,8 +134,8 @@ def test_the_tab_lists_all_three_engines_by_the_name_the_operator_uses(make_clie
 
     # CHANGED 2026-09-19: Bounce left the screen at the owner's request. Its
     # code was deleted on 2026-09-14, so its card carried a Start button that
-    # could not work. It is still in ENGINE_NAMES and still addressable -- see
-    # test_bounce_is_still_addressable_even_though_it_is_not_shown.
+    # could not work. CHANGED 2026-09-28: it left the protocol too -- see
+    # test_bounce_is_refused_as_an_unknown_engine.
     assert [r["id"] for r in rows] == ["breakout", "reversal"]
     assert [r["label"] for r in rows] == ["Breakout", "Reversal"]
 
@@ -142,11 +144,14 @@ def test_an_engine_that_is_not_built_reads_differently_from_one_that_is_stopped(
     make_client, engines,
 ):
     """Both show "not running". Only one of them can be started."""
-    rows = {r["id"]: r for r in make_client().get("/api/engines/state").json()["engines"]}
-
     # Bounce was the example here until it left the screen. "Built" still
     # means what it meant: a service exists AND an instance has been created.
-    assert "bounce" not in rows
+    engines["instances"]["reversal"] = None
+
+    rows = {r["id"]: r for r in make_client().get("/api/engines/state").json()["engines"]}
+
+    assert rows["reversal"]["built"] is False
+    assert rows["reversal"]["running"] is False
     assert rows["breakout"]["built"] is True
     assert rows["breakout"]["running"] is False
 
@@ -187,8 +192,8 @@ def test_stopping_one_engine_stops_only_that_one(make_client, engines):
 
 
 def test_the_tab_never_uses_the_bulk_start(make_client, engines):
-    """The registry's bulk start skips Bounce and is for the app's own startup
-    and the Local/Remote handover. A button wired to it would start engines
+    """The registry's bulk start is for the app's own startup and the
+    Local/Remote handover. A button wired to it would start engines
     nobody asked for."""
     client = make_client()
     client.post("/api/engines/running", json={"engine": "breakout", "running": True})
@@ -200,8 +205,10 @@ def test_the_tab_never_uses_the_bulk_start(make_client, engines):
 def test_starting_an_engine_that_is_not_built_is_refused_with_a_reason(
     make_client, engines,
 ):
+    engines["instances"]["reversal"] = None
+
     r = make_client().post("/api/engines/running",
-                           json={"engine": "bounce", "running": True})
+                           json={"engine": "reversal", "running": True})
 
     assert r.status_code == 409
     assert "not built on this install" in r.json()["error"]["message"]
@@ -292,14 +299,15 @@ class TestTheTabSaysWhichNodeItIsDriving:
 
         assert body["control_target"] == "remote"
 
-    def test_the_state_names_the_two_engines_that_have_an_ai_switch(
+    def test_the_state_names_the_one_engine_that_has_an_ai_switch(
         self, make_client, engines,
     ):
-        """The protocol carries `set_ai_eval` for exactly two of the three. A
-        tab that offered it on Reversal would offer a button that cannot work."""
+        """The protocol carries `set_ai_eval` for Breakout only (Bounce was the
+        other, until 2026-09-28). A tab that offered it on Reversal would offer
+        a button that cannot work."""
         keys = make_client().get("/api/engines/state").json()["ai_eval_keys"]
 
-        assert set(keys) == {"breakout", "bounce"}
+        assert set(keys) == {"breakout"}
 
     def test_the_settings_shown_are_the_ones_the_engines_obey(
         self, make_client, engines, monkeypatch,
@@ -317,8 +325,9 @@ class TestTheTabSaysWhichNodeItIsDriving:
         self, make_client, engines, monkeypatch,
     ):
         """"Not built on this install" is a reason to refuse only when the
-        command was going to be applied here. Bounce is unbuilt locally and
-        the VPS may well have it."""
+        command was going to be applied here. Reversal may be unbuilt locally
+        and running on the VPS. (Bounce was the example until 2026-09-28.)"""
+        engines["instances"]["reversal"] = None
         engines["target"] = "remote"
         sent = []
 
@@ -330,10 +339,10 @@ class TestTheTabSaysWhichNodeItIsDriving:
         monkeypatch.setattr(engines_router.engines_ctl, "set_engine_running", _remote)
 
         res = make_client().post("/api/engines/running",
-                                 json={"engine": "bounce", "running": True})
+                                 json={"engine": "reversal", "running": True})
 
         assert res.status_code == 200
-        assert sent == [("bounce", True)]
+        assert sent == [("reversal", True)]
         assert res.json()["where"] == "remote"
 
     def test_a_peer_that_refuses_reaches_the_operator_in_its_own_words(
@@ -411,7 +420,7 @@ class TestTheTabSaysWhichNodeItIsDriving:
         assert "not a setting" in res.json()["error"]["message"]
 
 
-# -- Bounce left the screen, not the wire ------------------------------------
+# -- Bounce left the screen ---------------------------------------------------
 
 def test_the_panel_does_not_offer_an_engine_whose_code_was_deleted(make_client, engines):
     # Bounce's code went on 2026-09-14. A card with a Start button for it is a
@@ -426,18 +435,6 @@ def test_the_engines_that_exist_are_still_offered(make_client, engines):
     ids = {e["id"] for e in make_client().get("/api/engines/state").json()["engines"]}
 
     assert {"breakout", "reversal"} <= ids
-
-
-def test_bounce_is_still_addressable_even_though_it_is_not_shown(make_client, engines):
-    # Leaving the SCREEN is not leaving the protocol. A paired node on an
-    # older build may still run Bounce, and validating the name against the
-    # visible list would make an engine the peer genuinely has unreachable
-    # from here. Locally it is still "not built on this install" -- 409, not
-    # the 400 an unknown name gets.
-    res = make_client().post("/api/engines/running",
-                             json={"engine": "bounce", "running": True})
-
-    assert res.status_code == 409
 
 
 def test_the_reversal_report_carries_the_virtual_trade_history(make_client, engines,
@@ -499,3 +496,44 @@ def test_a_missing_reversal_edge_read_does_not_take_the_report_down(
 
     assert body["edge"] == {}
     assert body["realised"] == {"net_pnl": 88.4}
+
+
+# -- Bounce is gone from the wire too (2026-09-28) ----------------------------
+# The name stayed in ENGINE_NAMES on the belief that the sync protocol bound
+# engines by position. It never did: every message carries the name. See
+# tests/services/engines/test_bounce_is_gone_from_the_wire.py.
+
+def test_bounce_is_refused_as_an_unknown_engine(make_client, engines):
+    """400, the answer for a name this build has never heard of -- not the
+    409 "not built on this install" that implied a peer might have it."""
+    res = make_client().post("/api/engines/running",
+                             json={"engine": "bounce", "running": True})
+
+    assert res.status_code == 400
+    assert "bounce" in res.json()["error"]["message"]
+
+
+def test_bounce_is_not_forwarded_to_the_peer_in_remote_mode(
+    make_client, engines, monkeypatch,
+):
+    engines["target"] = "remote"
+    sent = []
+
+    async def _remote(name, running):
+        sent.append((name, running))
+        return {"engine": name, "running": running, "built": True,
+                "where": "remote"}
+
+    monkeypatch.setattr(engines_router.engines_ctl, "set_engine_running", _remote)
+
+    res = make_client().post("/api/engines/running",
+                             json={"engine": "bounce", "running": True})
+
+    assert res.status_code == 400
+    assert sent == []
+
+
+def test_the_ai_switch_is_offered_only_for_breakout(make_client, engines):
+    keys = make_client().get("/api/engines/state").json()["ai_eval_keys"]
+
+    assert set(keys) == {"breakout"}

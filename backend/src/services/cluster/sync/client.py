@@ -606,12 +606,13 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
 
     async def send_engine_control(self, engine: str, action: str,
                                   enabled: Optional[bool] = None, timeout: float = 10.0) -> dict:
-        """Start/Stop/Run Now/set_ai_eval a sub-engine (breakout/bounce/reversal_engine)
+        """Start/Stop/Run Now/set_ai_eval a sub-engine (breakout/reversal_engine)
         on the VPS, for use when this node is in Remote mode — the Signal
         Generator panels' buttons must act on the VPS's own engine, not this
         node's own local instance, which is stood down and would do nothing
         while the button looked like it worked. enabled is only used by
-        set_ai_eval (the bounce/breakout AI-review toggle)."""
+        set_ai_eval (the Breakout AI-review toggle). A VPS answers a name it
+        has no engine for with an ack carrying `error`, never by crashing."""
         if self._ws is None or self.conn_state != CONN_CONNECTED:
             raise ConnectionError("not connected to VPS")
         self._engine_control_ack_event.clear()

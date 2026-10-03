@@ -26,14 +26,12 @@ The last two are the ones the owner named. `reversal_engine/re_macro.py` and
 scores, so the tests at the bottom check the Reversal Engine by exercising it,
 not by checking that a file exists.
 
-**The `bounce` slot in `_ENGINE_SERVICES` stays, bound to nothing.** It is
-position 1 of 3 in a tuple the sync server and the mode toggle unpack
-positionally, and `stood_down_engines` persists the name into the database.
-Removing the slot would desynchronise a paired node that still has it; binding
-it to a service whose `get_instance()` is always `None` costs one dict entry
-and every call site already guards for `None`. See
-`tests/frontend/test_bounce_generator_removed.py`, which still holds the
-ordering.
+**The `bounce` slot in `_ENGINE_SERVICES` stayed, bound to nothing, until
+2026-09-28.** It was kept on the belief that the sync server bound engines
+positionally across nodes. It never did: every sync message names its engine,
+so the slot went, and what holds instead -- a peer on an older build that
+still says "bounce" is refused harmlessly -- is in
+`tests/services/engines/test_bounce_is_gone_from_the_wire.py`.
 """
 from __future__ import annotations
 
@@ -169,35 +167,24 @@ class TestTheReversalEngineIsUnaffected:
         assert hits == []
 
 
-# ── the slot the sync protocol still expects ─────────────────────────────────
+# ── the slot is gone too (2026-09-28) ────────────────────────────────────────
 
-class TestTheBounceSlotIsEmptyRatherThanRemoved:
+class TestTheBounceSlotIsGone:
 
-    def test_sub_engines_still_returns_three_in_the_binding_order(self):
+    def test_sub_engines_returns_the_two_engines_that_exist(self):
         from backend.src.controllers import engines_controller as ec
-        subs = ec.sub_engines()
-        assert len(subs) == 3, (
-            "api/routers/remote.py unpacks this as `breakout, bounce, reversal` "
-            "and hands the three to server_start by keyword -- the arity is "
-            "the contract")
+        assert len(ec.sub_engines()) == 2, (
+            "api/routers/remote.py unpacks this as `breakout, reversal` and "
+            "hands the two to server_start by keyword")
 
-    def test_the_bounce_slot_is_none(self):
+    def test_engines_running_does_not_name_it(self):
         from backend.src.controllers import engines_controller as ec
-        assert ec.sub_engines()[1] is None
+        assert "bounce" not in ec.engines_running()
 
-    def test_engines_running_reports_it_as_not_running(self):
-        from backend.src.controllers import engines_controller as ec
-        assert ec.engines_running()["bounce"] is False
-
-    def test_the_bulk_start_and_stop_survive_the_empty_slot(self):
-        """Both iterate every slot. An AttributeError on the dead one would
-        take the mode toggle down with it -- and the mode toggle is what hands
-        trading between this node and the VPS.
-
-        Read from the registry rather than the controller since 2026-09-18: the
-        table and its two loops moved to services/engines/registry.py, where
-        the handover can reach them without a service importing a controller.
-        """
+    def test_the_bulk_start_and_stop_still_run(self):
+        """Both iterate every engine. An AttributeError here would take the
+        mode toggle down with it -- and the mode toggle is what hands trading
+        between this node and the VPS."""
         from backend.src.services.engines import registry
 
         registry.start_stopped()

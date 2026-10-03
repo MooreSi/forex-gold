@@ -38,7 +38,9 @@ class TestWhatItClaimsExists:
         named = {name for name in ("breakout", "bounce", "reversal")
                  if f"{name.capitalize()} Engine" in prompt}
 
-        assert named <= set(registry.IMPLEMENTED_NAMES)
+        # ENGINE_NAMES since 2026-09-28, when it stopped carrying Bounce and
+        # IMPLEMENTED_NAMES, which existed only to leave Bounce out, went.
+        assert named <= set(registry.ENGINE_NAMES)
 
 
 class TestItStillAsksForWhatTheScreenRenders:

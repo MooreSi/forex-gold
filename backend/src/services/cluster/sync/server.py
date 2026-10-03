@@ -62,11 +62,9 @@ _SYNCED_SETTINGS_KEYS = SYNCED_SETTINGS_KEYS
 
 class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                  ServerMt5AccountsMixin, ServerRestartMixin, ServerUpdateMixin):
-    def __init__(self, main_engine=None, breakout_engine=None,
-                 bounce_engine=None, re_engine=None):
+    def __init__(self, main_engine=None, breakout_engine=None, re_engine=None):
         self._main_engine     = main_engine
         self._breakout_engine = breakout_engine
-        self._bounce_engine   = bounce_engine
         self._re_engine      = re_engine
         self._clients: set = set()
         self._server_obj = None
@@ -291,13 +289,12 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
                 elif action == "run_now":
                     await eng._run_cycle()
                 elif action == "set_ai_eval":
-                    # Bounce/Breakout AI-review toggle — a risk_settings flag,
+                    # Breakout AI-review toggle — a risk_settings flag,
                     # not an engine lifecycle action, but routed through this
                     # same message type since the Mac's own stood-down copy of
                     # the setting has no effect on which node actually runs
                     # the generator (mirrors the Market Order routing fix).
-                    key = {"bounce": "sg_claude_eval_enabled",
-                           "breakout": "bo_claude_eval_enabled"}.get(engine_name)
+                    key = {"breakout": "bo_claude_eval_enabled"}.get(engine_name)
                     if key is None:
                         error = f"set_ai_eval not supported for {engine_name}"
                     else:
@@ -565,9 +562,11 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
     # ── Stand-down / resume ──────────────────────────────────────────────────
 
     def _sub_engines(self) -> dict:
+        # No "bounce": its code was deleted on 2026-09-14 and its slot is
+        # always None, but listing it put "Bounce off" in every heartbeat and
+        # on the Mac's Remote Node page.
         return {
             "breakout": self._breakout_engine,
-            "bounce":   self._bounce_engine,
             "reversal_engine":  self._re_engine,
         }
 
@@ -689,7 +688,8 @@ def get_instance() -> Optional[SyncServer]:
     return _instance
 
 
-def init(main_engine=None, breakout_engine=None, bounce_engine=None, re_engine=None) -> SyncServer:
+def init(main_engine=None, breakout_engine=None, re_engine=None) -> SyncServer:
     global _instance
-    _instance = SyncServer(main_engine, breakout_engine, bounce_engine, re_engine)
+    _instance = SyncServer(main_engine=main_engine, breakout_engine=breakout_engine,
+                           re_engine=re_engine)
     return _instance

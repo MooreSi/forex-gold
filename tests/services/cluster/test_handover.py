@@ -120,7 +120,6 @@ def cluster(monkeypatch):
     # cannot drift apart about which engines exist.
     monkeypatch.setattr(engine_registry, "_ENGINE_SERVICES", {
         "breakout": _Svc(breakout, "breakout"),
-        "bounce": None,
         "reversal": _Svc(reversal, "reversal"),
     })
     monkeypatch.setattr(handover._client, "get_instance", lambda: peer)
@@ -253,34 +252,11 @@ class TestHandingBack:
 
 
 # ── The empty slot ───────────────────────────────────────────────────────────
-
-def test_the_bounce_slot_is_skipped_rather_than_crashing():
-    """Bounce's code went on 2026-09-14 and its NAME stayed, so a paired node
-    on the older build does not see Reversal shift into its position. A None
-    service must be stepped over, not called."""
-    assert engine_registry._ENGINE_SERVICES["bounce"] is None
-    assert engine_registry._of(None) is None
-
-
-def test_the_binding_order_is_fixed():
-    """`server_start` binds them positionally. A reorder here silently sends a
-    paired node the wrong engine under the right name."""
-    assert engine_registry.ENGINE_NAMES == ("breakout", "bounce", "reversal")
-
-
-def test_bounce_is_never_bulk_started():
-    """A structural claim, and honestly a weak one.
-
-    Deleting the `_NOT_BULK_STARTED` guard from `registry.start_stopped` leaves
-    every test in this file green — the planted mutation survived on
-    2026-09-18. That is not a gap in the tests: the slot holds None, `_instance`
-    returns None for it, and the loop skips it anyway. The guard is belt and
-    braces, exactly as the comment beside it says, and it is asserted here so
-    that the safety property is recorded rather than incidental — the day
-    something is put back in that slot, the guard is what stops it being
-    started by a mode switch.
-    """
-    assert "bounce" in engine_registry._NOT_BULK_STARTED
+# Bounce's empty slot, its fixed position and its bulk-start guard were pinned
+# here until 2026-09-28, when the slot was removed: the "positional binding"
+# they protected never crossed the wire. What replaced them -- no slot, and a
+# peer that still says "bounce" refused harmlessly -- is in
+# tests/services/engines/test_bounce_is_gone_from_the_wire.py.
 
 
 @pytest.mark.asyncio

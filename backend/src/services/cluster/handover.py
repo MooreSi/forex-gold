@@ -48,8 +48,8 @@ TRADER_LOCAL = "local"
 
 # Which engines exist, and which of them a bulk start may touch, belong to
 # services/engines/registry.py. This file had its own copy of that table until
-# it was consolidated on 2026-09-18 -- two copies is how the empty `bounce`
-# slot gets re-introduced in one and not the other.
+# it was consolidated on 2026-09-18 -- two copies is how a stale entry
+# gets re-introduced in one and not the other.
 _start_stopped_engines = _engines.start_stopped
 _stop_running_engines = _engines.stop_running
 

@@ -20,7 +20,7 @@ from backend.src.services.risk import settings as _risk
 __all__ = [
     "get_risk_settings", "get_risk_settings_async",
     "update_risk_settings", "get_engine", "engines_running", "sub_engines",
-    "ENGINE_NAMES", "IMPLEMENTED_NAMES", "control_target", "effective_settings",
+    "ENGINE_NAMES", "control_target", "effective_settings",
     "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",
     "RemoteControlFailed", "place_market_order",
 ]
@@ -45,12 +45,9 @@ def update_risk_settings(fields: dict) -> None:
 # caller is the handover, a service, which may not import a controller.
 
 
-# Which engines exist, in the fixed binding order. Re-exported so a router can
-# render the tab from it rather than restating the list and drifting.
+# Which engines exist. Re-exported so a router can render the tab from it
+# rather than restating the list and drifting.
 ENGINE_NAMES = _engines.ENGINE_NAMES
-# Not the same list: ENGINE_NAMES is the sync protocol's positional order and
-# still holds Bounce's empty slot. See services/engines/registry.py.
-IMPLEMENTED_NAMES = _engines.IMPLEMENTED_NAMES
 
 
 def get_engine(name: str) -> Any:
@@ -64,8 +61,7 @@ def engines_running() -> dict:
 
 
 def sub_engines() -> tuple:
-    """(breakout, bounce, reversal) instances in the fixed binding order the
-    sync server's server_start has always received them."""
+    """(breakout, reversal) instances, for the sync server's server_start."""
     return _engines.all_instances()
 
 

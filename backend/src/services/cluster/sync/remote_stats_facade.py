@@ -2,7 +2,7 @@
 Facades exposing the same function names as each signal engine's `database`,
 `ml_engine`, and `adaptive_params` modules — transparently switching between
 this node's own local data and the mirrored remote-VPS snapshot based on the
-app's Local/Remote mode, so the Breakout/Bounce/Reversal Engine panel rendering code
+app's Local/Remote mode, so the Breakout/Reversal Engine panel rendering code
 needs no changes at any individual call site.
 
 Per-signal helpers with no remote equivalent (get_ml_features_for_signal,

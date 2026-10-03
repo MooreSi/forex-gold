@@ -100,6 +100,20 @@ MSG_RESUME_ACK        = "resume_ack"        # VPS -> Mac: resumed accepting new 
 MSG_ENGINE_CONTROL     = "engine_control"      # Mac -> VPS: {"engine": "reversal_engine", "action": "start"/"stop"/"run_now"}
 MSG_ENGINE_CONTROL_ACK = "engine_control_ack"  # VPS -> Mac: {"engine", "action", "is_running", "error"?}
 
+# The engine registry and the Signal Generator tab call Reversal "reversal";
+# the wire, the VPS's `_sub_engines` table, the heartbeat and the stood-down
+# lists have always called it "reversal_engine". Forwarding the registry name
+# unchanged got every Remote-mode Start/Stop for Reversal refused as
+# "unknown engine: reversal" (2026-09-28). The wire key is not renamed: a VPS
+# on an older build knows only "reversal_engine". A name missing from this
+# table goes out as it is, and a peer that does not know it refuses it.
+ENGINE_WIRE_NAMES = {"reversal": "reversal_engine"}
+
+
+def engine_wire_name(name: str) -> str:
+    """The name the peer's `_sub_engines` knows this engine by."""
+    return ENGINE_WIRE_NAMES.get(name, name)
+
 # Settings > Remote Node > Restart VPS (owner, 2026-09-26): restart the VPS
 # without logging in to it. The VPS restarts as /restartapp does
 # (sync/_restart_sync.py). An older VPS has no handler and never answers.

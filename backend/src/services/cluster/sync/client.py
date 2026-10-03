@@ -33,7 +33,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_RESUME_ACK, MSG_TRADE_CLOSED, MSG_LEDGER_PULL, MSG_LEDGER_PUSH,
     MSG_MODEL_SNAPSHOT_REQUEST, MSG_MODEL_SNAPSHOT_UPLOAD,
     MSG_MODEL_SNAPSHOT_BEGIN, MSG_MODEL_SNAPSHOT_END,
-    MSG_ENGINE_CONTROL, MSG_ENGINE_CONTROL_ACK,
+    MSG_ENGINE_CONTROL, MSG_ENGINE_CONTROL_ACK, engine_wire_name,
     MSG_MARKET_ORDER, MSG_MARKET_ORDER_ACK, MSG_SIGNAL_ORDER, MSG_SIGNAL_ORDER_ACK,
     MSG_SIGNAL_FOLLOWUP, MSG_SIGNAL_FOLLOWUP_ACK,
     MSG_LEARNED_RULE_SYNC, MSG_AI_CONFIG_SYNC, MSG_RESTART_NODE_ACK, MSG_UPDATE_NODE_ACK, MSG_UPDATE_NODE_RESULT,
@@ -615,7 +615,7 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin,
         if self._ws is None or self.conn_state != CONN_CONNECTED:
             raise ConnectionError("not connected to VPS")
         self._engine_control_ack_event.clear()
-        kwargs = {"engine": engine, "action": action}
+        kwargs = {"engine": engine_wire_name(engine), "action": action}
         if enabled is not None:
             kwargs["enabled"] = enabled
         await self._ws.send(json.dumps(make(MSG_ENGINE_CONTROL, **kwargs)))

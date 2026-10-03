@@ -73,6 +73,20 @@ def _expected_ea_version() -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _ea_is_newer(running: Optional[str], expected: Optional[str]) -> bool:
+    """True when the running EA's version is strictly above this app's source.
+
+    Numeric, dotted compare ("1.10" > "1.9"). Anything unparseable is False,
+    so an odd version string keeps the original "stale, run deploy" advice.
+    """
+    try:
+        a = tuple(int(x) for x in (running or "").split("."))
+        b = tuple(int(x) for x in (expected or "").split("."))
+    except ValueError:
+        return False
+    return bool(a) and bool(b) and a > b
+
+
 class VersionMixin:
     """EABridge's version-handshake method. Not instantiated on its own."""
 
@@ -116,6 +130,14 @@ class VersionMixin:
             return
 
         self.ea_version_ok = (self.ea_version == expected)
+        if not self.ea_version_ok and _ea_is_newer(self.ea_version, expected):
+            log.warning(
+                "[EABridge] EA v%s on the chart is NEWER than this app's EA "
+                "source v%s (compiled %s). Do NOT run tools/deploy_ea.sh: it "
+                "would overwrite the newer source. Copy the terminal's .mq5 "
+                "into mql5/ in the repo.",
+                self.ea_version, expected, self.ea_compiled)
+            return
         if not self.ea_version_ok:
             log.warning(
                 "[EABridge] EA VERSION MISMATCH: terminal is running v%s "
@@ -229,6 +251,13 @@ def ea_build_status() -> tuple[bool, str]:
                 f"edited since it was compiled ({hours:.0f} hours of changes "
                 f"it does not have). Fix: recompile in MetaEditor (F7). The "
                 f"chart reloads the new build by itself."
+            )
+        if _ea_is_newer(running, expected):
+            return True, (
+                f"The EA on the chart is v{running}, which is newer than the "
+                f"v{expected} this app ships. Do not run tools/deploy_ea.sh: "
+                f"it would overwrite the newer EA source. Copy the terminal's "
+                f"ForexTraderBridge.mq5 into mql5/ in the repo and commit it."
             )
         return True, (
             f"The EA on the chart is v{running}, but this app ships v{expected}. "

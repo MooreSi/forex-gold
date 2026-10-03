@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.08"
+#property version   "1.09"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,12 +40,12 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.08"
+#define EA_VERSION "1.09"
 // Hand-maintained, and bumped in the same edit as EA_VERSION: __DATETIME__
 // says when the .ex5 was COMPILED, which tells you nothing about how old
 // the source behind it is. This says when the source last changed, so the
 // two together answer "is the running build the current one".
-#define EA_VERSION_DATE "2026-09-14"
+#define EA_VERSION_DATE "2026-10-01"
 
 #include <Trade\Trade.mqh>
 
@@ -418,7 +418,9 @@ string g_panelTemplate = "";       // template name last seen from the app
 string g_panelLastSig  = "";       // most recent signal line, for context
 
 // ── Channel roster (panel_context) ──────────────────────────────────────
-#define PNL_MAX_CH  3
+// 3 Telegram slots + the Signal Generator engines (v1.09), drawn as two rows
+// of four. Keep equal to core_panel_context.MAX_PANEL_CHANNELS.
+#define PNL_MAX_CH  8
 string g_chName[PNL_MAX_CH];
 string g_chId[PNL_MAX_CH];
 string g_chTemplate[PNL_MAX_CH];
@@ -932,10 +934,17 @@ void HandleSetGlobalConfig(const string json)
 void HandleSetTemplate(const string json)
 {
    string name = JsonGetString(json, "template_name", "");
+   // Only trades opened under THIS template. Until v1.09 every open template
+   // trade was re-pointed at whatever was pushed, so saving one template, or
+   // just clicking a CH tab on this panel, put every OTHER template's open
+   // trades on its TP/BE/trail rules (found 2026-10-01). An empty name
+   // matches nothing, which is the safe reading of a malformed push.
+   string want = "template:" + name;
    int updated = 0;
    for(int i = 0; i < ArraySize(g_trades); i++)
    {
       if(!g_trades[i].isTemplate) continue;
+      if(name == "" || g_trades[i].strategy != want) continue;
       g_trades[i].tplCfg            = json;
       g_trades[i].tplTpslMode       = JsonGetString(json, "tpl_tpsl_mode", g_trades[i].tplTpslMode);
       g_trades[i].tplAnchor         = JsonGetString(json, "tpl_anchor", g_trades[i].tplAnchor);
@@ -952,6 +961,7 @@ void HandleSetTemplate(const string json)
    for(int i = 0; i < ArraySize(g_pending); i++)
    {
       if(!g_pending[i].isTemplate) continue;
+      if(name == "" || g_pending[i].strategy != want) continue;
       g_pending[i].tplCfg = json;
       updated++;
    }
@@ -3783,15 +3793,19 @@ int PanelDrawLeft()
    y += S;
 
    // ── Channel tabs ─────────────────────────────────────────────────
+   // Two rows of four (v1.09): Telegram channels first, then the Signal
+   // Generator engines. A quarter-width tab fits about 16 characters at size
+   // 7, so the name is cut; the full name is in the box below.
    for(int i = 0; i < PNL_MAX_CH; i++)
    {
       string cap = "CH" + (string)(i + 1);
-      if(g_chName[i] != "") cap += " (" + g_chName[i] + ")";
-      PnlButton("ch" + (string)i, x + i * (W3 + PNL_GAP), y, W3, H, cap,
+      if(g_chName[i] != "") cap += " " + StringSubstr(g_chName[i], 0, 12);
+      int row = i / 4, col = i % 4;
+      PnlButton("ch" + (string)i, x + col * (W4 + PNL_GAP), y + row * S, W4, H, cap,
                 i == g_chSel ? CLR_TEAL : CLR_CELL,
                 i == g_chSel ? clrWhite : CLR_DIM, 7);
    }
-   y += S;
+   y += S * ((PNL_MAX_CH + 3) / 4);
 
    // ── Selected channel: name and id, both read-only ────────────────
    // The terminal never writes channel identity -- see core_panel_context.

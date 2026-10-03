@@ -27,6 +27,8 @@ export interface ParsingCategory {
   badge: string;
   /** A semantic token name, not a colour: see index.css. */
   tone: "accent" | "remote" | "profit" | "warning";
+  /** One line under the badge: what the group decides. */
+  summary: string;
   toggles: ParsingToggle[];
 }
 
@@ -34,6 +36,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
   {
     badge: "PARSING",
     tone: "accent",
+    summary: "How a message is read into a signal.",
     toggles: [
       {
         key: "lk_enable_tp_parsing",
@@ -58,6 +61,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
   {
     badge: "EXECUTION",
     tone: "remote",
+    summary: "What happens once a signal is read: entries, closes and breakeven moves.",
     toggles: [
       {
         key: "auto_execute_signals",
@@ -100,6 +104,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
   {
     badge: "SAFETY",
     tone: "profit",
+    summary: "Messages that are never turned into trades.",
     toggles: [
       {
         key: "lk_ignore_media_messages",
@@ -118,6 +123,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
   {
     badge: "RESEARCH",
     tone: "remote",
+    summary: "Records only. Nothing here blocks, resizes or places a trade.",
     toggles: [
       {
         key: "tg_decision_log_enabled",
@@ -142,6 +148,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
     // cannot.
     badge: "EVENT GUARD",
     tone: "warning",
+    summary: "Blocks trades around scheduled economic releases.",
     toggles: [
       {
         key: "tg_event_tier_gate_enabled",
@@ -155,6 +162,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
   {
     badge: "MARKET GUARD",
     tone: "warning",
+    summary: "What happens to a signal that arrives while the market is shut.",
     toggles: [
       {
         key: "lk_queue_closed_market_limits",

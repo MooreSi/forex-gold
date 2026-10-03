@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import { PARSING_CATEGORIES } from "../content/settings";
+import { ParsingToggleCard } from "./ParsingToggleCard";
 
 interface ParsingSettingsSectionProps {
   settings: Record<string, unknown>;
@@ -31,45 +32,38 @@ function on(settings: Record<string, unknown>, key: string, fallback: boolean): 
 export function ParsingSettingsSection({ settings, onSave }: ParsingSettingsSectionProps) {
   return (
     <div className="space-y-4">
-      {PARSING_CATEGORIES.map((category) => (
-        <section key={category.badge}>
-          <h3 className="mb-2">
-            <span
-              className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider",
-                TONE_CLASS[category.tone],
-              )}
-            >
-              {category.badge}
-            </span>
-          </h3>
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {category.toggles.map((t) => (
-              <label
-                key={t.key}
-                data-testid={`toggle-${t.key}`}
-                className="flex h-full flex-col rounded border border-line bg-surface-2 p-2.5"
+      {PARSING_CATEGORIES.map((category) => {
+        const nOn = category.toggles.filter((t) => on(settings, t.key, t.defaultOn)).length;
+        return (
+          <section key={category.badge} className="rounded-lg border border-line bg-surface-1 p-3">
+            <header className="mb-2.5 flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider",
+                  TONE_CLASS[category.tone],
+                )}
               >
-                <span className="flex items-start gap-2">
-                  <Tooltip label={t.description}>
-                    <input
-                      type="checkbox"
-                      aria-label={t.label}
-                      checked={on(settings, t.key, t.defaultOn)}
-                      onChange={(e) => void onSave(t.key, e.target.checked ? 1 : 0)}
-                      className="mt-0.5 accent-accent"
-                    />
-                  </Tooltip>
-                  <span className="text-xs font-semibold text-ink-1">{t.label}</span>
-                </span>
-                <span className="mt-1 text-[11px] leading-snug text-ink-3">
-                  {t.description}
-                </span>
-              </label>
-            ))}
-          </div>
-        </section>
-      ))}
+                {category.badge}
+              </span>
+              <span className="text-[11px] text-ink-3">{category.summary}</span>
+              <span className="num ml-auto text-[10px] text-ink-3">
+                {nOn} of {category.toggles.length} on
+              </span>
+            </header>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {category.toggles.map((t) => (
+                <ParsingToggleCard
+                  key={t.key}
+                  toggle={t}
+                  on={on(settings, t.key, t.defaultOn)}
+                  blocks={category.tone === "warning"}
+                  onChange={(v) => void onSave(t.key, v ? 1 : 0)}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
       <NumericSettings settings={settings} onSave={onSave} />
     </div>
   );
@@ -84,38 +78,61 @@ function NumericSettings({ settings, onSave }: ParsingSettingsSectionProps) {
     setFallback(String(settings["lk_fallback_sl_pips"] ?? 50));
   }, [settings]);
 
+  const field =
+    "num w-20 rounded border border-line bg-surface-2 px-2 py-1 text-right text-ink-1 focus:border-accent focus:outline-none";
+
   return (
-    <div className="flex flex-wrap items-end gap-4 border-t border-line pt-3">
-      <label className="text-xs text-ink-2">
-        Second-message match window
-        <Tooltip label="How long after a signal a follow-up message can still be matched to it — an SL or a TP sent in a second post. Longer windows catch more follow-ups and risk attaching one to the wrong signal.">
-        <input
-          aria-label="Second-message match window"
-          inputMode="numeric"
-          value={window}
-          onChange={(e) => setWindow(e.target.value)}
-          onBlur={() => void onSave("lk_second_message_match_window_sec", Number(window) || 0)}
-          className="num ml-2 w-20 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-        />
-        </Tooltip>
-        <span className="ml-1 text-[11px] text-ink-3">seconds</span>
-      </label>
-      <label className="text-xs text-ink-2">
-        Fallback SL distance
-        <Tooltip label="The stop used when a signal names none and SL parsing is switched off. It decides how much a trade from such a signal can lose.">
-        <input
-          aria-label="Fallback SL distance"
-          inputMode="decimal"
-          value={fallback}
-          onChange={(e) => setFallback(e.target.value)}
-          onBlur={() => void onSave("lk_fallback_sl_pips", Number(fallback) || 0)}
-          className="num ml-2 w-20 rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
-        />
-        </Tooltip>
-        <span className="ml-1 text-[11px] text-ink-3">
-          pips; used only while SL parsing is off
+    <section className="rounded-lg border border-line bg-surface-1 p-3">
+      <header className="mb-2.5 flex items-center gap-2">
+        <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-ink-2">
+          VALUES
         </span>
-      </label>
-    </div>
+        <span className="text-[11px] text-ink-3">Saved when you leave the field.</span>
+      </header>
+      <div className="grid gap-2 md:grid-cols-2">
+        <label className="flex items-center justify-between gap-3 rounded-md border border-line bg-surface-2 p-3 text-xs text-ink-1">
+          <span>
+            <span className="font-semibold">Second-message match window</span>
+            <span className="block text-[11px] text-ink-3">
+              Used by TP/SL in Second Message
+            </span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Tooltip label="How long after a signal a follow-up message can still be matched to it — an SL or a TP sent in a second post. Longer windows catch more follow-ups and risk attaching one to the wrong signal.">
+              <input
+                aria-label="Second-message match window"
+                inputMode="numeric"
+                value={window}
+                onChange={(e) => setWindow(e.target.value)}
+                onBlur={() => void onSave("lk_second_message_match_window_sec", Number(window) || 0)}
+                className={field}
+              />
+            </Tooltip>
+            <span className="text-[11px] text-ink-3">sec</span>
+          </span>
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-md border border-line bg-surface-2 p-3 text-xs text-ink-1">
+          <span>
+            <span className="font-semibold">Fallback SL distance</span>
+            <span className="block text-[11px] text-ink-3">
+              Used only while SL parsing is off
+            </span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Tooltip label="The stop used when a signal names none and SL parsing is switched off. It decides how much a trade from such a signal can lose.">
+              <input
+                aria-label="Fallback SL distance"
+                inputMode="decimal"
+                value={fallback}
+                onChange={(e) => setFallback(e.target.value)}
+                onBlur={() => void onSave("lk_fallback_sl_pips", Number(fallback) || 0)}
+                className={field}
+              />
+            </Tooltip>
+            <span className="text-[11px] text-ink-3">pips</span>
+          </span>
+        </label>
+      </div>
+    </section>
   );
 }

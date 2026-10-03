@@ -425,11 +425,3 @@ async def try_handle_risk_free_be_trigger(
     from backend.src.services.trading.ai_signal_fallback import apply_sl_adjustment
     await apply_sl_adjustment(entry_price, channel_name, tg_id, "logic_keyword", bridge)
     return True
-
-
-    log.info("[LogicKeywords] TP HIT reported by %s: %s", channel_name, text[:120])
-    asyncio.create_task(telegram_alerts.send_message(
-        f"*TP hit reported* — {channel_name}\n{text[:300]}",
-        tg_id, "logic_keyword_tp_hit",
-    ))
-    return True

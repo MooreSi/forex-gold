@@ -57,6 +57,34 @@
       "loc": 96,
       "class": "unwired-tool",
       "reason": "docs/todo/reversal-engine/250 step 2: replays a Reversal signal through the EA template it traded under (backtest/template_simulator) or refuses with a reason. Pure; its caller is tools/re_measurement_audit.py, which is not an app entrypoint. Unwired on purpose -- feeding it to tpl_label_sweep would change what edge_model learns and so what the demo gate passes, which waits on the owner (docs/simon-handover/046). Pinned by tests/reversal_engine/test_own_template_label.py."
+    },
+    {
+      "module": "backend.src.services.backtest.edge_trials",
+      "file": "backend/src/services/backtest/edge_trials.py",
+      "loc": 280,
+      "class": "unwired-tool",
+      "reason": "The 2025 edge trials (docs/todo/reversal-engine/270). Pure: bars in, trades and verdicts out. Imported only by tools/edge_trials_2025.py and tools/edge_holdout.py, which are research scripts and not app entrypoints. Pinned by tests/backtest/test_edge_trials.py. Delete this entry if it is wired or removed."
+    },
+    {
+      "module": "backend.src.services.reversal_engine.historical_bars",
+      "file": "backend/src/services/reversal_engine/historical_bars.py",
+      "loc": 242,
+      "class": "unwired-tool",
+      "reason": "Dukascopy tick files to M1 bars and the resumable download (docs/todo/reversal-engine/260). Research only, off the trading path. Imported by historical_signals, edge_trials and tools/re_dukascopy_replay.py, none of which is an app entrypoint. Pinned by tests/reversal_engine/test_historical_replay.py. Delete this entry if it is wired or removed."
+    },
+    {
+      "module": "backend.src.services.reversal_engine.historical_signals",
+      "file": "backend/src/services/reversal_engine/historical_signals.py",
+      "loc": 154,
+      "class": "unwired-tool",
+      "reason": "Regenerates Reversal Engine signals from M1 bars alone, through the live level_detector and entry_zone_from_level (docs/todo/reversal-engine/260). Pure and research only. Imported by tools/re_dukascopy_replay.py and tools/edge_trials_2025.py. Pinned by tests/reversal_engine/test_historical_replay.py. Delete this entry if it is wired or removed."
+    },
+    {
+      "module": "backend.src.services.reversal_engine.replay_verdict",
+      "file": "backend/src/services/reversal_engine/replay_verdict.py",
+      "loc": 94,
+      "class": "unwired-tool",
+      "reason": "The pre-registered bar the Dukascopy replay is judged by, kept as code so a report cannot grade itself on a softer curve. Imported by the two research tools only. Pinned by tests/reversal_engine/test_replay_verdict.py. Delete this entry if it is wired or removed."
     }
   ]
 }

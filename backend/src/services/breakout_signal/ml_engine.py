@@ -75,6 +75,8 @@ except ImportError:
 
 _ML_AVAILABLE = _NP and _SK
 
+from backend.src.services.breakout_signal import ml_handover as _ho  # noqa: E402
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 MIN_TRAIN_SAMPLES = 15
 RETRAIN_EVERY     = 5
@@ -144,14 +146,16 @@ def init(data_dir: Path) -> None:
     _data_dir = Path(data_dir)
     if _ML_AVAILABLE:
         _load_all()
-        # Startup backfill: a feature-version bump discards the saved batch model,
-        # but the DB history remains trainable via _pad_legacy(). Rebuild it now
-        # rather than waiting for the labeled-count meta to reach MIN_TRAIN_SAMPLES
-        # again (~15 fresh trades with the live gate running on a noisy online SGD).
-        if _model is None:
+        # Startup backfill: a feature-version bump leaves no model at the new
+        # version (a previous one may be handed over, see ml_handover), but the DB
+        # history remains trainable via _pad_legacy(). Rebuild it now rather than
+        # waiting for the labeled-count meta to reach MIN_TRAIN_SAMPLES again
+        # (~15 fresh trades with the live gate running on a noisy online SGD).
+        # A handed-over model is the stopgap, not the answer, so it retrains too.
+        if _model is None or _ho.legacy_width:
             try:
                 _retrain()
-                if _model is not None:
+                if _model is not None and not _ho.legacy_width:
                     _save_all()
                     _log.info("[BO-ML] batch model rebuilt from padded legacy history")
             except Exception as e:
@@ -282,7 +286,10 @@ def predict(features: list[float]) -> Optional[float]:
     if not features or len(features) != N_FEATURES:
         return None
     try:
-        X = np.array(features, dtype=float).reshape(1, -1)
+        # A handed-over model is fitted on the leading block only; a full-width
+        # row raises inside predict(), which the except below turns into None,
+        # and the live gate reads None as "pass".
+        X = np.array(_ho.truncate(features), dtype=float).reshape(1, -1)
         preds = []
 
         if _model is not None:
@@ -360,7 +367,7 @@ def _online_update(features: list[float], label: float) -> None:
     if not _ML_AVAILABLE:
         return
     try:
-        X = np.array(features, dtype=float).reshape(1, -1)
+        X = np.array(_ho.truncate(features), dtype=float).reshape(1, -1)
 
         if _model_online is None:
             _model_online = Pipeline([
@@ -380,7 +387,7 @@ def _online_update(features: list[float], label: float) -> None:
 # ── Batch retrain ─────────────────────────────────────────────────────────────
 
 def _retrain() -> None:
-    global _model, _labeled_count
+    global _model, _model_online, _labeled_count
     if not _ML_AVAILABLE:
         return
 
@@ -465,6 +472,14 @@ def _retrain() -> None:
         except Exception as e:
             _log.warning("[BO-ML] RF retrain error: %s", e)
 
+    if _model is not None and _ho.legacy_width:
+        # A model on the current schema now exists. The handed-over online
+        # learner is still the old width and would reject every full-width
+        # update, so it goes; the fresh one starts as it always did after a bump.
+        _ho.end()
+        _model_online = None
+        _log.info("[BO-ML] handover ended: batch model retrained at v%d", MODEL_VERSION)
+
     import time as _t
     _train_history.append({
         "ts":                  _t.time(),
@@ -484,6 +499,12 @@ def _model_path(name: str) -> Optional[Path]:
 
 def _save_all() -> None:
     if not _ML_AVAILABLE or _data_dir is None:
+        return
+    if _ho.legacy_width:
+        # Never write an old-width model under the new version's name: the next
+        # start would load it as current, with no truncation, and predict()
+        # would return None. The previous version's files stay, so a restart
+        # hands over again.
         return
     try:
         meta = {"labeled_count": _labeled_count, "version": MODEL_VERSION}
@@ -530,6 +551,15 @@ def _load_all() -> None:
                 _log.info("[BO-ML] Online model is old classifier format — resetting to regressor")
     except Exception as e:
         _log.debug("[BO-ML] load online error: %s", e)
+
+    if _model is None and _model_online is None:
+        _batch, _online, _w = _ho.hand_over(_data_dir, MODEL_VERSION)
+        if _w:
+            _model, _model_online = _batch, _online
+            _ho.set_legacy_width(_w)
+            _log.warning("[BO-ML] v%d has no model yet; HANDING OVER the previous "
+                         "one, which scores its first %d features (ml_handover)",
+                         MODEL_VERSION, _w)
 
 
 # ── Status helpers ────────────────────────────────────────────────────────────

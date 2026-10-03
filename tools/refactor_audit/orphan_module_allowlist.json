@@ -38,6 +38,13 @@
       "reason": "Monte Carlo band around the backtest's single equity path -- docs/todo/backtest/020. Pure: takes a StrategyStats, returns percentiles, reaches nothing. Unwired because whether it surfaces on the Backtest page or stays a tool is the open decision in that file's section 3, and the owner has not answered it. Pinned by tests/backtest/test_resample.py. Delete this entry when the decision is made and it is wired (or removed)."
     },
     {
+      "module": "backend.src.services.backtest.event_buckets",
+      "file": "backend/src/services/backtest/event_buckets.py",
+      "loc": 153,
+      "class": "unwired-tool",
+      "reason": "Buckets closed signals by signed minutes to NFP / FOMC (rules) plus any events passed in a CSV. Pure; the database read is in tools/event_buckets.py, which is its caller and is not an app entrypoint. Research only: it exists to decide whether a post-release blackout or an event-radar feature is worth building, and the first run (4 events) could not say. Pinned by tests/backtest/test_event_buckets.py. Delete this entry if it is wired or removed."
+    },
+    {
       "module": "backend.src.services.analytics.regime_drift",
       "file": "backend/src/services/analytics/regime_drift.py",
       "loc": 194,

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.src.config import USER_DATA_DIR
-from backend.src.services.cluster.remote import _admission
+from backend.src.services.cluster.remote import _admission, _feedback
 from backend.src.services.cluster.remote.protocol import (
     MSG_HELLO, MSG_PONG, MSG_STATUS, MSG_DIAGNOSTICS, MSG_UPDATE_STATUS,
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
@@ -1034,6 +1034,8 @@ async def _handler(websocket) -> None:
             elif t == MSG_DIAGNOSTICS:
                 if conn_entry:
                     conn_entry["diagnostics"] = m.get("data", {})
+            elif t == _feedback.MSG_FEEDBACK:
+                await _feedback.handle(websocket, tok_meta, hostname, ip, m)
 
             elif t == MSG_UPDATE_STATUS:
                 status = m.get("status", "")

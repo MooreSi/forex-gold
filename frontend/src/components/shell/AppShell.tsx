@@ -1,6 +1,7 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import { useState, type ComponentType } from "react";
 import { AppHeader } from "./AppHeader";
+import { FeedbackButton } from "./FeedbackButton";
 import { DEFAULT_TAB, TABS } from "./tabs";
 import { DashboardPanel } from "@/components/dashboard/DashboardPanel";
 import { ChartPanel } from "@/components/chart/ChartPanel";
@@ -72,6 +73,8 @@ export function AppShell() {
               </Tabs.Trigger>
             );
           })}
+          {/* About is the last tab, so this lands straight after it. */}
+          <FeedbackButton />
         </Tabs.List>
 
         {TABS.map((t) => {

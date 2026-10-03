@@ -56,6 +56,14 @@ record. 57 commits since v0.611, plus this release's own change.
   stops for an upgrade; the version line says when this machine has unpushed
   commits.
 
+## Unreleased: Feedback
+
+- **Feedback button** after the About tab. Opens a popup for feature requests,
+  bug reports and general feedback. Sending alerts the owner by Telegram and
+  email and adds the entry to the admin console's new Feedback tab, where it
+  can be marked Completed. An install that cannot reach the admin server
+  queues the feedback and sends it on the next connection.
+
 ## v0.611 — Windows install and VPS setup (2026-09-25)
 
 The About screen carries the user-facing summary; this is the engineering

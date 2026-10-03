@@ -708,3 +708,32 @@ is nearer the broker; the Mac only edits the settings. Spec:
   started there side by side, not through a helper.
 - **Not yet through a demo session.** Nothing here has run against the
   owner's VPS.
+
+## Feedback: customer install to owner (2026-10-03)
+
+The **Feedback** button after the About tab opens a popup (feature request,
+bug, general feedback). It is not a tab: it opens over the current screen.
+
+The path, and why each step is there:
+
+- `POST /api/feedback` -> `feedback_controller.submit` -> `services/feedback/service.py`.
+- **A customer install** writes the entry to `remote/feedback_outbox.json` and
+  the remote client sends `MSG_FEEDBACK` (flush after WELCOME, and again on
+  each server ping). The entry leaves the outbox **only on `MSG_FEEDBACK_ACK`**,
+  so feedback written while the admin server is unreachable is delivered on
+  the next connection rather than lost. The hooks live in
+  `cluster/remote/_feedback.py` because `server.py` is LOC-baselined.
+- **The issuer machine** (`is_licence_issuer_machine`) records the entry
+  directly, without the socket.
+- **The server** (`_feedback.handle`) stores it in `remote/feedback.json`,
+  keyed on the sender-generated id, then announces it by Telegram and email
+  (`feedback/notify.py`). Each channel is tried independently, store first, so
+  a down channel never loses the entry. A repeat id is acked but not announced
+  again. A malformed entry is acked too, or the client would resend it on
+  every connection for ever.
+- **The admin console** (`~/forex-admin`, `api/feedback.py`) lists the store and
+  flips `status` open/completed. It imports `services/feedback/store.py`, the
+  same way the fleet routes import the remote server, and 503s elsewhere.
+- Email uses the existing Settings > Email configuration; with none
+  configured the Telegram alert and the console entry still happen and the
+  log says the email was not sent.

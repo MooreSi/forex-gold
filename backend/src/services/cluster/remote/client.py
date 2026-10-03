@@ -33,7 +33,7 @@ from backend.src.services.cluster.remote.protocol import (
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
     MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO, make,
 )
-from backend.src.services.cluster.remote import _broker_positions
+from backend.src.services.cluster.remote import _broker_positions, _feedback
 from backend.src.services.cluster.remote.tls import (
     client_ssl_context, peer_is_acceptable, SERVER_HOST, SERVER_PORT,
 )
@@ -670,6 +670,10 @@ async def _connect_loop() -> None:
 
                     elif t == MSG_PING:
                         await ws.send(json.dumps(make(MSG_PONG)))
+                        await _feedback.flush(ws)   # queued feedback goes out on the next ping
+
+                    elif t == _feedback.MSG_FEEDBACK_ACK:
+                        _feedback.on_ack(m)
 
                     elif t == MSG_GET_DIAG:
                         await ws.send(json.dumps(_build_diagnostics()))

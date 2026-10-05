@@ -594,3 +594,14 @@ reached the terminal's Experts folder. `app._install_ea_at_startup` now calls
 is inert (it changes nothing that runs until someone compiles) so it needs no
 empty-book wait; a busy book on Windows still triggers nothing. Compiling stays
 Windows-only. Pinned by `tests/services/broker/test_ea_source_syncs_off_windows.py`.
+
+- **Closes walk the filling modes on retcode 10030** (`mt5_fill.py`,
+  2026-10-05). IOC first, then RETURN, then FOK, only on 10030 (nothing
+  executed); no answer is never resent. Opening already did this.
+- **EA v1.10** (2026-10-05): PollSocket restarts its 10 s silence clock after
+  a late poll (> 3 s on a 200 ms timer), because OrderSend blocks the EA's only
+  thread and the app only answers the EA's own pings. Not compiled or demoed
+  when written; the app calls a v1.09 chart stale until it is.
+- **`get_tick_at` answers with the first tick of the next hour** on the Mac's
+  terminal in every logged case (bugs/052 addendum). Do not trust a
+  historical tick from it without checking its `time`.

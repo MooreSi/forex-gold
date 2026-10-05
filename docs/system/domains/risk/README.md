@@ -379,3 +379,12 @@ only, every source.
   and only tightens, so it does not undo it. Synced and in `_PROTECTIVE_KEYS`.
   **The trigger is the same local-table judgement as the halt**, not the MT5
   figure the dashboard shows. **Not yet run on a demo account.**
+
+- **A profit target, once reached, stays reached for the day** (2026-10-05,
+  bugs/064, handover 038 option A, provisional). `risk/schedule.py`'s
+  `TARGET_REACHED_KEY` latches the daily target and each window's target the
+  first time the gate *or the header badge* sees it reached; it expires at
+  midnight by construction. Resume is still the only way back in. Raising the
+  target above the latched level releases it; lowering it does not. Before
+  this, a later loss (once, the guard's own force-close) re-opened trading.
+  **Not yet run on a demo account.**

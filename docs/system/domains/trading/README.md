@@ -257,3 +257,17 @@ on any route (golden rule 3). Pinned by
 `tests/trading/test_entry_realignment_pip_limit.py`. **Needs a demo session
 before it is trusted:** it moves real entries on all four routes and was built
 from the tests alone, with no spec.
+
+- **The Limit Runner asks the Trading Schedule and the news blackout**
+  (2026-10-05, bugs/064 defect 2), ahead of both its exits, beside the pause
+  and trend gates it already had. It was the fifth route found missing the
+  schedule gate. Any new route to the EA needs all four:
+  pause, schedule, news, trend.
+- **ORB auto-execute refuses a fill below 1:1 at the current price**
+  (`_ORB_MIN_REALISED_RR`, bugs/059). The 2:1 target is measured from the
+  opening-range edge, but confirmation needs price beyond the Asian range,
+  which can leave almost no reward. The Asian range now ends at London open
+  (07:00 UTC under BST). **Not yet run on a demo account.**
+- **A forwarded open marks the Mac's signal `active`**
+  (`signal_state_repo.mark_forwarded_signal_active`, bugs/071 #3). Without it
+  the stranded-claim sweep re-queued forwarded signals after 15 minutes.

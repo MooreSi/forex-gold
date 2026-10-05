@@ -662,3 +662,11 @@ the intended effect, but it changes what the live ML feature does on the next
 refit, so watch `pro_likeness` after deploy. A signal captured at several
 stages is now one example (latest usable stage), not three. Pinned by
 `tests/reversal_engine/test_pro_model_honest_auc.py`.
+
+- **The Breakout engine has a real daily loss stop** (2026-10-05, bugs/048).
+  `breakout_signal/daily_loss_stop.py`, asked first in `_process_candidate`
+  (the only route to `create_signal`). Engine ledger, UTC day,
+  `daily_loss_stop_usd` (default $200). Fails open on a read error; the
+  account-wide halt still covers real orders.
+- The breakout AI reviewer's prompt says `ATR(M5)`; the stored column is
+  still called `atr_m15` (legacy name, M5 value, bugs/063).

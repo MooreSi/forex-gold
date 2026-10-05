@@ -211,6 +211,9 @@ async def run_monitor_cycle(ctx: MonitorCtx) -> bool:
                 _cap_ea = _ea_cap_mod.get_instance()
                 if _cap_ea is not None:
                     await _rr_cap.enforce_max_open_trades(_cap_ea, rs, tick=tick)
+                    # A trading pause (daily goal included) must also stop
+                    # orders already resting at the broker.
+                    await _rr_cap.enforce_trading_pause(_cap_ea, rs)
             except Exception:
                 log.debug("Max-open-trades guard failed", exc_info=True)
             _now_rest = time.time()

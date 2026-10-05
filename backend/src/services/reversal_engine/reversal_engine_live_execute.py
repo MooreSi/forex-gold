@@ -565,6 +565,15 @@ class _LiveExecuteMixin:
             )
             return None
 
+        # A trading pause stops every automated entry, and this route places a
+        # resting order without passing through open_trade, where the pause is
+        # enforced (owner, 2026-10-05). Handled, not handed back: returning
+        # None would send the signal down the market path, which has its own
+        # refusal and a different failure handling.
+        if await db_module.to_db_thread(_gov.is_trading_paused):
+            re_db.update_live_exec(sig["id"], status="limit_order_skip:trading paused")
+            return True
+
         from backend.src.services.broker import ea_bridge as _ea_mod
         _ea = _ea_mod.get_instance()
         if _ea is None or not _ea.is_ea_healthy():

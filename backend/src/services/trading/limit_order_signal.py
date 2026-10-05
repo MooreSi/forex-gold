@@ -261,6 +261,18 @@ async def handle_limit_order_signal(
     if per_signal_skip:
         return {"skip_reason": f"Auto-eval declined signal: {per_signal_skip_reason}"}
 
+    # A trading pause (daily goal, daily loss, give-back, manual) stops every
+    # automated entry. This route reaches the broker without passing through
+    # open_trade, where the pause is enforced, so it asks here -- ahead of the
+    # resting order AND the Entry Realignment market fallback below (owner,
+    # 2026-10-05: the daily goal was reached and trades kept opening).
+    if await db_module.to_db_thread(_gov.is_trading_paused):
+        _why = _gov.halt_reason()
+        log.warning("[LimitRunner] tg_id=%s not placed — trading paused%s",
+                    tg_id, f": {_why}" if _why else "")
+        return {"skip_reason": "Limit order skipped — trading paused"
+                               + (f": {_why}." if _why else ".")}
+
     from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()
     if _ea is None or not _ea.is_ea_healthy():

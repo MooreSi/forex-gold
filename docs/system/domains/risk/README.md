@@ -58,6 +58,35 @@ per-strategy parameters, Expert Tunables, custom strategies, retention).
 - Risk settings are served from a 10s TTL cache living on the `database` module itself; `update_risk_settings` carries a re-entrancy guard for sync-applied changes.
 - `retention.switch_environment` is the genuinely dangerous call in that module: `db.init()` closes stale connections and flushes every registered cache, and the whole app then reads a different file.
 
+## A pause is enforced in `open_trade` only; resting orders had to be taught it (2026-10-05, owner)
+
+The daily goal, daily-loss halt, give-back guard and manual pause all write
+`trade_pause_until`. `open_trade` is the one place that refused on it, so on a
+goal-reached day with the badge reading "Trading Paused", trades kept opening
+through routes that reach the EA without `open_trade`:
+
+- the Limit Runner (`limit_order_signal.handle_limit_order_signal`), including
+  its Entry Realignment market fallback -- now refuses first;
+- the Reversal Engine LIMIT ORDER path (`_try_re_limit_order`) -- now records
+  `limit_order_skip:trading paused` and returns handled;
+- orders already resting at the broker when the halt landed, which MT5 fills
+  with no round trip to Python -- `resting_revalidation.enforce_trading_pause`
+  withdraws them every monitor cycle, and `_refusal_for` keeps them off while
+  paused and re-arms them (original expiry) if the pause lifts.
+
+Channel `"Manual"` (manual limit, Set & Forget, ORB) is exempt by the owner's
+instruction. The withdraw side **fails open** on an unreadable pause (pulling
+the whole book on a database blip is the outage this module rules out); the
+placement side keeps `is_trading_paused`'s fail-closed behaviour. Pinned by
+`tests/trading/test_pause_covers_limit_and_resting_orders.py`.
+
+**Not covered: EA Template grid legs.** A grid template (Gold Diggers
+Institutional runs one) stages its resting legs inside the EA, with leg tickets
+Python does not hold, and they are not rows in `vantage_pending_orders`. A leg
+placed before the halt can still fill after it. Pulling them needs an EA-side
+command or a broker-order listing keyed to leg ids and a demo session; see
+`_on_grid_leg_cancelled`. Unresolved.
+
 ## Open questions
 
 - The Expert Tunables clamp ranges are "documented guesses, flagged for review" — the bounds themselves are unvalidated.

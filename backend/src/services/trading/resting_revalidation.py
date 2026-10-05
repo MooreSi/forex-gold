@@ -174,6 +174,38 @@ def _full_gate_refusal(row: dict, rs: dict, tick: Any, dpm_candles: Any) -> Opti
     return _momentum_refusal(row, dpm_candles)
 
 
+# Orders the owner places by hand (manual limit, Set & Forget, ORB) are written
+# with this channel name and are exempt from a trading pause (owner, 2026-10-05).
+_MANUAL_CHANNEL = "Manual"
+
+
+def _pause_refusal(row: dict) -> Optional[str]:
+    """Why a trading pause says this resting order must be off the book.
+
+    A pause (daily goal, daily loss, give-back, manual) stops new entries, but
+    `open_trade` is the only place that enforced it, and MT5 fills a resting
+    order with no round trip to Python -- so an order placed before the halt
+    went on filling through it (owner, 2026-10-05: daily goal reached, trades
+    kept opening). Manual orders are exempt.
+
+    **Fails open**, unlike `governor.is_trading_paused`: that one gates
+    placement and must refuse on an unreadable state, but this one PULLS
+    orders, and pulling the whole book because a database read blipped is the
+    self-inflicted outage this module's contract rules out.
+    """
+    if str(row.get("channel_name") or "") == _MANUAL_CHANNEL:
+        return None
+    try:
+        from backend.src.services.risk import app_config_repo as _cfg
+        if float(_cfg.read_app_config_strict("trade_pause_until") or 0) <= time.time():
+            return None
+    except Exception as exc:
+        log.debug("[Resting] pause state unreadable, withdrawing nothing: %s", exc)
+        return None
+    why = _gov.halt_reason()
+    return f"Trading paused — {why}" if why else "Trading paused"
+
+
 def _refusal_for(row: dict, rs: dict, bias: Optional[str], tick: Any,
                  dpm_candles: Any, ignore_proximity: bool = False) -> Optional[str]:
     """Why this resting order should be off the book, or None.
@@ -183,6 +215,9 @@ def _refusal_for(row: dict, rs: dict, bias: Optional[str], tick: Any,
     before price ever arrives; putting one BACK has no such hazard, and an
     order that should be on the book belongs there whatever the distance.
     """
+    paused = _pause_refusal(row)
+    if paused:
+        return paused
     if bool(rs.get("htf_bias_gate_enabled", 0)):
         bias_why = _gov.htf_bias_blocks(row.get("direction"), bias, rs)
         if bias_why:
@@ -396,6 +431,44 @@ async def revalidate_resting_orders(
             # One order the EA refuses -- filled in the meantime is the obvious
             # case -- must not abandon the rest of the sweep.
             log.warning("[Resting] could not revalidate %s: %s", row.get("trade_id"), exc)
+    return withdrawn
+
+
+async def enforce_trading_pause(ea, rs: dict,
+                                fetch: Optional[Callable[[], list]] = None) -> int:
+    """While trading is paused, take every automated resting order off the book.
+
+    Every monitor cycle, like `enforce_max_open_trades` and for the same
+    reason: a resting order can fill inside a minute. They come back through
+    the ordinary re-arm path (`_refusal_for` includes the pause) if the pause
+    lifts before the order's original life runs out. Returns how many were
+    withdrawn. Never raises. Cancels only; it never opens or closes anything.
+    """
+    try:
+        if _pause_refusal({"channel_name": ""}) is None:
+            return 0
+        from backend.src.services.broker import repo as _broker_repo
+        if fetch is None:
+            from backend.src.db import database as _db
+            rows = await _db.to_db_thread(_broker_repo.fetch_revalidatable_pending_orders)
+        else:
+            rows = fetch()
+    except Exception as exc:
+        log.debug("[Resting] pause guard skipped: %s", exc)
+        return 0
+    withdrawn = 0
+    for row in rows or []:
+        if str(row.get("status") or "working") != "working":
+            continue
+        reason = _pause_refusal(row)
+        if not reason:
+            continue
+        try:
+            if await _withdraw(ea, _broker_repo, row, reason):
+                withdrawn += 1
+        except Exception as exc:
+            log.warning("[Resting] could not withdraw %s for the pause: %s",
+                        row.get("trade_id"), exc)
     return withdrawn
 
 

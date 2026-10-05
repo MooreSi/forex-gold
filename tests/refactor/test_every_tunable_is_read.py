@@ -18,8 +18,9 @@ lever it spends a decision on and believes it has pulled.
 and its catalogue went on 2026-09-14, taking `allow_asian` and its
 `hour_filter_enabled` with them. That is a real resolution -- a lever the
 tuner can no longer be handed -- but it is not the same as the lever having
-been wired up, and the bug files say so. `daily_loss_stop_usd` survives in the
-Breakout catalogue and is still dead.
+been wired up, and the bug files say so. `daily_loss_stop_usd` survived in the
+Breakout catalogue until 2026-10-05, when it was wired up
+(`breakout_signal/daily_loss_stop.py`).
 
 A parameter's description is also read by a person, on the engine's own
 parameters panel. A described protection that does not exist is worse than an
@@ -50,9 +51,7 @@ from tests.refactor._source_scan import CATALOGUE_FILES, readers_of
 # Known dead, each with a bug tracking the decision. Shrink-only: when one is
 # deleted or wired up, remove it here. Adding to this set is the regression
 # this file exists to stop.
-KNOWN_DEAD = {
-    ("breakout", "daily_loss_stop_usd"),  # bugs/048
-}
+KNOWN_DEAD: set[tuple[str, str]] = set()  # daily_loss_stop_usd wired up 2026-10-05 (bugs/048)
 
 _CATALOGUES = {
     "breakout": bo_params,
@@ -98,8 +97,12 @@ class TestTheScannerCanSee:
     def test_the_catalogues_themselves_are_excluded(self):
         """Otherwise every parameter is trivially "read" by its own
         definition, and this whole file passes vacuously."""
-        assert readers_of("daily_loss_stop_usd", exclude=())
-        assert not readers_of("daily_loss_stop_usd", exclude=CATALOGUE_FILES)
+        # Was spelled with daily_loss_stop_usd while it was dead (bugs/048);
+        # wiring it up removed the only dead name, so this asserts the same
+        # property on the catalogue file itself.
+        catalogue = CATALOGUE_FILES[0]
+        assert catalogue in readers_of("min_quality_score", exclude=())
+        assert catalogue not in readers_of("min_quality_score", exclude=CATALOGUE_FILES)
 
 
 @pytest.mark.parametrize("engine", sorted(_CATALOGUES))

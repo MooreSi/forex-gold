@@ -183,6 +183,14 @@ def get_virtual_balance() -> float:
         return _STARTING_BALANCE
 
 
+def closed_pnl_since(ts: float) -> float:
+    """Net P&L of signals closed at or after `ts` (daily_loss_stop's measure)."""
+    row = get_db().get(
+        "SELECT SUM(COALESCE(net_pnl_dollars, pnl_dollars)) FROM bo_signals "
+        "WHERE status='closed' AND close_time >= ?", ts)
+    return float(row[0] or 0.0)
+
+
 def reconcile_balance_with_trades() -> Optional[float]:
     row = get_db().get(
         "SELECT SUM(COALESCE(net_pnl_dollars, pnl_dollars)) FROM bo_signals WHERE status='closed'"

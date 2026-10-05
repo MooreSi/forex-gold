@@ -27,6 +27,7 @@ import backend.src.config as cfg_module
 
 from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 from backend.src.services.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import daily_loss_stop
 from backend.src.services.breakout_signal import ml_engine as bo_ml
 from backend.src.services.market.indicators import H4_BIAS_MIN_CANDLES
 from backend.src.services.breakout_signal.signal_generator import (
@@ -418,6 +419,8 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         tick=None,
     ) -> None:
         """Risk calc → duplicate guard → Claude review → create signal."""
+        if daily_loss_stop.suppress(log_entry, velocity):   # bugs/048
+            return
         current_price = context["price"]
         trigger_tag   = "velocity" if velocity else "M5_candle"
 

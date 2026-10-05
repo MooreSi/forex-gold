@@ -422,6 +422,26 @@ async def try_handle_risk_free_be_trigger(
                  "TG CMD off, not acting", channel_name, phrase, trade["trade_id"][:8])
         return True
     entry_price = float(trade["entry_price"])
+    # Keep the better stop (owner, 2026-10-02). "Make it risk free" is
+    # satisfied by a stop already at or past entry, and moving it to bare entry
+    # would LOOSEN it. Live: a BUY filled at 4182.51 on a template whose own
+    # breakeven had locked a point (SL 4183.51); the channel's "Move SL to
+    # Break Even" then dragged it DOWN to 4182.51 and handed the point back.
+    # This is the BE trigger only: an explicit "adjust SL to X" still goes
+    # wherever the channel says (apply_sl_adjustment is untouched). The message
+    # is still claimed above, or the scan loop would offer it again every
+    # second.
+    try:
+        current_sl = float(trade["stop_loss"])
+    except (TypeError, ValueError, KeyError):
+        current_sl = None
+    if current_sl is not None:
+        is_buy = str(trade["direction"]).upper() == "BUY"
+        if (current_sl >= entry_price) if is_buy else (current_sl <= entry_price):
+            log.info("[LogicKeywords] RISK FREE/BE trigger (%s) matched '%s' -- trade=%s's stop "
+                     "%.2f is already at or past entry %.2f, leaving it",
+                     channel_name, phrase, trade["trade_id"][:8], current_sl, entry_price)
+            return True
     from backend.src.services.trading.ai_signal_fallback import apply_sl_adjustment
     await apply_sl_adjustment(entry_price, channel_name, tg_id, "logic_keyword", bridge)
     return True

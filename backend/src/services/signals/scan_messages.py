@@ -41,6 +41,7 @@ from backend.src.services.broker import ea_templates as _ea_templates
 from backend.src.services.trading.scan_auto_execute import execute_auto_signal as _execute_auto_signal_impl
 from backend.src.services.trading.scan_auto_execute import ime_enabled_for_channel as _ime_enabled_for_channel
 from backend.src.services.trading.limit_order_signal import handle_limit_order_signal as _handle_limit_order_signal_impl
+from backend.src.services.signals.repost_supersede import supersede_earlier_pending as _supersede_earlier_pending_impl
 from backend.src.services.signals.scan_edit_reparse import handle_signal_edit as _handle_signal_edit_impl
 from backend.src.services.trading.instant_entry import process_instant_entry as _process_instant_entry_impl
 from backend.src.services.signals.scan_staleness import record_staleness_or_new as _record_staleness_or_new_impl
@@ -485,6 +486,16 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                         new_signals.append(parsed | {"tg_message_id": tg_id, "auto_executed": executed,
                                                      "source_label": source_label})
                         continue
+
+            # A correction re-posted within the window replaces the queued
+            # signal it corrects (owner, 2026-10-02). Only once this post has
+            # itself become a signal; a failure here must not lose the post.
+            try:
+                await _supersede_earlier_pending_impl(
+                    tg_id, source_label, parsed["direction"].upper())
+            except Exception as _sup_exc:
+                log.warning("[%s] tg_id=%s repost supersede failed: %s",
+                            source_label, tg_id, _sup_exc)
 
             # Forwarded trade (centralized signal generation): the VPS actually
             # placed it — trade_id/mt5_ticket belong to its DB, not this node's

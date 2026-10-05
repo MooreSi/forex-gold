@@ -278,6 +278,43 @@ def has_pending_order(signal_id: str) -> bool:
     return row is not None
 
 
+def cancel_pending_reposts(tg_id: str, source_name: str, direction: str,
+                           since: float, now: float) -> list[str]:
+    """Cancel the still-queued signals Telegram post `tg_id` replaces.
+
+    A signal is replaced only if it is the same channel and direction, was
+    created at or after `since`, is still `pending`, and has no broker order
+    behind it in any live state (withdrawing one is a broker call, not a row
+    update). Returns [] when `tg_id` did not itself become a signal: a skipped
+    correction replaces nothing. Never touches a filled signal.
+    """
+    with db_module.db() as conn:
+        row = conn.execute(
+            "SELECT signal_id FROM vantage_tg_signals "
+            "WHERE tg_message_id=? AND signal_id IS NOT NULL",
+            (tg_id,),
+        ).fetchone()
+        if not row:
+            return []
+        newer = row[0]
+        ids = [r[0] for r in conn.execute(
+            "SELECT signal_id FROM vantage_signals "
+            "WHERE source_name=? AND direction=? AND status='pending' "
+            "AND created_at>=? AND signal_id<>? "
+            "AND signal_id NOT IN (SELECT signal_id FROM vantage_pending_orders "
+            "WHERE signal_id IS NOT NULL "
+            "AND status IN ('working','withdrawn','unknown'))",
+            (source_name, direction, since, newer),
+        ).fetchall()]
+        for sid in ids:
+            conn.execute(
+                "UPDATE vantage_signals SET status='cancelled', cancelled_at=? "
+                "WHERE signal_id=? AND status='pending'",
+                (now, sid),
+            )
+    return ids
+
+
 def insert_activated_grid_signal(
     signal_id: str, tg_id, source_name: str, direction: str,
     entry_low: float, entry_high: float, stop_loss: float,

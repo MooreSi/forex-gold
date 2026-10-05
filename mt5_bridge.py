@@ -42,6 +42,7 @@ if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mt5_terminal  # noqa: E402
 import mt5_orders  # noqa: E402
+import mt5_fill  # noqa: E402
 import mt5_ticks  # noqa: E402
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -827,9 +828,8 @@ def _close_position(ticket: int) -> dict:
             "magic":        20260601,
             "comment":      "close",
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
         }
-        result = mt5.order_send(request)
+        result = mt5_fill.send_close(mt5, request)   # IOC first; 10030 tries the other modes
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
             return {"success": True, "ticket": ticket, "close_price": close_price}
         return {"error": f"Close failed retcode={result.retcode if result else '?'}: "
@@ -867,9 +867,8 @@ def _partial_close(ticket: int, lots: float) -> dict:
             "magic":        20260601,
             "comment":      "partial",
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
         }
-        result = mt5.order_send(request)
+        result = mt5_fill.send_close(mt5, request)   # IOC first; 10030 tries the other modes
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
             return {"success": True, "ticket": ticket, "lots_closed": lots,
                     "close_price": close_price, "remaining": round(pos.volume - lots, 2)}

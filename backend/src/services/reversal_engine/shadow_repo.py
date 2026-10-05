@@ -34,7 +34,8 @@ def closed_decisions() -> list[dict]:
     rows = get_db().all(
         "SELECT d.variant AS variant, d.would_take AS would_take, "
         "       s.pnl_pts AS pnl_pts, s.sl_dist AS sl_dist, "
-        "       s.net_pnl_dollars AS net "
+        "       s.net_pnl_dollars AS net, "
+        "       s.live_exec_status AS live_exec_status "
         "FROM re_shadow_decisions d "
         "JOIN re_signals s ON s.signal_ref = d.signal_ref "
         "WHERE s.status='closed'")
@@ -65,9 +66,31 @@ def recent_decisions(limit: int = 100) -> list[dict]:
         "       s.direction AS direction, s.status AS status, "
         "       s.outcome AS outcome, s.sl_dist AS sl_dist, "
         "       s.pnl_pts AS pnl_pts, s.net_pnl_dollars AS net, "
+        "       s.live_exec_status AS live_exec_status, s.tpl_r AS tpl_r, "
         "       CASE WHEN s.status='closed' AND s.sl_dist > 0 "
         "            THEN s.pnl_pts / s.sl_dist END AS r "
         "FROM re_shadow_decisions d "
         "JOIN re_signals s ON s.signal_ref = d.signal_ref "
         "ORDER BY d.ts DESC LIMIT ?", limit)
+    return [dict(r) for r in rows]
+
+
+def ledger_rows(limit: int = 50) -> list[dict]:
+    """Every decision of the `limit` most recently decided signals, joined to
+    each signal's result. `limit` counts SIGNALS: the ledger has one row per
+    signal, and counting decision rows would return a fraction of that many.
+    """
+    rows = get_db().all(
+        "SELECT d.ts AS ts, d.signal_ref AS signal_ref, d.variant AS variant, "
+        "       d.would_take AS would_take, d.reason AS reason, "
+        "       s.direction AS direction, s.status AS status, "
+        "       s.outcome AS outcome, s.sl_dist AS sl_dist, "
+        "       s.pnl_pts AS pnl_pts, s.net_pnl_dollars AS net, "
+        "       s.live_exec_status AS live_exec_status, s.tpl_r AS tpl_r "
+        "FROM re_shadow_decisions d "
+        "JOIN re_signals s ON s.signal_ref = d.signal_ref "
+        "WHERE d.signal_ref IN ("
+        "  SELECT signal_ref FROM re_shadow_decisions "
+        "  GROUP BY signal_ref ORDER BY MAX(ts) DESC LIMIT ?) "
+        "ORDER BY d.ts DESC", limit)
     return [dict(r) for r in rows]

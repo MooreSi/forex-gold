@@ -133,6 +133,13 @@ def reversal_shadow_history(limit: int = 100) -> list:
     return _shadow.history(limit)
 
 
+def reversal_shadow_ledger(limit: int = 50) -> list:
+    """The virtual trade ledger, one row per signal: its result once, each
+    variant's call beside it."""
+    from backend.src.services.reversal_engine import shadow as _shadow
+    return _shadow.ledger(limit)
+
+
 # `reversal_macro_backfill` is a manual repair tool, not a screen: applying it
 # changes what the ML gate learns at its next retrain. It lives in
 # services/reversal_engine/macro_backfill.py and is run deliberately.

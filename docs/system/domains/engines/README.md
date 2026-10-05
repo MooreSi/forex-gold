@@ -615,3 +615,50 @@ Pinned by `tests/trend_pa/test_sessions_and_clock.py`.
 - **The fill-time re-score now measures FVG context again** against the fresh candles. It is not an `re_signals` column, so `dict(sig)` had none of it and all four FVG features, plus `pro_fvg_delta` and `pro_likeness`, fell back to "no gap" in the vector the ML gate decides on. `ml_prob_at_fill` stores None when there was no prediction, not 0.0. Pinned by `tests/reversal_engine/test_ml_fill_time_rescore.py`.
 - **The "Is it learning?" panel leaves executed rows out**: `fetch_ml_outcome_rows` now selects `live_exec_status`, which `_realised_r` needs to refuse broker-scale P&L. **Training rows are sorted by id** in `_get_training_data`, because `_fit_batch`'s time-decay weights are positional and the query has no ORDER BY. Pinned by `tests/reversal_engine/test_ml_training_rows.py`.
 - **Open (owner): `ref_level_win_rate` is wins / matches, not wins / closed matches.** `trades` counts every REF match at match time, `wins` only matched signals that closed as wins, so open or never-closed matches read as losses and a closed loss is counted nowhere. It is also our win rate on REF-matched levels, not the reference channel's. Not changed: `test_ml_realised_r_label.py::test_wins_are_credited_so_the_rate_is_no_longer_stuck_at_zero` and `::test_losses_do_not_inflate_the_win_count` pin the current `wins / trades` definition.
+
+## The virtual ledger answers one question per row (2026-10-02)
+
+The owner saw the same dollar figure down a column ("-$558.40") and read it as
+invented. It was one trade repeated once per variant. Three separate faults,
+each pinned in `tests/reversal_engine/test_shadow_ledger.py`:
+
+- **A variant that cannot differ from the champion measures nothing.** Four of
+  five challengers also carried the champion's ML floor, so on every signal the
+  ML gate skipped they were identical to it. `Variant.min_ml_prob` is now
+  `None` (no ML opinion) unless the variant is measuring the floor itself. The
+  default set is `live (champion)`, `no filter`, `ML floor 0.50`,
+  `trigger confirmed`, `liquidity aware`, `meta 0.55`. `confirmed entries` was
+  renamed `trigger confirmed`; rows under the old name stay in the table but are
+  not shown (`history`/`ledger` filter to live variants).
+- **One row per signal.** `shadow.ledger(limit)` states a signal's result once
+  and puts each variant's call (`take`, `reason`) beside it; `limit` counts
+  signals. `/engines/reversal/report` returns it as `ledger`, and the flat
+  `history` stays for callers that want decisions. A refusal now reports every
+  gate that refused, not only the first.
+- **R from the whole trade.** `r_full = net / (sl_dist * 10)`, because the
+  ledger sizes every signal at 0.1 lot. The legacy `r` (last leg's points over
+  the stop) called a $21 ladder win on a 7pt stop "0.02R"; it is kept beside
+  the new figure, unchanged. A broker-executed trade has `r_full` None (its
+  dollars are at the real lot), and an unsettled signal is None, never 0.
+  `r_replay` is the `tpl_r` replay figure, shown so the two methods can be
+  compared. `report()` gains `avoided_net`, `delta_vs_champion`,
+  `mean_r_full`, `mean_net`.
+
+## The pro model's AUC was earning its number from the date (2026-10-02)
+
+Measured on the live corpus: 0.82 with the random stratified folds the model
+used, 0.68 with whole days held out, 0.57 trained on the first 60% of time and
+scored on the last 40%. Background snapshots are taken every 15 minutes, so
+random folds put a snapshot's neighbours on both sides of the split and the
+forest partly learned the day (RSI, ATR and price level drift). Its output
+ranks our own trades' outcomes at AUC 0.496: it separates the moments a channel
+posted from background snapshots, not whether a trade wins.
+
+`pro_model.fit` now scores the gate on **time-blocked folds**
+(`_blocked_folds`) and reports a **forward-in-time** `auc_forward` beside it,
+never gated on. `_MIN_AUC` is unchanged, so the gate now sits on a lower,
+truer number: a model that was in use at 0.82 may stop clearing 0.55. That is
+the intended effect, but it changes what the live ML feature does on the next
+refit, so watch `pro_likeness` after deploy. A signal captured at several
+stages is now one example (latest usable stage), not three. Pinned by
+`tests/reversal_engine/test_pro_model_honest_auc.py`.

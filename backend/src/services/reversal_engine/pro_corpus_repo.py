@@ -123,12 +123,13 @@ def exists(tg_message_id: str, stage: str) -> bool:
 
 def rows(background: bool) -> list[dict]:
     """Every positive (background=False) or negative (background=True) row,
-    as dicts. Small enough to read whole: the corpus is a few hundred rows
+    as dicts, oldest first. Small enough to read whole: the corpus is a few hundred rows
     and both readers cache their result."""
     op = "=" if background else "!="
     out = re_db.get_db().all(
-        f"SELECT direction, indicators_json, fvg_json, session, regime_score, "
-        f"outcome, outcome_r, captured_at FROM pro_snapshots WHERE stage {op} 'background'"
+        f"SELECT tg_message_id, direction, indicators_json, fvg_json, session, "
+        f"regime_score, outcome, outcome_r, captured_at FROM pro_snapshots "
+        f"WHERE stage {op} 'background' ORDER BY captured_at, id"
     )
     return [dict(r) for r in out]
 

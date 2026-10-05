@@ -109,7 +109,7 @@ FEATURE_NAMES = [
     "fvg_size_norm",
 ]
 
-_state: dict = {"model": None, "scaler": None, "auc": None, "n": 0,
+_state: dict = {"model": None, "scaler": None, "auc": None, "auc_forward": None, "n": 0,
                 "fitted_at": 0.0, "rows_at_fit": -1, "reason": "not fitted"}
 
 
@@ -148,24 +148,74 @@ def _row_vector(row: dict) -> Optional[list[float]]:
                    m15.get("atr14"), row.get("regime_score"), fvg)
 
 
-def _dataset() -> tuple[list, list, list, float]:
-    """(X, y, sample_weight, rsi_spread) over the whole corpus."""
+def _dataset_timed() -> tuple[list, list, list, float, list]:
+    """(X, y, sample_weight, rsi_spread, times) over the whole corpus.
+
+    **A signal is one example, not one per capture stage.** The capture poller
+    snapshots a message at market_call, levels and complete; counting each
+    stage made one post three correlated positives, so the model was partly
+    scored on its own duplicates. The latest (most complete) usable stage of a
+    message is kept. Background samples are independent ticks and are not
+    merged.
+
+    `times` is each row's capture time, in the order of X, for the
+    time-blocked folds in `fit`.
+    """
     X: list = []
     y: list = []
     w: list = []
     rsis: list[float] = []
+    times: list = []
     for background, label in ((False, 1), (True, 0)):
-        for row in pro_corpus.rows(background=background):
+        kept: dict = {}
+        order: list = []
+        for n, row in enumerate(pro_corpus.rows(background=background)):
             v = _row_vector(row)
             if v is None:
                 continue
+            key = (row.get("tg_message_id") if label == 1 and row.get("tg_message_id")
+                   else f"#{n}")
+            if key not in kept:
+                order.append(key)
+            kept[key] = (v, row)
+        for key in order:
+            v, row = kept[key]
             X.append(v)
             y.append(label)
             w.append(1.0 if label == 0
                      else _OUTCOME_WEIGHT.get(row.get("outcome") or "", 1.0))
             rsis.append(v[FEATURE_NAMES.index("rsi_norm")] * 100.0)
+            times.append(float(row.get("captured_at") or 0.0))
     spread = (max(rsis) - min(rsis)) if rsis else 0.0
+    return X, y, w, spread, times
+
+
+def _dataset() -> tuple[list, list, list, float]:
+    """(X, y, sample_weight, rsi_spread) over the whole corpus."""
+    X, y, w, spread, _times = _dataset_timed()
     return X, y, w, spread
+
+
+def _blocked_folds(times, n_folds: int) -> list[list[int]]:
+    """`n_folds` contiguous blocks of row indices in time order.
+
+    Random stratified folds put a snapshot's neighbours on both sides of the
+    split. Background snapshots are taken every 15 minutes, so the forest
+    partly learned the day (RSI, ATR and price level drift): the same model
+    scored 0.82 on random folds and 0.68 with whole days held out. Blocks in
+    time order cannot do that. Ties in time are split by position, so a
+    constant clock still yields the requested number of folds; fewer rows than
+    folds yields fewer folds, never an error.
+    """
+    order = sorted(range(len(times)), key=lambda i: (times[i], i))
+    k = max(1, min(int(n_folds), len(order)))
+    base, extra = divmod(len(order), k)
+    folds, start = [], 0
+    for f in range(k):
+        size = base + (1 if f < extra else 0)
+        folds.append(order[start:start + size])
+        start += size
+    return [f for f in folds if f]
 
 
 # ── Fitting ───────────────────────────────────────────────────────────────────
@@ -177,7 +227,7 @@ def fit(force: bool = False) -> dict:
     twelve features. Skips the work when the corpus has not grown, so a
     caller that fires per signal does not refit on unchanged data.
     """
-    X, y, w, spread = _dataset()
+    X, y, w, spread, times = _dataset_timed()
     n_pos = sum(1 for v in y if v == 1)
     n_neg = len(y) - n_pos
 
@@ -192,7 +242,7 @@ def fit(force: bool = False) -> dict:
     if spread < _MIN_RSI_SPREAD:
         reasons.append(f"RSI spread {spread:.0f} < {_MIN_RSI_SPREAD:.0f} (single-regime sample)")
     if reasons:
-        _state.update(model=None, scaler=None, auc=None, n=len(y),
+        _state.update(model=None, scaler=None, auc=None, auc_forward=None, n=len(y),
                       rows_at_fit=len(y), reason="; ".join(reasons))
         return status()
 
@@ -219,12 +269,16 @@ def fit(force: bool = False) -> dict:
         return RandomForestClassifier(n_estimators=300, min_samples_leaf=5,
                                       class_weight="balanced", random_state=42)
 
-    # Out-of-fold AUC, not in-sample: with a few hundred rows an in-sample
-    # score would look good on a model that has memorised the week, which is
-    # the one failure mode this whole file is built to avoid.
+    # Out-of-fold AUC over TIME-BLOCKED folds, not in-sample and not random:
+    # see _blocked_folds. The gate (_MIN_AUC) is unchanged; what changed is the
+    # number it is applied to.
     try:
         oof = np.zeros(len(ya), dtype=float)
-        for tr, te in StratifiedKFold(n_splits=4, shuffle=True, random_state=42).split(Xa, ya):
+        for te in _blocked_folds(times, 4):
+            te = np.array(te)
+            tr = np.setdiff1d(np.arange(len(ya)), te)
+            if len(set(ya[tr])) < 2:
+                raise ValueError("a training block holds one class")
             m = _make()
             m.fit(Xa[tr], ya[tr], sample_weight=wa[tr])
             oof[te] = m.predict_proba(Xa[te])[:, 1]
@@ -233,10 +287,25 @@ def fit(force: bool = False) -> dict:
         log.debug("[ProModel] AUC estimation failed: %s", exc)
         auc = 0.0
 
+    # Reported beside it, never gated on: trained on the first 60% of time and
+    # scored on the last 40%, the question a live model is actually asked.
+    # None when it cannot be measured (one class on a side), never 0.0.
+    auc_forward: Optional[float] = None
+    try:
+        order = np.array(sorted(range(len(ya)), key=lambda i: (times[i], i)))
+        cut = int(len(order) * 0.6)
+        tr, te = order[:cut], order[cut:]
+        if len(set(ya[tr])) == 2 and len(set(ya[te])) == 2:
+            m = _make()
+            m.fit(Xa[tr], ya[tr], sample_weight=wa[tr])
+            auc_forward = float(roc_auc_score(ya[te], m.predict_proba(Xa[te])[:, 1]))
+    except Exception as exc:
+        log.debug("[ProModel] forward AUC estimation failed: %s", exc)
+
     model = _make()
     model.fit(Xa, ya, sample_weight=wa)
 
-    _state.update(model=model, scaler=None, auc=auc, n=len(ya),
+    _state.update(model=model, scaler=None, auc=auc, auc_forward=auc_forward, n=len(ya),
                   fitted_at=time.time(), rows_at_fit=len(ya),
                   reason="ok" if auc >= _MIN_AUC else
                          f"held-out AUC {auc:.3f} < {_MIN_AUC} — not used")
@@ -359,6 +428,7 @@ def status() -> dict:
     return {
         "ready": _ready(),
         "auc": _state["auc"],
+        "auc_forward": _state.get("auc_forward"),
         "n": _state["n"],
         "reason": _state["reason"],
         "fitted_at": _state["fitted_at"],

@@ -47,6 +47,7 @@ ENGINE_LABELS = {name: _LABELS.get(name, name)
 # How much of the virtual ledger the panel gets. Bounded here rather than by
 # the browser: it is a row per variant per signal, and both numbers grow.
 HISTORY_LIMIT = 200
+LEDGER_LIMIT = 100
 
 # How many signal and analysis-log rows the Breakout panel gets. Both grow
 # without limit, and an unbounded read is the browser deciding how expensive a
@@ -204,6 +205,9 @@ async def reversal_report() -> dict:
         "cross_asset": await _guarded(reversal_ctl.reversal_cross_asset, {}),
         "shadow": reversal_ctl.reversal_shadow_report(),
         "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
+        # One row per signal, its result stated once (2026-10-02): the flat
+        # `history` above repeated one trade's dollars once per variant.
+        "ledger": reversal_ctl.reversal_shadow_ledger(LEDGER_LIMIT),
         # The learning curve. `panel_data.ml_metrics()` has answered since the
         # restructure and no endpoint called it, so the React panel had no
         # data for the "is it learning?" chart the NiceGUI one drew. Guarded

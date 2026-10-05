@@ -283,4 +283,13 @@ _RECENT: list[tuple[int, str, object]] = [
     (57, "Entry Realignment pip limit (blank)", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN lk_entry_realignment_max_pips REAL NOT NULL DEFAULT 0",
     ]),
+
+    # Texts the AI fallback has already classified as "not a signal"
+    # (bugs/053 option 1). Only the negative verdict is kept: a text that ever
+    # produced a signal or an SL adjustment is asked again every time. Saves
+    # paying to reclassify a channel's repeated heads-up under each new id.
+    (58, "AI fallback remembers texts it was told are not signals", [
+        "CREATE TABLE IF NOT EXISTS ai_fallback_not_signal ("
+        " text_hash TEXT PRIMARY KEY, classified_at REAL NOT NULL)",
+    ]),
 ]

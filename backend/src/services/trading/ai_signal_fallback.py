@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from backend.src.services.ai import signal_extractor as ai_signal_extractor
 from backend.src.services.ai import claude_ai as claude_ai
+from backend.src.services.ai import recovered_repo as _verdicts
 from backend.src.db import database as db_module
 from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
@@ -91,6 +92,11 @@ async def try_ai_signal_fallback(
     cm = _CURRENCY_RE.search(text)
     if cm and cm.group(1).upper().replace("/", "").replace("-", "") != "XAUUSD":
         return None
+    # The same text under a new message id, already judged not a signal
+    # (bugs/053): a channel's repeated heads-up was a paid call every time.
+    if await db_module.to_db_thread(_verdicts.is_known_not_a_signal, text):
+        await db_module.to_db_thread(db_module.record_ai_fallback_check, tg_id, text)
+        return None
     try:
         result = await ai_signal_extractor.classify_message(text, channel_name, cfg)
     except Exception as e:
@@ -98,6 +104,7 @@ async def try_ai_signal_fallback(
         return None
     await db_module.to_db_thread(db_module.record_ai_fallback_check, tg_id, text)
     if result is None:
+        await db_module.to_db_thread(_verdicts.record_not_a_signal, text)
         return None
 
     if result.get("kind") == "sl_adjustment":

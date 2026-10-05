@@ -176,6 +176,32 @@ def record_ai_fallback_check(tg_message_id: str, text: str) -> None:
         log.warning("record_ai_fallback_check failed: %s", e)
 
 
+def is_known_not_a_signal(text: str) -> bool:
+    """Has the AI already said this exact text is neither a signal nor an SL
+    adjustment, under any message id? (bugs/053). False on any read error:
+    the cost of a wrong False is one paid call, of a wrong True a lost check."""
+    try:
+        with db() as conn:
+            return conn.execute(
+                "SELECT 1 FROM ai_fallback_not_signal WHERE text_hash=?",
+                (_text_hash(text),),
+            ).fetchone() is not None
+    except Exception:
+        return False
+
+
+def record_not_a_signal(text: str) -> None:
+    """Remember the AI's negative verdict on this text. Never call it for a
+    text that produced a signal or an SL adjustment."""
+    try:
+        with db() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO ai_fallback_not_signal (text_hash, classified_at) "
+                "VALUES (?,?)", (_text_hash(text), time.time()))
+    except Exception as e:
+        log.warning("record_not_a_signal failed: %s", e)
+
+
 def get_ai_recovered_signals(limit: int = 100) -> list[dict]:
     try:
         with db() as conn:

@@ -56,6 +56,7 @@ import logging
 
 from backend.src.services.risk import governor as _gov
 from backend.src.services.risk import lot_sizing
+from backend.src.services.risk import pause_message
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -271,8 +272,8 @@ async def handle_limit_order_signal(
         _why = _gov.halt_reason()
         log.warning("[LimitRunner] tg_id=%s not placed — trading paused%s",
                     tg_id, f": {_why}" if _why else "")
-        return {"skip_reason": "Limit order skipped — trading paused"
-                               + (f": {_why}." if _why else ".")}
+        _pause = pause_message.current_pause() or (0.0, _why)
+        return {"skip_reason": pause_message.limit_not_placed(*_pause)}
 
     from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()

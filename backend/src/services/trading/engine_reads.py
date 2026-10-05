@@ -34,6 +34,18 @@ async def open_positions_view(engine: Any) -> list[dict]:
 
 
 async def signals(engine: Any, status: Optional[str] = None) -> list[dict]:
+    """The Signals table: the trading node's (owner, 2026-10-05).
+
+    On a Mac that trades through the VPS this is the VPS's table, read over
+    the link; its own stopped being written when it stopped trading. Anywhere
+    else, this node's own, as before.
+    """
+    # Deferred: the cluster package pulls in the sync client, and this module
+    # is imported by every controller that reads trades.
+    from backend.src.services.cluster import peer_reports
+    remote = await peer_reports.signals_from_trading_node(status)
+    if remote is not None:
+        return remote
     return await to_db_thread(engine.get_signals, status=status)
 
 

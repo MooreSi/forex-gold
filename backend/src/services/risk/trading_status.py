@@ -54,6 +54,12 @@ log = logging.getLogger(__name__)
 
 _CONFIG_KEY = "trade_pause_until"
 
+# How both of `daily_goal`'s halts open ("Daily goal secured: ...", "Daily goal
+# reached (...), waiting for ..."). A halt that is only the goal is a good day,
+# not a guard tripping, and the header says so (owner, 2026-10-05). Pinned
+# against `daily_goal`'s wording by tests/risk/test_badge_names_a_reached_goal.py.
+GOAL_REASON_PREFIX = "Daily goal "
+
 
 # Deferred imports, for the same circular-import reason as schedule_options:
 # risk_settings_repo imports db.database, which imports it back.
@@ -139,7 +145,11 @@ def _as_the_vps_reports_it(view: dict) -> dict:
     until = remote.get("until")
     if remote.get("state") == "halted" and until:
         # The VPS wrote the time in ITS time zone; the operator reads this one.
-        label = f"Trading Paused until {_until_text(float(until))}"
+        # Labelled from `detail`, so a VPS on older code reads right too.
+        detail = str(remote.get("detail") or "")
+        only_goal = (detail.startswith(GOAL_REASON_PREFIX)
+                     and "Circuit breaker" not in detail)
+        label = halt_label(float(until), only_goal)
     return {
         "state": str(remote["state"]),
         "label": f"VPS: {label}",
@@ -154,6 +164,11 @@ def _as_the_vps_reports_it(view: dict) -> dict:
         "can_resume_on_vps": bool(remote.get("can_resume")),
         "node": "vps",
     }
+
+
+def halt_label(until: float, only_goal: bool) -> str:
+    head = "Goal Achieved Paused" if only_goal else "Trading Paused"
+    return f"{head} until {_until_text(until)}"
 
 
 def _until_text(ts: float) -> str:
@@ -219,8 +234,9 @@ def badge() -> dict:
             pause_until if manual_paused else 0.0,
         )
         reasons = []
+        halt_reason = _safe(_halt_reason, "") if manual_paused else ""
         if manual_paused:
-            reasons.append(_safe(_halt_reason, "") or "Trading paused")
+            reasons.append(halt_reason or "Trading paused")
         if breaker_active:
             reasons.append(
                 f"Circuit breaker active "
@@ -228,7 +244,8 @@ def badge() -> dict:
             )
         return {
             "state": "halted",
-            "label": f"Trading Paused until {_until_text(until)}",
+            "label": halt_label(until, not breaker_active
+                                 and halt_reason.startswith(GOAL_REASON_PREFIX)),
             "detail": " / ".join(r for r in reasons if r),
             "until": until, "resume_ts": None, "can_resume": True,
         }

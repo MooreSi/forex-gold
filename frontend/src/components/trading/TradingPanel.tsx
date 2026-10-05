@@ -63,7 +63,7 @@ export function TradingPanel() {
           </Button>
           <Button
             onClick={() => setPlacingLimit(true)}
-            disabledReason={c.disabledReason}
+            disabledReason={c.limitDisabledReason}
           >
             <Plus size={13} /> Limit order
           </Button>
@@ -100,6 +100,7 @@ export function TradingPanel() {
         <Tabs.Content value="signals" className="min-h-0 flex-1 overflow-auto">
           <SignalsSection
             signals={asArray<Record<string, unknown>>(c.signals.data)}
+            error={c.signals.error?.message ?? null}
             onChanged={() => void c.refreshAll()}
           />
         </Tabs.Content>
@@ -152,7 +153,7 @@ export function TradingPanel() {
         open={placingLimit}
         onOpenChange={setPlacingLimit}
         onPlaced={() => void c.refreshAll()}
-        disabledReason={c.disabledReason}
+        disabledReason={c.limitDisabledReason}
         price={header.data?.tick}
       />
     </PanelShell>

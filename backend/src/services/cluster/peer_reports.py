@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from backend.src.db import database as db_module
 from backend.src.services.broker import fill_cost_report
@@ -27,17 +27,40 @@ from backend.src.services.market import gex_report
 
 log = logging.getLogger(__name__)
 
-__all__ = ["REPORTS", "run_local", "fill_cost_async", "gex_async"]
+__all__ = ["REPORTS", "run_local", "fill_cost_async", "gex_async",
+           "signals_from_trading_node"]
+
+# How many signals one answer carries, newest first. The link's frames are
+# capped at 1 MiB (websockets' default) and a signal row is ~0.6 KB, so this
+# leaves room for AI commentary on every row.
+SIGNALS_LIMIT = 500
+
+
+def _int_in(lo: int, hi: int):
+    return lambda v: isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+async def _signals_report(status: Any = None, limit: int = SIGNALS_LIMIT) -> dict:
+    """This node's Signals table, newest first (owner, 2026-10-05)."""
+    from backend.src.services.signals import repo as signals_repo
+    rows = await db_module.to_db_thread(signals_repo.get_signals, status)
+    return {"signals": rows[:limit]}
+
 
 # The only reports a peer may ask for. The name arrives off the wire.
 REPORTS = {
     "fill_cost": fill_cost_report.report_async,
     "gex": gex_report.report_async,
+    "signals": _signals_report,
 }
 # Per report, the arguments it takes and how each is checked.
 _ARGS = {
-    "fill_cost": {"days": lambda v: isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365},
+    "fill_cost": {"days": _int_in(1, 365)},
     "gex": {},
+    "signals": {
+        "status": lambda v: v is None or (isinstance(v, str) and 0 < len(v) <= 32),
+        "limit": _int_in(1, 2000),
+    },
 }
 
 
@@ -95,3 +118,29 @@ async def fill_cost_async(days: int = 14) -> dict:
 
 async def gex_async() -> dict:
     return await on_trading_node("gex")
+
+
+async def signals_from_trading_node(status: Any = None) -> Optional[list[dict]]:
+    """The VPS's signals when it is the trader, each row tagged `node: "remote"`.
+
+    None when this node trades itself: the caller reads its own table, exactly
+    as before. Raises RemoteControlFailed when the VPS trades and cannot
+    answer -- never this node's list in its place (see the module docstring).
+    """
+    if not trader_is_peer():
+        return None
+    args: dict = {"limit": SIGNALS_LIMIT}
+    if status:
+        args["status"] = status
+    try:
+        got = await on_trading_node("signals", **args)
+    except RemoteControlFailed as exc:
+        if "unknown report" in str(exc):
+            raise RemoteControlFailed(
+                "The VPS is running older code that cannot send its signals. "
+                "Update it (Settings > Remote), then restart it."
+            ) from exc
+        raise
+    rows = got.get("signals")
+    return [{**r, "node": "remote"} for r in rows if isinstance(r, dict)] \
+        if isinstance(rows, list) else []

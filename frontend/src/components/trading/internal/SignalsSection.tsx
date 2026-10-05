@@ -29,8 +29,20 @@ import { SignalEditorDialog } from "./SignalEditorDialog";
  */
 interface SignalsSectionProps {
   signals: Record<string, unknown>[];
+  /** Why the list could not be read: on a Mac, the VPS did not answer. */
+  error?: string | null;
   onChanged: () => void;
 }
+
+/**
+ * On a Mac that trades through the VPS the rows are the VPS's, tagged
+ * `node: "remote"` by the backend (owner, 2026-10-05). The editor writes to
+ * THIS node's database, where they do not exist, so it is not offered.
+ */
+const REMOTE_EDIT_REASON =
+  "This signal is on the VPS, which is the active trader. Edit it on the VPS's dashboard.";
+
+const isRemote = (row: Record<string, unknown>) => row["node"] === "remote";
 
 /** How a status reads at a glance. Pending is the one that can still act. */
 const STATUS_LOOK: Record<string, string> = {
@@ -65,7 +77,7 @@ function entryBand(row: Record<string, unknown>): string {
   return `${formatPrice(low)} – ${formatPrice(high)}`;
 }
 
-export function SignalsSection({ signals, onChanged }: SignalsSectionProps) {
+export function SignalsSection({ signals, error, onChanged }: SignalsSectionProps) {
   const [editing, setEditing] = useState<Record<string, unknown> | null>(null);
   const [only, setOnly] = useState<string>("all");
 
@@ -82,7 +94,15 @@ export function SignalsSection({ signals, onChanged }: SignalsSectionProps) {
     ? signals
     : signals.filter((s) => String(s["status"] ?? "") === only);
 
+  const fromVps = signals.some(isRemote);
+  const problem = error ? (
+    <p role="alert" className="mb-2 text-xs text-loss">
+      Could not read the trading node&apos;s signals: {error}
+    </p>
+  ) : null;
+
   if (signals.length === 0) {
+    if (problem) return problem;
     return (
       <EmptyState
         title="No signals yet"
@@ -93,6 +113,13 @@ export function SignalsSection({ signals, onChanged }: SignalsSectionProps) {
 
   return (
     <>
+      {problem}
+      {fromVps && (
+        <p className="mb-2 text-[11px] text-ink-3">
+          Signals from the VPS, the active trader: the newest 500, as its own
+          dashboard shows them.
+        </p>
+      )}
       {statuses.length > 1 && (
         <div className="mb-2 flex items-center gap-1.5 text-[11px] text-ink-3">
           <span>showing</span>
@@ -187,7 +214,13 @@ export function SignalsSection({ signals, onChanged }: SignalsSectionProps) {
                         <span className="cursor-help text-accent">AI</span>
                       </Tooltip>
                     )}
-                    <Button variant="ghost" onClick={() => setEditing(s)}>Edit</Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setEditing(s)}
+                      disabledReason={isRemote(s) ? REMOTE_EDIT_REASON : null}
+                    >
+                      Edit
+                    </Button>
                   </span>
                 </td>
               </tr>

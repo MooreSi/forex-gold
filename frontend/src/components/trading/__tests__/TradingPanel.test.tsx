@@ -432,4 +432,45 @@ describe("a halt the operator can see before they click", () => {
 
     expect(await screen.findByRole("button", { name: /Market order/i })).toBeEnabled();
   });
+
+  // Owner, 2026-10-05: Limit order sits outside any pause. The backend places
+  // a manual limit through one already; only the button was in the way.
+  it("keeps Limit order selectable through a pause, and Market greyed", async () => {
+    vi.stubGlobal("fetch", withHalt({
+      reason: "Daily goal secured: +$30.00 today vs a goal of $25.00",
+      market_closed: false,
+      circuit_breaker: { is_active: false, remaining_secs: 0 },
+    }));
+
+    render(<TradingPanel />);
+
+    const market = await screen.findByRole("button", { name: /Market order/i });
+    await waitFor(() => expect(market).toBeDisabled());
+    expect(screen.getByRole("button", { name: /Limit order/i })).toBeEnabled();
+  });
+
+  it("keeps Limit order selectable through a tripped breaker", async () => {
+    vi.stubGlobal("fetch", withHalt({
+      reason: "",
+      market_closed: false,
+      circuit_breaker: { is_active: true, remaining_secs: 1800, consec_losses: 3 },
+    }));
+
+    render(<TradingPanel />);
+
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: /Market order/i })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /Limit order/i })).toBeEnabled();
+  });
+
+  it("still greys Limit order when the market is closed", async () => {
+    vi.stubGlobal("fetch", withHalt({
+      reason: "", market_closed: true, circuit_breaker: { is_active: false },
+    }));
+
+    render(<TradingPanel />);
+
+    const limit = await screen.findByRole("button", { name: /Limit order/i });
+    await waitFor(() => expect(limit).toBeDisabled());
+  });
 });

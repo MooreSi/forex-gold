@@ -11,6 +11,7 @@ from backend.src.services.signals import commentary as _commentary
 from backend.src.services.analytics import reporting as _reporting
 from backend.src.services.positions import core_strategy_catalogue as _catalogue
 from backend.src.services.trading import engine_reads as _reads
+from backend.src.services.cluster import remote_control as _remote
 
 # The strategy vocabulary is NOT re-exported here any more. Eighteen constants
 # were, so NiceGUI pages did not have to reach into backend.src.utils.models --
@@ -33,8 +34,9 @@ __all__ = [
     "delete_tg_signal_row", "get_open_trades", "get_signals",
     "get_tg_signals", "is_stuck_placeholder", "build_strategy_catalogue",
     "describe_strategy", "evaluate_channels", "is_weekly_market_closed",
-    "validate_signal",
+    "validate_signal", "RemoteControlFailed",
 ]
+RemoteControlFailed = _remote.RemoteControlFailed  # get_signals: the VPS did not answer
 
 
 def get_risk_settings() -> dict:

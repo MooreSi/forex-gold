@@ -26,7 +26,7 @@
 //| will always fail.                                                  |
 //+------------------------------------------------------------------+
 #property copyright "FOREX Trader"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 
 // ── Version handshake (2026-08-05) ────────────────────────────────────────
@@ -40,12 +40,12 @@
 // Bump this on every change to the wire protocol or to management behaviour,
 // and keep it identical to #property version above (MQL won't let a #define
 // stand in for the literal there, so the two are duplicated by necessity).
-#define EA_VERSION "1.09"
+#define EA_VERSION "1.10"
 // Hand-maintained, and bumped in the same edit as EA_VERSION: __DATETIME__
 // says when the .ex5 was COMPILED, which tells you nothing about how old
 // the source behind it is. This says when the source last changed, so the
 // two together answer "is the running build the current one".
-#define EA_VERSION_DATE "2026-10-01"
+#define EA_VERSION_DATE "2026-10-05"
 
 #include <Trade\Trade.mqh>
 
@@ -110,6 +110,10 @@ ulong  g_lastPingSent = 0;
 ulong  g_tickCount    = 0;
 ulong  g_managePasses = 0;
 ulong  g_lastRecv = 0;
+// v1.10: when PollSocket last ran. OnTimer calls it every 200 ms, so a gap of
+// seconds means this thread was blocked (OrderSend waits on the broker, up to
+// MT5's 180 s request timeout). See PollSocket.
+ulong  g_lastPollAt = 0;
 // Socket link state. g_connected only means SocketConnect returned true --
 // under Wine that happens even when nothing is listening, which is why the
 // EA used to print "connected" on every one of its retries. g_linkConfirmed
@@ -660,6 +664,14 @@ void SendJson(const string msg)
 
 void PollSocket()
 {
+   // v1.10 (handover 045, bugs/071 #1). The app only answers our pings, and
+   // while OrderSend blocked us we sent none, so the silence below was our
+   // own. A late poll restarts the clock: the app gets its full 10 s to
+   // answer the ping about to go out, instead of the link being dropped with
+   // the fill confirmation still unsent.
+   ulong now = GetTickCount64();
+   if(g_lastPollAt > 0 && now - g_lastPollAt > 3000) g_lastRecv = now;
+   g_lastPollAt = now;
    if(g_socket == INVALID_HANDLE) { EnsureConnected(); return; }
    uint avail = SocketIsReadable(g_socket);
    if(avail > 0)

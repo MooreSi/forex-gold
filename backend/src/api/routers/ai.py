@@ -10,6 +10,7 @@ the operator does with it is a separate action on a separate tab.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from typing import Any
@@ -74,7 +75,8 @@ async def evidence(subject: str = Query(...), days: int = DAYS) -> dict:
     if not path:
         raise Refusal("No database path is configured for this environment.")
     return {"subject": subject, "days": days, "billable": False,
-            "evidence": gather(path, days)}
+            # Off the loop: it stalled trading 956 ms on 2026-10-05 (bugs/030).
+            "evidence": await asyncio.to_thread(gather, path, days)}
 
 
 @router.get("/dpm")

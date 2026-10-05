@@ -12,6 +12,7 @@ tab states what is running before it offers to change it.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter
@@ -184,7 +185,7 @@ async def breakout_report() -> dict:
 
 
 async def _reversal_ledger() -> list:
-    return reversal_ctl.reversal_shadow_ledger(LEDGER_LIMIT)
+    return await asyncio.to_thread(reversal_ctl.reversal_shadow_ledger, LEDGER_LIMIT)
 
 
 @router.get("/reversal/report")
@@ -207,8 +208,10 @@ async def reversal_report() -> dict:
         # Other markets against gold, and the meta-labeller with and without
         # them at every refit. Research, so guarded.
         "cross_asset": await _guarded(reversal_ctl.reversal_cross_asset, {}),
-        "shadow": reversal_ctl.reversal_shadow_report(),
-        "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
+        # Off the loop: closed_decisions read the whole virtual ledger and
+        # stalled the trading loop 4.6 s on 2026-10-05 (bugs/030).
+        "shadow": await asyncio.to_thread(reversal_ctl.reversal_shadow_report),
+        "history": await asyncio.to_thread(reversal_ctl.reversal_shadow_history, HISTORY_LIMIT),
         # One row per signal, its result stated once (2026-10-02): the flat
         # `history` above repeated one trade's dollars once per variant.
         # Guarded like the other research reads: a ledger that cannot be read

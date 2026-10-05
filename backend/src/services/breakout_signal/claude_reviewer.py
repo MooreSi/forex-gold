@@ -73,7 +73,7 @@ def _build_prompt(candidate: dict, risk: dict, context: dict) -> str:
         f"BREAKOUT SIGNAL — XAUUSD {direction} ({bo_type.upper()})",
         "",
         f"Session: {session}  |  HTF H1: {htf_bias}  |  H4: {h4_bias}",
-        f"ADX: {adx:.1f}  |  MACD hist: {macd_hist:+.4f}  |  ATR(M15): {atr:.2f}",
+        f"ADX: {adx:.1f}  |  MACD hist: {macd_hist:+.4f}  |  ATR(M5): {atr:.2f}",  # atr_m15 is a legacy name: M5 (bugs/063)
         f"Current price: ${price:.2f}",
         "",
         f"Broken level: ${level:.2f} ({ltype}, strength {strength})",

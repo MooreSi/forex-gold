@@ -284,6 +284,12 @@ def deploy_after_update(repo_root: Optional[Path] = None,
     return {"ok": True, "report": report}
 
 
+# The reason `install_when_idle` gives off Windows. A name, because the startup
+# hook branches on it: "nothing can compile here" is the one refusal after which
+# copying the source is still right.
+NOT_WINDOWS = "not Windows"
+
+
 def install_when_idle(slots, platform: Optional[str] = None,
                       repo_root: Optional[Path] = None,
                       home: Optional[Path] = None) -> dict:
@@ -294,11 +300,13 @@ def install_when_idle(slots, platform: Optional[str] = None,
     Compiling makes an attached EA reload with the new build, which changes
     the rules managing any open position, so it waits for an empty book, as
     `reload_decision` does for a terminal restart. Unknown counts as busy.
-    Windows only: nothing can compile elsewhere. Never raises.
+    Windows only: nothing can compile elsewhere. Never raises. Off Windows the
+    caller still copies the source (`deploy_after_update`): see
+    `app._install_ea_at_startup`.
     """
     plat = platform if platform is not None else sys.platform
     if plat != "win32":
-        return {"installed": False, "reason": "not Windows"}
+        return {"installed": False, "reason": NOT_WINDOWS}
     try:
         in_use = slots()
     except Exception as e:

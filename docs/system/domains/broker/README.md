@@ -582,3 +582,15 @@ restart worked. `tests/core/test_bot_commands_infra_surface.py` pins that
 wording, so fixing it needs the owner's say. Pinned for the button by
 `tests/services/broker/test_restart_bridge_from_settings.py` and
 `BridgeRestartSection.test.tsx`.
+
+## Off Windows the repo's EA source is still copied at start (2026-10-01)
+
+Reported: the dashboard said the chart ran v1.08 and the app shipped v1.09, and
+MetaEditor on the Mac only had v1.08 to compile. `install_when_idle` returns
+`NOT_WINDOWS` off Windows (nothing can compile), and the only other copy
+happened after "Update to latest", so a checkout edited or pulled by hand never
+reached the terminal's Experts folder. `app._install_ea_at_startup` now calls
+`deploy_after_update` when, and only when, the result is `NOT_WINDOWS`. The copy
+is inert (it changes nothing that runs until someone compiles) so it needs no
+empty-book wait; a busy book on Windows still triggers nothing. Compiling stays
+Windows-only. Pinned by `tests/services/broker/test_ea_source_syncs_off_windows.py`.

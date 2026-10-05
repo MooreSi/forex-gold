@@ -430,6 +430,14 @@ async def _install_ea_at_startup() -> None:
         return
     if not result.get("installed"):
         log.info("[startup] EA not installed at startup: %s", result.get("reason"))
+    if result.get("reason") == ea_deploy.NOT_WINDOWS:
+        # Reported 2026-10-01: the dashboard said the chart ran v1.08 and the
+        # app shipped v1.09, and MetaEditor on the Mac only had v1.08 to
+        # compile. Nothing can compile off Windows, but the copy is inert --
+        # it changes nothing that runs until someone compiles -- so it needs no
+        # empty-book wait. A checkout edited or pulled by hand now reaches the
+        # terminal's Experts folder. Never raises.
+        await asyncio.to_thread(ea_deploy.deploy_after_update)
 
 
 async def startup() -> None:

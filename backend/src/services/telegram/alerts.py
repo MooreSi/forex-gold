@@ -137,6 +137,38 @@ async def register_commands(token: str) -> None:
         log.warning("Failed to register bot commands: %s", e)
 
 
+# Alerts that could not reach Telegram for a transport reason (no network, a
+# 5xx, a 429): (time, first line). The next send that succeeds is followed by
+# one summary, so an outage that silenced the alerts about itself is reported
+# when it ends (bugs/050). In memory: a restart loses the count, which the
+# vantage_telegram_log rows still record.
+_undelivered: list[tuple[float, str]] = []
+_UNDELIVERED_CAP = 200
+_SUMMARY_EVENT = "undelivered_alerts_summary"
+
+
+def _remember_undelivered(text: str, event_type: str) -> None:
+    if event_type == _SUMMARY_EVENT:
+        return
+    title = (text.strip().splitlines() or [""])[0].strip("*_` ")[:80] or event_type or "alert"
+    _undelivered.append((time.time(), title))
+    del _undelivered[:-_UNDELIVERED_CAP]
+
+
+async def _report_undelivered() -> None:
+    if not _undelivered:
+        return
+    lost = list(_undelivered)
+    _undelivered.clear()
+    first = time.strftime("%H:%M", time.localtime(lost[0][0]))
+    last = time.strftime("%H:%M", time.localtime(lost[-1][0]))
+    text = (f"*Telegram was unreachable*\n{len(lost)} alerts could not be sent "
+            f"between {first} and {last}. Most recent: {_md_esc(lost[-1][1])}.\n"
+            "Check the app for anything that needed you.")
+    if not await send_message(text, None, _SUMMARY_EVENT):
+        _undelivered[:0] = lost
+
+
 async def send_message(text: str, trade_id: Optional[str] = None, event_type: str = "",
                        reply_markup: Optional[dict] = None) -> bool:
     if not text:
@@ -198,11 +230,16 @@ async def send_message(text: str, trade_id: Optional[str] = None, event_type: st
                 event_type, trade_id, "sent" if ok else "failed",
                 None if ok else r.text[:200],
             )
-            return ok
+            if not ok and (r.status_code >= 500 or r.status_code == 429):
+                _remember_undelivered(text, event_type)
     except Exception as e:
         log.warning("Telegram send failed: %s", e)
         db_module.log_telegram_event(event_type, trade_id, "error", str(e)[:200])
+        _remember_undelivered(text, event_type)
         return False
+    if ok and event_type != _SUMMARY_EVENT:
+        await _report_undelivered()
+    return ok
 
 
 # ── Formatters ────────────────────────────────────────────────────────────────

@@ -183,6 +183,10 @@ async def breakout_report() -> dict:
     }
 
 
+async def _reversal_ledger() -> list:
+    return reversal_ctl.reversal_shadow_ledger(LEDGER_LIMIT)
+
+
 @router.get("/reversal/report")
 async def reversal_report() -> dict:
     """The Reversal engine's own measurements. Reads history, places nothing.
@@ -207,7 +211,9 @@ async def reversal_report() -> dict:
         "history": reversal_ctl.reversal_shadow_history(HISTORY_LIMIT),
         # One row per signal, its result stated once (2026-10-02): the flat
         # `history` above repeated one trade's dollars once per variant.
-        "ledger": reversal_ctl.reversal_shadow_ledger(LEDGER_LIMIT),
+        # Guarded like the other research reads: a ledger that cannot be read
+        # must not take down the report that carries the real P&L.
+        "ledger": await _guarded(_reversal_ledger, []),
         # The learning curve. `panel_data.ml_metrics()` has answered since the
         # restructure and no endpoint called it, so the React panel had no
         # data for the "is it learning?" chart the NiceGUI one drew. Guarded

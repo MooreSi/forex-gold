@@ -525,3 +525,41 @@ def test_a_near_miss_of_the_heartbeat_name_is_still_refused(make_client, engines
 
     assert r.status_code == 400
     assert engines["instances"]["reversal"].calls == []
+
+
+def test_the_reversal_report_carries_the_one_row_per_signal_ledger(make_client, engines,
+                                                                  monkeypatch):
+    # The flat history repeats one trade's dollars once per variant; the ledger
+    # states a signal's result once with each variant's call beside it
+    # (2026-10-02).
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_ledger",
+                        lambda limit: [{"signal_ref": "s1", "net": 21.4,
+                                        "calls": {"live (champion)": {"take": True}}}])
+
+    body = make_client().get("/api/engines/reversal/report").json()
+
+    assert body["ledger"][0]["signal_ref"] == "s1"
+
+
+def test_a_ledger_that_cannot_be_read_does_not_take_the_report_down(make_client, engines,
+                                                                   monkeypatch):
+    # It carries the real P&L too; a research read must not cost it.
+    def _boom(limit):
+        raise RuntimeError("no table")
+
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_ledger", _boom)
+
+    body = make_client().get("/api/engines/reversal/report").json()
+
+    assert body["ledger"] == []
+    assert "realised" in body
+
+
+def test_the_ledger_is_bounded_by_the_server(make_client, engines, monkeypatch):
+    asked = []
+    monkeypatch.setattr(engines_router.reversal_ctl, "reversal_shadow_ledger",
+                        lambda limit: asked.append(limit) or [])
+
+    make_client().get("/api/engines/reversal/report")
+
+    assert asked == [engines_router.LEDGER_LIMIT]

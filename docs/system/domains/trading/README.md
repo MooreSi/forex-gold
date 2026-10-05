@@ -226,3 +226,34 @@ placed: the repair pass adopted each placeholder onto a real ticket. A
 built-in strategy keeps 5 s, because its timeout falls back to Python. The
 wait is only as long as the EA is slow; an ack that arrives in 1 s returns in
 1 s. Pinned by `tests/core/test_template_ack_waits_at_least_30s.py`.
+
+## Entry Realignment has a pip limit, and applies on every route (2026-10-02, owner)
+
+Live: Gold Diggers VIP on the "Test" EA template, Entry Realignment on, "BUY
+ENTRY 4180-4176 SL 4174" arrived with the ask at 4183.80 (38 pips past the
+zone top). It queued, because realignment only handled the OTHER side on the
+market route (price falling through a BUY zone toward its stop); price having
+run away was realigned only by Limit Runner, by any distance.
+
+`lk_entry_realignment_max_pips` (migration 57, REAL, **blank/0 = no limit**) is
+now the one cap, both ways: price that MISSED the zone (BUY above, SELL below)
+and price that went THROUGH it toward the stop are realigned within N pips.
+Missed by more waits for the zone; breached by more is discarded. 1 pip = 0.10
+(`core_pips.PIPS_TO_PRICE_XAUUSD`). The arithmetic is `entry_realignment.py`
+(`realign_cap_pts`, `gap_fire_cap_pts`, `realign_missed`, `realign_grid_zone`,
+`realign_for_breach(max_pts=)`), pure; the routes are:
+
+- market strategies and **single** EA templates: the gap-fire block in
+  `scan_auto_execute` (it used to be IME-only);
+- **grid** templates: the whole zone shifts so the first leg sits at market,
+  only when a limit is set (IME has never shifted a grid);
+- the pending watcher (`pending_activation`): a queued signal fires within the
+  limit without IME;
+- Limit Runner: realigns within the limit; beyond it the order rests as a limit.
+
+When a limit is set it is the ONLY cap, so IME's fixed 15-point
+`MAX_GAP_FIRE_PTS` applies only when no limit is set. **Blank changes nothing**
+on any route (golden rule 3). Pinned by
+`tests/trading/test_entry_realignment_pip_limit.py`. **Needs a demo session
+before it is trusted:** it moves real entries on all four routes and was built
+from the tests alone, with no spec.

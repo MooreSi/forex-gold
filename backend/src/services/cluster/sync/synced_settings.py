@@ -161,6 +161,7 @@ SYNCED_SETTINGS_KEYS = (
     "unattended_mode", "lk_enable_tp_parsing", "lk_enable_sl_parsing", "lk_enable_close_all_parsing",
     "lk_enable_risk_free_be_parsing", "lk_enable_tp_hit_parsing", "lk_ignore_media_messages",
     "lk_ignore_forwarded_messages", "re_use_limit_order", "lk_entry_realignment",
+    "lk_entry_realignment_max_pips",
     "lk_enable_mirror_copy", "lk_queue_closed_market_limits", "lk_enable_second_message_tp_sl",
     "lk_second_message_match_window_sec", "re_require_ref_confirmation", "re_ref_confirmation_window_min",
     "lk_fallback_sl_pips", "giveback_guard_enabled", "giveback_arm_usd", "giveback_pct",

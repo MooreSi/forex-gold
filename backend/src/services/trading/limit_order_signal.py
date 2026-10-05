@@ -62,6 +62,7 @@ from typing import Any, Awaitable, Callable
 
 from backend.src.db import database as db_module
 from backend.src.services.broker.ea_bridge import StoodDownError
+from backend.src.services.trading import entry_realignment as _entry_realignment
 from backend.src.services.trading import trade_repo
 from backend.src.services.positions.core_closed_market_queue import queue_closed_market_limit, should_queue
 from backend.src.services.risk.strategy_params import get_strategy_params
@@ -382,6 +383,13 @@ async def handle_limit_order_signal(
         breached = tick is not None and (
             tick.ask >= price if direction == "BUY" else tick.bid <= price
         )
+        # The pip limit (owner, 2026-10-02): realign only within it; beyond
+        # it the order rests as a limit instead. 0 = no limit, the old
+        # any-distance behaviour.
+        _cap = _entry_realignment.realign_cap_pts(rs)
+        if breached and _cap > 0:
+            _gap = (tick.ask - price) if direction == "BUY" else (price - tick.bid)
+            breached = round(_gap, 2) <= _cap
         if breached:
             return await _open_realigned_market_order(
                 _ea, tg_id, channel_name, source_label, direction, lot,

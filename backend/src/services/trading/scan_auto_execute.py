@@ -396,6 +396,7 @@ async def _execute_auto_signal(
                         direction=dir_up, entry_low=el, entry_high=eh,
                         live_px=live_px, stop_loss=float(parsed["stop_loss"]),
                         tps={n: parsed.get(f"tp{n}") for n in range(1, 9)},
+                        max_pts=_entry_realignment.realign_cap_pts(rs),
                     )
                     if _realigned is not None:
                         parsed["stop_loss"] = _realigned.stop_loss
@@ -526,6 +527,11 @@ async def _execute_auto_signal(
                         _tpl_grid = ea_templates.is_grid_template(strategy)
 
                         if _tpl_grid:
+                            # Missed zone within the pip limit: grid to market.
+                            _grid_shift = _entry_realignment.realign_grid_zone(
+                                parsed, cur_px, rs, source_label)
+                            if _grid_shift:
+                                parsed, el, eh, gap_note = _grid_shift
                             signals_repo.insert_activated_grid_signal(
                                 signal_id, tg_id,
                                 f"Telegram Auto ({source_label})",
@@ -588,12 +594,16 @@ async def _execute_auto_signal(
                         # its zone. Cap restored 2026-08-13 at the wider of the two
                         # original values -- see MAX_GAP_FIRE_PTS, which this deliberately shares so the
                         # two entry paths cannot drift apart again.
-                        if not in_range and ime_enabled_for_channel(rs, channel_name):
+                        # Cap: IME's, or the pip limit alone (entry_realignment).
+                        _gap_cap = _entry_realignment.gap_fire_cap_pts(
+                            rs, ime_on=ime_enabled_for_channel(rs, channel_name),
+                            ime_cap=MAX_GAP_FIRE_PTS)
+                        if not in_range and _gap_cap > 0:
                             gap = (
                                 round(cur_px - eh, 2) if direction == "BUY"
                                 else round(el - cur_px, 2)
                             )
-                            if 0 < gap <= MAX_GAP_FIRE_PTS:
+                            if 0 < gap <= _gap_cap:
                                 sign = 1.0 if direction == "BUY" else -1.0
                                 parsed = dict(parsed)
                                 parsed["stop_loss"] = round(float(parsed["stop_loss"]) + sign * gap, 2)

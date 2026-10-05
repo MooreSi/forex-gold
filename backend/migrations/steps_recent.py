@@ -274,4 +274,13 @@ _RECENT: list[tuple[int, str, object]] = [
     (56, "Daily goal: move open trades to breakeven once reached (off)", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN daily_goal_protect_be INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Entry Realignment's pip limit (owner, 2026-10-02): realign a missed or
+    # breached zone only within N pips. 0 = no limit, which is exactly the
+    # behaviour before the column existed (Limit Runner and a breach realign by
+    # any distance, the market and watcher routes realign only under IME's own
+    # cap), so nothing changes on upgrade.
+    (57, "Entry Realignment pip limit (blank)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN lk_entry_realignment_max_pips REAL NOT NULL DEFAULT 0",
+    ]),
 ]

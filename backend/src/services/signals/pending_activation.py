@@ -399,7 +399,17 @@ async def try_activate_pending_signals(
                 round(_pw_px - _pw_eh, 2) if _pw_dir == "BUY"
                 else round(_pw_el - _pw_px, 2)
             )
-            if not (_pw_ime and _pw_gap > 0):
+            # The cap is `gap_fire_cap_pts`: IME's fixed MAX_GAP_FIRE_PTS when
+            # no Entry Realignment pip limit is set (and nothing fires without
+            # IME), otherwise that limit alone, with IME on or off (owner,
+            # 2026-10-02).
+            from backend.src.services.trading import entry_realignment as _er
+            from backend.src.services.trading.scan_auto_execute import (
+                MAX_GAP_FIRE_PTS,
+            )
+            _pw_cap = _er.gap_fire_cap_pts(
+                rs, ime_on=_pw_ime, ime_cap=MAX_GAP_FIRE_PTS)
+            if not (_pw_cap > 0 and _pw_gap > 0):
                 continue
             # Distance cap (2026-08-13). Restored after the uncapped version
             # chased a signal 28.22 points (282 pips) past its own zone --
@@ -407,14 +417,11 @@ async def try_activate_pending_signals(
             # gone and the "entry" is just buying the top of a move. Beyond
             # the cap the signal keeps waiting for a genuine return to zone.
             # Shared with the fresh-signal scan path so the two cannot drift.
-            from backend.src.services.trading.scan_auto_execute import (
-                MAX_GAP_FIRE_PTS,
-            )
-            if _pw_gap > MAX_GAP_FIRE_PTS:
+            if _pw_gap > _pw_cap:
                 log.debug(
                     "[PendingWatcher] Signal %s gap %.2f pts exceeds the %.1f pt "
                     "gap-fire cap — staying queued for a real zone return",
-                    sig["signal_id"][:8], _pw_gap, MAX_GAP_FIRE_PTS,
+                    sig["signal_id"][:8], _pw_gap, _pw_cap,
                 )
                 continue
 

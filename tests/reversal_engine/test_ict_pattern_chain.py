@@ -69,31 +69,37 @@ class TestFindingTheLiquidityPools:
         assert ict.detect_equal_levels(_flat(4)) == []
 
 
-class TestTheDefectInEqualLevels:
-    """**Known wrong — `docs/todo/bugs/047`.** Pinned so the fix is a visible,
-    deliberate change rather than a silent one."""
+class TestExactlyEqualHighs:
+    """**Was `TestTheDefectInEqualLevels` — `docs/todo/bugs/047`, fixed
+    2026-10-05.** The values went through `set()` before clustering, so two
+    candles printing the same high collapsed to one value and formed no pool:
+    a textbook double top was the one shape the detector could not see. Now a
+    repeat counts as a further touch when it is a swing extreme (strictly
+    above both neighbours). Measured on Dukascopy 2025 M15 before applying:
+    10 of 23,458 windows change, setups +4, win rate unchanged (bugs/047)."""
 
-    def test_exactly_equal_highs_are_invisible(self):
-        """Two candles printing the SAME high to 0.1 produce no pool at all,
-        because the values are put through `set()` before clustering and
-        collapse to one. A textbook double top -- the cleanest equal high
-        there is, and the strongest resting-liquidity magnet -- is the one
-        shape this detector cannot see."""
+    def test_exactly_equal_highs_form_a_pool(self):
         cs = _flat(10)
         cs[2] = _c(2 * 900, 100.0, 110.0, 95.0, 100.0)
         cs[6] = _c(6 * 900, 100.0, 110.0, 95.0, 100.0)
 
-        assert [p for p in ict.detect_equal_levels(cs) if p["type"] == "eq_high"] == []
+        pools = [p for p in ict.detect_equal_levels(cs) if p["type"] == "eq_high"
+                 and p["price"] == 110.0]
+        assert pools and pools[0]["touches"] == 2
 
-    def test_moving_one_of_them_by_a_tick_makes_it_appear(self):
-        """The same two highs, 0.4 apart instead of 0. This is the pair above
-        with one candle nudged, and it is found -- which is what makes the case
-        above a defect rather than a threshold."""
+    def test_moving_one_of_them_by_a_tick_still_finds_it(self):
         cs = _flat(10)
         cs[2] = _c(2 * 900, 100.0, 110.0, 95.0, 100.0)
         cs[6] = _c(6 * 900, 100.0, 110.4, 95.0, 100.0)
 
         assert [p for p in ict.detect_equal_levels(cs) if p["type"] == "eq_high"]
+
+    def test_a_flat_range_is_still_not_a_pool(self):
+        """The reason `set()` was there, kept: a quiet range whose candles all
+        print the same high is not a liquidity pool."""
+        cs = _flat(10)
+
+        assert [p for p in ict.detect_equal_levels(cs) if p["type"] == "eq_high"] == []
 
 
 class TestTheSweep:

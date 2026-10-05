@@ -194,17 +194,19 @@ EXPERT_PARAMS: list[ExpertParam] = [
         desc="1 trades the New York opening-range breakout (09:30-10:00 ET "
              "range, first M5 close beyond it, with the H4 EMA50 trend only, "
              "stop at the far side, target 2R) instead of the London report. "
-             "Replayed: London lost or broke even in every variant; New York "
-             "with the trend made +0.14R to +0.34R a trade. 0 keeps the "
+             "Replayed on the bridge's history (Dec 2023 on): New York with "
+             "the trend made +0.14R to +0.34R a trade. On 2019-2024 Dukascopy "
+             "data it was about zero (+0.03R over 503 trades). 0 keeps the "
              "London report's auto-execute exactly as it was.",
     ),
     ExpertParam(
         key="tpa_session_start_utc", label="Trend PA session start",
         default=8, min=0, max=23, unit="h UTC", domain="Strategy sessions",
         integer=True,
-        desc="The first UTC hour Trend PA may enter. Replayed with corrected "
-             "timestamps, entries from 08:00 to 12:00 lost and entries from "
-             "12:00 made money in every year; 12 trades New York only.",
+        desc="The first UTC hour Trend PA may enter; 12 trades New York "
+             "only. 12-20 made +0.125R a trade from Dec 2023, but lost in five "
+             "of the six years 2019-2024 (-0.14R over 913 trades): its record "
+             "is the 2024-26 gold bull run, not the rules.",
     ),
     ExpertParam(
         key="tpa_session_end_utc", label="Trend PA session end",

@@ -18,8 +18,15 @@ interface OrbReport {
   asia_low: number; asia_high: number; asia_range: number;
   or_low: number; or_high: number; or_range: number;
   stop: number; target: number; target2: number | null; rr: number | null;
+  /** R:R for a fill at the current price; rr is from the opening-range edge. */
+  realised_rr?: number | null;
+  /** Unix seconds; London opens 07:00 UTC under BST, 08:00 in winter. */
+  or_start?: number; or_end?: number;
   position_note: string;
 }
+
+const utcHm = (ts: number | undefined, fallback: string) =>
+  ts ? new Date(ts * 1000).toISOString().slice(11, 16) : fallback;
 
 interface OrbState {
   report: OrbReport | null;
@@ -149,13 +156,13 @@ export function OrbSection() {
 
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <StatCard
-              label="Asian range (00:00–08:00 UTC)"
+              label={`Asian range (00:00–${utcHm(report.or_start, "08:00")} UTC)`}
               value={`${formatPrice(report.asia_low)} – ${formatPrice(report.asia_high)}`}
               hint={`${report.asia_range?.toFixed(1)} pts`}
             />
             {report.phase !== "forming" && (
               <StatCard
-                label="London opening range (08:00–08:15 UTC)"
+                label={`London opening range (${utcHm(report.or_start, "08:00")}–${utcHm(report.or_end, "08:15")} UTC)`}
                 value={`${formatPrice(report.or_low)} – ${formatPrice(report.or_high)}`}
                 hint={`${report.or_range?.toFixed(1)} pts`}
               />
@@ -177,7 +184,7 @@ export function OrbSection() {
               <p className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-warning">
                 Breakout setup
               </p>
-              <div className="mt-1 grid gap-2 sm:grid-cols-4">
+              <div className="mt-1 grid gap-2 sm:grid-cols-5">
                 <StatCard label="Stop" value={formatPrice(report.stop)}
                   valueClassName="text-loss" />
                 <StatCard label="Target (2:1)" value={formatPrice(report.target)}
@@ -187,6 +194,11 @@ export function OrbSection() {
                   value={report.target2 ? formatPrice(report.target2) : "—"}
                 />
                 <StatCard label="R:R" value={report.rr ? `${report.rr.toFixed(2)}:1` : "—"} />
+                <StatCard
+                  label="R:R at price"
+                  value={report.realised_rr != null ? `${report.realised_rr.toFixed(2)}:1` : "—"}
+                  hint="Below 1:1 the automated path skips the trade."
+                />
               </div>
               <p className="mt-1 text-[10px] text-ink-3">
                 Stop is the midpoint of the London opening range. Target is 2x the

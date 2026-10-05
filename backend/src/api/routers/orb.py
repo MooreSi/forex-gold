@@ -1,8 +1,8 @@
 """The London opening-range breakout report, and its one-press execution.
 
-Classic ORB: the whole Asian session (00:00-08:00 UTC) is a confirmation
-filter, the first fifteen minutes of London (08:00-08:15 UTC) is the traded
-opening range, and a breakout only counts once price clears BOTH in the same
+Classic ORB: the Asian session (00:00 UTC to London's 08:00 local open, so
+07:00 UTC under BST) is a confirmation filter, the first fifteen minutes of
+London is the traded opening range, and a breakout only counts once price clears BOTH in the same
 direction. Stop at the opening range's midpoint, target at twice the resulting
 risk. A 3:1 level is shown alongside it and is informational only -- the
 automated path closes fully at the target and manages no partial ladder.

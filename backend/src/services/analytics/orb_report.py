@@ -58,7 +58,6 @@ from backend.src.utils.models import STRATEGY_ORB_FIXED
 log = logging.getLogger(__name__)
 
 _ASIA_START_HOUR   = 0
-_ASIA_END_HOUR     = 8    # 00:00-08:00 UTC -- confirmation-filter range
 _LONDON_OR_MINUTES = 15   # 08:00-08:15 UTC -- the traded opening range
 
 _ORB_SL_RANGE_PCT   = 0.50  # stop = breakout edge -/+ this fraction of the OR height (== OR midpoint)
@@ -96,9 +95,10 @@ async def build_orb_report(bridge: Any) -> Optional[dict]:
     asia_start = london_open_utc.replace(
         hour=_ASIA_START_HOUR, minute=0, second=0, microsecond=0
     ).timestamp()
-    asia_end = london_open_utc.replace(
-        hour=_ASIA_END_HOUR, minute=0, second=0, microsecond=0
-    ).timestamp()
+    # Ends where the opening range begins: 08:00 UTC in winter, 07:00 under
+    # BST. Fixed at 08:00 UTC it ran an hour past a summer open and absorbed
+    # the breakout move it exists to confirm (bugs/059).
+    asia_end = or_start
     asia_candles = await bridge.get_candles_range(asia_start, asia_end, timeframe="M1")
     if not asia_candles:
         return None
@@ -192,10 +192,15 @@ async def build_orb_report(bridge: Any) -> Optional[dict]:
     )
     reward = abs(target - breakout_edge)
     rr = round(reward / risk, 2) if risk > 0 else None
+    # rr is from the edge; confirmation needs price beyond the Asian range,
+    # often well past it. This is what a fill at the current price gets
+    # (2026-09-16: 2.00 reported, 0.17 realised -- bugs/059).
+    _to_stop = abs(current_price - stop)
+    realised_rr = round(abs(target - current_price) / _to_stop, 2) if _to_stop > 0 else None
 
     report.update({
         "stop": stop, "target": target, "target2": target2, "rr": rr,
-        "risk": risk, "reward": reward,
+        "realised_rr": realised_rr, "risk": risk, "reward": reward,
         "sl_range_pct": _ORB_SL_RANGE_PCT,
         "target_r_mult": _ORB_TARGET_R_MULT, "target2_r_mult": _ORB_TARGET2_R_MULT,
         "position_note": (

@@ -10,7 +10,7 @@ import asyncio
 import logging
 import smtplib
 import ssl
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
@@ -560,6 +560,10 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
     position_note = report.get("position_note", "")
 
     label, label_color = _DIRECTION_LABEL.get(direction, ("", _SUB))
+    # London opens at 08:00 local: 07:00 UTC under BST (bugs/059).
+    _hm = lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")  # noqa: E731
+    or_open = _hm(report["or_start"]) if report.get("or_start") else "08:00"
+    or_close = _hm(report["or_end"]) if report.get("or_end") else "08:15"
 
     asia_str = (
         f"${asia_low:.2f} – ${asia_high:.2f}  ({asia_range:.1f} pts)"
@@ -579,6 +583,7 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 
     if direction in ("bullish", "bearish"):
         rr = report.get("rr")
+        realised = report.get("realised_rr")
         target2 = report.get("target2")
         trade_section = f"""
   <tr><td style="background:{_BG};padding:16px 24px;">
@@ -589,6 +594,7 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
       {_stat_cell("TARGET (2:1)", f"${report['target']:.2f}", _GREEN)}
       {_stat_cell("TARGET 2 (3:1)", f"${target2:.2f}" if target2 else "—", _GREEN)}
       {_stat_cell("R:R", f"{rr:.2f}:1" if rr else "—", _GOLD)}
+      {_stat_cell("R:R AT PRICE", f"{realised:.2f}:1" if realised is not None else "—", _GOLD)}
     </tr></table>
     <p style="margin:12px 0 0;color:{_SUB};font-size:11px;">
       Stop = midpoint of the London opening range. Target = 2x the resulting
@@ -639,15 +645,15 @@ def build_orb_html(report: dict, date_str: str = "", has_chart: bool = False) ->
 
   {chart_html}
 
-  <!-- Asian range (00:00-08:00 UTC, confirmation filter) + London opening
-       range (08:00-08:15 UTC, the traded range) -->
+  <!-- Asian range (00:00 to London open, confirmation filter) + London
+       opening range (first 15 min from London open, the traded range) -->
   <tr><td style="background:{_BG};padding:16px 24px;">
     <h3 style="margin:0 0 8px;color:{_GOLD};font-size:13px;
-               text-transform:uppercase;letter-spacing:1px;">Asian Range (00:00–08:00 UTC)</h3>
+               text-transform:uppercase;letter-spacing:1px;">Asian Range (00:00–{or_open} UTC)</h3>
     <p style="margin:0 0 12px;color:{_TEXT};font-size:16px;font-family:monospace;font-weight:bold;">
       {asia_str}</p>
     <h3 style="margin:0 0 8px;color:{_GOLD};font-size:13px;
-               text-transform:uppercase;letter-spacing:1px;">London Opening Range (08:00–08:15 UTC)</h3>
+               text-transform:uppercase;letter-spacing:1px;">London Opening Range ({or_open}–{or_close} UTC)</h3>
     <p style="margin:0 0 6px;color:{_TEXT};font-size:16px;font-family:monospace;font-weight:bold;">
       {or_str}</p>
     <p style="margin:0 0 6px;color:{_SUB};font-size:13px;">{position_note}</p>

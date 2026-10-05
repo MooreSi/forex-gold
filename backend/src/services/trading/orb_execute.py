@@ -28,6 +28,8 @@ from backend.src.utils.models import STRATEGY_ORB_FIXED
 log = logging.getLogger(__name__)
 
 _ORB_PENDING_EXPIRE_MINUTES = 60.0  # matches the pre-2026-07-22 zone-watcher's own ORB-specific expiry
+# A fill must be able to win at least what it risks (bugs/059).
+_ORB_MIN_REALISED_RR = 1.0
 
 
 async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: bool) -> None:
@@ -114,6 +116,29 @@ async def orb_auto_execute(report: dict, bridge: Any, is_active_trader_node: boo
                 f"Price (${current_price:.2f}) has already reached/passed the target "
                 f"(${target:.2f}) before the trade could be placed — the breakout is too "
                 f"stale, no reward left to take.",
+                None, "orb_auto_execute_skipped",
+            ))
+            return
+        # The target is 2R from the opening-range edge, but the breakout only
+        # confirms beyond the Asian range, often far past that edge: on
+        # 2026-09-16 the earliest fill got 0.17:1, not 2:1 (bugs/059). Refuse
+        # a fill that cannot win at least what it risks. Provisional policy,
+        # owner approval 2026-10-05; the edge geometry itself is unchanged.
+        _to_stop = abs(current_price - stop_loss)
+        _realised = abs(target - current_price) / _to_stop if _to_stop > 0 else 0.0
+        if _realised < _ORB_MIN_REALISED_RR:
+            log.info(
+                "[ORB auto-execute] %s at %.2f risks %.2f to win %.2f (%.2f:1, below "
+                "%.1f:1) — the breakout confirmed too far past the edge, skipping",
+                direction, current_price, _to_stop, abs(target - current_price),
+                _realised, _ORB_MIN_REALISED_RR,
+            )
+            asyncio.create_task(telegram_alerts.send_message(
+                f"*ORB/IVB Auto-Execute Skipped*\nDirection: "
+                f"{'BUY' if direction == 'bullish' else 'SELL'}\n"
+                f"At ${current_price:.2f} the trade would risk ${_to_stop:.2f} to win "
+                f"${abs(target - current_price):.2f} ({_realised:.2f}:1). The breakout "
+                f"confirmed too far past the opening range for its 2:1 target.",
                 None, "orb_auto_execute_skipped",
             ))
             return

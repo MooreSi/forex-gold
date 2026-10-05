@@ -67,6 +67,16 @@ describe("the report", () => {
     expect(screen.getByText("London opening range (08:00–08:15 UTC)")).toBeInTheDocument();
   });
 
+  it("names the real London hours under BST and the R:R at the current price (bugs/059)", async () => {
+    state.report = { ...REPORT, or_start: Date.UTC(2026, 6, 20, 7) / 1000,
+                     or_end: Date.UTC(2026, 6, 20, 7, 15) / 1000, realised_rr: 0.17 };
+    render(<OrbSection />);
+
+    expect(await screen.findByText("Asian range (00:00–07:00 UTC)")).toBeInTheDocument();
+    expect(screen.getByText("London opening range (07:00–07:15 UTC)")).toBeInTheDocument();
+    expect(screen.getByText("0.17:1")).toBeInTheDocument();
+  });
+
   it("shows the setup with the stop, both targets and the R:R", async () => {
     render(<OrbSection />);
     await screen.findByText(/Breakout setup/);

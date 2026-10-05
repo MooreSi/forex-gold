@@ -157,9 +157,28 @@ def default_lexicon(category: str) -> list[str]:
     return list(DEFAULT_LEXICONS.get(category, []))
 
 
+# The scanner asks for a lexicon several times per message, on the event loop;
+# 44 loop stalls over a second had this read at the top of the stack (bugs/030).
+# Phrases change only through set_lexicon, which clears this, as does a
+# database switch. Same shape as strategy_params' cache.
+_LEXICON_TTL = 5.0
+_lexicon_cache: dict[str, tuple[list[str], float]] = {}
+db_module.register_cache_invalidator(_lexicon_cache.clear)
+
+
 def get_lexicon(category: str) -> list[str]:
     """Live phrase list for `category` -- DB override if saved, else the
     built-in default. Never raises on a corrupt/missing row."""
+    hit = _lexicon_cache.get(category)
+    now = time.monotonic()
+    if hit is not None and now - hit[1] < _LEXICON_TTL:
+        return list(hit[0])
+    phrases = _read_lexicon(category)
+    _lexicon_cache[category] = (phrases, now)
+    return list(phrases)
+
+
+def _read_lexicon(category: str) -> list[str]:
     row = telegram_repo.get_lexicon_json(category)
     if not row:
         return default_lexicon(category)
@@ -180,6 +199,7 @@ def set_lexicon(category: str, phrases: list[str]) -> list[str]:
         raise ValueError(f"Unknown Logic Keywords category: {category}")
     clean = [p.strip().upper() for p in phrases if p and p.strip()]
     telegram_repo.upsert_lexicon(category, json.dumps(clean))
+    _lexicon_cache.clear()
     return clean
 
 
